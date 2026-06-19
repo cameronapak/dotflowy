@@ -1,0 +1,9 @@
+node_modules
+dist
+.output
+.vinxi
+.DS_Store
+*.log
+.env
+.env.local
+.routeTree.gen.tmp*

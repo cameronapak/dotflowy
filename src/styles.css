@@ -1,0 +1,146 @@
+:root {
+  --bg: #fafafa;
+  --fg: #2a2a2a;
+  --muted: #8a8a8a;
+  --accent: #2c6cb0;
+  --row-hover: #f0f0f0;
+  --completed: #b0b0b0;
+  --bullet: #c8c8c8;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+
+.app-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 32px;
+}
+
+.outline-list,
+.outline-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline-children {
+  padding-left: 24px;
+}
+
+.outline-node {
+  margin: 0;
+}
+
+.outline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.outline-row:hover {
+  background: var(--row-hover);
+}
+
+.bullet {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 24px;
+  padding: 0;
+  margin-top: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bullet-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bullet);
+}
+
+.bullet-dot[data-has-children='true'] {
+  width: 8px;
+  height: 8px;
+  background: var(--muted);
+}
+
+.checkbox {
+  flex: 0 0 auto;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.node-text {
+  flex: 1 1 auto;
+  min-height: 24px;
+  padding: 2px 0;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.node-text[data-completed='true'] {
+  color: var(--completed);
+  text-decoration: line-through;
+}
+
+.node-text:empty::before {
+  content: '';
+  display: inline-block;
+}
+
+.outline-empty {
+  color: var(--muted);
+  padding: 24px 4px;
+  font-size: 13px;
+}
+
+.add-top {
+  margin-top: 16px;
+  background: transparent;
+  border: 1px dashed var(--bullet);
+  color: var(--muted);
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.add-top:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
