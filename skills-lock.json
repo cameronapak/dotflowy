@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "db-core": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/db/skills/db-core/SKILL.md",
+      "computedHash": "1904c40a36dbd83836a2ba7626b2effeac8ad45e6dadfa973552dfd7140e834a"
+    },
+    "db-core/collection-setup": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/db/skills/db-core/collection-setup/SKILL.md",
+      "computedHash": "fa8b535afa6a5c63d0e6678861b1b009cdd10963f241c716a66b6775d358199b"
+    },
+    "db-core/custom-adapter": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/db/skills/db-core/custom-adapter/SKILL.md",
+      "computedHash": "75aec364ed00d69c07fb18d8be0a5e311002e5030223c13fe164f9880717683d"
+    },
+    "db-core/live-queries": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/db/skills/db-core/live-queries/SKILL.md",
+      "computedHash": "16bab8d3ef3ee003ad1507bc61cff14ec529f5da5c13f2104e50da370aa18540"
+    },
+    "db-core/mutations-optimistic": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/db/skills/db-core/mutations-optimistic/SKILL.md",
+      "computedHash": "b187a9ffbaf11505ebf74848618c4de6843295a57154710e549ba0bb2eb5d3d6"
+    },
+    "db-core/persistence": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/db/skills/db-core/persistence/SKILL.md",
+      "computedHash": "375a173137681ac7a90de480964968055e7229dd820a951a8542e6bdcd4282da"
+    },
+    "offline": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/offline-transactions/skills/offline/SKILL.md",
+      "computedHash": "5a126db586ff66f92cf2e6190d9f8078565a76f1672f5476e04d579ff6e514ee"
+    },
+    "react-db": {
+      "source": "tanstack/db",
+      "sourceType": "github",
+      "skillPath": "packages/react-db/skills/react-db/SKILL.md",
+      "computedHash": "bea666abfdf61cd0c355ebb620880b707fb7ac797823d36390ee2951fa513dcc"
+    }
+  }
+}
