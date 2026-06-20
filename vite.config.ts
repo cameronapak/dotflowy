@@ -1,6 +1,8 @@
-import { defineConfig } from 'vite'
-import { tanstackStart } from '@tanstack/react-start/plugin/vite'
-import viteReact from '@vitejs/plugin-react'
+import path from "path";
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
 
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
 // which matters because TanStack DB's localStorage collection reads
@@ -16,5 +18,11 @@ export default defineConfig({
     }),
     // Order matters: react's plugin must come after Start's.
     viteReact(),
+    tailwindcss(),
   ],
-})
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+});

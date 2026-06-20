@@ -20,6 +20,7 @@ import {
 } from "../data/mutations";
 import { seedIfEmpty } from "../data/seed";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { Button } from "./ui/button";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
 // history state, so the incoming view knows which element to name.
@@ -242,9 +243,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         </div>
       )}
       {/* Click anywhere in the whitespace below the list adds a new top-level bullet. */}
-      <button
+      <Button
         type="button"
-        className="add-top"
+        size="icon-sm"
+        variant="outline"
         onClick={() => {
           const siblings = childrenOf(focusIndex.current, rootId);
           const afterId = siblings.length
@@ -255,7 +257,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         }}
       >
         <PlusIcon />
-      </button>
+      </Button>
     </div>
   );
 }
