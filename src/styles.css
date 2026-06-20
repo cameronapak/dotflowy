@@ -7,7 +7,7 @@
   --completed: #b0b0b0;
   --bullet: #c8c8c8;
   font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
 }
 
@@ -28,7 +28,7 @@ body {
 .app {
   max-width: 720px;
   margin: 0 auto;
-  padding: 48px 24px 96px;
+  padding: 24px;
 }
 
 .app-header h1 {
@@ -99,12 +99,12 @@ body {
   color: var(--fg);
 }
 
-.collapse-toggle[data-has-children='false'] {
+.collapse-toggle[data-has-children="false"] {
   cursor: default;
 }
 
-.outline-row:hover .collapse-toggle[data-has-children='true'],
-.collapse-toggle[data-collapsed='true'] {
+.outline-row:hover .collapse-toggle[data-has-children="true"],
+.collapse-toggle[data-collapsed="true"] {
   opacity: 1;
 }
 
@@ -140,7 +140,7 @@ body {
   background: var(--bullet);
 }
 
-.bullet-dot[data-has-children='true'] {
+.bullet-dot[data-has-children="true"] {
   width: 8px;
   height: 8px;
   background: var(--muted);
@@ -161,13 +161,13 @@ body {
   word-break: break-word;
 }
 
-.node-text[data-completed='true'] {
+.node-text[data-completed="true"] {
   color: var(--completed);
   text-decoration: line-through;
 }
 
 .node-text:empty::before {
-  content: '';
+  content: "";
   display: inline-block;
 }
 
@@ -182,10 +182,9 @@ body {
   background: transparent;
   border: 1px dashed var(--bullet);
   color: var(--muted);
-  padding: 8px 12px;
-  border-radius: 4px;
+  padding: 8px;
+  border-radius: 99px;
   cursor: pointer;
-  font-size: 13px;
 }
 
 .add-top:hover {
@@ -299,7 +298,7 @@ body {
 /* Invisible bridge across the gap between the "…" button and the panel, so the
    dropdown stays open while the mouse travels from one to the other. */
 .breadcrumb .crumb-dropdown::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   right: 0;
