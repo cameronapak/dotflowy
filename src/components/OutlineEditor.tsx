@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useRef } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
+import { ChevronRight } from 'lucide-react'
 import { useTree } from '../data/useTree'
-import { childrenOf, type TreeIndex } from '../data/tree'
+import { childrenOf, type Node, type TreeIndex } from '../data/tree'
 import {
   indent,
+  insertChildAtStart,
   insertSibling,
   outdent,
   removeNode,
@@ -13,18 +21,38 @@ import {
 import { seedIfEmpty } from '../data/seed'
 import { OutlineNode, type NodeCommands } from './OutlineNode'
 
+// Carry the zoom "pivot" (the node morphing between title and list-item) in
+// history state, so the incoming view knows which element to name.
+declare module '@tanstack/history' {
+  interface HistoryState {
+    pivotId?: string
+  }
+}
+
+interface OutlineEditorProps {
+  /**
+   * The node to treat as the temporary root ("zoomed in"). When null we
+   * render the whole outline from the top. Driven by the URL so zoom state
+   * survives reloads and participates in browser back/forward.
+   */
+  rootId: string | null
+}
+
 /**
  * Top-level outline editor. Owns:
  *  - reading the live tree
  *  - seeding on first run
  *  - focus management across bullets
  *  - translating keyboard commands into mutations
+ *  - the zoom view (breadcrumb + editable title) when rootId is set
  */
-export function OutlineEditor() {
+export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const { index } = useTree()
+  const navigate = useNavigate()
 
   // Refs registry: id -> contentEditable span. Lets us move focus
-  // between bullets after structural mutations.
+  // between bullets after structural mutations. The zoomed title also
+  // registers here under rootId, so focus logic treats it uniformly.
   const refs = useRef<Map<string, HTMLSpanElement | null>>(new Map())
   const registerRef = useCallback(
     (id: string, el: HTMLSpanElement | null) => {
@@ -35,7 +63,6 @@ export function OutlineEditor() {
   )
 
   // First-run seed. Runs when the collection has loaded and is empty.
-  const topLevel = childrenOf(index, null)
   useEffect(() => {
     // hasAnyNode is true if any node at all exists. We can't tell "loaded
     // but empty" from "not yet loaded" purely from useLiveQuery in v1;
@@ -65,6 +92,49 @@ export function OutlineEditor() {
 
   const focusIndex = useRef<TreeIndex>(index)
   focusIndex.current = index
+  // Keep the live rootId available inside command closures.
+  const rootIdRef = useRef<string | null>(rootId)
+  rootIdRef.current = rootId
+
+  // The "pivot" of the last zoom: the node that swaps between title and
+  // list-item roles. The incoming view reads it from history state and names
+  // that node's element so the browser morphs it across the navigation.
+  const location = useLocation()
+  const pivotId = location.state.pivotId ?? null
+  const pivotIdRef = useRef<string | null>(pivotId)
+  pivotIdRef.current = pivotId
+
+  /**
+   * Navigate to a new zoom root with a shared-element morph. `pivot` is the
+   * node that changes role: the target when zooming in (list item -> title),
+   * the current root when zooming out (title -> list item). We name the pivot
+   * in the OUTGOING view here; the incoming view names it declaratively.
+   */
+  const navigateZoom = (toRootId: string | null, pivot: string) => {
+    if (prefersReducedMotion()) {
+      if (toRootId === null) navigate({ to: '/' })
+      else navigate({ to: '/$nodeId', params: { nodeId: toRootId } })
+      return
+    }
+    // Retarget the morph name from this view's current pivot onto the new one.
+    const prev = pivotIdRef.current
+    if (prev && prev !== pivot) {
+      const prevEl = refs.current.get(prev)
+      prevEl?.style.removeProperty('view-transition-name')
+      prevEl?.classList.remove('vt-morph')
+    }
+    const el = refs.current.get(pivot)
+    if (el) {
+      el.style.setProperty('view-transition-name', 'zoom-target')
+      el.classList.add('vt-morph')
+    }
+    const opts = {
+      state: { pivotId: pivot },
+      viewTransition: { types: ['zoom'] },
+    }
+    if (toRootId === null) navigate({ to: '/', ...opts })
+    else navigate({ to: '/$nodeId', params: { nodeId: toRootId }, ...opts })
+  }
 
   const commands: NodeCommands = {
     onTextChange: (id, text) => setText(id, text),
@@ -81,6 +151,10 @@ export function OutlineEditor() {
     },
 
     onOutdent: (id) => {
+      // Don't let a direct child of the zoom root outdent past it; that
+      // would move it out of the visible subtree and look like it vanished.
+      const node = focusIndex.current.byId.get(id)
+      if (node && node.parentId === rootIdRef.current) return
       outdent(focusIndex.current, id)
     },
 
@@ -94,7 +168,12 @@ export function OutlineEditor() {
     onToggleCollapsed: (id, collapsed) => toggleCollapsed(id, collapsed),
 
     onMoveFocus: (id, direction) => {
-      const target = findVisibleNeighbor(focusIndex.current, id, direction)
+      const target = findVisibleNeighbor(
+        focusIndex.current,
+        rootIdRef.current,
+        id,
+        direction,
+      )
       if (target) {
         const el = refs.current.get(target)
         if (el) {
@@ -103,10 +182,67 @@ export function OutlineEditor() {
         }
       }
     },
+
+    // Zooming in: the clicked node is the pivot (list item -> title).
+    onZoom: (id) => navigateZoom(id, id),
+  }
+
+  const topLevel = childrenOf(index, rootId)
+  const zoomedNode = rootId ? index.byId.get(rootId) ?? null : null
+  const trail = buildTrail(index, rootId)
+
+  // Deep-linked to a node that no longer exists (and the store has loaded).
+  if (rootId !== null && zoomedNode === null && index.byId.size > 0) {
+    return (
+      <div className="outline-root">
+        <div className="outline-empty">
+          That bullet doesn't exist. <Link to="/">Back to top</Link>.
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="outline-root">
+      {rootId !== null && (
+        <nav className="breadcrumb" aria-label="Breadcrumb">
+          {/* Zooming out: the current root is the pivot (title -> list item). */}
+          <button
+            type="button"
+            className="crumb-link"
+            onClick={() => navigateZoom(null, rootId)}
+          >
+            Home
+          </button>
+          {trail.map((ancestor) => (
+            <span key={ancestor.id} className="crumb">
+              <ChevronRight className="sep" size={13} strokeWidth={2} />
+              <button
+                type="button"
+                className="crumb-link"
+                onClick={() => navigateZoom(ancestor.id, rootId)}
+              >
+                {ancestor.text || 'Untitled'}
+              </button>
+            </span>
+          ))}
+        </nav>
+      )}
+
+      {zoomedNode && (
+        <ZoomedTitle
+          node={zoomedNode}
+          isPivot={pivotId === zoomedNode.id}
+          registerRef={registerRef}
+          onTextChange={(text) => setText(zoomedNode.id, text)}
+          onAddChild={() => {
+            const newId = insertChildAtStart(focusIndex.current, zoomedNode.id)
+            pendingFocus.current = newId
+          }}
+          onArrowDown={() => commands.onMoveFocus(zoomedNode.id, 'down')}
+        />
+      )}
+
       <ul className="outline-list">
         {topLevel.map((node) => (
           <OutlineNode
@@ -115,6 +251,7 @@ export function OutlineEditor() {
             index={index}
             commands={commands}
             registerRef={registerRef}
+            pivotId={pivotId}
           />
         ))}
       </ul>
@@ -128,9 +265,9 @@ export function OutlineEditor() {
         type="button"
         className="add-top"
         onClick={() => {
-          const siblings = childrenOf(focusIndex.current, null)
+          const siblings = childrenOf(focusIndex.current, rootId)
           const afterId = siblings.length ? siblings[siblings.length - 1]!.id : null
-          const newId = insertSibling(focusIndex.current, null, afterId)
+          const newId = insertSibling(focusIndex.current, rootId, afterId)
           pendingFocus.current = newId
         }}
       >
@@ -141,31 +278,127 @@ export function OutlineEditor() {
 }
 
 /**
- * Walk the visible (non-collapsed) outline in display order and return
- * the id of the node immediately before/after `id`, or null if none.
+ * The zoomed node rendered as an editable page title. Mirrors OutlineNode's
+ * contentEditable text-sync so the caret is never clobbered during typing.
+ */
+function ZoomedTitle({
+  node,
+  isPivot,
+  registerRef,
+  onTextChange,
+  onAddChild,
+  onArrowDown,
+}: {
+  node: Node
+  isPivot: boolean
+  registerRef: (id: string, el: HTMLSpanElement | null) => void
+  onTextChange: (text: string) => void
+  onAddChild: () => void
+  onArrowDown: () => void
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el && el.textContent !== node.text) {
+      el.textContent = node.text
+    }
+  })
+
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLSpanElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onAddChild()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      onArrowDown()
+    }
+  }
+
+  return (
+    <h2 className="zoomed-title">
+      <span
+        ref={(el) => {
+          ref.current = el
+          registerRef(node.id, el)
+        }}
+        className={`node-text zoomed-title-text${isPivot ? ' vt-morph' : ''}`}
+        style={isPivot ? { viewTransitionName: 'zoom-target' } : undefined}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-label="Title"
+        data-completed={node.completed}
+        onInput={(e) => onTextChange(e.currentTarget.textContent ?? '')}
+        onKeyDown={handleKeyDown}
+      />
+    </h2>
+  )
+}
+
+/**
+ * Ancestors of the zoomed node, from the top of the outline down to (but
+ * not including) the zoomed node itself. Used to render the breadcrumb.
+ */
+function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
+  if (!rootId) return []
+  const trail: Node[] = []
+  let parentId = index.byId.get(rootId)?.parentId ?? null
+  // Guard against corrupted parent chains.
+  let guard = index.byId.size + 1
+  while (parentId && guard-- > 0) {
+    const parent = index.byId.get(parentId)
+    if (!parent) break
+    trail.unshift(parent)
+    parentId = parent.parentId
+  }
+  return trail
+}
+
+/**
+ * Walk the visible (non-collapsed) outline in display order within the
+ * current zoom root and return the id of the node immediately before/after
+ * `id`, or null if none. The zoom root (the title) is the first entry, so
+ * ArrowUp from the first child lands on the title.
  */
 function findVisibleNeighbor(
   index: TreeIndex,
+  rootId: string | null,
   id: string,
   direction: 'up' | 'down',
 ): string | null {
-  const flat = flattenVisible(index)
+  const flat = flattenVisible(index, rootId)
   const i = flat.findIndex((n) => n.id === id)
   if (i === -1) return null
   const neighbor = direction === 'up' ? flat[i - 1] : flat[i + 1]
   return neighbor ? neighbor.id : null
 }
 
-function flattenVisible(index: TreeIndex): Array<{ id: string }> {
+function flattenVisible(
+  index: TreeIndex,
+  rootId: string | null,
+): Array<{ id: string }> {
   const out: Array<{ id: string }> = []
+  // The zoomed title participates in up/down navigation.
+  if (rootId) out.push({ id: rootId })
   const walk = (parentId: string | null) => {
     for (const child of childrenOf(index, parentId)) {
       out.push({ id: child.id })
       if (!child.collapsed) walk(child.id)
     }
   }
-  walk(null)
+  walk(rootId)
   return out
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
 }
 
 function placeCaretAtEnd(el: HTMLElement) {

@@ -4,6 +4,7 @@ import {
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Node } from '../data/schema'
 import type { TreeIndex } from '../data/tree'
 import { childrenOf } from '../data/tree'
@@ -16,6 +17,9 @@ interface OutlineNodeProps {
   commands: NodeCommands
   // Refs registry so the editor can move focus between bullets.
   registerRef: (id: string, el: HTMLSpanElement | null) => void
+  // The node currently morphing across a zoom navigation, if any. When this
+  // node is the pivot, its text claims the shared view-transition-name.
+  pivotId: string | null
 }
 
 export interface NodeCommands {
@@ -27,6 +31,8 @@ export interface NodeCommands {
   onToggleCompleted: (id: string, completed: boolean) => void
   onToggleCollapsed: (id: string, collapsed: boolean) => void
   onMoveFocus: (id: string, direction: 'up' | 'down') => void
+  // Zoom the outline so this node becomes the temporary root.
+  onZoom: (id: string) => void
 }
 
 export const OutlineNode = memo(function OutlineNode({
@@ -34,10 +40,12 @@ export const OutlineNode = memo(function OutlineNode({
   index,
   commands,
   registerRef,
+  pivotId,
 }: OutlineNodeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null)
   const children = childrenOf(index, node.id)
   const hasChildren = children.length > 0
+  const isPivot = node.id === pivotId
 
   // Keep the contentEditable in sync with stored text WITHOUT clobbering
   // the user's caret. We only write to the DOM when the stored text
@@ -100,10 +108,29 @@ export const OutlineNode = memo(function OutlineNode({
       <div className="outline-row">
         <button
           type="button"
-          className="bullet"
+          className="collapse-toggle"
           aria-label={node.collapsed ? 'Expand' : 'Collapse'}
-          onClick={() => commands.onToggleCollapsed(node.id, !node.collapsed)}
-          title={hasChildren ? 'Click to collapse/expand' : ''}
+          data-has-children={hasChildren}
+          data-collapsed={node.collapsed}
+          // Childless rows render no glyph but keep the gutter clickable-free.
+          onClick={() =>
+            hasChildren && commands.onToggleCollapsed(node.id, !node.collapsed)
+          }
+          tabIndex={-1}
+        >
+          {hasChildren &&
+            (node.collapsed ? (
+              <ChevronRight size={14} strokeWidth={2.5} />
+            ) : (
+              <ChevronDown size={14} strokeWidth={2.5} />
+            ))}
+        </button>
+        <button
+          type="button"
+          className="bullet"
+          aria-label="Zoom in"
+          onClick={() => commands.onZoom(node.id)}
+          title="Zoom in"
         >
           <span
             className="bullet-dot"
@@ -123,7 +150,8 @@ export const OutlineNode = memo(function OutlineNode({
             textRef.current = el
             registerRef(node.id, el)
           }}
-          className="node-text"
+          className={`node-text${isPivot ? ' vt-morph' : ''}`}
+          style={isPivot ? { viewTransitionName: 'zoom-target' } : undefined}
           contentEditable
           suppressContentEditableWarning
           role="textbox"
@@ -142,6 +170,7 @@ export const OutlineNode = memo(function OutlineNode({
               index={index}
               commands={commands}
               registerRef={registerRef}
+              pivotId={pivotId}
             />
           ))}
         </ul>

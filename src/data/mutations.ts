@@ -60,6 +60,30 @@ export function insertSibling(
 }
 
 /**
+ * Insert a fresh empty node as the FIRST child of `parentId`, pushing the
+ * current head (if any) down. Used when pressing Enter on a zoomed node's
+ * title: the new bullet should appear directly under the title.
+ *
+ * Returns the new node's id so the editor can focus it.
+ */
+export function insertChildAtStart(
+  index: TreeIndex,
+  parentId: string | null,
+): string {
+  const id = createId()
+  const head = childrenOf(index, parentId)[0] ?? null
+
+  nodesCollection.insert(
+    makeNode({ id, parentId, prevSiblingId: null, text: '' }),
+  )
+
+  // The old head now follows the new node.
+  if (head) update(head.id, { prevSiblingId: id })
+
+  return id
+}
+
+/**
  * Append a node at the end of `parentId`'s children. Used by the
  * first-run seed, where we don't have a live TreeIndex in scope and the
  * caller knows the parent is empty or has a known last child.
