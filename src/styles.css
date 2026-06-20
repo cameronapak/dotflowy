@@ -197,18 +197,20 @@ body {
 
 .breadcrumb {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 10px;
+  min-width: 0;
 }
 
 .breadcrumb .crumb {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .breadcrumb .sep {
@@ -242,6 +244,94 @@ body {
 .breadcrumb .crumb-link:hover {
   color: var(--accent);
   text-decoration: underline;
+}
+
+/* Home and the collapsed "…" never shrink; only long crumbs truncate. */
+.breadcrumb > .crumb-link {
+  flex: 0 0 auto;
+}
+
+.breadcrumb .crumb {
+  flex: 0 1 auto;
+}
+
+.breadcrumb .crumb-collapsed {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* The "…" control: a small pill that reads as the collapsed middle. */
+.breadcrumb .crumb-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border: none;
+  border-radius: 999px;
+  background: var(--row-hover);
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.breadcrumb .crumb-ellipsis:hover,
+.breadcrumb .crumb-collapsed:focus-within .crumb-ellipsis {
+  color: var(--accent);
+}
+
+/* Dropdown of hidden ancestors. CSS-driven: shown on hover or keyboard focus. */
+.breadcrumb .crumb-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  min-width: 160px;
+  max-width: 280px;
+  padding: 4px;
+  border: 1px solid var(--bullet);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* Invisible bridge across the gap between the "…" button and the panel, so the
+   dropdown stays open while the mouse travels from one to the other. */
+.breadcrumb .crumb-dropdown::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 6px;
+}
+
+.breadcrumb .crumb-collapsed:hover .crumb-dropdown,
+.breadcrumb .crumb-collapsed:focus-within .crumb-dropdown {
+  display: flex;
+}
+
+.breadcrumb .crumb-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb .crumb-dropdown-item:hover,
+.breadcrumb .crumb-dropdown-item:focus-visible {
+  background: var(--row-hover);
+  color: var(--fg);
 }
 
 .zoomed-title {
