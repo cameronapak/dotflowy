@@ -166,7 +166,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
 
     onIndent: (id) => {
-      indent(focusIndex.current, id);
+      // Moving the node reparents it into a different <ul>, which remounts
+      // its contentEditable and drops focus. Re-focus it after the render.
+      if (indent(focusIndex.current, id)) pendingFocus.current = id;
     },
 
     onOutdent: (id) => {
@@ -174,7 +176,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // would move it out of the visible subtree and look like it vanished.
       const node = focusIndex.current.byId.get(id);
       if (node && node.parentId === rootIdRef.current) return;
-      outdent(focusIndex.current, id);
+      // Same remount-drops-focus issue as indent; re-focus on a real move.
+      if (outdent(focusIndex.current, id)) pendingFocus.current = id;
     },
 
     onDeleteEmpty: (id) => {

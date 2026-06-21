@@ -126,8 +126,10 @@ export function indent(index: TreeIndex, nodeId: string): boolean {
     ? oldSiblings[i + 1]!
     : null
 
-  // Node becomes last child of newParent.
+  // Node becomes last child of newParent. If that parent was collapsed, the
+  // node would be indented out of sight, so expand it to keep the node visible.
   update(nodeId, { parentId: newParent.id, prevSiblingId: null })
+  if (newParent.collapsed) update(newParent.id, { collapsed: false })
 
   // Old next sibling links back to node's old prev.
   if (oldNext) {
