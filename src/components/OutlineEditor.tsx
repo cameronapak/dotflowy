@@ -14,6 +14,7 @@ import {
   insertSibling,
   outdent,
   removeNode,
+  setIsTask,
   setText,
   toggleCollapsed,
   toggleCompleted,
@@ -163,6 +164,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
 
     onToggleCompleted: (id, completed) => toggleCompleted(id, completed),
+
+    onToggleTask: (id) => {
+      const node = focusIndex.current.byId.get(id);
+      if (!node) return;
+      setIsTask(id, !node.isTask);
+    },
 
     onToggleCollapsed: (id, collapsed) => toggleCollapsed(id, collapsed),
 

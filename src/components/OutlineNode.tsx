@@ -30,6 +30,8 @@ export interface NodeCommands {
   onOutdent: (id: string) => void;
   onDeleteEmpty: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
+  // Flip a bullet between plain and task (checkbox shown/hidden).
+  onToggleTask: (id: string) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
   onMoveFocus: (id: string, direction: "up" | "down") => void;
   // Zoom the outline so this node becomes the temporary root.
@@ -66,6 +68,13 @@ export const OutlineNode = memo(function OutlineNode({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       commands.onEnter(node.id, isCaretAtEnd(e.currentTarget));
+      return;
+    }
+
+    // Cmd/Ctrl+Enter: toggle whether this bullet is a task (has a checkbox).
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      commands.onToggleTask(node.id);
       return;
     }
 
@@ -139,13 +148,15 @@ export const OutlineNode = memo(function OutlineNode({
             data-has-children={hasChildren}
           />
         </button>
-        <Checkbox
-          className="checkbox"
-          checked={node.completed}
-          onCheckedChange={(checked) =>
-            commands.onToggleCompleted(node.id, checked)
-          }
-        />
+        {node.isTask && (
+          <Checkbox
+            className="checkbox"
+            checked={node.completed}
+            onCheckedChange={(checked) =>
+              commands.onToggleCompleted(node.id, checked)
+            }
+          />
+        )}
         <span
           ref={(el) => {
             textRef.current = el;

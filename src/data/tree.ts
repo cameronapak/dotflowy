@@ -91,6 +91,7 @@ export function makeNode(partial: Partial<Node> & Pick<Node, 'id'>): Node {
     parentId: null,
     prevSiblingId: null,
     text: '',
+    isTask: false,
     completed: false,
     collapsed: false,
     createdAt: now(),

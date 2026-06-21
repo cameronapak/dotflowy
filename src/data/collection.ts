@@ -3,6 +3,35 @@ import { localStorageCollectionOptions } from '@tanstack/react-db'
 import { nodeSchema } from './schema'
 import type { Node } from './schema'
 
+const STORAGE_KEY = 'workflowy-oss:nodes'
+
+/**
+ * One-time backfill: nodes stored before `isTask` existed lack the field,
+ * which the (intentionally default-less) schema would reject on load. Patch
+ * the raw localStorage payload before the collection reads it so validation
+ * only ever sees complete rows. Runs at import; browser-only (SPA mode).
+ */
+function migrateAddIsTask() {
+  if (typeof localStorage === 'undefined') return
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return
+  try {
+    const store = JSON.parse(raw) as Record<string, { data?: Partial<Node> }>
+    let changed = false
+    for (const entry of Object.values(store)) {
+      if (entry?.data && entry.data.isTask === undefined) {
+        entry.data.isTask = false
+        changed = true
+      }
+    }
+    if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
+  } catch {
+    // Corrupt payload: leave it for the collection to handle.
+  }
+}
+
+migrateAddIsTask()
+
 /**
  * Single source of truth for all outline nodes.
  *
@@ -25,7 +54,7 @@ import type { Node } from './schema'
 export const nodesCollection = createCollection(
   localStorageCollectionOptions({
     id: 'nodes',
-    storageKey: 'workflowy-oss:nodes',
+    storageKey: STORAGE_KEY,
     getKey: (node: Node) => node.id,
     schema: nodeSchema,
   }),
