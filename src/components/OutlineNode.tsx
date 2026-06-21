@@ -1,9 +1,5 @@
-import {
-  memo,
-  useEffect,
-  useRef,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { memo, useEffect, useRef } from "react";
+import { useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
@@ -71,63 +67,83 @@ export const OutlineNode = memo(function OutlineNode({
     }
   });
 
-  const handleKeyDown = (e: ReactKeyboardEvent<HTMLSpanElement>) => {
-    // While the "/" menu is open it owns Arrow/Enter/Tab/Esc. If it consumed
-    // the key, skip the outline's own handling below.
-    if (slash.handleKeyDown(e)) return;
-
-    // Cmd/Ctrl+Enter: toggle completion on any bullet (task or plain).
-    // MUST come before the plain-Enter branch below, which would otherwise
-    // swallow it (Cmd+Enter is still key === "Enter" with no shift).
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      commands.onToggleCompleted(node.id, !node.completed);
-      return;
-    }
-
-    // Enter: create a new sibling. Caret position is irrelevant for the
-    // mutation, but we pass it so the editor can decide mid-text split
-    // later. For v1 we always make an empty sibling after this node.
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      commands.onEnter(node.id, isCaretAtEnd(e.currentTarget));
-      return;
-    }
-
-    // Tab / Shift+Tab: indent / outdent.
-    if (e.key === "Tab") {
-      e.preventDefault();
-      if (e.shiftKey) commands.onOutdent(node.id);
-      else commands.onIndent(node.id);
-      return;
-    }
-
-    // Backspace on empty: delete and focus the previous node.
-    // contentEditable spans have no selectionStart; check emptiness via
-    // textContent and a collapsed caret at offset 0.
-    if (
-      e.key === "Backspace" &&
-      e.currentTarget.textContent === "" &&
-      isCaretAtStart(e.currentTarget)
-    ) {
-      e.preventDefault();
-      commands.onDeleteEmpty(node.id);
-      return;
-    }
-
-    // Arrow up/down at line edges: move between siblings for that
-    // outline feel. Simple version: jump to prev/next visible node.
-    if (e.key === "ArrowUp" && atLineStart(e.currentTarget)) {
-      e.preventDefault();
-      commands.onMoveFocus(node.id, "up");
-      return;
-    }
-    if (e.key === "ArrowDown" && atLineEnd(e.currentTarget)) {
-      e.preventDefault();
-      commands.onMoveFocus(node.id, "down");
-      return;
-    }
-  };
+  // Outline keyboard shortcuts, scoped to THIS bullet's contentEditable via
+  // `target: textRef`. Scoping to the element is what lets single keys
+  // (Enter/Tab/Backspace/Arrows) fire from a contentEditable -- the manager
+  // only ignores input elements that aren't the registration's own target.
+  //
+  // While the "/" menu is open it owns Arrow/Enter/Tab/Esc, so we disable
+  // these with `enabled: !slash.isOpen`. Disabled registrations bail before
+  // any preventDefault/stopPropagation, so the menu's own onKeyDown is
+  // untouched.
+  //
+  // Caret-conditional keys (Backspace/Arrows) opt out of the default
+  // preventDefault/stopPropagation and call them manually only when they
+  // actually act, so normal in-line editing and caret movement still work.
+  useHotkeys(
+    [
+      {
+        // Cmd/Ctrl+Enter: toggle completion on any bullet (task or plain).
+        hotkey: "Mod+Enter",
+        callback: () => commands.onToggleCompleted(node.id, !node.completed),
+      },
+      {
+        // Enter: create a new empty sibling after this node.
+        hotkey: "Enter",
+        callback: () => {
+          const el = textRef.current;
+          commands.onEnter(node.id, el ? isCaretAtEnd(el) : true);
+        },
+      },
+      {
+        // Tab: indent under the previous sibling.
+        hotkey: "Tab",
+        callback: () => commands.onIndent(node.id),
+      },
+      {
+        // Shift+Tab: outdent one level.
+        hotkey: "Shift+Tab",
+        callback: () => commands.onOutdent(node.id),
+      },
+      {
+        // Backspace on an empty bullet: delete it and focus the previous node.
+        hotkey: "Backspace",
+        callback: (e) => {
+          const el = textRef.current;
+          if (!el || el.textContent !== "" || !isCaretAtStart(el)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          commands.onDeleteEmpty(node.id);
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
+      {
+        // ArrowUp at the start of the line: move focus to the previous node.
+        hotkey: "ArrowUp",
+        callback: (e) => {
+          const el = textRef.current;
+          if (!el || !atLineStart(el)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          commands.onMoveFocus(node.id, "up");
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
+      {
+        // ArrowDown at the end of the line: move focus to the next node.
+        hotkey: "ArrowDown",
+        callback: (e) => {
+          const el = textRef.current;
+          if (!el || !atLineEnd(el)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          commands.onMoveFocus(node.id, "down");
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
+    ],
+    { target: textRef, enabled: !slash.isOpen },
+  );
 
   return (
     <li className="outline-node" data-node-id={node.id}>
@@ -189,7 +205,9 @@ export const OutlineNode = memo(function OutlineNode({
             slash.handleInput();
           }}
           onBlur={slash.close}
-          onKeyDown={handleKeyDown}
+          // The "/" menu owns its own Arrow/Enter/Tab/Esc navigation while
+          // open; the outline shortcuts above defer to it via `enabled`.
+          onKeyDown={slash.handleKeyDown}
         />
         {slash.menu}
       </div>

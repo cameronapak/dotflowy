@@ -1,11 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { useHotkey } from "@tanstack/react-hotkeys";
+import { useHotkey, useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
@@ -315,17 +310,15 @@ function ZoomedTitle({
     }
   });
 
-  const handleKeyDown = (e: ReactKeyboardEvent<HTMLSpanElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      onAddChild();
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      onArrowDown();
-    }
-  };
+  // Title shortcuts, scoped to the title's own contentEditable. Enter adds a
+  // first child under the title; ArrowDown drops focus into the first child.
+  useHotkeys(
+    [
+      { hotkey: "Enter", callback: () => onAddChild() },
+      { hotkey: "ArrowDown", callback: () => onArrowDown() },
+    ],
+    { target: ref },
+  );
 
   return (
     <h2 className="zoomed-title">
@@ -342,7 +335,6 @@ function ZoomedTitle({
         aria-label="Title"
         data-completed={node.completed}
         onInput={(e) => onTextChange(e.currentTarget.textContent ?? "")}
-        onKeyDown={handleKeyDown}
       />
     </h2>
   );
