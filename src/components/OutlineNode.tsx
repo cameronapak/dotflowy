@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
 import type { TreeIndex } from "../data/tree";
 import { childrenOf } from "../data/tree";
+import { useSlashMenu } from "./slash-menu";
 
 interface OutlineNodeProps {
   node: Node;
@@ -30,8 +31,8 @@ export interface NodeCommands {
   onOutdent: (id: string) => void;
   onDeleteEmpty: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
-  // Flip a bullet between plain and task (checkbox shown/hidden).
-  onToggleTask: (id: string) => void;
+  // Set whether a bullet is a task (checkbox shown/hidden).
+  onSetTask: (id: string, isTask: boolean) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
   onMoveFocus: (id: string, direction: "up" | "down") => void;
   // Zoom the outline so this node becomes the temporary root.
@@ -50,6 +51,15 @@ export const OutlineNode = memo(function OutlineNode({
   const hasChildren = children.length > 0;
   const isPivot = node.id === pivotId;
 
+  // The "/" command menu for this bullet. Only the focused bullet ever has a
+  // caret, so at most one menu is open across the whole outline.
+  const slash = useSlashMenu({
+    node,
+    commands,
+    getEl: () => textRef.current,
+    onTextChange: (text) => commands.onTextChange(node.id, text),
+  });
+
   // Keep the contentEditable in sync with stored text WITHOUT clobbering
   // the user's caret. We only write to the DOM when the stored text
   // differs from what's rendered, which is essentially never during
@@ -62,6 +72,10 @@ export const OutlineNode = memo(function OutlineNode({
   });
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLSpanElement>) => {
+    // While the "/" menu is open it owns Arrow/Enter/Tab/Esc. If it consumed
+    // the key, skip the outline's own handling below.
+    if (slash.handleKeyDown(e)) return;
+
     // Enter: create a new sibling. Caret position is irrelevant for the
     // mutation, but we pass it so the editor can decide mid-text split
     // later. For v1 we always make an empty sibling after this node.
@@ -74,7 +88,7 @@ export const OutlineNode = memo(function OutlineNode({
     // Cmd/Ctrl+Enter: toggle whether this bullet is a task (has a checkbox).
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      commands.onToggleTask(node.id);
+      commands.onSetTask(node.id, !node.isTask);
       return;
     }
 
@@ -168,11 +182,14 @@ export const OutlineNode = memo(function OutlineNode({
           suppressContentEditableWarning
           role="textbox"
           data-completed={node.completed}
-          onInput={(e) =>
-            commands.onTextChange(node.id, e.currentTarget.textContent ?? "")
-          }
+          onInput={(e) => {
+            commands.onTextChange(node.id, e.currentTarget.textContent ?? "");
+            slash.handleInput();
+          }}
+          onBlur={slash.close}
           onKeyDown={handleKeyDown}
         />
+        {slash.menu}
       </div>
 
       {!node.collapsed && hasChildren && (
