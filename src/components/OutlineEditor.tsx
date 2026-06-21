@@ -5,6 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
@@ -95,6 +96,29 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Keep the live rootId available inside command closures.
   const rootIdRef = useRef<string | null>(rootId);
   rootIdRef.current = rootId;
+
+  // Cmd/Ctrl+D toggles completion on the focused bullet. Every bullet is
+  // completable (not just tasks), so this works regardless of isTask. We find
+  // the focused node by reverse-looking-up the refs registry, which covers
+  // both list items and the zoomed title (registered under rootId).
+  useHotkey(
+    "Mod+D",
+    () => {
+      const active = document.activeElement;
+      let focusedId: string | null = null;
+      for (const [id, el] of refs.current) {
+        if (el === active) {
+          focusedId = id;
+          break;
+        }
+      }
+      if (!focusedId) return;
+      const node = focusIndex.current.byId.get(focusedId);
+      if (!node) return;
+      toggleCompleted(focusedId, !node.completed);
+    },
+    { preventDefault: true },
+  );
 
   // The "pivot" of the last zoom: the node that swaps between title and
   // list-item roles. The incoming view reads it from history state and names

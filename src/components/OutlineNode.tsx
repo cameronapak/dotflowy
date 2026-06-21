@@ -76,19 +76,21 @@ export const OutlineNode = memo(function OutlineNode({
     // the key, skip the outline's own handling below.
     if (slash.handleKeyDown(e)) return;
 
+    // Cmd/Ctrl+Enter: toggle completion on any bullet (task or plain).
+    // MUST come before the plain-Enter branch below, which would otherwise
+    // swallow it (Cmd+Enter is still key === "Enter" with no shift).
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      commands.onToggleCompleted(node.id, !node.completed);
+      return;
+    }
+
     // Enter: create a new sibling. Caret position is irrelevant for the
     // mutation, but we pass it so the editor can decide mid-text split
     // later. For v1 we always make an empty sibling after this node.
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       commands.onEnter(node.id, isCaretAtEnd(e.currentTarget));
-      return;
-    }
-
-    // Cmd/Ctrl+Enter: toggle whether this bullet is a task (has a checkbox).
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      commands.onSetTask(node.id, !node.isTask);
       return;
     }
 

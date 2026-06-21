@@ -260,12 +260,12 @@ export function toggleCompleted(nodeId: string, completed: boolean) {
 }
 
 /**
- * Make a bullet a task (gains a checkbox) or a plain bullet. Turning a task
- * back into a plain bullet clears its completion so a hidden "done" state
- * can't linger if it's ever re-promoted to a task later.
+ * Make a bullet a task (gains a checkbox) or a plain bullet. `isTask` is
+ * purely a display choice and is independent of `completed`: a plain bullet
+ * keeps whatever done-status it had. See docs/adr/0001.
  */
 export function setIsTask(nodeId: string, isTask: boolean) {
-  update(nodeId, isTask ? { isTask } : { isTask, completed: false })
+  update(nodeId, { isTask })
 }
 
 export function toggleCollapsed(nodeId: string, collapsed: boolean) {

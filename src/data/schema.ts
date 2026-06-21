@@ -25,10 +25,10 @@ export const nodeSchema = z.object({
   parentId: z.string().nullable(),
   prevSiblingId: z.string().nullable(),
   text: z.string(),
-  // Whether this bullet is a task (renders a checkbox) vs a plain bullet.
-  // `completed` only carries meaning when isTask is true. Kept as a flat
-  // boolean so it maps to a single column on the future sync backend.
+  // Whether this bullet renders a checkbox (a "task") vs a plain bullet.
+  // Purely a display choice, independent of `completed`. See docs/adr/0001.
   isTask: z.boolean(),
+  // Done-status. Applies to any bullet, task or not. Toggled by Cmd+Enter.
   completed: z.boolean(),
   collapsed: z.boolean(),
   createdAt: z.number(),
