@@ -214,17 +214,18 @@
 }
 
 .bullet {
-  @apply size-5 bg-card;
+  @apply size-5 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none;
   flex: 0 0 auto;
-  padding: 0;
   margin-top: 2px;
-  border: none;
-  background: transparent;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 99px;
+}
+
+.bullet:active {
+  @apply translate-y-px;
 }
 
 /* Workflowy's zoom affordance: a faint ring behind the dot on hover. */
@@ -257,8 +258,7 @@
 }
 
 .node-text[data-completed="true"] {
-  color: var(--completed);
-  text-decoration: line-through;
+  @apply text-muted-foreground/60 line-through;
 }
 
 .node-text:empty::before {
