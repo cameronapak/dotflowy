@@ -180,7 +180,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       if (outdent(focusIndex.current, id)) pendingFocus.current = id;
     },
 
-    onDeleteEmpty: (id) => {
+    onDeleteNode: (id) => {
       const focusId = removeNode(focusIndex.current, id);
       if (focusId) pendingFocus.current = focusId;
     },

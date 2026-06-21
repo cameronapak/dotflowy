@@ -25,7 +25,8 @@ export interface NodeCommands {
   onEnter: (id: string, caretAtEnd: boolean) => void;
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
-  onDeleteEmpty: (id: string) => void;
+  // Delete a bullet and its entire subtree, then focus a neighbor.
+  onDeleteNode: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
   // Set whether a bullet is a task (checkbox shown/hidden).
   onSetTask: (id: string, isTask: boolean) => void;
@@ -113,9 +114,20 @@ export const OutlineNode = memo(function OutlineNode({
           if (!el || el.textContent !== "" || !isCaretAtStart(el)) return;
           e.preventDefault();
           e.stopPropagation();
-          commands.onDeleteEmpty(node.id);
+          commands.onDeleteNode(node.id);
         },
         options: { preventDefault: false, stopPropagation: false },
+      },
+      {
+        // Cmd/Ctrl+Shift+Delete: delete this bullet and its whole subtree,
+        // regardless of text or caret position. On Mac "delete" is the
+        // Backspace key; register Delete too for the forward-delete key.
+        hotkey: "Mod+Shift+Backspace",
+        callback: () => commands.onDeleteNode(node.id),
+      },
+      {
+        hotkey: "Mod+Shift+Delete",
+        callback: () => commands.onDeleteNode(node.id),
       },
       {
         // ArrowUp at the start of the line: move focus to the previous node.
