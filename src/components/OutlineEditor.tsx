@@ -16,6 +16,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { seedIfEmpty } from "../data/seed";
+import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import { Button } from "./ui/button";
 
@@ -110,7 +111,20 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       if (!focusedId) return;
       const node = focusIndex.current.byId.get(focusedId);
       if (!node) return;
+      capture(focusIndex.current, focusedId);
       toggleCompleted(focusedId, !node.completed);
+    },
+    { preventDefault: true },
+  );
+
+  // Cmd/Ctrl+Z: undo the last action. preventDefault stops the browser's
+  // native contentEditable undo so we own history. Restores focus to the
+  // node that was focused before the undone action, when it still exists.
+  useHotkey(
+    "Mod+Z",
+    () => {
+      const focusId = undo(focusIndex.current);
+      if (focusId) pendingFocus.current = focusId;
     },
     { preventDefault: true },
   );
@@ -156,11 +170,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   };
 
   const commands: NodeCommands = {
-    onTextChange: (id, text) => setText(id, text),
+    onTextChange: (id, text) => {
+      // Coalesce a run of keystrokes on one bullet into a single undo step,
+      // capturing the pre-typing state on the first keystroke of the run.
+      capture(focusIndex.current, id, `text:${id}`);
+      setText(id, text);
+    },
 
     onEnter: (id) => {
       const node = focusIndex.current.byId.get(id);
       if (!node) return;
+      capture(focusIndex.current, id);
       const newId = insertSibling(focusIndex.current, node.parentId, id);
       pendingFocus.current = newId;
     },
@@ -168,7 +188,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onIndent: (id) => {
       // Moving the node reparents it into a different <ul>, which remounts
       // its contentEditable and drops focus. Re-focus it after the render.
+      capture(focusIndex.current, id);
       if (indent(focusIndex.current, id)) pendingFocus.current = id;
+      else drop(); // no move happened; discard the redundant undo point
     },
 
     onOutdent: (id) => {
@@ -177,19 +199,32 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       const node = focusIndex.current.byId.get(id);
       if (node && node.parentId === rootIdRef.current) return;
       // Same remount-drops-focus issue as indent; re-focus on a real move.
+      capture(focusIndex.current, id);
       if (outdent(focusIndex.current, id)) pendingFocus.current = id;
+      else drop();
     },
 
     onDeleteNode: (id) => {
+      capture(focusIndex.current, id);
       const focusId = removeNode(focusIndex.current, id);
       if (focusId) pendingFocus.current = focusId;
+      else drop(); // node didn't exist; nothing was deleted
     },
 
-    onToggleCompleted: (id, completed) => toggleCompleted(id, completed),
+    onToggleCompleted: (id, completed) => {
+      capture(focusIndex.current, id);
+      toggleCompleted(id, completed);
+    },
 
-    onSetTask: (id, isTask) => setIsTask(id, isTask),
+    onSetTask: (id, isTask) => {
+      capture(focusIndex.current, id);
+      setIsTask(id, isTask);
+    },
 
-    onToggleCollapsed: (id, collapsed) => toggleCollapsed(id, collapsed),
+    onToggleCollapsed: (id, collapsed) => {
+      capture(focusIndex.current, id);
+      toggleCollapsed(id, collapsed);
+    },
 
     onMoveFocus: (id, direction) => {
       const target = findVisibleNeighbor(
