@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, MoreHorizontal, PlusIcon } from "lucide-react";
+import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
 import {
@@ -353,13 +353,14 @@ function BreadcrumbTrail({
   return (
     <nav className="breadcrumb" aria-label="Breadcrumb">
       {/* Zooming out: the current root is the pivot (title -> list item). */}
-      <button
+      <Button
         type="button"
-        className="crumb-link"
+        size="icon"
+        variant="outline"
         onClick={() => onNavigate(null, rootId)}
       >
-        Home
-      </button>
+        <HomeIcon />
+      </Button>
       {lead.map((ancestor) => (
         <Crumb
           key={ancestor.id}
