@@ -5,6 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
 import type { TreeIndex } from "../data/tree";
 import { childrenOf } from "../data/tree";
@@ -138,13 +139,11 @@ export const OutlineNode = memo(function OutlineNode({
             data-has-children={hasChildren}
           />
         </button>
-        <input
-          type="checkbox"
+        <Checkbox
           className="checkbox"
-          aria-label="Complete"
           checked={node.completed}
-          onChange={(e) =>
-            commands.onToggleCompleted(node.id, e.target.checked)
+          onCheckedChange={(checked) =>
+            commands.onToggleCompleted(node.id, checked)
           }
         />
         <span

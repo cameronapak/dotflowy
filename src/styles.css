@@ -214,9 +214,8 @@
 }
 
 .bullet {
-  @apply size-5 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none;
+  @apply size-5 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none mt-1;
   flex: 0 0 auto;
-  margin-top: 2px;
   cursor: pointer;
   display: flex;
   align-items: center;
