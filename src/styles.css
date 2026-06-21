@@ -261,17 +261,11 @@ body {
 }
 
 .bullet:hover .bullet-dot {
-  @apply bg-muted;
+  @apply bg-primary;
 }
 
 .bullet-dot {
-  @apply block size-2 rounded-full bg-muted;
-}
-
-.bullet-dot[data-has-children="true"] {
-  width: 8px;
-  height: 8px;
-  background: var(--muted);
+  @apply block size-2 rounded-full bg-primary;
 }
 
 .checkbox {
