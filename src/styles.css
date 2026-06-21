@@ -45,7 +45,7 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --font-heading: var(--font-sans);
-  --font-sans: 'Geist Variable', sans-serif;
+  --font-sans: "Geist Variable", sans-serif;
 }
 
 :root {
@@ -241,9 +241,8 @@ body {
 }
 
 .bullet {
+  @apply size-5 bg-card;
   flex: 0 0 auto;
-  width: 16px;
-  height: 24px;
   padding: 0;
   margin-top: 2px;
   border: none;
@@ -252,24 +251,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 99px;
 }
 
 /* Workflowy's zoom affordance: a faint ring behind the dot on hover. */
-.bullet:hover {
-  background: rgba(44, 108, 176, 0.12);
+.bullet:hover,
+.bullet:has(span[data-has-children="true"]) {
+  @apply bg-primary/10;
 }
 
 .bullet:hover .bullet-dot {
-  background: var(--accent);
+  @apply bg-muted;
 }
 
 .bullet-dot {
-  display: block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--bullet);
+  @apply block size-2 rounded-full bg-muted;
 }
 
 .bullet-dot[data-has-children="true"] {
