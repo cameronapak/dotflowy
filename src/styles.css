@@ -371,7 +371,7 @@
 
 /* Dropdown of hidden ancestors. CSS-driven: shown on hover or keyboard focus. */
 .breadcrumb .crumb-dropdown {
-  @apply absolute shadow-lg rounded-lg;
+  @apply absolute shadow-lg rounded-lg bg-card!;
   top: calc(100% + 4px);
   left: 0;
   z-index: 20;
