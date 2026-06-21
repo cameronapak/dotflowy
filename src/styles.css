@@ -380,7 +380,6 @@
   min-width: 160px;
   max-width: 280px;
   padding: 4px;
-  background: var(--bg);
 }
 
 /* Invisible bridge across the gap between the "…" button and the panel, so the

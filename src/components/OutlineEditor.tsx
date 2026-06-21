@@ -203,13 +203,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   return (
     <div className="outline-root">
-      {rootId !== null && (
-        <BreadcrumbTrail
-          trail={trail}
-          rootId={rootId}
-          onNavigate={navigateZoom}
-        />
-      )}
+      <BreadcrumbTrail
+        trail={trail}
+        rootId={rootId || null}
+        onNavigate={navigateZoom}
+      />
 
       {zoomedNode && (
         <ZoomedTitle
@@ -332,7 +330,7 @@ function ZoomedTitle({
  * its text is long.
  */
 const LEADING = 1;
-const TRAILING = 1;
+const TRAILING = 2;
 
 function BreadcrumbTrail({
   trail,
@@ -340,7 +338,7 @@ function BreadcrumbTrail({
   onNavigate,
 }: {
   trail: Node[];
-  rootId: string;
+  rootId: string | null;
   onNavigate: (toRootId: string | null, pivot: string) => void;
 }) {
   // Only collapse when at least two crumbs would be hidden — folding a single
@@ -357,33 +355,38 @@ function BreadcrumbTrail({
         type="button"
         size="icon"
         variant="outline"
-        onClick={() => onNavigate(null, rootId)}
+        onClick={() => {
+          if (rootId === null) return;
+          onNavigate(null, rootId);
+        }}
       >
         <HomeIcon />
       </Button>
-      {lead.map((ancestor) => (
-        <Crumb
-          key={ancestor.id}
-          ancestor={ancestor}
-          rootId={rootId}
-          onNavigate={onNavigate}
-        />
-      ))}
-      {collapse && (
+      {rootId &&
+        lead.map((ancestor) => (
+          <Crumb
+            key={ancestor.id}
+            ancestor={ancestor}
+            rootId={rootId}
+            onNavigate={onNavigate}
+          />
+        ))}
+      {rootId && collapse && (
         <CollapsedCrumbs
           hidden={hidden}
           rootId={rootId}
           onNavigate={onNavigate}
         />
       )}
-      {tail.map((ancestor) => (
-        <Crumb
-          key={ancestor.id}
-          ancestor={ancestor}
-          rootId={rootId}
-          onNavigate={onNavigate}
-        />
-      ))}
+      {rootId &&
+        tail.map((ancestor) => (
+          <Crumb
+            key={ancestor.id}
+            ancestor={ancestor}
+            rootId={rootId}
+            onNavigate={onNavigate}
+          />
+        ))}
     </nav>
   );
 }
@@ -454,20 +457,20 @@ function CollapsedCrumbs({
 }
 
 /**
- * Ancestors of the zoomed node, from the top of the outline down to (but
- * not including) the zoomed node itself. Used to render the breadcrumb.
+ * The zoomed node and its ancestors, from the top of the outline down to
+ * (and including) the zoomed node itself. Used to render the breadcrumb.
  */
 function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
   if (!rootId) return [];
   const trail: Node[] = [];
-  let parentId = index.byId.get(rootId)?.parentId ?? null;
+  let current = index.byId.get(rootId) ?? null;
   // Guard against corrupted parent chains.
   let guard = index.byId.size + 1;
-  while (parentId && guard-- > 0) {
-    const parent = index.byId.get(parentId);
-    if (!parent) break;
-    trail.unshift(parent);
-    parentId = parent.parentId;
+  while (current && guard-- > 0) {
+    trail.unshift(current);
+    current = current.parentId
+      ? (index.byId.get(current.parentId) ?? null)
+      : null;
   }
   return trail;
 }
