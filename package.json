@@ -1,9 +1,9 @@
 {
-  "name": "workflowy-oss",
+  "name": "dotflowy-oss",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An open-source, local-first Workflowy clone built with TanStack Start and TanStack DB.",
+  "description": "An open-source, local-first Dotflowy outline editor built with TanStack Start and TanStack DB.",
   "license": "MIT",
   "scripts": {
     "dev": "vite dev",

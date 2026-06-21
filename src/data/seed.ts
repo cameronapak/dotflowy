@@ -24,7 +24,7 @@ export function seedIfEmpty(hasAnyNode: boolean): boolean {
       id: aId,
       parentId: null,
       prevSiblingId: null,
-      text: 'Welcome to Workflowy OSS',
+      text: 'Welcome to Dotflowy OSS',
       createdAt: now(),
     }),
   )

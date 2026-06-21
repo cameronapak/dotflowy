@@ -3,7 +3,7 @@ import { localStorageCollectionOptions } from '@tanstack/react-db'
 import { nodeSchema } from './schema'
 import type { Node } from './schema'
 
-const STORAGE_KEY = 'workflowy-oss:nodes'
+const STORAGE_KEY = 'dotflowy-oss:nodes'
 
 /**
  * One-time backfill: nodes stored before `isTask` existed lack the field,

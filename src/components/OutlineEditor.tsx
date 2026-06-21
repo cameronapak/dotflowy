@@ -65,7 +65,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // localStorage is synchronous though, so reading the raw key is safe.
     const raw =
       typeof localStorage !== "undefined"
-        ? localStorage.getItem("workflowy-oss:nodes")
+        ? localStorage.getItem("dotflowy-oss:nodes")
         : null;
     if (raw === null) seedIfEmpty(false);
   }, []);

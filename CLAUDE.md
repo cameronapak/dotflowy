@@ -24,7 +24,7 @@ There is **no test runner and no linter** configured. `typecheck` is the only st
 
 ## Data layer gotchas
 
-- **localStorage shape is not a plain array.** Under key `workflowy-oss:nodes`, TanStack DB stores an object keyed by id where each value is `{ data: Node, versionKey }` — not `Node[]`. To read it directly: `Object.values(JSON.parse(raw)).map(v => v.data)`.
+- **localStorage shape is not a plain array.** Under key `dotflowy-oss:nodes`, TanStack DB stores an object keyed by id where each value is `{ data: Node, versionKey }` — not `Node[]`. To read it directly: `Object.values(JSON.parse(raw)).map(v => v.data)`.
 - **The schema intentionally has no zod `.default()` values** (`src/data/schema.ts`). Defaults make zod's inferred input type optional, which collides with TanStack DB's schema-typed collection overload. Always build complete nodes via `makeNode()` in `tree.ts`; don't add `.default()` to the schema.
 - **Mutations operate on the live `TreeIndex`.** Every function in `mutations.ts` takes the current index (so it can find siblings/order) and mutates `nodesCollection` directly. The editor holds the live-derived index in a ref (`focusIndex`) and passes `focusIndex.current` into command handlers, because the `commands` object is recreated each render but closures capture stale values otherwise.
 

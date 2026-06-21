@@ -1,4 +1,4 @@
-# Workflowy OSS
+# Dotflowy OSS
 
 An open-source, local-first outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
 
