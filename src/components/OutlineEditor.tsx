@@ -181,6 +181,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
    * in the OUTGOING view here; the incoming view names it declaratively.
    */
   const navigateZoom = (toRootId: string | null, pivot: string) => {
+    // Zooming out reveals the trail: expand any collapsed ancestor between the
+    // node we're leaving and the destination root, so the pivot is actually
+    // visible when we land (otherwise a collapsed parent hides where you were).
+    revealAncestorsToRoot(focusIndex.current, pivot, toRootId);
     if (prefersReducedMotion()) {
       // No morph, but still carry the pivot so the new view restores focus.
       const state = { pivotId: pivot };
@@ -595,6 +599,37 @@ function CollapsedCrumbs({
       </div>
     </span>
   );
+}
+
+/**
+ * On zoom-out, expand every collapsed ancestor on the path from `pivot` (the
+ * node we're leaving) up to — but not including — `toRootId` (the destination
+ * root, or null for Home). This makes the trail that led to `pivot` visible in
+ * the view we're navigating to.
+ *
+ * No-op unless `pivot` is actually a descendant of `toRootId` — so zooming IN
+ * (pivot === toRootId) and any non-ancestral jump leave collapse state alone.
+ */
+function revealAncestorsToRoot(
+  index: TreeIndex,
+  pivot: string,
+  toRootId: string | null,
+) {
+  if (pivot === toRootId) return;
+  const collapsedOnPath: string[] = [];
+  let current = index.byId.get(pivot)?.parentId ?? null;
+  // Guard against corrupted parent chains, mirroring buildTrail.
+  let guard = index.byId.size + 1;
+  while (current && current !== toRootId && guard-- > 0) {
+    const node = index.byId.get(current);
+    if (!node) break;
+    if (node.collapsed) collapsedOnPath.push(current);
+    current = node.parentId ?? null;
+  }
+  // Only expand if we walked all the way up to the destination root; otherwise
+  // pivot wasn't below it and we'd be mangling an unrelated branch.
+  if (current !== toRootId) return;
+  for (const id of collapsedOnPath) toggleCollapsed(id, false);
 }
 
 /**
