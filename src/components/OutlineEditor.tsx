@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useHotkey, useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
-import { childrenOf, type Node, type TreeIndex } from "../data/tree";
+import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import {
   indent,
   insertChildAtStart,
@@ -704,25 +704,6 @@ function revealAncestorsToRoot(
   // pivot wasn't below it and we'd be mangling an unrelated branch.
   if (current !== toRootId) return;
   for (const id of collapsedOnPath) toggleCollapsed(id, false);
-}
-
-/**
- * The zoomed node and its ancestors, from the top of the outline down to
- * (and including) the zoomed node itself. Used to render the breadcrumb.
- */
-function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
-  if (!rootId) return [];
-  const trail: Node[] = [];
-  let current = index.byId.get(rootId) ?? null;
-  // Guard against corrupted parent chains.
-  let guard = index.byId.size + 1;
-  while (current && guard-- > 0) {
-    trail.unshift(current);
-    current = current.parentId
-      ? (index.byId.get(current.parentId) ?? null)
-      : null;
-  }
-  return trail;
 }
 
 /**

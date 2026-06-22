@@ -70,6 +70,26 @@ export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
   return index.childrenByParent.get(parentId ?? ROOT_PARENT) ?? []
 }
 
+/**
+ * A node and its ancestors, from the top of the outline down to (and
+ * including) `rootId` itself. Used by the zoom breadcrumb (OutlineEditor)
+ * and the quick-switcher's per-result breadcrumb context (ADR 0012).
+ */
+export function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
+  if (!rootId) return []
+  const trail: Node[] = []
+  let current = index.byId.get(rootId) ?? null
+  // Guard against corrupted parent chains.
+  let guard = index.byId.size + 1
+  while (current && guard-- > 0) {
+    trail.unshift(current)
+    current = current.parentId
+      ? (index.byId.get(current.parentId) ?? null)
+      : null
+  }
+  return trail
+}
+
 /** Stable-ish id. crypto.randomUUID is ubiquitous in modern browsers. */
 export function createId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {

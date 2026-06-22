@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-router'
 import { ThemeProvider } from '../components/theme-provider'
 import { ShowCompletedProvider } from '../components/show-completed-provider'
+import { NodeSwitcher } from '../components/node-switcher'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -39,6 +40,7 @@ function RootComponent() {
       <ThemeProvider>
         <ShowCompletedProvider>
           <Outlet />
+          <NodeSwitcher />
         </ShowCompletedProvider>
       </ThemeProvider>
     </RootDocument>

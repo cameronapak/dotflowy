@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BookmarksMenu, BookmarkStar } from "./bookmarks";
 import { ModeToggle } from "./mode-toggle";
+import { NodeSearchButton } from "./node-switcher";
 import { ShowCompletedToggle } from "./show-completed-toggle";
 import { Separator } from "./ui/separator";
 
@@ -26,6 +27,7 @@ export function Header({ children }: { children?: ReactNode }) {
         <div className="flex shrink-0 items-center gap-1">
           <BookmarkStar />
           <Separator orientation="vertical" />
+          <NodeSearchButton />
           <BookmarksMenu />
           <ShowCompletedToggle />
           <ModeToggle />
