@@ -60,6 +60,20 @@ export const OutlineNode = memo(function OutlineNode({
   showCompleted,
 }: OutlineNodeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null);
+  // Inline `code` is decorated LIVE -- the contentEditable always holds
+  // formatted HTML (mono chips), even while the caret is in the bullet. Each
+  // keystroke re-tokenizes the line and rebuilds its DOM, so we save the caret
+  // as an absolute character offset before the rebuild and restore it after
+  // (see decorate()). Backticks stay visible inside the chip, which keeps the
+  // source offset and the displayed offset identical -- no position mapping.
+  //
+  // Last text written to the DOM, so the sync effect skips redundant rebuilds
+  // (and the caret-jitter they'd cause) on unrelated re-renders.
+  const syncedRef = useRef<string | null>(null);
+  // True between compositionstart/end (IME: accents, CJK). Rebuilding the DOM
+  // mid-composition aborts the IME session, so we suspend decoration until it
+  // ends, then decorate once with the committed text.
+  const composingRef = useRef(false);
   // Hide completed subtrees when the toggle is off. Filtering here (where
   // children are listed) means a hidden completed node takes its whole subtree
   // with it for free.
@@ -80,15 +94,20 @@ export const OutlineNode = memo(function OutlineNode({
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
 
-  // Keep the contentEditable in sync with stored text WITHOUT clobbering
-  // the user's caret. We only write to the DOM when the stored text
-  // differs from what's rendered, which is essentially never during
-  // typing (the keystroke updates the store which echoes back equal).
+  // Push stored text into the contentEditable as formatted HTML when it
+  // changes from something OTHER than this bullet's own typing -- initial
+  // mount, undo, a programmatic setText. The guard (syncedRef === node.text)
+  // makes the common echo-after-keystroke a no-op: onInput already decorated
+  // and recorded the text, so the store round-trip rebuilds nothing and the
+  // caret never moves. We skip mid-composition; compositionend re-syncs.
   useEffect(() => {
     const el = textRef.current;
-    if (el && el.textContent !== node.text) {
-      el.textContent = node.text;
-    }
+    if (!el || composingRef.current) return;
+    if (syncedRef.current === node.text) return;
+    // Preserve the caret only when this bullet is focused (e.g. undo while
+    // editing); otherwise there's nothing to preserve.
+    decorate(el, node.text, document.activeElement === el);
+    syncedRef.current = node.text;
   });
 
   // Outline keyboard shortcuts, scoped to THIS bullet's contentEditable via
@@ -275,8 +294,27 @@ export const OutlineNode = memo(function OutlineNode({
           role="textbox"
           data-completed={node.completed}
           onInput={(e) => {
-            commands.onTextChange(node.id, e.currentTarget.textContent ?? "");
+            const el = e.currentTarget;
+            const text = el.textContent ?? "";
+            commands.onTextChange(node.id, text);
             slash.handleInput();
+            // Re-decorate live, preserving the caret. Suspended during IME
+            // composition; compositionend handles that case.
+            if (!composingRef.current) {
+              decorate(el, text, true);
+              syncedRef.current = text;
+            }
+          }}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={(e) => {
+            composingRef.current = false;
+            const el = e.currentTarget;
+            const text = el.textContent ?? "";
+            commands.onTextChange(node.id, text);
+            decorate(el, text, true);
+            syncedRef.current = text;
           }}
           onBlur={slash.close}
           // The "/" menu owns its own Arrow/Enter/Tab/Esc navigation while
@@ -312,17 +350,101 @@ export const OutlineNode = memo(function OutlineNode({
   );
 });
 
+// Inline `code` runs: `like this`. Single-line, non-empty, no nested backtick.
+// Backticks are kept VISIBLE inside the chip so the source string and the
+// rendered text have identical length -- caret offsets need no source<->display
+// mapping. The stored text is always the raw markdown.
+const INLINE_CODE = /`[^`\n]+`/g;
+
+const CODE_CLASS =
+  "rounded-[4px] border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground";
+
+// Build the display HTML for a bullet's text. Escapes first (the text is user
+// input going into innerHTML), then wraps inline-code runs. We wrap the WHOLE
+// match -- backticks included -- so the chip's text length equals the source's;
+// that's what lets the caret-offset save/restore work without mapping source
+// positions to display positions. Backticks aren't escaped, so they survive
+// escaping and the regex still matches the already-escaped text.
+function inlineMarkupHtml(text: string): string {
+  return escapeHtml(text).replace(
+    INLINE_CODE,
+    (match) => `<code class="${CODE_CLASS}">${match}</code>`,
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Re-render `el` as formatted HTML, optionally keeping the caret put. The DOM
+// rebuild invalidates any (node, offset) selection, so we capture the caret as
+// an absolute character offset first and re-derive it against the new tree
+// after. Writing innerHTML only when it actually changes avoids needless
+// rebuilds (and the caret flicker they cause) when text is already current.
+function decorate(el: HTMLElement, text: string, preserveCaret: boolean): void {
+  const html = inlineMarkupHtml(text);
+  if (el.innerHTML === html) return;
+  const offset = preserveCaret ? getCaretOffset(el) : -1;
+  el.innerHTML = html;
+  if (offset >= 0) setCaretOffset(el, offset);
+}
+
+// Absolute count of characters before the collapsed caret within `el`, across
+// all text nodes (so a `<code>` chip in the middle is counted transparently).
+function getCaretOffset(el: HTMLElement): number {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return 0;
+  const range = sel.getRangeAt(0);
+  if (!el.contains(range.endContainer)) return 0;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(el);
+  pre.setEnd(range.endContainer, range.endOffset);
+  return pre.toString().length;
+}
+
+// Drop the caret at absolute character `offset`, walking text nodes until the
+// offset falls inside one. Past-the-end lands at the very end.
+function setCaretOffset(el: HTMLElement, offset: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  let node = walker.nextNode();
+  while (node) {
+    const len = node.textContent?.length ?? 0;
+    if (remaining <= len) {
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    remaining -= len;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// Caret at the very end / start of the bullet, measured by absolute offset so
+// the test holds whether the line is one text node or split around chips.
 function isCaretAtEnd(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return true;
-  const range = sel.getRangeAt(0);
-  return range.endOffset === el.textContent?.length;
+  return getCaretOffset(el) === (el.textContent?.length ?? 0);
 }
 
 function isCaretAtStart(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return true;
-  return sel.getRangeAt(0).endOffset === 0;
+  return getCaretOffset(el) === 0;
 }
 
 // Caret-to-neighbor navigation is about VISUAL lines, not text offset: on a
