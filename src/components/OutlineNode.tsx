@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, type PointerEvent } from "react";
 import { useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,6 +48,10 @@ export interface NodeCommands {
   onMoveFocus: (id: string, direction: "up" | "down", x?: number) => void;
   // Zoom the outline so this node becomes the temporary root.
   onZoom: (id: string) => void;
+  // Drag-to-reorder, hung off the bullet dot. pointerdown arms a drag; click
+  // zooms only when no drag happened. See docs/adr/0010.
+  onBulletPointerDown: (id: string, e: PointerEvent) => void;
+  onBulletClick: (id: string) => void;
 }
 
 export const OutlineNode = memo(function OutlineNode({
@@ -247,7 +251,7 @@ export const OutlineNode = memo(function OutlineNode({
       <div className="outline-row" data-faded={faded}>
         <button
           type="button"
-          className="collapse-toggle"
+          className="collapse-toggle touch-hitbox"
           aria-label={node.collapsed ? "Expand" : "Collapse"}
           data-has-children={hasChildren}
           data-collapsed={node.collapsed}
@@ -263,7 +267,8 @@ export const OutlineNode = memo(function OutlineNode({
           type="button"
           className="bullet touch-hitbox"
           aria-label="Zoom in"
-          onClick={() => commands.onZoom(node.id)}
+          onPointerDown={(e) => commands.onBulletPointerDown(node.id, e)}
+          onClick={() => commands.onBulletClick(node.id)}
           title="Zoom in"
         >
           <span
@@ -357,7 +362,7 @@ export const OutlineNode = memo(function OutlineNode({
 const INLINE_CODE = /`[^`\n]+`/g;
 
 const CODE_CLASS =
-  "rounded-[4px] border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground";
+  "rounded-[4px] border border-border/60 bg-muted px-0.5 py-0.5 font-mono text-[0.85em] text-foreground";
 
 // Build the display HTML for a bullet's text. Escapes first (the text is user
 // input going into innerHTML), then wraps inline-code runs. We wrap the WHOLE
@@ -373,10 +378,7 @@ function inlineMarkupHtml(text: string): string {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // Re-render `el` as formatted HTML, optionally keeping the caret put. The DOM

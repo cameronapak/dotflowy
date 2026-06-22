@@ -278,6 +278,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 99px;
+  /* A touch starting on the dot is a drag (or a tap-to-zoom), never a scroll,
+     so the gesture stays ours. See docs/adr/0010. */
+  touch-action: none;
 }
 
 .bullet:active {
@@ -329,6 +332,57 @@
 .node-text:empty::before {
   content: "";
   display: inline-block;
+}
+
+/* --- Drag to reorder (docs/adr/0010) --- */
+
+/* While a drag is live: a grab cursor everywhere, and no accidental text
+   selection as the pointer sweeps across rows. */
+body.dragging-active {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.dragging-active * {
+  cursor: grabbing !important;
+}
+
+/* The grabbed row sits in place, dimmed; its subtree hides so we carry one
+   compact row. Both are visual-only and removed on drop (no data change). */
+.outline-row.drag-source {
+  @apply bg-card;
+}
+
+.outline-node.drag-collapsed > .outline-children-wrap {
+  display: none;
+}
+
+/* The floating label that follows the pointer. */
+.drag-pill {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  max-width: 320px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+
+/* The drop line. Its left edge is indented to the target depth, so the indent
+   itself is the depth feedback. A dot at the left marks the insertion point. */
+.drag-indicator {
+  @apply fixed h-1.5 rounded-full w-full;
+  z-index: 50;
+  pointer-events: none;
+  margin-top: -2px;
+  background: var(--primary);
 }
 
 .outline-empty {

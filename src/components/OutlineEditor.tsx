@@ -9,6 +9,7 @@ import {
   insertChildAtStart,
   insertSibling,
   moveDown,
+  moveNode,
   moveUp,
   outdent,
   removeNode,
@@ -20,6 +21,7 @@ import {
 import { seedIfEmpty } from "../data/seed";
 import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { useDragReorder } from "./use-drag-reorder";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
 import { Button } from "./ui/button";
@@ -63,6 +65,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     if (el) refs.current.set(id, el);
     else refs.current.delete(id);
   }, []);
+
+  // The top-level <ul>, so the drag indicator knows how wide to draw.
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   // First-run seed. Runs when the collection has loaded and is empty.
   useEffect(() => {
@@ -181,6 +186,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
    * in the OUTGOING view here; the incoming view names it declaratively.
    */
   const navigateZoom = (toRootId: string | null, pivot: string) => {
+    // Zooming out reveals the trail: expand any collapsed ancestor between the
+    // node we're leaving and the destination root, so the pivot is actually
+    // visible when we land (otherwise a collapsed parent hides where you were).
+    revealAncestorsToRoot(focusIndex.current, pivot, toRootId);
     if (prefersReducedMotion()) {
       // No morph, but still carry the pivot so the new view restores focus.
       const state = { pivotId: pivot };
@@ -222,6 +231,30 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
     { preventDefault: true },
   );
+
+  // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
+  // live values through getters (the same ref pattern the commands use), and
+  // commits through the one fused `moveNode` mutation. See docs/adr/0010.
+  const drag = useDragReorder({
+    getIndex: () => focusIndex.current,
+    getRootId: () => rootIdRef.current,
+    getShowCompleted: () => showCompleted,
+    getRowEl: (id) =>
+      (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
+      null,
+    getListEl: () => listRef.current,
+    onMove: (id, newParentId, afterSiblingId) => {
+      capture(focusIndex.current, id);
+      const moved = moveNode(
+        focusIndex.current,
+        id,
+        newParentId,
+        afterSiblingId,
+      );
+      if (moved) pendingFocus.current = id;
+      else drop();
+    },
+  });
 
   const commands: NodeCommands = {
     onTextChange: (id, text) => {
@@ -320,6 +353,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
     // Zooming in: the clicked node is the pivot (list item -> title).
     onZoom: (id) => navigateZoom(id, id),
+
+    onBulletPointerDown: (id, e) => drag.startDrag(id, e),
+
+    // The dot's click fires right after pointerup. Suppress the zoom when that
+    // press was actually a drag; otherwise zoom as before.
+    onBulletClick: (id) => {
+      if (drag.consumeClick()) return;
+      navigateZoom(id, id);
+    },
   };
 
   // Top-level roots start the fade cascade fresh: a completed ancestor above
@@ -369,7 +411,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           />
         )}
 
-        <ul className="outline-list">
+        <ul className="outline-list" ref={listRef}>
           {topLevel.map((node) => (
             <OutlineNode
               key={node.id}
@@ -595,6 +637,37 @@ function CollapsedCrumbs({
       </div>
     </span>
   );
+}
+
+/**
+ * On zoom-out, expand every collapsed ancestor on the path from `pivot` (the
+ * node we're leaving) up to — but not including — `toRootId` (the destination
+ * root, or null for Home). This makes the trail that led to `pivot` visible in
+ * the view we're navigating to.
+ *
+ * No-op unless `pivot` is actually a descendant of `toRootId` — so zooming IN
+ * (pivot === toRootId) and any non-ancestral jump leave collapse state alone.
+ */
+function revealAncestorsToRoot(
+  index: TreeIndex,
+  pivot: string,
+  toRootId: string | null,
+) {
+  if (pivot === toRootId) return;
+  const collapsedOnPath: string[] = [];
+  let current = index.byId.get(pivot)?.parentId ?? null;
+  // Guard against corrupted parent chains, mirroring buildTrail.
+  let guard = index.byId.size + 1;
+  while (current && current !== toRootId && guard-- > 0) {
+    const node = index.byId.get(current);
+    if (!node) break;
+    if (node.collapsed) collapsedOnPath.push(current);
+    current = node.parentId ?? null;
+  }
+  // Only expand if we walked all the way up to the destination root; otherwise
+  // pivot wasn't below it and we'd be mangling an unrelated branch.
+  if (current !== toRootId) return;
+  for (const id of collapsedOnPath) toggleCollapsed(id, false);
 }
 
 /**
