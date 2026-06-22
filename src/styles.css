@@ -130,18 +130,6 @@
   }
 }
 
-.app {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.app-header h1 {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 4px;
-}
-
 .subtitle {
   @apply text-muted-foreground;
   font-size: 13px;
@@ -294,7 +282,6 @@
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  margin-bottom: 10px;
   min-width: 0;
 }
 

@@ -18,6 +18,7 @@ import {
 import { seedIfEmpty } from "../data/seed";
 import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { Header } from "./Header";
 import { Button } from "./ui/button";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
@@ -253,7 +254,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && index.byId.size > 0) {
     return (
-      <div className="outline-root">
+      <div className="mx-auto max-w-[720px] p-6">
         <div className="outline-empty">
           That bullet doesn't exist. <Link to="/">Back to top</Link>.
         </div>
@@ -262,61 +263,67 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   }
 
   return (
-    <div className="outline-root">
-      <BreadcrumbTrail
-        trail={trail}
-        rootId={rootId || null}
-        onNavigate={navigateZoom}
-      />
+    <>
+      <Header>
+        <BreadcrumbTrail
+          trail={trail}
+          rootId={rootId || null}
+          onNavigate={navigateZoom}
+        />
+      </Header>
+      <div className="mx-auto max-w-[720px] p-6">
+        {zoomedNode && (
+          <ZoomedTitle
+            node={zoomedNode}
+            isPivot={pivotId === zoomedNode.id}
+            registerRef={registerRef}
+            onTextChange={(text) => setText(zoomedNode.id, text)}
+            onAddChild={() => {
+              const newId = insertChildAtStart(
+                focusIndex.current,
+                zoomedNode.id,
+              );
+              pendingFocus.current = newId;
+            }}
+            onArrowDown={() => commands.onMoveFocus(zoomedNode.id, "down")}
+          />
+        )}
 
-      {zoomedNode && (
-        <ZoomedTitle
-          node={zoomedNode}
-          isPivot={pivotId === zoomedNode.id}
-          registerRef={registerRef}
-          onTextChange={(text) => setText(zoomedNode.id, text)}
-          onAddChild={() => {
-            const newId = insertChildAtStart(focusIndex.current, zoomedNode.id);
+        <ul className="outline-list">
+          {topLevel.map((node) => (
+            <OutlineNode
+              key={node.id}
+              node={node}
+              index={index}
+              commands={commands}
+              registerRef={registerRef}
+              pivotId={pivotId}
+            />
+          ))}
+        </ul>
+        {topLevel.length === 0 && (
+          <div className="outline-empty">
+            Empty. Click below to add your first bullet.
+          </div>
+        )}
+        {/* Click anywhere in the whitespace below the list adds a new top-level bullet. */}
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="outline"
+          onClick={() => {
+            const siblings = childrenOf(focusIndex.current, rootId);
+            const afterId = siblings.length
+              ? siblings[siblings.length - 1]!.id
+              : null;
+            const newId = insertSibling(focusIndex.current, rootId, afterId);
             pendingFocus.current = newId;
           }}
-          onArrowDown={() => commands.onMoveFocus(zoomedNode.id, "down")}
-        />
-      )}
-
-      <ul className="outline-list">
-        {topLevel.map((node) => (
-          <OutlineNode
-            key={node.id}
-            node={node}
-            index={index}
-            commands={commands}
-            registerRef={registerRef}
-            pivotId={pivotId}
-          />
-        ))}
-      </ul>
-      {topLevel.length === 0 && (
-        <div className="outline-empty">
-          Empty. Click below to add your first bullet.
-        </div>
-      )}
-      {/* Click anywhere in the whitespace below the list adds a new top-level bullet. */}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="outline"
-        onClick={() => {
-          const siblings = childrenOf(focusIndex.current, rootId);
-          const afterId = siblings.length
-            ? siblings[siblings.length - 1]!.id
-            : null;
-          const newId = insertSibling(focusIndex.current, rootId, afterId);
-          pendingFocus.current = newId;
-        }}
-      >
-        <PlusIcon />
-      </Button>
-    </div>
+        >
+          <PlusIcon />
+        </Button>
+      </div>
+    </>
   );
 }
 

@@ -28,6 +28,10 @@ There is **no test runner and no linter** configured. `typecheck` is the only st
 - **The schema intentionally has no zod `.default()` values** (`src/data/schema.ts`). Defaults make zod's inferred input type optional, which collides with TanStack DB's schema-typed collection overload. Always build complete nodes via `makeNode()` in `tree.ts`; don't add `.default()` to the schema.
 - **Mutations operate on the live `TreeIndex`.** Every function in `mutations.ts` takes the current index (so it can find siblings/order) and mutates `nodesCollection` directly. The editor holds the live-derived index in a ref (`focusIndex`) and passes `focusIndex.current` into command handlers, because the `commands` object is recreated each render but closures capture stale values otherwise.
 
+## Styling
+
+Going forward all styles will be inline Tailwind classes instead of a separate CSS file.
+
 ## Editor internals (OutlineEditor + OutlineNode)
 
 These two files have a few coupled patterns worth knowing before touching them:
