@@ -270,6 +270,29 @@
   opacity: 1;
 }
 
+/*
+ * The chevron lives in the empty left margin, so it can grow its tap target
+ * LEFTWARD (into nothing) for a full 44px width without colliding with the
+ * bullet to its right. Anchored to the chevron's right edge so the boundary
+ * with the bullet stays clean.
+ */
+.collapse-toggle.touch-hitbox::before {
+  left: auto;
+  right: 0;
+  width: 44px;
+}
+
+/*
+ * Touch devices have no hover, so the reveal-on-hover chevron would be an
+ * invisible (if tappable) target. Keep it visible for any parent row so the
+ * collapse affordance is discoverable. Childless rows still render no glyph.
+ */
+@media (hover: none) {
+  .collapse-toggle[data-has-children="true"] {
+    opacity: 1;
+  }
+}
+
 .bullet {
   @apply size-5 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none mt-1;
   flex: 0 0 auto;
@@ -599,6 +622,16 @@ body.dragging-active * {
   }
 }
 
+/*
+ * Comfortable touch target WITHOUT width inflation. The gutter controls
+ * (chevron, bullet, checkbox) sit too close to each other -- and to the text
+ * -- to each claim 44px of WIDTH, so two centered 44px boxes used to overlap
+ * and fight over the same taps (later-painted element won, so chevron taps
+ * zoomed). We expand the target VERTICALLY only; each box stays as wide as its
+ * control, so the boxes no longer physically overlap and there's no z-index
+ * race. Width-expansion is opt-in per control where there's room (see the
+ * chevron override below).
+ */
 @utility touch-hitbox {
   position: relative;
 
@@ -607,12 +640,10 @@ body.dragging-active * {
     position: absolute;
     display: block;
     top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 100%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
     height: 100%;
     min-height: 44px;
-    min-width: 44px;
-    z-index: 9999;
   }
 }
