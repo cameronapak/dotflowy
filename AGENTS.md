@@ -29,6 +29,18 @@ Objective facts include repo structure, tracked paths, setup commands, validatio
 - After repo-reality changes, check `AGENTS.md` and `README.md` before finishing.
 - In the final response, mention any freshness updates.
 
+## Planning and design
+
+Substantial plans or design decisions go through `/grill-with-docs` — a relentless
+interview that sharpens the design and produces docs as it goes. Its output lands in
+`docs/adr/`: a numbered ADR per decision, with a glossary and an explicit "why" (see
+`docs/adr/0001`–`0006` for the format).
+
+- Keep ADRs as the home for *decisions + rationale + rejected alternatives*. AGENTS.md
+  holds only the operational rule plus a link to the ADR.
+- When a decision changes, add a new ADR (or supersede an existing one) rather than
+  rewriting history; update the AGENTS.md pointer to match.
+
 ## Commands
 
 ```sh
