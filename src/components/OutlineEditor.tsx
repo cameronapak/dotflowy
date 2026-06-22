@@ -18,7 +18,6 @@ import {
   toggleCollapsed,
   toggleCompleted,
 } from "../data/mutations";
-import { seedIfEmpty } from "../data/seed";
 import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import { decorate } from "./inline-code";
@@ -70,17 +69,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The top-level <ul>, so the drag indicator knows how wide to draw.
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // First-run seed. Runs when the collection has loaded and is empty.
-  useEffect(() => {
-    // hasAnyNode is true if any node at all exists. We can't tell "loaded
-    // but empty" from "not yet loaded" purely from useLiveQuery in v1;
-    // localStorage is synchronous though, so reading the raw key is safe.
-    const raw =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("dotflowy-oss:nodes")
-        : null;
-    if (raw === null) seedIfEmpty(false);
-  }, []);
+  // First-run seeding now happens during Jazz bootstrap (jazz.ts), before the
+  // editor ever mounts -- by the time we render, the db is loaded and either
+  // migrated, seeded, or genuinely populated. See DbGate in __root.tsx.
 
   // Track the most recently inserted/focused node id so we can focus it
   // after the next render. Storing in a ref + state-like cursor.

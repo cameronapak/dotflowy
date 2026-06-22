@@ -1,4 +1,5 @@
-import { nodesCollection } from './collection'
+import { app } from './schema'
+import { getDb, restoreNode } from './jazz'
 import type { Node } from './schema'
 import type { TreeIndex } from './tree'
 
@@ -77,17 +78,21 @@ export function undo(index: TreeIndex): string | null {
 
   const target = new Map(entry.nodes.map((n) => [n.id, n]))
   const current = index.byId
+  const db = getDb()
 
   // Anything that exists now but not in the snapshot was added since: remove it.
+  // Jazz deletes are soft, so this leaves a tombstone that `restoreNode` can
+  // revive if a later undo/redo re-creates the same id.
   for (const id of current.keys()) {
-    if (!target.has(id)) nodesCollection.delete(id)
+    if (!target.has(id)) db.delete(app.nodes, id)
   }
-  // Re-insert removed nodes and overwrite changed ones to match the snapshot.
+  // Re-insert removed nodes (reviving tombstones) and overwrite changed ones.
   for (const [id, node] of target) {
     if (!current.has(id)) {
-      nodesCollection.insert({ ...node })
+      restoreNode(node)
     } else {
-      nodesCollection.update(id, (draft) => Object.assign(draft, node))
+      const { id: _id, ...patch } = node
+      db.update(app.nodes, id, patch)
     }
   }
 

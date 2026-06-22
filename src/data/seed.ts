@@ -1,6 +1,6 @@
 import { appendChild } from './mutations'
 import { createId, makeNode, now } from './tree'
-import { nodesCollection } from './collection'
+import { insertNode } from './jazz'
 
 /**
  * Seed the outline on first run. Idempotent: if any node already exists
@@ -19,7 +19,7 @@ export function seedIfEmpty(hasAnyNode: boolean): boolean {
   const bId = createId()
   const cId = createId()
 
-  nodesCollection.insert(
+  insertNode(
     makeNode({
       id: aId,
       parentId: null,
@@ -28,7 +28,7 @@ export function seedIfEmpty(hasAnyNode: boolean): boolean {
       createdAt: now(),
     }),
   )
-  nodesCollection.insert(
+  insertNode(
     makeNode({
       id: bId,
       parentId: null,
@@ -36,7 +36,7 @@ export function seedIfEmpty(hasAnyNode: boolean): boolean {
       text: 'Press Enter to add a bullet',
     }),
   )
-  nodesCollection.insert(
+  insertNode(
     makeNode({
       id: cId,
       parentId: null,

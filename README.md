@@ -1,8 +1,8 @@
 # Dotflowy OSS
 
-An open-source, local-first outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
+An open-source, local-first outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [Jazz](https://jazz.tools).
 
-Your data lives entirely in your browser. No account, no server, no sync (yet).
+Your data lives in your browser (persisted to OPFS via Jazz's local-first runtime). No account today; multi-device sync is the next step (last-write-wins per field, single user across their own devices).
 
 ## Status
 
@@ -17,17 +17,16 @@ Very early. v1 scope only:
   - `Tab` / `Shift+Tab` — indent / outdent
   - `Backspace` on an empty bullet — delete and focus the previous one
   - `Arrow Up` / `Arrow Down` at line edges — move between bullets
-- Persists to `localStorage`; syncs across browser tabs automatically
+- Persists locally via Jazz (OPFS); syncs across browser tabs automatically
 
-Not built yet: drag-to-reorder, tags, search, sharing, undo/redo, mobile gestures, multi-device sync.
+Not built yet: tags, sharing, multi-device sync.
 
 ## Stack
 
 | Layer | Choice | Why |
 |---|---|---|
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
-| Data | TanStack DB `localStorageCollection` | Optimistic mutations, cross-tab sync, schema-validated, and a clean upgrade path to a real backend |
-| Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
+| Data | Jazz 2.0 (`jazz-tools`) | Local-first WASM runtime, OPFS persistence, last-write-wins-per-field sync built in |
 | Build | Vite 8 | What Start uses |
 | Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
 
@@ -50,13 +49,13 @@ bun run typecheck  # tsc --noEmit
 
 ### Data model
 
-Every bullet is one row in a single TanStack DB collection. The outline tree is reconstructed in memory at read time.
+Every bullet is one row in a single Jazz table. The outline tree is reconstructed in memory at read time.
 
 ```
 Node {
-  id, parentId, prevSiblingId,   // tree shape + sibling order
-  text, completed, collapsed,    // content + UI state
-  createdAt, updatedAt
+  id, parentId, prevSiblingId,        // tree shape + sibling order
+  text, isTask, completed, collapsed, // content + UI state
+  bookmarkedAt, createdAt, updatedAt
 }
 ```
 
@@ -66,39 +65,15 @@ See `src/data/tree.ts` for the index builder and `src/data/mutations.ts` for the
 
 ### Why flat, not nested
 
-A flat list of rows maps cleanly onto a sync backend later. Nested JSON would force deep-merge on every keystroke. Flat rows keep moves cheap and make the eventual ElectricSQL swap a schema change, not a rewrite.
+A flat list of rows maps cleanly onto the sync backend. Nested JSON would force deep-merge on every keystroke. Flat rows keep moves cheap and keep per-field last-write-wins conflict resolution well-defined.
 
 ### Persistence
 
-`nodesCollection` (`src/data/collection.ts`) wraps `localStorageCollectionOptions`. We mutate directly (`collection.insert / update / delete`) and the collection persists to `localStorage` and broadcasts changes to other tabs via `storage` events.
+The Jazz client (`src/data/jazz.ts`) is created once as a module singleton (`createDb`, anonymous local-first, OPFS-persistent). We mutate directly (`getDb().insert / update / delete`) and Jazz persists to OPFS, coordinates across browser tabs, and (once a server URL is configured) syncs across devices. `src/data/tree-store.ts` holds the one `db.subscribeAll` subscription and derives the shared in-memory index the components read.
 
-## Upgrading to real-time sync
+## Multi-device sync
 
-The architecture is intentionally backend-agnostic. When you want multi-device sync, swap the collection's options creator and add an `onInsert / onUpdate / onDelete` handler that talks to your API. None of the components or tree logic changes.
-
-```ts
-// Before (local-only)
-import { localStorageCollectionOptions } from '@tanstack/react-db'
-
-export const nodesCollection = createCollection(
-  localStorageCollectionOptions({ id: 'nodes', storageKey: '...', getKey, schema }),
-)
-
-// After (ElectricSQL + Postgres)
-import { electricCollectionOptions } from '@tanstack/electric-db-collection'
-
-export const nodesCollection = createCollection(
-  electricCollectionOptions({
-    id: 'nodes',
-    shape: { url: '...', params: { table: 'nodes' } },
-    getKey: (n) => n.id,
-    schema: nodeSchema,
-    // persistence handlers talk to your Postgres write path
-  }),
-)
-```
-
-`useLiveQuery`, `insert`, `update`, `delete` all keep working.
+Sync is single user across their own devices, resolved last-write-wins per field (no CRDT) — exactly Jazz's default merge behavior. The local OPFS document is the working copy today; pointing the client at a Jazz server URL (with auth) turns on device-to-device sync without touching the component or tree logic. See [ADR 0016](./docs/adr/0016-jazz-sync-backend.md) for the decision and the open edges (auth, the schema-catalogue server call, fractional indexing).
 
 ## Project layout
 
@@ -111,12 +86,14 @@ src/
     OutlineEditor.tsx  # reads tree, focus management, command dispatch
     OutlineNode.tsx    # one bullet + its subtree
   data/
-    schema.ts         # zod schema, Node type
-    collection.ts     # TanStack DB localStorage collection
+    schema.ts         # Jazz table + app, Node type
+    jazz.ts           # Jazz client singleton, getDb, migration, ready gate
+    tree-store.ts     # one db.subscribeAll -> shared TreeIndex + narrow hooks
     tree.ts           # flat-list -> TreeIndex, id/time helpers
     mutations.ts      # insert / indent / outdent / delete / setText
+    history.ts        # snapshot undo
     seed.ts           # first-run welcome bullets
-    useTree.ts        # useLiveQuery hook
+    useTree.ts        # whole-index hook (wraps tree-store)
   router.tsx
   styles.css
 vite.config.ts        # SPA mode

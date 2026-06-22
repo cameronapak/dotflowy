@@ -1,49 +1,80 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import { nodesCollection } from './collection'
-import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from './tree'
+import { RowChangeKind, type SubscriptionDelta } from 'jazz-tools'
+import { app, type Node } from './schema'
+import { whenDbReady } from './jazz'
+import { buildTreeIndex, childrenOf, type TreeIndex } from './tree'
 
 /**
- * A single, app-wide subscription to the nodes collection that derives one
- * shared {@link TreeIndex} and lets components subscribe to *narrow slices* of
- * it via {@link useNode} and {@link useVisibleChildIds}.
+ * A single, app-wide subscription to the nodes table that derives one shared
+ * {@link TreeIndex} and lets components subscribe to *narrow slices* of it via
+ * {@link useNode} and {@link useVisibleChildIds}.
  *
- * Why this exists: `useLiveQuery(nodesCollection)` rebuilds a brand-new `index`
- * object on every edit. Threading that object as a prop into every `OutlineNode`
- * defeats `React.memo` (a changed reference fails the shallow compare), so a
- * single keystroke re-rendered the entire visible tree -- O(visible nodes) per
- * keystroke, measured at 300 commits on a 300-node outline. See ADR 0014.
+ * Why this exists: a whole-tree subscription rebuilds a brand-new `index` on
+ * every edit. Threading that object as a prop into every `OutlineNode` defeats
+ * `React.memo` (a changed reference fails the shallow compare), so a single
+ * keystroke re-rendered the entire visible tree. See ADR 0014.
  *
  * The fix is a pull model: each `OutlineNode` reads *its own* node and child-id
- * list from this store. Because TanStack DB preserves object identity for
- * unchanged rows (an edit is an Immer draft of one row), `useNode`'s snapshot is
- * referentially stable for every node except the one that actually changed -- so
- * `useSyncExternalStore` re-renders only that node. `useVisibleChildIds` returns
- * a memoized id array that only changes identity when the *structure* (the set
- * or order of visible children) changes, never when a child's text changes.
+ * list from this store. Identity stability is what makes that work, so it is
+ * preserved deliberately here: Jazz's `subscribeAll` hands back a freshly
+ * allocated array of fresh row objects on every delta, so we apply the delta's
+ * row-change stream to a persistent `byId` map and keep the *old* object
+ * reference for any row that did not change. `useNode`'s snapshot is then
+ * referentially stable for every node except the one that actually changed --
+ * so `useSyncExternalStore` re-renders only that node.
  */
 
 const EMPTY_INDEX: TreeIndex = buildTreeIndex([])
 const EMPTY_IDS: string[] = []
 
 let index: TreeIndex = EMPTY_INDEX
+/** Identity-stable node objects, keyed by id. Survives across deltas. */
+let stableById = new Map<string, Node>()
 const listeners = new Set<() => void>()
 let started = false
+let unsubscribe: (() => void) | null = null
 
 function rebuild() {
-  index = buildTreeIndex(nodesCollection.toArray)
+  index = buildTreeIndex(Array.from(stableById.values()))
   for (const l of listeners) l()
 }
 
 /**
- * Begin the one collection subscription, lazily. `includeInitialState` makes the
- * callback fire immediately with the current rows, so the first read is already
- * populated; every later change rebuilds the shared index and notifies. Skipped
- * on the server (SPA + prerender, no localStorage) -- see ADR 0004.
+ * Fold one subscription delta into {@link stableById}, preserving object
+ * identity for unchanged rows. `delta.all` is the full current result set (all
+ * new references); `delta.delta` tells us which ids were added/updated, so every
+ * other row keeps the reference it already had.
+ */
+function applyDelta(delta: SubscriptionDelta<Node>) {
+  const changed = new Set<string>()
+  for (const d of delta.delta) {
+    if (d.kind === RowChangeKind.Added || d.kind === RowChangeKind.Updated) {
+      changed.add(d.id)
+    }
+  }
+  const next = new Map<string, Node>()
+  for (const row of delta.all) {
+    const prev = stableById.get(row.id)
+    next.set(row.id, prev && !changed.has(row.id) ? prev : row)
+  }
+  stableById = next
+  rebuild()
+}
+
+/**
+ * Begin the one table subscription, lazily and browser-only. Waits for the Jazz
+ * runtime to load, then `subscribeAll` fires immediately with the current rows
+ * (as an all-Added delta) and on every later change. Skipped on the server
+ * (SPA + prerender, no OPFS/Worker) -- see ADR 0004.
  */
 function ensureStarted() {
   if (started || typeof window === 'undefined') return
   started = true
-  nodesCollection.subscribeChanges(() => rebuild(), { includeInitialState: true })
+  void whenDbReady().then((db) => {
+    unsubscribe = db.subscribeAll(app.nodes, (delta) =>
+      applyDelta(delta as SubscriptionDelta<Node>),
+    )
+  })
 }
 
 function subscribe(cb: () => void): () => void {

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An open-source, local-first Dotflowy outline editor built with TanStack Start and TanStack DB.",
+  "description": "An open-source, local-first Dotflowy outline editor built with TanStack Start and Jazz.",
   "license": "MIT",
   "scripts": {
     "dev": "vite dev",
@@ -14,7 +14,6 @@
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.2.9",
-    "@tanstack/react-db": "^0.1.87",
     "@tanstack/react-hotkeys": "^0.10.0",
     "@tanstack/react-router": "^1.170.16",
     "@tanstack/react-start": "^1.168.26",

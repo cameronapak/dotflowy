@@ -8,6 +8,7 @@ import {
 import { ThemeProvider } from '../components/theme-provider'
 import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
+import { useDbReady } from '../data/jazz'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -39,12 +40,33 @@ function RootComponent() {
     <RootDocument>
       <ThemeProvider>
         <ShowCompletedProvider>
-          <Outlet />
-          <NodeSwitcher />
+          <DbGate>
+            <Outlet />
+            <NodeSwitcher />
+          </DbGate>
         </ShowCompletedProvider>
       </ThemeProvider>
     </RootDocument>
   )
+}
+
+/**
+ * Holds back the data-reading UI until the Jazz runtime has loaded the local
+ * document (WASM + OPFS startup). Without this gate the outline would flash
+ * empty for a beat before the first subscription delta arrives. Observing
+ * `useDbReady()` also kicks off the bootstrap on first mount. SPA-only: on the
+ * prerendered server pass it is never ready, which is fine (no data there).
+ */
+function DbGate({ children }: { children: ReactNode }) {
+  const ready = useDbReady()
+  if (!ready) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground">
+        Loading your outline...
+      </div>
+    )
+  }
+  return <>{children}</>
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {

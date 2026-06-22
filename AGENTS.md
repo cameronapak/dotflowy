@@ -12,7 +12,7 @@ Before substantial work:
 
 This file provides guidance to coding agents (Claude Code, and any tool reading `AGENTS.md`) when working with code in this repository. `CLAUDE.md` is a symlink to this file.
 
-The `README.md` covers the data model, persistence, backend-swap path, and project layout well — read it first and don't duplicate it here. This file is the stuff that isn't obvious from reading any single file.
+The `README.md` covers the data model, persistence, sync path, and project layout well — read it first and don't duplicate it here. This file is the stuff that isn't obvious from reading any single file.
 
 ## Documentation Freshness
 
@@ -57,14 +57,15 @@ There is **no test runner and no linter** configured. `typecheck` is the only st
 
 ## SPA mode
 
-No SSR — don't run code that touches `nodesCollection` during a server/render pass. Why: [ADR 0004](./docs/adr/0004-spa-only-no-ssr.md).
+No SSR — don't run code that touches the Jazz db during a server/render pass. The client (WASM + OPFS + a Worker) is browser-only; `whenDbReady()` deliberately never resolves on the server, and `tree-store` skips its subscription there. Why: [ADR 0004](./docs/adr/0004-spa-only-no-ssr.md).
 
 ## Data layer gotchas
 
-- **localStorage shape is not a plain array.** Under key `dotflowy-oss:nodes`, TanStack DB stores an object keyed by id where each value is `{ data: Node, versionKey }` — not `Node[]`. To read it directly: `Object.values(JSON.parse(raw)).map(v => v.data)`.
-- **Build nodes via `makeNode()` in `tree.ts`.** Don't add zod `.default()` values to `src/data/schema.ts`. Why: [ADR 0005](./docs/adr/0005-no-zod-defaults-in-schema.md).
-- **Mutations operate on the live `TreeIndex`.** Every function in `mutations.ts` takes the current index (so it can find siblings/order) and mutates `nodesCollection` directly. The editor holds the live-derived index in a ref (`focusIndex`) and passes `focusIndex.current` into command handlers — the `commands` object itself is now `useMemo`-stable (it must be, since it's a prop on every memoized `OutlineNode`), so the refs are how its closures still read live values. See [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
-- **Per-node subscriptions, not a threaded index.** Components read the tree through the **tree store** (`src/data/tree-store.ts`): `useNode(id)` and `useVisibleChildIds(parentId, showCompleted)` for narrow slices, `useTreeIndex()` (what `useTree()` wraps) for the whole index. `OutlineNode` takes a `nodeId` and reads its own slice, so a keystroke re-renders only the changed bullet, not the tree. Don't reintroduce passing `node`/`index` as props to `OutlineNode`. Why: [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
+- **The backend is Jazz, created once in `src/data/jazz.ts`.** `createDb` is async (loads WASM + OPFS Worker), so the db is a lazy module singleton: `whenDbReady()` returns the load promise, `getDb()` returns the live db (throws if called before ready — which never happens in practice, since user edits only fire after the editor has rendered real nodes). Writes are synchronous and local-first (`getDb().insert/update/delete(app.nodes, ...)`); deletes are **soft** (tombstone) with `restoreNode` to revive them. Why Jazz over the old TanStack DB / Turso plan: [ADR 0016](./docs/adr/0016-jazz-sync-backend.md).
+- **Timestamps are `s.float()`, never `s.int()`.** Jazz's `int` is a 32-bit integer; JS epoch-ms (`Date.now()` ~= 1.78e12) overflows it and the runtime throws `invalid value: integer ..., expected i32` on insert. `float` (f64) holds epoch-ms exactly. Applies to `createdAt` / `updatedAt` / `bookmarkedAt`.
+- **Build nodes via `makeNode()` in `tree.ts`.** `schema.ts` is a Jazz table now, not a zod schema — `makeNode()` is still the one place node defaults live (the [ADR 0005](./docs/adr/0005-no-zod-defaults-in-schema.md) "no defaults in the schema" rule survives the swap: don't push column defaults into the Jazz table either).
+- **Mutations operate on the live `TreeIndex`.** Every function in `mutations.ts` takes the current index (so it can find siblings/order) and writes through `getDb()`. The editor holds the live-derived index in a ref (`focusIndex`) and passes `focusIndex.current` into command handlers — the `commands` object itself is `useMemo`-stable (it must be, since it's a prop on every memoized `OutlineNode`), so the refs are how its closures still read live values. See [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
+- **Per-node subscriptions, not a threaded index.** Components read the tree through the **tree store** (`src/data/tree-store.ts`): one `db.subscribeAll` feeds a shared `TreeIndex`, exposed as `useNode(id)` and `useVisibleChildIds(parentId, showCompleted)` for narrow slices and `useTreeIndex()` (what `useTree()` wraps) for the whole index. Jazz hands back fresh row objects on every delta, so the store applies the delta's row-change stream to a persistent `byId` map to keep object identity stable for unchanged rows — that identity stability is what makes a keystroke re-render only the changed bullet. Don't reintroduce passing `node`/`index` as props to `OutlineNode`, and don't drop the identity-preserving delta merge. Why: [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
 
 ## Styling
 
@@ -93,7 +94,7 @@ How it's URL-driven and how the pivot morph animates: [ADR 0003](./docs/adr/0003
 
 ## Bookmarks
 
-A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on the node (not a side table — delete the node and the bookmark goes with it). The header **star** (`BookmarkStar` in `src/components/bookmarks.tsx`) pins the current zoom root; it also owns the trailing divider so it disappears cleanly on home. **Browsing** bookmarks lives in the **node quick-switcher's empty state** (Cmd+K), not the header — the standalone Bookmarks popover was removed once the switcher shipped ([ADR 0013](./docs/adr/0013-bookmarks-browse-folds-into-switcher.md)). **There is deliberately no sidebar** — the unused `ui/sidebar.tsx` is the documented promotion path for when a second nav tenant appears. Adding a new persistent `Node` field needs a localStorage backfill in `collection.ts` (see `migrateAddBookmarkedAt`). Why: [ADR 0011](./docs/adr/0011-bookmarks-via-header-popover.md), [ADR 0013](./docs/adr/0013-bookmarks-browse-folds-into-switcher.md).
+A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on the node (not a side table — delete the node and the bookmark goes with it). The header **star** (`BookmarkStar` in `src/components/bookmarks.tsx`) pins the current zoom root; it also owns the trailing divider so it disappears cleanly on home. **Browsing** bookmarks lives in the **node quick-switcher's empty state** (Cmd+K), not the header — the standalone Bookmarks popover was removed once the switcher shipped ([ADR 0013](./docs/adr/0013-bookmarks-browse-folds-into-switcher.md)). **There is deliberately no sidebar** — the unused `ui/sidebar.tsx` is the documented promotion path for when a second nav tenant appears. Adding a new persistent `Node` field means a new column in `schema.ts` plus a default in `makeNode()`; the one-time legacy import in `jazz.ts` (`migrateFromLocalStorage`) also backfills it for docs created before the Jazz swap. Why: [ADR 0011](./docs/adr/0011-bookmarks-via-header-popover.md), [ADR 0013](./docs/adr/0013-bookmarks-browse-folds-into-switcher.md).
 
 ## Node quick-switcher (Cmd+K search)
 

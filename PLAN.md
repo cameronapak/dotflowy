@@ -2,12 +2,20 @@
 
 Working plan for taking dotflowy from "fast at hundreds of nodes" to "fast at tens of
 thousands, synced across a user's devices." Decision record lives in
-[ADR 0015](./docs/adr/0015-scaling-roadmap-o1-write-path.md); the sync design will land in
-**ADR 0016** (not yet written). This file is the execution plan + the open decisions.
+[ADR 0015](./docs/adr/0015-scaling-roadmap-o1-write-path.md); the sync/backend decision
+landed in **[ADR 0016](./docs/adr/0016-jazz-sync-backend.md)**. This file is the execution
+plan + the open decisions.
 
-**Status (2026-06-22):** diagnosis done, roadmap sequenced, sync direction decided.
-**Blocked on:** 6 design decisions (see "Open decisions") before ADR 0016 can be written.
-**Next action:** Cam answers the open decisions → write ADR 0016 → start item 2 (fractional index).
+**Status (2026-06-22):** backend swapped to **Jazz 2.0** (ADR 0016), superseding the
+Turso/libSQL + custom-adapter direction below. Jazz provides per-field LWW (D4),
+soft-delete tombstones (D5), OPFS local persistence, and offline reconcile out of the
+box — so item 3 (sync adapter + local persistence) is effectively done by adoption. The
+rest of the roadmap stands and is unchanged by the swap.
+**Next action:** item 2 (fractional `sortKey`), then wire auth + a Jazz server URL to turn
+on multi-device sync.
+
+> Sections below predate the Jazz decision; kept for the diagnosis + rationale. Where they
+> name Turso/SQLite/TanStack-DB as the backend, read ADR 0016 instead.
 
 ---
 

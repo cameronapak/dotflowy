@@ -1,8 +1,10 @@
 # ADR 0015: Scaling roadmap — an O(1) write path
 
-Status: accepted (2026-06-22), **not yet implemented**. This ADR records the
-diagnosis, the target invariant, and the sequencing. Each phase lands its own
-implementation ADR (0016+) as it ships, or updates this one's checklist.
+Status: accepted (2026-06-22). The diagnosis, target invariant, and sequencing
+stand. **The backend choice below (Turso / libSQL) is superseded by
+[ADR 0016](./0016-jazz-sync-backend.md): the storage + sync layer is now Jazz 2.0.**
+Each remaining phase lands its own implementation ADR (0016+) as it ships, or
+updates this one's checklist.
 
 **Gate resolved (2026-06-22): sync is near-term.** The plan is therefore
 **foundation-first** (build the conflict-safe data model + sync/persistence layer

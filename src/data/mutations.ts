@@ -1,4 +1,5 @@
-import { nodesCollection } from './collection'
+import { app } from './schema'
+import { getDb, insertNode } from './jazz'
 import {
   type Node,
   type TreeIndex,
@@ -9,8 +10,8 @@ import {
 } from './tree'
 
 /**
- * All mutations operate on the nodesCollection directly (LocalStorage
- * collections are mutated imperatively; persistence is automatic).
+ * All mutations operate on the Jazz db directly (writes are synchronous,
+ * local-first; persistence + sync are automatic). See jazz.ts.
  *
  * Every function takes the current TreeIndex so it can find siblings /
  * ordering without re-deriving it. The caller (OutlineEditor) holds the
@@ -18,9 +19,7 @@ import {
  */
 
 function update(nodeId: string, patch: Partial<Node>) {
-  nodesCollection.update(nodeId, (draft) => {
-    Object.assign(draft, patch, { updatedAt: now() })
-  })
+  getDb().update(app.nodes, nodeId, { ...patch, updatedAt: now() })
 }
 
 /**
@@ -47,9 +46,7 @@ export function insertSibling(
     }
   }
 
-  nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text: '' }),
-  )
+  insertNode(makeNode({ id, parentId, prevSiblingId, text: '' }))
 
   // Repoint the follower at the new node.
   if (nextSiblingId) {
@@ -73,9 +70,7 @@ export function insertChildAtStart(
   const id = createId()
   const head = childrenOf(index, parentId)[0] ?? null
 
-  nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId: null, text: '' }),
-  )
+  insertNode(makeNode({ id, parentId, prevSiblingId: null, text: '' }))
 
   // The old head now follows the new node.
   if (head) update(head.id, { prevSiblingId: id })
@@ -96,9 +91,7 @@ export function appendChild(
   text = '',
 ): string {
   const id = createId()
-  nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text }),
-  )
+  insertNode(makeNode({ id, parentId, prevSiblingId, text }))
   return id
 }
 
@@ -450,7 +443,8 @@ export function removeNode(
     }
   }
 
-  for (const id of toDelete) nodesCollection.delete(id)
+  const db = getDb()
+  for (const id of toDelete) db.delete(app.nodes, id)
 
   // focusId may have been deleted if it was in the subtree (it isn't, by
   // construction: focus is a sibling or ancestor), so it's safe.
