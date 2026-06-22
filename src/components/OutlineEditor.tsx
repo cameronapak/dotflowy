@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useHotkey, useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
@@ -104,6 +104,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Keep the live rootId available inside command closures.
   const rootIdRef = useRef<string | null>(rootId);
   rootIdRef.current = rootId;
+  // Live values read by the *stable* command closures and navigateZoom. The
+  // commands object must keep its identity across renders (it's a prop on every
+  // memoized OutlineNode); reading these through refs is what lets it. See ADR 0014.
+  const showCompletedRef = useRef(showCompleted);
+  showCompletedRef.current = showCompleted;
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   // Cmd/Ctrl+D toggles completion on the focused bullet. Every bullet is
   // completable (not just tasks), so this works regardless of isTask. We find
@@ -186,7 +193,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
    * the current root when zooming out (title -> list item). We name the pivot
    * in the OUTGOING view here; the incoming view names it declaratively.
    */
-  const navigateZoom = (toRootId: string | null, pivot: string) => {
+  const navigateZoom = useCallback((toRootId: string | null, pivot: string) => {
+    const navigate = navigateRef.current;
     // Zooming out reveals the trail: expand any collapsed ancestor between the
     // node we're leaving and the destination root, so the pivot is actually
     // visible when we land (otherwise a collapsed parent hides where you were).
@@ -216,7 +224,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     };
     if (toRootId === null) navigate({ to: "/", ...opts });
     else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
-  };
+  }, []);
 
   // Cmd/Ctrl+,: zoom out one level — navigate to the current root's parent,
   // with the current root as the morph pivot (title -> list item). No-op at
@@ -239,7 +247,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const drag = useDragReorder({
     getIndex: () => focusIndex.current,
     getRootId: () => rootIdRef.current,
-    getShowCompleted: () => showCompleted,
+    getShowCompleted: () => showCompletedRef.current,
     getRowEl: (id) =>
       (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
       null,
@@ -256,8 +264,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       else drop();
     },
   });
+  // Stable references (useCallback([]) inside the hook), safe to close over in
+  // the memoized commands below.
+  const { startDrag, consumeClick } = drag;
 
-  const commands: NodeCommands = {
+  // Recreating this object each render would change a prop on every memoized
+  // OutlineNode and re-render the whole tree on every keystroke -- the exact bug
+  // ADR 0014 fixes. It stays stable because every live value it needs is read
+  // through a ref (focusIndex, rootIdRef, showCompletedRef) or is itself stable
+  // (navigateZoom, startDrag, consumeClick, the module-level mutations).
+  const commands = useMemo<NodeCommands>(
+    () => ({
     onTextChange: (id, text) => {
       // Coalesce a run of keystrokes on one bullet into a single undo step,
       // capturing the pre-typing state on the first keystroke of the run.
@@ -305,7 +322,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // Reorder/outdent remounts the contentEditable; re-focus on a real move.
       capture(focusIndex.current, id);
       const moved = moveUp(focusIndex.current, id, {
-        isVisible: (n) => showCompleted || !n.completed,
+        isVisible: (n) => showCompletedRef.current || !n.completed,
         rootId: rootIdRef.current,
       });
       if (moved) pendingFocus.current = id;
@@ -315,7 +332,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onMoveDown: (id) => {
       capture(focusIndex.current, id);
       const moved = moveDown(focusIndex.current, id, {
-        isVisible: (n) => showCompleted || !n.completed,
+        isVisible: (n) => showCompletedRef.current || !n.completed,
         rootId: rootIdRef.current,
       });
       if (moved) pendingFocus.current = id;
@@ -364,15 +381,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // Zooming in: the clicked node is the pivot (list item -> title).
     onZoom: (id) => navigateZoom(id, id),
 
-    onBulletPointerDown: (id, e) => drag.startDrag(id, e),
+    onBulletPointerDown: (id, e) => startDrag(id, e),
 
     // The dot's click fires right after pointerup. Suppress the zoom when that
     // press was actually a drag; otherwise zoom as before.
     onBulletClick: (id) => {
-      if (drag.consumeClick()) return;
+      if (consumeClick()) return;
       navigateZoom(id, id);
     },
-  };
+    }),
+    [navigateZoom, startDrag, consumeClick],
+  );
 
   // Top-level roots start the fade cascade fresh: a completed ancestor above
   // the current view (when zoomed) contributes nothing. Hide completed roots
@@ -425,8 +444,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           {topLevel.map((node) => (
             <OutlineNode
               key={node.id}
-              node={node}
-              index={index}
+              nodeId={node.id}
               commands={commands}
               registerRef={registerRef}
               pivotId={pivotId}

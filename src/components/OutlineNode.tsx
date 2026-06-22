@@ -3,16 +3,19 @@ import { useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
-import type { TreeIndex } from "../data/tree";
-import { childrenOf } from "../data/tree";
+import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { useSlashMenu } from "./slash-menu";
 import { decorate, getCaretOffset } from "./inline-code";
 
 interface OutlineNodeProps {
-  node: Node;
-  index: TreeIndex;
+  // The node id. The node itself and its visible children are read reactively
+  // from the shared tree store (useNode / useVisibleChildIds), NOT threaded as
+  // props -- that's what lets a keystroke re-render only the bullet that
+  // changed instead of the whole tree. See ADR 0014.
+  nodeId: string;
   // Commands the editor knows how to run. Keeping them as a single
   // object avoids each node importing mutations + focus logic directly.
+  // Must be referentially stable, or every node re-renders on every keystroke.
   commands: NodeCommands;
   // Refs registry so the editor can move focus between bullets.
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
@@ -55,15 +58,31 @@ export interface NodeCommands {
   onBulletClick: (id: string) => void;
 }
 
+/**
+ * Thin reactive wrapper: reads this node from the shared store and renders the
+ * body only when it exists. Memoized so a parent re-render skips it when its
+ * (stable) props are unchanged; its own `useNode` subscription still re-renders
+ * it when THIS node's data changes. The early return lives here -- before any
+ * other hooks -- so the rules of hooks hold while still letting a deleted node
+ * (id present in a parent's stale snapshot) render nothing. See ADR 0014.
+ */
 export const OutlineNode = memo(function OutlineNode({
+  nodeId,
+  ...rest
+}: OutlineNodeProps) {
+  const node = useNode(nodeId);
+  if (!node) return null;
+  return <OutlineNodeBody node={node} {...rest} />;
+});
+
+function OutlineNodeBody({
   node,
-  index,
   commands,
   registerRef,
   pivotId,
   ancestorCompleted,
   showCompleted,
-}: OutlineNodeProps) {
+}: Omit<OutlineNodeProps, "nodeId"> & { node: Node }) {
   const textRef = useRef<HTMLSpanElement | null>(null);
   // Inline `code` is decorated LIVE -- the contentEditable always holds
   // formatted HTML (mono chips), even while the caret is in the bullet. Each
@@ -79,13 +98,12 @@ export const OutlineNode = memo(function OutlineNode({
   // mid-composition aborts the IME session, so we suspend decoration until it
   // ends, then decorate once with the committed text.
   const composingRef = useRef(false);
-  // Hide completed subtrees when the toggle is off. Filtering here (where
-  // children are listed) means a hidden completed node takes its whole subtree
-  // with it for free.
-  const children = childrenOf(index, node.id).filter(
-    (c) => showCompleted || !c.completed,
-  );
-  const hasChildren = children.length > 0;
+  // Visible child ids, read reactively from the store. The array keeps its
+  // identity until the child set/order changes, so typing in a child doesn't
+  // re-render this parent; a completion toggle that flips visibility does. A
+  // hidden completed node takes its whole subtree with it for free.
+  const childIds = useVisibleChildIds(node.id, showCompleted);
+  const hasChildren = childIds.length > 0;
   const isPivot = node.id === pivotId;
   // Faded when this bullet is done, or sits anywhere under one that is.
   const faded = node.completed || ancestorCompleted;
@@ -337,11 +355,10 @@ export const OutlineNode = memo(function OutlineNode({
         // collapsed subtrees independently, so hidden rows are inert.
         <div className="outline-children-wrap" data-collapsed={node.collapsed}>
           <ul className="outline-children" aria-hidden={node.collapsed}>
-            {children.map((child) => (
+            {childIds.map((childId) => (
               <OutlineNode
-                key={child.id}
-                node={child}
-                index={index}
+                key={childId}
+                nodeId={childId}
                 commands={commands}
                 registerRef={registerRef}
                 pivotId={pivotId}
@@ -354,7 +371,7 @@ export const OutlineNode = memo(function OutlineNode({
       )}
     </li>
   );
-});
+}
 
 // Caret at the very end / start of the bullet, measured by absolute offset so
 // the test holds whether the line is one text node or split around chips.

@@ -1,21 +1,16 @@
-import { useMemo } from 'react'
-import { useLiveQuery } from '@tanstack/react-db'
-import { nodesCollection } from './collection'
-import { buildTreeIndex, type TreeIndex } from './tree'
+import { useTreeIndex } from './tree-store'
+import type { TreeIndex } from './tree'
 
 /**
- * Subscribe to all nodes and return a derived TreeIndex.
+ * Subscribe to the whole derived TreeIndex.
  *
- * We pass the collection directly to useLiveQuery (the "subscribe to
- * existing collection" overload), which returns `data: Array<Node>`.
- * The collection is our single source of truth so this is the whole
- * outline. Re-derives the index whenever the collection changes
- * (keystroke, insert, delete, cross-tab sync).
+ * Backed by the shared tree store (see tree-store.ts), which holds one
+ * subscription to the nodes collection and re-derives the index on change.
+ * This is the whole-index view used by readers that genuinely need everything
+ * (the quick-switcher search, bookmarks). The outline editor renders through
+ * the narrow `useNode` / `useVisibleChildIds` slices instead, so a keystroke
+ * re-renders only the bullet that changed. See ADR 0014.
  */
 export function useTree(): { index: TreeIndex } {
-  const { data } = useLiveQuery(nodesCollection)
-
-  const index = useMemo(() => buildTreeIndex(data ?? []), [data])
-
-  return { index }
+  return { index: useTreeIndex() }
 }
