@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { Search } from "lucide-react";
+import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { cn } from "@/lib/utils";
@@ -169,7 +169,14 @@ function SwitcherDialog({
             bookmarks.length === 0 ? (
               <Hint>No bookmarks yet. Type to search your nodes.</Hint>
             ) : (
-              <CommandGroup heading="Bookmarks">
+              <CommandGroup
+                heading={
+                  <div className="flex items-center gap-1">
+                    <BookmarkIcon className="size-4" />
+                    Bookmarks
+                  </div>
+                }
+              >
                 {bookmarks.map((node) => (
                   <ResultRow
                     key={node.id}

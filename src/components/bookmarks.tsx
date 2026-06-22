@@ -1,5 +1,5 @@
 import { useParams } from "@tanstack/react-router";
-import { Star } from "lucide-react";
+import { BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { toggleBookmark } from "../data/mutations";
 import { capture } from "../data/history";
@@ -46,7 +46,7 @@ export function BookmarkStar() {
           toggleBookmark(current.id, !isBookmarked);
         }}
       >
-        <Star className={isBookmarked ? "fill-current" : ""} />
+        <BookmarkIcon className={isBookmarked ? "fill-current" : ""} />
         <span className="sr-only">
           {isBookmarked ? "Remove bookmark" : "Bookmark this view"}
         </span>
