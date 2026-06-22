@@ -214,6 +214,11 @@ export const OutlineNode = memo(function OutlineNode({
             commands.onToggleCollapsed(node.id, true);
         },
       },
+      {
+        // Cmd/Ctrl+.: zoom this node to become the temporary root.
+        hotkey: "Mod+.",
+        callback: () => commands.onZoom(node.id),
+      },
     ],
     { target: textRef, enabled: !slash.isOpen },
   );

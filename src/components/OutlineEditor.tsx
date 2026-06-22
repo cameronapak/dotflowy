@@ -25,7 +25,8 @@ import { useShowCompleted } from "./show-completed-provider";
 import { Button } from "./ui/button";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
-// history state, so the incoming view knows which element to name.
+// history state, so the incoming view knows which element to name -- and so it
+// can restore focus after the navigation.
 declare module "@tanstack/history" {
   interface HistoryState {
     pivotId?: string;
@@ -142,6 +143,37 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const pivotIdRef = useRef<string | null>(pivotId);
   pivotIdRef.current = pivotId;
 
+  // After a zoom, drop focus where the user is most likely to continue:
+  //  - Zooming IN (pivot is now the title, pivotId === rootId): the first child
+  //    of the opened node, so you can start working inside it. If it has no
+  //    children, focus the title -- Enter there adds the first child.
+  //  - Zooming OUT (pivot is now a list item): the node you came from.
+  // Then scroll the target into view if it landed below the fold.
+  //
+  // Mount-only by design: the editor remounts per zoom view (ADR 0003's
+  // `key={nodeId}`), so this runs exactly once per navigation. It must be a
+  // passive effect, not useLayoutEffect: each bullet's text is written to its
+  // contentEditable in OutlineNode's own (passive) effect, so only by now is
+  // the list laid out at its real heights -- the scroll target would otherwise
+  // be computed against empty, collapsed rows.
+  useEffect(() => {
+    if (!pivotId) return;
+    let targetId = pivotId;
+    if (pivotId === rootId) {
+      const firstChild = childrenOf(index, rootId).find(
+        (n) => showCompleted || !n.completed,
+      );
+      if (firstChild) targetId = firstChild.id;
+    }
+    const el = refs.current.get(targetId);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    placeCaretAtEnd(el);
+    // `nearest` brings it just into view when below the fold and does nothing
+    // when it's already visible (the common case after a zoom).
+    el.scrollIntoView({ block: "nearest" });
+  }, []);
+
   /**
    * Navigate to a new zoom root with a shared-element morph. `pivot` is the
    * node that changes role: the target when zooming in (list item -> title),
@@ -150,8 +182,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
    */
   const navigateZoom = (toRootId: string | null, pivot: string) => {
     if (prefersReducedMotion()) {
-      if (toRootId === null) navigate({ to: "/" });
-      else navigate({ to: "/$nodeId", params: { nodeId: toRootId } });
+      // No morph, but still carry the pivot so the new view restores focus.
+      const state = { pivotId: pivot };
+      if (toRootId === null) navigate({ to: "/", state });
+      else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, state });
       return;
     }
     // Retarget the morph name from this view's current pivot onto the new one.
@@ -173,6 +207,21 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     if (toRootId === null) navigate({ to: "/", ...opts });
     else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
   };
+
+  // Cmd/Ctrl+,: zoom out one level — navigate to the current root's parent,
+  // with the current root as the morph pivot (title -> list item). No-op at
+  // the top. Mirror of Cmd+. (zoom in). Editor-level, not per-bullet, because
+  // zooming out is keyed off rootId, not the focused node.
+  useHotkey(
+    "Mod+,",
+    () => {
+      const currentRoot = rootIdRef.current;
+      if (currentRoot === null) return;
+      const node = focusIndex.current.byId.get(currentRoot);
+      navigateZoom(node?.parentId ?? null, currentRoot);
+    },
+    { preventDefault: true },
+  );
 
   const commands: NodeCommands = {
     onTextChange: (id, text) => {
@@ -334,11 +383,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             />
           ))}
         </ul>
-        {topLevel.length === 0 && (
-          <div className="outline-empty">
-            Empty. Click below to add your first bullet.
-          </div>
-        )}
         {/* Click anywhere in the whitespace below the list adds a new top-level bullet. */}
         <Button
           type="button"
@@ -686,7 +730,9 @@ function caretFromPoint(
   ).caretRangeFromPoint;
   if (legacy) {
     const range = legacy.call(document, x, y);
-    return range ? { node: range.startContainer, offset: range.startOffset } : null;
+    return range
+      ? { node: range.startContainer, offset: range.startOffset }
+      : null;
   }
   return null;
 }
