@@ -281,7 +281,7 @@ export const OutlineNode = memo(function OutlineNode({
         </button>
         {node.isTask && (
           <Checkbox
-            className="checkbox touch-hitbox"
+            className="checkbox border-foreground touch-hitbox"
             checked={node.completed}
             onCheckedChange={(checked) =>
               commands.onToggleCompleted(node.id, checked)
