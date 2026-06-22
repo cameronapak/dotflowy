@@ -45,17 +45,17 @@ There is **no test runner and no linter** configured. `typecheck` is the only st
 
 ## SPA mode
 
-`vite.config.ts` enables `spa: { enabled: true }` — there is no SSR. This is deliberate: the TanStack DB collection reads `globalThis.localStorage`, so it must only ever run in the browser. Don't add code that touches `nodesCollection` during a server/render pass.
+No SSR — don't run code that touches `nodesCollection` during a server/render pass. Why: [ADR 0004](./docs/adr/0004-spa-only-no-ssr.md).
 
 ## Data layer gotchas
 
 - **localStorage shape is not a plain array.** Under key `dotflowy-oss:nodes`, TanStack DB stores an object keyed by id where each value is `{ data: Node, versionKey }` — not `Node[]`. To read it directly: `Object.values(JSON.parse(raw)).map(v => v.data)`.
-- **The schema intentionally has no zod `.default()` values** (`src/data/schema.ts`). Defaults make zod's inferred input type optional, which collides with TanStack DB's schema-typed collection overload. Always build complete nodes via `makeNode()` in `tree.ts`; don't add `.default()` to the schema.
+- **Build nodes via `makeNode()` in `tree.ts`.** Don't add zod `.default()` values to `src/data/schema.ts`. Why: [ADR 0005](./docs/adr/0005-no-zod-defaults-in-schema.md).
 - **Mutations operate on the live `TreeIndex`.** Every function in `mutations.ts` takes the current index (so it can find siblings/order) and mutates `nodesCollection` directly. The editor holds the live-derived index in a ref (`focusIndex`) and passes `focusIndex.current` into command handlers, because the `commands` object is recreated each render but closures capture stale values otherwise.
 
 ## Styling
 
-Going forward all styles will be inline Tailwind classes instead of a separate CSS file.
+Inline Tailwind classes, not a separate CSS file. Why: [ADR 0006](./docs/adr/0006-inline-tailwind-styling.md).
 
 ## Editor internals (OutlineEditor + OutlineNode)
 
@@ -66,14 +66,12 @@ These two files have a few coupled patterns worth knowing before touching them:
 
 ## Zoom + view transitions
 
-The README still lists "zoom-to-node" as not built — it is. Clicking a bullet zooms it to a temporary root.
+Clicking a bullet zooms it to a temporary root (the README's "not built" note is stale). Two rules an agent must not break:
 
-- **URL-driven.** `rootId` comes from the route: `routes/index.tsx` renders `<OutlineEditor rootId={null}>`, `routes/$nodeId.tsx` renders `<OutlineEditor rootId={nodeId}>`. The zoom view is `key={nodeId}` so it remounts per node (prevents stale view-transition names leaking between consecutive zooms).
-- **The bullet dot zooms; collapse/expand is the hover chevron** in the left gutter (`OutlineNode`). Don't move zoom back onto the collapse control.
-- **Animation = a shared-element morph via the View Transitions API**, driven through TanStack Router's `viewTransition` option (it wraps navigation in `document.startViewTransition`). The unifying idea is the **pivot**: the one node that swaps between title and list-item roles. It claims `view-transition-name: zoom-target` in *both* views, so the browser morphs it.
-  - Zoom in → pivot is the clicked node (list item → title). Zoom out (breadcrumb) → pivot is the current root (title → list item).
-  - The pivot id rides in **history state** (`HistoryState` is module-augmented with `pivotId` in `OutlineEditor.tsx`). The incoming view names the pivot declaratively (`.vt-morph` class + inline `viewTransitionName`); `navigateZoom` names it imperatively in the outgoing view before navigating.
-  - The pivot's flex box is shrunk to fit-content only during the transition via `:root:active-view-transition-type(zoom) .vt-morph { flex-grow: 0 }`, so old and new boxes both wrap their text and the morph is a clean scale + translate (without this it slides from the stretched right edge). Reduced motion is respected (`prefersReducedMotion()` + a CSS `@media` guard).
+- **The bullet dot zooms; collapse/expand is the hover chevron** in the left gutter (`OutlineNode`). Don't move zoom onto the collapse control.
+- **`rootId` is route-owned** (`routes/index.tsx` → `null`, `routes/$nodeId.tsx` → `nodeId`); don't add editor-local zoom state.
+
+How it's URL-driven and how the pivot morph animates: [ADR 0003](./docs/adr/0003-zoom-via-view-transitions.md). That ADR also covers why screenshots can't verify the transition.
 
 ## Environment gotcha: adding a React-importing dependency
 
