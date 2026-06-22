@@ -264,11 +264,20 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       setText(id, text);
     },
 
-    onEnter: (id) => {
+    onEnter: (id, caretAtEnd) => {
       const node = focusIndex.current.byId.get(id);
       if (!node) return;
       capture(focusIndex.current, id);
-      const newId = insertSibling(focusIndex.current, node.parentId, id);
+      // Pressing Enter at the end of an open (expanded, has-children) bullet
+      // adds a child at the top of its list rather than a sibling -- you're
+      // diving into the thing you just finished naming. Anywhere else (caret
+      // mid-text, or a collapsed/leaf node) keeps the plain new-sibling.
+      const isOpen =
+        !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
+      const newId =
+        caretAtEnd && isOpen
+          ? insertChildAtStart(focusIndex.current, id)
+          : insertSibling(focusIndex.current, node.parentId, id);
       pendingFocus.current = newId;
     },
 
