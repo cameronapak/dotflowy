@@ -351,6 +351,10 @@ body.dragging-active * {
    compact row. Both are visual-only and removed on drop (no data change). */
 .outline-row.drag-source {
   @apply bg-card;
+
+  & > * {
+    @apply opacity-30;
+  }
 }
 
 .outline-node.drag-collapsed > .outline-children-wrap {
