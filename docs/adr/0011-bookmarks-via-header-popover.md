@@ -1,6 +1,9 @@
 # ADR 0011: Bookmarks via a header popover (no sidebar)
 
-Status: accepted (2026-06-22), implemented
+Status: accepted (2026-06-22), implemented. **The Bookmarks popover was later removed**
+([ADR 0013](./0013-bookmarks-browse-folds-into-switcher.md)) once the node quick-switcher's
+empty state (ADR 0012) became the browse surface. The data model, the star, and the no-sidebar
+stance below all still hold; only the popover is gone.
 
 ## Glossary
 
