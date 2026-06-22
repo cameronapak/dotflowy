@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { useHotkeys } from "@tanstack/react-hotkeys";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
 import type { TreeIndex } from "../data/tree";
@@ -215,12 +215,7 @@ export const OutlineNode = memo(function OutlineNode({
           }
           tabIndex={-1}
         >
-          {hasChildren &&
-            (node.collapsed ? (
-              <ChevronRight size={14} strokeWidth={2.5} />
-            ) : (
-              <ChevronDown size={14} strokeWidth={2.5} />
-            ))}
+          {hasChildren && <ChevronRight size={14} strokeWidth={2.5} />}
         </button>
         <button
           type="button"
@@ -267,21 +262,27 @@ export const OutlineNode = memo(function OutlineNode({
         {slash.menu}
       </div>
 
-      {!node.collapsed && hasChildren && (
-        <ul className="outline-children">
-          {children.map((child) => (
-            <OutlineNode
-              key={child.id}
-              node={child}
-              index={index}
-              commands={commands}
-              registerRef={registerRef}
-              pivotId={pivotId}
-              ancestorCompleted={faded}
-              showCompleted={showCompleted}
-            />
-          ))}
-        </ul>
+      {hasChildren && (
+        // Children stay mounted while collapsed so the reveal/hide can animate
+        // (the grid-rows trick needs both states present). The wrapper clamps
+        // height to 0 when collapsed; the editor's visible-order walk skips
+        // collapsed subtrees independently, so hidden rows are inert.
+        <div className="outline-children-wrap" data-collapsed={node.collapsed}>
+          <ul className="outline-children" aria-hidden={node.collapsed}>
+            {children.map((child) => (
+              <OutlineNode
+                key={child.id}
+                node={child}
+                index={index}
+                commands={commands}
+                registerRef={registerRef}
+                pivotId={pivotId}
+                ancestorCompleted={faded}
+                showCompleted={showCompleted}
+              />
+            ))}
+          </ul>
+        </div>
       )}
     </li>
   );
