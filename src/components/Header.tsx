@@ -13,7 +13,7 @@ import { ShowCompletedToggle } from "./show-completed-toggle";
  */
 export function Header({ children }: { children?: ReactNode }) {
   return (
-    <header className="border-b">
+    <header className="sticky top-0 z-10 border-b bg-background">
       {/* Border spans the full viewport; inner row is centered to match the
           720px outline content below. */}
       <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3">
