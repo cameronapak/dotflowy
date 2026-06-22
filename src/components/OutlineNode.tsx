@@ -60,6 +60,16 @@ export const OutlineNode = memo(function OutlineNode({
   showCompleted,
 }: OutlineNodeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null);
+  // Whether this bullet currently holds the caret. We EDIT raw plain text
+  // (single text node, backticks visible) and DISPLAY formatted HTML (inline
+  // `code` chips) only while blurred. Tracked in a ref, not state, so the
+  // focus/blur swap below runs synchronously inside the same focus event the
+  // editor triggers programmatically -- the caret it then places lands on the
+  // raw text node, so all the caret/keyboard logic keeps working unchanged.
+  const focusedRef = useRef(false);
+  // Last (text, focused) pair written to the DOM, so the sync effect skips
+  // redundant work -- including pointless innerHTML churn while blurred.
+  const syncedRef = useRef<{ text: string; focused: boolean } | null>(null);
   // Hide completed subtrees when the toggle is off. Filtering here (where
   // children are listed) means a hidden completed node takes its whole subtree
   // with it for free.
@@ -80,15 +90,24 @@ export const OutlineNode = memo(function OutlineNode({
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
 
-  // Keep the contentEditable in sync with stored text WITHOUT clobbering
-  // the user's caret. We only write to the DOM when the stored text
-  // differs from what's rendered, which is essentially never during
-  // typing (the keystroke updates the store which echoes back equal).
+  // Keep the contentEditable in sync with stored text WITHOUT clobbering the
+  // user's caret. While focused we write RAW text (and only when it differs,
+  // which is essentially never during typing -- the keystroke updates the
+  // store which echoes back equal). While blurred we render formatted HTML so
+  // inline `code` shows as a mono chip. The (text, focused) guard avoids
+  // re-writing identical content on unrelated re-renders.
   useEffect(() => {
     const el = textRef.current;
-    if (el && el.textContent !== node.text) {
-      el.textContent = node.text;
+    if (!el) return;
+    const focused = focusedRef.current;
+    const last = syncedRef.current;
+    if (last && last.text === node.text && last.focused === focused) return;
+    if (focused) {
+      if (el.textContent !== node.text) el.textContent = node.text;
+    } else {
+      el.innerHTML = inlineMarkupHtml(node.text);
     }
+    syncedRef.current = { text: node.text, focused };
   });
 
   // Outline keyboard shortcuts, scoped to THIS bullet's contentEditable via
@@ -274,11 +293,26 @@ export const OutlineNode = memo(function OutlineNode({
           suppressContentEditableWarning
           role="textbox"
           data-completed={node.completed}
+          onFocus={(e) => {
+            // Swap formatted HTML -> raw text synchronously, BEFORE the editor
+            // places the caret after a programmatic .focus(). No-op for the
+            // common case (no inline markup) where raw == rendered text.
+            focusedRef.current = true;
+            const el = e.currentTarget;
+            if (el.textContent !== node.text) el.textContent = node.text;
+            syncedRef.current = { text: node.text, focused: true };
+          }}
           onInput={(e) => {
             commands.onTextChange(node.id, e.currentTarget.textContent ?? "");
             slash.handleInput();
           }}
-          onBlur={slash.close}
+          onBlur={(e) => {
+            slash.close();
+            // Re-render the formatted view now that the caret has left.
+            focusedRef.current = false;
+            e.currentTarget.innerHTML = inlineMarkupHtml(node.text);
+            syncedRef.current = { text: node.text, focused: false };
+          }}
           // The "/" menu owns its own Arrow/Enter/Tab/Esc navigation while
           // open; the outline shortcuts above defer to it via `enabled`.
           onKeyDown={slash.handleKeyDown}
@@ -311,6 +345,30 @@ export const OutlineNode = memo(function OutlineNode({
     </li>
   );
 });
+
+// Inline `code` runs: `like this`. Single-line, non-empty, no nested backtick.
+// We render these as mono chips only while a bullet is BLURRED; the focused
+// bullet always edits the raw source (backticks visible). Keep this in lockstep
+// with how the text is *stored* -- the store still holds the raw markdown.
+const INLINE_CODE = /`([^`\n]+)`/g;
+
+// Build the display HTML for a bullet's stored text. Escapes first (the text is
+// user input going into innerHTML), then wraps inline-code runs. Backticks
+// aren't escaped, so they survive escaping and the regex still matches; the
+// captured group is already-escaped text, safe to drop straight into <code>.
+function inlineMarkupHtml(text: string): string {
+  return escapeHtml(text).replace(
+    INLINE_CODE,
+    '<code class="rounded-[4px] border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground">$1</code>',
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 function isCaretAtEnd(el: HTMLElement): boolean {
   const sel = window.getSelection();
