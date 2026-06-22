@@ -60,7 +60,7 @@ by default — they only ever expand, collapse, or do nothing.
 
 ## Note
 
-`Cmd+↑/↓` is the natural binding for a future *move-node-up/down* feature. This ADR
-claims it for expand/collapse; if move-node lands, it supersedes this and collapse moves
-to another key (e.g. `Cmd+Shift+↑/↓`). A future recursive deep-expand would similarly
-take `Cmd+Shift+↓`.
+`Cmd+↑/↓` is claimed here for expand/collapse and **keeps** it: the *move-node-up/down*
+feature landed on `Cmd+Shift+↑/↓` instead (see [ADR 0009](./0009-move-node-among-siblings.md)),
+so this ADR is **not** superseded. A future recursive deep-expand would take a different
+combo (this ADR's earlier guess of `Cmd+Shift+↓` is now taken by move-node).

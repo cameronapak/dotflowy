@@ -202,6 +202,135 @@ export function outdent(index: TreeIndex, nodeId: string): boolean {
   return true
 }
 
+interface MoveOpts {
+  /**
+   * Show-completed predicate. A move targets the nearest *visible* sibling,
+   * skipping hidden completed ones (they ride along, staying hidden), so a
+   * press is never a dead no-visible-change move. Defaults to "all visible".
+   */
+  isVisible?: (n: Node) => boolean
+  /**
+   * Boundary parent (the zoom root). A node directly under it must not escape
+   * the visible subtree, so an edge move there is a no-op. See docs/adr/0009.
+   */
+  rootId?: string | null
+}
+
+/**
+ * Outdent variant used by the move-up edge: the node pops out to become the
+ * sibling *immediately before* its old parent (promoted above it), as opposed
+ * to `outdent`, which lands it after the parent. Returns true on a real move.
+ */
+function outdentBeforeParent(
+  index: TreeIndex,
+  node: Node,
+  rootId: string | null,
+): boolean {
+  if (node.parentId === null || node.parentId === rootId) return false
+  const parent = index.byId.get(node.parentId)
+  if (!parent) return false
+
+  // node's raw next under the old parent relinks to node's old prev.
+  const oldSiblings = childrenOf(index, parent.id)
+  const i = oldSiblings.findIndex((n) => n.id === node.id)
+  const rawNext =
+    i !== -1 && i + 1 < oldSiblings.length ? oldSiblings[i + 1]! : null
+  if (rawNext) update(rawNext.id, { prevSiblingId: node.prevSiblingId })
+
+  // node slots in immediately before its old parent, at the parent's level.
+  update(node.id, {
+    parentId: parent.parentId,
+    prevSiblingId: parent.prevSiblingId,
+  })
+  update(parent.id, { prevSiblingId: node.id })
+  return true
+}
+
+/**
+ * Move `nodeId` up among its siblings. If a visible sibling sits above it,
+ * swap with that sibling (same depth, subtree carried). Otherwise (it is the
+ * first visible child) outdent to become the sibling before its parent.
+ *
+ * Returns true if a move happened. See docs/adr/0009.
+ */
+export function moveUp(
+  index: TreeIndex,
+  nodeId: string,
+  opts: MoveOpts = {},
+): boolean {
+  const isVisible = opts.isVisible ?? (() => true)
+  const node = index.byId.get(nodeId)
+  if (!node) return false
+
+  const siblings = childrenOf(index, node.parentId)
+  const i = siblings.findIndex((n) => n.id === nodeId)
+  if (i === -1) return false
+
+  // Nearest visible sibling above, skipping hidden completed ones.
+  let vp: Node | null = null
+  for (let j = i - 1; j >= 0; j--) {
+    if (isVisible(siblings[j]!)) {
+      vp = siblings[j]!
+      break
+    }
+  }
+
+  if (!vp) return outdentBeforeParent(index, node, opts.rootId ?? null)
+
+  // Swap: detach node, then re-insert it immediately before vp. A hidden
+  // sibling between them stays put (rides along below vp).
+  const rawNext = i + 1 < siblings.length ? siblings[i + 1]! : null
+  if (rawNext) update(rawNext.id, { prevSiblingId: node.prevSiblingId })
+  update(nodeId, { prevSiblingId: vp.prevSiblingId })
+  update(vp.id, { prevSiblingId: nodeId })
+  return true
+}
+
+/**
+ * Move `nodeId` down among its siblings. If a visible sibling sits below it,
+ * swap with that sibling. Otherwise (it is the last visible child) outdent to
+ * become the sibling after its parent (the existing `outdent` semantics).
+ *
+ * Returns true if a move happened. See docs/adr/0009.
+ */
+export function moveDown(
+  index: TreeIndex,
+  nodeId: string,
+  opts: MoveOpts = {},
+): boolean {
+  const isVisible = opts.isVisible ?? (() => true)
+  const node = index.byId.get(nodeId)
+  if (!node) return false
+
+  const siblings = childrenOf(index, node.parentId)
+  const i = siblings.findIndex((n) => n.id === nodeId)
+  if (i === -1) return false
+
+  // Nearest visible sibling below, skipping hidden completed ones.
+  let k = -1
+  for (let j = i + 1; j < siblings.length; j++) {
+    if (isVisible(siblings[j]!)) {
+      k = j
+      break
+    }
+  }
+
+  if (k === -1) {
+    // Edge: don't let a node directly under the zoom root escape the view.
+    if (node.parentId === opts.rootId) return false
+    return outdent(index, nodeId)
+  }
+
+  // Swap: detach node, then re-insert it immediately after vn.
+  const vn = siblings[k]!
+  const vnNext = k + 1 < siblings.length ? siblings[k + 1]! : null
+  const rawNext = siblings[i + 1]! // exists: there's a sibling at k > i
+  update(rawNext.id, { prevSiblingId: node.prevSiblingId })
+  update(nodeId, { prevSiblingId: vn.id })
+  if (vnNext) update(vnNext.id, { prevSiblingId: nodeId })
+  return true
+}
+
 /**
  * Delete a node. Children are deleted recursively (Workflowy behavior:
  * deleting a parent deletes its subtree). Returns the id to focus

@@ -8,6 +8,8 @@ import {
   indent,
   insertChildAtStart,
   insertSibling,
+  moveDown,
+  moveUp,
   outdent,
   removeNode,
   setIsTask,
@@ -204,6 +206,27 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // Same remount-drops-focus issue as indent; re-focus on a real move.
       capture(focusIndex.current, id);
       if (outdent(focusIndex.current, id)) pendingFocus.current = id;
+      else drop();
+    },
+
+    onMoveUp: (id) => {
+      // Reorder/outdent remounts the contentEditable; re-focus on a real move.
+      capture(focusIndex.current, id);
+      const moved = moveUp(focusIndex.current, id, {
+        isVisible: (n) => showCompleted || !n.completed,
+        rootId: rootIdRef.current,
+      });
+      if (moved) pendingFocus.current = id;
+      else drop();
+    },
+
+    onMoveDown: (id) => {
+      capture(focusIndex.current, id);
+      const moved = moveDown(focusIndex.current, id, {
+        isVisible: (n) => showCompleted || !n.completed,
+        rootId: rootIdRef.current,
+      });
+      if (moved) pendingFocus.current = id;
       else drop();
     },
 

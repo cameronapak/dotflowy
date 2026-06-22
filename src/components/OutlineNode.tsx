@@ -32,6 +32,10 @@ export interface NodeCommands {
   onEnter: (id: string, caretAtEnd: boolean) => void;
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
+  // Move a bullet (and its subtree) up/down among siblings; at the edge it
+  // outdents one level in that direction. See docs/adr/0009.
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
   // Delete a bullet and its entire subtree, then focus a neighbor.
   onDeleteNode: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
@@ -124,6 +128,20 @@ export const OutlineNode = memo(function OutlineNode({
         // Shift+Tab: outdent one level.
         hotkey: "Shift+Tab",
         callback: () => commands.onOutdent(node.id),
+      },
+      {
+        // Cmd/Ctrl+Shift+Up: move this bullet up among its siblings; at the
+        // top edge it outdents to before its parent. Default options always
+        // preventDefault, so macOS "extend selection to doc start" never
+        // fires inside the outline. See ADR 0009.
+        hotkey: "Mod+Shift+ArrowUp",
+        callback: () => commands.onMoveUp(node.id),
+      },
+      {
+        // Cmd/Ctrl+Shift+Down: move down; at the bottom edge it outdents to
+        // after its parent. Mirror of Mod+Shift+ArrowUp.
+        hotkey: "Mod+Shift+ArrowDown",
+        callback: () => commands.onMoveDown(node.id),
       },
       {
         // Backspace on an empty bullet: delete it and focus the previous node.
