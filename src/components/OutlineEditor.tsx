@@ -21,6 +21,7 @@ import {
 import { seedIfEmpty } from "../data/seed";
 import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { decorate } from "./inline-code";
 import { useDragReorder } from "./use-drag-reorder";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
@@ -475,12 +476,17 @@ function ZoomedTitle({
   onArrowDown: () => void;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
+  // Mirror OutlineNode's live inline-`code` decoration so a backtick run in the
+  // title renders as a mono chip too. See inline-code.ts and OutlineNode.
+  const syncedRef = useRef<string | null>(null);
+  const composingRef = useRef(false);
 
   useEffect(() => {
     const el = ref.current;
-    if (el && el.textContent !== node.text) {
-      el.textContent = node.text;
-    }
+    if (!el || composingRef.current) return;
+    if (syncedRef.current === node.text) return;
+    decorate(el, node.text, document.activeElement === el);
+    syncedRef.current = node.text;
   });
 
   // Title shortcuts, scoped to the title's own contentEditable. Enter adds a
@@ -507,7 +513,28 @@ function ZoomedTitle({
         role="textbox"
         aria-label="Title"
         data-completed={node.completed}
-        onInput={(e) => onTextChange(e.currentTarget.textContent ?? "")}
+        onInput={(e) => {
+          const el = e.currentTarget;
+          const text = el.textContent ?? "";
+          onTextChange(text);
+          // Re-decorate live, preserving the caret. Suspended during IME
+          // composition; compositionend handles that case.
+          if (!composingRef.current) {
+            decorate(el, text, true);
+            syncedRef.current = text;
+          }
+        }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={(e) => {
+          composingRef.current = false;
+          const el = e.currentTarget;
+          const text = el.textContent ?? "";
+          onTextChange(text);
+          decorate(el, text, true);
+          syncedRef.current = text;
+        }}
       />
     </h2>
   );
