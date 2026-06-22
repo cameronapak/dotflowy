@@ -19,6 +19,7 @@ import { seedIfEmpty } from "../data/seed";
 import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import { Header } from "./Header";
+import { useShowCompleted } from "./show-completed-provider";
 import { Button } from "./ui/button";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
@@ -49,6 +50,7 @@ interface OutlineEditorProps {
 export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const { index } = useTree();
   const navigate = useNavigate();
+  const { showCompleted } = useShowCompleted();
 
   // Refs registry: id -> contentEditable span. Lets us move focus
   // between bullets after structural mutations. The zoomed title also
@@ -247,7 +249,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onZoom: (id) => navigateZoom(id, id),
   };
 
-  const topLevel = childrenOf(index, rootId);
+  // Top-level roots start the fade cascade fresh: a completed ancestor above
+  // the current view (when zoomed) contributes nothing. Hide completed roots
+  // when the toggle is off. See docs/adr/0002.
+  const topLevel = childrenOf(index, rootId).filter(
+    (n) => showCompleted || !n.completed,
+  );
   const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const trail = buildTrail(index, rootId);
 
@@ -298,6 +305,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
               commands={commands}
               registerRef={registerRef}
               pivotId={pivotId}
+              ancestorCompleted={false}
+              showCompleted={showCompleted}
             />
           ))}
         </ul>

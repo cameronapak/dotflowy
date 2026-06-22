@@ -6,6 +6,7 @@ import {
   Scripts,
 } from '@tanstack/react-router'
 import { ThemeProvider } from '../components/theme-provider'
+import { ShowCompletedProvider } from '../components/show-completed-provider'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -36,7 +37,9 @@ function RootComponent() {
   return (
     <RootDocument>
       <ThemeProvider>
-        <Outlet />
+        <ShowCompletedProvider>
+          <Outlet />
+        </ShowCompletedProvider>
       </ThemeProvider>
     </RootDocument>
   )
