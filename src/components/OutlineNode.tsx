@@ -228,6 +228,7 @@ export const OutlineNode = memo(function OutlineNode({
             className="bullet-dot"
             data-completed={node.completed}
             data-has-children={hasChildren}
+            data-collapsed={node.collapsed}
           />
         </button>
         {node.isTask && (

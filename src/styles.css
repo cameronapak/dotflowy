@@ -283,9 +283,13 @@
   @apply translate-y-px;
 }
 
-/* Workflowy's zoom affordance: a faint ring behind the dot on hover. */
+/*
+ * Workflowy's zoom affordance: a faint ring behind the dot on hover. The ring
+ * also signifies hidden children -- so only show it when the node is collapsed.
+ * Once expanded, the visible children are the signifier and the ring is noise.
+ */
 .bullet:hover,
-.bullet:has(span[data-has-children="true"]) {
+.bullet:has(span[data-has-children="true"][data-collapsed="true"]) {
   @apply bg-primary/10;
 }
 
