@@ -31,6 +31,11 @@ export const nodeSchema = z.object({
   // Done-status. Applies to any bullet, task or not. Toggled by Cmd+Enter.
   completed: z.boolean(),
   collapsed: z.boolean(),
+  // Bookmark pointer. `null` = not bookmarked; a timestamp = bookmarked, and
+  // also the sort key for the bookmarks list (newest pinned first). A nullable
+  // timestamp beats a boolean: it carries both "is it pinned?" and "in what
+  // order?" in one field. See docs/adr/0011.
+  bookmarkedAt: z.number().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
