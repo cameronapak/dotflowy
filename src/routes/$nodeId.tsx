@@ -8,7 +8,7 @@ export const Route = createFileRoute("/$nodeId")({
 function ZoomedPage() {
   const { nodeId } = Route.useParams();
   return (
-    <main className="app">
+    <main>
       {/* Key by node id so each zoom view mounts a fresh title element;
           prevents a suppressed view-transition-name from leaking between
           consecutive zooms. */}

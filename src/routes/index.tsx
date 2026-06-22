@@ -7,7 +7,7 @@ export const Route = createFileRoute("/")({
 
 function HomePage() {
   return (
-    <main className="app">
+    <main>
       <OutlineEditor rootId={null} />
     </main>
   );

@@ -5,7 +5,22 @@ import {
   HeadContent,
   Scripts,
 } from '@tanstack/react-router'
+import { ThemeProvider } from '../components/theme-provider'
+import { ShowCompletedProvider } from '../components/show-completed-provider'
 import '../styles.css'
+
+// Runs before first paint so the page never flashes the wrong theme. Mirrors
+// the resolution logic in theme-provider.tsx (same storage key).
+const noFlashThemeScript = `
+(function () {
+  try {
+    var t = localStorage.getItem('dotflowy-oss:theme') || 'system';
+    var dark = t === 'dark' || (t === 'system' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (dark) document.documentElement.classList.add('dark');
+  } catch (e) {}
+})();
+`
 
 export const Route = createRootRoute({
   head: () => ({
@@ -21,7 +36,11 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <Outlet />
+      <ThemeProvider>
+        <ShowCompletedProvider>
+          <Outlet />
+        </ShowCompletedProvider>
+      </ThemeProvider>
     </RootDocument>
   )
 }
@@ -30,6 +49,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
         <HeadContent />
       </head>
       <body>

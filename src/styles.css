@@ -49,12 +49,12 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.27 0 0);
+  --card: oklch(0.99 0 0);
+  --card-foreground: oklch(0.27 0 0);
+  --popover: oklch(0.99 0 0);
+  --popover-foreground: oklch(0.27 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
@@ -84,12 +84,12 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  --background: oklch(0.205 0 0);
+  --foreground: oklch(0.92 0 0);
+  --card: oklch(0.25 0 0);
+  --card-foreground: oklch(0.92 0 0);
+  --popover: oklch(0.25 0 0);
+  --popover-foreground: oklch(0.92 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
@@ -130,18 +130,6 @@
   }
 }
 
-.app {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.app-header h1 {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 4px;
-}
-
 .subtitle {
   @apply text-muted-foreground;
   font-size: 13px;
@@ -174,6 +162,16 @@
 
 .outline-row:hover {
   background: var(--row-hover);
+}
+
+/*
+ * Completion fade. A row is faded when it's completed or sits under something
+ * completed (data-faded set in OutlineNode). Opacity lives on the row, NOT on
+ * .outline-node, so it never nests with descendant rows -- one uniform fade
+ * level at any depth, never compounding. See docs/adr/0002.
+ */
+.outline-row[data-faded="true"] {
+  opacity: 0.4;
 }
 
 /*
@@ -256,8 +254,13 @@
   word-break: break-word;
 }
 
+/*
+ * Strikethrough marks a bullet that is itself completed (self-only). The
+ * row-level fade above handles dimming, so we don't also mute the text color
+ * here -- that would double-dim. Faded-by-ancestor children get no strikethrough.
+ */
 .node-text[data-completed="true"] {
-  @apply text-muted-foreground/60 line-through;
+  @apply line-through;
 }
 
 .node-text:empty::before {
@@ -294,7 +297,6 @@
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  margin-bottom: 10px;
   min-width: 0;
 }
 
@@ -432,6 +434,13 @@
      morph name itself is applied dynamically (.vt-morph) to whichever node
      is the zoom pivot, so it works for both zoom-in and zoom-out. */
   display: inline-block;
+}
+
+/* A completed zoom root shows full completed styling: line-through (from the
+   shared .node-text rule) plus the fade. The title is an <h2>, not an
+   .outline-row, so it needs its own fade. See docs/adr/0002 decision 6. */
+.zoomed-title-text[data-completed="true"] {
+  opacity: 0.4;
 }
 
 /* During a zoom, the pivot's text box wraps its text tightly so the title

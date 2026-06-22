@@ -18,6 +18,13 @@ interface OutlineNodeProps {
   // The node currently morphing across a zoom navigation, if any. When this
   // node is the pivot, its text claims the shared view-transition-name.
   pivotId: string | null;
+  // True when an ancestor *within the current view* is completed, so this row
+  // renders faded even if it isn't itself completed. Visual-only inheritance;
+  // never written to data. Resets to false at each zoom root. See docs/adr/0002.
+  ancestorCompleted: boolean;
+  // Whether completed bullets are shown at all. When false, completed nodes and
+  // their whole subtrees are filtered out of the render.
+  showCompleted: boolean;
 }
 
 export interface NodeCommands {
@@ -42,11 +49,20 @@ export const OutlineNode = memo(function OutlineNode({
   commands,
   registerRef,
   pivotId,
+  ancestorCompleted,
+  showCompleted,
 }: OutlineNodeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null);
-  const children = childrenOf(index, node.id);
+  // Hide completed subtrees when the toggle is off. Filtering here (where
+  // children are listed) means a hidden completed node takes its whole subtree
+  // with it for free.
+  const children = childrenOf(index, node.id).filter(
+    (c) => showCompleted || !c.completed,
+  );
   const hasChildren = children.length > 0;
   const isPivot = node.id === pivotId;
+  // Faded when this bullet is done, or sits anywhere under one that is.
+  const faded = node.completed || ancestorCompleted;
 
   // The "/" command menu for this bullet. Only the focused bullet ever has a
   // caret, so at most one menu is open across the whole outline.
@@ -159,7 +175,7 @@ export const OutlineNode = memo(function OutlineNode({
 
   return (
     <li className="outline-node" data-node-id={node.id}>
-      <div className="outline-row">
+      <div className="outline-row" data-faded={faded}>
         <button
           type="button"
           className="collapse-toggle"
@@ -234,6 +250,8 @@ export const OutlineNode = memo(function OutlineNode({
               commands={commands}
               registerRef={registerRef}
               pivotId={pivotId}
+              ancestorCompleted={faded}
+              showCompleted={showCompleted}
             />
           ))}
         </ul>
