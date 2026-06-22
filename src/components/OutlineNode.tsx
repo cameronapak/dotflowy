@@ -247,7 +247,7 @@ export const OutlineNode = memo(function OutlineNode({
       <div className="outline-row" data-faded={faded}>
         <button
           type="button"
-          className="collapse-toggle"
+          className="collapse-toggle touch-hitbox"
           aria-label={node.collapsed ? "Expand" : "Collapse"}
           data-has-children={hasChildren}
           data-collapsed={node.collapsed}
@@ -373,10 +373,7 @@ function inlineMarkupHtml(text: string): string {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // Re-render `el` as formatted HTML, optionally keeping the caret put. The DOM
