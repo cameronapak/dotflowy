@@ -10,7 +10,8 @@ Very early. v1 scope only:
 
 - Nested bullets with inline editing
 - Checkbox to mark complete
-- Collapse / expand subtrees (click the bullet)
+- Collapse / expand subtrees (hover chevron in the gutter)
+- Zoom into a bullet as a temporary root (click the bullet dot)
 - Keyboard shortcuts:
   - `Enter` — new sibling
   - `Tab` / `Shift+Tab` — indent / outdent
@@ -18,7 +19,7 @@ Very early. v1 scope only:
   - `Arrow Up` / `Arrow Down` at line edges — move between bullets
 - Persists to `localStorage`; syncs across browser tabs automatically
 
-Not built yet: drag-to-reorder, tags, search, sharing, zoom-to-node, undo/redo, mobile gestures, multi-device sync.
+Not built yet: drag-to-reorder, tags, search, sharing, undo/redo, mobile gestures, multi-device sync.
 
 ## Stack
 
