@@ -78,12 +78,13 @@ These two files have a few coupled patterns worth knowing before touching them:
 - **Keyboard expand/collapse is directional, not a toggle.** `Cmd+↓` only opens a closed bullet; `Cmd+↑` only closes an open one; every other cell is a silent no-op. Both always `preventDefault` (so the caret never jumps), one level only, focus stays on the parent. Why: [ADR 0007](./docs/adr/0007-keyboard-expand-collapse.md).
 - **Arrow Up/Down crosses bullets from the edge *visual line* and preserves the caret column.** The cross test (`atLineStart`/`atLineEnd` in `OutlineNode.tsx`) compares the caret's rect to the element's rect, not text offset — so a single-line bullet crosses at any offset while a wrapped bullet still moves line-by-line internally. Landing uses `caretPositionFromPoint` to hit the same x; don't reach for a text-measurement library (the DOM already has the layout). Why: [ADR 0008](./docs/adr/0008-column-preserving-caret-nav.md).
 - **Cmd+Shift+↑/↓ moves a bullet among siblings; at the edge it outdents one level.** Swap with the nearest *visible* sibling (hidden completed ones are skipped, never a dead press); at the first/last visible child it pops out — up-edge to before its parent, down-edge to after it (the existing `outdent`). Never dives into a sibling subtree, never adopts siblings, no-op past the zoom root. `moveUp`/`moveDown` in `mutations.ts`. Why: [ADR 0009](./docs/adr/0009-move-node-among-siblings.md).
+- **Dragging the bullet dot reorders *and* reparents in one drop** (mouse + touch). Pointer y picks the gap, pointer x picks depth (clamped to `[depth(below), depth(above)+1]`); it commits through the single `moveNode` mutation. The whole gesture lives in `use-drag-reorder.ts` and runs imperatively (DOM, not React state) on the hot path. The dot still zooms on a plain click — a movement threshold tells drag from click, and `consumeClick()` suppresses the zoom after a real drag. Why: [ADR 0010](./docs/adr/0010-drag-to-reorder-and-reparent.md).
 
 ## Zoom + view transitions
 
 Clicking a bullet zooms it to a temporary root (the README's "not built" note is stale). Two rules an agent must not break:
 
-- **The bullet dot zooms; collapse/expand is the hover chevron** in the left gutter (`OutlineNode`). Don't move zoom onto the collapse control.
+- **The bullet dot zooms (click) and drags (press + move); collapse/expand is the hover chevron** in the left gutter (`OutlineNode`). Don't move zoom onto the collapse control. The dot's click/drag split is owned by `use-drag-reorder.ts` (see ADR 0010).
 - **`rootId` is route-owned** (`routes/index.tsx` → `null`, `routes/$nodeId.tsx` → `nodeId`); don't add editor-local zoom state.
 
 How it's URL-driven and how the pivot morph animates: [ADR 0003](./docs/adr/0003-zoom-via-view-transitions.md). That ADR also covers why screenshots can't verify the transition.

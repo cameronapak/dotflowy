@@ -9,6 +9,7 @@ import {
   insertChildAtStart,
   insertSibling,
   moveDown,
+  moveNode,
   moveUp,
   outdent,
   removeNode,
@@ -20,6 +21,7 @@ import {
 import { seedIfEmpty } from "../data/seed";
 import { capture, drop, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { useDragReorder } from "./use-drag-reorder";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
 import { Button } from "./ui/button";
@@ -63,6 +65,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     if (el) refs.current.set(id, el);
     else refs.current.delete(id);
   }, []);
+
+  // The top-level <ul>, so the drag indicator knows how wide to draw.
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   // First-run seed. Runs when the collection has loaded and is empty.
   useEffect(() => {
@@ -227,6 +232,30 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     { preventDefault: true },
   );
 
+  // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
+  // live values through getters (the same ref pattern the commands use), and
+  // commits through the one fused `moveNode` mutation. See docs/adr/0010.
+  const drag = useDragReorder({
+    getIndex: () => focusIndex.current,
+    getRootId: () => rootIdRef.current,
+    getShowCompleted: () => showCompleted,
+    getRowEl: (id) =>
+      (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
+      null,
+    getListEl: () => listRef.current,
+    onMove: (id, newParentId, afterSiblingId) => {
+      capture(focusIndex.current, id);
+      const moved = moveNode(
+        focusIndex.current,
+        id,
+        newParentId,
+        afterSiblingId,
+      );
+      if (moved) pendingFocus.current = id;
+      else drop();
+    },
+  });
+
   const commands: NodeCommands = {
     onTextChange: (id, text) => {
       // Coalesce a run of keystrokes on one bullet into a single undo step,
@@ -324,6 +353,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
     // Zooming in: the clicked node is the pivot (list item -> title).
     onZoom: (id) => navigateZoom(id, id),
+
+    onBulletPointerDown: (id, e) => drag.startDrag(id, e),
+
+    // The dot's click fires right after pointerup. Suppress the zoom when that
+    // press was actually a drag; otherwise zoom as before.
+    onBulletClick: (id) => {
+      if (drag.consumeClick()) return;
+      navigateZoom(id, id);
+    },
   };
 
   // Top-level roots start the fade cascade fresh: a completed ancestor above
@@ -373,7 +411,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           />
         )}
 
-        <ul className="outline-list">
+        <ul className="outline-list" ref={listRef}>
           {topLevel.map((node) => (
             <OutlineNode
               key={node.id}

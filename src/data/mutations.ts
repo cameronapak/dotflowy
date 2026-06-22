@@ -332,6 +332,81 @@ export function moveDown(
 }
 
 /**
+ * Move `nodeId` to be a child of `newParentId`, positioned immediately after
+ * `afterSiblingId` (or as the first child when `afterSiblingId` is null). This
+ * is the fused move that drag-and-drop performs: it changes parent AND sibling
+ * order in one shot, unlike the keyboard moves which only ever do one. See
+ * docs/adr/0010.
+ *
+ * Returns true if a real move happened. No-ops (and returns false) when the
+ * target is the node's current position, or when the move would create a cycle
+ * (dropping a node into its own subtree).
+ *
+ * Like every mutation here it reads sibling order from the pre-mutation `index`
+ * and relinks the `prevSiblingId` chain: detach the node (its old next sibling
+ * inherits its old prev), then splice it in (the node that followed the new
+ * slot now follows the node).
+ */
+export function moveNode(
+  index: TreeIndex,
+  nodeId: string,
+  newParentId: string | null,
+  afterSiblingId: string | null,
+): boolean {
+  const node = index.byId.get(nodeId)
+  if (!node) return false
+  // Can't land after yourself, and can't become your own parent.
+  if (afterSiblingId === nodeId || newParentId === nodeId) return false
+
+  // Cycle guard: walk up from the target parent; bail if we reach the node.
+  // Dropping a branch inside itself would orphan it. See docs/adr/0010.
+  if (newParentId !== null) {
+    let cursor: Node | undefined = index.byId.get(newParentId)
+    let guard = index.byId.size + 1
+    while (cursor && guard-- > 0) {
+      if (cursor.id === nodeId) return false
+      cursor = cursor.parentId
+        ? index.byId.get(cursor.parentId)
+        : undefined
+    }
+  }
+
+  // Already exactly here? Nothing to do (same parent, same predecessor).
+  if (
+    newParentId === node.parentId &&
+    (afterSiblingId ?? null) === (node.prevSiblingId ?? null)
+  ) {
+    return false
+  }
+
+  // The node currently following us under the OLD parent inherits our old prev.
+  const oldSiblings = childrenOf(index, node.parentId)
+  const oi = oldSiblings.findIndex((n) => n.id === nodeId)
+  const oldNext =
+    oi !== -1 && oi + 1 < oldSiblings.length ? oldSiblings[oi + 1]! : null
+
+  // The node that will follow us under the NEW parent: the one after
+  // `afterSiblingId`, or the current head when we're becoming the first child.
+  const newSiblings = childrenOf(index, newParentId)
+  let newNext: Node | null = null
+  if (afterSiblingId === null) {
+    newNext = newSiblings[0] ?? null
+  } else {
+    const ni = newSiblings.findIndex((n) => n.id === afterSiblingId)
+    newNext = ni !== -1 && ni + 1 < newSiblings.length ? newSiblings[ni + 1]! : null
+  }
+
+  // Detach, then re-splice. Reads above are all from the pre-mutation index, so
+  // ordering of the writes below doesn't matter.
+  if (oldNext) update(oldNext.id, { prevSiblingId: node.prevSiblingId })
+  update(nodeId, { parentId: newParentId, prevSiblingId: afterSiblingId })
+  if (newNext && newNext.id !== nodeId) {
+    update(newNext.id, { prevSiblingId: nodeId })
+  }
+  return true
+}
+
+/**
  * Delete a node. Children are deleted recursively (Workflowy behavior:
  * deleting a parent deletes its subtree). Returns the id to focus
  * afterwards: the next sibling if any, else the previous sibling, else

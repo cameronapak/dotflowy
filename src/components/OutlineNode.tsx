@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, type PointerEvent } from "react";
 import { useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,6 +48,10 @@ export interface NodeCommands {
   onMoveFocus: (id: string, direction: "up" | "down", x?: number) => void;
   // Zoom the outline so this node becomes the temporary root.
   onZoom: (id: string) => void;
+  // Drag-to-reorder, hung off the bullet dot. pointerdown arms a drag; click
+  // zooms only when no drag happened. See docs/adr/0010.
+  onBulletPointerDown: (id: string, e: PointerEvent) => void;
+  onBulletClick: (id: string) => void;
 }
 
 export const OutlineNode = memo(function OutlineNode({
@@ -263,7 +267,8 @@ export const OutlineNode = memo(function OutlineNode({
           type="button"
           className="bullet touch-hitbox"
           aria-label="Zoom in"
-          onClick={() => commands.onZoom(node.id)}
+          onPointerDown={(e) => commands.onBulletPointerDown(node.id, e)}
+          onClick={() => commands.onBulletClick(node.id)}
           title="Zoom in"
         >
           <span
