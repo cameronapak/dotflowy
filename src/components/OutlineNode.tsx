@@ -357,7 +357,7 @@ export const OutlineNode = memo(function OutlineNode({
 const INLINE_CODE = /`[^`\n]+`/g;
 
 const CODE_CLASS =
-  "rounded-[4px] border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground";
+  "rounded-[4px] border border-border/60 bg-muted px-0.5 py-0.5 font-mono text-[0.85em] text-foreground";
 
 // Build the display HTML for a bullet's text. Escapes first (the text is user
 // input going into innerHTML), then wraps inline-code runs. We wrap the WHOLE
