@@ -75,6 +75,8 @@ These two files have a few coupled patterns worth knowing before touching them:
 
 - **contentEditable text sync is manual.** The `node-text` / title spans are `contentEditable`, not controlled React values. Stored text is written to the DOM (`el.textContent = node.text`) only when it differs, to avoid clobbering the caret mid-typing; `onInput` pushes changes to the store. Don't convert these to React-controlled text.
 - **The `refs` registry maps node id → contentEditable span.** It unifies focus and animation: list-item bullets register under their own id, and the zoomed **title registers under `rootId`**. So `refs.current.get(someId)` returns the right element whether that node is currently a title or a list item — focus movement, pending-focus-after-mutation, and the zoom morph all rely on this.
+- **Keyboard expand/collapse is directional, not a toggle.** `Cmd+↓` only opens a closed bullet; `Cmd+↑` only closes an open one; every other cell is a silent no-op. Both always `preventDefault` (so the caret never jumps), one level only, focus stays on the parent. Why: [ADR 0007](./docs/adr/0007-keyboard-expand-collapse.md).
+- **Arrow Up/Down crosses bullets from the edge *visual line* and preserves the caret column.** The cross test (`atLineStart`/`atLineEnd` in `OutlineNode.tsx`) compares the caret's rect to the element's rect, not text offset — so a single-line bullet crosses at any offset while a wrapped bullet still moves line-by-line internally. Landing uses `caretPositionFromPoint` to hit the same x; don't reach for a text-measurement library (the DOM already has the layout). Why: [ADR 0008](./docs/adr/0008-column-preserving-caret-nav.md).
 
 ## Zoom + view transitions
 

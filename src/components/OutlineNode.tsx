@@ -38,7 +38,10 @@ export interface NodeCommands {
   // Set whether a bullet is a task (checkbox shown/hidden).
   onSetTask: (id: string, isTask: boolean) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
-  onMoveFocus: (id: string, direction: "up" | "down") => void;
+  // `x` is the caret's viewport x at the moment of the keypress, so the
+  // landing node can drop the caret at the same column. Omitted when there's
+  // no caret to preserve (e.g. the zoom title), which lands at the start.
+  onMoveFocus: (id: string, direction: "up" | "down", x?: number) => void;
   // Zoom the outline so this node becomes the temporary root.
   onZoom: (id: string) => void;
 }
@@ -146,28 +149,52 @@ export const OutlineNode = memo(function OutlineNode({
         callback: () => commands.onDeleteNode(node.id),
       },
       {
-        // ArrowUp at the start of the line: move focus to the previous node.
+        // ArrowUp on the first visual line: move to the previous node,
+        // preserving the caret's column (its x). Within a wrapped bullet the
+        // browser default handles line-1 <- line-2 itself.
         hotkey: "ArrowUp",
         callback: (e) => {
           const el = textRef.current;
           if (!el || !atLineStart(el)) return;
           e.preventDefault();
           e.stopPropagation();
-          commands.onMoveFocus(node.id, "up");
+          commands.onMoveFocus(node.id, "up", caretLineRect()?.left);
         },
         options: { preventDefault: false, stopPropagation: false },
       },
       {
-        // ArrowDown at the end of the line: move focus to the next node.
+        // ArrowDown on the last visual line: move to the next node, preserving
+        // the caret's column (its x).
         hotkey: "ArrowDown",
         callback: (e) => {
           const el = textRef.current;
           if (!el || !atLineEnd(el)) return;
           e.preventDefault();
           e.stopPropagation();
-          commands.onMoveFocus(node.id, "down");
+          commands.onMoveFocus(node.id, "down", caretLineRect()?.left);
         },
         options: { preventDefault: false, stopPropagation: false },
+      },
+      {
+        // Cmd/Ctrl+Down: open (reveal the children of) a closed bullet that
+        // has children. Direction encodes intent -- Down only ever opens.
+        // Default options preventDefault, so the caret never jumps to the end
+        // of the line; the toggle itself is conditional, making this a silent
+        // no-op on an already-open or childless bullet. See ADR 0007.
+        hotkey: "Mod+ArrowDown",
+        callback: () => {
+          if (hasChildren && node.collapsed)
+            commands.onToggleCollapsed(node.id, false);
+        },
+      },
+      {
+        // Cmd/Ctrl+Up: close (collapse) an open bullet that has children.
+        // Mirror of Mod+ArrowDown -- Up only ever closes; otherwise a no-op.
+        hotkey: "Mod+ArrowUp",
+        callback: () => {
+          if (hasChildren && !node.collapsed)
+            commands.onToggleCollapsed(node.id, true);
+        },
       },
     ],
     { target: textRef, enabled: !slash.isOpen },
@@ -273,12 +300,35 @@ function isCaretAtStart(el: HTMLElement): boolean {
   return sel.getRangeAt(0).endOffset === 0;
 }
 
+// Caret-to-neighbor navigation is about VISUAL lines, not text offset: on a
+// single-line bullet the caret is on both the first and last line at once, so
+// Up/Down should always cross to the neighbor regardless of where in the text
+// it sits. Only a wrapped (multi-line) bullet should move the caret within
+// itself first. We detect this from the caret's rect vs the element's rect.
+function caretLineRect(): DOMRect | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  let rect = range.getBoundingClientRect();
+  // A collapsed caret at a text-node boundary can report an empty rect in some
+  // browsers; fall back to its first client rect.
+  if (rect.height === 0) {
+    const first = range.getClientRects()[0];
+    if (first) rect = first;
+  }
+  return rect.height === 0 ? null : rect;
+}
+
 function atLineStart(el: HTMLElement): boolean {
-  return isCaretAtStart(el);
+  const rect = caretLineRect();
+  // No measurable caret (e.g. empty bullet) -> treat as the first line so Up
+  // crosses to the neighbor.
+  if (!rect) return true;
+  return rect.top - el.getBoundingClientRect().top < rect.height / 2;
 }
 
 function atLineEnd(el: HTMLElement): boolean {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return false;
-  return sel.getRangeAt(0).endOffset === (el.textContent?.length ?? 0);
+  const rect = caretLineRect();
+  if (!rect) return true;
+  return el.getBoundingClientRect().bottom - rect.bottom < rect.height / 2;
 }
