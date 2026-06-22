@@ -237,7 +237,7 @@ export const OutlineNode = memo(function OutlineNode({
         </button>
         <button
           type="button"
-          className="bullet"
+          className="bullet touch-hitbox"
           aria-label="Zoom in"
           onClick={() => commands.onZoom(node.id)}
           title="Zoom in"
@@ -251,7 +251,7 @@ export const OutlineNode = memo(function OutlineNode({
         </button>
         {node.isTask && (
           <Checkbox
-            className="checkbox"
+            className="checkbox touch-hitbox"
             checked={node.completed}
             onCheckedChange={(checked) =>
               commands.onToggleCompleted(node.id, checked)
