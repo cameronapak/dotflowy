@@ -477,3 +477,11 @@ export function setIsTask(nodeId: string, isTask: boolean) {
 export function toggleCollapsed(nodeId: string, collapsed: boolean) {
   update(nodeId, { collapsed })
 }
+
+/**
+ * Pin or unpin a node as a bookmark. Stores the moment it was pinned (the
+ * bookmarks list sorts by it) or `null` to unpin. See docs/adr/0011.
+ */
+export function toggleBookmark(nodeId: string, bookmarked: boolean) {
+  update(nodeId, { bookmarkedAt: bookmarked ? now() : null })
+}

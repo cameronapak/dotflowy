@@ -94,6 +94,7 @@ export function makeNode(partial: Partial<Node> & Pick<Node, 'id'>): Node {
     isTask: false,
     completed: false,
     collapsed: false,
+    bookmarkedAt: null,
     createdAt: now(),
     updatedAt: now(),
     ...partial,

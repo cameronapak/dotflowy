@@ -89,6 +89,10 @@ Clicking a bullet zooms it to a temporary root (the README's "not built" note is
 
 How it's URL-driven and how the pivot morph animates: [ADR 0003](./docs/adr/0003-zoom-via-view-transitions.md). That ADR also covers why screenshots can't verify the transition.
 
+## Bookmarks
+
+A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on the node (not a side table — delete the node and the bookmark goes with it). The header **star** pins the current zoom root; the header **Bookmarks** popover lists them newest-first and each row is a plain `<Link to="/$nodeId">`. The whole feature lives in `src/components/bookmarks.tsx`, self-contained (reads `rootId` from the route, not from the editor). **There is deliberately no sidebar** — the unused `ui/sidebar.tsx` is the documented promotion path for when a second nav tenant appears. Adding a new persistent `Node` field needs a localStorage backfill in `collection.ts` (see `migrateAddBookmarkedAt`). Why: [ADR 0011](./docs/adr/0011-bookmarks-via-header-popover.md).
+
 ## Environment gotcha: adding a React-importing dependency
 
 If you `bun add` a package that imports React (e.g. `lucide-react`) while `bun run dev` is already running, the app may crash with **"Invalid hook call / multiple copies of React"**. This is a stale Vite dep-optimize cache, not a code bug. Fix: stop the server, `rm -rf node_modules/.vite`, restart. A fresh `bun run dev` and the production build are unaffected.

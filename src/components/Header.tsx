@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { BookmarksMenu, BookmarkStar } from "./bookmarks";
 import { ModeToggle } from "./mode-toggle";
 import { ShowCompletedToggle } from "./show-completed-toggle";
+import { Separator } from "./ui/separator";
 
 /**
  * App header row: breadcrumb trail on the left (passed as children, since it's
@@ -18,7 +20,13 @@ export function Header({ children }: { children?: ReactNode }) {
           720px outline content below. */}
       <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3">
         <div className="min-w-0 flex-1">{children}</div>
+        {/* Right cluster: focused-node actions, a divider, then global actions.
+            BookmarkStar renders itself + the divider only when zoomed, so on
+            home the cluster is just the global group. */}
         <div className="flex shrink-0 items-center gap-1">
+          <BookmarkStar />
+          <Separator orientation="vertical" />
+          <BookmarksMenu />
           <ShowCompletedToggle />
           <ModeToggle />
         </div>

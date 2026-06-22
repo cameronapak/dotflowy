@@ -33,6 +33,33 @@ function migrateAddIsTask() {
 migrateAddIsTask()
 
 /**
+ * One-time backfill for `bookmarkedAt` (added in ADR 0011). Nodes stored before
+ * the field existed lack the key, which the default-less schema would reject on
+ * load. Patch missing values to `null` (not bookmarked) before the collection
+ * reads. Mirrors migrateAddIsTask; runs at import, browser-only (SPA mode).
+ */
+function migrateAddBookmarkedAt() {
+  if (typeof localStorage === 'undefined') return
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return
+  try {
+    const store = JSON.parse(raw) as Record<string, { data?: Partial<Node> }>
+    let changed = false
+    for (const entry of Object.values(store)) {
+      if (entry?.data && entry.data.bookmarkedAt === undefined) {
+        entry.data.bookmarkedAt = null
+        changed = true
+      }
+    }
+    if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(store))
+  } catch {
+    // Corrupt payload: leave it for the collection to handle.
+  }
+}
+
+migrateAddBookmarkedAt()
+
+/**
  * Single source of truth for all outline nodes.
  *
  * Backed by localStorage via TanStack DB's LocalStorageCollection.
