@@ -44,7 +44,9 @@ interface OutlineNodeProps {
 
 export interface NodeCommands {
   onTextChange: (id: string, text: string) => void;
-  onEnter: (id: string, caretAtEnd: boolean) => void;
+  // `caretOffset` is the absolute character offset of the caret within the
+  // bullet's text, so the editor can split the line at the caret.
+  onEnter: (id: string, caretOffset: number) => void;
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
   // Move a bullet (and its subtree) up/down among siblings; at the edge it
@@ -187,21 +189,23 @@ function OutlineNodeBody({
         callback: () => commands.onToggleCompleted(node.id, !node.completed),
       },
       {
-        // Enter: create a new empty sibling after this node.
+        // Enter: split the bullet at the caret -- text left of the caret stays,
+        // text to its right moves into a new sibling below (caret at the end is
+        // just the empty-tail case of the same split).
         hotkey: "Enter",
         callback: () => {
           const el = textRef.current;
-          commands.onEnter(node.id, el ? isCaretAtEnd(el) : true);
+          commands.onEnter(node.id, el ? getCaretOffset(el) : node.text.length);
         },
       },
       {
-        // Shift+Enter: same as Enter -- create a sibling, never insert a
+        // Shift+Enter: same as Enter -- split into a sibling, never insert a
         // literal newline. Captured explicitly so the contentEditable's
         // default line break can't fire; bullets are single-line.
         hotkey: "Shift+Enter",
         callback: () => {
           const el = textRef.current;
-          commands.onEnter(node.id, el ? isCaretAtEnd(el) : true);
+          commands.onEnter(node.id, el ? getCaretOffset(el) : node.text.length);
         },
       },
       {
@@ -464,14 +468,8 @@ function OutlineNodeBody({
   );
 }
 
-// Caret at the very end / start of the bullet, measured by absolute offset so
-// the test holds whether the line is one text node or split around chips.
-function isCaretAtEnd(el: HTMLElement): boolean {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return true;
-  return getCaretOffset(el) === (el.textContent?.length ?? 0);
-}
-
+// Caret at the very start of the bullet, measured by absolute offset so the
+// test holds whether the line is one text node or split around chips.
 function isCaretAtStart(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return true;

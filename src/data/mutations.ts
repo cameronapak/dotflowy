@@ -30,6 +30,9 @@ function update(nodeId: string, patch: Partial<Node>) {
  * `isTask` lets the caller carry the node type forward so pressing Enter at
  * the end of a task creates another task (not a plain bullet).
  *
+ * `text` seeds the new node's text -- used by the Enter-mid-bullet split, where
+ * everything right of the caret moves into this new sibling.
+ *
  * Returns the new node's id so the editor can focus it.
  */
 export function insertSibling(
@@ -37,6 +40,7 @@ export function insertSibling(
   parentId: string | null,
   afterId: string | null,
   isTask = false,
+  text = '',
 ): string {
   const id = createId()
   const prevSiblingId = afterId
@@ -52,7 +56,7 @@ export function insertSibling(
   }
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text: '', isTask }),
+    makeNode({ id, parentId, prevSiblingId, text, isTask }),
   )
 
   // Repoint the follower at the new node.

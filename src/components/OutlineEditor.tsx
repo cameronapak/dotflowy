@@ -114,6 +114,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Track the most recently inserted/focused node id so we can focus it
   // after the next render. Storing in a ref + state-like cursor.
   const pendingFocus = useRef<string | null>(null);
+  // When an Enter-split moves text into the new bullet, the caret should land at
+  // the START of that moved text, not after it. Every other pending-focus wants
+  // the end (natural typing flow), which is the default.
+  const pendingFocusAtStart = useRef(false);
 
   // After every render, if a focus is pending and the target exists, focus it.
   useEffect(() => {
@@ -121,10 +125,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       const el = refs.current.get(pendingFocus.current);
       if (el) {
         el.focus();
-        // Place caret at end for natural typing flow.
-        placeCaretAtEnd(el);
+        if (pendingFocusAtStart.current) placeCaretAtStart(el);
+        else placeCaretAtEnd(el);
       }
       pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
     }
   });
 
@@ -405,20 +410,42 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       setText(id, text);
     },
 
-    onEnter: (id, caretAtEnd) => {
+    onEnter: (id, caretOffset) => {
       const node = focusIndex.current.byId.get(id);
       if (!node) return;
       capture(focusIndex.current, id);
+      const offset = Math.max(0, Math.min(caretOffset, node.text.length));
+      const before = node.text.slice(0, offset);
+      const after = node.text.slice(offset);
+      const caretAtEnd = after.length === 0;
       // Pressing Enter at the end of an open (expanded, has-children) bullet
       // adds a child at the top of its list rather than a sibling -- you're
-      // diving into the thing you just finished naming. Anywhere else (caret
-      // mid-text, or a collapsed/leaf node) keeps the plain new-sibling.
+      // diving into the thing you just finished naming. Anywhere else keeps the
+      // plain new-sibling.
       const isOpen =
         !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
-      const newId =
-        caretAtEnd && isOpen
-          ? insertChildAtStart(focusIndex.current, id, node.isTask)
-          : insertSibling(focusIndex.current, node.parentId, id, node.isTask);
+      if (caretAtEnd && isOpen) {
+        pendingFocus.current = insertChildAtStart(
+          focusIndex.current,
+          id,
+          node.isTask,
+        );
+        return;
+      }
+      // Split at the caret: text left of it stays on this node, text to its
+      // right seeds the new sibling. (Caret at the end is just `after === ""`.)
+      const newId = insertSibling(
+        focusIndex.current,
+        node.parentId,
+        id,
+        node.isTask,
+        after,
+      );
+      if (!caretAtEnd) {
+        setText(id, before);
+        // Caret sits before the moved text, where the split happened.
+        pendingFocusAtStart.current = true;
+      }
       pendingFocus.current = newId;
     },
 

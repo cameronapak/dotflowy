@@ -13,7 +13,7 @@ Very early. v1 scope only:
 - Collapse / expand subtrees (hover chevron in the gutter)
 - Zoom into a bullet as a temporary root (click the bullet dot)
 - Keyboard shortcuts:
-  - `Enter` — new sibling (at the end of an expanded bullet, adds a child at the top instead)
+  - `Enter` — split at the caret into a new sibling below (at the end of an expanded bullet, adds a child at the top instead)
   - `Tab` / `Shift+Tab` — indent / outdent
   - `Backspace` on an empty bullet — delete and focus the previous one
   - `Arrow Up` / `Arrow Down` at line edges — move between bullets
