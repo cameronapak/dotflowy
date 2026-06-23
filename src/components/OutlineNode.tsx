@@ -41,9 +41,11 @@ interface OutlineNodeProps {
   // renders faded even if it isn't itself completed. Visual-only inheritance;
   // never written to data. Resets to false at each zoom root. See docs/adr/0002.
   ancestorCompleted: boolean;
-  // Whether completed bullets are shown at all. When false, completed nodes and
-  // their whole subtrees are filtered out of the render.
-  showCompleted: boolean;
+  // The composed Seam-G visibility predicate (ADR 0018): a node is pruned from
+  // the render iff it returns true (hide-completed when show-completed is off).
+  // Replaces the old `showCompleted` boolean -- this node no longer knows the
+  // hide rule, it just applies the predicate. Stable across keystrokes.
+  isHidden: (node: Node) => boolean;
   // Active tag filter, or null when none. When set, this node renders only if
   // it's in `visibleIds`; it's a match (normal styling) when in `matchIds`,
   // otherwise dimmed ancestor context. Filtering is render-time, so `collapsed`
@@ -105,7 +107,7 @@ function OutlineNodeBody({
   registerRef,
   pivotId,
   ancestorCompleted,
-  showCompleted,
+  isHidden,
   filter,
 }: Omit<OutlineNodeProps, "nodeId"> & { node: Node }) {
   const textRef = useRef<HTMLSpanElement | null>(null);
@@ -130,7 +132,7 @@ function OutlineNodeBody({
   // identity until the child set/order changes, so typing in a child doesn't
   // re-render this parent; a completion toggle that flips visibility does. A
   // hidden completed node takes its whole subtree with it for free.
-  const childIds = useVisibleChildIds(node.id, showCompleted);
+  const childIds = useVisibleChildIds(node.id, isHidden);
   // While filtering, only children on a path to a match stay visible, and the
   // collapse state is ignored so matches inside a closed subtree are revealed.
   // Filtering never mutates `collapsed` -- clearing the filter restores the
@@ -505,7 +507,7 @@ function OutlineNodeBody({
                 registerRef={registerRef}
                 pivotId={pivotId}
                 ancestorCompleted={faded}
-                showCompleted={showCompleted}
+                isHidden={isHidden}
                 filter={filter}
               />
             ))}

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { buildTagFilter, parseQuery, serializeQuery } from "../data/tags";
+import { parseQuery, serializeQuery } from "../data/tags";
 import {
   indent,
   insertChildAtStart,
@@ -53,10 +53,12 @@ import { hasLink } from "../data/links";
 import { pasteIntoBullet } from "./paste";
 import {
   blocksCaret,
+  buildViewFilter,
+  composeHidden,
   dispatchClick,
   dispatchContextMenu,
 } from "../plugins/registry";
-import type { PluginContext } from "../plugins/types";
+import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
@@ -102,6 +104,23 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
   const activeTagsRef = useRef(activeTags);
   activeTagsRef.current = activeTags;
+
+  // Seam G (ADR 0018): the composed per-node visibility predicate. The core no
+  // longer hardcodes `completed` -- it hides whatever the plugin view transforms
+  // hide (hide-completed today). Memoized so it stays referentially stable
+  // across keystrokes, which keeps useVisibleChildIds' cache warm and every
+  // memoized OutlineNode from re-rendering on a sibling's keystroke (ADR 0014).
+  // Depends on the whole view context for forward-correctness, though today's
+  // only hide rule reads showCompleted.
+  const viewCtx = useMemo<ViewContext>(
+    () => ({ showCompleted, search: activeTags, rootId }),
+    [showCompleted, activeTags, rootId],
+  );
+  const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
+  // Live handle for the stable command closures + drag (mirrors the ref pattern
+  // the other live values use, so `commands` keeps its identity -- ADR 0014).
+  const isHiddenRef = useRef(isHidden);
+  isHiddenRef.current = isHidden;
 
   // Refs registry: id -> contentEditable span. Lets us move focus
   // between bullets after structural mutations. The zoomed title also
@@ -166,8 +185,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Live values read by the *stable* command closures and navigateZoom. The
   // commands object must keep its identity across renders (it's a prop on every
   // memoized OutlineNode); reading these through refs is what lets it. See ADR 0014.
-  const showCompletedRef = useRef(showCompleted);
-  showCompletedRef.current = showCompleted;
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
@@ -314,9 +331,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     if (!pivotId) return;
     let targetId = pivotId;
     if (pivotId === rootId) {
-      const firstChild = childrenOf(index, rootId).find(
-        (n) => showCompleted || !n.completed,
-      );
+      const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
       if (firstChild) targetId = firstChild.id;
     }
     const el = refs.current.get(targetId);
@@ -403,7 +418,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const drag = useDragReorder({
     getIndex: () => focusIndex.current,
     getRootId: () => rootIdRef.current,
-    getShowCompleted: () => showCompletedRef.current,
+    getIsHidden: () => isHiddenRef.current,
     getRowEl: (id) =>
       (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
       null,
@@ -430,7 +445,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Recreating this object each render would change a prop on every memoized
   // OutlineNode and re-render the whole tree on every keystroke -- the exact bug
   // ADR 0014 fixes. It stays stable because every live value it needs is read
-  // through a ref (focusIndex, rootIdRef, showCompletedRef) or is itself stable
+  // through a ref (focusIndex, rootIdRef, isHiddenRef) or is itself stable
   // (navigateZoom, startDrag, consumeClick, the module-level mutations).
   const commands = useMemo<NodeCommands>(
     () => ({
@@ -507,7 +522,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // Reorder/outdent remounts the contentEditable; re-focus on a real move.
       capture(focusIndex.current, id);
       const moved = moveUp(focusIndex.current, id, {
-        isVisible: (n) => showCompletedRef.current || !n.completed,
+        isVisible: (n) => !isHiddenRef.current(n),
         rootId: rootIdRef.current,
       });
       if (moved) {
@@ -519,7 +534,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onMoveDown: (id) => {
       capture(focusIndex.current, id);
       const moved = moveDown(focusIndex.current, id, {
-        isVisible: (n) => showCompletedRef.current || !n.completed,
+        isVisible: (n) => !isHiddenRef.current(n),
         rootId: rootIdRef.current,
       });
       if (moved) {
@@ -559,7 +574,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         rootIdRef.current,
         id,
         direction,
-        showCompletedRef.current,
+        isHiddenRef.current,
       );
       if (target) {
         const el = refs.current.get(target);
@@ -605,22 +620,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   );
 
   // The pruned visible-set for the active filter (matches + ancestor context),
-  // or null when no filter. Render-time only -- never mutates a node. ADR 0015.
+  // or null when no filter. Now a plugin-contributed Seam-G transform (the tags
+  // plugin's tag-filter), composed in registry.buildViewFilter -- the core no
+  // longer imports buildTagFilter directly. Render-time only, never mutates a
+  // node (ADR 0015). The composed isHidden is passed so it prunes hidden nodes.
   const filter = useMemo(
-    () =>
-      activeTags.length
-        ? buildTagFilter(index, rootId, activeTags, showCompleted)
-        : null,
-    [activeTags, index, rootId, showCompleted],
+    () => buildViewFilter(index, viewCtx, isHidden),
+    [index, viewCtx, isHidden],
   );
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
   // Top-level roots start the fade cascade fresh: a completed ancestor above
-  // the current view (when zoomed) contributes nothing. Hide completed roots
-  // when the toggle is off (ADR 0002), and -- while filtering -- keep only the
-  // ones on a path to a match.
+  // the current view (when zoomed) contributes nothing. Apply the composed
+  // visibility prune (hide-completed when the toggle is off), and -- while
+  // filtering -- keep only the ones on a path to a match.
   const topLevel = childrenOf(index, rootId)
-    .filter((n) => showCompleted || !n.completed)
+    .filter((n) => !isHidden(n))
     .filter((n) => !filter || filter.visibleIds.has(n.id));
   const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const trail = buildTrail(index, rootId);
@@ -694,7 +709,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   registerRef={registerRef}
                   pivotId={pivotId}
                   ancestorCompleted={false}
-                  showCompleted={showCompleted}
+                  isHidden={isHidden}
                   filter={filter}
                 />
               ))}
@@ -1063,9 +1078,9 @@ function findVisibleNeighbor(
   rootId: string | null,
   id: string,
   direction: "up" | "down",
-  showCompleted: boolean,
+  isHidden: (n: Node) => boolean,
 ): string | null {
-  const flat = flattenVisible(index, rootId, showCompleted);
+  const flat = flattenVisible(index, rootId, isHidden);
   const i = flat.findIndex((n) => n.id === id);
   if (i === -1) return null;
   const neighbor = direction === "up" ? flat[i - 1] : flat[i + 1];
@@ -1075,18 +1090,19 @@ function findVisibleNeighbor(
 function flattenVisible(
   index: TreeIndex,
   rootId: string | null,
-  showCompleted: boolean,
+  isHidden: (n: Node) => boolean,
 ): Array<{ id: string }> {
   const out: Array<{ id: string }> = [];
   // The zoomed title participates in up/down navigation.
   if (rootId) out.push({ id: rootId });
   const walk = (parentId: string | null) => {
     for (const child of childrenOf(index, parentId)) {
-      // Mirror the render's visibility: when showCompleted is off, completed
-      // nodes (and their subtrees) are absent from the DOM. Keeping them in
-      // this walk would make findVisibleNeighbor return an id with no mounted
-      // element, so onMoveFocus silently no-ops and focus gets stuck.
-      if (!showCompleted && child.completed) continue;
+      // Mirror the render's visibility (the composed Seam-G prune): a hidden
+      // node (e.g. completed while show-completed is off) and its subtree are
+      // absent from the DOM. Keeping them here would make findVisibleNeighbor
+      // return an id with no mounted element, so onMoveFocus silently no-ops
+      // and focus gets stuck.
+      if (isHidden(child)) continue;
       out.push({ id: child.id });
       if (!child.collapsed) walk(child.id);
     }

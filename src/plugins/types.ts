@@ -8,7 +8,7 @@
 // add commands, keymap, slots, transforms, menus, and side-collections.
 
 import type { ReactNode } from "react";
-import type { TreeIndex } from "../data/tree";
+import type { Node, TreeIndex } from "../data/tree";
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
 import type { NodeCommands } from "../components/OutlineNode";
@@ -142,6 +142,65 @@ export interface InteractionSpec {
   ) => void;
 }
 
+// --- Seam G: render-time view transforms ------------------------------------
+//
+// The render-time tree prune (hide-completed, the tag `?q=` filter). Two shapes,
+// matching the two that genuinely exist (D9): a *cheap per-node predicate*
+// applied during the children walk (hide-completed), and an *optional global
+// precompute* that needs whole-tree context to prune to a subtree + mark dimmed
+// ancestor context (the tag filter). The core composes both and stops
+// special-casing `completed`; completion-hiding and tag-filtering converge on
+// this one mechanism.
+
+/**
+ * The generic params bag a view transform reads. The core assembles it from app
+ * state and hands it over without branching on any field -- so the core no
+ * longer "knows" about completion or tags, it just carries data into the pipe.
+ */
+export interface ViewContext {
+  /** Whether completed bullets are shown (the todo plugin's hide transform). */
+  showCompleted: boolean;
+  /** The active tag filter (parsed `?q=`) -- the same array as the tag plugin's
+   *  filter transform reads. */
+  search: string[];
+  /** The current zoom root, or null at the top. */
+  rootId: string | null;
+}
+
+/**
+ * A precomputed visible-set for a global view transform (the tag filter today).
+ * `visibleIds`: nodes that render (matches + their ancestor context).
+ * `matchIds`: the subset rendered as real matches; the rest are dimmed context.
+ */
+export interface ViewFilter {
+  visibleIds: Set<string>;
+  matchIds: Set<string>;
+}
+
+export interface ViewTransform {
+  /** Stable id, for debugging. */
+  id: string;
+  /**
+   * A cheap, pure per-node prune applied during the `childrenOf` walk in
+   * `useVisibleChildIds` (a hidden node takes its whole subtree with it). The
+   * core ORs every transform's `hidesNode` into one predicate. Hot path -- keep
+   * it allocation-free. Omit if this transform has no per-node prune.
+   */
+  hidesNode?(node: Node, ctx: ViewContext): boolean;
+  /**
+   * A global precompute that needs whole-tree context (the tag filter walks to
+   * mark ancestors of matches). Built once per view, not per parent. Receives
+   * the already-composed `isHidden` predicate so it can skip pruned nodes
+   * WITHOUT re-deriving completion -- cross-transform coupling stays generic.
+   * Return null to contribute no filter. First non-null across plugins wins.
+   */
+  buildFilter?(
+    index: TreeIndex,
+    ctx: ViewContext,
+    isHidden: (node: Node) => boolean,
+  ): ViewFilter | null;
+}
+
 // --- Seam I: input transforms (paste) ---------------------------------------
 //
 // The core owns the paste mechanics (always preventDefault, read source +
@@ -177,6 +236,8 @@ export interface PluginDef {
   tokens?: TokenSpec[];
   /** Seam B: delegated interactions on chips/links in the contentEditable. */
   interactions?: InteractionSpec[];
+  /** Seam G: render-time view transforms (hide-completed, the tag filter). */
+  viewTransforms?: ViewTransform[];
   /** Seam I: input transforms (paste). */
   input?: InputSpec;
 }

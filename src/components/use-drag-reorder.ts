@@ -1,5 +1,5 @@
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { childrenOf, type TreeIndex } from "../data/tree";
+import { childrenOf, type Node, type TreeIndex } from "../data/tree";
 
 /**
  * Pointer-driven drag to reorder and reparent a bullet, for mouse and touch.
@@ -40,7 +40,9 @@ interface Row {
 interface DragDeps {
   getIndex: () => TreeIndex;
   getRootId: () => string | null;
-  getShowCompleted: () => boolean;
+  /** The composed Seam-G visibility prune (hide-completed today). Drag mirrors
+   *  the render: a hidden node is not a droppable row. See ADR 0018. */
+  getIsHidden: () => (node: Node) => boolean;
   /** The `.outline-row` element for a node id (via the editor's refs registry). */
   getRowEl: (id: string) => HTMLElement | null;
   /** The `ul.outline-list` element, for the indicator's right edge. */
@@ -98,10 +100,10 @@ export function useDragReorder(deps: DragDeps) {
   // Build the visible, ordered rows (matching what's rendered), with depth,
   // excluding the grabbed node and everything under it (can't drop into self).
   const buildRows = useCallback((grabbedId: string): Row[] => {
-    const { getIndex, getRootId, getShowCompleted, getRowEl } = depsRef.current;
+    const { getIndex, getRootId, getIsHidden, getRowEl } = depsRef.current;
     const index = getIndex();
     const rootId = getRootId();
-    const showCompleted = getShowCompleted();
+    const isHidden = getIsHidden();
 
     const skip = new Set<string>([grabbedId]);
     const stack = [grabbedId];
@@ -116,7 +118,7 @@ export function useDragReorder(deps: DragDeps) {
     const rows: Row[] = [];
     const walk = (parentId: string | null, depth: number) => {
       for (const child of childrenOf(index, parentId)) {
-        if (!showCompleted && child.completed) continue;
+        if (isHidden(child)) continue;
         if (!skip.has(child.id)) {
           rows.push({
             id: child.id,

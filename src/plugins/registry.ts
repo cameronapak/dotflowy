@@ -5,6 +5,7 @@
 // exist; this file is the only place that knows the plugin set for tokens.
 
 import { plugins } from "./index";
+import type { Node, TreeIndex } from "../data/tree";
 import type {
   El,
   InteractionEvent,
@@ -12,6 +13,9 @@ import type {
   PluginContext,
   TokenSpec,
   TokenView,
+  ViewContext,
+  ViewFilter,
+  ViewTransform,
 } from "./types";
 
 // --- Seam A: composed tokens -----------------------------------------------
@@ -115,6 +119,45 @@ export function dispatchContextMenu(
     }
   }
   return false;
+}
+
+// --- Seam G: composed view transforms --------------------------------------
+
+const viewTransforms: ViewTransform[] = plugins.flatMap(
+  (p) => p.viewTransforms ?? [],
+);
+
+const hidePredicates = viewTransforms
+  .map((t) => t.hidesNode)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+/**
+ * Compose every plugin's `hidesNode` into ONE per-node predicate (a node is
+ * hidden iff any transform hides it). The caller memoizes the returned function
+ * on `ctx`'s fields so it stays referentially stable across keystrokes -- that
+ * stability is what keeps `useVisibleChildIds`'s cache warm (ADR 0014). With no
+ * hide transforms, returns a constant "nothing hidden".
+ */
+export function composeHidden(ctx: ViewContext): (node: Node) => boolean {
+  if (hidePredicates.length === 0) return () => false;
+  return (node) => hidePredicates.some((p) => p(node, ctx));
+}
+
+/**
+ * Run the global `buildFilter` transforms; the first non-null result wins (only
+ * the tag filter contributes one today). Passes the already-composed `isHidden`
+ * so a filter prunes hidden nodes without re-deriving completion.
+ */
+export function buildViewFilter(
+  index: TreeIndex,
+  ctx: ViewContext,
+  isHidden: (node: Node) => boolean,
+): ViewFilter | null {
+  for (const t of viewTransforms) {
+    const f = t.buildFilter?.(index, ctx, isHidden);
+    if (f) return f;
+  }
+  return null;
 }
 
 // --- Seam I: paste input transforms ----------------------------------------

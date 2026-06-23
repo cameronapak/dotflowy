@@ -88,9 +88,10 @@ export function matchesAllTags(text: string, activeTags: string[]): boolean {
  *   including) `rootId` -- the dimmed context that shows *where* a match lives.
  *
  * A node renders while filtered iff it is in `visibleIds`; it renders as a match
- * (normal styling) iff it is in `matchIds`, otherwise as dimmed context. Hidden
- * completed subtrees are skipped when `showCompleted` is off, mirroring the
- * normal outline.
+ * (normal styling) iff it is in `matchIds`, otherwise as dimmed context. Nodes
+ * the view otherwise hides (e.g. completed subtrees when show-completed is off)
+ * are skipped via the `isHidden` predicate -- this layer no longer knows about
+ * `completed`; the composed Seam-G predicate carries that (ADR 0018 D9).
  */
 export interface TagFilter {
   visibleIds: Set<string>
@@ -101,16 +102,16 @@ export function buildTagFilter(
   index: TreeIndex,
   rootId: string | null,
   activeTags: string[],
-  showCompleted: boolean,
+  isHidden: (node: Node) => boolean,
 ): TagFilter {
   const visibleIds = new Set<string>()
   const matchIds = new Set<string>()
 
   const walk = (parentId: string | null) => {
     for (const child of childrenOf(index, parentId)) {
-      // A hidden completed node takes its whole subtree with it, same as the
-      // normal render (useVisibleChildIds).
-      if (!showCompleted && child.completed) continue
+      // A hidden node takes its whole subtree with it, same as the normal
+      // render (useVisibleChildIds applies the same composed predicate).
+      if (isHidden(child)) continue
       if (matchesAllTags(child.text, activeTags)) {
         matchIds.add(child.id)
         let cur: Node | undefined = child

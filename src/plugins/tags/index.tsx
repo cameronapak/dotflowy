@@ -6,7 +6,7 @@
 // (Seam H) are still core-wired pending their dedicated refactors (see ADR 0018
 // implementation notes).
 
-import { TAG_PATTERN } from "../../data/tags";
+import { buildTagFilter, TAG_PATTERN } from "../../data/tags";
 import {
   definePlugin,
   type El,
@@ -85,6 +85,22 @@ export default definePlugin({
       // no filter-on-click; only the color picker.
       selector: ".tag-pill[data-tag]",
       onContextMenu: openColorMenu,
+    },
+  ],
+
+  // Seam G: the `#tag` filter, expressed as a global view transform. Active only
+  // when the `?q=` carries tags; prunes the tree to matches + their ancestor
+  // context (the pure walk stays in src/data/tags.ts). It's handed the composed
+  // `isHidden` so completed subtrees drop out without this layer knowing about
+  // completion. The core wires the result in as the `filter` prop (still
+  // core-rendered for now -- see ADR 0018's "still core-wired" note).
+  viewTransforms: [
+    {
+      id: "tag-filter",
+      buildFilter: (index, ctx, isHidden) =>
+        ctx.search.length
+          ? buildTagFilter(index, ctx.rootId, ctx.search, isHidden)
+          : null,
     },
   ],
 });

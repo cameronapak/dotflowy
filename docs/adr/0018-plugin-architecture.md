@@ -2,11 +2,11 @@
 
 Status: **partially implemented** (2026-06-23) — shaped in a `/grill-with-docs` session; design
 decisions **D1–D10** are settled and ratified (D9 + D10 included). The plugin **host** (D1/D5/D6/D8)
-and Seams **A** (inline tokens), **B** (delegated interaction), and **I** (paste) are **built and
-dogfooded**: `code`/`links`/`tags` are plugins in `src/plugins/`, with **links a complete plugin**
-(A+B+I). Remaining: Seams **C/D/F/G/H** and the **todos** plugin (incl. the D9 completion-ownership
-move) — they need the hot-path view-transform/store refactor and a menu engine. See *Implementation
-status* below.
+and Seams **A** (inline tokens), **B** (delegated interaction), **G** (view transforms), and **I**
+(paste) are **built and dogfooded**: `code`/`links`/`tags`/`todos` are plugins in `src/plugins/`,
+with **links a complete plugin** (A+B+I). Remaining: Seams **C/D/F/H** and the rest of the **todos**
+plugin (its interaction surface + the D9 completion-ownership move) — they need a menu engine. See
+*Implementation status* below.
 
 Relates to:
 
@@ -253,20 +253,29 @@ transforms instead of hardcoding `completed`.
   three URL/anchor cases are the links plugin's `input.onPaste`.
 - **Overlay host** — `ctx.openOverlay(node | null)`, a thin portal mount in `OutlineEditor`; the tag
   color picker (moved to `src/plugins/tags/tag-color-menu.tsx`, Seam E side-collection) uses it.
+- **Seam G (view transforms)** — `PluginDef.viewTransforms`, composed in `registry.ts`
+  (`composeHidden` ORs each transform's per-node `hidesNode` predicate; `buildViewFilter` runs the
+  global `buildFilter` precomputes, first non-null wins). The core no longer special-cases
+  `completed`: `useVisibleChildIds(parentId, isHidden)` takes the composed predicate, and every other
+  visibility read (the top-level prune, `flattenVisible`, drag rows, `moveUp/moveDown`'s `isVisible`,
+  post-zoom focus) goes through the same `isHidden`. **todos** contributes the hide-completed
+  predicate; **tags** contributes the `?q=` filter (`buildTagFilter`, now handed `isHidden` so it
+  prunes hidden nodes without knowing about completion). The filter result is still core-*rendered*
+  as the `filter` prop (its dimming/override of `collapsed` is wired in `OutlineNode`); only its
+  *computation* is now plugin-owned.
 
-So **links is a complete plugin** (its only seams are A+B+I), and **tags** is A+B+E.
+So **links is a complete plugin** (A+B+I), **tags** is A+B+E+G, and **todos** is a partial plugin
+(G only — its interaction surface is next).
 
 **Remaining:**
 
 - **Seam H** (`#`/`/` autocomplete) — generalize `tag-menu.tsx`/`slash-menu.tsx` into a core menu
   engine + plugin `menus` specs. Tags' `#` menu and the `/` palette are still core-wired.
-- **Seam G** (render-time view-transforms) — the invasive one. The tag `?q=` filter is still
-  computed in `OutlineEditor` and threaded as the `filter` prop; hide-completed is still hardcoded in
-  `useVisibleChildIds`. D9 wants both expressed as plugin-contributed transforms — a hot-path
-  (ADR 0014) store refactor that deserves its own careful pass.
-- **Seams C/D/F + the todos plugin** — slash commands, the `Mod+Enter`/`Mod+D` keymap, the checkbox
-  row slot, the `[]` autoformat, and (D9) moving completion's ownership out of core. Blocked on Seam G
-  (hide-completed) landing first, since todos reuses it.
+- **Seams C/D/F + the rest of the todos plugin** — slash commands, the `Mod+Enter`/`Mod+D` keymap,
+  the checkbox row slot, the `[]` autoformat, and (D9) moving completion's ownership out of core.
+  Seam G (hide-completed) has landed, so todos can now build on it. Fade-inheritance
+  (`faded`/`ancestorCompleted`) still reads `node.completed` in `OutlineNode` — it stays core until a
+  row-decoration seam exists.
 
 ## Why
 
