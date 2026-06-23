@@ -358,3 +358,26 @@ export function watchCaretReveal(
   document.addEventListener("selectionchange", handler);
   return () => document.removeEventListener("selectionchange", handler);
 }
+
+// Reveal the link under the caret on the NEXT animation frame, not synchronously.
+// On a mouse click, focus fires before the browser finalizes the click caret; a
+// synchronous reveal would expand the folded link under the pointer first, so a
+// click at the visual END of the line then lands geometrically in the MIDDLE of
+// the now-long raw markdown. Deferring lets the click settle against the folded
+// layout (caret at the true end); we then re-read the source offset, reveal, and
+// restore the caret. No-op if focus left before the frame. The selectionchange
+// watcher already covers a click; this is the belt for a focus that emits no
+// selectionchange (e.g. a programmatic el.focus()). See ADR 0017.
+export function revealLinkAtCaret(
+  el: HTMLElement,
+  text: string,
+  onRevealed?: () => void,
+): void {
+  requestAnimationFrame(() => {
+    if (document.activeElement !== el) return;
+    const caret = getCaretOffset(el);
+    decorate(el, text, caret, false);
+    onRevealed?.();
+    setCaretOffset(el, caret);
+  });
+}

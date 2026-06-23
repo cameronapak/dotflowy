@@ -45,6 +45,7 @@ import {
   decorate,
   getCaretOffset,
   readSource,
+  revealLinkAtCaret,
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
@@ -835,11 +836,12 @@ function ZoomedTitle({
             el,
             () => composingRef.current,
           );
+          // Deferred to the next frame so a CLICK at the title's end settles on
+          // the folded layout before the link expands; see revealLinkAtCaret.
           if (!hasLink(node.text)) return;
-          const caret = getCaretOffset(el);
-          decorate(el, node.text, caret, false);
-          syncedRef.current = node.text;
-          setCaretOffset(el, caret);
+          revealLinkAtCaret(el, node.text, () => {
+            syncedRef.current = node.text;
+          });
         }}
         onBlur={(e) => {
           const el = e.currentTarget;

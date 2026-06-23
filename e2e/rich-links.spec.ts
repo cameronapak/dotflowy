@@ -156,6 +156,69 @@ test.describe("Per-link reveal", () => {
   });
 });
 
+test.describe("Click caret near a folded link", () => {
+  // Read the markdown SOURCE back from the DOM (mirrors readSource in
+  // inline-code.ts): a folded <a> contributes its data-src, everything else its
+  // textContent. After typing past a link the link re-folds, so its textContent
+  // (the label) is no longer the source -- only data-src is.
+  const readSource = (page: Page, id: string) =>
+    text(page, id).evaluate((el: HTMLElement) => {
+      let out = "";
+      const visit = (n: Node) => {
+        if (n.nodeType === 3) {
+          out += n.textContent ?? "";
+          return;
+        }
+        const e = n as HTMLElement;
+        if (e.hasAttribute?.("data-link") && e.hasAttribute("data-src")) {
+          out += e.getAttribute("data-src") ?? "";
+          return;
+        }
+        n.childNodes.forEach(visit);
+      };
+      el.childNodes.forEach(visit);
+      return out;
+    });
+
+  // The folded label is far shorter than the raw source. When focus revealed the
+  // link SYNCHRONOUSLY, the line expanded under the pointer mid-click and the
+  // browser then placed the caret geometrically at the click point -- now in the
+  // middle of the long URL. The fix defers the reveal to the next frame so the
+  // click's caret settles against the FOLDED layout first. (A synthetic
+  // Playwright click can't reproduce the browser's post-reveal re-placement, so
+  // we assert the fix's guarantee directly: focus must not expand the link
+  // synchronously.)
+  const LONG = "Go [docs](https://example.com/a/very/long/path/that/keeps/going)";
+
+  test("focusing does not synchronously expand a folded link", async ({
+    page,
+  }) => {
+    await load(page, [{ id: "n", parentId: null, prevSiblingId: null, text: LONG }]);
+    await expect(text(page, "n").locator("a[data-link]")).toHaveCount(1);
+
+    // Put the caret on the trailing link (end) while still blurred, then focus,
+    // and check IN THE SAME TICK whether the folded <a> survived. The old
+    // synchronous reveal would have already swapped it for raw spans.
+    const stillFolded = await text(page, "n").evaluate((el: HTMLElement) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false); // caret at the very end, on the link
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      el.focus(); // the editor's onFocus runs synchronously here
+      return el.querySelectorAll("a[data-link]").length === 1;
+    });
+    expect(stillFolded).toBe(true);
+
+    // It still reveals on the next frame, caret preserved at the end: a sentinel
+    // typed now lands AFTER the link, leaving the token intact.
+    await expect(text(page, "n").locator(".link-reveal")).toBeVisible();
+    await page.keyboard.type("!");
+    expect(await readSource(page, "n")).toBe(LONG + "!");
+  });
+});
+
 test.describe("Creating links by paste", () => {
   test("pasting a bare URL into an empty bullet auto-links it", async ({
     page,

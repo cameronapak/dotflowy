@@ -15,6 +15,7 @@ import {
   decorate,
   getCaretOffset,
   readSource,
+  revealLinkAtCaret,
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
@@ -451,14 +452,15 @@ function OutlineNodeBody({
               el,
               () => composingRef.current,
             );
-            // Reveal the link under the caret right now (the watcher only fires
-            // on subsequent moves). A link-free bullet is a no-op -- nothing
-            // folds -- so the native click caret stands untouched.
+            // Reveal the link under the caret (the watcher only fires on
+            // subsequent moves). A link-free bullet is a no-op -- nothing folds
+            // -- so the native click caret stands untouched. Deferred to the
+            // next frame so a CLICK at the line's end settles on the folded
+            // layout before the link expands; see revealLinkAtCaret.
             if (!hasLink(node.text)) return;
-            const caret = getCaretOffset(el);
-            decorate(el, node.text, caret, false);
-            syncedRef.current = node.text;
-            setCaretOffset(el, caret);
+            revealLinkAtCaret(el, node.text, () => {
+              syncedRef.current = node.text;
+            });
           }}
           onBlur={(e) => {
             slash.close();
