@@ -705,6 +705,73 @@ body.dragging-active * {
   filter: brightness(1.12);
 }
 
+/* Rich links (ADR 0017, per-link reveal). A link FOLDS to a clean <a> with a
+   trailing external-link icon when the caret isn't on it; it REVEALS to raw
+   `[label](url)` -- decorated, not plain -- when the caret is within/adjacent.
+   At most one link reveals at a time (the one under the caret). */
+.node-link,
+.link-url {
+  color: oklch(0.5 0.18 255);
+}
+
+.node-link {
+  text-decoration-color: oklch(0.5 0.18 255 / 0.5);
+}
+
+.dark .node-link,
+.dark .link-url {
+  color: oklch(0.78 0.13 245);
+}
+
+.dark .node-link {
+  text-decoration-color: oklch(0.78 0.13 245 / 0.5);
+}
+
+.node-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Revealed-link decoration: faint `[]()` punctuation (most-dimmed), normal
+   label, link-color url -- mimicking Obsidian Live Preview. The label/url carry
+   no underline (raw editing mode); only the folded <a> underlines. */
+.md-punct {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.link-label {
+  color: var(--foreground);
+}
+
+/* The external-link affordance: a small icon after a folded link and after a
+   revealed link's source, painted with the current text color via an SVG mask
+   (lucide `external-link`). Not part of textContent, so caret math is unaffected. */
+.node-link[data-link]::after,
+.link-reveal[data-link-reveal]::after {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-left: 0.12em;
+  vertical-align: -0.02em;
+  background-color: currentColor;
+  opacity: 0.75;
+  -webkit-mask: var(--external-link-icon) no-repeat center / contain;
+  mask: var(--external-link-icon) no-repeat center / contain;
+}
+
+.link-reveal[data-link-reveal]::after {
+  color: oklch(0.5 0.18 255);
+}
+
+.dark .link-reveal[data-link-reveal]::after {
+  color: oklch(0.78 0.13 245);
+}
+
+:root {
+  --external-link-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/></svg>');
+}
+
 /* The active-tag filter bar above the outline. */
 .tag-filter-bar {
   display: flex;

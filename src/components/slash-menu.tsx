@@ -14,6 +14,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { Node } from "../data/schema";
 import type { NodeCommands } from "./OutlineNode";
+import {
+  decorate,
+  getCaretOffset,
+  readSource,
+  setCaretOffset,
+} from "./inline-code";
 
 /**
  * A single entry in the `/` command menu. `available` lets a command hide
@@ -141,13 +147,15 @@ export function useSlashMenu({
         setState(null);
         return;
       }
-      // Strip the "/query" the user typed, then run the command.
-      const text = el.textContent ?? "";
+      // Strip the "/query" the user typed, then run the command. Work in
+      // SOURCE space (readSource, not textContent) so a folded link elsewhere
+      // on the line keeps its url instead of flattening to its label.
+      const text = readSource(el);
       const end = state.slashIndex + 1 + state.query.length;
       const newText = text.slice(0, state.slashIndex) + text.slice(end);
-      el.textContent = newText;
-      placeCaretAtOffset(el, state.slashIndex);
       onTextChange(newText);
+      decorate(el, newText, state.slashIndex, false);
+      setCaretOffset(el, state.slashIndex);
       setState(null);
       item.run(node.id, commands);
     },
@@ -284,7 +292,7 @@ function detectSlash(
 ): { query: string; slashIndex: number } | null {
   const caret = caretOffset(el);
   if (caret === null) return null;
-  const before = (el.textContent ?? "").slice(0, caret);
+  const before = readSource(el).slice(0, caret);
   const slashIndex = before.lastIndexOf("/");
   if (slashIndex === -1) return null;
   const prev = before[slashIndex - 1];
@@ -294,16 +302,14 @@ function detectSlash(
   return { query, slashIndex };
 }
 
-/** Number of characters before the collapsed caret within `el`, or null. */
+/** SOURCE-character offset before the collapsed caret within `el`, or null when
+ *  there's no collapsed selection inside it. Source-aware (folded links count
+ *  their full markdown), so detect/select below slice readSource consistently. */
 export function caretOffset(el: HTMLElement): number | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
-  const range = sel.getRangeAt(0);
-  if (!el.contains(range.endContainer)) return null;
-  const pre = range.cloneRange();
-  pre.selectNodeContents(el);
-  pre.setEnd(range.endContainer, range.endOffset);
-  return pre.toString().length;
+  if (!el.contains(sel.getRangeAt(0).endContainer)) return null;
+  return getCaretOffset(el);
 }
 
 /** Viewport coords of the caret, falling back to the element's box. */
@@ -319,19 +325,4 @@ export function caretPosition(el: HTMLElement): { x: number; y: number } {
   }
   const box = el.getBoundingClientRect();
   return { x: box.left, y: box.bottom };
-}
-
-export function placeCaretAtOffset(el: HTMLElement, offset: number) {
-  const range = document.createRange();
-  const textNode = el.firstChild;
-  if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-    const max = textNode.textContent?.length ?? 0;
-    range.setStart(textNode, Math.min(offset, max));
-  } else {
-    range.selectNodeContents(el);
-  }
-  range.collapse(true);
-  const sel = window.getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
 }

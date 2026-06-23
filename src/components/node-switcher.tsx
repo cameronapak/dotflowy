@@ -4,6 +4,7 @@ import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
+import { stripLinks } from "../data/links";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import {
@@ -35,7 +36,15 @@ export function openNodeSwitcher() {
   opener?.();
 }
 
-const FUSE_OPTIONS: IFuseOptions<Node> = {
+// We search a link-stripped projection of each node (a `[label](url)` flattens
+// to `label`), so URL noise stays out of the corpus and match indices line up
+// with the clean text the result row displays. See ADR 0017.
+interface Searchable {
+  node: Node;
+  text: string;
+}
+
+const FUSE_OPTIONS: IFuseOptions<Searchable> = {
   keys: ["text"],
   includeMatches: true,
   // CRITICAL: without this Fuse penalizes matches late in the string, so
@@ -125,7 +134,9 @@ function SwitcherDialog({
   // open the outline isn't being edited, so `nodes` is stable.
   const fuse = useMemo(() => {
     if (!open) return null;
-    const searchable = nodes.filter((n) => n.text.trim() !== "");
+    const searchable: Searchable[] = nodes
+      .filter((n) => n.text.trim() !== "")
+      .map((n) => ({ node: n, text: stripLinks(n.text) }));
     return new Fuse(searchable, FUSE_OPTIONS);
   }, [open, nodes]);
 
@@ -193,9 +204,9 @@ function SwitcherDialog({
             <CommandGroup heading="Results">
               {results.map(({ item, matches }) => (
                 <ResultRow
-                  key={item.id}
+                  key={item.node.id}
                   index={index}
-                  node={item}
+                  node={item.node}
                   matches={matches}
                   onSelect={go}
                 />
@@ -239,12 +250,13 @@ function ResultRow({
 }) {
   // Ancestors, top-down, excluding the node itself -- the disambiguating
   // breadcrumb ("Work › Q3 › Notes"). Displayed, never searched (ADR 0012).
+  // Links flatten to their label so a crumb never shows raw `[..](..)`.
   const crumbs = buildTrail(index, node.id)
     .slice(0, -1)
-    .map((n) => n.text.trim() || "Untitled")
+    .map((n) => stripLinks(n.text).trim() || "Untitled")
     .join(" › ");
 
-  const title = node.text.trim() || "Untitled";
+  const title = stripLinks(node.text).trim() || "Untitled";
 
   return (
     <CommandItem value={node.id} onSelect={() => onSelect(node.id)}>

@@ -6,12 +6,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
-import {
-  caretOffset,
-  caretPosition,
-  placeCaretAtOffset,
-  wrap,
-} from "./slash-menu";
+import { caretOffset, caretPosition, wrap } from "./slash-menu";
+import { decorate, readSource, setCaretOffset } from "./inline-code";
 
 /**
  * Tag autocomplete for a single bullet's contentEditable span. Mirrors
@@ -91,14 +87,15 @@ export function useTagMenu({
         return;
       }
       // Replace the "#query" the user typed with the full tag + a trailing
-      // space (so it's "finished"). The store round-trip re-decorates it into a
-      // chip, preserving the caret.
-      const text = el.textContent ?? "";
+      // space (so it's "finished"), in SOURCE space so a folded link on the
+      // line keeps its url. Re-decorate into a chip, then place the caret.
+      const text = readSource(el);
       const end = state.hashIndex + 1 + state.query.length;
       const newText = text.slice(0, state.hashIndex) + tag + " " + text.slice(end);
-      el.textContent = newText;
-      placeCaretAtOffset(el, state.hashIndex + tag.length + 1);
+      const caret = state.hashIndex + tag.length + 1;
       onTextChange(newText);
+      decorate(el, newText, caret, false);
+      setCaretOffset(el, caret);
       setState(null);
     },
     [getEl, state, items, onTextChange],
@@ -210,7 +207,7 @@ function detectTag(
 ): { query: string; hashIndex: number } | null {
   const caret = caretOffset(el);
   if (caret === null) return null;
-  const before = (el.textContent ?? "").slice(0, caret);
+  const before = readSource(el).slice(0, caret);
   const hashIndex = before.lastIndexOf("#");
   if (hashIndex === -1) return null;
   const prev = before[hashIndex - 1];

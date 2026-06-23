@@ -11,7 +11,15 @@ import {
 } from "../data/tree-store";
 import { useSlashMenu } from "./slash-menu";
 import { useTagMenu } from "./tag-menu";
-import { decorate, getCaretOffset } from "./inline-code";
+import {
+  decorate,
+  getCaretOffset,
+  readSource,
+  setCaretOffset,
+  watchCaretReveal,
+} from "./inline-code";
+import { hasLink } from "../data/links";
+import { pasteIntoBullet } from "./paste-links";
 
 interface OutlineNodeProps {
   // The node id. The node itself and its visible children are read reactively
@@ -114,6 +122,9 @@ function OutlineNodeBody({
   // mid-composition aborts the IME session, so we suspend decoration until it
   // ends, then decorate once with the committed text.
   const composingRef = useRef(false);
+  // Cleanup for the per-link reveal watcher, live only while this bullet is
+  // focused (added in onFocus, called in onBlur). See ADR 0017.
+  const caretWatchRef = useRef<(() => void) | null>(null);
   // Visible child ids, read reactively from the store. The array keeps its
   // identity until the child set/order changes, so typing in a child doesn't
   // re-render this parent; a completion toggle that flips visibility does. A
@@ -162,9 +173,14 @@ function OutlineNodeBody({
     const el = textRef.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === node.text) return;
-    // Preserve the caret only when this bullet is focused (e.g. undo while
-    // editing); otherwise there's nothing to preserve.
-    decorate(el, node.text, document.activeElement === el);
+    // A focused bullet reveals the link under its caret (per-link); a blurred
+    // one folds every link. The focus/blur handlers own the swap when only
+    // focus changes; this effect handles store-driven text changes (mount,
+    // undo, programmatic setText). Preserve the caret only when focused (e.g.
+    // undo while editing). See ADR 0017.
+    const focused = document.activeElement === el;
+    const revealOffset = focused ? getCaretOffset(el) : null;
+    decorate(el, node.text, revealOffset, focused);
     syncedRef.current = node.text;
   });
 
@@ -378,7 +394,9 @@ function OutlineNodeBody({
           data-completed={node.completed}
           onInput={(e) => {
             const el = e.currentTarget;
-            const text = el.textContent ?? "";
+            // readSource (not textContent) is the markdown source: a focused
+            // bullet may still hold folded links, whose label != source.
+            const text = readSource(el);
             // Markdown-style task autoformat: typing "[]" or "[ ]" at the very
             // start of a plain bullet turns it into a task and strips the
             // marker. Mirrors the Backspace-on-the-checkbox demotion below.
@@ -388,27 +406,21 @@ function OutlineNodeBody({
                 const stripped = text.slice(marker[0].length);
                 commands.onSetTask(node.id, true);
                 commands.onTextChange(node.id, stripped);
-                decorate(el, stripped, false);
-                syncedRef.current = stripped;
                 // Caret to the start -- the marker we stripped sat there.
-                const sel = window.getSelection();
-                if (sel) {
-                  const range = document.createRange();
-                  range.selectNodeContents(el);
-                  range.collapse(true);
-                  sel.removeAllRanges();
-                  sel.addRange(range);
-                }
+                decorate(el, stripped, 0, false);
+                syncedRef.current = stripped;
+                setCaretOffset(el, 0);
                 return;
               }
             }
             commands.onTextChange(node.id, text);
             slash.handleInput();
             tagMenu.handleInput();
-            // Re-decorate live, preserving the caret. Suspended during IME
-            // composition; compositionend handles that case.
+            // Re-decorate live, revealing the link under the caret. Preserves
+            // the caret. Suspended during IME composition; compositionend
+            // handles that case.
             if (!composingRef.current) {
-              decorate(el, text, true);
+              decorate(el, text, getCaretOffset(el), true);
               syncedRef.current = text;
             }
           }}
@@ -418,14 +430,48 @@ function OutlineNodeBody({
           onCompositionEnd={(e) => {
             composingRef.current = false;
             const el = e.currentTarget;
-            const text = el.textContent ?? "";
+            const text = readSource(el);
             commands.onTextChange(node.id, text);
-            decorate(el, text, true);
+            decorate(el, text, getCaretOffset(el), true);
             syncedRef.current = text;
           }}
-          onBlur={() => {
+          onPaste={(e) => {
+            const el = e.currentTarget;
+            const next = pasteIntoBullet(e, el, (t) =>
+              commands.onTextChange(node.id, t),
+            );
+            if (next !== null) syncedRef.current = next;
+          }}
+          onFocus={(e) => {
+            // Per-link reveal: watch the caret so exactly the link it's on shows
+            // raw markdown (ADR 0017). The watcher lives only while focused.
+            const el = e.currentTarget;
+            caretWatchRef.current?.();
+            caretWatchRef.current = watchCaretReveal(
+              el,
+              () => composingRef.current,
+            );
+            // Reveal the link under the caret right now (the watcher only fires
+            // on subsequent moves). A link-free bullet is a no-op -- nothing
+            // folds -- so the native click caret stands untouched.
+            if (!hasLink(node.text)) return;
+            const caret = getCaretOffset(el);
+            decorate(el, node.text, caret, false);
+            syncedRef.current = node.text;
+            setCaretOffset(el, caret);
+          }}
+          onBlur={(e) => {
             slash.close();
             tagMenu.close();
+            caretWatchRef.current?.();
+            caretWatchRef.current = null;
+            // Fold: re-render every link in this bullet as a clean <a>.
+            const el = e.currentTarget;
+            const text = readSource(el);
+            if (hasLink(text)) {
+              decorate(el, text, null, false);
+              syncedRef.current = text;
+            }
           }}
           // The "/" and "#" menus own Arrow/Enter/Tab/Esc while open; the
           // outline shortcuts above defer via `enabled`. The tag menu gets first

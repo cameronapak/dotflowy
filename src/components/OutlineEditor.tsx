@@ -41,7 +41,15 @@ import {
 import { seedIfEmpty } from "../data/seed";
 import { capture, drop, redo, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
-import { decorate } from "./inline-code";
+import {
+  decorate,
+  getCaretOffset,
+  readSource,
+  setCaretOffset,
+  watchCaretReveal,
+} from "./inline-code";
+import { hasLink } from "../data/links";
+import { pasteIntoBullet } from "./paste-links";
 import { useDragReorder } from "./use-drag-reorder";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
@@ -197,12 +205,25 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // click to the filter instead. On touch a transient caret may flash before
   // the navigation, which re-prunes the view -- accepted for v1 (ADR 0015).
   const onContentMouseDown = (e: ReactMouseEvent) => {
-    if ((e.target as HTMLElement).closest?.(".tag[data-tag]")) e.preventDefault();
+    const target = e.target as HTMLElement;
+    // Block the editing caret for both interactive chips: tag chips filter,
+    // folded links open. A revealed link is plain text (no <a>), so editing
+    // it is untouched. See ADR 0015 (tags) and ADR 0017 (links).
+    if (target.closest?.(".tag[data-tag]") || target.closest?.("a[data-link]"))
+      e.preventDefault();
   };
   const onContentClick = (e: ReactMouseEvent) => {
-    const el = (e.target as HTMLElement).closest?.(
-      ".tag[data-tag]",
-    ) as HTMLElement | null;
+    const target = e.target as HTMLElement;
+    // A folded link opens in a new tab. Editing a link is done from its edges
+    // (click beside it -> the bullet reveals raw), same as tag/code chips.
+    const link = target.closest?.("a[data-link]") as HTMLAnchorElement | null;
+    if (link) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(link.href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const el = target.closest?.(".tag[data-tag]") as HTMLElement | null;
     const name = el?.dataset.tag;
     if (!name) return;
     e.preventDefault();
@@ -740,12 +761,15 @@ function ZoomedTitle({
   // title renders as a mono chip too. See inline-code.ts and OutlineNode.
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
+  const caretWatchRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === node.text) return;
-    decorate(el, node.text, document.activeElement === el);
+    const focused = document.activeElement === el;
+    const revealOffset = focused ? getCaretOffset(el) : null;
+    decorate(el, node.text, revealOffset, focused);
     syncedRef.current = node.text;
   });
 
@@ -776,12 +800,12 @@ function ZoomedTitle({
         data-completed={node.completed}
         onInput={(e) => {
           const el = e.currentTarget;
-          const text = el.textContent ?? "";
+          const text = readSource(el);
           onTextChange(text);
-          // Re-decorate live, preserving the caret. Suspended during IME
-          // composition; compositionend handles that case.
+          // Re-decorate live, revealing the link under the caret. Suspended
+          // during IME composition; compositionend handles that case.
           if (!composingRef.current) {
-            decorate(el, text, true);
+            decorate(el, text, getCaretOffset(el), true);
             syncedRef.current = text;
           }
         }}
@@ -791,10 +815,41 @@ function ZoomedTitle({
         onCompositionEnd={(e) => {
           composingRef.current = false;
           const el = e.currentTarget;
-          const text = el.textContent ?? "";
+          const text = readSource(el);
           onTextChange(text);
-          decorate(el, text, true);
+          decorate(el, text, getCaretOffset(el), true);
           syncedRef.current = text;
+        }}
+        onPaste={(e) => {
+          const el = e.currentTarget;
+          const next = pasteIntoBullet(e, el, onTextChange);
+          if (next !== null) syncedRef.current = next;
+        }}
+        onFocus={(e) => {
+          // Per-link reveal in the title (ADR 0017): watch the caret, and
+          // reveal the link it's currently on. Link-free is a no-op so the
+          // native caret stands.
+          const el = e.currentTarget;
+          caretWatchRef.current?.();
+          caretWatchRef.current = watchCaretReveal(
+            el,
+            () => composingRef.current,
+          );
+          if (!hasLink(node.text)) return;
+          const caret = getCaretOffset(el);
+          decorate(el, node.text, caret, false);
+          syncedRef.current = node.text;
+          setCaretOffset(el, caret);
+        }}
+        onBlur={(e) => {
+          const el = e.currentTarget;
+          caretWatchRef.current?.();
+          caretWatchRef.current = null;
+          const text = readSource(el);
+          if (hasLink(text)) {
+            decorate(el, text, null, false);
+            syncedRef.current = text;
+          }
         }}
       />
     </h2>
