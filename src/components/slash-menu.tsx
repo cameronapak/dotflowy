@@ -255,7 +255,7 @@ function SlashMenu({
   );
 }
 
-function wrap(index: number, length: number): number {
+export function wrap(index: number, length: number): number {
   if (length === 0) return 0;
   return (index + length) % length;
 }
@@ -281,7 +281,7 @@ function detectSlash(
 }
 
 /** Number of characters before the collapsed caret within `el`, or null. */
-function caretOffset(el: HTMLElement): number | null {
+export function caretOffset(el: HTMLElement): number | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
   const range = sel.getRangeAt(0);
@@ -293,7 +293,7 @@ function caretOffset(el: HTMLElement): number | null {
 }
 
 /** Viewport coords of the caret, falling back to the element's box. */
-function caretPosition(el: HTMLElement): { x: number; y: number } {
+export function caretPosition(el: HTMLElement): { x: number; y: number } {
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0).cloneRange();
@@ -307,7 +307,7 @@ function caretPosition(el: HTMLElement): { x: number; y: number } {
   return { x: box.left, y: box.bottom };
 }
 
-function placeCaretAtOffset(el: HTMLElement, offset: number) {
+export function placeCaretAtOffset(el: HTMLElement, offset: number) {
   const range = document.createRange();
   const textNode = el.firstChild;
   if (textNode && textNode.nodeType === Node.TEXT_NODE) {

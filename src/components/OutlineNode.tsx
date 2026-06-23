@@ -3,8 +3,14 @@ import { useHotkeys } from "@tanstack/react-hotkeys";
 import { ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
-import { useNode, useVisibleChildIds } from "../data/tree-store";
+import { collectAllTags, type TagFilter } from "../data/tags";
+import {
+  getTreeIndex,
+  useNode,
+  useVisibleChildIds,
+} from "../data/tree-store";
 import { useSlashMenu } from "./slash-menu";
+import { useTagMenu } from "./tag-menu";
 import { decorate, getCaretOffset } from "./inline-code";
 
 interface OutlineNodeProps {
@@ -29,6 +35,11 @@ interface OutlineNodeProps {
   // Whether completed bullets are shown at all. When false, completed nodes and
   // their whole subtrees are filtered out of the render.
   showCompleted: boolean;
+  // Active tag filter, or null when none. When set, this node renders only if
+  // it's in `visibleIds`; it's a match (normal styling) when in `matchIds`,
+  // otherwise dimmed ancestor context. Filtering is render-time, so `collapsed`
+  // is ignored -- matches inside collapsed subtrees are revealed. See ADR 0015.
+  filter: TagFilter | null;
 }
 
 export interface NodeCommands {
@@ -82,6 +93,7 @@ function OutlineNodeBody({
   pivotId,
   ancestorCompleted,
   showCompleted,
+  filter,
 }: Omit<OutlineNodeProps, "nodeId"> & { node: Node }) {
   const textRef = useRef<HTMLSpanElement | null>(null);
   // Inline `code` is decorated LIVE -- the contentEditable always holds
@@ -103,7 +115,17 @@ function OutlineNodeBody({
   // re-render this parent; a completion toggle that flips visibility does. A
   // hidden completed node takes its whole subtree with it for free.
   const childIds = useVisibleChildIds(node.id, showCompleted);
-  const hasChildren = childIds.length > 0;
+  // While filtering, only children on a path to a match stay visible, and the
+  // collapse state is ignored so matches inside a closed subtree are revealed.
+  // Filtering never mutates `collapsed` -- clearing the filter restores the
+  // exact prior view (ADR 0015).
+  const visibleChildIds = filter
+    ? childIds.filter((id) => filter.visibleIds.has(id))
+    : childIds;
+  const hasChildren = visibleChildIds.length > 0;
+  const effectiveCollapsed = filter ? false : node.collapsed;
+  // Dimmed when this node is only here as ancestor context for a match below it.
+  const isContext = filter ? !filter.matchIds.has(node.id) : false;
   const isPivot = node.id === pivotId;
   // Faded when this bullet is done, or sits anywhere under one that is.
   const faded = node.completed || ancestorCompleted;
@@ -114,6 +136,15 @@ function OutlineNodeBody({
     node,
     commands,
     getEl: () => textRef.current,
+    onTextChange: (text) => commands.onTextChange(node.id, text),
+  });
+
+  // Tag autocomplete: typing "#" offers existing tags (read live from the
+  // shared index) to complete. Coexists with the slash menu -- different
+  // trigger chars, at most one open at a time. See ADR 0015.
+  const tagMenu = useTagMenu({
+    getEl: () => textRef.current,
+    getAllTags: () => collectAllTags(getTreeIndex()),
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
 
@@ -162,6 +193,16 @@ function OutlineNodeBody({
         },
       },
       {
+        // Shift+Enter: same as Enter -- create a sibling, never insert a
+        // literal newline. Captured explicitly so the contentEditable's
+        // default line break can't fire; bullets are single-line.
+        hotkey: "Shift+Enter",
+        callback: () => {
+          const el = textRef.current;
+          commands.onEnter(node.id, el ? isCaretAtEnd(el) : true);
+        },
+      },
+      {
         // Tab: indent under the previous sibling.
         hotkey: "Tab",
         callback: () => commands.onIndent(node.id),
@@ -186,11 +227,22 @@ function OutlineNodeBody({
         callback: () => commands.onMoveDown(node.id),
       },
       {
-        // Backspace on an empty bullet: delete it and focus the previous node.
+        // Backspace at the start of a bullet. On a task, the first backspace
+        // "deletes the checkbox" -- demoting it to a plain bullet while keeping
+        // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
+        // deletes the node and focuses the previous one. Otherwise it falls
+        // through to normal character deletion.
         hotkey: "Backspace",
         callback: (e) => {
           const el = textRef.current;
-          if (!el || el.textContent !== "" || !isCaretAtStart(el)) return;
+          if (!el || !isCaretAtStart(el)) return;
+          if (node.isTask) {
+            e.preventDefault();
+            e.stopPropagation();
+            commands.onSetTask(node.id, false);
+            return;
+          }
+          if (el.textContent !== "") return;
           e.preventDefault();
           e.stopPropagation();
           commands.onDeleteNode(node.id);
@@ -262,18 +314,18 @@ function OutlineNodeBody({
         callback: () => commands.onZoom(node.id),
       },
     ],
-    { target: textRef, enabled: !slash.isOpen },
+    { target: textRef, enabled: !slash.isOpen && !tagMenu.isOpen },
   );
 
   return (
     <li className="outline-node" data-node-id={node.id}>
-      <div className="outline-row" data-faded={faded}>
+      <div className="outline-row" data-faded={faded} data-context={isContext}>
         <button
           type="button"
           className="collapse-toggle touch-hitbox"
-          aria-label={node.collapsed ? "Expand" : "Collapse"}
+          aria-label={effectiveCollapsed ? "Expand" : "Collapse"}
           data-has-children={hasChildren}
-          data-collapsed={node.collapsed}
+          data-collapsed={effectiveCollapsed}
           // Childless rows render no glyph but keep the gutter clickable-free.
           onClick={() =>
             hasChildren && commands.onToggleCollapsed(node.id, !node.collapsed)
@@ -294,7 +346,7 @@ function OutlineNodeBody({
             className="bullet-dot"
             data-completed={node.completed}
             data-has-children={hasChildren}
-            data-collapsed={node.collapsed}
+            data-collapsed={effectiveCollapsed}
           />
         </button>
         {node.isTask && (
@@ -320,8 +372,32 @@ function OutlineNodeBody({
           onInput={(e) => {
             const el = e.currentTarget;
             const text = el.textContent ?? "";
+            // Markdown-style task autoformat: typing "[]" or "[ ]" at the very
+            // start of a plain bullet turns it into a task and strips the
+            // marker. Mirrors the Backspace-on-the-checkbox demotion below.
+            if (!node.isTask && !composingRef.current) {
+              const marker = text.match(/^\[ ?\] ?/);
+              if (marker) {
+                const stripped = text.slice(marker[0].length);
+                commands.onSetTask(node.id, true);
+                commands.onTextChange(node.id, stripped);
+                decorate(el, stripped, false);
+                syncedRef.current = stripped;
+                // Caret to the start -- the marker we stripped sat there.
+                const sel = window.getSelection();
+                if (sel) {
+                  const range = document.createRange();
+                  range.selectNodeContents(el);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                }
+                return;
+              }
+            }
             commands.onTextChange(node.id, text);
             slash.handleInput();
+            tagMenu.handleInput();
             // Re-decorate live, preserving the caret. Suspended during IME
             // composition; compositionend handles that case.
             if (!composingRef.current) {
@@ -340,12 +416,20 @@ function OutlineNodeBody({
             decorate(el, text, true);
             syncedRef.current = text;
           }}
-          onBlur={slash.close}
-          // The "/" menu owns its own Arrow/Enter/Tab/Esc navigation while
-          // open; the outline shortcuts above defer to it via `enabled`.
-          onKeyDown={slash.handleKeyDown}
+          onBlur={() => {
+            slash.close();
+            tagMenu.close();
+          }}
+          // The "/" and "#" menus own Arrow/Enter/Tab/Esc while open; the
+          // outline shortcuts above defer via `enabled`. The tag menu gets first
+          // crack (it's the more specific trigger), then the slash menu.
+          onKeyDown={(e) => {
+            if (tagMenu.handleKeyDown(e)) return;
+            slash.handleKeyDown(e);
+          }}
         />
         {slash.menu}
+        {tagMenu.menu}
       </div>
 
       {hasChildren && (
@@ -353,9 +437,12 @@ function OutlineNodeBody({
         // (the grid-rows trick needs both states present). The wrapper clamps
         // height to 0 when collapsed; the editor's visible-order walk skips
         // collapsed subtrees independently, so hidden rows are inert.
-        <div className="outline-children-wrap" data-collapsed={node.collapsed}>
-          <ul className="outline-children" aria-hidden={node.collapsed}>
-            {childIds.map((childId) => (
+        <div
+          className="outline-children-wrap"
+          data-collapsed={effectiveCollapsed}
+        >
+          <ul className="outline-children" aria-hidden={effectiveCollapsed}>
+            {visibleChildIds.map((childId) => (
               <OutlineNode
                 key={childId}
                 nodeId={childId}
@@ -364,6 +451,7 @@ function OutlineNodeBody({
                 pivotId={pivotId}
                 ancestorCompleted={faded}
                 showCompleted={showCompleted}
+                filter={filter}
               />
             ))}
           </ul>

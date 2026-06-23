@@ -27,12 +27,16 @@ function update(nodeId: string, patch: Partial<Node>) {
  * Insert a fresh empty node as the next sibling of `afterId`, or as the
  * new last child of `parentId` when afterId is null.
  *
+ * `isTask` lets the caller carry the node type forward so pressing Enter at
+ * the end of a task creates another task (not a plain bullet).
+ *
  * Returns the new node's id so the editor can focus it.
  */
 export function insertSibling(
   index: TreeIndex,
   parentId: string | null,
   afterId: string | null,
+  isTask = false,
 ): string {
   const id = createId()
   const prevSiblingId = afterId
@@ -48,7 +52,7 @@ export function insertSibling(
   }
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text: '' }),
+    makeNode({ id, parentId, prevSiblingId, text: '', isTask }),
   )
 
   // Repoint the follower at the new node.
@@ -69,12 +73,13 @@ export function insertSibling(
 export function insertChildAtStart(
   index: TreeIndex,
   parentId: string | null,
+  isTask = false,
 ): string {
   const id = createId()
   const head = childrenOf(index, parentId)[0] ?? null
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId: null, text: '' }),
+    makeNode({ id, parentId, prevSiblingId: null, text: '', isTask }),
   )
 
   // The old head now follows the new node.

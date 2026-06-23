@@ -1,6 +1,12 @@
 # ADR 0012: Node quick-switcher (Cmd+K fuzzy jump-to)
 
-Status: accepted (2026-06-22), implemented
+Status: accepted (2026-06-22), implemented. **Narrowed (not superseded) by
+[ADR 0015](./0015-tag-filtering.md):** the switcher is now one of **two** search surfaces. It keeps
+its job — the **fuzzy, ranked, navigate-away jump-to** ("go somewhere else") — unchanged. The new
+**tag filter** owns the other job — exact-match, structural prune, sticky/URL-driven ("narrow what's
+in front of me"). v1 of the filter adds no free-text input, so the magnifier and Cmd+K here are
+untouched; if free text later lands in the filter (ADR 0015's deferred work), the magnifier morphs
+into the filter input and Cmd+K stays the fuzzy jump-to described below.
 
 ## Glossary
 
