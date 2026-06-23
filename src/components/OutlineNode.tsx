@@ -162,6 +162,16 @@ function OutlineNodeBody({
         },
       },
       {
+        // Shift+Enter: same as Enter -- create a sibling, never insert a
+        // literal newline. Captured explicitly so the contentEditable's
+        // default line break can't fire; bullets are single-line.
+        hotkey: "Shift+Enter",
+        callback: () => {
+          const el = textRef.current;
+          commands.onEnter(node.id, el ? isCaretAtEnd(el) : true);
+        },
+      },
+      {
         // Tab: indent under the previous sibling.
         hotkey: "Tab",
         callback: () => commands.onIndent(node.id),
