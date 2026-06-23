@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import {
   Link,
@@ -12,7 +13,11 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router";
-import { useHotkey, useHotkeys } from "@tanstack/react-hotkeys";
+import {
+  useHotkey,
+  useHotkeys,
+  type UseHotkeyDefinition,
+} from "@tanstack/react-hotkeys";
 import {
   ChevronRight,
   HomeIcon,
@@ -22,8 +27,7 @@ import {
 } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { buildTagFilter, parseQuery, serializeQuery } from "../data/tags";
-import { TagColorMenu } from "./tag-color-menu";
+import { parseQuery, serializeQuery } from "../data/tags";
 import {
   indent,
   insertChildAtStart,
@@ -50,7 +54,16 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
-import { pasteIntoBullet } from "./paste-links";
+import { pasteIntoBullet } from "./paste";
+import {
+  blocksCaret,
+  buildViewFilter,
+  composeHidden,
+  dispatchClick,
+  dispatchContextMenu,
+  keymapSpecs,
+} from "../plugins/registry";
+import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
@@ -96,6 +109,23 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
   const activeTagsRef = useRef(activeTags);
   activeTagsRef.current = activeTags;
+
+  // Seam G (ADR 0018): the composed per-node visibility predicate. The core no
+  // longer hardcodes `completed` -- it hides whatever the plugin view transforms
+  // hide (hide-completed today). Memoized so it stays referentially stable
+  // across keystrokes, which keeps useVisibleChildIds' cache warm and every
+  // memoized OutlineNode from re-rendering on a sibling's keystroke (ADR 0014).
+  // Depends on the whole view context for forward-correctness, though today's
+  // only hide rule reads showCompleted.
+  const viewCtx = useMemo<ViewContext>(
+    () => ({ showCompleted, search: activeTags, rootId }),
+    [showCompleted, activeTags, rootId],
+  );
+  const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
+  // Live handle for the stable command closures + drag (mirrors the ref pattern
+  // the other live values use, so `commands` keeps its identity -- ADR 0014).
+  const isHiddenRef = useRef(isHidden);
+  isHiddenRef.current = isHidden;
 
   // Refs registry: id -> contentEditable span. Lets us move focus
   // between bullets after structural mutations. The zoomed title also
@@ -160,8 +190,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Live values read by the *stable* command closures and navigateZoom. The
   // commands object must keep its identity across renders (it's a prop on every
   // memoized OutlineNode); reading these through refs is what lets it. See ADR 0014.
-  const showCompletedRef = useRef(showCompleted);
-  showCompletedRef.current = showCompleted;
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
@@ -215,47 +243,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // plain mousedown would place an editing caret; we block that and route the
   // click to the filter instead. On touch a transient caret may flash before
   // the navigation, which re-prunes the view -- accepted for v1 (ADR 0015).
+  // Delegated interaction (Seam B). Chips/links live inside the contentEditable,
+  // so the core runs ONE set of handlers on the content container and dispatches
+  // to whichever plugin owns the surface under the pointer (registry.ts). The
+  // core has zero feature knowledge -- a folded link opens, a tag chip filters,
+  // a right-click picks a color, all decided by the plugins. See ADR 0018.
   const onContentMouseDown = (e: ReactMouseEvent) => {
-    const target = e.target as HTMLElement;
-    // Block the editing caret for both interactive chips: tag chips filter,
-    // folded links open. A revealed link is plain text (no <a>), so editing
-    // it is untouched. See ADR 0015 (tags) and ADR 0017 (links).
-    if (target.closest?.(".tag[data-tag]") || target.closest?.("a[data-link]"))
-      e.preventDefault();
+    if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
   };
   const onContentClick = (e: ReactMouseEvent) => {
-    const target = e.target as HTMLElement;
-    // A folded link opens in a new tab. Editing a link is done from its edges
-    // (click beside it -> the bullet reveals raw), same as tag/code chips.
-    const link = target.closest?.("a[data-link]") as HTMLAnchorElement | null;
-    if (link) {
-      e.preventDefault();
-      e.stopPropagation();
-      window.open(link.href, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const el = target.closest?.(".tag[data-tag]") as HTMLElement | null;
-    const name = el?.dataset.tag;
-    if (!name) return;
-    e.preventDefault();
-    e.stopPropagation();
-    addTag("#" + name);
+    dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
-  // Right-click any tag surface (chip or filter pill) to pick its color. Plain
-  // click is taken by filtering, so color-pick rides the context menu. ADR 0016.
-  const [colorMenu, setColorMenu] = useState<{
-    tag: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  // A plugin-owned overlay (the tag color picker), mounted once below. The core
+  // is a thin host -- the overlay portals + dismisses itself (ADR 0018 Seam B).
+  const [overlayNode, setOverlayNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
-    const el = (e.target as HTMLElement).closest?.(
-      "[data-tag]",
-    ) as HTMLElement | null;
-    const name = el?.dataset.tag;
-    if (!name) return;
-    e.preventDefault();
-    setColorMenu({ tag: name, x: e.clientX, y: e.clientY });
+    dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
   };
 
   // The id of the currently focused bullet, found by reverse-looking-up the
@@ -269,20 +272,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     return null;
   };
 
-  // Cmd/Ctrl+D toggles completion on the focused bullet. Every bullet is
-  // completable (not just tasks), so this works regardless of isTask.
-  useHotkey(
-    "Mod+D",
-    () => {
-      const focusedId = findFocusedId();
-      if (!focusedId) return;
-      const node = focusIndex.current.byId.get(focusedId);
-      if (!node) return;
-      capture(focusIndex.current, focusedId);
-      toggleCompleted(focusedId, !node.completed);
-    },
-    { preventDefault: true },
-  );
+  // Mod+D used to live here as an editor-level global; it's now the todos
+  // plugin's per-bullet keymap (Seam D), registered on every bullet AND the
+  // zoomed title -- so it covers the same focus targets without the core
+  // knowing about completion. See the todos plugin + ZoomedTitle below.
 
   // Cmd/Ctrl+Z: undo the last action. preventDefault stops the browser's
   // native contentEditable undo so we own history. Restores focus to the
@@ -333,9 +326,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     if (!pivotId) return;
     let targetId = pivotId;
     if (pivotId === rootId) {
-      const firstChild = childrenOf(index, rootId).find(
-        (n) => showCompleted || !n.completed,
-      );
+      const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
       if (firstChild) targetId = firstChild.id;
     }
     const el = refs.current.get(targetId);
@@ -422,7 +413,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const drag = useDragReorder({
     getIndex: () => focusIndex.current,
     getRootId: () => rootIdRef.current,
-    getShowCompleted: () => showCompletedRef.current,
+    getIsHidden: () => isHiddenRef.current,
     getRowEl: (id) =>
       (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
       null,
@@ -449,7 +440,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Recreating this object each render would change a prop on every memoized
   // OutlineNode and re-render the whole tree on every keystroke -- the exact bug
   // ADR 0014 fixes. It stays stable because every live value it needs is read
-  // through a ref (focusIndex, rootIdRef, showCompletedRef) or is itself stable
+  // through a ref (focusIndex, rootIdRef, isHiddenRef) or is itself stable
   // (navigateZoom, startDrag, consumeClick, the module-level mutations).
   const commands = useMemo<NodeCommands>(
     () => ({
@@ -526,7 +517,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // Reorder/outdent remounts the contentEditable; re-focus on a real move.
       capture(focusIndex.current, id);
       const moved = moveUp(focusIndex.current, id, {
-        isVisible: (n) => showCompletedRef.current || !n.completed,
+        isVisible: (n) => !isHiddenRef.current(n),
         rootId: rootIdRef.current,
       });
       if (moved) {
@@ -538,7 +529,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onMoveDown: (id) => {
       capture(focusIndex.current, id);
       const moved = moveDown(focusIndex.current, id, {
-        isVisible: (n) => showCompletedRef.current || !n.completed,
+        isVisible: (n) => !isHiddenRef.current(n),
         rootId: rootIdRef.current,
       });
       if (moved) {
@@ -578,7 +569,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         rootIdRef.current,
         id,
         direction,
-        showCompletedRef.current,
+        isHiddenRef.current,
       );
       if (target) {
         const el = refs.current.get(target);
@@ -605,23 +596,41 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [navigateZoom, startDrag, consumeClick],
   );
 
+  // PluginContext factory (ADR 0018 D8): the promoted command set + tree reads +
+  // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
+  // live values (focusIndex/activeTagsRef) at call time; stable identity.
+  const pluginCtx = useCallback(
+    (): PluginContext => ({
+      tree: focusIndex.current,
+      mutations: commands,
+      nav: {
+        zoom: (id) => navigateZoom(id, id),
+        filterTag: (tag) => addTag(tag),
+        setSearch: (tags) => setQ(tags),
+      },
+      search: activeTagsRef.current,
+      openOverlay: (node) => setOverlayNode(node),
+    }),
+    [commands, navigateZoom, addTag, setQ],
+  );
+
   // The pruned visible-set for the active filter (matches + ancestor context),
-  // or null when no filter. Render-time only -- never mutates a node. ADR 0015.
+  // or null when no filter. Now a plugin-contributed Seam-G transform (the tags
+  // plugin's tag-filter), composed in registry.buildViewFilter -- the core no
+  // longer imports buildTagFilter directly. Render-time only, never mutates a
+  // node (ADR 0015). The composed isHidden is passed so it prunes hidden nodes.
   const filter = useMemo(
-    () =>
-      activeTags.length
-        ? buildTagFilter(index, rootId, activeTags, showCompleted)
-        : null,
-    [activeTags, index, rootId, showCompleted],
+    () => buildViewFilter(index, viewCtx, isHidden),
+    [index, viewCtx, isHidden],
   );
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
   // Top-level roots start the fade cascade fresh: a completed ancestor above
-  // the current view (when zoomed) contributes nothing. Hide completed roots
-  // when the toggle is off (ADR 0002), and -- while filtering -- keep only the
-  // ones on a path to a match.
+  // the current view (when zoomed) contributes nothing. Apply the composed
+  // visibility prune (hide-completed when the toggle is off), and -- while
+  // filtering -- keep only the ones on a path to a match.
   const topLevel = childrenOf(index, rootId)
-    .filter((n) => showCompleted || !n.completed)
+    .filter((n) => !isHidden(n))
     .filter((n) => !filter || filter.visibleIds.has(n.id));
   const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const trail = buildTrail(index, rootId);
@@ -654,14 +663,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onClick={onContentClick}
         onContextMenu={onContentContextMenu}
       >
-        {colorMenu && (
-          <TagColorMenu
-            tag={colorMenu.tag}
-            x={colorMenu.x}
-            y={colorMenu.y}
-            onClose={() => setColorMenu(null)}
-          />
-        )}
+        {overlayNode}
         {activeTags.length > 0 && (
           <TagFilterBar
             tags={activeTags}
@@ -675,6 +677,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             node={zoomedNode}
             isPivot={pivotId === zoomedNode.id}
             registerRef={registerRef}
+            getCtx={pluginCtx}
             onTextChange={(text) => setText(zoomedNode.id, text)}
             onAddChild={() => {
               const newId = insertChildAtStart(
@@ -699,10 +702,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   key={node.id}
                   nodeId={node.id}
                   commands={commands}
+                  pluginCtx={pluginCtx}
                   registerRef={registerRef}
                   pivotId={pivotId}
                   ancestorCompleted={false}
-                  showCompleted={showCompleted}
+                  isHidden={isHidden}
                   filter={filter}
                 />
               ))}
@@ -782,6 +786,7 @@ function ZoomedTitle({
   node,
   isPivot,
   registerRef,
+  getCtx,
   onTextChange,
   onAddChild,
   onArrowDown,
@@ -789,6 +794,9 @@ function ZoomedTitle({
   node: Node;
   isPivot: boolean;
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
+  /** The PluginContext factory, so the plugin keymap (Seam D) works on the
+   *  title too -- Mod+Enter / Mod+D toggle completion of the zoomed node. */
+  getCtx: () => PluginContext;
   onTextChange: (text: string) => void;
   onAddChild: () => void;
   onArrowDown: () => void;
@@ -812,10 +820,16 @@ function ZoomedTitle({
 
   // Title shortcuts, scoped to the title's own contentEditable. Enter adds a
   // first child under the title; ArrowDown drops focus into the first child.
+  // The plugin keymap (Seam D) is registered here too, so todos' Mod+Enter /
+  // Mod+D toggle completion of the zoomed node just like on a list-item bullet.
   useHotkeys(
     [
       { hotkey: "Enter", callback: () => onAddChild() },
       { hotkey: "ArrowDown", callback: () => onArrowDown() },
+      ...keymapSpecs.map((k) => ({
+        hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
+        callback: () => k.run(node.id, getCtx()),
+      })),
     ],
     { target: ref },
   );
@@ -1071,9 +1085,9 @@ function findVisibleNeighbor(
   rootId: string | null,
   id: string,
   direction: "up" | "down",
-  showCompleted: boolean,
+  isHidden: (n: Node) => boolean,
 ): string | null {
-  const flat = flattenVisible(index, rootId, showCompleted);
+  const flat = flattenVisible(index, rootId, isHidden);
   const i = flat.findIndex((n) => n.id === id);
   if (i === -1) return null;
   const neighbor = direction === "up" ? flat[i - 1] : flat[i + 1];
@@ -1083,18 +1097,19 @@ function findVisibleNeighbor(
 function flattenVisible(
   index: TreeIndex,
   rootId: string | null,
-  showCompleted: boolean,
+  isHidden: (n: Node) => boolean,
 ): Array<{ id: string }> {
   const out: Array<{ id: string }> = [];
   // The zoomed title participates in up/down navigation.
   if (rootId) out.push({ id: rootId });
   const walk = (parentId: string | null) => {
     for (const child of childrenOf(index, parentId)) {
-      // Mirror the render's visibility: when showCompleted is off, completed
-      // nodes (and their subtrees) are absent from the DOM. Keeping them in
-      // this walk would make findVisibleNeighbor return an id with no mounted
-      // element, so onMoveFocus silently no-ops and focus gets stuck.
-      if (!showCompleted && child.completed) continue;
+      // Mirror the render's visibility (the composed Seam-G prune): a hidden
+      // node (e.g. completed while show-completed is off) and its subtree are
+      // absent from the DOM. Keeping them here would make findVisibleNeighbor
+      // return an id with no mounted element, so onMoveFocus silently no-ops
+      // and focus gets stuck.
+      if (isHidden(child)) continue;
       out.push({ id: child.id });
       if (!child.collapsed) walk(child.id);
     }

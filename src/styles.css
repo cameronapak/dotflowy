@@ -870,7 +870,8 @@ body.dragging-active * {
   @apply text-accent;
 }
 
-/* A tag rendered as its chip inside an autocomplete row (tag-menu.tsx). */
+/* A tag rendered as its chip inside an autocomplete row (the tags plugin's
+   Seam-H menu, src/plugins/tags/index.tsx, in the menu-engine list). */
 .tag-option {
   display: inline-flex;
   align-items: center;

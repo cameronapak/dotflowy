@@ -76,14 +76,19 @@ export function useNode(id: string): Node | undefined {
 }
 
 /**
- * Subscribe to a node's ordered, visibility-filtered child ids. The returned
- * array keeps its identity until the *structure* changes (insert, delete,
- * reorder, or a completion toggle that flips visibility) -- a child's text
- * change leaves it untouched, so the parent does not re-render on typing.
+ * Subscribe to a node's ordered, visibility-filtered child ids. `isHidden` is
+ * the composed Seam-G prune predicate (ADR 0018): the store no longer hardcodes
+ * `completed` -- it hides whatever the predicate hides (hide-completed today).
+ * It must be referentially stable across keystrokes (the caller memoizes it on
+ * its inputs), or this cache resets every render and parents re-render on typing.
+ *
+ * The returned array keeps its identity until the *structure* changes (insert,
+ * delete, reorder, or a prune that flips visibility) -- a child's text change
+ * leaves it untouched, so the parent does not re-render on typing.
  */
 export function useVisibleChildIds(
   parentId: string | null,
-  showCompleted: boolean,
+  isHidden: (node: Node) => boolean,
 ): string[] {
   // Cache the last (key, ids) so getSnapshot returns a referentially stable
   // array while the structure is unchanged. Starts null -- the first call
@@ -92,10 +97,10 @@ export function useVisibleChildIds(
   const getSnapshot = useCallback(() => {
     const kids = childrenOf(getTreeIndex(), parentId)
     const ids: string[] = []
-    for (const n of kids) if (showCompleted || !n.completed) ids.push(n.id)
+    for (const n of kids) if (!isHidden(n)) ids.push(n.id)
     const key = ids.join('\n')
     if (!cache.current || cache.current.key !== key) cache.current = { key, ids }
     return cache.current.ids
-  }, [parentId, showCompleted])
+  }, [parentId, isHidden])
   return useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_IDS)
 }

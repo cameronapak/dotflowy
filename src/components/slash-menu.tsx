@@ -5,15 +5,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  ListIcon,
-  SquareCheckIcon,
-  CornerUpRightIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { CornerUpRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Node } from "../data/schema";
-import type { NodeCommands } from "./OutlineNode";
+import type { CommandSpec, PluginContext } from "../plugins/types";
+import { commandSpecs } from "../plugins/registry";
 import {
   decorate,
   getCaretOffset,
@@ -22,43 +18,13 @@ import {
 } from "./inline-code";
 
 /**
- * A single entry in the `/` command menu. `available` lets a command hide
- * itself based on the current node (e.g. "To-do" disappears once the bullet
- * is already a task). `run` receives the node id and performs the action.
+ * The core's own slash commands. Move is structural (reparent any node), not a
+ * feature concept, so it stays core; feature commands (`/todo`, `/bullet`) are
+ * the todos plugin's, registered via Seam C. The whole list is plugin commands
+ * (array order) THEN core, so the contextual type-change commands lead and Move
+ * trails -- preserving the pre-plugin palette order.
  */
-export interface SlashCommand {
-  id: string;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  keywords: string[];
-  available: (node: Node) => boolean;
-  run: (nodeId: string, commands: NodeCommands) => void;
-}
-
-/**
- * The command registry. New slash commands get added here; the detection,
- * filtering, keyboard, and rendering machinery below is generic.
- */
-const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: "todo",
-    label: "To-do",
-    description: "Turn into a To-do",
-    icon: SquareCheckIcon,
-    keywords: ["todo", "task", "checkbox", "check", "done", "into"],
-    available: (node) => !node.isTask,
-    run: (id, commands) => commands.onSetTask(id, true),
-  },
-  {
-    id: "bullet",
-    label: "Bullet",
-    description: "Turn into a plain bullet",
-    icon: ListIcon,
-    keywords: ["bullet", "plain", "text", "list", "into"],
-    available: (node) => node.isTask,
-    run: (id, commands) => commands.onSetTask(id, false),
-  },
+const CORE_COMMANDS: CommandSpec[] = [
   {
     id: "move",
     label: "Move",
@@ -66,13 +32,17 @@ const SLASH_COMMANDS: SlashCommand[] = [
     icon: CornerUpRightIcon,
     keywords: ["move", "reparent", "under", "into", "relocate", "home"],
     available: () => true,
-    run: (id, commands) => commands.onRequestMove(id),
+    run: (id, ctx) => ctx.mutations.onRequestMove(id),
   },
 ];
 
-function filterCommands(node: Node, query: string): SlashCommand[] {
+/** The composed command list driving the `/` palette: plugin commands (Seam C),
+ *  then the core's. Detection/filtering/keyboard/rendering below stay generic. */
+const COMMANDS: CommandSpec[] = [...commandSpecs, ...CORE_COMMANDS];
+
+function filterCommands(node: Node, query: string): CommandSpec[] {
   const q = query.toLowerCase();
-  const available = SLASH_COMMANDS.filter((c) => c.available(node));
+  const available = COMMANDS.filter((c) => c.available(node));
   if (!q) return available;
   return available.filter(
     (c) =>
@@ -99,12 +69,14 @@ interface SlashState {
  */
 export function useSlashMenu({
   node,
-  commands,
+  ctx,
   getEl,
   onTextChange,
 }: {
   node: Node;
-  commands: NodeCommands;
+  /** The PluginContext factory (read live values at event time), the same one
+   *  the bullet hands to the menu engine. A picked command runs with `ctx()`. */
+  ctx: () => PluginContext;
   getEl: () => HTMLElement | null;
   onTextChange: (text: string) => void;
 }) {
@@ -157,9 +129,9 @@ export function useSlashMenu({
       decorate(el, newText, state.slashIndex, false);
       setCaretOffset(el, state.slashIndex);
       setState(null);
-      item.run(node.id, commands);
+      item.run(node.id, ctx());
     },
-    [getEl, state, node, commands, onTextChange],
+    [getEl, state, node, ctx, onTextChange],
   );
 
   // Intercept navigation keys while open. Returns true if it consumed the
@@ -225,7 +197,7 @@ function SlashMenu({
   onHover,
   onSelect,
 }: {
-  items: SlashCommand[];
+  items: CommandSpec[];
   activeIndex: number;
   x: number;
   y: number;

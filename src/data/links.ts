@@ -1,12 +1,12 @@
 // Pure link layer for rich links (ADR 0017). A link is `[label](url)` living
 // literally in `node.text` -- never a stored field, exactly like a `code` run
-// (inline-code.ts) or a `#tag` (tags.ts). The renderer (inline-code.ts) reuses
-// LINK_PATTERN to decorate the same runs; while a bullet is focused they show
-// as raw markdown, while blurred they fold to a clean <a>.
+// or a `#tag`. The links plugin (src/plugins/links, ADR 0018) reuses
+// LINK_PATTERN to decorate the same runs as a token; while a bullet is focused
+// they show as raw markdown, while blurred they fold to a clean <a>.
 //
 // This module is DOM-free and side-effect-free. The DOM half (folding,
-// caret remap on reveal) lives in inline-code.ts; the paste orchestration in
-// paste-links.ts.
+// caret remap on reveal) lives in inline-code.ts; the link-aware paste cases in
+// the links plugin, over the core paste handler in paste.ts.
 
 // A link token: `[label](url)`. The label is "anything but `]`", the url is
 // "anything but `)`". Kept deliberately simple -- URLs that would break it (a
