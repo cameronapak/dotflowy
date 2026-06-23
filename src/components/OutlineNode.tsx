@@ -1,11 +1,11 @@
-import { memo, useEffect, useRef, type PointerEvent } from "react";
-import { useHotkeys } from "@tanstack/react-hotkeys";
+import { Fragment, memo, useEffect, useRef, type PointerEvent } from "react";
+import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import { ChevronRight } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
 import type { PluginContext } from "../plugins/types";
+import { autoformat, keymapSpecs, rowSlots } from "../plugins/registry";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
 import {
@@ -151,13 +151,20 @@ function OutlineNodeBody({
   const faded = node.completed || ancestorCompleted;
 
   // The "/" command menu for this bullet. Only the focused bullet ever has a
-  // caret, so at most one menu is open across the whole outline.
+  // caret, so at most one menu is open across the whole outline. Its command
+  // list is registry-driven now (Seam C: `/todo`/`/bullet` are the todos
+  // plugin's, `/move` core); a picked command runs with pluginCtx().
   const slash = useSlashMenu({
     node,
-    commands,
+    ctx: pluginCtx,
     getEl: () => textRef.current,
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
+
+  // Plugin row slots for this bullet (Seam F): the todos checkbox renders here
+  // when the node is a task. Stable array (precomputed in the registry), so it
+  // never perturbs this memoized node's render.
+  const beforeTextSlots = rowSlots("row:before-text");
 
   // Plugin caret menus (ADR 0018 Seam H): typing a trigger char ("#") opens an
   // autocomplete driven by the plugin that registered it (the tags plugin's tag
@@ -206,11 +213,17 @@ function OutlineNodeBody({
   // actually act, so normal in-line editing and caret movement still work.
   useHotkeys(
     [
-      {
-        // Cmd/Ctrl+Enter: toggle completion on any bullet (task or plain).
-        hotkey: "Mod+Enter",
-        callback: () => commands.onToggleCompleted(node.id, !node.completed),
-      },
+      // Plugin per-bullet keymap (Seam D): hotkeys a plugin owns while this
+      // bullet is focused -- todos' Mod+Enter / Mod+D toggle completion. They
+      // run with pluginCtx() at event time; the registry guards them against the
+      // core's reserved keys. Same `enabled` gate as the rest, so a menu's
+      // Arrow/Enter takes precedence while open.
+      ...keymapSpecs.map((k) => ({
+        // KeymapSpec.hotkey is a plain string (plugin contract stays library-
+        // agnostic); the manager wants its RegisterableHotkey union here.
+        hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
+        callback: () => k.run(node.id, pluginCtx()),
+      })),
       {
         // Enter: split the bullet at the caret -- text left of the caret stays,
         // text to its right moves into a new sibling below (caret at the end is
@@ -378,15 +391,9 @@ function OutlineNodeBody({
             data-collapsed={effectiveCollapsed}
           />
         </button>
-        {node.isTask && (
-          <Checkbox
-            className="checkbox touch-hitbox"
-            checked={node.completed}
-            onCheckedChange={(checked) =>
-              commands.onToggleCompleted(node.id, checked)
-            }
-          />
-        )}
+        {beforeTextSlots.map((slot) => (
+          <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
+        ))}
         <span
           ref={(el) => {
             textRef.current = el;
@@ -404,19 +411,18 @@ function OutlineNodeBody({
             // readSource (not textContent) is the markdown source: a focused
             // bullet may still hold folded links, whose label != source.
             const text = readSource(el);
-            // Markdown-style task autoformat: typing "[]" or "[ ]" at the very
-            // start of a plain bullet turns it into a task and strips the
-            // marker. Mirrors the Backspace-on-the-checkbox demotion below.
-            if (!node.isTask && !composingRef.current) {
-              const marker = text.match(/^\[ ?\] ?/);
-              if (marker) {
-                const stripped = text.slice(marker[0].length);
-                commands.onSetTask(node.id, true);
-                commands.onTextChange(node.id, stripped);
-                // Caret to the start -- the marker we stripped sat there.
-                decorate(el, stripped, 0, false);
-                syncedRef.current = stripped;
-                setCaretOffset(el, 0);
+            // Plugin autoformat (Seam I): a markdown-style shortcut rewrites the
+            // line (todos' "[]"/"[ ]" -> task + strip marker). The plugin's
+            // side effect runs first (flip the type), then the core writes the
+            // new text and places the caret. Suspended during IME composition.
+            if (!composingRef.current) {
+              const af = autoformat({ text, node });
+              if (af) {
+                af.before?.(pluginCtx());
+                commands.onTextChange(node.id, af.text);
+                decorate(el, af.text, af.caret, false);
+                syncedRef.current = af.text;
+                setCaretOffset(el, af.caret);
                 return;
               }
             }

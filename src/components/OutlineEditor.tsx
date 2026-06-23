@@ -13,7 +13,11 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router";
-import { useHotkey, useHotkeys } from "@tanstack/react-hotkeys";
+import {
+  useHotkey,
+  useHotkeys,
+  type UseHotkeyDefinition,
+} from "@tanstack/react-hotkeys";
 import {
   ChevronRight,
   HomeIcon,
@@ -57,6 +61,7 @@ import {
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
+  keymapSpecs,
 } from "../plugins/registry";
 import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
@@ -267,20 +272,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     return null;
   };
 
-  // Cmd/Ctrl+D toggles completion on the focused bullet. Every bullet is
-  // completable (not just tasks), so this works regardless of isTask.
-  useHotkey(
-    "Mod+D",
-    () => {
-      const focusedId = findFocusedId();
-      if (!focusedId) return;
-      const node = focusIndex.current.byId.get(focusedId);
-      if (!node) return;
-      capture(focusIndex.current, focusedId);
-      toggleCompleted(focusedId, !node.completed);
-    },
-    { preventDefault: true },
-  );
+  // Mod+D used to live here as an editor-level global; it's now the todos
+  // plugin's per-bullet keymap (Seam D), registered on every bullet AND the
+  // zoomed title -- so it covers the same focus targets without the core
+  // knowing about completion. See the todos plugin + ZoomedTitle below.
 
   // Cmd/Ctrl+Z: undo the last action. preventDefault stops the browser's
   // native contentEditable undo so we own history. Restores focus to the
@@ -682,6 +677,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             node={zoomedNode}
             isPivot={pivotId === zoomedNode.id}
             registerRef={registerRef}
+            getCtx={pluginCtx}
             onTextChange={(text) => setText(zoomedNode.id, text)}
             onAddChild={() => {
               const newId = insertChildAtStart(
@@ -790,6 +786,7 @@ function ZoomedTitle({
   node,
   isPivot,
   registerRef,
+  getCtx,
   onTextChange,
   onAddChild,
   onArrowDown,
@@ -797,6 +794,9 @@ function ZoomedTitle({
   node: Node;
   isPivot: boolean;
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
+  /** The PluginContext factory, so the plugin keymap (Seam D) works on the
+   *  title too -- Mod+Enter / Mod+D toggle completion of the zoomed node. */
+  getCtx: () => PluginContext;
   onTextChange: (text: string) => void;
   onAddChild: () => void;
   onArrowDown: () => void;
@@ -820,10 +820,16 @@ function ZoomedTitle({
 
   // Title shortcuts, scoped to the title's own contentEditable. Enter adds a
   // first child under the title; ArrowDown drops focus into the first child.
+  // The plugin keymap (Seam D) is registered here too, so todos' Mod+Enter /
+  // Mod+D toggle completion of the zoomed node just like on a list-item bullet.
   useHotkeys(
     [
       { hotkey: "Enter", callback: () => onAddChild() },
       { hotkey: "ArrowDown", callback: () => onArrowDown() },
+      ...keymapSpecs.map((k) => ({
+        hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
+        callback: () => k.run(node.id, getCtx()),
+      })),
     ],
     { target: ref },
   );

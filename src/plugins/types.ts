@@ -7,7 +7,7 @@
 // token + decorator), B (delegated interaction), I (input/paste); later slices
 // add commands, keymap, slots, transforms, menus, and side-collections.
 
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { Node, TreeIndex } from "../data/tree";
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
@@ -219,9 +219,93 @@ export interface PasteInput {
   hasSelection: boolean;
 }
 
+/** What an autoformat transform is told: the just-typed SOURCE text and the
+ *  node it's in (so it can gate on type, e.g. only plain bullets). */
+export interface AutoformatInput {
+  text: string;
+  node: Node;
+}
+
+/** The rewrite an autoformat performs. The core writes `text` back to the
+ *  store + DOM and places the caret at `caret` (a SOURCE offset); the plugin's
+ *  `before` side effect runs first (e.g. flip the bullet to a task) so the type
+ *  change lands before the text. */
+export interface AutoformatResult {
+  text: string;
+  caret: number;
+  before?(ctx: PluginContext): void;
+}
+
 export interface InputSpec {
   /** Decide the replacement string for a paste, or null to defer. */
   onPaste?: (input: PasteInput) => string | null;
+  /**
+   * Rewrite the text the user just typed -- a markdown-style shortcut like
+   * `[]` -> task. Returns null to leave it untouched. The core owns the
+   * mechanics (write + decorate + caret); the plugin only decides the new text,
+   * caret, and an optional pre-write side effect. First non-null across plugins
+   * wins (todos owns the `[]`/`[ ]` task marker).
+   */
+  autoformat?: (input: AutoformatInput) => AutoformatResult | null;
+}
+
+// --- Seam C: the `/` command palette ----------------------------------------
+//
+// A plugin contributes slash commands. The core keeps a small generic set
+// (Move); plugin commands concatenate after array order. v1 keeps the bespoke
+// `/` engine (useSlashMenu) -- this seam only makes its command LIST
+// registry-driven (folding the palette into the menu engine, Seam H, is later).
+
+export interface CommandSpec {
+  id: string;
+  label: string;
+  description: string;
+  /** The option's leading icon. Any component taking `className` works (lucide
+   *  icons do); the core renders it -- so the type stays icon-library-agnostic. */
+  icon: ComponentType<{ className?: string }>;
+  /** Extra fuzzy-match terms beyond the label. */
+  keywords: string[];
+  /** Hide the command for nodes it doesn't apply to (e.g. "To-do" once the
+   *  bullet already is a task). */
+  available(node: Node): boolean;
+  /** Run the command against the focused node. */
+  run(nodeId: string, ctx: PluginContext): void;
+}
+
+// --- Seam D: per-bullet keymap ----------------------------------------------
+//
+// A plugin binds a hotkey active while a bullet (or the zoomed title) is
+// focused. The core's reserved keys -- Enter, Shift+Enter, Tab, Shift+Tab,
+// Backspace, the arrows, the structural moves (Mod+Shift+Arrow, Mod+Arrow) and
+// Mod+. -- are off-limits (D7); the registry guards against a collision at load.
+// todos owns Mod+Enter and Mod+D (toggle completion).
+
+export interface KeymapSpec {
+  id: string;
+  /** A @tanstack/react-hotkeys hotkey string, e.g. "Mod+Enter". Must not be a
+   *  core-reserved key (the registry warns if it is). */
+  hotkey: string;
+  /** Run against the focused node. `ctx` reads live tree/commands. */
+  run(nodeId: string, ctx: PluginContext): void;
+}
+
+// --- Seam F: row render slots -----------------------------------------------
+//
+// A plugin renders a REAL React node (D10) into a named position in a bullet's
+// row -- the todos checkbox, between the bullet dot and the text. The core
+// renders whatever the matching slots return, in plugin/array order; a slot
+// returns null to contribute nothing for a given node (the checkbox only shows
+// on a task). Unlike a token (Seam A, El descriptor), a slot is plain JSX.
+
+export type SlotPosition = "row:before-text";
+
+export interface SlotSpec {
+  id: string;
+  position: SlotPosition;
+  /** Render the slot for `node`, or null to contribute nothing. `getCtx` is the
+   *  same stable factory the bullet passes everywhere -- call it inside event
+   *  handlers (the checkbox's onCheckedChange), not at render. */
+  render(node: Node, getCtx: () => PluginContext): ReactNode;
 }
 
 // --- Seam H: caret autocomplete menus ---------------------------------------
@@ -293,11 +377,17 @@ export interface PluginDef {
   tokens?: TokenSpec[];
   /** Seam B: delegated interactions on chips/links in the contentEditable. */
   interactions?: InteractionSpec[];
+  /** Seam C: `/` palette commands (todos' `/todo` + `/bullet`). */
+  commands?: CommandSpec[];
+  /** Seam D: per-bullet hotkeys (todos' Mod+Enter / Mod+D). */
+  keymap?: KeymapSpec[];
+  /** Seam F: row render slots (the todos checkbox). */
+  slots?: SlotSpec[];
   /** Seam G: render-time view transforms (hide-completed, the tag filter). */
   viewTransforms?: ViewTransform[];
   /** Seam H: caret autocomplete menus (the `#` tag menu). */
   menus?: MenuSpec[];
-  /** Seam I: input transforms (paste). */
+  /** Seam I: input transforms (paste + autoformat). */
   input?: InputSpec;
 }
 

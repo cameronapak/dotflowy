@@ -275,17 +275,36 @@ transforms instead of hardcoding `completed`.
   `slash-menu.tsx`. The engine reads the bullet's `pluginCtx` (a stable `OutlineNode` prop). Covered
   by `e2e/tag-menu.spec.ts`.
 
-So **links is a complete plugin** (A+B+I), **tags** is A+B+E+G+H, and **todos** is a partial plugin
-(G only — its interaction surface is next).
+- **Seams C/D/F/I (the todos plugin)** — `PluginDef.commands`/`keymap`/`slots` + `input.autoformat`,
+  composed in `registry.ts` (`commandSpecs`, `keymapSpecs`, `rowSlots(position)`, `autoformat`).
+  Completion is now **the todos plugin's concept** (D9), built on the `completed`/`isTask` node slots:
+  - **F (row slot)** — the checkbox renders via `slots: [{ position: "row:before-text", render(node,
+    getCtx) }]`; `OutlineNode` maps `rowSlots(...)` (a precomputed, referentially stable array) into
+    the row. The hardcoded `<Checkbox>` is gone from the core.
+  - **C (commands)** — `/todo` + `/bullet` are todos commands; `/move` stays a **core** command (it's
+    structural, not a todo concept). `slash-menu.tsx`'s list is now `[...commandSpecs, ...CORE]` and
+    `useSlashMenu` takes the `pluginCtx` thunk. The bespoke `/` engine stays for now — only its
+    *command list* is registry-driven (folding the palette into the Seam-H engine is still later).
+  - **D (keymap)** — `Mod+Enter`/`Mod+D` (toggle completion) are todos keymap entries, registered on
+    **both** the bullet (`OutlineNode`) and the zoomed title (`ZoomedTitle`), so they work wherever a
+    node is focused. The editor-level `Mod+D` global is deleted. The registry warns at load if a
+    plugin keymap binds a core-reserved key (D7).
+  - **I (autoformat)** — the `[]`/`[ ]` task marker is `input.autoformat`; the core owns the
+    write+decorate+caret mechanics, the plugin decides the rewrite + the `onSetTask` side effect.
 
-**Remaining:**
+  Covered by `e2e/todos.spec.ts` (the checkbox click, `[]`, `Mod+Enter`, `/todo`+`/bullet`).
 
-- **Seams C/D/F + the rest of the todos plugin** — slash commands, the `Mod+Enter`/`Mod+D` keymap,
-  the checkbox row slot, the `[]` autoformat, and (D9) moving completion's ownership out of core.
-  Seam G (hide-completed) has landed, so todos can now build on it. When the `/` palette's commands
-  become a Seam-C registry, the `/` menu folds into the Seam-H engine too (it still uses the core
-  `useSlashMenu` for now). Fade-inheritance (`faded`/`ancestorCompleted`) still reads
-  `node.completed` in `OutlineNode` — it stays core until a row-decoration seam exists.
+So **links is a complete plugin** (A+B+I), **tags** is A+B+E+G+H, and **todos** is now C+D+F+G+I —
+the "reduce todos to a plugin" headline is met. This supersedes ADR 0001/0002's "core owns
+checkboxes" framing: the `completed`/`isTask` *fields* stay core slots (D9 perf exception), but their
+behavior, UI, and shortcuts are the plugin's.
+
+**Remaining (deliberately core for now):**
+
+- **Fade-inheritance** (`faded`/`ancestorCompleted` in `OutlineNode`) and the **Backspace-on-the-
+  checkbox demotion** still read `completed`/`isTask` in the core — they await a row-decoration /
+  reserved-key seam. **The `/` palette** still runs the bespoke `useSlashMenu` (only its command list
+  is a Seam-C registry); it folds into the Seam-H menu engine in a later pass.
 
 ## Why
 
