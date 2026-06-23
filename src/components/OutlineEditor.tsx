@@ -294,8 +294,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
       const newId =
         caretAtEnd && isOpen
-          ? insertChildAtStart(focusIndex.current, id)
-          : insertSibling(focusIndex.current, node.parentId, id);
+          ? insertChildAtStart(focusIndex.current, id, node.isTask)
+          : insertSibling(focusIndex.current, node.parentId, id, node.isTask);
       pendingFocus.current = newId;
     },
 
