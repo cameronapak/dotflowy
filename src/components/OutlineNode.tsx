@@ -196,11 +196,22 @@ function OutlineNodeBody({
         callback: () => commands.onMoveDown(node.id),
       },
       {
-        // Backspace on an empty bullet: delete it and focus the previous node.
+        // Backspace at the start of a bullet. On a task, the first backspace
+        // "deletes the checkbox" -- demoting it to a plain bullet while keeping
+        // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
+        // deletes the node and focuses the previous one. Otherwise it falls
+        // through to normal character deletion.
         hotkey: "Backspace",
         callback: (e) => {
           const el = textRef.current;
-          if (!el || el.textContent !== "" || !isCaretAtStart(el)) return;
+          if (!el || !isCaretAtStart(el)) return;
+          if (node.isTask) {
+            e.preventDefault();
+            e.stopPropagation();
+            commands.onSetTask(node.id, false);
+            return;
+          }
+          if (el.textContent !== "") return;
           e.preventDefault();
           e.stopPropagation();
           commands.onDeleteNode(node.id);
@@ -330,6 +341,29 @@ function OutlineNodeBody({
           onInput={(e) => {
             const el = e.currentTarget;
             const text = el.textContent ?? "";
+            // Markdown-style task autoformat: typing "[]" or "[ ]" at the very
+            // start of a plain bullet turns it into a task and strips the
+            // marker. Mirrors the Backspace-on-the-checkbox demotion below.
+            if (!node.isTask && !composingRef.current) {
+              const marker = text.match(/^\[ ?\] ?/);
+              if (marker) {
+                const stripped = text.slice(marker[0].length);
+                commands.onSetTask(node.id, true);
+                commands.onTextChange(node.id, stripped);
+                decorate(el, stripped, false);
+                syncedRef.current = stripped;
+                // Caret to the start -- the marker we stripped sat there.
+                const sel = window.getSelection();
+                if (sel) {
+                  const range = document.createRange();
+                  range.selectNodeContents(el);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                }
+                return;
+              }
+            }
             commands.onTextChange(node.id, text);
             slash.handleInput();
             // Re-decorate live, preserving the caret. Suspended during IME
