@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import {
   Link,
@@ -23,7 +24,6 @@ import {
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { buildTagFilter, parseQuery, serializeQuery } from "../data/tags";
-import { TagColorMenu } from "./tag-color-menu";
 import {
   indent,
   insertChildAtStart,
@@ -50,7 +50,13 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
-import { pasteIntoBullet } from "./paste-links";
+import { pasteIntoBullet } from "./paste";
+import {
+  blocksCaret,
+  dispatchClick,
+  dispatchContextMenu,
+} from "../plugins/registry";
+import type { PluginContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
@@ -215,47 +221,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // plain mousedown would place an editing caret; we block that and route the
   // click to the filter instead. On touch a transient caret may flash before
   // the navigation, which re-prunes the view -- accepted for v1 (ADR 0015).
+  // Delegated interaction (Seam B). Chips/links live inside the contentEditable,
+  // so the core runs ONE set of handlers on the content container and dispatches
+  // to whichever plugin owns the surface under the pointer (registry.ts). The
+  // core has zero feature knowledge -- a folded link opens, a tag chip filters,
+  // a right-click picks a color, all decided by the plugins. See ADR 0018.
   const onContentMouseDown = (e: ReactMouseEvent) => {
-    const target = e.target as HTMLElement;
-    // Block the editing caret for both interactive chips: tag chips filter,
-    // folded links open. A revealed link is plain text (no <a>), so editing
-    // it is untouched. See ADR 0015 (tags) and ADR 0017 (links).
-    if (target.closest?.(".tag[data-tag]") || target.closest?.("a[data-link]"))
-      e.preventDefault();
+    if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
   };
   const onContentClick = (e: ReactMouseEvent) => {
-    const target = e.target as HTMLElement;
-    // A folded link opens in a new tab. Editing a link is done from its edges
-    // (click beside it -> the bullet reveals raw), same as tag/code chips.
-    const link = target.closest?.("a[data-link]") as HTMLAnchorElement | null;
-    if (link) {
-      e.preventDefault();
-      e.stopPropagation();
-      window.open(link.href, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const el = target.closest?.(".tag[data-tag]") as HTMLElement | null;
-    const name = el?.dataset.tag;
-    if (!name) return;
-    e.preventDefault();
-    e.stopPropagation();
-    addTag("#" + name);
+    dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
-  // Right-click any tag surface (chip or filter pill) to pick its color. Plain
-  // click is taken by filtering, so color-pick rides the context menu. ADR 0016.
-  const [colorMenu, setColorMenu] = useState<{
-    tag: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  // A plugin-owned overlay (the tag color picker), mounted once below. The core
+  // is a thin host -- the overlay portals + dismisses itself (ADR 0018 Seam B).
+  const [overlayNode, setOverlayNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
-    const el = (e.target as HTMLElement).closest?.(
-      "[data-tag]",
-    ) as HTMLElement | null;
-    const name = el?.dataset.tag;
-    if (!name) return;
-    e.preventDefault();
-    setColorMenu({ tag: name, x: e.clientX, y: e.clientY });
+    dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
   };
 
   // The id of the currently focused bullet, found by reverse-looking-up the
@@ -605,6 +586,24 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [navigateZoom, startDrag, consumeClick],
   );
 
+  // PluginContext factory (ADR 0018 D8): the promoted command set + tree reads +
+  // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
+  // live values (focusIndex/activeTagsRef) at call time; stable identity.
+  const pluginCtx = useCallback(
+    (): PluginContext => ({
+      tree: focusIndex.current,
+      mutations: commands,
+      nav: {
+        zoom: (id) => navigateZoom(id, id),
+        filterTag: (tag) => addTag(tag),
+        setSearch: (tags) => setQ(tags),
+      },
+      search: activeTagsRef.current,
+      openOverlay: (node) => setOverlayNode(node),
+    }),
+    [commands, navigateZoom, addTag, setQ],
+  );
+
   // The pruned visible-set for the active filter (matches + ancestor context),
   // or null when no filter. Render-time only -- never mutates a node. ADR 0015.
   const filter = useMemo(
@@ -654,14 +653,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onClick={onContentClick}
         onContextMenu={onContentContextMenu}
       >
-        {colorMenu && (
-          <TagColorMenu
-            tag={colorMenu.tag}
-            x={colorMenu.x}
-            y={colorMenu.y}
-            onClose={() => setColorMenu(null)}
-          />
-        )}
+        {overlayNode}
         {activeTags.length > 0 && (
           <TagFilterBar
             tags={activeTags}

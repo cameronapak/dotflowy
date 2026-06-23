@@ -20,7 +20,7 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
-import { pasteIntoBullet } from "./paste-links";
+import { pasteIntoBullet } from "./paste";
 
 interface OutlineNodeProps {
   // The node id. The node itself and its visible children are read reactively

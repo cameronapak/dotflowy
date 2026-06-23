@@ -1,5 +1,9 @@
-// Shared inline decoration for contentEditable bullet/title text: `code` runs,
-// #tags, and rich links.
+// Shared inline decoration for contentEditable bullet/title text. The tokens
+// themselves (`code` runs, #tags, rich links) are PLUGIN-CONTRIBUTED (ADR 0018):
+// each registers a regex fragment + a declarative `render` in src/plugins/, and
+// the registry composes them into one combined regex + dispatch (registry.ts).
+// This file owns only the generic machinery -- the one decorate pass, escaping
+// + serialization, and the source-offset caret math -- with no per-token branch.
 //
 // Both the outline bullets (OutlineNode) and the zoomed page title
 // (OutlineEditor's ZoomedTitle) render their stored markdown as live HTML:
@@ -8,49 +12,16 @@
 // The caret is saved as an absolute SOURCE-character offset before the rebuild
 // and restored after.
 //
-// Code runs and #tags keep their FULL source visible (backticks, the leading
-// `#`), so for them the source string and the rendered text have identical
-// length. Links are the exception: a link FOLDS to a clean <a> (shorter than
-// its `[label](url)` source) unless the caret is on it (per-link reveal, ADR
-// 0017). A folded link is therefore an atomic widget whose displayed length
-// (the label) differs from its source length -- the caret helpers below correct
-// for that so every consumer keeps speaking source offsets.
+// Most tokens keep their FULL source visible (backticks, the leading `#`), so
+// source string and rendered text have identical length. A FOLDING token (a
+// link) is the exception: it folds to a shorter atomic widget unless the caret
+// is on it. An atom carries its full source in `data-src` (+ `data-src-len`)
+// and `contenteditable="false"`; the caret helpers below count it off `data-src`
+// generically, so every consumer keeps speaking source offsets -- with no
+// per-token special-casing (the unlock in ADR 0018 D6).
 
-import { TAG_PATTERN } from "../data/tags";
-import { LINK_PATTERN } from "../data/links";
-
-// Inline `code` runs: `like this`. Single-line, non-empty, no nested backtick.
-const CODE_RUN = "`[^`\\n]+`";
-
-// One pass over links, code runs, and tags, in document order. Links are listed
-// FIRST so the whole `[label](url)` is consumed as one opaque token -- a `#tag`
-// or `code` run *inside* a link's label/url never becomes its own chip. Code
-// then precedes tags so a `#tag` inside a code run (e.g. `#define`) stays code.
-const TOKEN = new RegExp(`${LINK_PATTERN}|${CODE_RUN}|${TAG_PATTERN}`, "gu");
-
-const CODE_CLASS =
-  "rounded-[4px] border border-border/60 bg-muted px-0.5 py-0.5 font-mono text-[0.85em] text-foreground";
-
-// Tag chips borrow the Badge shape (ui/badge.tsx) -- a rounded-full pill --
-// applied as an inline utility string because the chip is injected via
-// innerHTML, not rendered as the <Badge> component. By default a chip is a
-// neutral outline (the `.tag` rule in styles.css, border-border); a chosen
-// color fills it via the generated stylesheet keyed by `data-tag` (ADR 0016).
-// `.tag` is also the delegated click handler's hook (OutlineEditor).
-const TAG_CLASS =
-  "tag rounded-full px-1.5 py-0.5 text-[0.85em] font-medium cursor-pointer";
-
-// Folded link: a clean, ATOMIC <a> showing only the label. The whole `(url)` is
-// hidden, and `contenteditable="false"` makes it one indivisible caret unit --
-// the caret can sit before or after it but never inside (entering its boundary
-// is what reveals it). `data-src`/`data-src-len` carry the full markdown so
-// readSource can reconstruct it and the caret helpers can count it. Opened
-// (never caret-placed) by the delegated handler in OutlineEditor. See ADR 0017.
-const LINK_CLASS = "node-link cursor-pointer underline underline-offset-2";
-
-// Parse one `[label](url)` token. Returns null on the (impossible-here) shapes
-// the combined regex wouldn't have matched.
-const LINK_PARTS = /^\[([^\]]*)\]\(([^)]*)\)$/;
+import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
+import type { El } from "../plugins/types";
 
 // Last HTML we wrote to each element, so decorate() can skip a rebuild (and the
 // caret jitter it causes) when nothing visible changed. Keyed by the element so
@@ -76,58 +47,39 @@ export function inlineMarkupHtml(
 ): string {
   let html = "";
   let last = 0;
-  for (const m of text.matchAll(TOKEN)) {
+  for (const m of text.matchAll(tokenRegex)) {
     const start = m.index ?? 0;
     const tok = m[0];
+    const end = start + tok.length;
     html += escapeHtml(text.slice(last, start));
-    const first = tok.charCodeAt(0);
-    if (first === 91 /* [ -> link */) {
-      const end = start + tok.length;
-      const parts = LINK_PARTS.exec(tok);
-      const label = parts?.[1] ?? "";
-      const url = parts?.[2] ?? "";
-      const reveal =
-        revealOffset != null && revealOffset >= start && revealOffset <= end;
-      html += reveal
-        ? revealedLinkHtml(label, url)
-        : foldedLinkHtml(label, url, tok);
-    } else if (first === 96 /* backtick -> code */) {
-      html += `<code class="${CODE_CLASS}">${escapeHtml(tok)}</code>`;
-    } else {
-      const name = tok.slice(1);
-      html += `<span class="${TAG_CLASS}" data-tag="${name}">${escapeHtml(tok)}</span>`;
-    }
-    last = start + tok.length;
+    // The plugin that owns this token returns a declarative descriptor; the
+    // core escapes + serializes it, so a plugin never hands us raw HTML (D6).
+    html += serializeEl(renderToken(m, { revealOffset, start, end }));
+    last = end;
   }
   html += escapeHtml(text.slice(last));
   return html;
 }
 
-// A folded link: clean label, the markdown source carried in data-* for
-// reconstruction. contenteditable=false makes it atomic.
-function foldedLinkHtml(label: string, url: string, tok: string): string {
-  return (
-    `<a class="${LINK_CLASS}" data-link contenteditable="false"` +
-    ` data-src="${escapeAttr(tok)}" data-src-len="${tok.length}"` +
-    ` href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">` +
-    `${escapeHtml(label)}</a>`
-  );
-}
-
-// A revealed link: the raw `[label](url)` as decorated spans whose combined
-// textContent EQUALS the source (so it stays 1:1 with source offsets, exactly
-// like code/tag chips). The `[]()` punctuation is faint, the url is link-color.
-function revealedLinkHtml(label: string, url: string): string {
-  return (
-    `<span class="link-reveal" data-link-reveal>` +
-    `<span class="md-punct">[</span>` +
-    `<span class="link-label">${escapeHtml(label)}</span>` +
-    `<span class="md-punct">]</span>` +
-    `<span class="md-punct">(</span>` +
-    `<span class="link-url">${escapeHtml(url)}</span>` +
-    `<span class="md-punct">)</span>` +
-    `</span>`
-  );
+// Serialize a plugin's element descriptor (El) into the contentEditable HTML
+// string. The core owns escaping: text children are HTML-escaped, attribute
+// values are attr-escaped, `true` is a bare boolean attribute, and
+// `false`/`undefined` drop the attribute. Insertion order is preserved so the
+// generated HTML stays stable (the render cache compares strings).
+function serializeEl(el: El): string {
+  if (typeof el === "string") return escapeHtml(el);
+  let out = `<${el.tag}`;
+  if (el.attrs) {
+    for (const [name, value] of Object.entries(el.attrs)) {
+      if (value === false || value == null) continue;
+      if (value === true) out += ` ${name}`;
+      else out += ` ${name}="${escapeAttr(String(value))}"`;
+    }
+  }
+  out += ">";
+  if (el.children) for (const child of el.children) out += serializeEl(child);
+  out += `</${el.tag}>`;
+  return out;
 }
 
 // Quote/angle-bracket-safe attribute value for the link href + data-src (they
@@ -140,14 +92,13 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// True for a folded-link atomic widget (an <a> carrying its markdown source).
-// Revealed links are spans (no data-src), so they read back 1:1 as plain text.
-function isFoldedLink(node: Node): node is HTMLElement {
-  return (
-    node.nodeType === 1 &&
-    (node as HTMLElement).hasAttribute("data-link") &&
-    (node as HTMLElement).hasAttribute("data-src")
-  );
+// True for an ATOMIC folding-token widget -- any element carrying its full
+// source in `data-src` (a folded link today). Keyed on `data-src` alone, not on
+// "link", so the caret math is generic over folding tokens (ADR 0018 D6).
+// Non-folding tokens (code, tags) and revealed links carry no data-src, so they
+// read back 1:1 as plain text.
+function isAtom(node: Node): node is HTMLElement {
+  return node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src");
 }
 
 function foldedSrcLen(el: HTMLElement): number {
@@ -170,7 +121,7 @@ export function readSource(el: HTMLElement): string {
       out += node.textContent ?? "";
       return;
     }
-    if (isFoldedLink(node)) {
+    if (isAtom(node)) {
       out += node.getAttribute("data-src") ?? "";
       return;
     }
@@ -253,7 +204,7 @@ function sourceOffsetUpTo(
       }
       return;
     }
-    if (isFoldedLink(node)) {
+    if (isAtom(node)) {
       total += foldedSrcLen(node as HTMLElement);
       // Caret can't normally land inside an atomic widget; if it somehow did,
       // snap to just after it.
@@ -300,7 +251,7 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
       }
       return;
     }
-    if (isFoldedLink(node)) {
+    if (isAtom(node)) {
       const len = foldedSrcLen(node as HTMLElement);
       if (remaining <= len) {
         placeAtWidget(node as HTMLElement, remaining === 0 ? "before" : "after");
@@ -352,7 +303,7 @@ export function watchCaretReveal(
     if (!sel || sel.rangeCount === 0) return;
     if (!el.contains(sel.getRangeAt(0).endContainer)) return;
     const text = readSource(el);
-    if (!text.includes("](")) return; // fast path: no link possible
+    if (!hasFoldingToken(text)) return; // fast path: nothing here can reveal
     decorate(el, text, getCaretOffset(el), true);
   };
   document.addEventListener("selectionchange", handler);

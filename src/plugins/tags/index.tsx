@@ -1,0 +1,90 @@
+// Tags plugin (ADR 0018). `#tag` as a plugin. Seam A: the chip render. Seam B:
+// the delegated chip click -> filter and right-click -> color picker. The pure
+// tag layer (parse/normalize/collect/filter) stays in src/data/tags.ts and the
+// color side-collection in src/data/tag-colors.ts (Seam E); this file is the
+// plugin that wires them. The filter view-transform (Seam G) and `#` autocomplete
+// (Seam H) are still core-wired pending their dedicated refactors (see ADR 0018
+// implementation notes).
+
+import { TAG_PATTERN } from "../../data/tags";
+import {
+  definePlugin,
+  type El,
+  type InteractionEvent,
+  type PluginContext,
+} from "../types";
+import { TagColorMenu } from "./tag-color-menu";
+
+// Tag chips borrow the Badge pill shape, applied as an inline utility string
+// (the chip is injected via innerHTML, not rendered as <Badge>). A neutral
+// outline by default (the `.tag` rule, border-border); a chosen color fills it
+// via the generated stylesheet keyed by `data-tag` (ADR 0016). `.tag` is also
+// the delegated click handler's hook.
+const TAG_CLASS =
+  "tag rounded-full px-1.5 py-0.5 text-[0.85em] font-medium cursor-pointer";
+
+function tagEl(tok: string): El {
+  const name = tok.slice(1);
+  return {
+    tag: "span",
+    attrs: { class: TAG_CLASS, "data-tag": name },
+    children: [tok],
+  };
+}
+
+// Open the color picker at the pointer, routed through the generic overlay host
+// (ctx.openOverlay). Shared by chips and filter pills.
+function openColorMenu(
+  el: HTMLElement,
+  ctx: PluginContext,
+  e: InteractionEvent,
+) {
+  const name = el.dataset.tag;
+  if (!name) return;
+  e.preventDefault();
+  ctx.openOverlay(
+    <TagColorMenu
+      tag={name}
+      x={e.clientX}
+      y={e.clientY}
+      onClose={() => ctx.openOverlay(null)}
+    />,
+  );
+}
+
+export default definePlugin({
+  id: "tags",
+  tokens: [
+    {
+      id: "tag",
+      pattern: TAG_PATTERN,
+      // Last: a `#tag` inside a link or code run is already consumed by those.
+      precedence: 20,
+      render: (tok) => tagEl(tok),
+    },
+  ],
+
+  // Seam B: a chip click AND-s the tag into the filter; a chip's mousedown
+  // blocks the editing caret (it's inside contentEditable); right-click on a
+  // chip OR a filter pill opens the color picker.
+  interactions: [
+    {
+      selector: ".tag[data-tag]",
+      blockCaretOnMouseDown: true,
+      onClick: (el, ctx, e) => {
+        const name = el.dataset.tag;
+        if (!name) return;
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.nav.filterTag("#" + name);
+      },
+      onContextMenu: openColorMenu,
+    },
+    {
+      // Filter pills live outside the contentEditable, so no caret to block and
+      // no filter-on-click; only the color picker.
+      selector: ".tag-pill[data-tag]",
+      onContextMenu: openColorMenu,
+    },
+  ],
+});
