@@ -367,6 +367,7 @@ function OutlineNodeBody({
           style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
           contentEditable
           suppressContentEditableWarning
+          spellCheck={false}
           role="textbox"
           data-completed={node.completed}
           onInput={(e) => {

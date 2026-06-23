@@ -738,6 +738,7 @@ function ZoomedTitle({
         style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
         contentEditable
         suppressContentEditableWarning
+        spellCheck={false}
         role="textbox"
         aria-label="Title"
         data-completed={node.completed}
