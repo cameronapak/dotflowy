@@ -10,6 +10,7 @@ import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
 import { MoveDialog } from '../components/move-dialog'
 import { TagColorStyles } from '../components/tag-color-menu'
+import { Toaster } from '../components/ui/sonner'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -45,6 +46,7 @@ function RootComponent() {
           <NodeSwitcher />
           <MoveDialog />
           <TagColorStyles />
+          <Toaster />
         </ShowCompletedProvider>
       </ThemeProvider>
     </RootDocument>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { HomeIcon } from "lucide-react";
+import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
@@ -23,8 +24,9 @@ import {
  * (self-contained, single mount, module-level opener), but it *acts* -- it runs
  * the `moveNode` mutation -- rather than only navigating.
  *
- * After the move it navigates to the destination's zoom view so the moved node
- * is visible in its new home (plain nav, no zoom morph -- there's no pivot dot).
+ * After the move it stays put and fires a toast confirming the destination
+ * (with a "Go" action to jump there on demand) -- moving a node shouldn't yank
+ * you away from where you were working.
  */
 
 // Module-level opener so the slash command (deep inside a bullet's
@@ -149,10 +151,22 @@ function MoveDialogInner({
     const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
     const moved = moveNode(index, nodeId, targetId, after);
     if (!moved) return;
-    // Land in the destination's zoom view so the moved node is visible in its
-    // new home. Plain nav, no morph (ADR 0003): no pivot dot is involved.
-    if (targetId === null) navigate({ to: "/" });
-    else navigate({ to: "/$nodeId", params: { nodeId: targetId } });
+    // Stay put -- moving shouldn't navigate you away. Confirm with a toast, and
+    // offer a "Go" action to jump to the destination's zoom view on demand
+    // (plain nav, no morph -- ADR 0003 -- since no pivot dot is involved).
+    const dest =
+      targetId === null
+        ? "Home"
+        : index.byId.get(targetId)?.text.trim() || "Untitled";
+    toast.success(`Moved to ${dest}`, {
+      action: {
+        label: "Go",
+        onClick: () =>
+          targetId === null
+            ? navigate({ to: "/" })
+            : navigate({ to: "/$nodeId", params: { nodeId: targetId } }),
+      },
+    });
   }
 
   return (
