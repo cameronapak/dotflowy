@@ -9,6 +9,7 @@ import type { Node, TreeIndex } from "../data/tree";
 import type {
   El,
   InteractionEvent,
+  MenuSpec,
   PasteInput,
   PluginContext,
   TokenSpec,
@@ -159,6 +160,12 @@ export function buildViewFilter(
   }
   return null;
 }
+
+// --- Seam H: caret autocomplete menus --------------------------------------
+
+/** Every plugin's caret menus, in array order. The engine (menu-engine.tsx)
+ *  detects whichever trigger is live before the caret and drives it. */
+export const menuSpecs: MenuSpec[] = plugins.flatMap((p) => p.menus ?? []);
 
 // --- Seam I: paste input transforms ----------------------------------------
 

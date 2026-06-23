@@ -224,6 +224,63 @@ export interface InputSpec {
   onPaste?: (input: PasteInput) => string | null;
 }
 
+// --- Seam H: caret autocomplete menus ---------------------------------------
+//
+// A trigger char ("#", "/") opens a menu at the caret. The core owns the ENGINE
+// (detect the trigger before the caret, portal the list, arrow/enter/tab/escape,
+// splice the picked replacement into the source); a plugin contributes a
+// `MenuSpec` -- the trigger + how to build entries. The `#` tag menu is the
+// tags plugin's; the `/` palette folds in with the command registry (Seam C).
+
+/** A live trigger before the caret: the source offset of the trigger char and
+ *  the query typed after it. */
+export interface MenuTrigger {
+  query: string;
+  /** Source offset of the trigger char. */
+  triggerIndex: number;
+}
+
+/**
+ * One option in a menu. Fully self-describing: how it renders (a REAL React node
+ * -- D10) and what it does when picked. The engine owns the splice: it replaces
+ * the `[triggerIndex, triggerIndex + 1 + query.length)` span with `replacement`,
+ * places the caret at `triggerIndex + (caret ?? replacement.length)`, then runs
+ * `after` (a slash command's mutation). So an entry never touches the DOM.
+ */
+export interface MenuEntry {
+  /** Stable key for the option list. */
+  key: string;
+  /** The option's inner content (the engine wraps it in the option button). */
+  render(active: boolean): ReactNode;
+  /** Text that replaces the trigger + query span. */
+  replacement: string;
+  /** Caret offset WITHIN `replacement` after picking (default: its end). */
+  caret?: number;
+  /** Side effect after the text edit (e.g. run a slash command). */
+  after?(): void;
+}
+
+export interface MenuSpec {
+  id: string;
+  /** The trigger char, e.g. "#" or "/". */
+  trigger: string;
+  /**
+   * Decide whether the trigger is live, given the SOURCE text before the caret.
+   * Defaults (when omitted) to: the trigger sits at start-or-after-whitespace
+   * and the query after it has no whitespace. Tags override this to require the
+   * query be tag-chars (so a `#` mid-punctuation doesn't open).
+   */
+  match?(before: string): MenuTrigger | null;
+  /** Build the option entries for a live trigger. Reads the tree/commands via
+   *  `ctx`; `node` is the bullet the caret is in (slash filters by its type). */
+  entries(trigger: MenuTrigger, node: Node, ctx: PluginContext): MenuEntry[];
+  /** Keep the menu "open" even with zero entries (the `/` palette shows "No
+   *  commands"). Default false -- so a brand-new `#tag`'s Enter passes through. */
+  openWhenEmpty?: boolean;
+  /** Text shown when `openWhenEmpty` and there are no entries. */
+  emptyLabel?: string;
+}
+
 // --- The plugin object ------------------------------------------------------
 
 /**
@@ -238,6 +295,8 @@ export interface PluginDef {
   interactions?: InteractionSpec[];
   /** Seam G: render-time view transforms (hide-completed, the tag filter). */
   viewTransforms?: ViewTransform[];
+  /** Seam H: caret autocomplete menus (the `#` tag menu). */
+  menus?: MenuSpec[];
   /** Seam I: input transforms (paste). */
   input?: InputSpec;
 }

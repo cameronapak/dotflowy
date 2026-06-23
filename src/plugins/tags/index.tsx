@@ -6,11 +6,12 @@
 // (Seam H) are still core-wired pending their dedicated refactors (see ADR 0018
 // implementation notes).
 
-import { buildTagFilter, TAG_PATTERN } from "../../data/tags";
+import { buildTagFilter, collectAllTags, TAG_PATTERN } from "../../data/tags";
 import {
   definePlugin,
   type El,
   type InteractionEvent,
+  type MenuTrigger,
   type PluginContext,
 } from "../types";
 import { TagColorMenu } from "./tag-color-menu";
@@ -30,6 +31,31 @@ function tagEl(tok: string): El {
     attrs: { class: TAG_CLASS, "data-tag": name },
     children: [tok],
   };
+}
+
+// The `#` autocomplete menu (Seam H). Triggers only when the `#` is at the
+// start or after whitespace AND the query so far is all tag chars (so `a#b` or a
+// `#` mid-punctuation doesn't open) -- stricter than the engine's default match.
+const TAG_CHARS = /^[\p{L}\p{N}_-]+$/u;
+
+function tagMenuMatch(before: string): MenuTrigger | null {
+  const triggerIndex = before.lastIndexOf("#");
+  if (triggerIndex === -1) return null;
+  const prev = before[triggerIndex - 1];
+  if (triggerIndex > 0 && prev !== " " && prev !== " ") return null;
+  const query = before.slice(triggerIndex + 1);
+  if (query.length > 0 && !TAG_CHARS.test(query)) return null;
+  return { query, triggerIndex };
+}
+
+// Each menu option is the tag's own colored chip (`.tag-option` + `data-tag` is
+// painted by the generated TagColorStyles stylesheet, same as inline chips).
+function tagOption(tag: string) {
+  return (
+    <span className="tag-option" data-tag={tag.slice(1)}>
+      {tag}
+    </span>
+  );
 }
 
 // Open the color picker at the pointer, routed through the generic overlay host
@@ -101,6 +127,30 @@ export default definePlugin({
         ctx.search.length
           ? buildTagFilter(index, ctx.rootId, ctx.search, isHidden)
           : null,
+    },
+  ],
+
+  // Seam H: `#` autocomplete over existing tags (read live from the tree). New
+  // tags are made by just finishing typing -- no "create" row, so the menu only
+  // opens when at least one existing tag matches (openWhenEmpty stays false).
+  // Picking inserts the full tag + a trailing space (it's "finished").
+  menus: [
+    {
+      id: "tag",
+      trigger: "#",
+      match: tagMenuMatch,
+      entries: (trigger, _node, ctx) => {
+        const q = trigger.query.toLowerCase();
+        const all = collectAllTags(ctx.tree);
+        const matches = q
+          ? all.filter((t) => t.slice(1).toLowerCase().includes(q))
+          : all;
+        return matches.slice(0, 8).map((tag) => ({
+          key: tag,
+          render: () => tagOption(tag),
+          replacement: tag + " ",
+        }));
+      },
     },
   ],
 });

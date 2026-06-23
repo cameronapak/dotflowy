@@ -2,10 +2,11 @@
 
 Status: **partially implemented** (2026-06-23) — shaped in a `/grill-with-docs` session; design
 decisions **D1–D10** are settled and ratified (D9 + D10 included). The plugin **host** (D1/D5/D6/D8)
-and Seams **A** (inline tokens), **B** (delegated interaction), **G** (view transforms), and **I**
-(paste) are **built and dogfooded**: `code`/`links`/`tags`/`todos` are plugins in `src/plugins/`,
-with **links a complete plugin** (A+B+I). Remaining: Seams **C/D/F/H** and the rest of the **todos**
-plugin (its interaction surface + the D9 completion-ownership move) — they need a menu engine. See
+and Seams **A** (inline tokens), **B** (delegated interaction), **G** (view transforms), **H** (the
+caret-menu engine), and **I** (paste) are **built and dogfooded**: `code`/`links`/`tags`/`todos` are
+plugins in `src/plugins/`, with **links a complete plugin** (A+B+I). Remaining: Seams **C/D/F** and
+the rest of the **todos** plugin (its interaction surface + the D9 completion-ownership move); the
+`/` palette folds into the menu engine when its commands become a Seam-C registry. See
 *Implementation status* below.
 
 Relates to:
@@ -264,18 +265,27 @@ transforms instead of hardcoding `completed`.
   as the `filter` prop (its dimming/override of `collapsed` is wired in `OutlineNode`); only its
   *computation* is now plugin-owned.
 
-So **links is a complete plugin** (A+B+I), **tags** is A+B+E+G, and **todos** is a partial plugin
+- **Seam H (caret menu engine)** — `PluginDef.menus`, a generic engine in `menu-engine.tsx`
+  (`useMenus`, one per focused bullet) that detects whichever trigger is live before the caret,
+  portals the option list, drives arrow/enter/tab/escape, and splices the picked entry's
+  `replacement` into the SOURCE (`readSource` space, so a folded link keeps its url) with an optional
+  `after` side effect. A `MenuSpec` is `{ trigger, match?, entries(trigger, node, ctx), … }`;
+  `registry.menuSpecs` lists them. **tags** owns the `#` menu (entries off `collectAllTags`, picked
+  via `ctx.tree`). The old `tag-menu.tsx` is deleted; the shared caret helpers stay in
+  `slash-menu.tsx`. The engine reads the bullet's `pluginCtx` (a stable `OutlineNode` prop). Covered
+  by `e2e/tag-menu.spec.ts`.
+
+So **links is a complete plugin** (A+B+I), **tags** is A+B+E+G+H, and **todos** is a partial plugin
 (G only — its interaction surface is next).
 
 **Remaining:**
 
-- **Seam H** (`#`/`/` autocomplete) — generalize `tag-menu.tsx`/`slash-menu.tsx` into a core menu
-  engine + plugin `menus` specs. Tags' `#` menu and the `/` palette are still core-wired.
 - **Seams C/D/F + the rest of the todos plugin** — slash commands, the `Mod+Enter`/`Mod+D` keymap,
   the checkbox row slot, the `[]` autoformat, and (D9) moving completion's ownership out of core.
-  Seam G (hide-completed) has landed, so todos can now build on it. Fade-inheritance
-  (`faded`/`ancestorCompleted`) still reads `node.completed` in `OutlineNode` — it stays core until a
-  row-decoration seam exists.
+  Seam G (hide-completed) has landed, so todos can now build on it. When the `/` palette's commands
+  become a Seam-C registry, the `/` menu folds into the Seam-H engine too (it still uses the core
+  `useSlashMenu` for now). Fade-inheritance (`faded`/`ancestorCompleted`) still reads
+  `node.completed` in `OutlineNode` — it stays core until a row-decoration seam exists.
 
 ## Why
 

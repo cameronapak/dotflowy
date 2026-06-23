@@ -706,6 +706,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   key={node.id}
                   nodeId={node.id}
                   commands={commands}
+                  pluginCtx={pluginCtx}
                   registerRef={registerRef}
                   pivotId={pivotId}
                   ancestorCompleted={false}
