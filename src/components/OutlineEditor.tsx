@@ -493,6 +493,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         rootIdRef.current,
         id,
         direction,
+        showCompletedRef.current,
       );
       if (target) {
         const el = refs.current.get(target);
@@ -950,8 +951,9 @@ function findVisibleNeighbor(
   rootId: string | null,
   id: string,
   direction: "up" | "down",
+  showCompleted: boolean,
 ): string | null {
-  const flat = flattenVisible(index, rootId);
+  const flat = flattenVisible(index, rootId, showCompleted);
   const i = flat.findIndex((n) => n.id === id);
   if (i === -1) return null;
   const neighbor = direction === "up" ? flat[i - 1] : flat[i + 1];
@@ -961,12 +963,18 @@ function findVisibleNeighbor(
 function flattenVisible(
   index: TreeIndex,
   rootId: string | null,
+  showCompleted: boolean,
 ): Array<{ id: string }> {
   const out: Array<{ id: string }> = [];
   // The zoomed title participates in up/down navigation.
   if (rootId) out.push({ id: rootId });
   const walk = (parentId: string | null) => {
     for (const child of childrenOf(index, parentId)) {
+      // Mirror the render's visibility: when showCompleted is off, completed
+      // nodes (and their subtrees) are absent from the DOM. Keeping them in
+      // this walk would make findVisibleNeighbor return an id with no mounted
+      // element, so onMoveFocus silently no-ops and focus gets stuck.
+      if (!showCompleted && child.completed) continue;
       out.push({ id: child.id });
       if (!child.collapsed) walk(child.id);
     }

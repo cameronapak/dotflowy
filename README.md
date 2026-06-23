@@ -45,6 +45,7 @@ Other useful scripts:
 bun run build      # production build
 bun run preview    # preview the production build
 bun run typecheck  # tsc --noEmit
+bun run test:e2e   # Playwright end-to-end tests (chromium)
 ```
 
 ## How it works
