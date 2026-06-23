@@ -231,6 +231,33 @@
 }
 
 /*
+ * "Acted-upon" pulse. A row briefly tinted bg-card, fading back to transparent,
+ * marks the bullet an action just landed on -- a node you dragged elsewhere, or
+ * the node you jumped to via /move's "Go". Purely visual (the .node-acted class
+ * is added then cleared on animationend in flash-node.ts); never persisted. The
+ * fade keeps card's lightness while dropping alpha to 0 (relative-color `/ 0`),
+ * so it dissolves cleanly instead of graying out through transparent-black.
+ */
+@keyframes node-acted-fade {
+  from {
+    background-color: var(--card);
+  }
+  to {
+    background-color: oklch(from var(--card) l c h / 0);
+  }
+}
+
+.outline-row.node-acted {
+  animation: node-acted-fade 2.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-row.node-acted {
+    animation: none;
+  }
+}
+
+/*
  * Collapse/expand chevron. Sits in the left gutter (absolute, so toggling
  * it never reflows the bullet) and only shows on row hover or while the row
  * holds focus, except when the row is collapsed, where it stays visible so the

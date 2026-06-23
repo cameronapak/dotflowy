@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
+import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
 import { cn } from "@/lib/utils";
 import {
@@ -159,6 +160,7 @@ function MoveDialogInner({
 
   function move(targetId: string | null) {
     if (!nodeId) return;
+    const movedId = nodeId;
     onOpenChange(false);
     capture(index, nodeId);
     // Append as the last child of the destination (or last top-level for Home).
@@ -176,10 +178,14 @@ function MoveDialogInner({
     toast.success(`Moved to ${dest}`, {
       action: {
         label: "Go",
-        onClick: () =>
+        onClick: () => {
+          // Flash + focus the moved node once the destination view mounts, so
+          // it's easy to spot where it landed. See flash-node.ts.
+          requestFlashAfterNav(movedId);
           targetId === null
             ? navigate({ to: "/" })
-            : navigate({ to: "/$nodeId", params: { nodeId: targetId } }),
+            : navigate({ to: "/$nodeId", params: { nodeId: targetId } });
+        },
       },
     });
   }

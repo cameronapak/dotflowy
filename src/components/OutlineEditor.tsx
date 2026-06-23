@@ -52,6 +52,7 @@ import {
 import { hasLink } from "../data/links";
 import { pasteIntoBullet } from "./paste-links";
 import { useDragReorder } from "./use-drag-reorder";
+import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
 import { openMoveDialog } from "./move-dialog";
@@ -127,6 +128,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // the START of that moved text, not after it. Every other pending-focus wants
   // the end (natural typing flow), which is the default.
   const pendingFocusAtStart = useRef(false);
+  // Like pendingFocus, but pulses the row's background (bg-card -> transparent)
+  // to mark the node an action just landed on -- set after a drag-move. Same
+  // post-render timing, since the moved row only exists after the next render.
+  const pendingFlash = useRef<string | null>(null);
 
   // After every render, if a focus is pending and the target exists, focus it.
   useEffect(() => {
@@ -139,6 +144,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       }
       pendingFocus.current = null;
       pendingFocusAtStart.current = false;
+    }
+    if (pendingFlash.current) {
+      const el = refs.current.get(pendingFlash.current);
+      flashRow(el?.closest(".outline-row") ?? null);
+      pendingFlash.current = null;
     }
   });
 
@@ -337,6 +347,21 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     el.scrollIntoView({ block: "nearest" });
   }, []);
 
+  // /move's "Go" jumps to the destination's zoom view and asks us to focus and
+  // flash the node that was moved, so it's easy to spot where it landed. Mount-
+  // only, like the post-zoom focus above (the editor remounts per view), and a
+  // passive effect for the same reason -- bullet text/heights settle first.
+  useEffect(() => {
+    const flashId = consumeFlashAfterNav();
+    if (!flashId) return;
+    const el = refs.current.get(flashId);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    placeCaretAtEnd(el);
+    el.scrollIntoView({ block: "nearest" });
+    flashRow(el.closest(".outline-row"));
+  }, []);
+
   /**
    * Navigate to a new zoom root with a shared-element morph. `pivot` is the
    * node that changes role: the target when zooming in (list item -> title),
@@ -410,8 +435,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         newParentId,
         afterSiblingId,
       );
-      if (moved) pendingFocus.current = id;
-      else drop();
+      if (moved) {
+        pendingFocus.current = id;
+        // Tint the row it landed on so the eye can find what just moved.
+        pendingFlash.current = id;
+      } else drop();
     },
   });
   // Stable references (useCallback([]) inside the hook), safe to close over in
@@ -475,8 +503,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // Moving the node reparents it into a different <ul>, which remounts
       // its contentEditable and drops focus. Re-focus it after the render.
       capture(focusIndex.current, id);
-      if (indent(focusIndex.current, id)) pendingFocus.current = id;
-      else drop(); // no move happened; discard the redundant undo point
+      if (indent(focusIndex.current, id)) {
+        pendingFocus.current = id;
+        pendingFlash.current = id;
+      } else drop(); // no move happened; discard the redundant undo point
     },
 
     onOutdent: (id) => {
@@ -486,8 +516,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       if (node && node.parentId === rootIdRef.current) return;
       // Same remount-drops-focus issue as indent; re-focus on a real move.
       capture(focusIndex.current, id);
-      if (outdent(focusIndex.current, id)) pendingFocus.current = id;
-      else drop();
+      if (outdent(focusIndex.current, id)) {
+        pendingFocus.current = id;
+        pendingFlash.current = id;
+      } else drop();
     },
 
     onMoveUp: (id) => {
@@ -497,8 +529,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         isVisible: (n) => showCompletedRef.current || !n.completed,
         rootId: rootIdRef.current,
       });
-      if (moved) pendingFocus.current = id;
-      else drop();
+      if (moved) {
+        pendingFocus.current = id;
+        pendingFlash.current = id;
+      } else drop();
     },
 
     onMoveDown: (id) => {
@@ -507,8 +541,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         isVisible: (n) => showCompletedRef.current || !n.completed,
         rootId: rootIdRef.current,
       });
-      if (moved) pendingFocus.current = id;
-      else drop();
+      if (moved) {
+        pendingFocus.current = id;
+        pendingFlash.current = id;
+      } else drop();
     },
 
     onDeleteNode: (id) => {
