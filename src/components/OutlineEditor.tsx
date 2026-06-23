@@ -1,9 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearch,
+} from "@tanstack/react-router";
 import { useHotkey, useHotkeys } from "@tanstack/react-hotkeys";
-import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
+import {
+  ChevronRight,
+  HomeIcon,
+  MoreHorizontal,
+  PlusIcon,
+  X,
+} from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
+import { buildTagFilter, parseQuery, serializeQuery } from "../data/tags";
+import { TagColorMenu } from "./tag-color-menu";
 import {
   indent,
   insertChildAtStart,
@@ -58,6 +78,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
 
+  // Active tag filter, read from the `q` search param (ADR 0015). Empty unless
+  // a filter is on. Kept in a ref too, so the stable chip-click/bar handlers
+  // below can read the current tags without re-binding.
+  const search = useSearch({ strict: false }) as { q?: string };
+  const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
+  const activeTagsRef = useRef(activeTags);
+  activeTagsRef.current = activeTags;
+
   // Refs registry: id -> contentEditable span. Lets us move focus
   // between bullets after structural mutations. The zoomed title also
   // registers here under rootId, so focus logic treats it uniformly.
@@ -111,6 +139,86 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   showCompletedRef.current = showCompleted;
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+
+  // Write the active tags into the `q` param, navigating on the current route.
+  // Mirrors navigateZoom's null-root branch. Stable (reads live values through
+  // refs) so the chip-click handler and filter bar never re-bind.
+  const setQ = useCallback((tags: string[]) => {
+    const q = serializeQuery(tags);
+    const nextSearch = q ? { q } : {};
+    const root = rootIdRef.current;
+    if (root === null) navigateRef.current({ to: "/", search: nextSearch });
+    else
+      navigateRef.current({
+        to: "/$nodeId",
+        params: { nodeId: root },
+        search: nextSearch,
+      });
+  }, []);
+  // Clicking a tag AND-s it into the filter (accretes, never replaces); a
+  // pill's ✕ drops one; clear-all drops the filter.
+  const addTag = useCallback(
+    (tag: string) => {
+      const current = activeTagsRef.current;
+      if (current.includes(tag)) return;
+      setQ([...current, tag]);
+    },
+    [setQ],
+  );
+  const removeTag = useCallback(
+    (tag: string) => setQ(activeTagsRef.current.filter((t) => t !== tag)),
+    [setQ],
+  );
+  const clearTags = useCallback(() => setQ([]), [setQ]);
+
+  // Escape clears the filter -- but only when the caret isn't inside a bullet,
+  // so it never eats an in-progress edit (ADR 0015).
+  useEffect(() => {
+    if (activeTags.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.classList.contains("node-text"))
+        return;
+      clearTags();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeTags.length, clearTags]);
+
+  // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
+  // plain mousedown would place an editing caret; we block that and route the
+  // click to the filter instead. On touch a transient caret may flash before
+  // the navigation, which re-prunes the view -- accepted for v1 (ADR 0015).
+  const onContentMouseDown = (e: ReactMouseEvent) => {
+    if ((e.target as HTMLElement).closest?.(".tag[data-tag]")) e.preventDefault();
+  };
+  const onContentClick = (e: ReactMouseEvent) => {
+    const el = (e.target as HTMLElement).closest?.(
+      ".tag[data-tag]",
+    ) as HTMLElement | null;
+    const name = el?.dataset.tag;
+    if (!name) return;
+    e.preventDefault();
+    e.stopPropagation();
+    addTag("#" + name);
+  };
+  // Right-click any tag surface (chip or filter pill) to pick its color. Plain
+  // click is taken by filtering, so color-pick rides the context menu. ADR 0016.
+  const [colorMenu, setColorMenu] = useState<{
+    tag: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const onContentContextMenu = (e: ReactMouseEvent) => {
+    const el = (e.target as HTMLElement).closest?.(
+      "[data-tag]",
+    ) as HTMLElement | null;
+    const name = el?.dataset.tag;
+    if (!name) return;
+    e.preventDefault();
+    setColorMenu({ tag: name, x: e.clientX, y: e.clientY });
+  };
 
   // Cmd/Ctrl+D toggles completion on the focused bullet. Every bullet is
   // completable (not just tasks), so this works regardless of isTask. We find
@@ -393,12 +501,24 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [navigateZoom, startDrag, consumeClick],
   );
 
+  // The pruned visible-set for the active filter (matches + ancestor context),
+  // or null when no filter. Render-time only -- never mutates a node. ADR 0015.
+  const filter = useMemo(
+    () =>
+      activeTags.length
+        ? buildTagFilter(index, rootId, activeTags, showCompleted)
+        : null,
+    [activeTags, index, rootId, showCompleted],
+  );
+  const noMatches = filter !== null && filter.matchIds.size === 0;
+
   // Top-level roots start the fade cascade fresh: a completed ancestor above
   // the current view (when zoomed) contributes nothing. Hide completed roots
-  // when the toggle is off. See docs/adr/0002.
-  const topLevel = childrenOf(index, rootId).filter(
-    (n) => showCompleted || !n.completed,
-  );
+  // when the toggle is off (ADR 0002), and -- while filtering -- keep only the
+  // ones on a path to a match.
+  const topLevel = childrenOf(index, rootId)
+    .filter((n) => showCompleted || !n.completed)
+    .filter((n) => !filter || filter.visibleIds.has(n.id));
   const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const trail = buildTrail(index, rootId);
 
@@ -422,7 +542,30 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           onNavigate={navigateZoom}
         />
       </Header>
-      <div className="mx-auto max-w-[720px] p-6">
+      {/* Tag chips live inside the bullets' contentEditable, so the click that
+          filters is captured here (mousedown blocks the editing caret). */}
+      <div
+        className="mx-auto max-w-[720px] p-6"
+        onMouseDown={onContentMouseDown}
+        onClick={onContentClick}
+        onContextMenu={onContentContextMenu}
+      >
+        {colorMenu && (
+          <TagColorMenu
+            tag={colorMenu.tag}
+            x={colorMenu.x}
+            y={colorMenu.y}
+            onClose={() => setColorMenu(null)}
+          />
+        )}
+        {activeTags.length > 0 && (
+          <TagFilterBar
+            tags={activeTags}
+            onRemove={removeTag}
+            onClear={clearTags}
+          />
+        )}
+
         {zoomedNode && (
           <ZoomedTitle
             node={zoomedNode}
@@ -440,37 +583,90 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           />
         )}
 
-        <ul className="outline-list" ref={listRef}>
-          {topLevel.map((node) => (
-            <OutlineNode
-              key={node.id}
-              nodeId={node.id}
-              commands={commands}
-              registerRef={registerRef}
-              pivotId={pivotId}
-              ancestorCompleted={false}
-              showCompleted={showCompleted}
-            />
-          ))}
-        </ul>
-        {/* Click anywhere in the whitespace below the list adds a new top-level bullet. */}
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="outline"
-          onClick={() => {
-            const siblings = childrenOf(focusIndex.current, rootId);
-            const afterId = siblings.length
-              ? siblings[siblings.length - 1]!.id
-              : null;
-            const newId = insertSibling(focusIndex.current, rootId, afterId);
-            pendingFocus.current = newId;
-          }}
-        >
-          <PlusIcon />
-        </Button>
+        {noMatches ? (
+          <div className="outline-empty">
+            No nodes tagged {activeTags.join(" ")} here.
+          </div>
+        ) : (
+          <>
+            <ul className="outline-list" ref={listRef}>
+              {topLevel.map((node) => (
+                <OutlineNode
+                  key={node.id}
+                  nodeId={node.id}
+                  commands={commands}
+                  registerRef={registerRef}
+                  pivotId={pivotId}
+                  ancestorCompleted={false}
+                  showCompleted={showCompleted}
+                  filter={filter}
+                />
+              ))}
+            </ul>
+            {/* Click in the whitespace below the list adds a new top-level
+                bullet. Hidden while filtering -- there's no "add here" then. */}
+            {!filter && (
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                onClick={() => {
+                  const siblings = childrenOf(focusIndex.current, rootId);
+                  const afterId = siblings.length
+                    ? siblings[siblings.length - 1]!.id
+                    : null;
+                  const newId = insertSibling(
+                    focusIndex.current,
+                    rootId,
+                    afterId,
+                  );
+                  pendingFocus.current = newId;
+                }}
+              >
+                <PlusIcon />
+              </Button>
+            )}
+          </>
+        )}
       </div>
     </>
+  );
+}
+
+/**
+ * The active-tag filter bar: a row of tag pills, shown only while a filter is
+ * on. Each pill's ✕ drops that one tag; "Clear" drops the whole filter. Tags
+ * are *added* by clicking chips in the outline, never typed here -- v1 is
+ * tags-only and click-driven. See docs/adr/0015.
+ */
+function TagFilterBar({
+  tags,
+  onRemove,
+  onClear,
+}: {
+  tags: string[];
+  onRemove: (tag: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="tag-filter-bar" role="search" aria-label="Tag filter">
+      {tags.map((tag) => (
+        <span key={tag} className="tag-pill" data-tag={tag.slice(1)}>
+          {tag}
+          <button
+            type="button"
+            className="tag-pill-remove"
+            aria-label={`Remove ${tag} from filter`}
+            onClick={() => onRemove(tag)}
+          >
+            <X size={12} strokeWidth={2.5} />
+          </button>
+        </span>
+      ))}
+      <button type="button" className="tag-filter-clear" onClick={onClear}>
+        Clear
+      </button>
+    </div>
   );
 }
 

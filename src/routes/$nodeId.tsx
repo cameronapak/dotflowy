@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { OutlineEditor } from "../components/OutlineEditor";
+import { validateOutlineSearch } from "../data/tags";
 
 export const Route = createFileRoute("/$nodeId")({
   component: ZoomedPage,
+  validateSearch: validateOutlineSearch,
 });
 
 function ZoomedPage() {

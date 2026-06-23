@@ -8,6 +8,7 @@ import {
 import { ThemeProvider } from '../components/theme-provider'
 import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
+import { TagColorStyles } from '../components/tag-color-menu'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -41,6 +42,7 @@ function RootComponent() {
         <ShowCompletedProvider>
           <Outlet />
           <NodeSwitcher />
+          <TagColorStyles />
         </ShowCompletedProvider>
       </ThemeProvider>
     </RootDocument>

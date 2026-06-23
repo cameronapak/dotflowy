@@ -221,6 +221,16 @@
 }
 
 /*
+ * Tag-filter context dim. While a tag filter is active, a row that's only on
+ * screen as ancestor context for a match below it (not itself a match) is
+ * dimmed so the actual matches read as the foreground. Same opacity lever as
+ * the completion fade, on the row. See docs/adr/0015.
+ */
+.outline-row[data-context="true"] {
+  opacity: 0.45;
+}
+
+/*
  * Collapse/expand chevron. Sits in the left gutter (absolute, so toggling
  * it never reflows the bullet) and only shows on row hover or while the row
  * holds focus, except when the row is collapsed, where it stays visible so the
@@ -646,4 +656,114 @@ body.dragging-active * {
     height: 100%;
     min-height: 44px;
   }
+}
+
+/*
+ * Tag color palette. A tag is colored only when chosen (ADR 0016); the choice
+ * is applied via a generated stylesheet keyed by `data-tag` (tag-colors.ts),
+ * which sets background/color/border-color to one of these named pairs. Default
+ * (no choice) is the neutral outline below. Light/dark pairs via custom props.
+ */
+:root {
+  --tag-red: oklch(0.94 0.045 25);    --tag-red-fg: oklch(0.48 0.16 25);
+  --tag-orange: oklch(0.94 0.05 55);  --tag-orange-fg: oklch(0.48 0.13 50);
+  --tag-amber: oklch(0.95 0.06 90);   --tag-amber-fg: oklch(0.47 0.11 85);
+  --tag-green: oklch(0.94 0.06 150);  --tag-green-fg: oklch(0.45 0.13 150);
+  --tag-teal: oklch(0.94 0.05 195);   --tag-teal-fg: oklch(0.46 0.10 200);
+  --tag-blue: oklch(0.94 0.05 250);   --tag-blue-fg: oklch(0.49 0.15 255);
+  --tag-indigo: oklch(0.94 0.05 280); --tag-indigo-fg: oklch(0.49 0.16 280);
+  --tag-purple: oklch(0.94 0.05 310); --tag-purple-fg: oklch(0.49 0.17 310);
+  --tag-pink: oklch(0.94 0.05 345);   --tag-pink-fg: oklch(0.49 0.17 345);
+}
+
+.dark {
+  --tag-red: oklch(0.34 0.055 25);    --tag-red-fg: oklch(0.85 0.10 25);
+  --tag-orange: oklch(0.34 0.055 55); --tag-orange-fg: oklch(0.86 0.10 60);
+  --tag-amber: oklch(0.35 0.06 90);   --tag-amber-fg: oklch(0.88 0.11 90);
+  --tag-green: oklch(0.34 0.06 150);  --tag-green-fg: oklch(0.86 0.11 150);
+  --tag-teal: oklch(0.34 0.055 195);  --tag-teal-fg: oklch(0.85 0.09 200);
+  --tag-blue: oklch(0.34 0.06 250);   --tag-blue-fg: oklch(0.84 0.11 255);
+  --tag-indigo: oklch(0.34 0.06 280); --tag-indigo-fg: oklch(0.84 0.12 280);
+  --tag-purple: oklch(0.34 0.06 310); --tag-purple-fg: oklch(0.85 0.12 310);
+  --tag-pink: oklch(0.34 0.06 345);   --tag-pink-fg: oklch(0.85 0.12 345);
+}
+
+/* Neutral default for every tag surface -- an outline, no fill, until a color
+   is chosen (the generated stylesheet then overrides bg/color/border-color). */
+.tag,
+.tag-pill,
+.tag-option {
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.tag:hover {
+  filter: brightness(0.97);
+}
+
+.dark .tag:hover {
+  filter: brightness(1.12);
+}
+
+/* The active-tag filter bar above the outline. */
+.tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+/* Layout only -- color comes from the tag's `.tag-cN` palette class. */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tag-pill-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.tag-pill-remove:hover {
+  opacity: 1;
+  background: var(--row-hover);
+}
+
+.tag-filter-clear {
+  border: none;
+  background: transparent;
+  @apply text-muted-foreground;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tag-filter-clear:hover {
+  @apply text-accent;
+}
+
+/* A tag rendered as its chip inside an autocomplete row (tag-menu.tsx). */
+.tag-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 500;
 }
