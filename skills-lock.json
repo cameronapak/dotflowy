@@ -37,6 +37,12 @@
       "skillPath": "packages/db/skills/db-core/persistence/SKILL.md",
       "computedHash": "375a173137681ac7a90de480964968055e7229dd820a951a8542e6bdcd4282da"
     },
+    "domain-modeling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/domain-modeling/SKILL.md",
+      "computedHash": "67343881f5def98487d56243155716110afbcbf22ec92421c882d532b941cb17"
+    },
     "grill-with-docs": {
       "source": "mattpocock/skills",
       "sourceType": "github",
