@@ -11,6 +11,8 @@ export interface SeedNode {
   collapsed?: boolean;
   completed?: boolean;
   isTask?: boolean;
+  /** Epoch ms when bookmarked; omit/null for an un-bookmarked node. */
+  bookmarkedAt?: number | null;
 }
 
 const STORAGE_KEY = "dotflowy-oss:nodes";
@@ -37,7 +39,7 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
         isTask: n.isTask ?? false,
         completed: n.completed ?? false,
         collapsed: n.collapsed ?? false,
-        bookmarkedAt: null,
+        bookmarkedAt: n.bookmarkedAt ?? null,
         createdAt: 0,
         updatedAt: 0,
       },

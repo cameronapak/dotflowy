@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { HomeIcon } from "lucide-react";
+import { BookmarkIcon, HomeIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
@@ -23,6 +23,10 @@ import {
  * picked target (or a top-level node for Home). Mirrors `node-switcher.tsx`
  * (self-contained, single mount, module-level opener), but it *acts* -- it runs
  * the `moveNode` mutation -- rather than only navigating.
+ *
+ * The empty-query state lists **bookmarks** (same as the quick-switcher), since
+ * the usual move target is a saved view -- so the common case is a single pick,
+ * no typing. Typing falls back to the full fuzzy search over every node.
  *
  * After the move it stays put and fires a toast confirming the destination
  * (with a "Go" action to jump there on demand) -- moving a node shouldn't yank
@@ -130,14 +134,25 @@ function MoveDialogInner({
 
   const q = query.trim();
 
-  const results = useMemo<Hit[]>(() => {
-    if (!q || !fuse) {
-      return candidates.slice(0, RESULT_LIMIT).map((node) => ({ node }));
-    }
+  // null => empty-query mode (show bookmarks, mirroring the quick-switcher).
+  // Otherwise the Fuse hits over every candidate.
+  const results = useMemo<Hit[] | null>(() => {
+    if (!q || !fuse) return null;
     return fuse
       .search(q, { limit: RESULT_LIMIT })
       .map((r) => ({ node: r.item, matches: r.matches }));
-  }, [q, fuse, candidates]);
+  }, [q, fuse]);
+
+  // Bookmarked destinations for the empty-query state, newest first. Drawn from
+  // `candidates` (not all nodes), so the moved node and its own subtree are
+  // already excluded -- you can't bookmark-jump a branch into itself.
+  const bookmarks = useMemo(
+    () =>
+      candidates
+        .filter((n) => n.bookmarkedAt != null)
+        .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0)),
+    [candidates],
+  );
 
   // "Home" shows on an empty query or when the text looks like the word.
   const showHome = q === "" || "home".includes(q.toLowerCase());
@@ -191,7 +206,29 @@ function MoveDialogInner({
               </CommandItem>
             </CommandGroup>
           )}
-          {results.length === 0 ? (
+          {results === null ? (
+            bookmarks.length === 0 ? (
+              <Hint>Type to search your nodes.</Hint>
+            ) : (
+              <CommandGroup
+                heading={
+                  <div className="flex items-center gap-1">
+                    <BookmarkIcon className="size-4" />
+                    Bookmarks
+                  </div>
+                }
+              >
+                {bookmarks.map((node) => (
+                  <DestinationRow
+                    key={node.id}
+                    index={index}
+                    node={node}
+                    onSelect={move}
+                  />
+                ))}
+              </CommandGroup>
+            )
+          ) : results.length === 0 ? (
             !showHome && <Hint>No matches.</Hint>
           ) : (
             <CommandGroup heading="Move under">
