@@ -45,6 +45,7 @@ import { decorate } from "./inline-code";
 import { useDragReorder } from "./use-drag-reorder";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
+import { openMoveDialog } from "./move-dialog";
 import { Button } from "./ui/button";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
@@ -477,6 +478,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       capture(focusIndex.current, id);
       setIsTask(id, isTask);
     },
+
+    // Open the move picker; the dialog runs the mutation + navigation itself.
+    onRequestMove: (id) => openMoveDialog(id),
 
     onToggleCollapsed: (id, collapsed) => {
       capture(focusIndex.current, id);

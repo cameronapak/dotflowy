@@ -56,6 +56,8 @@ export interface NodeCommands {
   onToggleCompleted: (id: string, completed: boolean) => void;
   // Set whether a bullet is a task (checkbox shown/hidden).
   onSetTask: (id: string, isTask: boolean) => void;
+  // Open the `/move` destination picker for this bullet.
+  onRequestMove: (id: string) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
   // `x` is the caret's viewport x at the moment of the keypress, so the
   // landing node can drop the caret at the same column. Omitted when there's

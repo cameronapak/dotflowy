@@ -8,6 +8,7 @@ import {
 import { ThemeProvider } from '../components/theme-provider'
 import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
+import { MoveDialog } from '../components/move-dialog'
 import { TagColorStyles } from '../components/tag-color-menu'
 import '../styles.css'
 
@@ -42,6 +43,7 @@ function RootComponent() {
         <ShowCompletedProvider>
           <Outlet />
           <NodeSwitcher />
+          <MoveDialog />
           <TagColorStyles />
         </ShowCompletedProvider>
       </ThemeProvider>

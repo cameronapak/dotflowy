@@ -5,7 +5,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ListIcon, SquareCheckIcon, type LucideIcon } from "lucide-react";
+import {
+  ListIcon,
+  SquareCheckIcon,
+  CornerUpRightIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Node } from "../data/schema";
 import type { NodeCommands } from "./OutlineNode";
@@ -47,6 +52,15 @@ const SLASH_COMMANDS: SlashCommand[] = [
     keywords: ["bullet", "plain", "text", "list", "into"],
     available: (node) => node.isTask,
     run: (id, commands) => commands.onSetTask(id, false),
+  },
+  {
+    id: "move",
+    label: "Move",
+    description: "Move under another node",
+    icon: CornerUpRightIcon,
+    keywords: ["move", "reparent", "under", "into", "relocate", "home"],
+    available: () => true,
+    run: (id, commands) => commands.onRequestMove(id),
   },
 ];
 
