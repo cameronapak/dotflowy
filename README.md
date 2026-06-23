@@ -17,9 +17,10 @@ Very early. v1 scope only:
   - `Tab` / `Shift+Tab` — indent / outdent
   - `Backspace` on an empty bullet — delete and focus the previous one
   - `Arrow Up` / `Arrow Down` at line edges — move between bullets
+  - `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` — undo / redo
 - Persists to `localStorage`; syncs across browser tabs automatically
 
-Not built yet: drag-to-reorder, tags, search, sharing, undo/redo, mobile gestures, multi-device sync.
+Not built yet: sharing, mobile gestures, multi-device sync.
 
 ## Stack
 

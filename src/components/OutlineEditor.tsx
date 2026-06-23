@@ -39,7 +39,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { seedIfEmpty } from "../data/seed";
-import { capture, drop, undo } from "../data/history";
+import { capture, drop, redo, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import { decorate } from "./inline-code";
 import { useDragReorder } from "./use-drag-reorder";
@@ -220,21 +220,23 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     setColorMenu({ tag: name, x: e.clientX, y: e.clientY });
   };
 
+  // The id of the currently focused bullet, found by reverse-looking-up the
+  // refs registry (covers both list items and the zoomed title, registered
+  // under rootId). Null when focus is outside the outline.
+  const findFocusedId = (): string | null => {
+    const active = document.activeElement;
+    for (const [id, el] of refs.current) {
+      if (el === active) return id;
+    }
+    return null;
+  };
+
   // Cmd/Ctrl+D toggles completion on the focused bullet. Every bullet is
-  // completable (not just tasks), so this works regardless of isTask. We find
-  // the focused node by reverse-looking-up the refs registry, which covers
-  // both list items and the zoomed title (registered under rootId).
+  // completable (not just tasks), so this works regardless of isTask.
   useHotkey(
     "Mod+D",
     () => {
-      const active = document.activeElement;
-      let focusedId: string | null = null;
-      for (const [id, el] of refs.current) {
-        if (el === active) {
-          focusedId = id;
-          break;
-        }
-      }
+      const focusedId = findFocusedId();
       if (!focusedId) return;
       const node = focusIndex.current.byId.get(focusedId);
       if (!node) return;
@@ -247,10 +249,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Cmd/Ctrl+Z: undo the last action. preventDefault stops the browser's
   // native contentEditable undo so we own history. Restores focus to the
   // node that was focused before the undone action, when it still exists.
+  // The currently-focused id is handed to undo so redo can later return focus
+  // to where the action left it.
   useHotkey(
     "Mod+Z",
     () => {
-      const focusId = undo(focusIndex.current);
+      const focusId = undo(focusIndex.current, findFocusedId());
+      if (focusId) pendingFocus.current = focusId;
+    },
+    { preventDefault: true },
+  );
+
+  // Cmd/Ctrl+Shift+Z: redo the last undone action, the mirror of Mod+Z.
+  useHotkey(
+    "Mod+Shift+Z",
+    () => {
+      const focusId = redo(focusIndex.current, findFocusedId());
       if (focusId) pendingFocus.current = focusId;
     },
     { preventDefault: true },
