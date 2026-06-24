@@ -5,6 +5,12 @@ import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { stripLinks } from "../data/links";
+import {
+  searchAliases,
+  searchActions,
+  searchAnnotation,
+} from "../plugins/registry";
+import type { SearchAction } from "../plugins/types";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import {
@@ -42,10 +48,15 @@ export function openNodeSwitcher() {
 interface Searchable {
   node: Node;
   text: string;
+  // Extra match terms a plugin contributes for this node (Seam J) -- the daily
+  // plugin's relative label ("Today"), absent from the full-date text. Searched
+  // but NOT highlighted (highlight only looks at the "text" key), so the row
+  // still displays node.text with no misaligned ranges. See ADR 0022.
+  aliases: string[];
 }
 
 const FUSE_OPTIONS: IFuseOptions<Searchable> = {
-  keys: ["text"],
+  keys: ["text", "aliases"],
   includeMatches: true,
   // CRITICAL: without this Fuse penalizes matches late in the string, so
   // "notes" would miss "Weekly team notes". See ADR 0012.
@@ -136,7 +147,7 @@ function SwitcherDialog({
     if (!open) return null;
     const searchable: Searchable[] = nodes
       .filter((n) => n.text.trim() !== "")
-      .map((n) => ({ node: n, text: stripLinks(n.text) }));
+      .map((n) => ({ node: n, text: stripLinks(n.text), aliases: searchAliases(n) }));
     return new Fuse(searchable, FUSE_OPTIONS);
   }, [open, nodes]);
 
@@ -162,6 +173,20 @@ function SwitcherDialog({
     navigate({ to: "/$nodeId", params: { nodeId } });
   }
 
+  // Plugin-contributed VIRTUAL rows (Seam J), built from the live query -- the
+  // daily plugin's "Go to Today" when today's note doesn't exist yet. Each runs
+  // its own action (create + navigate) on pick. Empty for an empty query.
+  const actions = useMemo<SearchAction[]>(() => {
+    if (!q) return [];
+    return searchActions(q, {
+      index,
+      goTo: (id) => {
+        onPicked();
+        navigate({ to: "/$nodeId", params: { nodeId: id } });
+      },
+    });
+  }, [q, index, navigate, onPicked]);
+
   return (
     <CommandDialog
       open={open}
@@ -176,6 +201,13 @@ function SwitcherDialog({
           placeholder="Search nodes..."
         />
         <CommandList>
+          {actions.length > 0 && (
+            <CommandGroup heading="Actions">
+              {actions.map((a) => (
+                <ActionRow key={a.key} action={a} />
+              ))}
+            </CommandGroup>
+          )}
           {results === null ? (
             bookmarks.length === 0 ? (
               <Hint>No bookmarks yet. Type to search your nodes.</Hint>
@@ -199,7 +231,11 @@ function SwitcherDialog({
               </CommandGroup>
             )
           ) : results.length === 0 ? (
-            <Hint>No matches.</Hint>
+            // Suppress "No matches" when a virtual action still answers the query
+            // (e.g. "today" with no node, but the create-today action is shown).
+            actions.length === 0 ? (
+              <Hint>No matches.</Hint>
+            ) : null
           ) : (
             <CommandGroup heading="Results">
               {results.map(({ item, matches }) => (
@@ -226,6 +262,25 @@ export function NodeSearchButton() {
       <Search />
       <span className="sr-only">Search nodes</span>
     </Button>
+  );
+}
+
+/** A virtual (non-node) row -- a plugin's Seam-J action (e.g. "Go to Today").
+ *  Carries its own icon and runs its own action on pick. */
+function ActionRow({ action }: { action: SearchAction }) {
+  const Icon = action.icon;
+  return (
+    <CommandItem value={action.key} onSelect={() => action.run()}>
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate">{action.label}</span>
+        {action.hint && (
+          <span className="truncate text-xs text-muted-foreground">
+            {action.hint}
+          </span>
+        )}
+      </div>
+    </CommandItem>
   );
 }
 
@@ -257,6 +312,10 @@ function ResultRow({
     .join(" › ");
 
   const title = stripLinks(node.text).trim() || "Untitled";
+  // A plugin's display-only suffix (Seam J) -- the daily plugin's "Today" -- so a
+  // day note reads "Tuesday, June 23, 2026 (Today)". Not part of node.text, so
+  // it's rendered as a separate, un-highlighted span after the title.
+  const annotation = searchAnnotation(node);
 
   return (
     <CommandItem value={node.id} onSelect={() => onSelect(node.id)}>
@@ -268,6 +327,9 @@ function ResultRow({
           )}
         >
           {highlight(title, textMatchIndices(matches))}
+          {annotation && (
+            <span className="ml-1 text-muted-foreground">({annotation})</span>
+          )}
         </span>
         {crumbs && (
           <span className="truncate text-xs text-muted-foreground">

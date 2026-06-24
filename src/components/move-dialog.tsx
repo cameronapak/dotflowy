@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
+import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,10 @@ export function openMoveDialog(nodeId: string) {
 }
 
 const FUSE_OPTIONS: IFuseOptions<Node> = {
-  keys: ["text"],
+  // Plus plugin-contributed aliases (Seam J) so `/move` -> "today" finds the
+  // daily note despite its full-date text. Matched, never highlighted
+  // (textMatchIndices keeps only the "text" key). See ADR 0022.
+  keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
   includeMatches: true,
   // Match late in the string too, so "notes" finds "Weekly team notes" (ADR 0012).
   ignoreLocation: true,
@@ -283,6 +287,9 @@ function DestinationRow({
     .join(" › ");
 
   const title = node.text.trim() || "Untitled";
+  // Display-only plugin suffix (Seam J), mirroring node-switcher: "(Today)" on a
+  // day note. Separate, un-highlighted span -- it isn't part of node.text.
+  const annotation = searchAnnotation(node);
 
   return (
     <CommandItem value={node.id} onSelect={() => onSelect(node.id)}>
@@ -294,6 +301,9 @@ function DestinationRow({
           )}
         >
           {highlight(title, textMatchIndices(matches))}
+          {annotation && (
+            <span className="ml-1 text-muted-foreground">({annotation})</span>
+          )}
         </span>
         {crumbs && (
           <span className="truncate text-xs text-muted-foreground">

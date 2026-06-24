@@ -11,11 +11,14 @@ import type {
   AutoformatResult,
   CommandSpec,
   El,
+  HeaderSlotSpec,
   InteractionEvent,
   KeymapSpec,
   MenuSpec,
   PasteInput,
   PluginContext,
+  SearchAction,
+  SearchActionContext,
   SlotPosition,
   SlotSpec,
   TokenSpec,
@@ -259,4 +262,70 @@ for (const s of slotSpecs) {
  *  referentially stable array (precomputed), safe to read on the hot path. */
 export function rowSlots(position: SlotPosition): readonly SlotSpec[] {
   return slotsByPosition.get(position) ?? EMPTY_SLOTS;
+}
+
+// --- Seam F (header): node-less chrome slots --------------------------------
+
+/** Every plugin's header slots, in array order. The core renders these into the
+ *  header's action cluster (the daily "Today" button). */
+export const headerSlots: HeaderSlotSpec[] = plugins.flatMap(
+  (p) => p.headerSlots ?? [],
+);
+
+// --- Protected nodes --------------------------------------------------------
+
+const protectPredicates = plugins
+  .map((p) => p.protects)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+/** True iff any plugin protects `nodeId` from deletion. Consulted by the core's
+ *  single delete entry point (OutlineEditor's `onDeleteNode`), which no-ops when
+ *  this returns true. The core never learns *why* a node is protected. */
+export function isProtected(nodeId: string): boolean {
+  return protectPredicates.some((p) => p(nodeId));
+}
+
+// --- Seam J: search providers ----------------------------------------------
+
+const aliasProviders = plugins
+  .map((p) => p.searchAliases)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+const actionProviders = plugins
+  .map((p) => p.searchActions)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+const annotationProviders = plugins
+  .map((p) => p.searchAnnotation)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+/** Extra fuzzy-match terms for `node`, contributed by plugins that recognize it
+ *  (the daily plugin's relative date label). Empty for an ordinary node. The
+ *  pickers key Fuse on these but never highlight them -- the row still displays
+ *  `node.text`. */
+export function searchAliases(node: Node): string[] {
+  if (aliasProviders.length === 0) return [];
+  return aliasProviders.flatMap((fn) => fn(node));
+}
+
+/** Virtual (non-node) rows for the Cmd+K switcher, built from the live query.
+ *  Each runs an action on pick (daily's create-today-if-absent). Composed across
+ *  plugins in array order. */
+export function searchActions(
+  query: string,
+  ctx: SearchActionContext,
+): SearchAction[] {
+  if (actionProviders.length === 0) return [];
+  return actionProviders.flatMap((fn) => fn(query, ctx));
+}
+
+/** A short display-only suffix for `node`'s picker row (the daily plugin's
+ *  relative "Today" label), or null. First non-null wins, in array order --
+ *  shown parenthesized after the title, never searched or highlighted. */
+export function searchAnnotation(node: Node): string | null {
+  for (const fn of annotationProviders) {
+    const a = fn(node);
+    if (a) return a;
+  }
+  return null;
 }
