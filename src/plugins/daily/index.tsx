@@ -92,7 +92,7 @@ function DailyBadge({ nodeId }: { nodeId: string }) {
   const key = useDailyDate(nodeId)
   if (!key) return null
   return (
-    <Badge variant="secondary" className="shrink-0" data-daily-date={key}>
+    <Badge variant="secondary" className="shrink-0 mt-1" data-daily-date={key}>
       {formatDayBadge(key)}
     </Badge>
   )
