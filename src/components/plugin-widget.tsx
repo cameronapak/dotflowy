@@ -79,7 +79,7 @@ if (
         try {
           props = JSON.parse(this.dataset.props) as Record<string, Json>;
         } catch {
-          props = {};
+          // malformed data-props -> keep the empty default
         }
       }
       this.root = createRoot(this);
