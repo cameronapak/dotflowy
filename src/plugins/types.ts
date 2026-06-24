@@ -308,6 +308,29 @@ export interface SlotSpec {
   render(node: Node, getCtx: () => PluginContext): ReactNode;
 }
 
+// --- Seam F (header): node-less chrome slots --------------------------------
+//
+// A row slot (above) decorates a node. A *header* slot places a control in the
+// app header -- which has NO focused node -- so it is its own spec whose render
+// takes only the PluginContext factory. The core renders every header slot into
+// the header's action cluster (plugin/array order). First consumer: the Daily
+// Notes plugin's "go to today" button (ADR 0019/0020).
+
+export interface HeaderSlotSpec {
+  id: string;
+  /** Render the header control. `getCtx` is the same stable PluginContext
+   *  factory used everywhere; call it inside handlers (onClick), not at render. */
+  render(getCtx: () => PluginContext): ReactNode;
+}
+
+// --- Protected nodes --------------------------------------------------------
+//
+// A plugin can declare a node un-deletable. The core consults the composed
+// predicate on its delete path and no-ops on a protected node -- it knows "this
+// id is protected", never why. Protection is DELETE-ONLY: a protected node is
+// still editable, renamable, and can take children. First consumer: the Daily
+// Notes plugin's container (ADR 0019/0021).
+
 // --- Seam H: caret autocomplete menus ---------------------------------------
 //
 // A trigger char ("#", "/") opens a menu at the caret. The core owns the ENGINE
@@ -383,6 +406,11 @@ export interface PluginDef {
   keymap?: KeymapSpec[];
   /** Seam F: row render slots (the todos checkbox). */
   slots?: SlotSpec[];
+  /** Seam F (header): node-less header chrome (the daily "Today" button). */
+  headerSlots?: HeaderSlotSpec[];
+  /** Protected nodes: return true to forbid deleting `nodeId` (the daily
+   *  container). Called on the delete path only (client). */
+  protects?(nodeId: string): boolean;
   /** Seam G: render-time view transforms (hide-completed, the tag filter). */
   viewTransforms?: ViewTransform[];
   /** Seam H: caret autocomplete menus (the `#` tag menu). */

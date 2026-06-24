@@ -61,6 +61,7 @@ import {
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
+  isProtected,
   keymapSpecs,
 } from "../plugins/registry";
 import type { PluginContext, ViewContext } from "../plugins/types";
@@ -539,6 +540,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
 
     onDeleteNode: (id) => {
+      // A plugin can protect a node from deletion (the daily container). The
+      // core no-ops here -- the single funnel every delete path flows through.
+      if (isProtected(id)) return;
       capture(focusIndex.current, id);
       const focusId = removeNode(focusIndex.current, id);
       if (focusId) pendingFocus.current = focusId;
@@ -648,7 +652,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   return (
     <>
-      <Header>
+      <Header getCtx={pluginCtx}>
         <BreadcrumbTrail
           trail={trail}
           rootId={rootId || null}

@@ -11,6 +11,7 @@ import type {
   AutoformatResult,
   CommandSpec,
   El,
+  HeaderSlotSpec,
   InteractionEvent,
   KeymapSpec,
   MenuSpec,
@@ -259,4 +260,25 @@ for (const s of slotSpecs) {
  *  referentially stable array (precomputed), safe to read on the hot path. */
 export function rowSlots(position: SlotPosition): readonly SlotSpec[] {
   return slotsByPosition.get(position) ?? EMPTY_SLOTS;
+}
+
+// --- Seam F (header): node-less chrome slots --------------------------------
+
+/** Every plugin's header slots, in array order. The core renders these into the
+ *  header's action cluster (the daily "Today" button). */
+export const headerSlots: HeaderSlotSpec[] = plugins.flatMap(
+  (p) => p.headerSlots ?? [],
+);
+
+// --- Protected nodes --------------------------------------------------------
+
+const protectPredicates = plugins
+  .map((p) => p.protects)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+/** True iff any plugin protects `nodeId` from deletion. Consulted by the core's
+ *  single delete entry point (OutlineEditor's `onDeleteNode`), which no-ops when
+ *  this returns true. The core never learns *why* a node is protected. */
+export function isProtected(nodeId: string): boolean {
+  return protectPredicates.some((p) => p(nodeId));
 }

@@ -6,9 +6,10 @@
 // public API, so the core can't grow feature-specific branches.
 
 import code from "./code";
+import daily from "./daily";
 import links from "./links";
 import tags from "./tags";
 import todos from "./todos";
 import type { PluginDef } from "./types";
 
-export const plugins: PluginDef[] = [code, links, tags, todos];
+export const plugins: PluginDef[] = [code, links, tags, todos, daily];
