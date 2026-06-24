@@ -5,6 +5,7 @@
 // exist; this file is the only place that knows the plugin set for tokens.
 
 import { plugins } from "./index";
+import { registerWidget } from "../components/plugin-widget";
 import type { Node, TreeIndex } from "../data/tree";
 import type {
   AutoformatInput,
@@ -26,6 +27,7 @@ import type {
   ViewContext,
   ViewFilter,
   ViewTransform,
+  WidgetEl,
 } from "./types";
 
 // --- Plugin styles seam ----------------------------------------------------
@@ -53,6 +55,15 @@ const tokenSpecs: TokenSpec[] = plugins
   .sort((a, b) => a.spec.precedence - b.spec.precedence || a.order - b.order)
   .map(({ spec }) => spec);
 
+// Seam A (React mode -- ADR 0028): register each widget token's component with
+// the custom-element host, keyed by the token id (the `data-widget` value the
+// serializer stamps). Importing plugin-widget here also runs its client-only
+// `customElements.define` side effect (no-op in the prerender). Done once at
+// load, in the same pass that builds the token regex.
+for (const spec of tokenSpecs) {
+  if (spec.component) registerWidget(spec.id, spec.component);
+}
+
 // Each fragment goes in its own named group (`_t0`, `_t1`, ...) so a match can
 // be dispatched back to the spec that produced it -- robust even if a fragment
 // has internal capture groups. One combined `gu` regex => one matchAll pass,
@@ -75,12 +86,22 @@ function specForMatch(m: RegExpMatchArray): TokenSpec | null {
   return null;
 }
 
-/** Render one matched token to its descriptor, dispatching to its plugin. */
-export function renderToken(m: RegExpMatchArray, view: TokenView): El {
+/** Render one matched token to its descriptor, dispatching to its plugin. A
+ *  widget result is stamped with the token id (its component key) so the
+ *  serializer can address the right `<dotflowy-widget>` component (ADR 0028). */
+export function renderToken(
+  m: RegExpMatchArray,
+  view: TokenView,
+): El | WidgetEl {
   const spec = specForMatch(m);
   // Should never miss (every match comes from some group), but fall back to the
   // raw source as plain text rather than throw on the hot path.
-  return spec ? spec.render(m[0], view) : m[0];
+  if (!spec) return m[0];
+  const r = spec.render(m[0], view);
+  if (typeof r === "object" && (r as WidgetEl).kind === "widget") {
+    (r as WidgetEl).widget = spec.id;
+  }
+  return r;
 }
 
 // A regex matching only the FOLDING tokens (links today), or one that never

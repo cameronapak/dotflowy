@@ -43,6 +43,51 @@ export interface ElNode {
   children?: El[];
 }
 
+/** A JSON-serializable value. Widget props cross the contentEditable's innerHTML
+ *  boundary as a JSON string (the core mounts the component LATER, when the
+ *  browser upgrades the element), so they must be plain data -- no functions, no
+ *  React nodes. */
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | Json[]
+  | { [key: string]: Json };
+
+/**
+ * Seam A (React mode -- ADR 0028): an ATOMIC widget. Unlike an `El` (serialized
+ * to an innerHTML string), a widget renders REAL TSX -- a component, lucide
+ * icons, Tailwind classes, no plugin CSS. The core serializes it to one custom
+ * element that is an opaque atom (`contenteditable="false"` + `data-src`, so the
+ * existing caret math jumps over it and `readSource` reads `source`, never the
+ * rendered interior), then mounts the token's `component` with `props` when the
+ * browser upgrades that element. The chip is non-editable; the caret never
+ * enters it. Use a widget for a chip that wants components; `El` stays the fast
+ * string path for plain tokens. `widget` is stamped by the core (the token id).
+ */
+export interface WidgetEl {
+  /** Discriminator vs `ElNode`. */
+  kind: "widget";
+  /** The component key (the token's id). Stamped by the core -- a plugin leaves
+   *  it unset. */
+  widget?: string;
+  /** The atom's SOURCE text -- what `readSource` and the caret math count
+   *  (written as `data-src`), and what the component receives as `source`. */
+  source: string;
+  /** Serializable props handed to the component on mount (as `data-props`).
+   *  Omit for a presentational chip whose only input is `source`. */
+  props?: Record<string, Json>;
+  /** Extra attributes on the atom element -- Seam B interaction hooks like
+   *  `data-href`. The core owns `data-src`/`data-src-len`/`data-widget`/
+   *  `contenteditable`; don't set those here. */
+  attrs?: Record<string, string | number | boolean | undefined>;
+}
+
+/** What the core passes a widget's `component`: the atom's `source` text plus
+ *  whatever serializable `props` the token's render returned. */
+export type WidgetProps = { source: string } & Record<string, Json>;
+
 /**
  * What a token `render` is told about the line being decorated. `revealOffset`
  * is the caret's SOURCE offset (null when the bullet is blurred); `start`/`end`
@@ -77,8 +122,20 @@ export interface TokenSpec {
    * fast path; non-folding tokens (code/tags, source == display) leave it off.
    */
   folds?: boolean;
-  /** Build the descriptor for one matched token. `tok` is the matched source. */
-  render(tok: string, view: TokenView): El;
+  /**
+   * Build the descriptor for one matched token. `tok` is the matched source.
+   * Return an `El` (the string fast path) or a `WidgetEl` (a real-TSX atomic
+   * widget -- ADR 0028); a token that ever returns a `WidgetEl` must set
+   * `component`.
+   */
+  render(tok: string, view: TokenView): El | WidgetEl;
+  /**
+   * Seam A (React mode -- ADR 0028): the component the core mounts for a
+   * `WidgetEl` this token returns, keyed by the token's `id`. Receives
+   * `WidgetProps` (the atom's `source` + the widget's `props`). Required iff
+   * `render` can return a `WidgetEl`.
+   */
+  component?: ComponentType<WidgetProps>;
 }
 
 // --- PluginContext (D8) -----------------------------------------------------
@@ -430,12 +487,15 @@ export interface SearchAction {
 export interface PluginDef {
   id: string;
   /**
-   * Plugin-owned CSS. The core mounts every plugin's `styles` once via
-   * `<PluginStyles>` (a React 19 hoisted `<style>`), so a plugin ships its
-   * styling IN ITS FOLDER instead of bleeding into core `styles.css`. Namespace
-   * every selector by the plugin's own prefix (e.g. `.bible-ref`) -- this is
-   * colocation + no-bleed-by-convention, NOT Shadow-DOM isolation (impossible
-   * for an inline chip living inside the editor's contentEditable).
+   * Plugin-owned static CSS (ADR 0027). The core mounts every plugin's `styles`
+   * once via `<PluginStyles>` (a React 19 hoisted `<style>`), so a plugin ships
+   * its styling IN ITS FOLDER instead of bleeding into core `styles.css`.
+   * Namespace every selector by the plugin's own prefix -- this is colocation +
+   * no-bleed-by-convention, NOT Shadow-DOM isolation (impossible for an inline
+   * chip living inside the editor's contentEditable). Currently no plugin uses
+   * this: route-bible, its first mover, moved to the widget seam (`component` +
+   * `WidgetEl`), which renders real TSX + Tailwind with no CSS (ADR 0028). Kept
+   * as the home for a plugin's static CSS when one needs it.
    *
    * RAW CSS only: this string is not run through the Tailwind build, so no
    * `@apply` and no utility classes -- spell the rules out. Dynamic, data-driven

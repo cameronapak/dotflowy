@@ -10,8 +10,9 @@ import { seedOutline, type SeedNode } from "./fixtures";
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
+// The chip is the `<dotflowy-widget>` atom carrying data-bible-ref (ADR 0028).
 const chip = (page: Page, id: string) =>
-  text(page, id).locator("span[data-bible-ref]");
+  text(page, id).locator("[data-bible-ref]");
 
 async function load(page: Page, tree: SeedNode[]) {
   // Capture window.open so we can assert click-to-open without a real popup.
@@ -47,10 +48,12 @@ test.describe("Scripture reference chips", () => {
       "https://route.bible/jhn.3.16?src=dotflowy",
     );
 
-    // The plugin styles seam (ADR 0027) actually delivered the plugin's CSS: a
-    // bare span defaults to `inline`, so `inline-block` proves `.bible-ref` from
-    // the mounted <PluginStyles> applied (not core styles.css).
-    await expect(chip(page, "ref")).toHaveCSS("display", "inline-block");
+    // The chip is a real-TSX atomic widget (ADR 0028): the `<dotflowy-widget>`
+    // custom element mounted BibleChip, so its lucide icons (the book + the
+    // external-link SVGs) are present -- proof the React root rendered inside the
+    // atom, not a serialized El string.
+    await expect(chip(page, "ref").locator("svg")).toHaveCount(2);
+    await expect(chip(page, "ref").locator("svg").first()).toBeVisible();
 
     // A book-like word + number that isn't a real reference never chips (the
     // parser gate rejects it).
