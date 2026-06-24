@@ -1,12 +1,12 @@
 # Dotflowy OSS
 
-An open-source, local-first outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
+An open-source outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
 
-Your data lives entirely in your browser. No account, no server, no sync (yet).
+Local-first at heart, with an optional single-user Cloudflare deployment that syncs your outline across devices via [D1](https://developers.cloudflare.com/d1/) behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/).
 
 ## Status
 
-Local-first and single-player — your outline lives in `localStorage` and syncs across tabs in the same browser, with no multi-device sync yet.
+Your outline is stored in a TanStack DB collection. By default that's backed by **Cloudflare D1** through a Worker (`/api/nodes`), scoped to the Access-authenticated user — so it syncs across your devices (it re-pulls on tab focus; real-time push is not built yet). See [ADR 0023](docs/adr/0023-d1-sync-via-worker.md). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.
 
 What works:
 
@@ -35,14 +35,15 @@ What works:
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo |
 | `Cmd/Ctrl+K` | Open the quick-switcher |
 
-Not built yet: sharing, multi-device sync.
+Not built yet: sharing, real-time multi-device push (sync today reconciles on tab focus), multi-user accounts.
 
 ## Stack
 
 | Layer | Choice | Why |
 |---|---|---|
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
-| Data | TanStack DB `localStorageCollection` | Optimistic mutations, cross-tab sync, schema-validated, and a clean upgrade path to a real backend |
+| Data | TanStack DB query collection over Cloudflare D1 | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. (Side data — tag colors, daily index — is still `localStorage`.) |
+| Backend | Cloudflare Worker + D1, behind Access | One Worker serves the SPA and the `/api/nodes` sync API; single-user identity via Access email |
 | Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
 | Build | Vite 8 | What Start uses |
 | Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
@@ -65,14 +66,23 @@ bun run test:e2e   # Playwright end-to-end tests (chromium)
 
 ## Deploy
 
-It's a static SPA, so hosting is trivial — any static host works. The repo is set up for **Cloudflare Workers** (Static Assets):
+The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* the `/api/nodes` sync API backed by **D1**, gated by **Cloudflare Access**. Config is in `wrangler.jsonc`. Full design: [ADR 0023](docs/adr/0023-d1-sync-via-worker.md).
 
 ```sh
-bun run deploy     # build + wrangler deploy
-bun run cf:dev     # build + local Workers preview (wrangler dev)
+# local dev (two terminals): Vite HMR + a local Worker/D1 it proxies /api to
+bun run db:migrate:local   # once: create the local D1 schema
+bun run dev:api            # wrangler dev (Worker + local D1) on :8787
+bun run dev                # vite dev (proxies /api -> :8787)
+
+# or a production-like single-server preview
+bun run cf:dev             # build + wrangler dev
+
+# ship it
+bun run db:migrate:remote  # before the first deploy
+bun run deploy             # build + wrangler deploy
 ```
 
-Config lives in `wrangler.jsonc`. The build emits to `dist/client`; `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback. Your data still lives entirely in the browser — nothing is sent to the server.
+`build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback. **Cloudflare Access** must be configured on the zone (a one-time dashboard step) — it's what authenticates the single user the Worker scopes data to.
 
 ## How it works
 
@@ -95,43 +105,28 @@ See `src/data/tree.ts` for the index builder and `src/data/mutations.ts` for the
 
 ### Why flat, not nested
 
-A flat list of rows maps cleanly onto a sync backend later. Nested JSON would force deep-merge on every keystroke. Flat rows keep moves cheap and make the eventual ElectricSQL swap a schema change, not a rewrite.
+A flat list of rows maps cleanly onto a sync backend. Nested JSON would force deep-merge on every keystroke. Flat rows keep moves cheap and made the move to D1 a `nodes` table, not a rewrite.
 
 ### Persistence
 
-`nodesCollection` (`src/data/collection.ts`) wraps `localStorageCollectionOptions`. We mutate directly (`collection.insert / update / delete`) and the collection persists to `localStorage` and broadcasts changes to other tabs via `storage` events.
+`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: the `queryFn` GETs the full node set from `/api/nodes` and the mutation handlers POST/PATCH/DELETE through the same Worker, which reads/writes the D1 `nodes` table scoped to the Access-authenticated user. We mutate directly (`collection.insert / update / delete`); writes are optimistic locally and persisted server-side, reconciling across devices on tab focus. See [ADR 0023](docs/adr/0023-d1-sync-via-worker.md).
 
 ### Plugins
 
 The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [ADR 0018](docs/adr/0018-plugin-architecture.md) (the design lives in `docs/adr/`).
 
-## Upgrading to real-time sync
+## Sync: where it stands
 
-The architecture is intentionally backend-agnostic. When you want multi-device sync, swap the collection's options creator and add an `onInsert / onUpdate / onDelete` handler that talks to your API. None of the components or tree logic changes.
+The collection interface is backend-agnostic — that's how the move from `localStorage` to D1 touched only `collection.ts` (the options creator) and added a Worker, leaving every component and the tree logic unchanged.
 
-```ts
-// Before (local-only)
-import { localStorageCollectionOptions } from '@tanstack/react-db'
+Today, sync is **single-user, near-real-time on tab focus**: optimistic local writes are persisted to D1, and the collection re-pulls server state when you refocus the tab (`refetchOnWindowFocus`). Not yet built:
 
-export const nodesCollection = createCollection(
-  localStorageCollectionOptions({ id: 'nodes', storageKey: '...', getKey, schema }),
-)
+- **Real-time push** — a Durable Object per outline streaming changes over WebSocket, instead of focus-driven refetch.
+- **Multi-user** — Access scopes to one identity; real accounts (sign-up/login) are a larger step.
+- **Synced side data** — tag colors and the daily index are still `localStorage` (per-collection sync is a follow-up).
+- **localStorage → D1 import** — an existing local outline starts fresh in D1.
 
-// After (ElectricSQL + Postgres)
-import { electricCollectionOptions } from '@tanstack/electric-db-collection'
-
-export const nodesCollection = createCollection(
-  electricCollectionOptions({
-    id: 'nodes',
-    shape: { url: '...', params: { table: 'nodes' } },
-    getKey: (n) => n.id,
-    schema: nodeSchema,
-    // persistence handlers talk to your Postgres write path
-  }),
-)
-```
-
-`useLiveQuery`, `insert`, `update`, `delete` all keep working.
+See [ADR 0023](docs/adr/0023-d1-sync-via-worker.md) for the design and rejected alternatives (incl. why D1 over ElectricSQL).
 
 ## Project layout
 
@@ -154,7 +149,9 @@ src/
     Header.tsx, paste.ts, flash-node.ts, *-provider.tsx, *-toggle.tsx, ui/
   data/
     schema.ts         # zod schema, Node type
-    collection.ts     # TanStack DB localStorage collection (+ field migrations)
+    collection.ts     # TanStack DB query collection over D1 (/api/nodes)
+    api.ts            # REST client for the /api/nodes Worker
+    query-client.ts   # shared TanStack Query client (focus refetch = sync)
     tree.ts           # flat-list -> TreeIndex, trail / id / time helpers
     tree-store.ts     # per-node subscriptions (useNode / useVisibleChildIds)
     mutations.ts      # insert / move / delete / field setters
@@ -169,8 +166,12 @@ src/
     code/ links/ tags/ todos/   # one folder per plugin
   router.tsx
   styles.css
+worker/               # Cloudflare Worker: serves the SPA + /api/nodes over D1
+  index.ts            #   fetch handler (Access-scoped CRUD), own tsconfig
+migrations/           # D1 SQL migrations (0001_create_nodes.sql)
+wrangler.jsonc        # Worker + assets + D1 binding config
 docs/adr/             # numbered architecture decision records
-vite.config.ts        # SPA mode
+vite.config.ts        # SPA mode + /api dev proxy
 ```
 
 ## License

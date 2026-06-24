@@ -140,16 +140,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The top-level <ul>, so the drag indicator knows how wide to draw.
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // First-run seed. Runs when the collection has loaded and is empty.
+  // First-run seed. seedIfEmpty awaits the collection's initial D1 load and
+  // only seeds if the server has no nodes for this user (see seed.ts) — so it
+  // is safe to call unconditionally on mount.
   useEffect(() => {
-    // hasAnyNode is true if any node at all exists. We can't tell "loaded
-    // but empty" from "not yet loaded" purely from useLiveQuery in v1;
-    // localStorage is synchronous though, so reading the raw key is safe.
-    const raw =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("dotflowy-oss:nodes")
-        : null;
-    if (raw === null) seedIfEmpty(false);
+    void seedIfEmpty();
   }, []);
 
   // Track the most recently inserted/focused node id so we can focus it

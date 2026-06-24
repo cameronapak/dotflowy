@@ -11,7 +11,16 @@ import viteReact from "@vitejs/plugin-react";
 //
 // It also keeps deployment trivial: any static CDN works.
 export default defineConfig({
-  server: { port: 3000 },
+  server: {
+    port: 3000,
+    // Dev only: proxy the data API to a locally-running Worker + D1
+    // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
+    // UI while the real /api/nodes path is served by the Worker against a local
+    // D1. In production the same Worker serves both. See docs/adr/0023.
+    proxy: {
+      "/api": "http://localhost:8787",
+    },
+  },
   plugins: [
     tanstackStart({
       spa: { enabled: true },

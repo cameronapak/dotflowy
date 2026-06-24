@@ -2,16 +2,30 @@ import { appendChild } from './mutations'
 import { createId, makeNode, now } from './tree'
 import { nodesCollection } from './collection'
 
+// One-shot guard, set synchronously before the first await. The old
+// localStorage seed was synchronous, so a double-mounted effect saw the
+// just-written rows and skipped. The D1 path is async: two effect invocations
+// (StrictMode / Start's dev client re-mount) would both await an empty
+// collection and both seed. This flag closes that race — the second caller
+// bails before inserting. Module-scoped, so it survives a component remount.
+let seedStarted = false
+
 /**
- * Seed the outline on first run. Idempotent: if any node already exists
- * in the collection, do nothing.
+ * Seed the outline on first run. Idempotent and async-safe: it awaits the
+ * collection's initial load (`toArrayWhenReady`) before deciding, so it only
+ * seeds when the server genuinely has no nodes for this user — never on the
+ * brief "empty before the first fetch resolves" window the D1-backed query
+ * collection passes through. Returns true if it seeded.
  *
- * We can't read state synchronously at module load in a way that's safe
- * across hydration, so the component calls this inside a useEffect once
- * it observes an empty collection.
+ * The component calls this once on mount; the inserts persist to D1 through the
+ * collection's normal mutation path. See docs/adr/0023.
  */
-export function seedIfEmpty(hasAnyNode: boolean): boolean {
-  if (hasAnyNode) return false
+export async function seedIfEmpty(): Promise<boolean> {
+  if (seedStarted) return false
+  seedStarted = true
+
+  const existing = await nodesCollection.toArrayWhenReady()
+  if (existing.length > 0) return false
 
   // Three sibling top-level bullets, one with a child, so the user lands
   // on something that demonstrates the structure immediately.
