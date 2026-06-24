@@ -8,7 +8,10 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "build:cf": "vite build && cp dist/client/_shell.html dist/client/index.html",
     "preview": "vite preview",
+    "cf:dev": "bun run build:cf && wrangler dev",
+    "deploy": "bun run build:cf && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
@@ -50,6 +53,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.6.0",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "wrangler": "^4.104.0"
   }
 }

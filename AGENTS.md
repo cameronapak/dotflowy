@@ -49,7 +49,12 @@ bun run build      # production build (also prerenders /)
 bun run typecheck  # tsc --noEmit
 bun run test:e2e   # playwright (chromium) end-to-end tests
 bun run test:e2e:ui  # same, in Playwright's interactive UI
+bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
+bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
+bun run deploy     # build:cf, then `wrangler deploy`
 ```
+
+`typecheck` is currently **red on a pre-existing, unrelated basis** (an unused `src/components/ui/form.tsx` imports `radix-ui`/`react-hook-form`, neither installed; `vite.config.ts` wants `@types/node` for `path`/`__dirname`). The bundler ignores all of these and the build/deploy succeed; don't treat them as regressions, but a real change must not *add* errors.
 
 There is **no unit-test runner and no linter** configured; `typecheck` is the only static gate — run it after any change. End-to-end behavior is covered by **Playwright** (`e2e/`, chromium-only, boots the Vite dev server on port 3210 and reuses one already running locally). Specs seed a deterministic tree straight into localStorage via `seedOutline` in `e2e/fixtures.ts` — the on-disk shape is TanStack DB's `{ "s:<id>": { versionKey, data } }`, not a `Node[]`. The `e2e/` dir is outside `tsconfig.json`'s `include`, so Playwright files don't affect `typecheck`. The README lists the npm scripts.
 
@@ -62,6 +67,14 @@ There is **no unit-test runner and no linter** configured; `typecheck` is the on
 ## SPA mode
 
 No SSR — don't run code that touches `nodesCollection` during a server/render pass. Why: [ADR 0004](./docs/adr/0004-spa-only-no-ssr.md).
+
+## Deploying to Cloudflare
+
+Hosted on **Cloudflare Workers Static Assets** (`wrangler.jsonc`), not Pages — the forward-path Cloudflare picks for new projects, and the tier that will later hold the D1 sync API. The config is **assets-only** today (no `main` Worker entry); `bun run deploy` is the whole flow.
+
+- **`_shell.html` → `index.html` is load-bearing.** TanStack Start SPA mode emits the shell as `dist/client/_shell.html`, but Workers Static Assets serves `index.html` for the root and for the SPA fallback. `build:cf` copies it so both resolve. Don't point wrangler at a dir without that copy, and don't rename the shell in Start config without updating the copy.
+- **SPA fallback** is `not_found_handling: "single-page-application"` in `wrangler.jsonc` — any unmatched path (e.g. `/$nodeId` zoom routes) serves `index.html` and the client router takes over. Verified locally via `wrangler dev` (root + a `/<id>` route both return the shell; the fallback body is byte-identical to `index.html`).
+- **Future D1 API stays out of the render pass.** When sync lands, add a `main` Worker entry serving `/api/*` against a D1 binding — as plain Worker fetch handlers, *not* TanStack Start SSR. ADR 0004's "no `nodesCollection` on the server" rule still holds: the React app stays a pure static SPA; only the Worker talks to D1.
 
 ## Data layer gotchas
 

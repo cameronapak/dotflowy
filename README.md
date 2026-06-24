@@ -63,6 +63,17 @@ bun run typecheck  # tsc --noEmit
 bun run test:e2e   # Playwright end-to-end tests (chromium)
 ```
 
+## Deploy
+
+It's a static SPA, so hosting is trivial — any static host works. The repo is set up for **Cloudflare Workers** (Static Assets):
+
+```sh
+bun run deploy     # build + wrangler deploy
+bun run cf:dev     # build + local Workers preview (wrangler dev)
+```
+
+Config lives in `wrangler.jsonc`. The build emits to `dist/client`; `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback. Your data still lives entirely in the browser — nothing is sent to the server.
+
 ## How it works
 
 ### Data model

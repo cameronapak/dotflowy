@@ -1,0 +1,16 @@
+{
+  // Cloudflare Workers deploy config. Step 1: serve the static SPA only.
+  // The same Worker will later gain a `main` entry + a D1 binding for the
+  // /api/* sync path (see README "Hosting on Cloudflare").
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dotflowy",
+  "compatibility_date": "2026-06-23",
+  "assets": {
+    // TanStack Start SPA build output. `build:cf` copies _shell.html ->
+    // index.html in here so the root and the SPA fallback resolve.
+    "directory": "./dist/client",
+    // Any unmatched path (e.g. /$nodeId zoom routes) serves index.html so
+    // the client router takes over. This is the SPA fallback.
+    "not_found_handling": "single-page-application"
+  }
+}
