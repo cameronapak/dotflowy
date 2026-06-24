@@ -66,7 +66,7 @@ function parseDateKey(key: string): Date | null {
 }
 
 /** The full, human date used to seed a day node's text + feed Cmd+K search,
- *  e.g. "Monday, June 23, 2026". */
+ *  e.g. "Tuesday, June 23, 2026". */
 export function formatDayText(key: string): string {
   const d = parseDateKey(key)
   if (!d) return key

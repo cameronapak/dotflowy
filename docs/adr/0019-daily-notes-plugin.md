@@ -44,7 +44,7 @@ pieces:
 
 4. **A daily note is just a node; the date is *displayed* from the index, not stored as
    identity.** No new `Node` type or field. The note's `text` is **freeform, seeded to the
-   full formatted date** ("Monday, June 23, 2026") — searchable in Cmd+K and shown as the
+   full formatted date** ("Tuesday, June 23, 2026") — searchable in Cmd+K and shown as the
    page title when you zoom in — but **not load-bearing** (identity is the index). On top
    of that, a `<Badge>` (`src/components/ui/badge.tsx`) **row slot** (Seam F), driven by an
    `id → date` reverse lookup, shows a **relative** label ("Today" / "Yesterday" /
