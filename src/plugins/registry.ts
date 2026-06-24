@@ -28,6 +28,20 @@ import type {
   ViewTransform,
 } from "./types";
 
+// --- Plugin styles seam ----------------------------------------------------
+
+/**
+ * Every plugin's own CSS, concatenated in array order. The core mounts this once
+ * via `<PluginStyles>` (a React 19 hoisted `<style>`) so a plugin keeps its
+ * styling in its folder, not core `styles.css`. Empty string when no plugin
+ * contributes styles. Namespacing is by each plugin's selector prefix
+ * (convention), not Shadow-DOM isolation (impossible for inline tokens).
+ */
+export const pluginStyles: string = plugins
+  .map((p) => p.styles)
+  .filter((s): s is string => !!s)
+  .join("\n");
+
 // --- Seam A: composed tokens -----------------------------------------------
 
 // Every plugin's tokens, flattened in array order then sorted by precedence.

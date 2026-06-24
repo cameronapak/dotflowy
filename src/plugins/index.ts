@@ -8,8 +8,9 @@
 import code from "./code";
 import daily from "./daily";
 import links from "./links";
+import routeBible from "./route-bible";
 import tags from "./tags";
 import todos from "./todos";
 import type { PluginDef } from "./types";
 
-export const plugins: PluginDef[] = [code, links, tags, todos, daily];
+export const plugins: PluginDef[] = [code, links, routeBible, tags, todos, daily];

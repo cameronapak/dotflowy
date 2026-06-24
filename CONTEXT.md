@@ -37,3 +37,16 @@ _Avoid_: locked node (implies read-only — it isn't), pinned node, system node
 A node-less plugin render slot in the app header. Distinct from a **row slot**,
 which decorates a single bullet and is handed that node.
 _Avoid_: header widget, toolbar item
+
+**Scripture reference**:
+A Bible citation written inside `node.text` (`John 3:16`, `Genesis 1`,
+`1 Cor 13:4-7`). Parsed from text by the route-bible plugin, never a stored field —
+the same stance as a `#tag` or a link. A book name alone is not one (a chapter is
+required); a whole-chapter reference is.
+_Avoid_: verse, passage (those are the parts), citation
+
+**Reference chip**:
+The non-folding, clickable `Badge`-styled span a **Scripture reference** renders as.
+Its visible text is the user's verbatim source; only the route.bible link it opens
+is canonicalized.
+_Avoid_: verse badge, scripture link

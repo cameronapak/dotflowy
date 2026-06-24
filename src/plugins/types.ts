@@ -429,6 +429,20 @@ export interface SearchAction {
  */
 export interface PluginDef {
   id: string;
+  /**
+   * Plugin-owned CSS. The core mounts every plugin's `styles` once via
+   * `<PluginStyles>` (a React 19 hoisted `<style>`), so a plugin ships its
+   * styling IN ITS FOLDER instead of bleeding into core `styles.css`. Namespace
+   * every selector by the plugin's own prefix (e.g. `.bible-ref`) -- this is
+   * colocation + no-bleed-by-convention, NOT Shadow-DOM isolation (impossible
+   * for an inline chip living inside the editor's contentEditable).
+   *
+   * RAW CSS only: this string is not run through the Tailwind build, so no
+   * `@apply` and no utility classes -- spell the rules out. Dynamic, data-driven
+   * stylesheets (the tag-color generator) stay bespoke `<style>` components;
+   * this seam is for a plugin's static CSS.
+   */
+  styles?: string;
   /** Seam A: inline tokens, composed into the one combined regex. */
   tokens?: TokenSpec[];
   /** Seam B: delegated interactions on chips/links in the contentEditable. */
