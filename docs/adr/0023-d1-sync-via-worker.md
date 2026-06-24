@@ -104,8 +104,12 @@ gives a production-like single-server preview. The React app always calls the re
 - **Side-collections are still localStorage-only.** Tag colors (`tag-colors.ts`) and the
   daily index (`daily-index.ts`) are *not* synced to D1 yet, so on a second device tag
   colors and daily-note identity won't follow. Each is a future per-collection sync.
-- **No localStorage → D1 data import.** A user with an existing local outline starts fresh
-  in D1 (their localStorage is left intact, just unread). A one-time import is a small,
-  separate follow-up.
+- **localStorage → D1 import (done).** A returning user's pre-D1 outline (the old
+  `dotflowy-oss:nodes` localStorage collection) is imported into D1 once, on the first load
+  against an empty server, by `importLegacyNodes` (`src/data/import-legacy.ts`), orchestrated
+  ahead of the seed by `bootstrapOutline` (`seed.ts`). It imports only when D1 is empty
+  (never clobbers server data) and only once (a `dotflowy-oss:d1-imported` localStorage flag,
+  so a later legitimately-emptied outline isn't resurrected); the legacy key is left intact
+  as a backup. Covered by `e2e/import-legacy.spec.ts`.
 - **Deploy-time human steps:** configure Cloudflare Access on the zone, and
   `bun run db:migrate:remote` before the first `bun run deploy`.

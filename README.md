@@ -124,7 +124,8 @@ Today, sync is **single-user, near-real-time on tab focus**: optimistic local wr
 - **Real-time push** — a Durable Object per outline streaming changes over WebSocket, instead of focus-driven refetch.
 - **Multi-user** — Access scopes to one identity; real accounts (sign-up/login) are a larger step.
 - **Synced side data** — tag colors and the daily index are still `localStorage` (per-collection sync is a follow-up).
-- **localStorage → D1 import** — an existing local outline starts fresh in D1.
+
+A returning user's pre-D1 outline is **imported from `localStorage` into D1 once** on first load against an empty server (`src/data/import-legacy.ts`), so the move doesn't strand existing data.
 
 See [ADR 0023](docs/adr/0023-d1-sync-via-worker.md) for the design and rejected alternatives (incl. why D1 over ElectricSQL).
 
@@ -157,7 +158,8 @@ src/
     mutations.ts      # insert / move / delete / field setters
     history.ts        # undo / redo capture
     tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection
-    seed.ts           # first-run welcome bullets
+    seed.ts           # first-run bootstrap: import legacy localStorage, else seed welcome bullets
+    import-legacy.ts  # one-time pre-D1 localStorage -> D1 outline import
     useTree.ts        # useLiveQuery hook
   plugins/            # the editor's plugin layer (ADR 0018)
     index.ts          # the one ordered array: [code, links, tags, todos]
