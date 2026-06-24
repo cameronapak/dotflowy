@@ -110,6 +110,44 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
       }
     },
   );
+
+  // The plugin side-collections (tag colors, daily index) are now D1-backed too
+  // (ADR 0024), so every spec's app load GETs /api/kv per collection and the
+  // daily specs WRITE through it (a failed write would roll back the optimistic
+  // insert). Mock the generic kv store per collection namespace, starting empty.
+  const kv = new Map<string, Map<string, unknown>>();
+  const ns = (collection: string) => {
+    let m = kv.get(collection);
+    if (!m) kv.set(collection, (m = new Map()));
+    return m;
+  };
+
+  await page.route(
+    (url) => url.pathname === "/api/kv",
+    async (route) => {
+      const req = route.request();
+      const collection = new URL(req.url()).searchParams.get("collection") ?? "";
+      const m = ns(collection);
+      switch (req.method()) {
+        case "GET":
+          return reply(route, [...m.values()]);
+        case "POST": {
+          const { rows } = req.postDataJSON() as {
+            rows: { key: string; value: unknown }[];
+          };
+          for (const r of rows ?? []) m.set(r.key, r.value);
+          return reply(route, { ok: true });
+        }
+        case "DELETE": {
+          const { keys } = req.postDataJSON() as { keys: string[] };
+          for (const k of keys ?? []) m.delete(k);
+          return reply(route, { ok: true });
+        }
+        default:
+          return route.fulfill({ status: 405, body: "{}" });
+      }
+    },
+  );
 }
 
 /**

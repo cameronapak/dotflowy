@@ -1,7 +1,10 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { createCollection, localStorageCollectionOptions } from '@tanstack/react-db'
+import { createCollection } from '@tanstack/react-db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
 import { normalizeTag } from './tags'
+import { queryClient } from './query-client'
+import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from './kv-api'
 
 /**
  * Custom tag colors. A tag's color is **chosen**, not derived -- by default a
@@ -9,11 +12,10 @@ import { normalizeTag } from './tags'
  * it. The choice is keyed by the *normalized* tag name, so it applies to every
  * instance of that tag everywhere. See docs/adr/0016.
  *
- * Backed by its own localStorage TanStack DB collection (sibling to
- * nodesCollection), so it rides the same persistence and future backend-swap /
- * sync path -- a custom color is shared meaning, not view-state, and should
- * sync across devices once sync lands. Empty by default; absence of a row means
- * "no color" (the neutral default).
+ * Backed by D1 through the generic /api/kv side-collection store (ADR 0024),
+ * sibling to nodesCollection -- a custom color is shared meaning, not
+ * view-state, so it syncs across devices. Empty by default; absence of a row
+ * means "no color" (the neutral default).
  *
  * Color is applied through a single generated stylesheet keyed by `data-tag`
  * (see {@link tagColorsCss} and TagColorStyles), NOT a per-instance class -- so
@@ -45,12 +47,29 @@ const tagColorSchema = z.object({
 
 export type TagColorRow = z.infer<typeof tagColorSchema>
 
+const KV = 'tag-colors'
+
 export const tagColorsCollection = createCollection(
-  localStorageCollectionOptions({
+  queryCollectionOptions({
     id: 'tag-colors',
-    storageKey: 'dotflowy-oss:tag-colors',
+    queryKey: ['kv', KV],
+    queryClient,
+    queryFn: () => kvFetch<TagColorRow>(KV),
     getKey: (row: TagColorRow) => row.tag,
     schema: tagColorSchema,
+    // Insert and update both upsert the whole row (tiny key->value items).
+    onInsert: async ({ transaction }) => {
+      await kvPut(KV, toKvRows(transaction))
+      return { refetch: false }
+    },
+    onUpdate: async ({ transaction }) => {
+      await kvPut(KV, toKvRows(transaction))
+      return { refetch: false }
+    },
+    onDelete: async ({ transaction }) => {
+      await kvDelete(KV, toKvKeys(transaction))
+      return { refetch: false }
+    },
   }),
 )
 

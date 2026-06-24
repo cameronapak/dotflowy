@@ -54,6 +54,10 @@ interface Node {
 
 const DEV_OWNER = 'local-dev'
 
+// Plugin side-collections backed by the generic `kv` table (ADR 0024). The
+// allowlist stops a client writing arbitrary collection namespaces.
+const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
+
 /** Columns a client is allowed to write, mapped to their bool-ness. */
 const BOOL_COLUMNS = new Set(['isTask', 'completed', 'collapsed'])
 const WRITABLE_COLUMNS = new Set([
@@ -197,6 +201,64 @@ async function handleNodes(
   }
 }
 
+/**
+ * Generic key/value store for the plugin side-collections (tag colors, the
+ * daily index). One table, namespaced by `collection`; `value` is the
+ * JSON-stringified item. The client api computes each row's `key` from the
+ * collection's getKey (kv-api.ts), so the Worker stores it opaquely. GET returns
+ * the COMPLETE set for one collection (the query collection treats it as
+ * authoritative). See docs/adr/0024.
+ */
+async function handleKv(
+  request: Request,
+  env: Env,
+  owner: string,
+  collection: string,
+): Promise<Response> {
+  switch (request.method) {
+    case 'GET': {
+      const { results } = await env.DB.prepare(
+        'SELECT value FROM kv WHERE owner = ? AND collection = ?',
+      )
+        .bind(owner, collection)
+        .all<{ value: string }>()
+      return json(results.map((r) => JSON.parse(r.value)))
+    }
+    case 'POST': {
+      // Upsert. Insert and update both land here (the items are tiny key->value
+      // rows, so we store the whole value rather than diffing).
+      const { rows } = (await request.json()) as {
+        rows: { key: string; value: unknown }[]
+      }
+      if (!rows?.length) return json({ ok: true })
+      const stmt = env.DB.prepare(
+        `INSERT INTO kv (owner, collection, key, value, updatedAt)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(owner, collection, key) DO UPDATE SET
+           value = excluded.value, updatedAt = excluded.updatedAt`,
+      )
+      const ts = Date.now()
+      await env.DB.batch(
+        rows.map((r) =>
+          stmt.bind(owner, collection, r.key, JSON.stringify(r.value), ts),
+        ),
+      )
+      return json({ ok: true })
+    }
+    case 'DELETE': {
+      const { keys } = (await request.json()) as { keys: string[] }
+      if (!keys?.length) return json({ ok: true })
+      const stmt = env.DB.prepare(
+        'DELETE FROM kv WHERE owner = ? AND collection = ? AND key = ?',
+      )
+      await env.DB.batch(keys.map((k) => stmt.bind(owner, collection, k)))
+      return json({ ok: true })
+    }
+    default:
+      return json({ error: 'method not allowed' }, 405)
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -205,12 +267,19 @@ export default {
     const owner = ownerFor(request)
     if (!owner) return json({ error: 'unauthorized' }, 401)
 
-    if (url.pathname === '/api/nodes') {
-      try {
+    try {
+      if (url.pathname === '/api/nodes') {
         return await handleNodes(request, env, owner)
-      } catch (err) {
-        return json({ error: String(err) }, 500)
       }
+      if (url.pathname === '/api/kv') {
+        const collection = url.searchParams.get('collection')
+        if (!collection || !KV_COLLECTIONS.has(collection)) {
+          return json({ error: 'unknown collection' }, 400)
+        }
+        return await handleKv(request, env, owner, collection)
+      }
+    } catch (err) {
+      return json({ error: String(err) }, 500)
     }
     return json({ error: 'not found' }, 404)
   },

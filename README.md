@@ -42,7 +42,7 @@ Not built yet: sharing, real-time multi-device push (sync today reconciles on ta
 | Layer | Choice | Why |
 |---|---|---|
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
-| Data | TanStack DB query collection over Cloudflare D1 | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. (Side data — tag colors, daily index — is still `localStorage`.) |
+| Data | TanStack DB query collections over Cloudflare D1 | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([ADR 0024](docs/adr/0024-side-collections-via-kv-table.md)). |
 | Backend | Cloudflare Worker + D1, behind Access | One Worker serves the SPA and the `/api/nodes` sync API; single-user identity via Access email |
 | Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
 | Build | Vite 8 | What Start uses |
@@ -111,6 +111,8 @@ A flat list of rows maps cleanly onto a sync backend. Nested JSON would force de
 
 `nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: the `queryFn` GETs the full node set from `/api/nodes` and the mutation handlers POST/PATCH/DELETE through the same Worker, which reads/writes the D1 `nodes` table scoped to the Access-authenticated user. We mutate directly (`collection.insert / update / delete`); writes are optimistic locally and persisted server-side, reconciling across devices on tab focus. See [ADR 0023](docs/adr/0023-d1-sync-via-worker.md).
 
+Plugin **side-collections** (tag colors, the daily index) sync the same way, over a generic `/api/kv` store (one `kv` D1 table namespaced by collection) — so a custom tag color or a daily-note follows you across devices too. See [ADR 0024](docs/adr/0024-side-collections-via-kv-table.md).
+
 ### Plugins
 
 The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [ADR 0018](docs/adr/0018-plugin-architecture.md) (the design lives in `docs/adr/`).
@@ -123,7 +125,6 @@ Today, sync is **single-user, near-real-time on tab focus**: optimistic local wr
 
 - **Real-time push** — a Durable Object per outline streaming changes over WebSocket, instead of focus-driven refetch.
 - **Multi-user** — Access scopes to one identity; real accounts (sign-up/login) are a larger step.
-- **Synced side data** — tag colors and the daily index are still `localStorage` (per-collection sync is a follow-up).
 
 A returning user's pre-D1 outline is **imported from `localStorage` into D1 once** on first load against an empty server (`src/data/import-legacy.ts`), so the move doesn't strand existing data.
 
@@ -152,25 +153,26 @@ src/
     schema.ts         # zod schema, Node type
     collection.ts     # TanStack DB query collection over D1 (/api/nodes)
     api.ts            # REST client for the /api/nodes Worker
+    kv-api.ts         # REST client for the generic /api/kv side-collection store
     query-client.ts   # shared TanStack Query client (focus refetch = sync)
     tree.ts           # flat-list -> TreeIndex, trail / id / time helpers
     tree-store.ts     # per-node subscriptions (useNode / useVisibleChildIds)
     mutations.ts      # insert / move / delete / field setters
     history.ts        # undo / redo capture
-    tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection
+    tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection (D1-backed via /api/kv)
     seed.ts           # first-run bootstrap: import legacy localStorage, else seed welcome bullets
     import-legacy.ts  # one-time pre-D1 localStorage -> D1 outline import
     useTree.ts        # useLiveQuery hook
   plugins/            # the editor's plugin layer (ADR 0018)
-    index.ts          # the one ordered array: [code, links, tags, todos]
+    index.ts          # the one ordered array: [code, links, tags, todos, daily]
     types.ts          # the typed seam contract (definePlugin)
     registry.ts       # composes every plugin's registrations once at load
-    code/ links/ tags/ todos/   # one folder per plugin
+    code/ links/ tags/ todos/ daily/   # one folder per plugin
   router.tsx
   styles.css
-worker/               # Cloudflare Worker: serves the SPA + /api/nodes over D1
+worker/               # Cloudflare Worker: serves the SPA + /api/nodes + /api/kv over D1
   index.ts            #   fetch handler (Access-scoped CRUD), own tsconfig
-migrations/           # D1 SQL migrations (0001_create_nodes.sql)
+migrations/           # D1 SQL migrations (0001 nodes, 0002 kv)
 wrangler.jsonc        # Worker + assets + D1 binding config
 docs/adr/             # numbered architecture decision records
 vite.config.ts        # SPA mode + /api dev proxy

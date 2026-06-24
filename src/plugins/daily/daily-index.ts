@@ -1,9 +1,15 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import {
-  createCollection,
-  localStorageCollectionOptions,
-} from '@tanstack/react-db'
+import { createCollection } from '@tanstack/react-db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
+import { queryClient } from '../../data/query-client'
+import {
+  kvDelete,
+  kvFetch,
+  kvPut,
+  toKvKeys,
+  toKvRows,
+} from '../../data/kv-api'
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0019). A row maps a
@@ -15,9 +21,10 @@ import { z } from 'zod'
  * machine-addressable ("the node for 2026-06-23"), and that identity can't live
  * in mutable text (Seam A's tags/links derive from text precisely because their
  * identity *is* the text). Seam E keeps it off the `Node` schema. A sibling of
- * `nodesCollection`, so it rides the same persistence + future sync path.
+ * `nodesCollection`, backed by D1 through the generic /api/kv store (ADR 0024),
+ * so daily-note identity syncs across devices.
  *
- * Mirrors `tag-colors.ts`: a localStorage TanStack DB collection plus a
+ * Mirrors `tag-colors.ts`: a D1-backed kv collection plus a
  * `subscribeChanges`/`useSyncExternalStore` reactive read (NOT `useLiveQuery`,
  * which hard-fails the `/` prerender -- ADR 0004).
  */
@@ -34,12 +41,29 @@ const dailyRowSchema = z.object({
 
 export type DailyRow = z.infer<typeof dailyRowSchema>
 
+const KV = 'daily-index'
+
 export const dailyIndexCollection = createCollection(
-  localStorageCollectionOptions({
+  queryCollectionOptions({
     id: 'daily-index',
-    storageKey: 'dotflowy-oss:daily-index',
+    queryKey: ['kv', KV],
+    queryClient,
+    queryFn: () => kvFetch<DailyRow>(KV),
     getKey: (row: DailyRow) => row.key,
     schema: dailyRowSchema,
+    // Insert and update both upsert the whole row (tiny key->value items).
+    onInsert: async ({ transaction }) => {
+      await kvPut(KV, toKvRows(transaction))
+      return { refetch: false }
+    },
+    onUpdate: async ({ transaction }) => {
+      await kvPut(KV, toKvRows(transaction))
+      return { refetch: false }
+    },
+    onDelete: async ({ transaction }) => {
+      await kvDelete(KV, toKvKeys(transaction))
+      return { refetch: false }
+    },
   }),
 )
 
