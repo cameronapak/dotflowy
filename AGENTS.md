@@ -14,6 +14,8 @@ This file provides guidance to coding agents (Claude Code, and any tool reading 
 
 The `README.md` covers the data model, persistence, backend-swap path, and project layout well — read it first and don't duplicate it here. This file is the stuff that isn't obvious from reading any single file.
 
+This codebase uses the errore.org convention. ALWAYS read the errore skill before editing any code.
+
 ## Documentation Freshness
 
 Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false, update it in the same change when the fix is objective.
