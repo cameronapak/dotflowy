@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
-import { searchAliases } from "../plugins/registry";
+import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
 import { cn } from "@/lib/utils";
@@ -287,6 +287,9 @@ function DestinationRow({
     .join(" › ");
 
   const title = node.text.trim() || "Untitled";
+  // Display-only plugin suffix (Seam J), mirroring node-switcher: "(Today)" on a
+  // day note. Separate, un-highlighted span -- it isn't part of node.text.
+  const annotation = searchAnnotation(node);
 
   return (
     <CommandItem value={node.id} onSelect={() => onSelect(node.id)}>
@@ -298,6 +301,9 @@ function DestinationRow({
           )}
         >
           {highlight(title, textMatchIndices(matches))}
+          {annotation && (
+            <span className="ml-1 text-muted-foreground">({annotation})</span>
+          )}
         </span>
         {crumbs && (
           <span className="truncate text-xs text-muted-foreground">

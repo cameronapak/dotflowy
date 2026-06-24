@@ -295,6 +295,10 @@ const actionProviders = plugins
   .map((p) => p.searchActions)
   .filter((f): f is NonNullable<typeof f> => f != null);
 
+const annotationProviders = plugins
+  .map((p) => p.searchAnnotation)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
 /** Extra fuzzy-match terms for `node`, contributed by plugins that recognize it
  *  (the daily plugin's relative date label). Empty for an ordinary node. The
  *  pickers key Fuse on these but never highlight them -- the row still displays
@@ -313,4 +317,15 @@ export function searchActions(
 ): SearchAction[] {
   if (actionProviders.length === 0) return [];
   return actionProviders.flatMap((fn) => fn(query, ctx));
+}
+
+/** A short display-only suffix for `node`'s picker row (the daily plugin's
+ *  relative "Today" label), or null. First non-null wins, in array order --
+ *  shown parenthesized after the title, never searched or highlighted. */
+export function searchAnnotation(node: Node): string | null {
+  for (const fn of annotationProviders) {
+    const a = fn(node);
+    if (a) return a;
+  }
+  return null;
 }

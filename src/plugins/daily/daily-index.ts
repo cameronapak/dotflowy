@@ -78,18 +78,33 @@ export function formatDayText(key: string): string {
   })
 }
 
+/** The *relative* label for a day key -- Today / Yesterday / Tomorrow -- or null
+ *  for anything further out. Null (not a short date) on purpose: a date is
+ *  redundant next to the seeded full-date text, so callers that annotate the
+ *  date (the Cmd+K result, Seam J) want only the genuinely-additive relatives. */
+export function formatDayRelative(
+  key: string,
+  today = localDateKey(),
+): string | null {
+  const d = parseDateKey(key)
+  const t = parseDateKey(today)
+  if (!d || !t) return null
+  const diff = Math.round((d.getTime() - t.getTime()) / 86_400_000)
+  if (diff === 0) return 'Today'
+  if (diff === -1) return 'Yesterday'
+  if (diff === 1) return 'Tomorrow'
+  return null
+}
+
 /** The compact *relative* label for the badge: Today / Yesterday / Tomorrow,
  *  else a short date ("Jun 23"). Complementary to the seeded full-date text, not
  *  a duplicate of it -- it's the "this is a daily note" signifier + quick
  *  orientation. Computed from the key vs today (ADR 0019). */
 export function formatDayBadge(key: string, today = localDateKey()): string {
+  const rel = formatDayRelative(key, today)
+  if (rel) return rel
   const d = parseDateKey(key)
-  const t = parseDateKey(today)
-  if (!d || !t) return key
-  const diff = Math.round((d.getTime() - t.getTime()) / 86_400_000)
-  if (diff === 0) return 'Today'
-  if (diff === -1) return 'Yesterday'
-  if (diff === 1) return 'Tomorrow'
+  if (!d) return key
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 

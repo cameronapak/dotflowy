@@ -5,7 +5,11 @@ import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { stripLinks } from "../data/links";
-import { searchAliases, searchActions } from "../plugins/registry";
+import {
+  searchAliases,
+  searchActions,
+  searchAnnotation,
+} from "../plugins/registry";
 import type { SearchAction } from "../plugins/types";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
@@ -308,6 +312,10 @@ function ResultRow({
     .join(" › ");
 
   const title = stripLinks(node.text).trim() || "Untitled";
+  // A plugin's display-only suffix (Seam J) -- the daily plugin's "Today" -- so a
+  // day note reads "Tuesday, June 23, 2026 (Today)". Not part of node.text, so
+  // it's rendered as a separate, un-highlighted span after the title.
+  const annotation = searchAnnotation(node);
 
   return (
     <CommandItem value={node.id} onSelect={() => onSelect(node.id)}>
@@ -319,6 +327,9 @@ function ResultRow({
           )}
         >
           {highlight(title, textMatchIndices(matches))}
+          {annotation && (
+            <span className="ml-1 text-muted-foreground">({annotation})</span>
+          )}
         </span>
         {crumbs && (
           <span className="truncate text-xs text-muted-foreground">

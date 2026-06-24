@@ -29,6 +29,7 @@ import { childrenOf, type TreeIndex } from '../../data/tree'
 import {
   CONTAINER_KEY,
   formatDayBadge,
+  formatDayRelative,
   formatDayText,
   getContainerId,
   getDayId,
@@ -172,6 +173,14 @@ export default definePlugin({
   searchAliases: (node) => {
     const key = getDayKey(node.id)
     return key ? [formatDayBadge(key)] : []
+  },
+
+  // Seam J: a parenthetical suffix on the picker row so a day note reads
+  // "Tuesday, June 23, 2026 (Today)" -- relative labels only (a date would just
+  // echo the text). Display-only; the alias above is what actually matches.
+  searchAnnotation: (node) => {
+    const key = getDayKey(node.id)
+    return key ? formatDayRelative(key) : null
   },
 
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT

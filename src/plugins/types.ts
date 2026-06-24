@@ -457,6 +457,11 @@ export interface PluginDef {
   /** Seam J: virtual rows for the Cmd+K switcher, built from the live query;
    *  each runs an action on pick (daily's create-today-if-absent). */
   searchActions?(query: string, ctx: SearchActionContext): SearchAction[];
+  /** Seam J: a short, display-only suffix for a node's row in the pickers (the
+   *  daily plugin's "Today" relative label), shown parenthesized after the title
+   *  so a day note reads "Tuesday, June 23, 2026 (Today)". Never highlighted,
+   *  never searched -- pure clarity. First non-null across plugins wins. */
+  searchAnnotation?(node: Node): string | null;
 }
 
 /** Identity helper -- gives a plugin object its type without a cast (D5). */

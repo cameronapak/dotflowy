@@ -135,10 +135,14 @@ test.describe("daily notes", () => {
     ).toHaveCount(0);
 
     // ...and the real day note is found via its "Today" alias even though its
-    // text is the full date (the row displays that date, hence the year).
+    // text is the full date (the row displays that date, hence the year). The
+    // row also carries a "(Today)" suffix (Seam J annotation) for clarity.
     const year = String(new Date().getFullYear());
     const hit = page.getByRole("option", { name: new RegExp(year) });
     await expect(hit).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: /\(Today\)/ }),
+    ).toBeVisible();
     await hit.click();
     await expect(page).toHaveURL(/\/[^/]+$/);
     await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);

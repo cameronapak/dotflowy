@@ -13,12 +13,15 @@ Cmd+K. **Extends the navigation-only quick-switcher of [ADR 0012](./0012-node-qu
   findable by a label that isn't in its text. Matched, **never highlighted**.
 - **Virtual search action** — a *non-node* row a plugin contributes to the Cmd+K switcher,
   built from the live query, that **runs an action** on pick (daily's create-today-if-absent).
+- **Search annotation** — a short, display-only suffix a plugin adds to a *real* node's
+  picker row (daily's "Today"), shown parenthesized after the title. Never searched, never
+  highlighted — pure orientation.
 - **`SearchActionContext`** — the minimal surface a virtual action gets: `{ index, goTo }`.
   Deliberately *not* a full `PluginContext` (the switcher has none).
 
 ## Decision
 
-A **search provider seam (J)** with two independent halves a plugin can contribute:
+A **search provider seam (J)** with three independent halves a plugin can contribute:
 
 1. **`searchAliases(node): string[]`** — pure projection, no ctx. The two Fuse-driven
    pickers (`node-switcher.tsx`, `move-dialog.tsx`) add `aliases` as a **second Fuse key**.
@@ -33,12 +36,20 @@ A **search provider seam (J)** with two independent halves a plugin can contribu
    a plain navigate, so the `__root.tsx`-mounted switcher needs **no `PluginContext`** and
    plugins **import no router types**.
 
-Both are composed in `registry.ts` (`searchAliases` / `searchActions`) like every other
-seam. **daily** contributes: aliases = the relative label for its mapped node; one virtual
-"Go to Today" action that appears **only when today's note doesn't exist** (when it does, the
-alias surfaces the real node — no duplicate row). Its `run` reuses `getOrCreateDay`, which
-was refactored to take a `TreeIndex` (not a `PluginContext`) precisely so the switcher, the
-Today button, and the `/` command all share one get-or-create.
+3. **`searchAnnotation(node): string | null`** — pure projection, no ctx. A short suffix the
+   pickers render parenthesized after the title, in a separate **un-highlighted** span (so a
+   day note reads `Tuesday, June 23, 2026 (Today)`). First non-null across plugins wins. It
+   isn't part of `node.text`, so it never perturbs the Fuse highlight ranges — same separation
+   reasoning as the alias key.
+
+All three are composed in `registry.ts` (`searchAliases` / `searchActions` / `searchAnnotation`)
+like every other seam. **daily** contributes: aliases = the relative label for its mapped node;
+one virtual "Go to Today" action that appears **only when today's note doesn't exist** (when it
+does, the alias surfaces the real node — no duplicate row); an annotation = the relative label
+**only when it's Today/Yesterday/Tomorrow** (`formatDayRelative`, null otherwise — a short date
+would just echo the full-date text). Its action `run` reuses `getOrCreateDay`, which was
+refactored to take a `TreeIndex` (not a `PluginContext`) precisely so the switcher, the Today
+button, and the `/` command all share one get-or-create.
 
 ## Why
 
@@ -91,14 +102,17 @@ Today button, and the `/` command all share one get-or-create.
 ## What changed
 
 - **`src/plugins/types.ts`** — `SearchAction`, `SearchActionContext`, and the
-  `PluginDef.searchAliases` / `searchActions` seam fields (Seam J).
-- **`src/plugins/registry.ts`** — composed `searchAliases(node)` and `searchActions(query, ctx)`.
-- **`src/plugins/daily/daily-index.ts`** — `getDayKey(nodeId)` (the sync reverse lookup).
+  `PluginDef.searchAliases` / `searchActions` / `searchAnnotation` seam fields (Seam J).
+- **`src/plugins/registry.ts`** — composed `searchAliases(node)`, `searchActions(query, ctx)`,
+  and `searchAnnotation(node)` (first non-null wins).
+- **`src/plugins/daily/daily-index.ts`** — `getDayKey(nodeId)` (the sync reverse lookup);
+  `formatDayRelative(key)` (relative-only label; `formatDayBadge` now builds on it).
 - **`src/plugins/daily/index.tsx`** — `getOrCreateDay`/`ensureContainer`/`ensureDay` now take
-  a `TreeIndex`; the `searchAliases` + `searchActions` contributions.
+  a `TreeIndex`; the `searchAliases` + `searchActions` + `searchAnnotation` contributions.
 - **`src/components/node-switcher.tsx`** — `aliases` Fuse key (non-highlighted) + a virtual
-  "Actions" group with `ActionRow`.
-- **`src/components/move-dialog.tsx`** — `aliases` Fuse key (via `getFn`).
+  "Actions" group with `ActionRow` + the parenthetical `searchAnnotation` suffix.
+- **`src/components/move-dialog.tsx`** — `aliases` Fuse key (via `getFn`) + the same annotation
+  suffix (the two rows are kept mirrored).
 - **`e2e/daily-notes.spec.ts`** — Cmd+K create-today-when-absent, and surface-by-alias /
   no-dup-action when present.
 - **No `Node` schema change, no `collection.ts` migration, no new route.**
