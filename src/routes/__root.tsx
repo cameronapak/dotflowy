@@ -10,6 +10,7 @@ import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
 import { MoveDialog } from '../components/move-dialog'
 import { TagColorStyles } from '../plugins/tags/tag-color-menu'
+import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
 import '../styles.css'
 
@@ -46,6 +47,7 @@ function RootComponent() {
           <NodeSwitcher />
           <MoveDialog />
           <TagColorStyles />
+          <PluginStyles />
           <Toaster />
         </ShowCompletedProvider>
       </ThemeProvider>

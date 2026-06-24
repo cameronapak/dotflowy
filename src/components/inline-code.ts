@@ -21,7 +21,13 @@
 // per-token special-casing (the unlock in ADR 0018 D6).
 
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
-import type { El } from "../plugins/types";
+import { WIDGET_TAG } from "./plugin-widget";
+import type { El, WidgetEl } from "../plugins/types";
+
+/** True for a widget descriptor (Seam A's React mode -- ADR 0028) vs an `El`. */
+function isWidgetEl(el: El | WidgetEl): el is WidgetEl {
+  return typeof el === "object" && (el as WidgetEl).kind === "widget";
+}
 
 // Last HTML we wrote to each element, so decorate() can skip a rebuild (and the
 // caret jitter it causes) when nothing visible changed. Keyed by the element so
@@ -66,8 +72,9 @@ export function inlineMarkupHtml(
 // values are attr-escaped, `true` is a bare boolean attribute, and
 // `false`/`undefined` drop the attribute. Insertion order is preserved so the
 // generated HTML stays stable (the render cache compares strings).
-function serializeEl(el: El): string {
+function serializeEl(el: El | WidgetEl): string {
   if (typeof el === "string") return escapeHtml(el);
+  if (isWidgetEl(el)) return serializeWidget(el);
   let out = `<${el.tag}`;
   if (el.attrs) {
     for (const [name, value] of Object.entries(el.attrs)) {
@@ -79,6 +86,34 @@ function serializeEl(el: El): string {
   out += ">";
   if (el.children) for (const child of el.children) out += serializeEl(child);
   out += `</${el.tag}>`;
+  return out;
+}
+
+// Serialize a widget descriptor to the `<dotflowy-widget>` atom (ADR 0028). The
+// core owns the atom contract -- `data-src` (+ `data-src-len`) and
+// `contenteditable="false"` make `readSource`/the caret math treat it as one
+// opaque unit (isAtom keys on `data-src`), exactly like a folded link. The
+// component mounts later, when plugin-widget upgrades the element by its
+// `data-widget` id; `props` ride along as JSON in `data-props`. The atom's text
+// child is the raw source -- a graceful pre-mount fallback that React replaces.
+// The string is deterministic (stable attr order, JSON of an insertion-ordered
+// props object) so the render cache still skips an unchanged rebuild.
+function serializeWidget(w: WidgetEl): string {
+  let out = `<${WIDGET_TAG} data-widget="${escapeAttr(w.widget ?? "")}"`;
+  out += ` data-src="${escapeAttr(w.source)}"`;
+  out += ` data-src-len="${w.source.length}"`;
+  out += ` contenteditable="false"`;
+  if (w.props && Object.keys(w.props).length > 0) {
+    out += ` data-props="${escapeAttr(JSON.stringify(w.props))}"`;
+  }
+  if (w.attrs) {
+    for (const [name, value] of Object.entries(w.attrs)) {
+      if (value === false || value == null) continue;
+      if (value === true) out += ` ${name}`;
+      else out += ` ${name}="${escapeAttr(String(value))}"`;
+    }
+  }
+  out += `>${escapeHtml(w.source)}</${WIDGET_TAG}>`;
   return out;
 }
 
