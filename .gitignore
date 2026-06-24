@@ -2,6 +2,7 @@ node_modules
 dist
 .output
 .vinxi
+.wrangler
 .DS_Store
 *.log
 .env

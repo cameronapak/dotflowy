@@ -42,7 +42,7 @@ import {
   toggleCollapsed,
   toggleCompleted,
 } from "../data/mutations";
-import { seedIfEmpty } from "../data/seed";
+import { bootstrapOutline } from "../data/seed";
 import { capture, drop, redo, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
@@ -140,16 +140,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The top-level <ul>, so the drag indicator knows how wide to draw.
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // First-run seed. Runs when the collection has loaded and is empty.
+  // First-run bootstrap: import a pre-D1 localStorage outline if present, else
+  // seed the welcome bullets. Both await the collection's initial D1 load and
+  // no-op unless the server is empty (see seed.ts / import-legacy.ts), so this
+  // is safe to call unconditionally on mount.
   useEffect(() => {
-    // hasAnyNode is true if any node at all exists. We can't tell "loaded
-    // but empty" from "not yet loaded" purely from useLiveQuery in v1;
-    // localStorage is synchronous though, so reading the raw key is safe.
-    const raw =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("dotflowy-oss:nodes")
-        : null;
-    if (raw === null) seedIfEmpty(false);
+    void bootstrapOutline();
   }, []);
 
   // Track the most recently inserted/focused node id so we can focus it
