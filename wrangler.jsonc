@@ -14,9 +14,12 @@
     // Any unmatched path (e.g. /$nodeId zoom routes) serves index.html so the
     // client router takes over.
     "not_found_handling": "single-page-application",
-    // Only /api/* invokes the Worker; everything else is served straight from
-    // static assets (cheaper, and keeps the SPA fast).
-    "run_worker_first": ["/api/*"]
+    // Run the Worker first for EVERY request (not just /api/*) so it can gate
+    // the document load behind the Basic Auth challenge — a fetch() 401 won't
+    // pop the browser's login prompt, only a navigation does. The Worker's
+    // non-/api branch then serves assets via env.ASSETS (SPA fallback intact).
+    // See ADR 0025.
+    "run_worker_first": true
   },
   "d1_databases": [
     {

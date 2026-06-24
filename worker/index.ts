@@ -22,6 +22,13 @@
 interface Env {
   DB: D1Database
   ASSETS: Fetcher
+  /** Shared secret for the HTTP Basic Auth fallback gate (set via
+   *  `wrangler secret put APP_PASSWORD`). Unset -> the app is locked. */
+  APP_PASSWORD?: string
+  /** Owner key to scope data under when authed via Basic Auth. Defaults to
+   *  'owner'; set it to your future Access email so a later switch to Access
+   *  keeps the same rows. */
+  APP_OWNER?: string
 }
 
 /** A row as stored in SQLite — booleans are 0/1 integers. */
@@ -72,12 +79,48 @@ const WRITABLE_COLUMNS = new Set([
   'updatedAt',
 ])
 
-function ownerFor(request: Request): string | null {
+function basicAuthChallenge(): Response {
+  return new Response('Authentication required', {
+    status: 401,
+    headers: { 'WWW-Authenticate': 'Basic realm="dotflowy", charset="UTF-8"' },
+  })
+}
+
+/**
+ * Resolve the request's owner, or return a Response that denies it.
+ *
+ * Three tiers, in order:
+ *  1. **Cloudflare Access** (preferred / future): a verified
+ *     `Cf-Access-Authenticated-User-Email` header → owner = that email.
+ *  2. **Local dev**: no Access in front of `wrangler dev`, gated on a localhost
+ *     hostname (prod traffic can't present one) → owner = DEV_OWNER.
+ *  3. **Production without Access**: a single-user **HTTP Basic Auth** gate
+ *     (`env.APP_PASSWORD`, set via `wrangler secret put`). The browser prompts
+ *     on the document load and then sends the header on every request, incl. the
+ *     `/api` fetches. **Fail closed** if the secret is unset. Owner is
+ *     `env.APP_OWNER` (default 'owner') — independent of the typed username, so
+ *     any username works and the data stays unified. See ADR 0023 / 0025.
+ */
+function authorize(request: Request, env: Env, url: URL): { owner: string } | Response {
   const email = request.headers.get('Cf-Access-Authenticated-User-Email')
-  if (email) return email
-  const host = new URL(request.url).hostname
-  if (host === 'localhost' || host === '127.0.0.1') return DEV_OWNER
-  return null // No Access identity in production -> unauthorized.
+  if (email) return { owner: email }
+
+  const host = url.hostname
+  if (host === 'localhost' || host === '127.0.0.1') return { owner: DEV_OWNER }
+
+  const expected = env.APP_PASSWORD
+  if (!expected) return basicAuthChallenge() // not configured -> locked
+  const [scheme, encoded] = (request.headers.get('Authorization') ?? '').split(' ')
+  if (scheme !== 'Basic' || !encoded) return basicAuthChallenge()
+  let decoded = ''
+  try {
+    decoded = atob(encoded)
+  } catch {
+    return basicAuthChallenge()
+  }
+  const pass = decoded.slice(decoded.indexOf(':') + 1)
+  if (!decoded || pass !== expected) return basicAuthChallenge()
+  return { owner: env.APP_OWNER || 'owner' }
 }
 
 function rowToNode(r: NodeRow): Node {
@@ -262,10 +305,16 @@ async function handleKv(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
-    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
-    const owner = ownerFor(request)
-    if (!owner) return json({ error: 'unauthorized' }, 401)
+    // Gate EVERY path (incl. the document + assets), not just /api — a fetch()
+    // 401 won't trigger the browser's Basic Auth prompt, only a navigation
+    // does. Requires `run_worker_first: true` in wrangler.jsonc so the Worker
+    // sees the document request.
+    const auth = authorize(request, env, url)
+    if (auth instanceof Response) return auth
+    const { owner } = auth
+
+    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
     try {
       if (url.pathname === '/api/nodes') {

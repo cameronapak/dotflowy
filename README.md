@@ -2,7 +2,7 @@
 
 An open-source outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
 
-Local-first at heart, with an optional single-user Cloudflare deployment that syncs your outline across devices via [D1](https://developers.cloudflare.com/d1/) behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/).
+Local-first at heart, with an optional single-user Cloudflare deployment that syncs your outline across devices via [D1](https://developers.cloudflare.com/d1/), gated by either [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) or a built-in HTTP Basic Auth fallback (so it works before you set Access up).
 
 ## Status
 
@@ -43,7 +43,7 @@ Not built yet: sharing, real-time multi-device push (sync today reconciles on ta
 |---|---|---|
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
 | Data | TanStack DB query collections over Cloudflare D1 | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([ADR 0024](docs/adr/0024-side-collections-via-kv-table.md)). |
-| Backend | Cloudflare Worker + D1, behind Access | One Worker serves the SPA and the `/api/nodes` sync API; single-user identity via Access email |
+| Backend | Cloudflare Worker + D1 | One Worker serves the SPA and the `/api/nodes` + `/api/kv` sync APIs; single-user, gated by Cloudflare Access or an HTTP Basic Auth fallback ([ADR 0025](docs/adr/0025-basic-auth-fallback-gate.md)) |
 | Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
 | Build | Vite 8 | What Start uses |
 | Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
@@ -66,7 +66,7 @@ bun run test:e2e   # Playwright end-to-end tests (chromium)
 
 ## Deploy
 
-The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* the `/api/nodes` sync API backed by **D1**, gated by **Cloudflare Access**. Config is in `wrangler.jsonc`. Full design: [ADR 0023](docs/adr/0023-d1-sync-via-worker.md).
+The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* the `/api/nodes` + `/api/kv` sync APIs backed by **D1**, gated by **Cloudflare Access** (or an HTTP Basic Auth fallback — [ADR 0025](docs/adr/0025-basic-auth-fallback-gate.md)). Config is in `wrangler.jsonc`. Full design: [ADR 0023](docs/adr/0023-d1-sync-via-worker.md).
 
 ```sh
 # local dev (two terminals): Vite HMR + a local Worker/D1 it proxies /api to
@@ -82,7 +82,9 @@ bun run db:migrate:remote  # before the first deploy
 bun run deploy             # build + wrangler deploy
 ```
 
-`build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback. **Cloudflare Access** must be configured on the zone (a one-time dashboard step) — it's what authenticates the single user the Worker scopes data to.
+`build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
+
+**Auth.** The Worker authenticates the single user one of two ways. The simplest, no-dashboard path is **HTTP Basic Auth**: set a secret with `wrangler secret put APP_PASSWORD`, and the browser prompts on first load. The cleaner long-term path is **Cloudflare Access** on a custom domain (a one-time Zero Trust dashboard step); when its email header is present it takes precedence, no code change. Until one of these is in place, the Worker fails closed (the site is locked). See [ADR 0025](docs/adr/0025-basic-auth-fallback-gate.md).
 
 ## How it works
 
