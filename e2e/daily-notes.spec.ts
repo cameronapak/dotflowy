@@ -95,6 +95,55 @@ test.describe("daily notes", () => {
     ).toBeVisible();
   });
 
+  test("Cmd+K 'today' offers a create-today action when the note is absent", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await page.keyboard.press(`${modifier()}+k`);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.type("today");
+
+    // The virtual (non-node) action -- today's note doesn't exist yet.
+    const go = page.getByRole("option", { name: /Go to Today/ });
+    await expect(go).toBeVisible();
+    await go.click();
+
+    // It created + navigated to today's note (URL left "/"; year in the title).
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await expect(page).not.toHaveURL(/\/$/);
+    const year = String(new Date().getFullYear());
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await goHome(page);
+    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+  });
+
+  test("Cmd+K 'today' surfaces the existing note by its label, with no dup action", async ({
+    page,
+  }) => {
+    await load(page);
+    await todayButton(page).click(); // create today's note
+    await goHome(page);
+
+    await page.keyboard.press(`${modifier()}+k`);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.type("today");
+
+    // The create-action is suppressed (the note exists)...
+    await expect(
+      page.getByRole("option", { name: /Go to Today/ }),
+    ).toHaveCount(0);
+
+    // ...and the real day note is found via its "Today" alias even though its
+    // text is the full date (the row displays that date, hence the year).
+    const year = String(new Date().getFullYear());
+    const hit = page.getByRole("option", { name: new RegExp(year) });
+    await expect(hit).toBeVisible();
+    await hit.click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+  });
+
   test("the Daily container resists deletion; ordinary nodes still delete", async ({
     page,
   }) => {

@@ -124,6 +124,13 @@ export function isContainerNode(nodeId: string): boolean {
   return getContainerId() === nodeId
 }
 
+/** The date key a node maps to if it's a *day* note (not the container), else
+ *  null. The synchronous reverse of {@link getDayId} -- used by the search-alias
+ *  seam (Seam J), which runs outside any hook context. */
+export function getDayKey(nodeId: string): string | null {
+  return findRow((r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY)?.key ?? null
+}
+
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
 
 const EMPTY: DailyRow[] = []

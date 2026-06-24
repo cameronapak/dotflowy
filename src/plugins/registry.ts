@@ -17,6 +17,8 @@ import type {
   MenuSpec,
   PasteInput,
   PluginContext,
+  SearchAction,
+  SearchActionContext,
   SlotPosition,
   SlotSpec,
   TokenSpec,
@@ -281,4 +283,34 @@ const protectPredicates = plugins
  *  this returns true. The core never learns *why* a node is protected. */
 export function isProtected(nodeId: string): boolean {
   return protectPredicates.some((p) => p(nodeId));
+}
+
+// --- Seam J: search providers ----------------------------------------------
+
+const aliasProviders = plugins
+  .map((p) => p.searchAliases)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+const actionProviders = plugins
+  .map((p) => p.searchActions)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+/** Extra fuzzy-match terms for `node`, contributed by plugins that recognize it
+ *  (the daily plugin's relative date label). Empty for an ordinary node. The
+ *  pickers key Fuse on these but never highlight them -- the row still displays
+ *  `node.text`. */
+export function searchAliases(node: Node): string[] {
+  if (aliasProviders.length === 0) return [];
+  return aliasProviders.flatMap((fn) => fn(node));
+}
+
+/** Virtual (non-node) rows for the Cmd+K switcher, built from the live query.
+ *  Each runs an action on pick (daily's create-today-if-absent). Composed across
+ *  plugins in array order. */
+export function searchActions(
+  query: string,
+  ctx: SearchActionContext,
+): SearchAction[] {
+  if (actionProviders.length === 0) return [];
+  return actionProviders.flatMap((fn) => fn(query, ctx));
 }

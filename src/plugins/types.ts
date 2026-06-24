@@ -388,6 +388,39 @@ export interface MenuSpec {
   emptyLabel?: string;
 }
 
+// --- Seam J: search providers (Cmd+K switcher + /move picker) ---------------
+//
+// The Fuse-driven pickers match on node text. A plugin can (1) contribute extra
+// match TERMS for a real node it recognizes -- the daily plugin maps a node to
+// "Today"/"Yesterday" even though its text is a full date -- and (2) contribute
+// VIRTUAL rows that run an action on pick (create today's note when it doesn't
+// exist yet). Aliases are a pure projection (no ctx); virtual actions get a
+// MINIMAL surface (the index + a plain navigate) so the `__root.tsx`-mounted
+// switcher needs no PluginContext and plugins import no router types. See ADR
+// 0022 (this extends the navigation-only switcher of ADR 0012).
+
+/** The minimal surface a virtual search action gets when picked. */
+export interface SearchActionContext {
+  /** The live tree index (for get-or-create reads). */
+  index: TreeIndex;
+  /** Plain navigation to a node's zoom view (no morph -- a result isn't a pivot). */
+  goTo(nodeId: string): void;
+}
+
+/** A virtual (non-node) row in a search picker -- runs `run` when picked. */
+export interface SearchAction {
+  /** Stable list key. */
+  key: string;
+  /** The row's primary label, e.g. "Go to Today". */
+  label: string;
+  /** Optional secondary line (breadcrumb-style), e.g. "Creates today's note". */
+  hint?: string;
+  /** Leading icon (a className-taking component, like CommandSpec.icon). */
+  icon: ComponentType<{ className?: string }>;
+  /** Run on pick: create/resolve a node, then navigate. Self-contained. */
+  run(): void;
+}
+
 // --- The plugin object ------------------------------------------------------
 
 /**
@@ -417,6 +450,13 @@ export interface PluginDef {
   menus?: MenuSpec[];
   /** Seam I: input transforms (paste + autoformat). */
   input?: InputSpec;
+  /** Seam J: extra fuzzy-match terms for a node the plugin recognizes (the
+   *  daily plugin's "Today"/"Yesterday" labels, absent from the full-date text).
+   *  Matched but not highlighted (the row still displays `node.text`). */
+  searchAliases?(node: Node): string[];
+  /** Seam J: virtual rows for the Cmd+K switcher, built from the live query;
+   *  each runs an action on pick (daily's create-today-if-absent). */
+  searchActions?(query: string, ctx: SearchActionContext): SearchAction[];
 }
 
 /** Identity helper -- gives a plugin object its type without a cast (D5). */

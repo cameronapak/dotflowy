@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
+import { searchAliases } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,10 @@ export function openMoveDialog(nodeId: string) {
 }
 
 const FUSE_OPTIONS: IFuseOptions<Node> = {
-  keys: ["text"],
+  // Plus plugin-contributed aliases (Seam J) so `/move` -> "today" finds the
+  // daily note despite its full-date text. Matched, never highlighted
+  // (textMatchIndices keeps only the "text" key). See ADR 0022.
+  keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
   includeMatches: true,
   // Match late in the string too, so "notes" finds "Weekly team notes" (ADR 0012).
   ignoreLocation: true,

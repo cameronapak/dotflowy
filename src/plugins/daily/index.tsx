@@ -25,13 +25,14 @@ import {
   moveNode,
   setText,
 } from '../../data/mutations'
-import { childrenOf } from '../../data/tree'
+import { childrenOf, type TreeIndex } from '../../data/tree'
 import {
   CONTAINER_KEY,
   formatDayBadge,
   formatDayText,
   getContainerId,
   getDayId,
+  getDayKey,
   isContainerNode,
   localDateKey,
   setMapping,
@@ -45,10 +46,10 @@ import {
  * Self-healing: a mapping that points at a node which no longer exists is
  * rebuilt (the container is protected, so this is belt-and-suspenders).
  */
-function ensureContainer(ctx: PluginContext): string {
+function ensureContainer(index: TreeIndex): string {
   const existing = getContainerId()
-  if (existing && ctx.tree.byId.has(existing)) return existing
-  const tops = childrenOf(ctx.tree, null)
+  if (existing && index.byId.has(existing)) return existing
+  const tops = childrenOf(index, null)
   const after = tops.length ? tops[tops.length - 1]!.id : null
   const id = appendChild(null, after, 'Daily')
   setMapping(CONTAINER_KEY, id)
@@ -61,25 +62,26 @@ function ensureContainer(ctx: PluginContext): string {
  * label. v1 caveat: creating an out-of-order past day (via a future picker)
  * still lands on top -- acceptable until the picker ships its own ordering.
  */
-function ensureDay(key: string, containerId: string, ctx: PluginContext): string {
+function ensureDay(key: string, containerId: string, index: TreeIndex): string {
   const existing = getDayId(key)
-  if (existing && ctx.tree.byId.has(existing)) return existing
-  const id = insertChildAtStart(ctx.tree, containerId)
+  if (existing && index.byId.has(existing)) return existing
+  const id = insertChildAtStart(index, containerId)
   setText(id, formatDayText(key))
   setMapping(key, id)
   return id
 }
 
 /** Ensure the container + the day exist and return the day's node id (no nav).
- *  Date-generic so the Today button, the `/` command, and a future week picker
- *  are all pure callers (ADR 0019). */
-function getOrCreateDay(key: string, ctx: PluginContext): string {
-  return ensureDay(key, ensureContainer(ctx), ctx)
+ *  Takes just the tree index (not a `PluginContext`) so the Today button, the
+ *  `/` command, AND the Cmd+K virtual action (Seam J -- which has no
+ *  `PluginContext`) all reuse the exact same get-or-create (ADR 0019/0022). */
+function getOrCreateDay(key: string, index: TreeIndex): string {
+  return ensureDay(key, ensureContainer(index), index)
 }
 
 /** get-or-create the day, then zoom to it (the Today button + future picker). */
 function goToDate(key: string, ctx: PluginContext): void {
-  ctx.nav.zoom(getOrCreateDay(key, ctx))
+  ctx.nav.zoom(getOrCreateDay(key, ctx.tree))
 }
 
 // --- header slot: the "Today" button ----------------------------------------
@@ -145,7 +147,7 @@ export default definePlugin({
       keywords: ['today', 'daily', 'journal'],
       available: () => true,
       run: (nodeId, ctx) => {
-        const todayId = getOrCreateDay(localDateKey(), ctx)
+        const todayId = getOrCreateDay(localDateKey(), ctx.tree)
         if (todayId === nodeId) return // can't move today's note under itself
         capture(ctx.tree, nodeId)
         const kids = childrenOf(ctx.tree, todayId)
@@ -162,4 +164,34 @@ export default definePlugin({
   // Protected nodes: the container can't be deleted -- it guards every day note
   // and everything written under them (removeNode cascades the subtree).
   protects: (nodeId) => isContainerNode(nodeId),
+
+  // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
+  // switcher and the /move picker, even though the node's text is the full date.
+  // Matched (a second Fuse key) but never highlighted -- the row still shows the
+  // date text. "Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping.
+  searchAliases: (node) => {
+    const key = getDayKey(node.id)
+    return key ? [formatDayBadge(key)] : []
+  },
+
+  // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
+  // exist yet (when it does, the alias above surfaces the real node -- no dup).
+  // Picking it creates the note + container, then navigates. This is the "search
+  // today even if it isn't there" half (ADR 0022).
+  searchActions: (query, ctx) => {
+    const q = query.trim().toLowerCase()
+    if (q.length < 2 || !'today'.startsWith(q)) return []
+    const key = localDateKey()
+    const existing = getDayId(key)
+    if (existing && ctx.index.byId.has(existing)) return []
+    return [
+      {
+        key: 'daily-go-today',
+        label: 'Go to Today',
+        hint: "Creates today's daily note",
+        icon: CalendarDaysIcon,
+        run: () => ctx.goTo(getOrCreateDay(key, ctx.index)),
+      },
+    ]
+  },
 })
