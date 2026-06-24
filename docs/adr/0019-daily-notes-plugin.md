@@ -41,6 +41,9 @@ pieces:
    entry dangles) → zoom to it. Self-healing: a deleted day note is recreated empty on
    next visit; a deleted container is recreated. The button is scoped to *today*; the core
    logic is date-generic from day one so the picker is a pure caller, no retrofit.
+   The non-zooming half is factored out as `getOrCreateDay(key, ctx)` so callers
+   that don't navigate (the `/` "Send to Today" command — see below) reuse the
+   exact same get-or-create.
 
 4. **A daily note is just a node; the date is *displayed* from the index, not stored as
    identity.** No new `Node` type or field. The note's `text` is **freeform, seeded to the
@@ -64,6 +67,15 @@ pieces:
 
 The **Today button** itself is a header slot (ADR 0020): `render(getCtx)` → on click runs
 the get-or-create path for today and `ctx.nav.zoom`s to it.
+
+A follow-up **"Send to Today" `/` command** (Seam C) reuses the same `getOrCreateDay`, then
+moves the focused node under today's note via the low-level `moveNode` mutation — mirroring
+the core `/move` completion (`move-dialog.tsx`): one `capture` undo step, append as today's
+last child, stay put with a "Moved to Today" toast whose "Go" zooms there. Its label
+deliberately omits "move" (the palette substring-matches label + keywords, so "Move to
+Today" would shadow the core `/move`); it's discovered via `/today`. `moveNode`'s own cycle
+guard makes sending the container or an ancestor of today a safe no-op. This is additive use
+of an existing seam, so it needed no new ADR.
 
 ## Why
 
@@ -131,8 +143,9 @@ the get-or-create path for today and `ctx.nav.zoom`s to it.
   the non-reactive lookups (`getContainerId` / `getDayId` / `setMapping` / `isContainerNode`),
   and the reactive `useDailyDate` (subscribe pattern mirroring `tag-colors.ts`, prerender-safe).
 - **`src/plugins/daily/index.tsx`** (new) — the `PluginDef`: the Today header slot, the
-  date-badge row slot, the `protects` predicate, and the get-or-create
-  (`ensureContainer` / `ensureDay` / `goToDate`).
+  date-badge row slot, the `protects` predicate, the get-or-create
+  (`ensureContainer` / `ensureDay` / `getOrCreateDay` / `goToDate`), and the "Send to
+  Today" `/` command (Seam C).
 - **`src/plugins/index.ts`** — `daily` added to the `plugins` array (one line).
 - **`src/plugins/types.ts`** — `HeaderSlotSpec` + `PluginDef.headerSlots` (ADR 0020) and
   `PluginDef.protects` (ADR 0021).
@@ -140,6 +153,7 @@ the get-or-create path for today and `ctx.nav.zoom`s to it.
 - **`src/components/Header.tsx`** — renders header slots (new optional `getCtx` prop).
 - **`src/components/OutlineEditor.tsx`** — passes `getCtx={pluginCtx}` to `Header`;
   `onDeleteNode` consults `isProtected` and no-ops on a protected node.
-- **`e2e/daily-notes.spec.ts`** (new) — creation+zoom, idempotency, protection.
+- **`e2e/daily-notes.spec.ts`** (new) — creation+zoom, idempotency, protection, the
+  "Send to Today" `/` command.
 - **AGENTS.md** — the daily-notes operational pointer.
 - **No nodes-schema change, no `collection.ts` migration, no new route.**

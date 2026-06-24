@@ -13,11 +13,18 @@
 // capture/pending-focus semantics are editor-edit concerns a get-or-create that
 // navigates away doesn't want.
 
-import { CalendarDaysIcon } from 'lucide-react'
+import { CalendarArrowDownIcon, CalendarDaysIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { definePlugin, type PluginContext } from '../types'
-import { appendChild, insertChildAtStart, setText } from '../../data/mutations'
+import { capture } from '../../data/history'
+import {
+  appendChild,
+  insertChildAtStart,
+  moveNode,
+  setText,
+} from '../../data/mutations'
 import { childrenOf } from '../../data/tree'
 import {
   CONTAINER_KEY,
@@ -63,12 +70,16 @@ function ensureDay(key: string, containerId: string, ctx: PluginContext): string
   return id
 }
 
-/** Ensure the container + the day exist, then zoom to the day. Date-generic so
- *  a future week picker is a pure caller (ADR 0019). */
+/** Ensure the container + the day exist and return the day's node id (no nav).
+ *  Date-generic so the Today button, the `/` command, and a future week picker
+ *  are all pure callers (ADR 0019). */
+function getOrCreateDay(key: string, ctx: PluginContext): string {
+  return ensureDay(key, ensureContainer(ctx), ctx)
+}
+
+/** get-or-create the day, then zoom to it (the Today button + future picker). */
 function goToDate(key: string, ctx: PluginContext): void {
-  const containerId = ensureContainer(ctx)
-  const dayId = ensureDay(key, containerId, ctx)
-  ctx.nav.zoom(dayId)
+  ctx.nav.zoom(getOrCreateDay(key, ctx))
 }
 
 // --- header slot: the "Today" button ----------------------------------------
@@ -116,6 +127,35 @@ export default definePlugin({
       id: 'daily-date-badge',
       position: 'row:before-text',
       render: (node) => <DailyBadge nodeId={node.id} />,
+    },
+  ],
+
+  // Seam C: a `/` command to move the focused node under today's note. Mirrors
+  // the core `/move` completion (move-dialog.tsx): one undo step, append as
+  // today's last child, then stay put + toast with a "Go" to jump there. Label
+  // deliberately avoids "move" -- the menu substring-matches label+keywords, so
+  // "Move to Today" would shadow the core `/move`. "/today" finds this; "/move"
+  // stays the general mover.
+  commands: [
+    {
+      id: 'send-to-today',
+      label: 'Send to Today',
+      description: "Move this node under today's daily note",
+      icon: CalendarArrowDownIcon,
+      keywords: ['today', 'daily', 'journal'],
+      available: () => true,
+      run: (nodeId, ctx) => {
+        const todayId = getOrCreateDay(localDateKey(), ctx)
+        if (todayId === nodeId) return // can't move today's note under itself
+        capture(ctx.tree, nodeId)
+        const kids = childrenOf(ctx.tree, todayId)
+        const after = kids.length ? kids[kids.length - 1]!.id : null
+        if (moveNode(ctx.tree, nodeId, todayId, after)) {
+          toast.success('Moved to Today', {
+            action: { label: 'Go', onClick: () => ctx.nav.zoom(todayId) },
+          })
+        }
+      },
     },
   ],
 

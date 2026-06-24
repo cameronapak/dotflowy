@@ -69,6 +69,32 @@ test.describe("daily notes", () => {
     await expect(page.locator("[data-daily-date]")).toHaveCount(1);
   });
 
+  test("the `/` command moves a node under today's note", async ({ page }) => {
+    await load(page);
+
+    // Run the slash command from a top-level node. The leading space makes the
+    // "/" follow whitespace so detectSlash fires; "/today" uniquely matches
+    // "Move to Today" (see move-dialog.spec for the pattern).
+    const charlie = page.locator(
+      'li[data-node-id="charlie"] > .outline-row > .node-text',
+    );
+    await charlie.click();
+    await expect(charlie).toBeFocused();
+    await page.keyboard.type(" /today");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Enter");
+
+    // Confirming toast, and the node -- a top-level sibling before -- now nests
+    // under the Daily container's today note (creating both on first use).
+    await expect(page.getByText("Moved to Today")).toBeVisible();
+    const dailyContainer = page.locator("li[data-node-id]", {
+      hasText: "Daily",
+    });
+    await expect(
+      dailyContainer.locator('li[data-node-id="charlie"]'),
+    ).toBeVisible();
+  });
+
   test("the Daily container resists deletion; ordinary nodes still delete", async ({
     page,
   }) => {
