@@ -45,6 +45,9 @@ jobs:
           cp .env.server.example .env.server
           echo "DATABASE_URL=$DATABASE_URL" >> .env.server
 
+      - name: Install project dependencies
+        run: wasp install
+
       - name: Compile Wasp (generates SDK + applies migrations)
         run: wasp compile
 
