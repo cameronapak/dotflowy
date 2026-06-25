@@ -6,6 +6,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   Link,
@@ -103,13 +104,19 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
 
-  // Active tag filter, read from the `q` search param (ADR 0015). Empty unless
-  // a filter is on. Kept in a ref too, so the stable chip-click/bar handlers
-  // below can read the current tags without re-binding.
-  const search = useSearch({ strict: false }) as { q?: string };
-  const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
-  const activeTagsRef = useRef(activeTags);
-  activeTagsRef.current = activeTags;
+  // Live handle to the current tree for the stable command/drag closures (the
+  // ref pattern every live value uses, so `commands` keeps its identity across
+  // renders -- a prop on every memoized OutlineNode. See ADR 0014).
+  const focusIndex = useRef<TreeIndex>(index);
+  focusIndex.current = index;
+
+  // First-run import-or-seed bootstrap; safe to run on mount. See seed.ts.
+  useBootstrapOutline();
+
+  // URL-driven tag filter (?q=, ADR 0015): the active tags plus the stable
+  // chip-click / filter-bar handlers and escape-to-clear. See useTagFilter.
+  const { activeTags, activeTagsRef, addTag, removeTag, clearTags, setQ } =
+    useTagFilter(rootId, navigate);
 
   // Seam G (ADR 0018): the composed per-node visibility predicate. The core no
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
@@ -128,127 +135,32 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const isHiddenRef = useRef(isHidden);
   isHiddenRef.current = isHidden;
 
-  // Refs registry: id -> contentEditable span. Lets us move focus
-  // between bullets after structural mutations. The zoomed title also
-  // registers here under rootId, so focus logic treats it uniformly.
-  const refs = useRef<Map<string, HTMLSpanElement | null>>(new Map());
-  const registerRef = useCallback((id: string, el: HTMLSpanElement | null) => {
-    if (el) refs.current.set(id, el);
-    else refs.current.delete(id);
-  }, []);
+  const rootIdRef = useRef<string | null>(rootId);
+  rootIdRef.current = rootId;
+
+  // Focus plumbing: the id->contentEditable registry, the post-render focus/
+  // flash pass, and undo/redo (which restore focus where the action left it).
+  // The refs are returned so the command closures + drag can write them. See
+  // useOutlineFocus.
+  const { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash } =
+    useOutlineFocus(focusIndex);
 
   // The top-level <ul>, so the drag indicator knows how wide to draw.
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // First-run bootstrap: import a pre-D1 localStorage outline if present, else
-  // seed the welcome bullets. Both await the collection's initial D1 load and
-  // no-op unless the server is empty (see seed.ts / import-legacy.ts), so this
-  // is safe to call unconditionally on mount.
-  //
-  // bootstrapOutline returns a BootstrapError as a value (errore convention)
-  // when the initial D1 load failed -- which it detects deliberately, because
-  // the query adapter resolves an empty array (and logs its own error) rather
-  // than rejecting on a 500/offline. We log here too for a single, app-level
-  // "bootstrap was skipped because the load failed" signal, and so the seed
-  // never runs over a just-unreachable outline. The trailing .catch is a
-  // backstop for anything truly unexpected (e.g. a localStorage quota throw) so
-  // the mount effect can never produce an unhandled rejection.
-  useEffect(() => {
-    bootstrapOutline()
-      .then((err) => {
-        if (err instanceof Error)
-          console.error("Outline bootstrap skipped:", err);
-      })
-      .catch((err) => console.error("Outline bootstrap threw:", err));
-  }, []);
-
-  // Track the most recently inserted/focused node id so we can focus it
-  // after the next render. Storing in a ref + state-like cursor.
-  const pendingFocus = useRef<string | null>(null);
-  // When an Enter-split moves text into the new bullet, the caret should land at
-  // the START of that moved text, not after it. Every other pending-focus wants
-  // the end (natural typing flow), which is the default.
-  const pendingFocusAtStart = useRef(false);
-  // Like pendingFocus, but pulses the row's background (bg-card -> transparent)
-  // to mark the node an action just landed on -- set after a drag-move. Same
-  // post-render timing, since the moved row only exists after the next render.
-  const pendingFlash = useRef<string | null>(null);
-
-  // After every render, if a focus is pending and the target exists, focus it.
-  useEffect(() => {
-    if (pendingFocus.current) {
-      const el = refs.current.get(pendingFocus.current);
-      if (el) {
-        el.focus();
-        if (pendingFocusAtStart.current) placeCaretAtStart(el);
-        else placeCaretAtEnd(el);
-      }
-      pendingFocus.current = null;
-      pendingFocusAtStart.current = false;
-    }
-    if (pendingFlash.current) {
-      const el = refs.current.get(pendingFlash.current);
-      flashRow(el?.closest(".outline-row") ?? null);
-      pendingFlash.current = null;
-    }
+  // Zoom navigation: the shared-element morph between a node's title and list-
+  // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation
+  // focus landing. See useZoomNavigation.
+  const { navigateZoom, pivotId } = useZoomNavigation({
+    index,
+    rootId,
+    isHidden,
+    refs,
+    focusIndex,
+    navigate,
   });
 
-  const focusIndex = useRef<TreeIndex>(index);
-  focusIndex.current = index;
-  // Keep the live rootId available inside command closures.
-  const rootIdRef = useRef<string | null>(rootId);
-  rootIdRef.current = rootId;
-  // Live values read by the *stable* command closures and navigateZoom. The
-  // commands object must keep its identity across renders (it's a prop on every
-  // memoized OutlineNode); reading these through refs is what lets it. See ADR 0014.
-  const navigateRef = useRef(navigate);
-  navigateRef.current = navigate;
 
-  // Write the active tags into the `q` param, navigating on the current route.
-  // Mirrors navigateZoom's null-root branch. Stable (reads live values through
-  // refs) so the chip-click handler and filter bar never re-bind.
-  const setQ = useCallback((tags: string[]) => {
-    const q = serializeQuery(tags);
-    const nextSearch = q ? { q } : {};
-    const root = rootIdRef.current;
-    if (root === null) navigateRef.current({ to: "/", search: nextSearch });
-    else
-      navigateRef.current({
-        to: "/$nodeId",
-        params: { nodeId: root },
-        search: nextSearch,
-      });
-  }, []);
-  // Clicking a tag AND-s it into the filter (accretes, never replaces); a
-  // pill's ✕ drops one; clear-all drops the filter.
-  const addTag = useCallback(
-    (tag: string) => {
-      const current = activeTagsRef.current;
-      if (current.includes(tag)) return;
-      setQ([...current, tag]);
-    },
-    [setQ],
-  );
-  const removeTag = useCallback(
-    (tag: string) => setQ(activeTagsRef.current.filter((t) => t !== tag)),
-    [setQ],
-  );
-  const clearTags = useCallback(() => setQ([]), [setQ]);
-
-  // Escape clears the filter -- but only when the caret isn't inside a bullet,
-  // so it never eats an in-progress edit (ADR 0015).
-  useEffect(() => {
-    if (activeTags.length === 0) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.classList.contains("node-text"))
-        return;
-      clearTags();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [activeTags.length, clearTags]);
 
   // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
   // plain mousedown would place an editing caret; we block that and route the
@@ -272,151 +184,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
   };
 
-  // The id of the currently focused bullet, found by reverse-looking-up the
-  // refs registry (covers both list items and the zoomed title, registered
-  // under rootId). Null when focus is outside the outline.
-  const findFocusedId = (): string | null => {
-    const active = document.activeElement;
-    for (const [id, el] of refs.current) {
-      if (el === active) return id;
-    }
-    return null;
-  };
 
-  // Mod+D used to live here as an editor-level global; it's now the todos
-  // plugin's per-bullet keymap (Seam D), registered on every bullet AND the
-  // zoomed title -- so it covers the same focus targets without the core
-  // knowing about completion. See the todos plugin + ZoomedTitle below.
-
-  // Cmd/Ctrl+Z: undo the last action. preventDefault stops the browser's
-  // native contentEditable undo so we own history. Restores focus to the
-  // node that was focused before the undone action, when it still exists.
-  // The currently-focused id is handed to undo so redo can later return focus
-  // to where the action left it.
-  useHotkey(
-    "Mod+Z",
-    () => {
-      const focusId = undo(focusIndex.current, findFocusedId());
-      if (focusId) pendingFocus.current = focusId;
-    },
-    { preventDefault: true },
-  );
-
-  // Cmd/Ctrl+Shift+Z: redo the last undone action, the mirror of Mod+Z.
-  useHotkey(
-    "Mod+Shift+Z",
-    () => {
-      const focusId = redo(focusIndex.current, findFocusedId());
-      if (focusId) pendingFocus.current = focusId;
-    },
-    { preventDefault: true },
-  );
-
-  // The "pivot" of the last zoom: the node that swaps between title and
-  // list-item roles. The incoming view reads it from history state and names
-  // that node's element so the browser morphs it across the navigation.
-  const location = useLocation();
-  const pivotId = location.state.pivotId ?? null;
-  const pivotIdRef = useRef<string | null>(pivotId);
-  pivotIdRef.current = pivotId;
-
-  // After a zoom, drop focus where the user is most likely to continue:
-  //  - Zooming IN (pivot is now the title, pivotId === rootId): the first child
-  //    of the opened node, so you can start working inside it. If it has no
-  //    children, focus the title -- Enter there adds the first child.
-  //  - Zooming OUT (pivot is now a list item): the node you came from.
-  // Then scroll the target into view if it landed below the fold.
-  //
-  // Mount-only by design: the editor remounts per zoom view (ADR 0003's
-  // `key={nodeId}`), so this runs exactly once per navigation. It must be a
-  // passive effect, not useLayoutEffect: each bullet's text is written to its
-  // contentEditable in OutlineNode's own (passive) effect, so only by now is
-  // the list laid out at its real heights -- the scroll target would otherwise
-  // be computed against empty, collapsed rows.
-  useEffect(() => {
-    if (!pivotId) return;
-    let targetId = pivotId;
-    if (pivotId === rootId) {
-      const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
-      if (firstChild) targetId = firstChild.id;
-    }
-    const el = refs.current.get(targetId);
-    if (!el) return;
-    el.focus({ preventScroll: true });
-    placeCaretAtEnd(el);
-    // `nearest` brings it just into view when below the fold and does nothing
-    // when it's already visible (the common case after a zoom).
-    el.scrollIntoView({ block: "nearest" });
-  }, []);
-
-  // /move's "Go" jumps to the destination's zoom view and asks us to focus and
-  // flash the node that was moved, so it's easy to spot where it landed. Mount-
-  // only, like the post-zoom focus above (the editor remounts per view), and a
-  // passive effect for the same reason -- bullet text/heights settle first.
-  useEffect(() => {
-    const flashId = consumeFlashAfterNav();
-    if (!flashId) return;
-    const el = refs.current.get(flashId);
-    if (!el) return;
-    el.focus({ preventScroll: true });
-    placeCaretAtEnd(el);
-    el.scrollIntoView({ block: "nearest" });
-    flashRow(el.closest(".outline-row"));
-  }, []);
-
-  /**
-   * Navigate to a new zoom root with a shared-element morph. `pivot` is the
-   * node that changes role: the target when zooming in (list item -> title),
-   * the current root when zooming out (title -> list item). We name the pivot
-   * in the OUTGOING view here; the incoming view names it declaratively.
-   */
-  const navigateZoom = useCallback((toRootId: string | null, pivot: string) => {
-    const navigate = navigateRef.current;
-    // Zooming out reveals the trail: expand any collapsed ancestor between the
-    // node we're leaving and the destination root, so the pivot is actually
-    // visible when we land (otherwise a collapsed parent hides where you were).
-    revealAncestorsToRoot(focusIndex.current, pivot, toRootId);
-    if (prefersReducedMotion()) {
-      // No morph, but still carry the pivot so the new view restores focus.
-      const state = { pivotId: pivot };
-      if (toRootId === null) navigate({ to: "/", state });
-      else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, state });
-      return;
-    }
-    // Retarget the morph name from this view's current pivot onto the new one.
-    const prev = pivotIdRef.current;
-    if (prev && prev !== pivot) {
-      const prevEl = refs.current.get(prev);
-      prevEl?.style.removeProperty("view-transition-name");
-      prevEl?.classList.remove("vt-morph");
-    }
-    const el = refs.current.get(pivot);
-    if (el) {
-      el.style.setProperty("view-transition-name", "zoom-target");
-      el.classList.add("vt-morph");
-    }
-    const opts = {
-      state: { pivotId: pivot },
-      viewTransition: { types: ["zoom"] },
-    };
-    if (toRootId === null) navigate({ to: "/", ...opts });
-    else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
-  }, []);
-
-  // Cmd/Ctrl+,: zoom out one level — navigate to the current root's parent,
-  // with the current root as the morph pivot (title -> list item). No-op at
-  // the top. Mirror of Cmd+. (zoom in). Editor-level, not per-bullet, because
-  // zooming out is keyed off rootId, not the focused node.
-  useHotkey(
-    "Mod+,",
-    () => {
-      const currentRoot = rootIdRef.current;
-      if (currentRoot === null) return;
-      const node = focusIndex.current.byId.get(currentRoot);
-      navigateZoom(node?.parentId ?? null, currentRoot);
-    },
-    { preventDefault: true },
-  );
 
   // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
   // live values through getters (the same ref pattern the commands use), and
@@ -448,167 +216,23 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // the memoized commands below.
   const { startDrag, consumeClick } = drag;
 
-  // Recreating this object each render would change a prop on every memoized
-  // OutlineNode and re-render the whole tree on every keystroke -- the exact bug
-  // ADR 0014 fixes. It stays stable because every live value it needs is read
-  // through a ref (focusIndex, rootIdRef, isHiddenRef) or is itself stable
-  // (navigateZoom, startDrag, consumeClick, the module-level mutations).
-  const commands = useMemo<NodeCommands>(
-    () => ({
-    onTextChange: (id, text) => {
-      // Coalesce a run of keystrokes on one bullet into a single undo step,
-      // capturing the pre-typing state on the first keystroke of the run.
-      capture(focusIndex.current, id, `text:${id}`);
-      setText(id, text);
-    },
-
-    onEnter: (id, caretOffset) => {
-      const node = focusIndex.current.byId.get(id);
-      if (!node) return;
-      capture(focusIndex.current, id);
-      const offset = Math.max(0, Math.min(caretOffset, node.text.length));
-      const before = node.text.slice(0, offset);
-      const after = node.text.slice(offset);
-      const caretAtEnd = after.length === 0;
-      // Pressing Enter at the end of an open (expanded, has-children) bullet
-      // adds a child at the top of its list rather than a sibling -- you're
-      // diving into the thing you just finished naming. Anywhere else keeps the
-      // plain new-sibling.
-      const isOpen =
-        !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
-      if (caretAtEnd && isOpen) {
-        pendingFocus.current = insertChildAtStart(
-          focusIndex.current,
-          id,
-          node.isTask,
-        );
-        return;
-      }
-      // Split at the caret: text left of it stays on this node, text to its
-      // right seeds the new sibling. (Caret at the end is just `after === ""`.)
-      const newId = insertSibling(
-        focusIndex.current,
-        node.parentId,
-        id,
-        node.isTask,
-        after,
-      );
-      if (!caretAtEnd) {
-        setText(id, before);
-        // Caret sits before the moved text, where the split happened.
-        pendingFocusAtStart.current = true;
-      }
-      pendingFocus.current = newId;
-    },
-
-    onIndent: (id) => {
-      // Moving the node reparents it into a different <ul>, which remounts
-      // its contentEditable and drops focus. Re-focus it after the render.
-      capture(focusIndex.current, id);
-      if (indent(focusIndex.current, id)) {
-        pendingFocus.current = id;
-        pendingFlash.current = id;
-      } else drop(); // no move happened; discard the redundant undo point
-    },
-
-    onOutdent: (id) => {
-      // Don't let a direct child of the zoom root outdent past it; that
-      // would move it out of the visible subtree and look like it vanished.
-      const node = focusIndex.current.byId.get(id);
-      if (node && node.parentId === rootIdRef.current) return;
-      // Same remount-drops-focus issue as indent; re-focus on a real move.
-      capture(focusIndex.current, id);
-      if (outdent(focusIndex.current, id)) {
-        pendingFocus.current = id;
-        pendingFlash.current = id;
-      } else drop();
-    },
-
-    onMoveUp: (id) => {
-      // Reorder/outdent remounts the contentEditable; re-focus on a real move.
-      capture(focusIndex.current, id);
-      const moved = moveUp(focusIndex.current, id, {
-        isVisible: (n) => !isHiddenRef.current(n),
-        rootId: rootIdRef.current,
-      });
-      if (moved) {
-        pendingFocus.current = id;
-        pendingFlash.current = id;
-      } else drop();
-    },
-
-    onMoveDown: (id) => {
-      capture(focusIndex.current, id);
-      const moved = moveDown(focusIndex.current, id, {
-        isVisible: (n) => !isHiddenRef.current(n),
-        rootId: rootIdRef.current,
-      });
-      if (moved) {
-        pendingFocus.current = id;
-        pendingFlash.current = id;
-      } else drop();
-    },
-
-    onDeleteNode: (id) => {
-      // A plugin can protect a node from deletion (the daily container). The
-      // core no-ops here -- the single funnel every delete path flows through.
-      if (isProtected(id)) return;
-      capture(focusIndex.current, id);
-      const focusId = removeNode(focusIndex.current, id);
-      if (focusId) pendingFocus.current = focusId;
-      else drop(); // node didn't exist; nothing was deleted
-    },
-
-    onToggleCompleted: (id, completed) => {
-      capture(focusIndex.current, id);
-      toggleCompleted(id, completed);
-    },
-
-    onSetTask: (id, isTask) => {
-      capture(focusIndex.current, id);
-      setIsTask(id, isTask);
-    },
-
-    // Open the move picker; the dialog runs the mutation + navigation itself.
-    onRequestMove: (id) => openMoveDialog(id),
-
-    onToggleCollapsed: (id, collapsed) => {
-      capture(focusIndex.current, id);
-      toggleCollapsed(id, collapsed);
-    },
-
-    onMoveFocus: (id, direction, x) => {
-      const target = findVisibleNeighbor(
-        focusIndex.current,
-        rootIdRef.current,
-        id,
-        direction,
-        isHiddenRef.current,
-      );
-      if (target) {
-        const el = refs.current.get(target);
-        if (el) {
-          el.focus();
-          if (x != null) placeCaretAtColumn(el, direction, x);
-          else placeCaretAtStart(el);
-        }
-      }
-    },
-
-    // Zooming in: the clicked node is the pivot (list item -> title).
-    onZoom: (id) => navigateZoom(id, id),
-
-    onBulletPointerDown: (id, e) => startDrag(id, e),
-
-    // The dot's click fires right after pointerup. Suppress the zoom when that
-    // press was actually a drag; otherwise zoom as before.
-    onBulletClick: (id) => {
-      if (consumeClick()) return;
-      navigateZoom(id, id);
-    },
-    }),
-    [navigateZoom, startDrag, consumeClick],
-  );
+  // The per-bullet command set. Recreating it each render would change a prop
+  // on every memoized OutlineNode and re-render the whole tree on every
+  // keystroke -- the exact bug ADR 0014 fixes. It stays stable because every
+  // live value it needs is read through a ref or is itself stable. See
+  // useNodeCommands.
+  const commands = useNodeCommands({
+    focusIndex,
+    rootIdRef,
+    isHiddenRef,
+    refs,
+    pendingFocus,
+    pendingFocusAtStart,
+    pendingFlash,
+    navigateZoom,
+    startDrag,
+    consumeClick,
+  });
 
   // PluginContext factory (ADR 0018 D8): the promoted command set + tree reads +
   // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
@@ -752,6 +376,519 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * First-run bootstrap: import a pre-D1 localStorage outline if present, else
+ * seed the welcome bullets. Both await the collection's initial D1 load and
+ * no-op unless the server is empty (seed.ts / import-legacy.ts), so this is
+ * safe to call unconditionally on mount.
+ *
+ * bootstrapOutline returns a BootstrapError as a value (errore convention) when
+ * the initial D1 load failed -- it detects that deliberately, because the query
+ * adapter resolves an empty array (and logs its own error) rather than rejecting
+ * on a 500/offline. We log here too for a single, app-level "bootstrap skipped
+ * because the load failed" signal, so the seed never runs over a just-
+ * unreachable outline. The trailing .catch is a backstop for anything truly
+ * unexpected (e.g. a localStorage quota throw) so the mount effect can never
+ * produce an unhandled rejection.
+ */
+function useBootstrapOutline() {
+  useEffect(() => {
+    bootstrapOutline()
+      .then((err) => {
+        if (err instanceof Error)
+          console.error("Outline bootstrap skipped:", err);
+      })
+      .catch((err) => console.error("Outline bootstrap threw:", err));
+  }, []);
+}
+
+interface OutlineFocus {
+  /** id -> contentEditable span. The zoomed title registers under rootId too,
+   *  so focus logic treats titles and list items uniformly. */
+  refs: RefObject<Map<string, HTMLSpanElement | null>>;
+  registerRef: (id: string, el: HTMLSpanElement | null) => void;
+  /** The node to focus after the next render (most-recently inserted/moved). */
+  pendingFocus: RefObject<string | null>;
+  /** When an Enter-split moved text into the new bullet, land the caret at its
+   *  START, not its end (every other pending-focus wants the end). */
+  pendingFocusAtStart: RefObject<boolean>;
+  /** Like pendingFocus, but pulses the row's background to mark a just-moved
+   *  node (set after a drag/keyboard move). */
+  pendingFlash: RefObject<string | null>;
+}
+
+/**
+ * Focus plumbing for the editor: the id->span registry, the after-render focus/
+ * flash pass, and undo/redo (which restore focus to the node the undone action
+ * left it on). Split out of OutlineEditor so the body stays readable; the refs
+ * are returned so the command closures and drag can write them. See ADR 0014.
+ */
+function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
+  // The refs registry. Lazy-init the Map once: useRef has no lazy-initializer
+  // form, so passing `new Map()` directly would rebuild and discard it on every
+  // render. (react-doctor/rerender-lazy-ref-init.)
+  const refs = useRef<Map<string, HTMLSpanElement | null>>(null!);
+  if (!refs.current) refs.current = new Map();
+  const registerRef = useCallback((id: string, el: HTMLSpanElement | null) => {
+    if (el) refs.current.set(id, el);
+    else refs.current.delete(id);
+  }, []);
+
+  const pendingFocus = useRef<string | null>(null);
+  const pendingFocusAtStart = useRef(false);
+  const pendingFlash = useRef<string | null>(null);
+
+  // After every render, if a focus is pending and the target exists, focus it;
+  // likewise flash a just-moved row. Both run post-render because the target row
+  // only exists after the structural mutation's render.
+  useEffect(() => {
+    if (pendingFocus.current) {
+      const el = refs.current.get(pendingFocus.current);
+      if (el) {
+        el.focus();
+        if (pendingFocusAtStart.current) placeCaretAtStart(el);
+        else placeCaretAtEnd(el);
+      }
+      pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
+    }
+    if (pendingFlash.current) {
+      const el = refs.current.get(pendingFlash.current);
+      flashRow(el?.closest(".outline-row") ?? null);
+      pendingFlash.current = null;
+    }
+  });
+
+  // The currently-focused bullet id, by reverse-looking-up the registry (covers
+  // list items and the zoomed title). Null when focus is outside the outline.
+  const findFocusedId = useCallback((): string | null => {
+    const active = document.activeElement;
+    for (const [id, el] of refs.current) {
+      if (el === active) return id;
+    }
+    return null;
+  }, []);
+
+  // Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z: undo/redo, owning history over the browser's
+  // native contentEditable undo (preventDefault). The focused id is handed in so
+  // redo can return focus where the action left it; the restored id becomes the
+  // next pending focus.
+  useHotkey(
+    "Mod+Z",
+    () => {
+      const focusId = undo(focusIndex.current, findFocusedId());
+      if (focusId) pendingFocus.current = focusId;
+    },
+    { preventDefault: true },
+  );
+  useHotkey(
+    "Mod+Shift+Z",
+    () => {
+      const focusId = redo(focusIndex.current, findFocusedId());
+      if (focusId) pendingFocus.current = focusId;
+    },
+    { preventDefault: true },
+  );
+
+  return { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash };
+}
+
+interface TagFilterControls {
+  activeTags: string[];
+  activeTagsRef: RefObject<string[]>;
+  addTag: (tag: string) => void;
+  removeTag: (tag: string) => void;
+  clearTags: () => void;
+  setQ: (tags: string[]) => void;
+}
+
+/**
+ * The URL-driven tag filter (?q=, ADR 0015): the active tags read from the
+ * search param, plus the stable handlers that write them. Self-contained -- it
+ * keeps its own live rootId/navigate refs so the handlers never re-bind.
+ */
+function useTagFilter(
+  rootId: string | null,
+  navigate: ReturnType<typeof useNavigate>,
+): TagFilterControls {
+  const search = useSearch({ strict: false }) as { q?: string };
+  const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
+  const activeTagsRef = useRef(activeTags);
+  activeTagsRef.current = activeTags;
+  const rootIdRef = useRef<string | null>(rootId);
+  rootIdRef.current = rootId;
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  // Write the active tags into the `q` param on the current route. Stable
+  // (reads live values through refs), so the chip-click handler and filter bar
+  // never re-bind.
+  const setQ = useCallback((tags: string[]) => {
+    const q = serializeQuery(tags);
+    const nextSearch = q ? { q } : {};
+    const root = rootIdRef.current;
+    if (root === null) navigateRef.current({ to: "/", search: nextSearch });
+    else
+      navigateRef.current({
+        to: "/$nodeId",
+        params: { nodeId: root },
+        search: nextSearch,
+      });
+  }, []);
+  // Clicking a tag AND-s it into the filter (accretes, never replaces); a
+  // pill's ✕ drops one; clear-all drops the filter.
+  const addTag = useCallback(
+    (tag: string) => {
+      const current = activeTagsRef.current;
+      if (current.includes(tag)) return;
+      setQ([...current, tag]);
+    },
+    [setQ],
+  );
+  const removeTag = useCallback(
+    (tag: string) => setQ(activeTagsRef.current.filter((t) => t !== tag)),
+    [setQ],
+  );
+  const clearTags = useCallback(() => setQ([]), [setQ]);
+
+  // Escape clears the filter -- but only when the caret isn't inside a bullet,
+  // so it never eats an in-progress edit (ADR 0015).
+  useEffect(() => {
+    if (activeTags.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.classList.contains("node-text"))
+        return;
+      clearTags();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeTags.length, clearTags]);
+
+  return { activeTags, activeTagsRef, addTag, removeTag, clearTags, setQ };
+}
+
+interface ZoomNavigationArgs {
+  index: TreeIndex;
+  rootId: string | null;
+  isHidden: (node: Node) => boolean;
+  refs: RefObject<Map<string, HTMLSpanElement | null>>;
+  focusIndex: RefObject<TreeIndex>;
+  navigate: ReturnType<typeof useNavigate>;
+}
+
+/**
+ * Zoom navigation: the shared-element morph between a node's title and list-item
+ * roles, Cmd+, zoom-out, and the focus landing after a navigation. Returns the
+ * stable `navigateZoom` and the current pivot id. The mount-only effects rely on
+ * the editor remounting per zoom view (ADR 0003's `key={nodeId}`).
+ */
+function useZoomNavigation({
+  index,
+  rootId,
+  isHidden,
+  refs,
+  focusIndex,
+  navigate,
+}: ZoomNavigationArgs): {
+  navigateZoom: (toRootId: string | null, pivot: string) => void;
+  pivotId: string | null;
+} {
+  // The "pivot" of the last zoom: the node that swaps between title and list-
+  // item roles. The incoming view reads it from history state and names that
+  // node's element so the browser morphs it across the navigation.
+  const location = useLocation();
+  const pivotId = location.state.pivotId ?? null;
+  const pivotIdRef = useRef<string | null>(pivotId);
+  pivotIdRef.current = pivotId;
+  const rootIdRef = useRef<string | null>(rootId);
+  rootIdRef.current = rootId;
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  /**
+   * Navigate to a new zoom root with a shared-element morph. `pivot` is the
+   * node that changes role: the target when zooming in (list item -> title),
+   * the current root when zooming out (title -> list item). We name the pivot in
+   * the OUTGOING view here; the incoming view names it declaratively.
+   */
+  const navigateZoom = useCallback(
+    (toRootId: string | null, pivot: string) => {
+      const navigate = navigateRef.current;
+      // Zooming out reveals the trail: expand any collapsed ancestor between the
+      // node we're leaving and the destination root, so the pivot is actually
+      // visible when we land (otherwise a collapsed parent hides where you were).
+      revealAncestorsToRoot(focusIndex.current, pivot, toRootId);
+      if (prefersReducedMotion()) {
+        // No morph, but still carry the pivot so the new view restores focus.
+        const state = { pivotId: pivot };
+        if (toRootId === null) navigate({ to: "/", state });
+        else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, state });
+        return;
+      }
+      // Retarget the morph name from this view's current pivot onto the new one.
+      const prev = pivotIdRef.current;
+      if (prev && prev !== pivot) {
+        const prevEl = refs.current.get(prev);
+        prevEl?.style.removeProperty("view-transition-name");
+        prevEl?.classList.remove("vt-morph");
+      }
+      const el = refs.current.get(pivot);
+      if (el) {
+        el.style.setProperty("view-transition-name", "zoom-target");
+        el.classList.add("vt-morph");
+      }
+      const opts = {
+        state: { pivotId: pivot },
+        viewTransition: { types: ["zoom"] },
+      };
+      if (toRootId === null) navigate({ to: "/", ...opts });
+      else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
+    },
+    [focusIndex, refs],
+  );
+
+  // Cmd/Ctrl+,: zoom out one level -- navigate to the current root's parent,
+  // with the current root as the morph pivot (title -> list item). No-op at the
+  // top. Mirror of Cmd+. (zoom in). Keyed off rootId, not the focused node.
+  useHotkey(
+    "Mod+,",
+    () => {
+      const currentRoot = rootIdRef.current;
+      if (currentRoot === null) return;
+      const node = focusIndex.current.byId.get(currentRoot);
+      navigateZoom(node?.parentId ?? null, currentRoot);
+    },
+    { preventDefault: true },
+  );
+
+  // After a zoom, drop focus where the user is most likely to continue:
+  //  - Zooming IN (pivotId === rootId): the first visible child of the opened
+  //    node, or its title when childless.
+  //  - Zooming OUT: the node you came from.
+  // Then scroll the target into view if it landed below the fold. Mount-only by
+  // design (the editor remounts per zoom view) and passive: each bullet's text
+  // is written in OutlineNode's own passive effect, so only by now is the list
+  // laid out at its real heights.
+  useEffect(() => {
+    if (!pivotId) return;
+    let targetId = pivotId;
+    if (pivotId === rootId) {
+      const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
+      if (firstChild) targetId = firstChild.id;
+    }
+    const el = refs.current.get(targetId);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    placeCaretAtEnd(el);
+    el.scrollIntoView({ block: "nearest" });
+  }, []);
+
+  // /move's "Go" jumps to the destination's zoom view and asks us to focus and
+  // flash the moved node so it's easy to spot. Mount-only/passive, like above.
+  useEffect(() => {
+    const flashId = consumeFlashAfterNav();
+    if (!flashId) return;
+    const el = refs.current.get(flashId);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    placeCaretAtEnd(el);
+    el.scrollIntoView({ block: "nearest" });
+    flashRow(el.closest(".outline-row"));
+  }, []);
+
+  return { navigateZoom, pivotId };
+}
+
+interface NodeCommandsArgs {
+  focusIndex: RefObject<TreeIndex>;
+  rootIdRef: RefObject<string | null>;
+  isHiddenRef: RefObject<(node: Node) => boolean>;
+  refs: RefObject<Map<string, HTMLSpanElement | null>>;
+  pendingFocus: RefObject<string | null>;
+  pendingFocusAtStart: RefObject<boolean>;
+  pendingFlash: RefObject<string | null>;
+  navigateZoom: (toRootId: string | null, pivot: string) => void;
+  startDrag: ReturnType<typeof useDragReorder>["startDrag"];
+  consumeClick: ReturnType<typeof useDragReorder>["consumeClick"];
+}
+
+/**
+ * The per-bullet command set, handed to every OutlineNode. Stable identity
+ * (a prop on every memoized node) because every live value it needs is read
+ * through a ref or is itself stable. See ADR 0014.
+ */
+function useNodeCommands({
+  focusIndex,
+  rootIdRef,
+  isHiddenRef,
+  refs,
+  pendingFocus,
+  pendingFocusAtStart,
+  pendingFlash,
+  navigateZoom,
+  startDrag,
+  consumeClick,
+}: NodeCommandsArgs): NodeCommands {
+  return useMemo<NodeCommands>(
+    () => ({
+      onTextChange: (id, text) => {
+        // Coalesce a run of keystrokes on one bullet into a single undo step,
+        // capturing the pre-typing state on the first keystroke of the run.
+        capture(focusIndex.current, id, `text:${id}`);
+        setText(id, text);
+      },
+
+      onEnter: (id, caretOffset) => {
+        const node = focusIndex.current.byId.get(id);
+        if (!node) return;
+        capture(focusIndex.current, id);
+        const offset = Math.max(0, Math.min(caretOffset, node.text.length));
+        const before = node.text.slice(0, offset);
+        const after = node.text.slice(offset);
+        const caretAtEnd = after.length === 0;
+        // Pressing Enter at the end of an open (expanded, has-children) bullet
+        // adds a child at the top of its list rather than a sibling -- you're
+        // diving into the thing you just finished naming. Anywhere else keeps
+        // the plain new-sibling.
+        const isOpen =
+          !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
+        if (caretAtEnd && isOpen) {
+          pendingFocus.current = insertChildAtStart(
+            focusIndex.current,
+            id,
+            node.isTask,
+          );
+          return;
+        }
+        // Split at the caret: text left of it stays on this node, text to its
+        // right seeds the new sibling. (Caret at the end is just `after === ""`.)
+        const newId = insertSibling(
+          focusIndex.current,
+          node.parentId,
+          id,
+          node.isTask,
+          after,
+        );
+        if (!caretAtEnd) {
+          setText(id, before);
+          // Caret sits before the moved text, where the split happened.
+          pendingFocusAtStart.current = true;
+        }
+        pendingFocus.current = newId;
+      },
+
+      onIndent: (id) => {
+        // Moving the node reparents it into a different <ul>, which remounts
+        // its contentEditable and drops focus. Re-focus it after the render.
+        capture(focusIndex.current, id);
+        if (indent(focusIndex.current, id)) {
+          pendingFocus.current = id;
+          pendingFlash.current = id;
+        } else drop(); // no move happened; discard the redundant undo point
+      },
+
+      onOutdent: (id) => {
+        // Don't let a direct child of the zoom root outdent past it; that
+        // would move it out of the visible subtree and look like it vanished.
+        const node = focusIndex.current.byId.get(id);
+        if (node && node.parentId === rootIdRef.current) return;
+        // Same remount-drops-focus issue as indent; re-focus on a real move.
+        capture(focusIndex.current, id);
+        if (outdent(focusIndex.current, id)) {
+          pendingFocus.current = id;
+          pendingFlash.current = id;
+        } else drop();
+      },
+
+      onMoveUp: (id) => {
+        // Reorder/outdent remounts the contentEditable; re-focus on a real move.
+        capture(focusIndex.current, id);
+        const moved = moveUp(focusIndex.current, id, {
+          isVisible: (n) => !isHiddenRef.current(n),
+          rootId: rootIdRef.current,
+        });
+        if (moved) {
+          pendingFocus.current = id;
+          pendingFlash.current = id;
+        } else drop();
+      },
+
+      onMoveDown: (id) => {
+        capture(focusIndex.current, id);
+        const moved = moveDown(focusIndex.current, id, {
+          isVisible: (n) => !isHiddenRef.current(n),
+          rootId: rootIdRef.current,
+        });
+        if (moved) {
+          pendingFocus.current = id;
+          pendingFlash.current = id;
+        } else drop();
+      },
+
+      onDeleteNode: (id) => {
+        // A plugin can protect a node from deletion (the daily container). The
+        // core no-ops here -- the single funnel every delete path flows through.
+        if (isProtected(id)) return;
+        capture(focusIndex.current, id);
+        const focusId = removeNode(focusIndex.current, id);
+        if (focusId) pendingFocus.current = focusId;
+        else drop(); // node didn't exist; nothing was deleted
+      },
+
+      onToggleCompleted: (id, completed) => {
+        capture(focusIndex.current, id);
+        toggleCompleted(id, completed);
+      },
+
+      onSetTask: (id, isTask) => {
+        capture(focusIndex.current, id);
+        setIsTask(id, isTask);
+      },
+
+      // Open the move picker; the dialog runs the mutation + navigation itself.
+      onRequestMove: (id) => openMoveDialog(id),
+
+      onToggleCollapsed: (id, collapsed) => {
+        capture(focusIndex.current, id);
+        toggleCollapsed(id, collapsed);
+      },
+
+      onMoveFocus: (id, direction, x) => {
+        const target = findVisibleNeighbor(
+          focusIndex.current,
+          rootIdRef.current,
+          id,
+          direction,
+          isHiddenRef.current,
+        );
+        if (target) {
+          const el = refs.current.get(target);
+          if (el) {
+            el.focus();
+            if (x != null) placeCaretAtColumn(el, direction, x);
+            else placeCaretAtStart(el);
+          }
+        }
+      },
+
+      // Zooming in: the clicked node is the pivot (list item -> title).
+      onZoom: (id) => navigateZoom(id, id),
+
+      onBulletPointerDown: (id, e) => startDrag(id, e),
+
+      // The dot's click fires right after pointerup. Suppress the zoom when that
+      // press was actually a drag; otherwise zoom as before.
+      onBulletClick: (id) => {
+        if (consumeClick()) return;
+        navigateZoom(id, id);
+      },
+    }),
+    [navigateZoom, startDrag, consumeClick],
   );
 }
 
