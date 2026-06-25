@@ -1,0 +1,14 @@
+{
+  // Minimal wrangler config kept after Phase 4 cutover — one-time D1 export only.
+  // See cloudflare-legacy/README.md. Do not redeploy the Worker from here.
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "dotflowy-d1-export",
+  "compatibility_date": "2026-06-23",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dotflowy-db",
+      "database_id": "da326dc6-b043-4df9-a277-08e9fad1d749"
+    }
+  ]
+}

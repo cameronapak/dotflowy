@@ -4,28 +4,20 @@ import { now } from './tree'
 import type { Node } from './schema'
 
 /**
- * One-time import of a pre-D1 outline from localStorage into D1.
+ * One-time import of a pre-server outline from localStorage into Postgres.
  *
- * Before ADR 0023 the outline lived in a TanStack DB localStorage collection
- * under `dotflowy-oss:nodes`, shaped `{ "s:<id>": { versionKey, data: Node } }`.
- * After the D1 move that store is never read, so a returning user would face an
- * empty outline while their data sits untouched in localStorage. This pushes it
- * into D1 once, the first time the app loads against an empty server.
+ * Before the Wasp migration the outline lived in a TanStack DB localStorage
+ * collection under `dotflowy-oss:nodes`. This pushes it into the signed-in
+ * user's silo once, the first time the app loads against an empty server.
  *
  * Guards (all three must hold to import):
  *  - the `d1-imported` flag is absent — so we never re-import after the user has
- *    legitimately emptied their D1 outline,
+ *    legitimately emptied their server outline,
  *  - localStorage actually holds legacy nodes,
- *  - D1 is EMPTY — never clobber server data (e.g. already migrated on another
- *    device).
+ *  - the server silo is EMPTY — never clobber server data.
  *
  * Non-destructive: the legacy key is left intact as a backup. Returns true only
- * when it actually wrote nodes (so the caller skips the first-run seed), false
- * otherwise. bootstrapOutline gates on a failed initial load BEFORE calling us,
- * so by here the collection is ready and an empty D1 is genuinely empty -- we
- * never mark IMPORTED_FLAG against an outage. The single-run / StrictMode
- * guarding lives in that one caller, so this needs no in-flight guard of its
- * own. See docs/DECISIONS.md (D1 sync).
+ * when it actually wrote nodes (so the caller skips the first-run seed).
  */
 const LEGACY_KEY = 'dotflowy-oss:nodes'
 const IMPORTED_FLAG = 'dotflowy-oss:d1-imported'
@@ -45,7 +37,7 @@ export async function importLegacyNodes(): Promise<boolean> {
     return false
   }
 
-  // One array insert == one transaction == one batched POST to /api/nodes.
+  // One array insert == one transaction == one batched upsertNodes call.
   nodesCollection.insert(legacy)
   localStorage.setItem(IMPORTED_FLAG, String(now()))
   return true

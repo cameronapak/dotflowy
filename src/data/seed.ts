@@ -10,19 +10,11 @@ import { BootstrapError } from './errors'
 let bootstrappedUserId: string | null = null
 
 /**
- * First-run bootstrap. Exactly one of two things happens: a pre-D1 outline in
- * localStorage is imported into D1 (returning user), or the welcome bullets are
- * seeded (genuinely new user). Import wins when present, so we never stack
- * welcome bullets on top of imported data. Called once on mount; see
- * import-legacy.ts and docs/DECISIONS.md (D1 sync).
- *
- * Bail BEFORE seeding/importing if the initial load failed. The query adapter
- * calls markReady() even on a failed fetch, so `toArrayWhenReady()` resolves
- * EMPTY rather than rejecting (see nodesLoadError) -- without this gate a
- * returning user who opens the app during a server outage would have welcome
- * bullets seeded over their real (just-unreachable) outline, and the one-time
- * legacy-import flag would be set against a write that rolls back. We surface
- * the failure as a value (errore convention); the caller logs it.
+ * First-run bootstrap. Exactly one of two things happens: a legacy localStorage
+ * outline is imported into the signed-in user's Postgres silo (returning user),
+ * or the welcome bullets are seeded (genuinely new user). Import wins when
+ * present. Called once on mount with the current `userId`; guards reset on
+ * auth change (PRD US-1).
  */
 export async function bootstrapOutline(
   userId: string,
@@ -50,16 +42,7 @@ let seedStartedUserId: string | null = null
  * Seed the outline on first run. Idempotent and async-safe: it awaits the
  * collection's initial load (`toArrayWhenReady`) before deciding, so it only
  * seeds when the server genuinely has no nodes for this user — never on the
- * brief "empty before the first fetch resolves" window the D1-backed query
- * collection passes through. Returns true if it seeded, false otherwise.
- *
- * The failed-load case is handled upstream in bootstrapOutline (the query
- * adapter resolves this empty on failure, so seeding here would clobber a
- * just-unreachable outline). By the time bootstrap calls us the collection is
- * already ready, so this await resolves instantly.
- *
- * The component calls this once on mount; the inserts persist to D1 through the
- * collection's normal mutation path. See docs/DECISIONS.md (D1 sync).
+ * brief "empty before the first fetch resolves" window.
  */
 async function seedIfEmpty(userId: string): Promise<boolean> {
   if (seedStartedUserId === userId) return false

@@ -12,7 +12,9 @@
   "scripts": {
     "typecheck": "tsc -b tsconfig.src.json",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "db:export-d1": "bash scripts/export-d1.sh",
+    "db:import-d1": "bun scripts/import-d1-export.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

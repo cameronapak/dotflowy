@@ -168,7 +168,12 @@ it's the CSS-injection guard.
 
 ## D1 sync via a Worker
 
-One Cloudflare **Worker** (`worker/index.ts`) serves the static SPA *and* the sync API — `/api/nodes`
+> **Superseded (2026-06):** Production now runs on Wasp + PostgreSQL (Railway).
+> See [`docs/PRD-wasp-migration.md`](./PRD-wasp-migration.md). This entry
+> documents the v1 Cloudflare stack and why the client stayed a TanStack DB
+> collection mirror through the migration.
+
+One Cloudflare **Worker** (`worker/index.ts`, removed at cutover) served the static SPA *and* the sync API — `/api/nodes`
 (the outline) and `/api/kv` (plugin side-collections: tag colors, daily index) — both backed by
 **D1**, scoped per owner. `collection.ts` is a TanStack DB `queryCollectionOptions` collection; its
 interface is identical to the old localStorage version, so the tree store, mutations, and
