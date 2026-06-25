@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { AccountMenu } from "./account-menu";
 import { BookmarkStar } from "./bookmarks";
 import { ModeToggle } from "./mode-toggle";
 import { NodeSearchButton } from "./node-switcher";
@@ -45,6 +46,7 @@ export function Header({
           <NodeSearchButton />
           <ShowCompletedToggle />
           <ModeToggle />
+          <AccountMenu />
         </div>
       </div>
     </header>
