@@ -1,8 +1,8 @@
 import { useId } from "react";
 import { CheckIcon } from "lucide-react";
-import { Button } from "./ui/button";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
-import { Switch } from "./ui/switch";
+import { Button } from "@/components/ui/button";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Switch } from "@/components/ui/switch";
 import { useShowCompleted } from "./show-completed-provider";
 
 /**

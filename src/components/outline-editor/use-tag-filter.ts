@@ -6,7 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { parseQuery, serializeQuery } from "../../data/tags";
+import { parseQuery, serializeQuery } from "../../plugins/tags/tags";
 
 export interface TagFilterControls {
   activeTags: string[];

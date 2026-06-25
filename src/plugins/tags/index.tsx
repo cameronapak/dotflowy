@@ -1,12 +1,10 @@
 // Tags plugin (ADR 0018). `#tag` as a plugin. Seam A: the chip render. Seam B:
 // the delegated chip click -> filter and right-click -> color picker. The pure
-// tag layer (parse/normalize/collect/filter) stays in src/data/tags.ts and the
+// tag layer (parse/normalize/collect/filter) lives in ./tags.ts and the
 // color side-collection in ./tag-colors.ts (Seam E); this file is the
-// plugin that wires them. The filter view-transform (Seam G) and `#` autocomplete
-// (Seam H) are still core-wired pending their dedicated refactors (see ADR 0018
-// implementation notes).
+// plugin that wires them.
 
-import { buildTagFilter, collectAllTags, TAG_PATTERN } from "../../data/tags";
+import { buildTagFilter, collectAllTags, TAG_PATTERN } from "./tags";
 import {
   definePlugin,
   type El,
@@ -116,7 +114,7 @@ export default definePlugin({
 
   // Seam G: the `#tag` filter, expressed as a global view transform. Active only
   // when the `?q=` carries tags; prunes the tree to matches + their ancestor
-  // context (the pure walk stays in src/data/tags.ts). It's handed the composed
+  // context (the pure walk stays in ./tags.ts). It's handed the composed
   // `isHidden` so completed subtrees drop out without this layer knowing about
   // completion. The core wires the result in as the `filter` prop (still
   // core-rendered for now -- see ADR 0018's "still core-wired" note).

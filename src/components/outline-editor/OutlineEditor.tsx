@@ -28,7 +28,7 @@ import {
 import type { PluginContext, ViewContext } from "../../plugins/types";
 import { useDragReorder } from "../use-drag-reorder";
 import { Header } from "../Header";
-import { useShowCompleted } from "../show-completed-provider";
+import { useShowCompleted } from "../../plugins/todos/show-completed-provider";
 import { Button } from "../ui/button";
 import { BreadcrumbTrail } from "./breadcrumb-trail";
 import { onContentMouseDown } from "./on-content-interaction";

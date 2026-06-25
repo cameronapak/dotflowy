@@ -144,6 +144,7 @@ src/
     OutlineEditor.tsx   # thin re-export; implementation in outline-editor/
     outline-editor/     # editor orchestration, zoom UI, focus + command hooks
     OutlineNode.tsx     # one bullet + its subtree (memoized, per-node store subscription)
+    node-commands.ts    # NodeCommands type (PluginContext.mutations contract)
     inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
     menu-engine.tsx     # generic caret-autocomplete engine (`/` + `#` menus)
     node-switcher.tsx   # Cmd+K quick-switcher
@@ -161,7 +162,6 @@ src/
     tree-store.ts     # per-node subscriptions (useNode / useVisibleChildIds)
     mutations.ts      # insert / move / delete / field setters
     history.ts        # undo / redo capture
-    tags.ts, links.ts  # pure parsing (tag colors side-collection: plugins/tags/tag-colors.ts)
     seed.ts           # first-run bootstrap: import legacy localStorage, else seed welcome bullets
     import-legacy.ts  # one-time pre-D1 localStorage -> D1 outline import
     useTree.ts        # useLiveQuery hook
@@ -170,7 +170,7 @@ src/
     core-slash.tsx    # core `/` palette MenuSpec (Seam H), built from Seam C + Move
     types.ts          # the typed seam contract (definePlugin)
     registry.ts       # composes every plugin's registrations once at load
-    code/ links/ route-bible/ tags/ todos/ daily/   # one folder per plugin (side-collections colocated, e.g. tags/tag-colors.ts)
+    code/ links/ route-bible/ tags/ todos/ daily/   # one folder per plugin (parsing + side-collections colocated, e.g. tags/tags.ts, tags/tag-colors.ts, todos/show-completed-*.tsx)
   router.tsx
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + /api/nodes + /api/kv over D1

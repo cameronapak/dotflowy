@@ -17,7 +17,7 @@ import {
 } from "../../data/mutations";
 import { capture, drop } from "../../data/history";
 import { isProtected } from "../../plugins/registry";
-import type { NodeCommands } from "../OutlineNode";
+import type { NodeCommands } from "../node-commands";
 import type { useDragReorder } from "../use-drag-reorder";
 import { openMoveDialog } from "../move-dialog-opener";
 import { placeCaretAtColumn, placeCaretAtStart } from "./caret";

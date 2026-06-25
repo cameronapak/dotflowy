@@ -4,7 +4,7 @@ import {
   type UseHotkeyDefinition,
 } from "@tanstack/react-hotkeys";
 import type { Node } from "../../data/schema";
-import { hasLink } from "../../data/links";
+import { hasLink } from "../../plugins/links/links";
 import {
   decorate,
   getCaretOffset,

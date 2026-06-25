@@ -4,7 +4,7 @@ import type { Node } from "../data/schema";
 import { keymapSpecs, tryCaretBackspace } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 import { getCaretOffset } from "./inline-code";
-import type { NodeCommands } from "./OutlineNode";
+import type { NodeCommands } from "./node-commands";
 
 interface BulletKeymapArgs {
   node: Node;

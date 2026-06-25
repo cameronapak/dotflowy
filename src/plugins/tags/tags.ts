@@ -1,4 +1,4 @@
-import { childrenOf, type Node, type TreeIndex } from './tree'
+import { childrenOf, type Node, type TreeIndex } from '../../data/tree'
 
 /**
  * Tags are parsed out of `node.text` at read time -- never a stored field.

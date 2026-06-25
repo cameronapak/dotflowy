@@ -3,7 +3,7 @@
 // (per-link reveal, ADR 0017), otherwise a clean <a>. Slice 1 ports the token
 // render (Seam A); the delegated open (Seam B) and paste (Seam I) follow.
 //
-// The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
+// The pure link layer (parse/strip/encode) lives in ./links.ts; this is
 // just the decoration half expressed as El descriptors.
 
 import {
@@ -11,7 +11,7 @@ import {
   encodeUrlForMarkdown,
   isHttpUrl,
   LINK_PATTERN,
-} from "../../data/links";
+} from "./links";
 import { definePlugin, type El } from "../types";
 
 // Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so

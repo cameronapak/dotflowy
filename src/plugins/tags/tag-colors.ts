@@ -2,7 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
-import { normalizeTag } from '../../data/tags'
+import { normalizeTag } from './tags'
 import { queryClient } from '../../data/query-client'
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from '../../data/kv-api'
 
