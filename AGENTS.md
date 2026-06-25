@@ -10,6 +10,19 @@ Before substantial work:
 
 # Project Guidance
 
+> [!IMPORTANT]
+> **Wasp migration in progress** (see [`docs/PRD-wasp-migration.md`](./docs/PRD-wasp-migration.md)).
+> **Phase 1 (scaffold) is done:** the repo is now a **Wasp** app (`main.wasp.ts`,
+> `schema.prisma`, email/password auth). Run the app with **`wasp start`**
+> (needs Node 24 + a Postgres — `wasp start db` or a `DATABASE_URL`), not
+> `bun run dev`. The Cloudflare/D1/wrangler stack and the old `bun`/`vite`
+> commands are being retired (Cloudflare files deleted at Phase 4 cutover).
+>
+> The outline editor source lives under **`legacy/`** for now (it's still
+> TanStack-Start/Router code); **Phase 3** ports it back into `src/`. Until then,
+> the feature sections below describe code at its `legacy/...` (formerly `src/...`)
+> path. This banner and the rest of this doc get rewritten at Phase 4.
+
 Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to this file.
 
 `README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) — read that when a rule below points at it.

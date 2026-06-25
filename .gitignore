@@ -5,6 +5,15 @@ dist
 .wrangler
 .DS_Store
 *.log
+
+# Wasp build output
+.wasp/
+
+# Dotenv files (may hold secrets). Keep *.example committed.
 .env
 .env.local
+.env.*
+!.env.example
+!.env.*.example
+
 .routeTree.gen.tmp*

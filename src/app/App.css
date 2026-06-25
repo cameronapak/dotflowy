@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* Small shared surface used by the auth pages. */
+@utility card {
+  @apply rounded-xl border border-neutral-200 bg-white shadow-sm;
+}

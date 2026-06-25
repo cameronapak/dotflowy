@@ -1,0 +1,84 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Per-user identity. Email/password credentials live in Wasp's generated
+// Auth/AuthIdentity tables and link back to this entity via Wasp's auth.
+// Deleting a User cascades to all of their outline + plugin rows.
+model User {
+  id String @id @default(uuid())
+
+  nodes      Node[]
+  tagColors  TagColor[]
+  dailyIndex DailyIndexEntry[]
+}
+
+// A single bullet in the outline. Mirrors src/data/schema.ts (the client
+// `Node`) with `owner` replaced by `userId`. Flat list: the tree is rebuilt
+// in memory from `parentId`, ordered within a parent by the `prevSiblingId`
+// linked list (Workflowy-style O(1) inserts).
+//
+// `id` has no default on purpose: the client generates ids via makeNode() and
+// the sync boundary upserts them. createdAt/updatedAt/bookmarkedAt are stored
+// as DateTime here, but the client mirror uses epoch-ms numbers; the sync
+// boundary maps between the two (Phase 3). `updatedAt` is the
+// server-authoritative timestamp for last-write-wins (PRD US-4).
+model Node {
+  id            String         @id
+  userId        String
+  parentId      String?
+  prevSiblingId String?
+  text          String         @default("")
+  isTask        Boolean        @default(false)
+  completed     Boolean        @default(false)
+  collapsed     Boolean        @default(false)
+  bookmarkedAt  DateTime?
+  visibility    NodeVisibility @default(private)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, parentId])
+}
+
+// Sharing is stubbed for v1 (private silos only). `public` exists so the
+// later sharing PRD (v1.3+) has the field without a migration; no UI reads it.
+enum NodeVisibility {
+  private
+  public
+}
+
+// Plugin side-collection: per-user custom tag colors (src/plugins/tags).
+// Keyed by (userId, normalized tag). Replaces the generic /api/kv store.
+model TagColor {
+  userId    String
+  tag       String
+  color     String
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, tag])
+}
+
+// Plugin side-collection: per-user daily-note identity (src/plugins/daily).
+// `key` is a local date "YYYY-MM-DD" or the "container" sentinel; `nodeId`
+// points at the owning Node. The nodeId -> Node FK behaviour (onDelete SetNull
+// vs Cascade) is an open question (PRD Appendix C), so nodeId is a plain
+// column for now rather than a Prisma relation.
+model DailyIndexEntry {
+  userId String
+  key    String
+  nodeId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+}
