@@ -84,14 +84,6 @@ export function drop(): void {
   }
 }
 
-export function canUndo(): boolean {
-  return undoStack.length > 0
-}
-
-export function canRedo(): boolean {
-  return redoStack.length > 0
-}
-
 /**
  * Reconcile the live collection to `entry`'s snapshot. Returns the id to focus
  * afterwards, or null if that node no longer exists in the restored state.

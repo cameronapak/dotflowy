@@ -17,7 +17,7 @@ export const TAG_PATTERN = '(?<=^|\\s)#[\\p{L}\\p{N}_-]+'
 const TAG_RE = new RegExp(TAG_PATTERN, 'gu')
 
 /** The distinct tags in a string, with their leading `#`, in first-seen order. */
-export function parseTags(text: string): string[] {
+function parseTags(text: string): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const m of text.matchAll(TAG_RE)) {
@@ -72,7 +72,7 @@ export function collectAllTags(index: TreeIndex): string[] {
 }
 
 /** True iff `text` carries every one of `activeTags` (per-node AND). */
-export function matchesAllTags(text: string, activeTags: string[]): boolean {
+function matchesAllTags(text: string, activeTags: string[]): boolean {
   if (activeTags.length === 0) return false
   const tags = new Set(parseTags(text))
   return activeTags.every((t) => tags.has(t))

@@ -255,6 +255,7 @@ function OutlineNodeBody({
           contentEditable
           suppressContentEditableWarning
           spellCheck={false}
+          aria-label={node.text.trim() || "Empty bullet"}
           role="textbox"
           data-completed={node.completed}
           onInput={(e) => {

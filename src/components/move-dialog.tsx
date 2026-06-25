@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { BookmarkIcon, HomeIcon } from "lucide-react";
@@ -10,6 +16,7 @@ import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
 import { cn } from "@/lib/utils";
+import { setMoveDialogOpener } from "./move-dialog-opener";
 import {
   Command,
   CommandDialog,
@@ -35,16 +42,6 @@ import {
  * you away from where you were working.
  */
 
-// Module-level opener so the slash command (deep inside a bullet's
-// contentEditable) can open the single mounted dialog without a context
-// provider -- same spirit as the quick-switcher's opener and the history stack.
-let opener: ((nodeId: string) => void) | null = null;
-
-/** Open the move picker for `nodeId` from anywhere (e.g. the `/move` command). */
-export function openMoveDialog(nodeId: string) {
-  opener?.(nodeId);
-}
-
 const FUSE_OPTIONS: IFuseOptions<Node> = {
   // Plus plugin-contributed aliases (Seam J) so `/move` -> "today" finds the
   // daily note despite its full-date text. Matched, never highlighted
@@ -65,6 +62,13 @@ interface Hit {
 
 const RESULT_LIMIT = 50;
 
+const BOOKMARKS_HEADING = (
+  <div className="flex items-center gap-1">
+    <BookmarkIcon className="size-4" />
+    Bookmarks
+  </div>
+);
+
 /**
  * Outer shell: owns open/query/target state and registers the opener, but reads
  * NO data. The data-driven dialog ({@link MoveDialogInner}, which calls
@@ -75,17 +79,19 @@ const RESULT_LIMIT = 50;
 export function MoveDialog() {
   const [target, setTarget] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   useEffect(() => {
-    opener = (nodeId) => {
+    setMoveDialogOpener((nodeId) => {
       setTarget(nodeId);
       setQuery("");
-    };
+    });
     return () => {
-      opener = null;
+      setMoveDialogOpener(null);
     };
   }, []);
 
@@ -220,14 +226,7 @@ function MoveDialogInner({
             bookmarks.length === 0 ? (
               <Hint>Type to search your nodes.</Hint>
             ) : (
-              <CommandGroup
-                heading={
-                  <div className="flex items-center gap-1">
-                    <BookmarkIcon className="size-4" />
-                    Bookmarks
-                  </div>
-                }
-              >
+              <CommandGroup heading={BOOKMARKS_HEADING}>
                 {bookmarks.map((node) => (
                   <DestinationRow
                     key={node.id}
@@ -333,11 +332,11 @@ function highlight(
   if (!ranges || ranges.length === 0) return text;
   const parts: ReactNode[] = [];
   let last = 0;
-  ranges.forEach(([start, end], i) => {
+  ranges.forEach(([start, end]) => {
     if (start > last) parts.push(text.slice(last, start));
     parts.push(
       <mark
-        key={i}
+        key={`${start}-${end}`}
         className="rounded-[2px] bg-primary/20 px-px text-foreground"
       >
         {text.slice(start, end + 1)}

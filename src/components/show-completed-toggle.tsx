@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { CheckIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
@@ -11,6 +12,7 @@ import { useShowCompleted } from "./show-completed-provider";
  * primary control. State is global and persisted (see show-completed-provider).
  */
 export function ShowCompletedToggle() {
+  const switchId = useId();
   const { showCompleted, setShowCompleted } = useShowCompleted();
 
   return (
@@ -33,8 +35,12 @@ export function ShowCompletedToggle() {
         }
       />
       <HoverCardContent align="end" className="w-auto">
-        <label className="flex cursor-pointer items-center gap-2 font-medium select-none">
+        <label
+          htmlFor={switchId}
+          className="flex cursor-pointer items-center gap-2 font-medium select-none"
+        >
           <Switch
+            id={switchId}
             size="sm"
             checked={showCompleted}
             onCheckedChange={setShowCompleted}

@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
 type Theme = "dark" | "light" | "system";
 
@@ -8,8 +15,37 @@ interface ThemeProviderState {
 }
 
 const STORAGE_KEY = "dotflowy-oss:theme";
+const VALID_THEMES = new Set<Theme>(["dark", "light", "system"]);
 
 const ThemeProviderContext = createContext<ThemeProviderState | null>(null);
+
+const themeListeners = new Set<() => void>();
+
+function subscribeTheme(onStoreChange: () => void) {
+  themeListeners.add(onStoreChange);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === STORAGE_KEY) onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    themeListeners.delete(onStoreChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function getThemeSnapshot(): Theme {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored && VALID_THEMES.has(stored as Theme)) return stored as Theme;
+  return "system";
+}
+
+function getThemeServerSnapshot(): Theme {
+  return "system";
+}
+
+function notifyThemeListeners() {
+  for (const l of themeListeners) l();
+}
 
 /**
  * Applies the resolved theme to <html>. "system" follows the OS preference.
@@ -28,19 +64,11 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // SPA mode still does a server render pass for the shell, where localStorage
-  // is undefined. So we default to "system" during render and read the stored
-  // value on mount. The inline no-flash script in __root.tsx applies the right
-  // theme to <html> before hydration, so there's no visible flash.
-  const [theme, setThemeState] = useState<Theme>("system");
-
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (stored && stored !== theme) setThemeState(stored);
-    // Mount-only: read the stored theme once. `theme` is compared against its
-    // mount-time default; re-running would fight setTheme.
-    // eslint-disable-next-line react-doctor/exhaustive-deps
-  }, []);
+  const theme = useSyncExternalStore(
+    subscribeTheme,
+    getThemeSnapshot,
+    getThemeServerSnapshot,
+  );
 
   useEffect(() => {
     applyTheme(theme);
@@ -55,20 +83,22 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
 
-  const setTheme = (next: Theme) => {
+  const setTheme = useCallback((next: Theme) => {
     localStorage.setItem(STORAGE_KEY, next);
-    setThemeState(next);
-  };
+    notifyThemeListeners();
+  }, []);
+
+  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
 
   return (
-    <ThemeProviderContext.Provider value={{ theme, setTheme }}>
+    <ThemeProviderContext.Provider value={value}>
       {children}
     </ThemeProviderContext.Provider>
   );
 }
 
 export function useTheme() {
-  const ctx = useContext(ThemeProviderContext);
+  const ctx = use(ThemeProviderContext);
   if (!ctx) throw new Error("useTheme must be used within a ThemeProvider");
   return ctx;
 }

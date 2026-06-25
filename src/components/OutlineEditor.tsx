@@ -71,7 +71,7 @@ import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { useShowCompleted } from "./show-completed-provider";
-import { openMoveDialog } from "./move-dialog";
+import { openMoveDialog } from "./move-dialog-opener";
 import { Button } from "./ui/button";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
@@ -933,6 +933,29 @@ function useNodeCommands({
  * are *added* by clicking chips in the outline, never typed here -- v1 is
  * tags-only and click-driven. See ADR 0015.
  */
+function TagPill({
+  tag,
+  onRemove,
+}: {
+  tag: string;
+  onRemove: (tag: string) => void;
+}) {
+  const name = tag.slice(1);
+  return (
+    <span className="tag-pill" data-tag={name}>
+      {tag}
+      <button
+        type="button"
+        className="tag-pill-remove"
+        aria-label={`Remove ${tag} from filter`}
+        onClick={() => onRemove(tag)}
+      >
+        <X size={12} strokeWidth={2.5} />
+      </button>
+    </span>
+  );
+}
+
 function TagFilterBar({
   tags,
   onRemove,
@@ -943,24 +966,14 @@ function TagFilterBar({
   onClear: () => void;
 }) {
   return (
-    <div className="tag-filter-bar" role="search" aria-label="Tag filter">
+    <search aria-label="Tag filter" className="tag-filter-bar">
       {tags.map((tag) => (
-        <span key={tag} className="tag-pill" data-tag={tag.slice(1)}>
-          {tag}
-          <button
-            type="button"
-            className="tag-pill-remove"
-            aria-label={`Remove ${tag} from filter`}
-            onClick={() => onRemove(tag)}
-          >
-            <X size={12} strokeWidth={2.5} />
-          </button>
-        </span>
+        <TagPill key={tag} tag={tag} onRemove={onRemove} />
       ))}
       <button type="button" className="tag-filter-clear" onClick={onClear}>
         Clear
       </button>
-    </div>
+    </search>
   );
 }
 

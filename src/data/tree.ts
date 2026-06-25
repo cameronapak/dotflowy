@@ -15,9 +15,9 @@ export interface TreeIndex {
 }
 
 /** Synthetic parent id for top-level nodes (those with parentId === null). */
-export const ROOT_PARENT = '__root__'
+const ROOT_PARENT = '__root__'
 
-export function parentKeyOf(node: Node): string {
+function parentKeyOf(node: Node): string {
   return node.parentId ?? ROOT_PARENT
 }
 

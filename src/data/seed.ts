@@ -65,7 +65,7 @@ let seedStarted = false
  * The component calls this once on mount; the inserts persist to D1 through the
  * collection's normal mutation path. See docs/DECISIONS.md (D1 sync).
  */
-export async function seedIfEmpty(): Promise<boolean> {
+async function seedIfEmpty(): Promise<boolean> {
   if (seedStarted) return false
   seedStarted = true
 

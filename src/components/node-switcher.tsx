@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { Search, BookmarkIcon } from "lucide-react";
@@ -12,6 +18,7 @@ import {
 } from "../plugins/registry";
 import type { SearchAction } from "../plugins/types";
 import { cn } from "@/lib/utils";
+import { setNodeSwitcherOpener, openNodeSwitcher } from "./node-switcher-opener";
 import { Button } from "./ui/button";
 import {
   Command,
@@ -31,16 +38,6 @@ import {
  * and owns its own open/query state and global hotkey. Mounted once in
  * `__root.tsx`; the header magnifier reaches it via {@link openNodeSwitcher}.
  */
-
-// Module-level opener so the far-away header button (and any future caller) can
-// open the single mounted dialog without a context provider -- same spirit as
-// the module-level history stack. The mounted NodeSwitcher registers its setter.
-let opener: (() => void) | null = null;
-
-/** Open the quick-switcher from anywhere (e.g. the header search button). */
-export function openNodeSwitcher() {
-  opener?.();
-}
 
 // We search a link-stripped projection of each node (a `[label](url)` flattens
 // to `label`), so URL noise stays out of the corpus and match indices line up
@@ -67,6 +64,13 @@ const FUSE_OPTIONS: IFuseOptions<Searchable> = {
 
 const RESULT_LIMIT = 50;
 
+const BOOKMARKS_HEADING = (
+  <div className="flex items-center gap-1">
+    <BookmarkIcon className="size-4" />
+    Bookmarks
+  </div>
+);
+
 /**
  * Outer shell: owns open/query state and the global hotkey, but reads NO data.
  * The data-driven dialog ({@link SwitcherDialog}, which calls `useTree`) is
@@ -77,15 +81,17 @@ const RESULT_LIMIT = 50;
 export function NodeSwitcher() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   // Register the module-level opener for the lifetime of this mount.
   useEffect(() => {
-    opener = () => setOpen(true);
+    setNodeSwitcherOpener(() => setOpen(true));
     return () => {
-      opener = null;
+      setNodeSwitcherOpener(null);
     };
   }, []);
 
@@ -215,14 +221,7 @@ function SwitcherDialog({
             bookmarks.length === 0 ? (
               <Hint>No bookmarks yet. Type to search your nodes.</Hint>
             ) : (
-              <CommandGroup
-                heading={
-                  <div className="flex items-center gap-1">
-                    <BookmarkIcon className="size-4" />
-                    Bookmarks
-                  </div>
-                }
-              >
+              <CommandGroup heading={BOOKMARKS_HEADING}>
                 {bookmarks.map((node) => (
                   <ResultRow
                     key={node.id}
@@ -362,11 +361,11 @@ function highlight(
   if (!ranges || ranges.length === 0) return text;
   const parts: ReactNode[] = [];
   let last = 0;
-  ranges.forEach(([start, end], i) => {
+  ranges.forEach(([start, end]) => {
     if (start > last) parts.push(text.slice(last, start));
     parts.push(
       <mark
-        key={i}
+        key={`${start}-${end}`}
         className="rounded-[2px] bg-primary/20 px-px text-foreground"
       >
         {text.slice(start, end + 1)}

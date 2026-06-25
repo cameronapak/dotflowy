@@ -30,7 +30,7 @@ export const BIBLE_REF_PATTERN =
   "(?<=^|[\\s(])(?:[1-3]\\s*)?[A-Za-z]+(?:\\s+of\\s+[A-Za-z]+)?\\s+\\d+(?:(?::|\\s)\\d+(?:-\\d+)?)?";
 
 /** The route.bible base every reference resolves against. */
-export const ROUTE_BIBLE_BASE = "https://route.bible";
+const ROUTE_BIBLE_BASE = "https://route.bible";
 
 /**
  * Validate a detected candidate and build its route.bible URL, or null if it

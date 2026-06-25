@@ -23,7 +23,7 @@ export function hasLink(text: string): boolean {
 }
 
 /** A single parsed link occurrence. `start`/`end` index into the source text. */
-export interface ParsedLink {
+interface ParsedLink {
   label: string;
   url: string;
   start: number;
@@ -31,7 +31,7 @@ export interface ParsedLink {
 }
 
 /** Every link in the text, in document order. */
-export function parseLinks(text: string): ParsedLink[] {
+function parseLinks(text: string): ParsedLink[] {
   const out: ParsedLink[] = [];
   for (const m of text.matchAll(LINK_RE())) {
     out.push({

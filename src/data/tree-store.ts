@@ -55,7 +55,7 @@ function subscribe(cb: () => void): () => void {
 }
 
 /** The current shared index. Touching it starts the subscription on first use. */
-export function getTreeIndex(): TreeIndex {
+function getTreeIndex(): TreeIndex {
   ensureStarted()
   return index
 }

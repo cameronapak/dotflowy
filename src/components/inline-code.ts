@@ -47,7 +47,7 @@ const renderCache = new WeakMap<HTMLElement, string>();
 // you can arrow/click in from either edge); otherwise it FOLDS to a clean <a>.
 // At most one link reveals -- the one under the caret. Code and tags keep their
 // source visible in both states. See ADR 0017 (per-link reveal).
-export function inlineMarkupHtml(
+function inlineMarkupHtml(
   text: string,
   revealOffset: number | null,
 ): string {

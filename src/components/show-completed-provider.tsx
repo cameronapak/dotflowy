@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
 interface ShowCompletedState {
   showCompleted: boolean;
@@ -8,6 +14,34 @@ interface ShowCompletedState {
 const STORAGE_KEY = "dotflowy-oss:show-completed";
 
 const ShowCompletedContext = createContext<ShowCompletedState | null>(null);
+
+const showCompletedListeners = new Set<() => void>();
+
+function subscribeShowCompleted(onStoreChange: () => void) {
+  showCompletedListeners.add(onStoreChange);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === STORAGE_KEY) onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    showCompletedListeners.delete(onStoreChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function getShowCompletedSnapshot(): boolean {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored === null) return true;
+  return stored === "true";
+}
+
+function getShowCompletedServerSnapshot(): boolean {
+  return true;
+}
+
+function notifyShowCompletedListeners() {
+  for (const l of showCompletedListeners) l();
+}
 
 /**
  * Global "Show completed" preference (Workflowy's header toggle). When false,
@@ -24,27 +58,31 @@ export function ShowCompletedProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [showCompleted, setShowCompletedState] = useState(true);
+  const showCompleted = useSyncExternalStore(
+    subscribeShowCompleted,
+    getShowCompletedSnapshot,
+    getShowCompletedServerSnapshot,
+  );
 
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored !== null) setShowCompletedState(stored === "true");
+  const setShowCompleted = useCallback((next: boolean) => {
+    localStorage.setItem(STORAGE_KEY, String(next));
+    notifyShowCompletedListeners();
   }, []);
 
-  const setShowCompleted = (next: boolean) => {
-    localStorage.setItem(STORAGE_KEY, String(next));
-    setShowCompletedState(next);
-  };
+  const value = useMemo(
+    () => ({ showCompleted, setShowCompleted }),
+    [showCompleted, setShowCompleted],
+  );
 
   return (
-    <ShowCompletedContext.Provider value={{ showCompleted, setShowCompleted }}>
+    <ShowCompletedContext.Provider value={value}>
       {children}
     </ShowCompletedContext.Provider>
   );
 }
 
 export function useShowCompleted() {
-  const ctx = useContext(ShowCompletedContext);
+  const ctx = use(ShowCompletedContext);
   if (!ctx)
     throw new Error(
       "useShowCompleted must be used within a ShowCompletedProvider",
