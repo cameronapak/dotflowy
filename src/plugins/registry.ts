@@ -13,6 +13,7 @@ import type {
   CommandSpec,
   El,
   HeaderSlotSpec,
+  SubheaderSlotSpec,
   InteractionEvent,
   KeymapSpec,
   MenuSpec,
@@ -309,6 +310,14 @@ export function rowSlots(position: SlotPosition): readonly SlotSpec[] {
  *  header's action cluster (the daily "Today" button). */
 export const headerSlots: HeaderSlotSpec[] = plugins.flatMap(
   (p) => p.headerSlots ?? [],
+);
+
+// --- Seam F (subheader): contextual chrome below the header -----------------
+
+/** Every plugin's subheader slots, in array order. The core renders non-null
+ *  results into one collapsible muted band below the header. */
+export const subheaderSlots: SubheaderSlotSpec[] = plugins.flatMap(
+  (p) => p.subheaderSlots ?? [],
 );
 
 // --- Protected nodes --------------------------------------------------------

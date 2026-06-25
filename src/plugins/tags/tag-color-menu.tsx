@@ -1,26 +1,32 @@
 import { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Ban } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   TAG_COLORS,
   clearTagColor,
   setTagColor,
+  tagColorPaletteCss,
   tagColorsCss,
   useTagColor,
   useTagColorRows,
 } from "../../data/tag-colors";
 
 /**
- * The generated override stylesheet -- one rule per colored tag, keyed by
- * `data-tag`. Mounted once (in __root). A color change updates this single
- * stylesheet, so every chip/pill/menu-row of that tag repaints with no React
- * re-render. See docs/DECISIONS.md (tag colors). Owned by the tags plugin (ADR 0018 Seam E).
+ * Named tag color pairs + per-tag overrides. Mounted once in __root__. Palette
+ * custom properties and generated `[data-tag]` rules live here so the tags
+ * plugin owns all tag paint CSS; surfaces use Tailwind for the neutral default.
  */
 export function TagColorStyles() {
   const rows = useTagColorRows();
-  const css = useMemo(() => tagColorsCss(rows), [rows]);
-  return <style data-tag-colors>{css}</style>;
+  const overrides = useMemo(() => tagColorsCss(rows), [rows]);
+  return (
+    <>
+      <style data-tag-palette>{tagColorPaletteCss}</style>
+      <style data-tag-colors>{overrides}</style>
+    </>
+  );
 }
 
 /**
@@ -75,14 +81,16 @@ export function TagColorMenu({
       className="bg-popover fixed z-50 flex items-center gap-1 rounded-lg border p-1.5 shadow-md"
       style={{ left: Math.max(8, left), top: Math.max(8, top) }}
     >
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="icon-xs"
         role="menuitemradio"
         aria-checked={current === null}
         aria-label="No color"
         title="No color"
         className={cn(
-          "flex size-6 items-center justify-center rounded-md border text-muted-foreground",
+          "text-muted-foreground",
           current === null &&
             "ring-2 ring-ring ring-offset-1 ring-offset-popover",
         )}
@@ -91,18 +99,19 @@ export function TagColorMenu({
           onClose();
         }}
       >
-        <Ban className="size-3.5" />
-      </button>
+        <Ban />
+      </Button>
       {TAG_COLORS.map((color) => (
-        <button
+        <Button
           key={color}
           type="button"
+          variant="outline"
+          size="icon-xs"
           role="menuitemradio"
           aria-checked={current === color}
           aria-label={color}
           title={color}
           className={cn(
-            "size-6 rounded-md border",
             current === color &&
               "ring-2 ring-ring ring-offset-1 ring-offset-popover",
           )}
@@ -114,14 +123,8 @@ export function TagColorMenu({
             onClose();
           }}
         >
-          <span
-            style={{
-              color: `var(--tag-${color}-fg)`,
-            }}
-          >
-            #
-          </span>
-        </button>
+          <span style={{ color: `var(--tag-${color}-fg)` }}>#</span>
+        </Button>
       ))}
     </div>,
     document.body,

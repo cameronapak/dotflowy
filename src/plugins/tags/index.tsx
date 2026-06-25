@@ -1,12 +1,11 @@
 // Tags plugin (ADR 0018). `#tag` as a plugin. Seam A: the chip render. Seam B:
-// the delegated chip click -> filter and right-click -> color picker. The pure
-// tag layer (parse/normalize/collect/filter) stays in src/data/tags.ts and the
-// color side-collection in src/data/tag-colors.ts (Seam E); this file is the
-// plugin that wires them. The filter view-transform (Seam G) and `#` autocomplete
-// (Seam H) are still core-wired pending their dedicated refactors (see ADR 0018
-// implementation notes).
+// the delegated chip click -> filter and right-click -> color picker. Seam F
+// (subheader): the active-tag filter bar. Seam G: the `?q=` view transform.
+// Seam H: `#` autocomplete. The pure tag layer (parse/normalize/collect/filter)
+// stays in src/data/tags.ts and the color side-collection in
+// src/data/tag-colors.ts (Seam E); this folder wires them.
 
-import { buildTagFilter, collectAllTags, TAG_PATTERN } from "../../data/tags";
+import { buildTagFilter, collectAllTags, parseQuery, TAG_PATTERN } from "../../data/tags";
 import {
   definePlugin,
   type El,
@@ -14,21 +13,20 @@ import {
   type MenuTrigger,
   type PluginContext,
 } from "../types";
+import { Badge } from "@/components/ui/badge";
+import { TAG_CHIP_CLASS } from "./tag-classes";
+import { TagFilterSubheader } from "./filter-bar";
+import { addTagToFilter } from "./use-tag-filter";
 import { TagColorMenu } from "./tag-color-menu";
 
-// Tag chips borrow the Badge pill shape, applied as an inline utility string
-// (the chip is injected via innerHTML, not rendered as <Badge>). A neutral
-// outline by default (the `.tag` rule, border-border); a chosen color fills it
-// via the generated stylesheet keyed by `data-tag` (ADR 0016). `.tag` is also
-// the delegated click handler's hook.
-const TAG_CLASS =
-  "tag rounded-full px-1.5 py-0.5 text-[0.85em] font-medium cursor-pointer";
+// Inline chips use badgeVariants via TAG_CHIP_CLASS (innerHTML, not <Badge>).
+// React surfaces (filter bar, `#` menu) use <Badge variant="outline"> directly.
 
 function tagEl(tok: string): El {
   const name = tok.slice(1);
   return {
     tag: "span",
-    attrs: { class: TAG_CLASS, "data-tag": name },
+    attrs: { class: TAG_CHIP_CLASS, "data-tag": name },
     children: [tok],
   };
 }
@@ -48,13 +46,13 @@ function tagMenuMatch(before: string): MenuTrigger | null {
   return { query, triggerIndex };
 }
 
-// Each menu option is the tag's own colored chip (`.tag-option` + `data-tag` is
-// painted by the generated TagColorStyles stylesheet, same as inline chips).
+// Each menu option is the tag's own colored chip (`data-tag` is painted by
+// TagColorStyles, same as inline chips).
 function tagOption(tag: string) {
   return (
-    <span className="tag-option" data-tag={tag.slice(1)}>
+    <Badge variant="outline" className="tag-option" data-tag={tag.slice(1)}>
       {tag}
-    </span>
+    </Badge>
   );
 }
 
@@ -97,19 +95,19 @@ export default definePlugin({
     {
       selector: ".tag[data-tag]",
       blockCaretOnMouseDown: true,
-      onClick: (el, ctx, e) => {
+      onClick: (el, _ctx, e) => {
         const name = el.dataset.tag;
         if (!name) return;
         e.preventDefault();
         e.stopPropagation();
-        ctx.nav.filterTag("#" + name);
+        addTagToFilter("#" + name);
       },
       onContextMenu: openColorMenu,
     },
     {
       // Filter pills live outside the contentEditable, so no caret to block and
       // no filter-on-click; only the color picker.
-      selector: ".tag-pill[data-tag]",
+      selector: "[data-tag-pill][data-tag]",
       onContextMenu: openColorMenu,
     },
   ],
@@ -123,10 +121,22 @@ export default definePlugin({
   viewTransforms: [
     {
       id: "tag-filter",
-      buildFilter: (index, ctx, isHidden) =>
-        ctx.search.length
-          ? buildTagFilter(index, ctx.rootId, ctx.search, isHidden)
-          : null,
+      buildFilter: (index, ctx, isHidden) => {
+        const tags = parseQuery(ctx.search.q as string | undefined);
+        if (!tags.length) return null;
+        const filter = buildTagFilter(index, ctx.rootId, tags, isHidden);
+        return {
+          ...filter,
+          emptyMessage: `No nodes tagged ${tags.join(" ")} here.`,
+        };
+      },
+    },
+  ],
+
+  subheaderSlots: [
+    {
+      id: "tag-filter",
+      render: () => <TagFilterSubheader />,
     },
   ],
 

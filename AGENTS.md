@@ -118,9 +118,9 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
 
-- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
+- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
-- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
+- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
 
@@ -132,14 +132,15 @@ Seams wired today (each row: the contract, who owns it):
 | **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`) |
 | **E** side-collection | plugin-owned data, no `Node` field (see Tag colors, below). | tags |
 | **F** row slot | `{position:"row:before-text", render(node,getCtx)}`, real JSX. | todos (checkbox) |
-| **F** header slot | `{id, render(getCtx)}`, real JSX, no node. | daily ("Today") |
+| **F** header slot | `{id, render(getCtx)}`, real JSX, no node — persistent actions in the header's right cluster. | daily ("Today") |
+| **F** subheader slot | `{id, render(getCtx)}`, real JSX, no node — contextual chrome below the header (collapses + animates when every slot returns null; sticks with the header). | tags (filter bar) |
 | **G** view transform | per-node `hidesNode` predicate (composed into the one `isHidden`) + optional global `buildFilter`. Core no longer hardcodes `completed`. | todos (hide-completed), tags (`?q=`) |
 | **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`) |
 | **I** input | `input.onPaste` (replacement string) + `input.autoformat` (rewrite just-typed text). | links (paste), todos (`[]`) |
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
-| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op); **plugin styles seam** (static CSS, currently no consumer). | tags (picker), daily (container) |
+| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op). | tags (picker), daily (container) |
 
-Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
+Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineNode`; the `/` palette still runs `useSlashMenu` (only its command *list* is registry-driven).
 
@@ -147,7 +148,7 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 ## Tag filtering + colors (`src/plugins/tags/`)
 
-`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The filter is a Seam-G transform (`buildTagFilter`); the click is Seam-B delegated (`onClick → ctx.nav.filterTag`). Pure logic in `src/data/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
+`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The tags plugin owns the full filter stack: URL sync, escape-to-clear, the subheader pill bar (Seam F-subheader), the Seam-G transform (`buildTagFilter`), and chip click routing (Seam B). Pure logic in `src/data/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
 
 **Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, D1-backed via `/api/kv`) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `__root.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/DECISIONS.md#custom-tag-colors).
 

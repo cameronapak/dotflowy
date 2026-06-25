@@ -25,11 +25,9 @@ import {
   HomeIcon,
   MoreHorizontal,
   PlusIcon,
-  X,
 } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { parseQuery, serializeQuery } from "../data/tags";
 import {
   indent,
   insertChildAtStart,
@@ -70,6 +68,7 @@ import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
+import { Subheader } from "./Subheader";
 import { useShowCompleted } from "./show-completed-provider";
 import { openMoveDialog } from "./move-dialog-opener";
 import { Button } from "./ui/button";
@@ -123,10 +122,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // First-run import-or-seed bootstrap; safe to run on mount. See seed.ts.
   useBootstrapOutline();
 
-  // URL-driven tag filter (?q=, ADR 0015): the active tags plus the stable
-  // chip-click / filter-bar handlers and escape-to-clear. See useTagFilter.
-  const { activeTags, activeTagsRef, addTag, removeTag, clearTags, setQ } =
-    useTagFilter(rootId, navigate);
+  const routeSearch = useSearch({ strict: false }) as { q?: string };
 
   // Seam G (ADR 0018): the composed per-node visibility predicate. The core no
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
@@ -136,8 +132,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Depends on the whole view context for forward-correctness, though today's
   // only hide rule reads showCompleted.
   const viewCtx = useMemo<ViewContext>(
-    () => ({ showCompleted, search: activeTags, rootId }),
-    [showCompleted, activeTags, rootId],
+    () => ({ showCompleted, search: routeSearch, rootId }),
+    [showCompleted, routeSearch, rootId],
   );
   const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
   // Live handle for the stable command closures + drag (mirrors the ref pattern
@@ -261,15 +257,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       mutations: commands,
       nav: {
         zoom: (id) => navigateZoom(id, id),
-        filterTag: (tag) => addTag(tag),
-        setSearch: (tags) => setQ(tags),
       },
-      search: activeTagsRef.current,
       openOverlay: (node) => setOverlayNode(node),
     }),
-    // activeTagsRef is a stable ref (read at call time); listing the ref itself
-    // -- not activeTagsRef.current -- keeps pluginCtx referentially stable.
-    [commands, navigateZoom, addTag, setQ, activeTagsRef],
+    [commands, navigateZoom],
   );
 
   // The pruned visible-set for the active filter (matches + ancestor context),
@@ -305,13 +296,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   return (
     <>
-      <Header getCtx={pluginCtx}>
-        <BreadcrumbTrail
-          trail={trail}
-          rootId={rootId || null}
-          onNavigate={navigateZoom}
-        />
-      </Header>
+      <div className="sticky top-0 z-10">
+        <Header getCtx={pluginCtx}>
+          <BreadcrumbTrail
+            trail={trail}
+            rootId={rootId || null}
+            onNavigate={navigateZoom}
+          />
+        </Header>
+        <Subheader getCtx={pluginCtx} />
+      </div>
       {/* Tag chips live inside the bullets' contentEditable, so the click that
           filters is captured here (mousedown blocks the editing caret). */}
       <div
@@ -324,13 +318,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onContextMenu={onContentContextMenu}
       >
         {overlayNode}
-        {activeTags.length > 0 && (
-          <TagFilterBar
-            tags={activeTags}
-            onRemove={removeTag}
-            onClear={clearTags}
-          />
-        )}
 
         {zoomedNode && (
           <ZoomedTitle
@@ -350,10 +337,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           />
         )}
 
-        {noMatches ? (
-          <div className="outline-empty">
-            No nodes tagged {activeTags.join(" ")} here.
-          </div>
+        {noMatches && filter?.emptyMessage ? (
+          <div className="outline-empty">{filter.emptyMessage}</div>
         ) : (
           <>
             <ul className="outline-list" ref={listRef}>
@@ -516,82 +501,6 @@ function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
   );
 
   return { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash };
-}
-
-interface TagFilterControls {
-  activeTags: string[];
-  activeTagsRef: RefObject<string[]>;
-  addTag: (tag: string) => void;
-  removeTag: (tag: string) => void;
-  clearTags: () => void;
-  setQ: (tags: string[]) => void;
-}
-
-/**
- * The URL-driven tag filter (?q=, ADR 0015): the active tags read from the
- * search param, plus the stable handlers that write them. Self-contained -- it
- * keeps its own live rootId/navigate refs so the handlers never re-bind.
- */
-function useTagFilter(
-  rootId: string | null,
-  navigate: ReturnType<typeof useNavigate>,
-): TagFilterControls {
-  const search = useSearch({ strict: false }) as { q?: string };
-  const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
-  const activeTagsRef = useRef(activeTags);
-  activeTagsRef.current = activeTags;
-  const rootIdRef = useRef<string | null>(rootId);
-  rootIdRef.current = rootId;
-  const navigateRef = useRef(navigate);
-  navigateRef.current = navigate;
-
-  // Write the active tags into the `q` param on the current route. Stable
-  // (reads live values through refs), so the chip-click handler and filter bar
-  // never re-bind.
-  const setQ = useCallback((tags: string[]) => {
-    const q = serializeQuery(tags);
-    const nextSearch = q ? { q } : {};
-    const root = rootIdRef.current;
-    if (root === null) navigateRef.current({ to: "/", search: nextSearch });
-    else
-      navigateRef.current({
-        to: "/$nodeId",
-        params: { nodeId: root },
-        search: nextSearch,
-      });
-  }, []);
-  // Clicking a tag AND-s it into the filter (accretes, never replaces); a
-  // pill's ✕ drops one; clear-all drops the filter.
-  const addTag = useCallback(
-    (tag: string) => {
-      const current = activeTagsRef.current;
-      if (current.includes(tag)) return;
-      setQ([...current, tag]);
-    },
-    [setQ],
-  );
-  const removeTag = useCallback(
-    (tag: string) => setQ(activeTagsRef.current.filter((t) => t !== tag)),
-    [setQ],
-  );
-  const clearTags = useCallback(() => setQ([]), [setQ]);
-
-  // Escape clears the filter -- but only when the caret isn't inside a bullet,
-  // so it never eats an in-progress edit (ADR 0015).
-  useEffect(() => {
-    if (activeTags.length === 0) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.classList.contains("node-text"))
-        return;
-      clearTags();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [activeTags.length, clearTags]);
-
-  return { activeTags, activeTagsRef, addTag, removeTag, clearTags, setQ };
 }
 
 interface ZoomNavigationArgs {
@@ -924,56 +833,6 @@ function useNodeCommands({
     // would defeat the pattern.
     // eslint-disable-next-line react-doctor/exhaustive-deps
     [navigateZoom, startDrag, consumeClick],
-  );
-}
-
-/**
- * The active-tag filter bar: a row of tag pills, shown only while a filter is
- * on. Each pill's ✕ drops that one tag; "Clear" drops the whole filter. Tags
- * are *added* by clicking chips in the outline, never typed here -- v1 is
- * tags-only and click-driven. See ADR 0015.
- */
-function TagPill({
-  tag,
-  onRemove,
-}: {
-  tag: string;
-  onRemove: (tag: string) => void;
-}) {
-  const name = tag.slice(1);
-  return (
-    <span className="tag-pill" data-tag={name}>
-      {tag}
-      <button
-        type="button"
-        className="tag-pill-remove"
-        aria-label={`Remove ${tag} from filter`}
-        onClick={() => onRemove(tag)}
-      >
-        <X size={12} strokeWidth={2.5} />
-      </button>
-    </span>
-  );
-}
-
-function TagFilterBar({
-  tags,
-  onRemove,
-  onClear,
-}: {
-  tags: string[];
-  onRemove: (tag: string) => void;
-  onClear: () => void;
-}) {
-  return (
-    <search aria-label="Tag filter" className="tag-filter-bar">
-      {tags.map((tag) => (
-        <TagPill key={tag} tag={tag} onRemove={onRemove} />
-      ))}
-      <button type="button" className="tag-filter-clear" onClick={onClear}>
-        Clear
-      </button>
-    </search>
   );
 }
 

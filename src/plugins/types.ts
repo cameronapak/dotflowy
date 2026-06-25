@@ -153,13 +153,7 @@ export interface PluginContext {
   nav: {
     /** Zoom a node to the temporary root. */
     zoom: (id: string) => void;
-    /** AND a `#tag` into the active filter (accretes, never replaces). */
-    filterTag: (tag: string) => void;
-    /** Replace the active tag filter wholesale. */
-    setSearch: (tags: string[]) => void;
   };
-  /** The active tag filter (the parsed `?q=`), read-only. */
-  search: string[];
   /** Show (or dismiss, with null) a self-managing overlay -- a portaled popover
    *  the plugin owns (e.g. the tag color picker). A thin generic host: the core
    *  just mounts the node; the overlay handles its own positioning + dismiss. */
@@ -217,9 +211,8 @@ export interface InteractionSpec {
 export interface ViewContext {
   /** Whether completed bullets are shown (the todo plugin's hide transform). */
   showCompleted: boolean;
-  /** The active tag filter (parsed `?q=`) -- the same array as the tag plugin's
-   *  filter transform reads. */
-  search: string[];
+  /** The current route's search params (opaque to the core -- plugins parse). */
+  search: Record<string, unknown>;
   /** The current zoom root, or null at the top. */
   rootId: string | null;
 }
@@ -232,6 +225,8 @@ export interface ViewContext {
 export interface ViewFilter {
   visibleIds: Set<string>;
   matchIds: Set<string>;
+  /** Shown when `matchIds` is empty; plugin-owned copy (the tag filter today). */
+  emptyMessage?: string;
 }
 
 export interface ViewTransform {
@@ -380,6 +375,22 @@ export interface HeaderSlotSpec {
   render(getCtx: () => PluginContext): ReactNode;
 }
 
+// --- Seam F (subheader): contextual chrome below the header -----------------
+//
+// Header slots are persistent actions (the daily "Today" button). Subheader
+// slots are contextual state (the tag filter bar, a future week nav). The core
+// renders every non-null slot into one muted band that collapses with animation
+// when empty and sticks below the header. v1: render all non-null slots; shared
+// row layout (leading/main/trailing regions) is deferred until a second consumer
+// ships.
+
+export interface SubheaderSlotSpec {
+  id: string;
+  /** Return null to contribute nothing. `getCtx` is optional for plugins that
+   *  read route state directly (the tag filter); call it inside handlers only. */
+  render(getCtx: () => PluginContext): ReactNode;
+}
+
 // --- Protected nodes --------------------------------------------------------
 //
 // A plugin can declare a node un-deletable. The core consults the composed
@@ -515,6 +526,8 @@ export interface PluginDef {
   slots?: SlotSpec[];
   /** Seam F (header): node-less header chrome (the daily "Today" button). */
   headerSlots?: HeaderSlotSpec[];
+  /** Seam F (subheader): contextual chrome below the header (the tag filter). */
+  subheaderSlots?: SubheaderSlotSpec[];
   /** Protected nodes: return true to forbid deleting `nodeId` (the daily
    *  container). Called on the delete path only (client). */
   protects?(nodeId: string): boolean;
