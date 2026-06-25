@@ -37,6 +37,12 @@
       "skillPath": "packages/db/skills/db-core/persistence/SKILL.md",
       "computedHash": "375a173137681ac7a90de480964968055e7229dd820a951a8542e6bdcd4282da"
     },
+    "deploying-app": {
+      "source": "wasp-lang/wasp-agent-plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/wasp/skills/deploying-app/SKILL.md",
+      "computedHash": "cebbd6558d27fd23fc8ff7789528301159ca6366618369145934032c771b8306"
+    },
     "domain-modeling": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -48,6 +54,12 @@
       "sourceType": "github",
       "skillPath": "skills/errore/SKILL.md",
       "computedHash": "c8c58707dfee91f71d479431d3ab3d64d63f824c22760444e7ae08b6397fd378"
+    },
+    "expert-advice": {
+      "source": "wasp-lang/wasp-agent-plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/wasp/skills/expert-advice/SKILL.md",
+      "computedHash": "d11c957fa2cee0c6db4388762a8af5507245f1fc20f46e75897d056a095368c6"
     },
     "grill-with-docs": {
       "source": "mattpocock/skills",
@@ -72,6 +84,24 @@
       "sourceType": "github",
       "skillPath": "skills/shadcn/SKILL.md",
       "computedHash": "ac9d0d69caac7de1d1e5647f3db3bcd2f13af355d6b3a78780fbf7fc80e8dca0"
+    },
+    "start-dev-server": {
+      "source": "wasp-lang/wasp-agent-plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/wasp/skills/start-dev-server/SKILL.md",
+      "computedHash": "71a6f03db962b1589b6fce979bdbd159ae90a1ffda769b6e4c707415081668b2"
+    },
+    "wasp-plugin-help": {
+      "source": "wasp-lang/wasp-agent-plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/wasp/skills/wasp-plugin-help/SKILL.md",
+      "computedHash": "11c648398edcf7b39f49f806d566937977594daaa0556c678bb667b822b03a24"
+    },
+    "wasp-plugin-init": {
+      "source": "wasp-lang/wasp-agent-plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/wasp/skills/wasp-plugin-init/SKILL.md",
+      "computedHash": "df7a77cfd9cec7785ef16d44abada829241197283babfa0467cfcc1e9f6c8c8d"
     }
   }
 }

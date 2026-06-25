@@ -182,3 +182,7 @@ A Bible ref in `node.text` renders as a chip opening [route.bible](https://route
 ## Verifying UI changes
 
 Screenshots **cannot capture view-transition overlays** (they show the settled DOM, so a morph always looks "done"). Verify transitions by instrumenting `document.startViewTransition` and asserting on which element holds `view-transition-name`.
+
+# Wasp Knowledge
+
+Wasp knowledge can be found at @.claude/wasp/general-wasp-knowledge.md
