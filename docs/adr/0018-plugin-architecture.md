@@ -1,13 +1,13 @@
 # ADR 0018: Plugin architecture (a beautiful core, extended by plugins)
 
-Status: **partially implemented** (2026-06-23) — shaped in a `/grill-with-docs` session; design
-decisions **D1–D10** are settled and ratified (D9 + D10 included). The plugin **host** (D1/D5/D6/D8)
-and Seams **A** (inline tokens), **B** (delegated interaction), **G** (view transforms), **H** (the
-caret-menu engine), and **I** (paste) are **built and dogfooded**: `code`/`links`/`tags`/`todos` are
-plugins in `src/plugins/`, with **links a complete plugin** (A+B+I). Remaining: Seams **C/D/F** and
-the rest of the **todos** plugin (its interaction surface + the D9 completion-ownership move); the
-`/` palette folds into the menu engine when its commands become a Seam-C registry. See
-*Implementation status* below.
+Status: **accepted, implemented** (2026-06-23). Decisions **D1–D10** below are the design;
+Seams **A–I** all shipped and `code`/`links`/`tags`/`todos` are dogfooded plugins. Later ADRs
+extended the seam set: header slots ([ADR 0020](./0020-header-slot-seam.md)), protected nodes
+([ADR 0021](./0021-protected-nodes.md)), search providers / Seam J ([ADR 0022](./0022-search-provider-seam.md)),
+the plugin-styles seam ([ADR 0027](./0027-plugin-styles-seam.md)), and React-widget tokens
+([ADR 0028](./0028-react-token-widgets.md)). **The live seam map + current owners is the Plugins
+section of `AGENTS.md`;** this ADR is the design rationale. Still deliberately core: fade-inheritance,
+Backspace-on-checkbox demotion, and the `/`-palette engine (only its command list is a Seam-C registry).
 
 Relates to:
 
@@ -43,11 +43,10 @@ Relates to:
 - **Side-collection** — a separate TanStack DB collection keyed by node id (`tagColorsCollection`),
   data that rides alongside nodes without touching the node schema. The clean-uninstall path for
   plugin-owned data. See *Seam E*.
-- **"Extensible by default"** — zenbu's thesis (as inferred from its docs' page set, not its prose):
-  because everything flows through dependency **Injection** + aspect-oriented **Advice**
-  (before/after/around) + **Events** over **Services**/**Views**, any unit can be advised, replaced,
-  or observed *without the original author designing a plugin API up front*. App code is itself a
-  plugin. Elegant for an Electron multi-process host; heavy to graft onto a contentEditable SPA.
+- **"Extensible by default"** — zenbu's thesis: everything flows through DI + aspect-oriented advice
+  + events, so any unit can be advised/replaced/observed without a plugin API designed up front.
+  Elegant for an Electron multi-process host; heavy to graft onto a contentEditable SPA (see
+  *Rejected alternatives*).
 
 ## The seams Dotflowy actually has
 
@@ -77,21 +76,15 @@ inventing a runtime.
 
 ## The fork that decides everything
 
-Two very different things wear the word "plugin," and the whole architecture hinges on which one:
-
-1. **Internal extension registry.** Typed seams; plugins are modules compiled into the bundle; the
-   `SLASH_COMMANDS`-style array generalized to all nine seams. Lets you (or an AI agent working *in
-   the repo*) add features without spaghetti. Cost: ~a refactor.
-2. **Runtime third-party plugins.** Code loaded *after install* to modify a running app — zenbu's
-   actual claim. Needs a module loader, a sandbox, a capability/permission model, plugin-owned
-   persisted data with versioning, and a stable public API surface. Cost: a new platform.
-
-**Resolved → #1** (D1): internal registry, contributor-authored locally; driver is (c) keeping the
-core clean. #2 is the deferred door (*Rejected alternatives*, *Deferred*).
+The architecture hinges on which "plugin" we mean: **#1 an internal extension registry** (typed
+seams, modules compiled into the bundle — roughly a refactor) or **#2 runtime third-party plugins**
+(code loaded after install — a module loader + sandbox + capability model + versioned public API, a
+whole new platform). **Resolved → #1** (D1), driver (c) keep the core clean; #2 is the deferred door
+(*Rejected alternatives*, *Deferred*).
 
 ## Decision
 
-Promoted so far (the grilling continues below them):
+The ten ratified decisions:
 
 - **D1. Internal registry, contributor-authored (the fork → #1).** Plugins are modules **compiled
   into the bundle**; contributors author them locally in-repo. No runtime/after-install loading, no
@@ -164,7 +157,10 @@ Promoted so far (the grilling continues below them):
     structural editing keys (`Enter`, `Tab`, `Shift+Tab`, `Backspace`, `Arrow*`, and the move/zoom
     combos) are **core-sacred and cannot be rebound by a plugin**. A collision *between plugins* on a
     non-reserved key **throws at registration in dev** (loud — you want to know two plugins fight over
-    `Cmd+Enter`), first-in-array wins in prod. (Reserved set ratified in *Open questions → K*.)
+    `Cmd+Enter`), first-in-array wins in prod. **Reserved-key denylist:** `Enter`, `Shift+Enter`,
+    `Tab`, `Shift+Tab`, `Backspace`, `Arrow{Up,Down,Left,Right}`, `Mod+Shift+Arrow{Up,Down}`,
+    `Mod+Arrow{Up,Down}`, `Mod+.`. `Mod+Enter`/`Mod+D` are **not** core-sacred — they belong to the
+    todo plugin (D9).
 
 - **D8. PluginContext = the promoted `NodeCommands`.** This is **not** a from-scratch API. The slash
   registry already hands each command `run(nodeId, commands: NodeCommands)`; the plugin surface is
@@ -213,98 +209,18 @@ Promoted so far (the grilling continues below them):
   bundle. Forcing tokens through live React would mean the Lexical/ProseMirror substrate rewrite ADR
   0017 already rejected.)
 
-## Open questions (the grilling)
-
-Resolved → see *Decision*: ~~A (driver/fork)~~ → D1. ~~B (data ownership)~~ → D2. ~~C (hot path)~~ →
-D3. ~~D (trust)~~ → folds out of D3. ~~F (v1 order)~~ → D4.
-
-Resolved → see *Decision*: ~~G (dogfooding)~~ → D5/D-G. ~~H (shape + wiring)~~ → D5.
-~~I (token contract)~~ → D6. ~~E (ordering/conflicts)~~ → D7. ~~J (PluginContext)~~ → D8.
-
-Resolved → see *Decision*: ~~K (reserved keys / `Mod+Enter`)~~ → D7 + D9 (completion keys move into
-the todo plugin, the sanctioned reserved-key binding). ~~L (render-slot shape)~~ → D10 (slots are
-React components; inline tokens are descriptors). ~~M (doc completion)~~ → done (sections below).
-
-Reserved-key denylist (ratified, D7): `Enter`, `Shift+Enter`, `Tab`, `Shift+Tab`, `Backspace`,
-`Arrow{Up,Down,Left,Right}`, `Mod+Shift+Arrow{Up,Down}`, `Mod+Arrow{Up,Down}`, `Mod+.`. `Mod+Enter`
-and `Mod+D` are **not** core-sacred — they belong to the todo plugin (D9).
-
-Left for the implementation ADR (not this design): the exact `El` descriptor type, the `slots` key
-names, `PluginContext` field-by-field, and the order the core store is refactored to read Seam-G
-transforms instead of hardcoding `completed`.
-
 ## Implementation status
 
-**Built (typecheck + Playwright green, incl. a new `e2e/tag-filter.spec.ts`):**
+All of D1–D10 shipped and dogfooded. The host is `src/plugins/{types,index,registry}.ts`; `El` is
+`string | { tag, attrs?, children? }`, `PluginContext` is `{ tree, mutations, nav, search,
+openOverlay }`. **The current seam map, per-plugin owners, and per-seam mechanics live in the
+Plugins section of `AGENTS.md`** (kept fresh as seams are added); this ADR is the design, not the
+inventory. The D9 move makes the `completed`/`isTask` *fields* core slots but their behavior, UI,
+and shortcuts the todos plugin's — superseding ADR 0001/0002's "core owns checkboxes" framing.
 
-- **Host** — `src/plugins/types.ts` (the `definePlugin` contract), `src/plugins/index.ts` (the one
-  explicit ordered array `[code, links, tags]`, D5), `src/plugins/registry.ts` (composes the seams
-  from the array once at load). `El` is pinned as `string | { tag, attrs?, children? }` (D6/D10);
-  `PluginContext` (D8) = `{ tree, mutations (NodeCommands), nav: { zoom, filterTag, setSearch },
-  search, openOverlay }`.
-- **Seam A (tokens)** — `inline-code.ts`'s `inlineMarkupHtml` is now registry-driven: plugins
-  contribute regex fragments composed into ONE `gu` regex; `render` returns `El`; the core escapes +
-  serializes (`serializeEl`). Folding generalized — `isFoldedLink` → `isAtom` (keys on `data-src`),
-  and the reveal fast-path uses `hasFoldingToken`. `code`/`links`/`tags` token render all moved into
-  their plugin folders; HTML output is byte-identical (the render cache + rich-links e2e confirm it).
-- **Seam B (delegated interaction)** — `registry.blocksCaret`/`dispatchClick`/`dispatchContextMenu`;
-  `OutlineEditor`'s three content-container handlers are now **fully generic** (zero feature
-  knowledge). Links contribute open; tags contribute filter-on-click + color-on-right-click.
-- **Seam I (paste)** — `paste-links.ts` → `paste.ts` (generic mechanics + plain-text baseline); the
-  three URL/anchor cases are the links plugin's `input.onPaste`.
-- **Overlay host** — `ctx.openOverlay(node | null)`, a thin portal mount in `OutlineEditor`; the tag
-  color picker (moved to `src/plugins/tags/tag-color-menu.tsx`, Seam E side-collection) uses it.
-- **Seam G (view transforms)** — `PluginDef.viewTransforms`, composed in `registry.ts`
-  (`composeHidden` ORs each transform's per-node `hidesNode` predicate; `buildViewFilter` runs the
-  global `buildFilter` precomputes, first non-null wins). The core no longer special-cases
-  `completed`: `useVisibleChildIds(parentId, isHidden)` takes the composed predicate, and every other
-  visibility read (the top-level prune, `flattenVisible`, drag rows, `moveUp/moveDown`'s `isVisible`,
-  post-zoom focus) goes through the same `isHidden`. **todos** contributes the hide-completed
-  predicate; **tags** contributes the `?q=` filter (`buildTagFilter`, now handed `isHidden` so it
-  prunes hidden nodes without knowing about completion). The filter result is still core-*rendered*
-  as the `filter` prop (its dimming/override of `collapsed` is wired in `OutlineNode`); only its
-  *computation* is now plugin-owned.
-
-- **Seam H (caret menu engine)** — `PluginDef.menus`, a generic engine in `menu-engine.tsx`
-  (`useMenus`, one per focused bullet) that detects whichever trigger is live before the caret,
-  portals the option list, drives arrow/enter/tab/escape, and splices the picked entry's
-  `replacement` into the SOURCE (`readSource` space, so a folded link keeps its url) with an optional
-  `after` side effect. A `MenuSpec` is `{ trigger, match?, entries(trigger, node, ctx), … }`;
-  `registry.menuSpecs` lists them. **tags** owns the `#` menu (entries off `collectAllTags`, picked
-  via `ctx.tree`). The old `tag-menu.tsx` is deleted; the shared caret helpers stay in
-  `slash-menu.tsx`. The engine reads the bullet's `pluginCtx` (a stable `OutlineNode` prop). Covered
-  by `e2e/tag-menu.spec.ts`.
-
-- **Seams C/D/F/I (the todos plugin)** — `PluginDef.commands`/`keymap`/`slots` + `input.autoformat`,
-  composed in `registry.ts` (`commandSpecs`, `keymapSpecs`, `rowSlots(position)`, `autoformat`).
-  Completion is now **the todos plugin's concept** (D9), built on the `completed`/`isTask` node slots:
-  - **F (row slot)** — the checkbox renders via `slots: [{ position: "row:before-text", render(node,
-    getCtx) }]`; `OutlineNode` maps `rowSlots(...)` (a precomputed, referentially stable array) into
-    the row. The hardcoded `<Checkbox>` is gone from the core.
-  - **C (commands)** — `/todo` + `/bullet` are todos commands; `/move` stays a **core** command (it's
-    structural, not a todo concept). `slash-menu.tsx`'s list is now `[...commandSpecs, ...CORE]` and
-    `useSlashMenu` takes the `pluginCtx` thunk. The bespoke `/` engine stays for now — only its
-    *command list* is registry-driven (folding the palette into the Seam-H engine is still later).
-  - **D (keymap)** — `Mod+Enter`/`Mod+D` (toggle completion) are todos keymap entries, registered on
-    **both** the bullet (`OutlineNode`) and the zoomed title (`ZoomedTitle`), so they work wherever a
-    node is focused. The editor-level `Mod+D` global is deleted. The registry warns at load if a
-    plugin keymap binds a core-reserved key (D7).
-  - **I (autoformat)** — the `[]`/`[ ]` task marker is `input.autoformat`; the core owns the
-    write+decorate+caret mechanics, the plugin decides the rewrite + the `onSetTask` side effect.
-
-  Covered by `e2e/todos.spec.ts` (the checkbox click, `[]`, `Mod+Enter`, `/todo`+`/bullet`).
-
-So **links is a complete plugin** (A+B+I), **tags** is A+B+E+G+H, and **todos** is now C+D+F+G+I —
-the "reduce todos to a plugin" headline is met. This supersedes ADR 0001/0002's "core owns
-checkboxes" framing: the `completed`/`isTask` *fields* stay core slots (D9 perf exception), but their
-behavior, UI, and shortcuts are the plugin's.
-
-**Remaining (deliberately core for now):**
-
-- **Fade-inheritance** (`faded`/`ancestorCompleted` in `OutlineNode`) and the **Backspace-on-the-
-  checkbox demotion** still read `completed`/`isTask` in the core — they await a row-decoration /
-  reserved-key seam. **The `/` palette** still runs the bespoke `useSlashMenu` (only its command list
-  is a Seam-C registry); it folds into the Seam-H menu engine in a later pass.
+Still deliberately core (await a future row-decoration / reserved-key seam): fade-inheritance
+(`faded`/`ancestorCompleted`), Backspace-on-checkbox demotion, and the `/`-palette engine
+(`useSlashMenu` — only its command *list* is a Seam-C registry).
 
 ## Why
 
@@ -360,47 +276,9 @@ behavior, UI, and shortcuts are the plugin's.
 - **Seams the first three features don't need** — a settings/preferences seam, a toolbar seam,
   lifecycle beyond `register` + `migrate`.
 
-## Appendix: the `definePlugin` surface (sketch, not final — the implementation ADR pins types)
+## The `definePlugin` surface
 
-```ts
-// src/plugins/<name>/index.ts  — one default-exported plugin object.
-// src/plugins/index.ts         — export const plugins = [code, links, tags, todos]  (D5: explicit, ordered)
-export default definePlugin({
-  id: "todos",
-
-  // Seam A/B — inline tokens. Declarative: the core composes every plugin's
-  // `pattern` into ONE regex and owns escaping. A folding token (links) emits a
-  // single atomic element carrying its `src`; the caret math counts it (D6).
-  tokens: [/* { id, pattern, precedence, render(match, { revealOffset }): El,
-                onClick?(match, ctx), onContextMenu?(match, ctx) } */],
-
-  // Seam C — slash commands (concatenated in array order, filtered by query).
-  commands: [/* { id, label, description, icon, keywords, available, run(nodeId, ctx) } */],
-
-  // Seam D — additive keymap over the reserved-key denylist (D7). Todos is the
-  // one plugin allowed Mod+Enter / Mod+D, because it defines completion (D9).
-  keymap: [/* { hotkey, when?, run(nodeId, ctx) } */],
-
-  // Seam F — row render slots. REAL React components (D10).
-  slots: { /* "row:before-text": ({ node, ctx }) => <Checkbox … /> */ },
-
-  // Seam G — render-time view transforms (hide-completed, tag filter). Pure,
-  // return the visible/match sets like buildTagFilter does today.
-  transforms: [/* { id, build(index, rootId, params, ctx): ViewFilter } */],
-
-  // Seam H — caret autocomplete menus ("#", "/").
-  menus: [/* { trigger, items(query, ctx), onPick(item, ctx) } */],
-
-  // Seam I — input transforms (paste, autoformat).
-  input: { /* onPaste?(e, el, ctx), autoformat?: [{ pattern, run(nodeId, ctx) }] */ },
-
-  // Seam E — plugin-owned side-collection keyed by node id (+ optional migration).
-  // Omitted by todos (its data is the core-reserved node slot, D9); used by tag colors.
-  collection: /* { name, schema, migrate? } | undefined */ undefined,
-});
-
-// El (D6):  string  (escaped text)  |  { tag, attrs?, children?: El[] }   — never raw HTML.
-// ctx = PluginContext (D8): the promoted, frozen NodeCommands + reads + nav:
-//   { tree /* readonly index */, mutations /* NodeCommands */,
-//     nav: { zoom, navigate, filterTag, setSearch }, search /* current ?q= */ }
-```
+The authoritative, current contract is **`src/plugins/types.ts`** (`definePlugin`, `El`/`WidgetEl`,
+and the per-seam `*Spec` types). One default-exported plugin object per `src/plugins/<name>/`,
+registered into whatever seams it needs; `src/plugins/index.ts` is the explicit ordered array (D5).
+The original design sketch was superseded by that file — read it instead.
