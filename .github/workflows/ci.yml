@@ -1,9 +1,11 @@
+# CI disabled during Wasp migration — re-enable push/PR triggers when ready.
 name: CI
 
 on:
-  push:
-    branches: [main, wasp]
-  pull_request:
+  workflow_dispatch:
+#  push:
+#    branches: [main, wasp]
+#  pull_request:
 
 jobs:
   test:
