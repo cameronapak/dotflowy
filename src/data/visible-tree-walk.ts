@@ -28,7 +28,7 @@ export function walkVisibleNodes(
 }
 
 /** Flat list of visible node ids in display order within the current zoom root. */
-export function flattenVisible(
+function flattenVisible(
   index: TreeIndex,
   rootId: string | null,
   isHidden: (node: Node) => boolean,
