@@ -14,6 +14,10 @@ Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to thi
 
 `README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) — read that when a rule below points at it.
 
+## Error Handling
+
+This codebase uses the errore.org convention. ALWAYS read the errore skill before editing any code.
+
 ## Documentation Freshness
 
 Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false about an objective fact (repo structure, paths, commands, tooling, workflow constraints proven by the repo), fix it in the same change.
@@ -43,8 +47,6 @@ bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
 bun run deploy     # build:cf, then `wrangler deploy`
 ```
-
-`typecheck` is **red on a pre-existing, unrelated basis** (an unused `src/components/ui/form.tsx` imports uninstalled `radix-ui`/`react-hook-form`; `vite.config.ts` wants `@types/node`). The bundler ignores these and build/deploy succeed — don't treat them as regressions, but a real change must not *add* errors.
 
 **No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change. End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
 
