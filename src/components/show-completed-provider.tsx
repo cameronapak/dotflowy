@@ -13,7 +13,7 @@ const ShowCompletedContext = createContext<ShowCompletedState | null>(null);
  * Global "Show completed" preference (Workflowy's header toggle). When false,
  * completed bullets and their entire subtrees are hidden from the outline. This
  * is UI state, not document data, so it lives in its own localStorage key
- * separate from the nodes collection. See docs/adr/0002.
+ * separate from the nodes collection. See ADR 0002.
  *
  * Mirrors ThemeProvider: defaults during the SPA's server render pass (no
  * localStorage there) and reads the stored value on mount. Default is `true`

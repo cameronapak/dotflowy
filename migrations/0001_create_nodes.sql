@@ -1,7 +1,7 @@
 -- Outline nodes, one row per bullet. Mirrors the Node type in
 -- src/data/schema.ts; booleans are stored as INTEGER 0/1, timestamps as
 -- INTEGER epoch-ms. `owner` scopes every row to the authenticated user
--- (Cloudflare Access email). See docs/adr/0023.
+-- (Cloudflare Access email). See docs/DECISIONS.md (D1 sync).
 CREATE TABLE IF NOT EXISTS nodes (
   id            TEXT PRIMARY KEY,
   owner         TEXT NOT NULL,

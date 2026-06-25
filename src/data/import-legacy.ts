@@ -21,7 +21,7 @@ import type { Node } from './schema'
  * Non-destructive: the legacy key is left intact as a backup. Returns true only
  * when it actually wrote nodes, so the caller skips the first-run seed. The
  * single-run / StrictMode guarding lives in the one caller (bootstrapOutline in
- * seed.ts), so this needs no in-flight guard of its own. See docs/adr/0023.
+ * seed.ts), so this needs no in-flight guard of its own. See docs/DECISIONS.md (D1 sync).
  */
 const LEGACY_KEY = 'dotflowy-oss:nodes'
 const IMPORTED_FLAG = 'dotflowy-oss:d1-imported'

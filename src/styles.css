@@ -214,7 +214,7 @@
  * Completion fade. A row is faded when it's completed or sits under something
  * completed (data-faded set in OutlineNode). Opacity lives on the row, NOT on
  * .outline-node, so it never nests with descendant rows -- one uniform fade
- * level at any depth, never compounding. See docs/adr/0002.
+ * level at any depth, never compounding. See ADR 0002.
  */
 .outline-row[data-faded="true"] {
   opacity: 0.4;
@@ -224,7 +224,7 @@
  * Tag-filter context dim. While a tag filter is active, a row that's only on
  * screen as ancestor context for a match below it (not itself a match) is
  * dimmed so the actual matches read as the foreground. Same opacity lever as
- * the completion fade, on the row. See docs/adr/0015.
+ * the completion fade, on the row. See ADR 0015.
  */
 .outline-row[data-context="true"] {
   opacity: 0.45;
@@ -339,7 +339,7 @@
   justify-content: center;
   border-radius: 99px;
   /* A touch starting on the dot is a drag (or a tap-to-zoom), never a scroll,
-     so the gesture stays ours. See docs/adr/0010. */
+     so the gesture stays ours. See ADR 0010. */
   touch-action: none;
 }
 
@@ -394,7 +394,7 @@
   display: inline-block;
 }
 
-/* --- Drag to reorder (docs/adr/0010) --- */
+/* --- Drag to reorder (ADR 0010) --- */
 
 /* While a drag is live: a grab cursor everywhere, and no accidental text
    selection as the pointer sweeps across rows. */
@@ -619,7 +619,7 @@ body.dragging-active * {
 
 /* A completed zoom root shows full completed styling: line-through (from the
    shared .node-text rule) plus the fade. The title is an <h2>, not an
-   .outline-row, so it needs its own fade. See docs/adr/0002 decision 6. */
+   .outline-row, so it needs its own fade. See ADR 0002 decision 6. */
 .zoomed-title-text[data-completed="true"] {
   opacity: 0.4;
 }

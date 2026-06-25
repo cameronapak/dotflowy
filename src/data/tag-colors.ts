@@ -10,7 +10,7 @@ import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from './kv-api'
  * Custom tag colors. A tag's color is **chosen**, not derived -- by default a
  * tag is a neutral outlined chip (`border-border`), and picking a color fills
  * it. The choice is keyed by the *normalized* tag name, so it applies to every
- * instance of that tag everywhere. See docs/adr/0016.
+ * instance of that tag everywhere. See docs/DECISIONS.md (tag colors).
  *
  * Backed by D1 through the generic /api/kv side-collection store (ADR 0024),
  * sibling to nodesCollection -- a custom color is shared meaning, not

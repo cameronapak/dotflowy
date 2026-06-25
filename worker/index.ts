@@ -16,7 +16,7 @@
  * front, so we fall back to a fixed dev owner — gated on the request hostname
  * being localhost, which production traffic can never present (Access fronts
  * the real hostname). Hardening path: validate the Access JWT signature
- * (`Cf-Access-Jwt-Assertion`) against the team's JWKS. See docs/adr/0023.
+ * (`Cf-Access-Jwt-Assertion`) against the team's JWKS. See docs/DECISIONS.md (D1 sync).
  */
 
 interface Env {
@@ -250,7 +250,7 @@ async function handleNodes(
  * JSON-stringified item. The client api computes each row's `key` from the
  * collection's getKey (kv-api.ts), so the Worker stores it opaquely. GET returns
  * the COMPLETE set for one collection (the query collection treats it as
- * authoritative). See docs/adr/0024.
+ * authoritative). See docs/DECISIONS.md (D1 sync).
  */
 async function handleKv(
   request: Request,

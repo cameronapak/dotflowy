@@ -15,7 +15,7 @@ import { createNodes, deleteNodes, fetchNodes, updateNodes } from './api'
  * persisted server-side; each handler returns `{ refetch: false }` so a
  * keystroke does NOT trigger a full re-GET (the editor fires many small
  * writes). Cross-device edits reconcile on window-focus refetch — see
- * query-client.ts. Why D1: docs/adr/0023.
+ * query-client.ts. Why D1: docs/DECISIONS.md (D1 sync).
  *
  * A transaction can carry several mutations (a structural move relinks
  * multiple siblings), so every handler maps over `transaction.mutations`

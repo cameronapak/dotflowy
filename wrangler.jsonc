@@ -1,6 +1,6 @@
 {
   // Cloudflare Workers deploy config. One Worker serves the static SPA AND the
-  // /api/nodes sync API backed by D1. See docs/adr/0023.
+  // /api/nodes sync API backed by D1. See docs/DECISIONS.md (D1 sync).
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dotflowy",
   "main": "worker/index.ts",

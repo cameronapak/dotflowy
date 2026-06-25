@@ -26,7 +26,7 @@ export const nodeSchema = z.object({
   prevSiblingId: z.string().nullable(),
   text: z.string(),
   // Whether this bullet renders a checkbox (a "task") vs a plain bullet.
-  // Purely a display choice, independent of `completed`. See docs/adr/0001.
+  // Purely a display choice, independent of `completed`. See ADR 0001.
   isTask: z.boolean(),
   // Done-status. Applies to any bullet, task or not. Toggled by Cmd+Enter.
   completed: z.boolean(),
@@ -34,7 +34,7 @@ export const nodeSchema = z.object({
   // Bookmark pointer. `null` = not bookmarked; a timestamp = bookmarked, and
   // also the sort key for the bookmarks list (newest pinned first). A nullable
   // timestamp beats a boolean: it carries both "is it pinned?" and "in what
-  // order?" in one field. See docs/adr/0011.
+  // order?" in one field. See ADR 0011.
   bookmarkedAt: z.number().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),

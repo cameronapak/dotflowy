@@ -40,7 +40,7 @@ interface OutlineNodeProps {
   pivotId: string | null;
   // True when an ancestor *within the current view* is completed, so this row
   // renders faded even if it isn't itself completed. Visual-only inheritance;
-  // never written to data. Resets to false at each zoom root. See docs/adr/0002.
+  // never written to data. Resets to false at each zoom root. See ADR 0002.
   ancestorCompleted: boolean;
   // The composed Seam-G visibility predicate (ADR 0018): a node is pruned from
   // the render iff it returns true (hide-completed when show-completed is off).
@@ -62,7 +62,7 @@ export interface NodeCommands {
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
   // Move a bullet (and its subtree) up/down among siblings; at the edge it
-  // outdents one level in that direction. See docs/adr/0009.
+  // outdents one level in that direction. See ADR 0009.
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   // Delete a bullet and its entire subtree, then focus a neighbor.
@@ -80,7 +80,7 @@ export interface NodeCommands {
   // Zoom the outline so this node becomes the temporary root.
   onZoom: (id: string) => void;
   // Drag-to-reorder, hung off the bullet dot. pointerdown arms a drag; click
-  // zooms only when no drag happened. See docs/adr/0010.
+  // zooms only when no drag happened. See ADR 0010.
   onBulletPointerDown: (id: string, e: PointerEvent) => void;
   onBulletClick: (id: string) => void;
 }

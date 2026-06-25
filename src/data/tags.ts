@@ -5,7 +5,7 @@ import { childrenOf, type Node, type TreeIndex } from './tree'
  * `#important` lives literally in the text, the same way an inline `code` run
  * does (see inline-code.ts). Parsing here keeps the data layer the source of
  * truth; the renderer (inline-code.ts) reuses {@link TAG_PATTERN} to decorate
- * the same runs as clickable chips. See docs/adr/0015.
+ * the same runs as clickable chips. See ADR 0015.
  *
  * A tag is `#` preceded by start-of-text or whitespace, then one or more
  * letters / numbers / underscore / hyphen, ending at the next space or
@@ -81,7 +81,7 @@ export function matchesAllTags(text: string, activeTags: string[]): boolean {
 /**
  * The visible set for a tag filter, computed at render time from the tree --
  * never mutating any node (in particular `collapsed` is untouched, so clearing
- * the filter restores the exact prior view). See docs/adr/0015.
+ * the filter restores the exact prior view). See ADR 0015.
  *
  * - `matchIds`: nodes whose own text carries all active tags.
  * - `visibleIds`: every match plus all of its ancestors up to (but not

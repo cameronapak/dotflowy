@@ -60,7 +60,7 @@ function toNode(n: SeedNode): ApiNode {
  *   - DELETE -> drop `{ ids }`
  * so the real `collection.ts` -> `api.ts` query/mutation path is exercised end
  * to end; only D1 is swapped for a Map. The Worker's own SQL is covered by
- * `typecheck:worker` plus manual verification (docs/adr/0023), not here.
+ * `typecheck:worker` plus manual verification (docs/DECISIONS.md (D1 sync)), not here.
  *
  * The store is scoped to this test's `page`. Playwright gives each test its own
  * page/context, so two tests never share state -- stronger isolation than a

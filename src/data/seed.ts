@@ -14,7 +14,7 @@ let bootstrapped = false
  * localStorage is imported into D1 (returning user), or the welcome bullets are
  * seeded (genuinely new user). Import wins when present, so we never stack
  * welcome bullets on top of imported data. Called once on mount; see
- * import-legacy.ts and docs/adr/0023.
+ * import-legacy.ts and docs/DECISIONS.md (D1 sync).
  */
 export async function bootstrapOutline(): Promise<void> {
   if (bootstrapped) return
@@ -39,7 +39,7 @@ let seedStarted = false
  * collection passes through. Returns true if it seeded.
  *
  * The component calls this once on mount; the inserts persist to D1 through the
- * collection's normal mutation path. See docs/adr/0023.
+ * collection's normal mutation path. See docs/DECISIONS.md (D1 sync).
  */
 export async function seedIfEmpty(): Promise<boolean> {
   if (seedStarted) return false

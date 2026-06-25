@@ -6,7 +6,7 @@ import { QueryClient } from '@tanstack/query-core'
  * `refetchOnWindowFocus` is the v1 cross-device sync cadence: switch back to a
  * tab and it re-pulls the full node set from D1, picking up edits made on
  * another device. Real-time push (Durable Objects) is the deferred next step.
- * See docs/adr/0023.
+ * See docs/DECISIONS.md (D1 sync).
  */
 export const queryClient = new QueryClient({
   defaultOptions: {

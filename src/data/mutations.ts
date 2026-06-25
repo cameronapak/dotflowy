@@ -220,7 +220,7 @@ interface MoveOpts {
   isVisible?: (n: Node) => boolean
   /**
    * Boundary parent (the zoom root). A node directly under it must not escape
-   * the visible subtree, so an edge move there is a no-op. See docs/adr/0009.
+   * the visible subtree, so an edge move there is a no-op. See ADR 0009.
    */
   rootId?: string | null
 }
@@ -260,7 +260,7 @@ function outdentBeforeParent(
  * swap with that sibling (same depth, subtree carried). Otherwise (it is the
  * first visible child) outdent to become the sibling before its parent.
  *
- * Returns true if a move happened. See docs/adr/0009.
+ * Returns true if a move happened. See ADR 0009.
  */
 export function moveUp(
   index: TreeIndex,
@@ -300,7 +300,7 @@ export function moveUp(
  * swap with that sibling. Otherwise (it is the last visible child) outdent to
  * become the sibling after its parent (the existing `outdent` semantics).
  *
- * Returns true if a move happened. See docs/adr/0009.
+ * Returns true if a move happened. See ADR 0009.
  */
 export function moveDown(
   index: TreeIndex,
@@ -345,7 +345,7 @@ export function moveDown(
  * `afterSiblingId` (or as the first child when `afterSiblingId` is null). This
  * is the fused move that drag-and-drop performs: it changes parent AND sibling
  * order in one shot, unlike the keyboard moves which only ever do one. See
- * docs/adr/0010.
+ * ADR 0010.
  *
  * Returns true if a real move happened. No-ops (and returns false) when the
  * target is the node's current position, or when the move would create a cycle
@@ -368,7 +368,7 @@ export function moveNode(
   if (afterSiblingId === nodeId || newParentId === nodeId) return false
 
   // Cycle guard: walk up from the target parent; bail if we reach the node.
-  // Dropping a branch inside itself would orphan it. See docs/adr/0010.
+  // Dropping a branch inside itself would orphan it. See ADR 0010.
   if (newParentId !== null) {
     let cursor: Node | undefined = index.byId.get(newParentId)
     let guard = index.byId.size + 1
@@ -477,7 +477,7 @@ export function toggleCompleted(nodeId: string, completed: boolean) {
 /**
  * Make a bullet a task (gains a checkbox) or a plain bullet. `isTask` is
  * purely a display choice and is independent of `completed`: a plain bullet
- * keeps whatever done-status it had. See docs/adr/0001.
+ * keeps whatever done-status it had. See ADR 0001.
  */
 export function setIsTask(nodeId: string, isTask: boolean) {
   update(nodeId, { isTask })
@@ -489,7 +489,7 @@ export function toggleCollapsed(nodeId: string, collapsed: boolean) {
 
 /**
  * Pin or unpin a node as a bookmark. Stores the moment it was pinned (the
- * bookmarks list sorts by it) or `null` to unpin. See docs/adr/0011.
+ * bookmarks list sorts by it) or `null` to unpin. See ADR 0011.
  */
 export function toggleBookmark(nodeId: string, bookmarked: boolean) {
   update(nodeId, { bookmarkedAt: bookmarked ? now() : null })

@@ -4,7 +4,7 @@ import type { Node } from './schema'
  * Thin REST client for the D1-backed /api/nodes Worker. Same-origin, so the
  * Cloudflare Access cookie rides along automatically. The collection's mutation
  * handlers (collection.ts) call create/update/delete; the queryFn calls
- * fetchNodes. See docs/adr/0023.
+ * fetchNodes. See docs/DECISIONS.md (D1 sync).
  */
 
 const ENDPOINT = '/api/nodes'

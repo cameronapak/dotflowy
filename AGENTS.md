@@ -12,7 +12,7 @@ Before substantial work:
 
 Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to this file.
 
-`README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature, each pointing at its ADR for the *why*.
+`README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) — read that when a rule below points at it.
 
 ## Documentation Freshness
 
@@ -25,10 +25,11 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 
 ## Planning and design
 
-Substantial plans or design decisions go through `/grill-with-docs`, which produces a numbered ADR per decision in `docs/adr/` (glossary + decision + why; see `0001`–`0006` for the format).
+Substantial plans or design decisions go through `/grill-with-docs` — a relentless interview that *sharpens* the decision. It does **not** mint a doc per decision.
 
-- ADRs are the home for *decisions + rationale + rejected alternatives*. AGENTS.md holds only the operational rule plus a link to the ADR.
-- When a decision changes, add or supersede an ADR rather than rewriting history; update the AGENTS.md pointer to match.
+- A decision earns a written record **only if an agent reading the code alone would get it wrong** — the *why* is non-obvious and the obvious "fix" breaks something. Those few live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) (one file, scannable in one pass).
+- If the code already makes the call obvious, the code is the doc — don't write it down.
+- When a decision changes, edit its entry in place (or delete it). History — including superseded decisions and their rejected alternatives — is in `git log`, not a pile of superseding files.
 
 ## Commands
 
@@ -55,11 +56,11 @@ bun run deploy     # build:cf, then `wrangler deploy`
 
 ## SPA mode (no SSR)
 
-Don't run code that touches `nodesCollection` during a server/render pass. Why: [ADR 0004](./docs/adr/0004-spa-only-no-ssr.md).
+Don't run code that touches `nodesCollection` during a server/render pass. Why: [the SPA/no-SSR constraint in `docs/DECISIONS.md`](./docs/DECISIONS.md#d1-sync-via-a-worker).
 
 ## Deploying to Cloudflare (Worker + D1 sync)
 
-**One Worker** (`worker/index.ts`) on **Cloudflare Workers** (not Pages) serves the static SPA (via `ASSETS`) and the **D1**-backed sync API: `/api/nodes` (outline) and `/api/kv` (plugin side-collections). Design + rejected alternatives: [ADR 0023](./docs/adr/0023-d1-sync-via-worker.md), [ADR 0024](./docs/adr/0024-side-collections-via-kv-table.md), [ADR 0025](./docs/adr/0025-basic-auth-fallback-gate.md).
+**One Worker** (`worker/index.ts`) on **Cloudflare Workers** (not Pages) serves the static SPA (via `ASSETS`) and the **D1**-backed sync API: `/api/nodes` (outline) and `/api/kv` (plugin side-collections). Design + rejected alternatives: [D1 sync via a Worker](./docs/DECISIONS.md#d1-sync-via-a-worker) and [the auth gate](./docs/DECISIONS.md#the-auth-gate).
 
 - **`_shell.html` → `index.html` copy is load-bearing.** SPA mode emits `dist/client/_shell.html`, but Static Assets serves `index.html` for root + SPA fallback. `build:cf` copies it; don't point wrangler at a dir without that copy.
 - **`run_worker_first: true`** routes *every* request through the Worker (so it can gate the document load for Basic Auth). The non-`/api` branch serves assets via `env.ASSETS.fetch`, which still applies `single-page-application` fallback for `/$nodeId` routes.
@@ -67,31 +68,31 @@ Don't run code that touches `nodesCollection` during a server/render pass. Why: 
 - **The Worker is typechecked separately** (`bun run typecheck:worker`, `worker/tsconfig.json` with `@cloudflare/workers-types`); it lives in `worker/` so its runtime types don't clash with the app's DOM lib. Don't move it under `src/`.
 - **Dev loop:** run `bun run dev` (Vite) *and* `bun run dev:api` (`wrangler dev` on :8787, Worker + local D1); first time `bun run db:migrate:local`. `bun run cf:dev` is a production-like single-server preview.
 - **Migrations** in `migrations/`; `bun run db:migrate:local` / `:remote`. Run `:remote` **before** the first `bun run deploy`.
-- **[ADR 0004](./docs/adr/0004-spa-only-no-ssr.md) still holds:** the React app stays a pure static SPA; D1 work lives in the Worker's `/api/*` handlers, never the render pass.
+- **The SPA/no-SSR rule still holds:** the React app stays a pure static SPA; D1 work lives in the Worker's `/api/*` handlers, never the render pass.
 
 ## Data layer gotchas
 
-- **Nodes live in D1, not localStorage** ([ADR 0023](./docs/adr/0023-d1-sync-via-worker.md)). `nodesCollection` is a TanStack DB query collection over `/api/nodes` (`collection.ts` + `api.ts` + `query-client.ts`); the interface is unchanged, so store/mutations/components didn't change. **Side-collections (`tag-colors.ts`, `daily-index.ts`) are D1-backed too** ([ADR 0024](./docs/adr/0024-side-collections-via-kv-table.md)) over a generic `/api/kv?collection=<name>` store (`kv-api.ts`); each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
+- **Nodes live in D1, not localStorage** ([D1 sync](./docs/DECISIONS.md#d1-sync-via-a-worker)). `nodesCollection` is a TanStack DB query collection over `/api/nodes` (`collection.ts` + `api.ts` + `query-client.ts`); the interface is unchanged, so store/mutations/components didn't change. **Side-collections (`tag-colors.ts`, `daily-index.ts`) are D1-backed too** over a generic `/api/kv?collection=<name>` store (`kv-api.ts`); each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
 - **First-run bootstrap = import-or-seed.** On mount `OutlineEditor` calls `bootstrapOutline()` (`seed.ts`): `importLegacyNodes()` first (one-time pre-D1 localStorage → D1 migration into an *empty* D1, guarded by a `dotflowy-oss:d1-imported` flag, non-destructive), then `seedIfEmpty()` only if nothing imported. Keep the **single guard in `bootstrapOutline`** — splitting it races import vs. seed under StrictMode. Covered by `e2e/import-legacy.spec.ts`.
 - **e2e seeds through the API, not localStorage** (`seedOutline` mocks `/api/nodes`). Don't reintroduce a localStorage node seed for the live store. (The import spec writes the legacy localStorage shape on purpose.)
-- **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [ADR 0005](./docs/adr/0005-no-zod-defaults-in-schema.md).
-- **Mutations operate on the live `TreeIndex`.** Every `mutations.ts` function takes the current index and mutates `nodesCollection` directly. The editor passes `focusIndex.current` (a ref) into the `useMemo`-stable `commands` object, which is how its closures read live values. [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
-- **Per-node subscriptions, not a threaded index.** Components read the **tree store** (`tree-store.ts`): `useNode(id)`, `useVisibleChildIds(parentId, showCompleted)`, `useTreeIndex()`. `OutlineNode` takes a `nodeId` and reads its own slice, so a keystroke re-renders only the changed bullet. **Don't pass `node`/`index` as props to `OutlineNode`.** [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
+- **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [No zod defaults](./docs/DECISIONS.md#no-zod-defaults-in-the-schema).
+- **Mutations operate on the live `TreeIndex`.** Every `mutations.ts` function takes the current index and mutates `nodesCollection` directly. The editor passes `focusIndex.current` (a ref) into the `useMemo`-stable `commands` object, which is how its closures read live values. [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
+- **Per-node subscriptions, not a threaded index.** Components read the **tree store** (`tree-store.ts`): `useNode(id)`, `useVisibleChildIds(parentId, showCompleted)`, `useTreeIndex()`. `OutlineNode` takes a `nodeId` and reads its own slice, so a keystroke re-renders only the changed bullet. **Don't pass `node`/`index` as props to `OutlineNode`.** [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
 
 ## Styling
 
-Inline Tailwind classes, not a separate CSS file. Why: [ADR 0006](./docs/adr/0006-inline-tailwind-styling.md).
+Inline Tailwind classes, not a separate CSS file (separate CSS only for the view-transition rules in `styles.css`).
 
 ## Editor internals (OutlineEditor + OutlineNode)
 
-- **`OutlineNode` = a `memo`'d wrapper + `OutlineNodeBody`.** The wrapper calls `useNode(nodeId)` and early-returns when the node is gone; keep all other hooks in the body (rules-of-hooks). The memo only pays off while `commands`/`registerRef`/`pivotId`/`showCompleted` stay referentially stable — never pass a fresh object/callback per render. [ADR 0014](./docs/adr/0014-localized-node-rendering-via-tree-store.md).
+- **`OutlineNode` = a `memo`'d wrapper + `OutlineNodeBody`.** The wrapper calls `useNode(nodeId)` and early-returns when the node is gone; keep all other hooks in the body (rules-of-hooks). The memo only pays off while `commands`/`registerRef`/`pivotId`/`showCompleted` stay referentially stable — never pass a fresh object/callback per render. [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
 - **contentEditable text sync is manual.** The `node-text`/title spans are contentEditable, not controlled React. Stored text is written to the DOM only when it differs (to avoid clobbering the caret); `onInput` pushes to the store. Don't convert to React-controlled text.
 - **The `refs` registry maps node id → contentEditable span.** List bullets register under their own id; the zoomed **title registers under `rootId`**. So `refs.current.get(id)` works whether that node is a title or a list item — focus, pending-focus, and the zoom morph all rely on this.
 - **Enter splits the bullet at the caret.** Text left of the caret stays; text right moves to a new sibling below, focused at its *start* (the lone exception to the end-of-text `pendingFocus` default — `pendingFocusAtStart`). Caret-at-end is the empty-tail case, so Enter at the end of an expanded parent still dives in. One undo step. `e2e/enter-split.spec.ts`.
-- **Keyboard expand/collapse is directional, not a toggle:** `Cmd+↓` opens a closed bullet, `Cmd+↑` closes an open one, everything else is a silent no-op; both always `preventDefault`, one level, focus stays. [ADR 0007](./docs/adr/0007-keyboard-expand-collapse.md).
-- **Arrow Up/Down crosses bullets from the edge *visual line*, preserving the caret column** (rect comparison, not text offset; lands via `caretPositionFromPoint`). The neighbor walk (`findVisibleNeighbor` → `flattenVisible`) **must mirror render visibility** (skip completed when `showCompleted` is off) or focus silently no-ops. [ADR 0008](./docs/adr/0008-column-preserving-caret-nav.md).
-- **Cmd+Shift+↑/↓ moves a bullet among *visible* siblings; at the edge it outdents one level** (never dives into a sibling subtree, no-op past the zoom root). `moveUp`/`moveDown` in `mutations.ts`. [ADR 0009](./docs/adr/0009-move-node-among-siblings.md).
-- **Dragging the bullet dot reorders *and* reparents in one drop** (mouse + touch; y picks the gap, x picks depth). Lives in `use-drag-reorder.ts`, runs imperatively on the hot path. The dot still zooms on a plain click (a movement threshold + `consumeClick()` split drag from click). [ADR 0010](./docs/adr/0010-drag-to-reorder-and-reparent.md).
+- **Keyboard expand/collapse is directional, not a toggle:** `Cmd+↓` opens a closed bullet, `Cmd+↑` closes an open one, everything else is a silent no-op; both always `preventDefault`, one level, focus stays.
+- **Arrow Up/Down crosses bullets from the edge *visual line*, preserving the caret column** (rect comparison, not text offset; lands via `caretPositionFromPoint`). The neighbor walk (`findVisibleNeighbor` → `flattenVisible`) **must mirror render visibility** (skip completed when `showCompleted` is off) or focus silently no-ops.
+- **Cmd+Shift+↑/↓ moves a bullet among *visible* siblings; at the edge it outdents one level** (never dives into a sibling subtree, no-op past the zoom root). `moveUp`/`moveDown` in `mutations.ts`.
+- **Dragging the bullet dot reorders *and* reparents in one drop** (mouse + touch; y picks the gap, x picks depth). Lives in `use-drag-reorder.ts`, runs imperatively on the hot path. The dot still zooms on a plain click (a movement threshold + `consumeClick()` split drag from click).
 - **A moved bullet flashes then fades** (`flash-node.ts`, `.outline-row.node-acted`) as an acted-upon signifier — every keyboard/drag move sets `pendingFlash` alongside `pendingFocus`; `/move`'s "Go" flashes across a navigation via `requestFlashAfterNav`/`consumeFlashAfterNav`. `e2e/move-flash.spec.ts`.
 
 ## Zoom + view transitions
@@ -100,19 +101,19 @@ Clicking a bullet zooms it to a temporary root. Two rules:
 - **The dot zooms (click) and drags (press + move); collapse/expand is the hover chevron** in the left gutter. Don't move zoom onto the collapse control.
 - **`rootId` is route-owned** (`routes/index.tsx` → `null`, `routes/$nodeId.tsx` → `nodeId`); don't add editor-local zoom state.
 
-How it's URL-driven, the pivot morph, and why screenshots can't verify it: [ADR 0003](./docs/adr/0003-zoom-via-view-transitions.md).
+It's URL-driven via the route; the pivot morphs with a `view-transition-name`. Screenshots can't verify view transitions — see *Verifying UI changes* below.
 
 ## Bookmarks
 
-A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on the node (delete the node, the bookmark goes with it). The header **star** (`BookmarkStar`, `bookmarks.tsx`) pins the current zoom root; **browsing** them lives in the Cmd+K switcher's empty state (the standalone popover was removed). **No sidebar** — the unused `ui/sidebar.tsx` is the documented promotion path. A new persistent `Node` field needs a backfill in `collection.ts` (see `migrateAddBookmarkedAt`). Why: [ADR 0011](./docs/adr/0011-bookmarks-via-header-popover.md), [ADR 0013](./docs/adr/0013-bookmarks-browse-folds-into-switcher.md).
+A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on the node (delete the node, the bookmark goes with it). The header **star** (`BookmarkStar`, `bookmarks.tsx`) pins the current zoom root; **browsing** them lives in the Cmd+K switcher's empty state (the standalone popover was removed). **No sidebar** — the unused `ui/sidebar.tsx` is the documented promotion path. A new persistent `Node` field needs a backfill in `collection.ts` (see `migrateAddBookmarkedAt`).
 
 ## Node quick-switcher (Cmd+K search)
 
-**Cmd+K** (or the header magnifier on touch) opens a Fuse.js fuzzy jump over every node's text, navigating to the picked node's zoom view; it also renders **plugin-contributed virtual actions** (Seam J). The whole feature is `node-switcher.tsx`, mounted **once in `__root.tsx`** and reached via `openNodeSwitcher()`. The listener is **capture-phase** (fires inside a contentEditable); cmdk's own filter is **off** (Fuse drives the list, with a second non-highlighted `aliases` key). Empty query lists bookmarks; a matching query also shows an "Actions" group. **No `Node` field, no migration.** Why: [ADR 0012](./docs/adr/0012-node-quick-switcher.md), [ADR 0022](./docs/adr/0022-search-provider-seam.md).
+**Cmd+K** (or the header magnifier on touch) opens a Fuse.js fuzzy jump over every node's text, navigating to the picked node's zoom view; it also renders **plugin-contributed virtual actions** (Seam J). The whole feature is `node-switcher.tsx`, mounted **once in `__root.tsx`** and reached via `openNodeSwitcher()`. The listener is **capture-phase** (fires inside a contentEditable); cmdk's own filter is **off** (Fuse drives the list, with a second non-highlighted `aliases` key). Empty query lists bookmarks; a matching query also shows an "Actions" group. **No `Node` field, no migration.**
 
 ## Plugins (`src/plugins`)
 
-The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Full seam contract + rationale: [ADR 0018](./docs/adr/0018-plugin-architecture.md); React-widget token mode: [ADR 0028](./docs/adr/0028-react-token-widgets.md).
+The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
@@ -128,12 +129,12 @@ Seams wired today (each row: the contract, who owns it):
 | **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`) |
 | **E** side-collection | plugin-owned data, no `Node` field (see Tag colors, below). | tags |
 | **F** row slot | `{position:"row:before-text", render(node,getCtx)}`, real JSX. | todos (checkbox) |
-| **F** header slot | `{id, render(getCtx)}`, real JSX, no node — [ADR 0020](./docs/adr/0020-header-slot-seam.md). | daily ("Today") |
+| **F** header slot | `{id, render(getCtx)}`, real JSX, no node. | daily ("Today") |
 | **G** view transform | per-node `hidesNode` predicate (composed into the one `isHidden`) + optional global `buildFilter`. Core no longer hardcodes `completed`. | todos (hide-completed), tags (`?q=`) |
 | **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`) |
 | **I** input | `input.onPaste` (replacement string) + `input.autoformat` (rewrite just-typed text). | links (paste), todos (`[]`) |
-| **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext` — [ADR 0022](./docs/adr/0022-search-provider-seam.md). | daily |
-| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op) — [ADR 0021](./docs/adr/0021-protected-nodes.md); **plugin styles seam** (static CSS, currently no consumer) — [ADR 0027](./docs/adr/0027-plugin-styles-seam.md). | tags (picker), daily (container) |
+| **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
+| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op); **plugin styles seam** (static CSS, currently no consumer). | tags (picker), daily (container) |
 
 Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
 
@@ -143,19 +144,19 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 ## Tag filtering + colors (`src/plugins/tags/`)
 
-`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The filter is a Seam-G transform (`buildTagFilter`); the click is Seam-B delegated (`onClick → ctx.nav.filterTag`). Pure logic in `src/data/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions). Why: [ADR 0015](./docs/adr/0015-tag-filtering.md).
+`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The filter is a Seam-G transform (`buildTagFilter`); the click is Seam-B delegated (`onClick → ctx.nav.filterTag`). Pure logic in `src/data/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
 
-**Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `__root.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [ADR 0016](./docs/adr/0016-custom-tag-colors.md).
+**Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, D1-backed via `/api/kv`) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `__root.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/DECISIONS.md#custom-tag-colors).
 
 ## Rich links (`src/plugins/links/`)
 
 Markdown `[label](url)` **parsed from `node.text`** (Seam A+B+I token), the only construct that **folds**: reveal is **per-link** (Obsidian Live Preview style) — a link shows raw only when the caret is within/adjacent (source offset ∈ `[start, end]`); every other link folds to a clean `<a contenteditable="false">`. At most one reveals at a time.
 
-The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Search indexes `stripLinks(node.text)`. Why: [ADR 0017](./docs/adr/0017-rich-links.md).
+The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/DECISIONS.md#rich-links-the-source-offset-caret).
 
 ## Daily notes (`src/plugins/daily/`)
 
-A daily note is a normal node addressed by a date; the header **Today button** navigates to today's, creating it on first use. **No `Node` field, no migration, no route.** Why: [ADR 0019](./docs/adr/0019-daily-notes-plugin.md).
+A daily note is a normal node addressed by a date; the header **Today button** navigates to today's, creating it on first use. **No `Node` field, no migration, no route.**
 
 - **Identity is a side-collection.** `dailyIndexCollection` (`daily-index.ts`) maps a key → `nodeId`: a **local** date `YYYY-MM-DD` (use `localDateKey()`, **not** `toISOString` — day boundary is local midnight) or the `container` sentinel. Never derive a day from `node.text`.
 - **Structure.** Days are children of one auto-created **"Daily" container** (a **protected node**, since `removeNode` cascades). New days insert at the top (newest-first). `goToDate(key, ctx)` is get-or-create, idempotent and self-healing; creation uses low-level `mutations.ts` primitives directly (not `ctx.mutations` — wrong capture/focus semantics for a navigate-away create).
@@ -164,10 +165,10 @@ A daily note is a normal node addressed by a date; the header **Today button** n
 
 ## Scripture references (`src/plugins/route-bible/`)
 
-A Bible ref in `node.text` renders as a chip opening [route.bible](https://route.bible) (Seam A widget + Seam B click — the links shape minus the fold). **No `Node` field, no migration.** Why: [ADR 0026](./docs/adr/0026-route-bible-plugin.md), [ADR 0028](./docs/adr/0028-react-token-widgets.md).
+A Bible ref in `node.text` renders as a chip opening [route.bible](https://route.bible) (Seam A widget + Seam B click — the links shape minus the fold). **No `Node` field, no migration.** Widget mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
 
 - **Liberal regex PROPOSES, `grab-bcv` DISPOSES.** `BIBLE_REF_PATTERN` (`bible.ts`) requires a chapter, verse optional, and over-matches on purpose; `resolveBibleRef(tok)` runs the candidate through grab-bcv's `tryParsePassage` and returns null for non-references (the core then renders raw text). Dependency is **`grab-bcv`** (parse + `toResolverUrl`), not `@route-bible/core`.
-- **A real-TSX atomic widget** ([ADR 0028](./docs/adr/0028-react-token-widgets.md)): `render` returns a `WidgetEl` + `component: BibleChip`; the core serializes it to a `<dotflowy-widget>` atom and mounts `BibleChip` (`chip.tsx`) — lucide icons + Tailwind, **no plugin CSS**. `readSource` reads `data-src`; the caret jumps over it.
+- **A real-TSX atomic widget** ([React token widgets](./docs/DECISIONS.md#react-token-widgets)): `render` returns a `WidgetEl` + `component: BibleChip`; the core serializes it to a `<dotflowy-widget>` atom and mounts `BibleChip` (`chip.tsx`) — lucide icons + Tailwind, **no plugin CSS**. `readSource` reads `data-src`; the caret jumps over it.
 - v1 is liberal by explicit call (accepts `Matthew 5 minutes` → `Matthew 5`); tightening is a one-line regex change. Covered by `e2e/route-bible.spec.ts`.
 
 ## Environment gotcha: adding a React-importing dependency

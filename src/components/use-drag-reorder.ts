@@ -6,7 +6,7 @@ import { childrenOf, type Node, type TreeIndex } from "../data/tree";
  * Drives the gesture imperatively (no React state on the hot path): on each
  * pointermove it measures the rendered rows, resolves the drop to a parent +
  * predecessor, and positions a floating pill and a drop indicator directly in
- * the DOM. The single `moveNode` call happens on release. See docs/adr/0010.
+ * the DOM. The single `moveNode` call happens on release. See ADR 0010.
  *
  * The whole feature hangs off the bullet dot, which already zooms on click:
  * `startDrag` arms a movement threshold on pointerdown, and `consumeClick`
@@ -23,7 +23,7 @@ const INDENT_FALLBACK = 24;
 // one level deeper. 0 = snap to the nearest level (flips at the halfway point);
 // higher = stickier toward the shallower level, so a near-vertical drag stays
 // at sibling depth instead of slipping under the row above. 0.4 means you cross
-// ~90% of an indent to nest. Tunable feel knob. See docs/adr/0010.
+// ~90% of an indent to nest. Tunable feel knob. See ADR 0010.
 const NEST_RESISTANCE = 0.4;
 // Distance from a viewport edge (px) that triggers auto-scroll while dragging.
 const EDGE = 72;

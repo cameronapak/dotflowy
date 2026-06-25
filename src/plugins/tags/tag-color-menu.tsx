@@ -15,7 +15,7 @@ import {
  * The generated override stylesheet -- one rule per colored tag, keyed by
  * `data-tag`. Mounted once (in __root). A color change updates this single
  * stylesheet, so every chip/pill/menu-row of that tag repaints with no React
- * re-render. See docs/adr/0016. Owned by the tags plugin (ADR 0018 Seam E).
+ * re-render. See docs/DECISIONS.md (tag colors). Owned by the tags plugin (ADR 0018 Seam E).
  */
 export function TagColorStyles() {
   const rows = useTagColorRows();
@@ -28,7 +28,7 @@ export function TagColorStyles() {
  * by right-clicking a tag chip or filter pill (the tags plugin's Seam-B
  * interaction routes it through ctx.openOverlay); picking applies to every
  * instance of the tag. Anchored at the pointer, dismissed on outside click or
- * Escape. See docs/adr/0016 and ADR 0018.
+ * Escape. See docs/DECISIONS.md (tag colors) and ADR 0018.
  */
 export function TagColorMenu({
   tag,

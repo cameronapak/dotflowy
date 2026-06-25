@@ -406,7 +406,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
   // live values through getters (the same ref pattern the commands use), and
-  // commits through the one fused `moveNode` mutation. See docs/adr/0010.
+  // commits through the one fused `moveNode` mutation. See ADR 0010.
   const drag = useDragReorder({
     getIndex: () => focusIndex.current,
     getRootId: () => rootIdRef.current,
@@ -745,7 +745,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
  * The active-tag filter bar: a row of tag pills, shown only while a filter is
  * on. Each pill's ✕ drops that one tag; "Clear" drops the whole filter. Tags
  * are *added* by clicking chips in the outline, never typed here -- v1 is
- * tags-only and click-driven. See docs/adr/0015.
+ * tags-only and click-driven. See ADR 0015.
  */
 function TagFilterBar({
   tags,
