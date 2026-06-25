@@ -38,10 +38,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install Wasp CLI
-        run: curl -sSL https://get.wasp.sh/installer.sh | sh -s -- -v 0.24.0
-
-      - name: Add Wasp to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        run: npm install -g @wasp.sh/wasp-cli@0.24.0
 
       - name: Configure Wasp env
         run: |
