@@ -145,9 +145,12 @@ function SwitcherDialog({
   // open the outline isn't being edited, so `nodes` is stable.
   const fuse = useMemo(() => {
     if (!open) return null;
-    const searchable: Searchable[] = nodes
-      .filter((n) => n.text.trim() !== "")
-      .map((n) => ({ node: n, text: stripLinks(n.text), aliases: searchAliases(n) }));
+    const searchable: Searchable[] = [];
+    for (const n of nodes) {
+      if (n.text.trim() !== "") {
+        searchable.push({ node: n, text: stripLinks(n.text), aliases: searchAliases(n) });
+      }
+    }
     return new Fuse(searchable, FUSE_OPTIONS);
   }, [open, nodes]);
 

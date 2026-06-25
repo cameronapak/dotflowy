@@ -97,13 +97,13 @@ export function clearTagColor(tag: string) {
  * the fill wins. Invalid colors / unsafe tag names are skipped.
  */
 export function tagColorsCss(rows: TagColorRow[]): string {
-  return rows
-    .filter((r) => TAG_COLOR_SET.has(r.color) && /^[\p{L}\p{N}_-]+$/u.test(r.tag))
-    .map(
-      (r) =>
-        `[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${r.color});color:var(--tag-${r.color}-fg);border-color:transparent}`,
-    )
-    .join('\n')
+  const lines: string[] = [];
+  for (const r of rows) {
+    if (TAG_COLOR_SET.has(r.color) && /^[\p{L}\p{N}_-]+$/u.test(r.tag)) {
+      lines.push(`[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${r.color});color:var(--tag-${r.color}-fg);border-color:transparent}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 // --- Reactive read (mirrors tree-store: subscribeChanges + useSyncExternalStore,

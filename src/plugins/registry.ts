@@ -49,9 +49,13 @@ export const pluginStyles: string = plugins
 // Every plugin's tokens, flattened in array order then sorted by precedence.
 // Array.prototype.sort is stable, so equal precedences keep plugin/array order
 // (D7's tiebreak).
-const tokenSpecs: TokenSpec[] = plugins
-  .flatMap((p) => p.tokens ?? [])
-  .map((spec, order) => ({ spec, order }))
+const withOrder: { spec: TokenSpec; order: number }[] = [];
+for (const p of plugins) {
+  for (const spec of (p.tokens ?? [])) {
+    withOrder.push({ spec, order: withOrder.length });
+  }
+}
+const tokenSpecs: TokenSpec[] = withOrder
   .sort((a, b) => a.spec.precedence - b.spec.precedence || a.order - b.order)
   .map(({ spec }) => spec);
 

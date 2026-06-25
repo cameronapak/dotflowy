@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
@@ -184,6 +185,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const onContentClick = (e: ReactMouseEvent) => {
     dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
+  const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    dispatchClick(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+  };
   // A plugin-owned overlay (the tag color picker), mounted once below. The core
   // is a thin host -- the overlay portals + dismisses itself (ADR 0018 Seam B).
   const [overlayNode, setOverlayNode] = useState<ReactNode>(null);
@@ -277,8 +288,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // visibility prune (hide-completed when the toggle is off), and -- while
   // filtering -- keep only the ones on a path to a match.
   const topLevel = childrenOf(index, rootId)
-    .filter((n) => !isHidden(n))
-    .filter((n) => !filter || filter.visibleIds.has(n.id));
+    .filter((n) => !isHidden(n) && (!filter || filter.visibleIds.has(n.id)));
   const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const trail = buildTrail(index, rootId);
 
@@ -305,9 +315,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       {/* Tag chips live inside the bullets' contentEditable, so the click that
           filters is captured here (mousedown blocks the editing caret). */}
       <div
+        role="region"
+        aria-label="Outline"
         className="mx-auto max-w-[720px] p-6"
         onMouseDown={onContentMouseDown}
         onClick={onContentClick}
+        onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}
       >
         {overlayNode}
