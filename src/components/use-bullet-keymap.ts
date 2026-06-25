@@ -1,10 +1,10 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import type { RefObject } from "react";
 import type { Node } from "../data/schema";
-import { keymapSpecs } from "../plugins/registry";
+import { keymapSpecs, tryCaretBackspace } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 import { getCaretOffset } from "./inline-code";
-import type { NodeCommands } from "./OutlineNode";
+import type { NodeCommands } from "./node-commands";
 
 interface BulletKeymapArgs {
   node: Node;
@@ -95,19 +95,16 @@ export function useBulletKeymap({
         callback: () => commands.onMoveDown(node.id),
       },
       {
-        // Backspace at the start of a bullet. On a task, the first backspace
-        // "deletes the checkbox" -- demoting it to a plain bullet while keeping
-        // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
-        // deletes the node and focuses the previous one. Otherwise it falls
-        // through to normal character deletion.
+        // Backspace at the start of a bullet. Plugins may intercept first
+        // (todos' checkbox demotion via caretKeys); otherwise an empty plain
+        // bullet deletes and focuses the previous one.
         hotkey: "Backspace",
         callback: (e) => {
           const el = textRef.current;
           if (!el || !isCaretAtStart(el)) return;
-          if (node.isTask) {
+          if (tryCaretBackspace(node, pluginCtx())) {
             e.preventDefault();
             e.stopPropagation();
-            commands.onSetTask(node.id, false);
             return;
           }
           if (el.textContent !== "") return;

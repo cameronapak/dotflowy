@@ -16,6 +16,8 @@
       {
         "files": [
           "src/components/OutlineEditor.tsx",
+          "src/components/outline-editor/OutlineEditor.tsx",
+          "src/components/outline-editor/zoomed-title.tsx",
           "src/components/OutlineNode.tsx"
         ],
         "rules": [
@@ -28,7 +30,6 @@
       {
         "files": [
           "src/components/menu-list.tsx",
-          "src/components/slash-menu-list.tsx",
           "src/components/ui/input-group.tsx",
           "src/components/ui/input-group-addon.tsx"
         ],

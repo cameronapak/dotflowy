@@ -24,7 +24,7 @@ import {
  * `nodesCollection`, backed by D1 through the generic /api/kv store (ADR 0024),
  * so daily-note identity syncs across devices.
  *
- * Mirrors `tag-colors.ts`: a D1-backed kv collection plus a
+ * Mirrors `plugins/tags/tag-colors.ts`: a D1-backed kv collection plus a
  * `subscribeChanges`/`useSyncExternalStore` reactive read (NOT `useLiveQuery`,
  * which hard-fails the `/` prerender -- ADR 0004).
  */
@@ -170,7 +170,7 @@ export function getDayKey(nodeId: string): string | null {
   return findRow((r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY)?.key ?? null
 }
 
-// --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
+// --- Reactive read (mirrors plugins/tags/tag-colors.ts; prerender-safe) -----
 
 const EMPTY: DailyRow[] = []
 let rows: DailyRow[] = EMPTY

@@ -12,10 +12,10 @@ import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
-import { searchAliases, searchAnnotation } from "../plugins/registry";
+import { composeSelfCompleted, searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 import { setMoveDialogOpener } from "./move-dialog-opener";
 import {
   Command,
@@ -296,7 +296,7 @@ function DestinationRow({
         <span
           className={cn(
             "truncate",
-            node.completed && "text-muted-foreground line-through",
+            composeSelfCompleted(node) && "text-muted-foreground line-through",
           )}
         >
           {highlight(title, textMatchIndices(matches))}

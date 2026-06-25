@@ -48,7 +48,7 @@ export const kvDelete = (
 // are tiny key->value rows), and onDelete sends the keys. These map a query
 // collection's mutation transaction to those payloads. The param is structural
 // (just the fields read), so the concrete transaction type satisfies it without
-// importing TanStack's mutation generics. Used by tag-colors.ts / daily-index.ts.
+// importing TanStack's mutation generics. Used by plugin side-collections.
 
 type KvMutations = { mutations: readonly { key: unknown; modified?: unknown }[] }
 

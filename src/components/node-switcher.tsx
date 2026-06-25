@@ -10,14 +10,15 @@ import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
-import { stripLinks } from "../data/links";
+import { stripLinks } from "../plugins/links/links";
 import {
+  composeSelfCompleted,
   searchAliases,
   searchActions,
   searchAnnotation,
 } from "../plugins/registry";
 import type { SearchAction } from "../plugins/types";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 import { setNodeSwitcherOpener, openNodeSwitcher } from "./node-switcher-opener";
 import { Button } from "./ui/button";
 import {
@@ -325,7 +326,7 @@ function ResultRow({
         <span
           className={cn(
             "truncate",
-            node.completed && "text-muted-foreground line-through",
+            composeSelfCompleted(node) && "text-muted-foreground line-through",
           )}
         >
           {highlight(title, textMatchIndices(matches))}
