@@ -10,6 +10,7 @@ import type { Node, TreeIndex } from "../data/tree";
 import type {
   AutoformatInput,
   AutoformatResult,
+  CaretKeySpec,
   CommandSpec,
   El,
   HeaderSlotSpec,
@@ -19,6 +20,8 @@ import type {
   MenuSpec,
   PasteInput,
   PluginContext,
+  RowDecorationContext,
+  RowDecorationSpec,
   SearchAction,
   SearchActionContext,
   SlotPosition,
@@ -213,7 +216,8 @@ export function buildViewFilter(
 // --- Seam H: caret autocomplete menus --------------------------------------
 
 /** Every plugin's caret menus, in array order. The engine (menu-engine.tsx)
- *  detects whichever trigger is live before the caret and drives it. */
+ *  detects whichever trigger is live before the caret and drives it. The core's
+ *  `/` palette (core-slash.tsx) appends after plugin menus. */
 export const menuSpecs: MenuSpec[] = plugins.flatMap((p) => p.menus ?? []);
 
 // --- Seam I: paste input transforms ----------------------------------------
@@ -242,8 +246,8 @@ export function autoformat(input: AutoformatInput): AutoformatResult | null {
 
 // --- Seam C: the `/` command palette ---------------------------------------
 
-/** Every plugin's slash commands, in array order. The core's bespoke `/` engine
- *  (useSlashMenu) concatenates these after its own generic commands (Move). */
+/** Every plugin's slash commands, in array order. The core `/` menu spec
+ *  (core-slash.tsx) concatenates these after its own generic commands (Move). */
 export const commandSpecs: CommandSpec[] = plugins.flatMap(
   (p) => p.commands ?? [],
 );
@@ -254,6 +258,42 @@ export const commandSpecs: CommandSpec[] = plugins.flatMap(
  *  the zoomed title (both register the same way), so a binding works wherever a
  *  node is focused. */
 export const keymapSpecs: KeymapSpec[] = plugins.flatMap((p) => p.keymap ?? []);
+
+/** Backspace-at-caret-start handlers, in plugin/array order. First true wins. */
+export const caretKeySpecs: CaretKeySpec[] = plugins.flatMap(
+  (p) => p.caretKeys ?? [],
+);
+
+/** Row visual decoration specs, in plugin/array order. */
+const rowDecorationSpecs: RowDecorationSpec[] = plugins.flatMap(
+  (p) => p.rowDecorations ?? [],
+);
+
+/** Compose `data-faded` for a row. The core threads `ancestorFaded` down the tree. */
+export function composeRowFaded(
+  node: Node,
+  ancestorFaded: boolean,
+): boolean {
+  if (rowDecorationSpecs.length === 0) return ancestorFaded;
+  const ctx: RowDecorationContext = { ancestorFaded };
+  return rowDecorationSpecs.some((s) => s.rowFaded(node, ctx));
+}
+
+/** Compose `data-completed` for the bullet dot and text (self-only strikethrough). */
+export function composeSelfCompleted(node: Node): boolean {
+  return rowDecorationSpecs.some((s) => s.selfCompleted?.(node));
+}
+
+/** Ask plugins to handle Backspace at caret-start; true if consumed. */
+export function tryCaretBackspace(
+  node: Node,
+  ctx: PluginContext,
+): boolean {
+  for (const spec of caretKeySpecs) {
+    if (spec.handle(node, ctx)) return true;
+  }
+  return false;
+}
 
 // D7 reserved-key denylist: keys the core owns on a focused bullet. A plugin
 // keymap must not bind these or the core handler would never fire. A load-time

@@ -1,5 +1,5 @@
 import { useParams } from "react-router";
-import { OutlineEditor } from "../components/OutlineEditor";
+import { OutlineEditor } from "../components/outline-editor/OutlineEditor";
 
 /**
  * The outline editor page, shared by `/` (rootId = null, the whole outline) and

@@ -84,8 +84,8 @@ Historical Cloudflare Worker + D1 deploy notes: [D1 sync via a Worker](./docs/DE
 
 ## Data layer gotchas
 
-- **Nodes live in Postgres, not localStorage.** `nodesCollection` is a TanStack DB query collection over Wasp `getNodes` (`collection.ts` + `api.ts` + `query-client.ts`); mutations call `upsertNodes` / `updateNodes` / `deleteNodes`. **Side-collections** (`tag-colors.ts`, `daily-index.ts`) use typed Prisma tables via plugin Wasp operations — not the old generic `/api/kv` store. The old `dotflowy-oss:*` localStorage keys are no longer read for the live store.
-- **First-run bootstrap = import-or-seed (per userId).** On mount `OutlineEditor` calls `bootstrapOutline(userId)` (`seed.ts`): `importLegacyNodes()` first (one-time pre-D1 localStorage → server migration into an *empty* silo, guarded by `dotflowy-oss:d1-imported`), then `seedIfEmpty()` only if nothing imported. Guards reset on auth change. Keep the **single guard in `bootstrapOutline`** — splitting it races import vs. seed under StrictMode. Covered by `e2e/import-legacy.spec.ts`.
+- **Nodes live in Postgres, not localStorage.** `nodesCollection` is a TanStack DB query collection over Wasp `getNodes` (`collection.ts` + `api.ts` + `query-client.ts`); mutations call `upsertNodes` / `updateNodes` / `deleteNodes`. **Side-collections** live in `plugins/tags/tag-colors.ts` and `plugins/daily/daily-index.ts` — typed Prisma tables via plugin Wasp operations, not the old generic `/api/kv` store. The old `dotflowy-oss:*` localStorage keys are no longer read for the live store.
+- **First-run bootstrap = import-or-seed (per userId).** On mount `useBootstrapOutline` calls `bootstrapOutline(userId)` (`seed.ts`): `importLegacyNodes()` first (one-time pre-D1 localStorage → server migration into an *empty* silo, guarded by `dotflowy-oss:d1-imported`), then `seedIfEmpty()` only if nothing imported. Guards reset on auth change. Keep the **single guard in `bootstrapOutline`** — splitting it races import vs. seed under StrictMode. Covered by `e2e/import-legacy.spec.ts`.
 - **e2e seeds through mocked Wasp operations**, not localStorage (`seedOutline` in `e2e/fixtures.ts`). Don't reintroduce a localStorage node seed for the live store.
 - **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [No zod defaults](./docs/DECISIONS.md#no-zod-defaults-in-the-schema).
 - **Mutations operate on the live `TreeIndex`.** Every `mutations.ts` function takes the current index and mutates `nodesCollection` directly. The editor passes `focusIndex.current` (a ref) into the `useMemo`-stable `commands` object, which is how its closures read live values. [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
@@ -127,9 +127,9 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
 
-- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
+- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `CaretKeySpec`, `SlotSpec`, `RowDecorationSpec`, `HeaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
-- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
+- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap/caret-key/row-decoration lists with the load-time reserved-key guard, row/header slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic. **`core-slash.tsx`** appends the `/` palette `MenuSpec` (Seam H) from `[...commandSpecs, Move]`.
 
 Seams wired today (each row: the contract, who owns it):
 
@@ -139,25 +139,24 @@ Seams wired today (each row: the contract, who owns it):
 | **B** delegated interaction | one set of content-container handlers, dispatched by `target.closest(selector)`; core has zero feature knowledge. | links, tags, route-bible |
 | **C** `/` command | `CommandSpec`; the `/` list is `[...commandSpecs, ...CORE]`. `/move` stays core. | todos (`/todo`,`/bullet`), daily ("Send to Today") |
 | **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`) |
+| **D+** caret key | `caretKeys`: Backspace-at-caret-start interceptors; first `handle` true wins. | todos (checkbox demotion) |
 | **E** side-collection | plugin-owned data, no `Node` field (see Tag colors, below). | tags |
 | **F** row slot | `{position:"row:before-text", render(node,getCtx)}`, real JSX. | todos (checkbox) |
-| **F** header slot | `{id, render(getCtx)}`, real JSX, no node — persistent actions in the header's right cluster. | daily ("Today") |
-| **F** subheader slot | `{id, render(getCtx)}`, real JSX, no node — contextual chrome below the header (collapses + animates when every slot returns null; sticks with the header). | tags (filter bar) |
+| **F+** row decoration | `rowDecorations`: compose `data-faded` / `data-completed` (visual-only). | todos (completion fade) |
+| **F** header slot | `{id, render(getCtx)}`, real JSX, no node. | daily ("Today") |
 | **G** view transform | per-node `hidesNode` predicate (composed into the one `isHidden`) + optional global `buildFilter`. Core no longer hardcodes `completed`. | todos (hide-completed), tags (`?q=`) |
-| **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`) |
+| **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`), core (`/` via `core-slash.tsx`) |
 | **I** input | `input.onPaste` (replacement string) + `input.autoformat` (rewrite just-typed text). | links (paste), todos (`[]`) |
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
 | — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op). | tags (picker), daily (container) |
 
-Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
-
-**Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineNode`; the `/` palette still runs `useSlashMenu` (only its command *list* is registry-driven).
+Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+G+H · **todos** C+D+caretKeys+F+rowDecorations+G+I · **daily** C+F(header)+F(row)+J+protected.
 
 **Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans.
 
 ## Tag filtering + colors (`src/plugins/tags/`)
 
-`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The tags plugin owns the full filter stack: URL sync, escape-to-clear, the subheader pill bar (Seam F-subheader), the Seam-G transform (`buildTagFilter`), and chip click routing (Seam B). Pure logic in `src/data/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
+`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** URL sync, escape-to-clear, and the filter bar live in `outline-editor/use-tag-filter.ts` + `tag-filter-bar.tsx`; the filter transform is Seam G (`buildTagFilter`); chip click is Seam B (`onClick → ctx.nav.filterTag`). Pure logic in `src/plugins/tags/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
 
 **Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, Postgres via Wasp `getTagColors`/`upsertTagColors`) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `App.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/DECISIONS.md#custom-tag-colors).
 
@@ -165,7 +164,15 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 Markdown `[label](url)` **parsed from `node.text`** (Seam A+B+I token), the only construct that **folds**: reveal is **per-link** (Obsidian Live Preview style) — a link shows raw only when the caret is within/adjacent (source offset ∈ `[start, end]`); every other link folds to a clean `<a contenteditable="false">`. At most one reveals at a time.
 
-The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/DECISIONS.md#rich-links-the-source-offset-caret).
+The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Parsing lives in `plugins/links/links.ts`. Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/DECISIONS.md#rich-links-the-source-offset-caret).
+
+## Todos (`src/plugins/todos/`)
+
+Tasks/completion are the todos plugin's concept — checkboxes, hide-completed, fade cascade, `/todo`/`/bullet`, `[]` autoformat, Mod+Enter/D. The `completed`/`isTask` **fields** stay on `Node` (the one named exception in DECISIONS.md) but all behavior lives here.
+
+- **Show completed** is plugin-owned UI state: `show-completed-provider.tsx` (persisted preference, mounted in `App.tsx`) and `show-completed-toggle.tsx` (header control — imported explicitly in `Header.tsx` to preserve action order).
+- **Seam G** hide-completed reads `showCompleted` from the provider via `ViewContext`.
+- **`NodeCommands`** (the promoted mutation surface plugins call via `ctx.mutations`) is typed in `src/components/node-commands.ts` — not on `OutlineNode`, so `plugins/types.ts` doesn't import a React component.
 
 ## Daily notes (`src/plugins/daily/`)
 

@@ -11,7 +11,7 @@ import {
   tagColorsCss,
   useTagColor,
   useTagColorRows,
-} from "../../data/tag-colors";
+} from "./tag-colors";
 
 /**
  * Named tag color pairs + per-tag overrides. Mounted once in __root__. Palette

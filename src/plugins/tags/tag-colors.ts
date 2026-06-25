@@ -3,7 +3,7 @@ import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
 import { normalizeTag } from './tags'
-import { queryClient } from './query-client'
+import { queryClient } from '../../data/query-client'
 import {
   getTagColors,
   upsertTagColors,

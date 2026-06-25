@@ -1,7 +1,7 @@
 import { Outlet } from "react-router";
 import { useAuth } from "wasp/client/auth";
 import { ThemeProvider } from "../components/theme-provider";
-import { ShowCompletedProvider } from "../components/show-completed-provider";
+import { ShowCompletedProvider } from "../plugins/todos/show-completed-provider";
 import { NodeSwitcher } from "../components/node-switcher";
 import { MoveDialog } from "../components/move-dialog";
 import { TagColorStyles } from "../plugins/tags/tag-color-menu";

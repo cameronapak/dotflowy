@@ -1,5 +1,8 @@
 "use client"
 
+// Intentionally unused today — shadcn sidebar scaffold kept as the bookmark-
+// sidebar promotion path (see AGENTS.md Bookmarks). Wire it up before deleting.
+
 import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"

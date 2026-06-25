@@ -13,6 +13,7 @@ import type {
   PluginContext,
 } from "../plugins/types";
 import { menuSpecs } from "../plugins/registry";
+import { coreSlashMenu } from "../plugins/core-slash";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { MenuList } from "./menu-list";
@@ -27,8 +28,10 @@ import { MenuList } from "./menu-list";
  * per-menu behavior (which trigger, which entries) is a plugin `MenuSpec`.
  *
  * Mirrors the old useTagMenu/useSlashMenu shape so OutlineNode wires it in the
- * same way; the `#` tag menu now lives in the tags plugin.
+ * same way; the `#` tag menu lives in the tags plugin, `/` in core-slash.tsx.
  */
+
+const ALL_MENU_SPECS = [...menuSpecs, coreSlashMenu];
 
 interface MenuOpen {
   specId: string;
@@ -69,7 +72,7 @@ export function useMenus({
   const [open, setOpen] = useState<MenuOpen | null>(null);
 
   const spec: MenuSpec | null = open
-    ? (menuSpecs.find((s) => s.id === open.specId) ?? null)
+    ? (ALL_MENU_SPECS.find((s) => s.id === open.specId) ?? null)
     : null;
 
   // The entries for the open menu, recomputed as the query changes. Reads the
@@ -96,7 +99,7 @@ export function useMenus({
     const caret = caretOffset(el);
     if (caret === null) return setOpen(null);
     const before = readSource(el).slice(0, caret);
-    for (const s of menuSpecs) {
+    for (const s of ALL_MENU_SPECS) {
       const match = (s.match ?? defaultMatch(s.trigger))(before);
       if (!match) continue;
       const ents = s.entries(match, node, ctx());

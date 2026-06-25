@@ -6,11 +6,9 @@
 // transforms, and input shortcuts all live here. This supersedes ADR 0001/0002's
 // "core owns checkboxes" framing: the data slots remain, the behavior is a plugin.
 //
-// Seams contributed: F (checkbox row slot), G (hide-completed view transform),
-// D (Mod+Enter / Mod+D toggle), C (`/todo` + `/bullet`), I (`[]` autoformat).
-// Still core-wired (next passes): the fade-inheritance cascade and the
-// Backspace-on-the-checkbox demotion read `completed`/`isTask` in OutlineNode --
-// they await a row-decoration / reserved-key seam.
+// Seams contributed: F (checkbox row slot), F+ (completion fade cascade),
+// G (hide-completed view transform), D (Mod+Enter / Mod+D toggle),
+// D+ (Backspace-at-start checkbox demotion), C (`/todo` + `/bullet`), I (`[]` autoformat).
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -47,6 +45,16 @@ export default definePlugin({
     },
   ],
 
+  // Seam F+: completion fade + strikethrough. Visual-only inheritance threaded
+  // by the core as `ancestorFaded`; never written to data.
+  rowDecorations: [
+    {
+      id: "completion-fade",
+      rowFaded: (node, ctx) => node.completed || ctx.ancestorFaded,
+      selfCompleted: (node) => node.completed,
+    },
+  ],
+
   // Seam G: when show-completed is off, a completed bullet (and its whole
   // subtree) drops out of the render. The core ORs this into the composed
   // `isHidden` predicate; `useVisibleChildIds` and the tag filter both apply it,
@@ -64,6 +72,20 @@ export default definePlugin({
   keymap: [
     { id: "toggle-completed-enter", hotkey: "Mod+Enter", run: toggleCompletion },
     { id: "toggle-completed-d", hotkey: "Mod+D", run: toggleCompletion },
+  ],
+
+  // Seam D+: Backspace at caret-start on a task demotes it to a plain bullet
+  // (mirrors the `[ ]` autoformat). The core only calls this at offset 0.
+  caretKeys: [
+    {
+      id: "demote-task-backspace",
+      hotkey: "Backspace",
+      handle: (node, ctx) => {
+        if (!node.isTask) return false;
+        ctx.mutations.onSetTask(node.id, false);
+        return true;
+      },
+    },
   ],
 
   // Seam C: turn a bullet into a task or back into a plain bullet. Each hides
@@ -91,9 +113,9 @@ export default definePlugin({
   ],
 
   // Seam I: typing `[]` or `[ ]` at the very start of a plain bullet turns it
-  // into a task and strips the marker (mirrors the Backspace-on-the-checkbox
-  // demotion, which stays core for now). The core writes the stripped text and
-  // places the caret; this only decides the rewrite + the type flip.
+  // into a task and strips the marker (mirrors Backspace-on-the-checkbox
+  // demotion in caretKeys). The core writes the stripped text and places the
+  // caret; this only decides the rewrite + the type flip.
   input: {
     autoformat: ({ text, node }) => {
       if (node.isTask) return null;

@@ -130,7 +130,7 @@ Plugin **side-collections** (tag colors, daily index) use typed Prisma tables an
 
 ### Plugins
 
-The editor core is extended by compiled-in plugins under `src/plugins/`. See [the plugin architecture](docs/DECISIONS.md#plugin-architecture).
+The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `route-bible`, `tags`, `todos`, and `daily` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/DECISIONS.md#plugin-architecture).
 
 ## Sync: where it stands
 
@@ -147,8 +147,18 @@ main.wasp.ts          # Wasp app spec (routes, auth, operation slices)
 schema.prisma         # User, Node, TagColor, DailyIndexEntry
 migrations/           # Prisma SQL migrations
 src/
-  app/                # Wasp pages (OutlinePage, auth)
-  components/         # OutlineEditor, OutlineNode, menus, header, …
+  app/                # Wasp pages (OutlinePage, auth, App shell)
+  components/
+    outline-editor/   # editor orchestration, zoom UI, focus + command hooks
+    OutlineNode.tsx   # one bullet + its subtree (memoized, per-node store subscription)
+    node-commands.ts  # NodeCommands type (PluginContext.mutations contract)
+    inline-code.ts    # contentEditable decorate / caret engine (source-offset aware)
+    menu-engine.tsx   # generic caret-autocomplete engine (`/` + `#` menus)
+    node-switcher.tsx # Cmd+K quick-switcher
+    move-dialog.tsx   # the `/move` destination picker
+    bookmarks.tsx     # header star + bookmark browsing
+    use-drag-reorder.ts
+    Header.tsx, paste.ts, flash-node.ts, ui/
   data/               # schema, collection, api (Wasp op wrappers), tree, mutations, …
   nodes/              # getNodes / upsertNodes / … (Wasp server ops)
   plugins/            # code, links, tags, todos, daily, route-bible (+ *.wasp.ts slices)

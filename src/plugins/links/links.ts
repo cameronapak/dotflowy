@@ -1,8 +1,8 @@
 // Pure link layer for rich links (ADR 0017). A link is `[label](url)` living
 // literally in `node.text` -- never a stored field, exactly like a `code` run
-// or a `#tag`. The links plugin (src/plugins/links, ADR 0018) reuses
-// LINK_PATTERN to decorate the same runs as a token; while a bullet is focused
-// they show as raw markdown, while blurred they fold to a clean <a>.
+// or a `#tag`. The links plugin reuses LINK_PATTERN to decorate the same runs
+// as a token; while a bullet is focused they show as raw markdown, while blurred
+// they fold to a clean <a>.
 //
 // This module is DOM-free and side-effect-free. The DOM half (folding,
 // caret remap on reveal) lives in inline-code.ts; the link-aware paste cases in

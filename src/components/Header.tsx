@@ -3,7 +3,7 @@ import { AccountMenu } from "./account-menu";
 import { BookmarkStar } from "./bookmarks";
 import { ModeToggle } from "./mode-toggle";
 import { NodeSearchButton } from "./node-switcher";
-import { ShowCompletedToggle } from "./show-completed-toggle";
+import { ShowCompletedToggle } from "../plugins/todos/show-completed-toggle";
 import { headerSlots } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 
