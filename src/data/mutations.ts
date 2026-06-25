@@ -78,12 +78,13 @@ export function insertChildAtStart(
   index: TreeIndex,
   parentId: string | null,
   isTask = false,
+  text = '',
 ): string {
   const id = createId()
   const head = childrenOf(index, parentId)[0] ?? null
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId: null, text: '', isTask }),
+    makeNode({ id, parentId, prevSiblingId: null, text, isTask }),
   )
 
   // The old head now follows the new node.
