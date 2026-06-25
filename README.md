@@ -117,7 +117,7 @@ Plugin **side-collections** (tag colors, the daily index) sync the same way, ove
 
 ### Plugins
 
-The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/DECISIONS.md#plugin-architecture).
+The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `route-bible`, `tags`, `todos`, and `daily` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/DECISIONS.md#plugin-architecture).
 
 ## Sync: where it stands
 
@@ -141,11 +141,11 @@ src/
     index.tsx         # the outline at the top level
     $nodeId.tsx       # the same outline zoomed into one bullet
   components/
-    OutlineEditor.tsx   # reads tree, focus + command dispatch, the zoom view
+    OutlineEditor.tsx   # thin re-export; implementation in outline-editor/
+    outline-editor/     # editor orchestration, zoom UI, focus + command hooks
     OutlineNode.tsx     # one bullet + its subtree (memoized, per-node store subscription)
     inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
-    menu-engine.tsx     # generic caret-autocomplete engine
-    slash-menu.tsx      # the `/` command palette
+    menu-engine.tsx     # generic caret-autocomplete engine (`/` + `#` menus)
     node-switcher.tsx   # Cmd+K quick-switcher
     move-dialog.tsx     # the `/move` destination picker
     bookmarks.tsx       # header star + bookmark browsing
@@ -161,15 +161,16 @@ src/
     tree-store.ts     # per-node subscriptions (useNode / useVisibleChildIds)
     mutations.ts      # insert / move / delete / field setters
     history.ts        # undo / redo capture
-    tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection (D1-backed via /api/kv)
+    tags.ts, links.ts  # pure parsing (tag colors side-collection: plugins/tags/tag-colors.ts)
     seed.ts           # first-run bootstrap: import legacy localStorage, else seed welcome bullets
     import-legacy.ts  # one-time pre-D1 localStorage -> D1 outline import
     useTree.ts        # useLiveQuery hook
   plugins/            # the editor's plugin layer (see docs/DECISIONS.md)
-    index.ts          # the one ordered array: [code, links, tags, todos, daily]
+    index.ts          # the one ordered array: [code, links, route-bible, tags, todos, daily]
+    core-slash.tsx    # core `/` palette MenuSpec (Seam H), built from Seam C + Move
     types.ts          # the typed seam contract (definePlugin)
     registry.ts       # composes every plugin's registrations once at load
-    code/ links/ tags/ todos/ daily/   # one folder per plugin
+    code/ links/ route-bible/ tags/ todos/ daily/   # one folder per plugin (side-collections colocated, e.g. tags/tag-colors.ts)
   router.tsx
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + /api/nodes + /api/kv over D1

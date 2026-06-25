@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 import type { MenuEntry } from "../plugins/types";
 
 export function MenuList({

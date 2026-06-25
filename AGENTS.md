@@ -75,7 +75,7 @@ Don't run code that touches `nodesCollection` during a server/render pass. Why: 
 
 ## Data layer gotchas
 
-- **Nodes live in D1, not localStorage** ([D1 sync](./docs/DECISIONS.md#d1-sync-via-a-worker)). `nodesCollection` is a TanStack DB query collection over `/api/nodes` (`collection.ts` + `api.ts` + `query-client.ts`); the interface is unchanged, so store/mutations/components didn't change. **Side-collections (`tag-colors.ts`, `daily-index.ts`) are D1-backed too** over a generic `/api/kv?collection=<name>` store (`kv-api.ts`); each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
+- **Nodes live in D1, not localStorage** ([D1 sync](./docs/DECISIONS.md#d1-sync-via-a-worker)). `nodesCollection` is a TanStack DB query collection over `/api/nodes` (`collection.ts` + `api.ts` + `query-client.ts`); the interface is unchanged, so store/mutations/components didn't change. **Side-collections are D1-backed too** over a generic `/api/kv?collection=<name>` store (`kv-api.ts`) — tag colors live in `plugins/tags/tag-colors.ts`, the daily index in `plugins/daily/daily-index.ts`; each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
 - **First-run bootstrap = import-or-seed.** On mount `OutlineEditor` calls `bootstrapOutline()` (`seed.ts`): `importLegacyNodes()` first (one-time pre-D1 localStorage → D1 migration into an *empty* D1, guarded by a `dotflowy-oss:d1-imported` flag, non-destructive), then `seedIfEmpty()` only if nothing imported. Keep the **single guard in `bootstrapOutline`** — splitting it races import vs. seed under StrictMode. Covered by `e2e/import-legacy.spec.ts`.
 - **e2e seeds through the API, not localStorage** (`seedOutline` mocks `/api/nodes`). Don't reintroduce a localStorage node seed for the live store. (The import spec writes the legacy localStorage shape on purpose.)
 - **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [No zod defaults](./docs/DECISIONS.md#no-zod-defaults-in-the-schema).
@@ -118,9 +118,9 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
 
-- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
+- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `CaretKeySpec`, `SlotSpec`, `RowDecorationSpec`, `HeaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
-- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
+- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap/caret-key/row-decoration lists with the load-time reserved-key guard, row/header slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic. **`core-slash.tsx`** appends the `/` palette `MenuSpec` (Seam H) from `[...commandSpecs, Move]`.
 
 Seams wired today (each row: the contract, who owns it):
 
@@ -130,18 +130,18 @@ Seams wired today (each row: the contract, who owns it):
 | **B** delegated interaction | one set of content-container handlers, dispatched by `target.closest(selector)`; core has zero feature knowledge. | links, tags, route-bible |
 | **C** `/` command | `CommandSpec`; the `/` list is `[...commandSpecs, ...CORE]`. `/move` stays core. | todos (`/todo`,`/bullet`), daily ("Send to Today") |
 | **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`) |
+| **D+** caret key | `caretKeys`: Backspace-at-caret-start interceptors; first `handle` true wins. | todos (checkbox demotion) |
 | **E** side-collection | plugin-owned data, no `Node` field (see Tag colors, below). | tags |
 | **F** row slot | `{position:"row:before-text", render(node,getCtx)}`, real JSX. | todos (checkbox) |
+| **F+** row decoration | `rowDecorations`: compose `data-faded` / `data-completed` (visual-only). | todos (completion fade) |
 | **F** header slot | `{id, render(getCtx)}`, real JSX, no node. | daily ("Today") |
 | **G** view transform | per-node `hidesNode` predicate (composed into the one `isHidden`) + optional global `buildFilter`. Core no longer hardcodes `completed`. | todos (hide-completed), tags (`?q=`) |
-| **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`) |
+| **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`), core (`/` via `core-slash.tsx`) |
 | **I** input | `input.onPaste` (replacement string) + `input.autoformat` (rewrite just-typed text). | links (paste), todos (`[]`) |
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
 | — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op); **plugin styles seam** (static CSS, currently no consumer). | tags (picker), daily (container) |
 
-Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
-
-**Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineNode`; the `/` palette still runs `useSlashMenu` (only its command *list* is registry-driven).
+Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+G+H · **todos** C+D+caretKeys+F+rowDecorations+G+I · **daily** C+F(header)+F(row)+J+protected.
 
 **Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans.
 

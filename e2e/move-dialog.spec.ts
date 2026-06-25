@@ -15,7 +15,7 @@ async function load(page: Page, tree: SeedNode[]) {
  * Open the `/move` dialog for a node the way a user does: focus the bullet, type
  * the slash command, and Enter to run it. A click lands the caret past the
  * bullet text, so the " /" follows whitespace and `detectSlash` fires (a "/"
- * mid-word would be ignored, e.g. a URL). See slash-menu.tsx.
+ * mid-word would be ignored, e.g. a URL). See menu-engine.tsx / core-slash.tsx.
  */
 async function openMove(page: Page, id: string) {
   await text(page, id).click();

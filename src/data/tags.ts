@@ -53,7 +53,7 @@ export function serializeQuery(tags: string[]): string {
 }
 
 /** The bare tag name (no leading `#`, lowercased) -- the key tag colors and
- *  case-folded comparisons use. See [[tag-colors]] (src/data/tag-colors.ts). */
+ *  case-folded comparisons use. See the tags plugin's tag-colors.ts (Seam E). */
 export function normalizeTag(tag: string): string {
   return tag.replace(/^#/, '').toLowerCase()
 }

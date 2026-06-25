@@ -15,7 +15,7 @@ import { moveNode } from "../data/mutations";
 import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 import { setMoveDialogOpener } from "./move-dialog-opener";
 import {
   Command,

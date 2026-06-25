@@ -1,7 +1,7 @@
 // Tags plugin (ADR 0018). `#tag` as a plugin. Seam A: the chip render. Seam B:
 // the delegated chip click -> filter and right-click -> color picker. The pure
 // tag layer (parse/normalize/collect/filter) stays in src/data/tags.ts and the
-// color side-collection in src/data/tag-colors.ts (Seam E); this file is the
+// color side-collection in ./tag-colors.ts (Seam E); this file is the
 // plugin that wires them. The filter view-transform (Seam G) and `#` autocomplete
 // (Seam H) are still core-wired pending their dedicated refactors (see ADR 0018
 // implementation notes).

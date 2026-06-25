@@ -17,7 +17,7 @@ import {
   searchAnnotation,
 } from "../plugins/registry";
 import type { SearchAction } from "../plugins/types";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 import { setNodeSwitcherOpener, openNodeSwitcher } from "./node-switcher-opener";
 import { Button } from "./ui/button";
 import {

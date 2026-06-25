@@ -687,7 +687,7 @@ body.dragging-active * {
 
 /*
  * Tag color palette. A tag is colored only when chosen (ADR 0016); the choice
- * is applied via a generated stylesheet keyed by `data-tag` (tag-colors.ts),
+ * is applied via a generated stylesheet keyed by `data-tag` (plugins/tags/tag-colors.ts),
  * which sets background/color/border-color to one of these named pairs. Default
  * (no choice) is the neutral outline below. Light/dark pairs via custom props.
  */

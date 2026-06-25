@@ -2,9 +2,9 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
-import { normalizeTag } from './tags'
-import { queryClient } from './query-client'
-import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from './kv-api'
+import { normalizeTag } from '../../data/tags'
+import { queryClient } from '../../data/query-client'
+import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from '../../data/kv-api'
 
 /**
  * Custom tag colors. A tag's color is **chosen**, not derived -- by default a

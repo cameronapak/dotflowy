@@ -4,8 +4,7 @@ import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
 import type { PluginContext } from "../plugins/types";
-import { autoformat, rowSlots } from "../plugins/registry";
-import { useSlashMenu } from "./slash-menu";
+import { autoformat, composeRowFaded, composeSelfCompleted, rowSlots } from "../plugins/registry";
 import { useMenus } from "./menu-engine";
 import { useBulletKeymap } from "./use-bullet-keymap";
 import {
@@ -38,10 +37,9 @@ interface OutlineNodeProps {
   // The node currently morphing across a zoom navigation, if any. When this
   // node is the pivot, its text claims the shared view-transition-name.
   pivotId: string | null;
-  // True when an ancestor *within the current view* is completed, so this row
-  // renders faded even if it isn't itself completed. Visual-only inheritance;
-  // never written to data. Resets to false at each zoom root. See ADR 0002.
-  ancestorCompleted: boolean;
+  // Composed row fade inherited from ancestors within the current view (the
+  // todos plugin's completion cascade). Visual-only; never written to data.
+  ancestorFaded: boolean;
   // The composed Seam-G visibility predicate (ADR 0018): a node is pruned from
   // the render iff it returns true (hide-completed when show-completed is off).
   // Replaces the old `showCompleted` boolean -- this node no longer knows the
@@ -108,7 +106,7 @@ function OutlineNodeBody({
   pluginCtx,
   registerRef,
   pivotId,
-  ancestorCompleted,
+  ancestorFaded,
   isHidden,
   filter,
 }: Omit<OutlineNodeProps, "nodeId"> & { node: Node }) {
@@ -147,17 +145,16 @@ function OutlineNodeBody({
   // Dimmed when this node is only here as ancestor context for a match below it.
   const isContext = filter ? !filter.matchIds.has(node.id) : false;
   const isPivot = node.id === pivotId;
-  // Faded when this bullet is done, or sits anywhere under one that is.
-  const faded = node.completed || ancestorCompleted;
+  const faded = composeRowFaded(node, ancestorFaded);
+  const selfCompleted = composeSelfCompleted(node);
 
-  // The "/" command menu for this bullet. Only the focused bullet ever has a
-  // caret, so at most one menu is open across the whole outline. Its command
-  // list is registry-driven now (Seam C: `/todo`/`/bullet` are the todos
-  // plugin's, `/move` core); a picked command runs with pluginCtx().
-  const slash = useSlashMenu({
+  // Plugin caret menus (ADR 0018 Seam H): `/` opens the command palette
+  // (core-slash.tsx); `#` opens the tags plugin's autocomplete. At most one
+  // menu is open across the outline.
+  const menus = useMenus({
     node,
-    ctx: pluginCtx,
     getEl: () => textRef.current,
+    ctx: pluginCtx,
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
 
@@ -165,17 +162,6 @@ function OutlineNodeBody({
   // when the node is a task. Stable array (precomputed in the registry), so it
   // never perturbs this memoized node's render.
   const beforeTextSlots = rowSlots("row:before-text");
-
-  // Plugin caret menus (ADR 0018 Seam H): typing a trigger char ("#") opens an
-  // autocomplete driven by the plugin that registered it (the tags plugin's tag
-  // menu). The engine is generic; it coexists with the slash menu -- different
-  // trigger chars, at most one open at a time.
-  const menus = useMenus({
-    node,
-    getEl: () => textRef.current,
-    ctx: pluginCtx,
-    onTextChange: (text) => commands.onTextChange(node.id, text),
-  });
 
   // Push stored text into the contentEditable as formatted HTML when it
   // changes from something OTHER than this bullet's own typing -- initial
@@ -199,15 +185,15 @@ function OutlineNodeBody({
   });
 
   // This bullet's keyboard shortcuts (Enter/Tab/Backspace/Arrows/zoom + the
-  // plugin keymap), scoped to its contentEditable. Disabled while a "/" or "#"
-  // menu is open so the menu owns Arrow/Enter/Tab/Esc. See use-bullet-keymap.ts.
+  // plugin keymap), scoped to its contentEditable. Disabled while a caret menu
+  // is open so the menu owns Arrow/Enter/Tab/Esc. See use-bullet-keymap.ts.
   useBulletKeymap({
     node,
     textRef,
     commands,
     pluginCtx,
     hasChildren,
-    enabled: !slash.isOpen && !menus.isOpen,
+    enabled: !menus.isOpen,
   });
 
   return (
@@ -237,7 +223,7 @@ function OutlineNodeBody({
         >
           <span
             className="bullet-dot"
-            data-completed={node.completed}
+            data-completed={selfCompleted}
             data-has-children={hasChildren}
             data-collapsed={effectiveCollapsed}
           />
@@ -257,7 +243,7 @@ function OutlineNodeBody({
           spellCheck={false}
           aria-label={node.text.trim() || "Empty bullet"}
           aria-multiline="true"
-          data-completed={node.completed}
+          data-completed={selfCompleted}
           onInput={(e) => {
             const el = e.currentTarget;
             // readSource (not textContent) is the markdown source: a focused
@@ -279,7 +265,6 @@ function OutlineNodeBody({
               }
             }
             commands.onTextChange(node.id, text);
-            slash.handleInput();
             menus.handleInput();
             // Re-decorate live, revealing the link under the caret. Preserves
             // the caret. Suspended during IME composition; compositionend
@@ -327,7 +312,6 @@ function OutlineNodeBody({
             });
           }}
           onBlur={(e) => {
-            slash.close();
             menus.close();
             caretWatchRef.current?.();
             caretWatchRef.current = null;
@@ -344,11 +328,9 @@ function OutlineNodeBody({
           // first crack (the "#" trigger is the more specific), then the slash
           // menu.
           onKeyDown={(e) => {
-            if (menus.handleKeyDown(e)) return;
-            slash.handleKeyDown(e);
+            menus.handleKeyDown(e);
           }}
         />
-        {slash.menu}
         {menus.menu}
       </div>
 
@@ -370,7 +352,7 @@ function OutlineNodeBody({
                 pluginCtx={pluginCtx}
                 registerRef={registerRef}
                 pivotId={pivotId}
-                ancestorCompleted={faded}
+                ancestorFaded={faded}
                 isHidden={isHidden}
                 filter={filter}
               />

@@ -1,5 +1,6 @@
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
+import { walkVisibleNodes } from "../data/visible-tree-walk";
 
 /**
  * Pointer-driven drag to reorder and reparent a bullet, for mouse and touch.
@@ -116,23 +117,21 @@ export function useDragReorder(deps: DragDeps) {
     }
 
     const rows: Row[] = [];
-    const walk = (parentId: string | null, depth: number) => {
-      for (const child of childrenOf(index, parentId)) {
-        if (isHidden(child)) continue;
-        if (!skip.has(child.id)) {
-          rows.push({
-            id: child.id,
-            parentId: child.parentId,
-            depth,
-            el: getRowEl(child.id),
-          });
-        }
-        // Descend regardless of skip: a non-skipped node can't live under a
-        // skipped (grabbed) one, so this only walks real visible structure.
-        if (!child.collapsed && !skip.has(child.id)) walk(child.id, depth + 1);
-      }
-    };
-    walk(rootId, 0);
+    walkVisibleNodes(
+      index,
+      rootId,
+      isHidden,
+      (child, depth) => {
+        rows.push({
+          id: child.id,
+          parentId: child.parentId,
+          depth,
+          el: getRowEl(child.id),
+        });
+      },
+      0,
+      { skip: (node) => skip.has(node.id) },
+    );
     return rows;
   }, []);
 

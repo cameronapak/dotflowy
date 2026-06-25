@@ -309,9 +309,8 @@ export interface InputSpec {
 // --- Seam C: the `/` command palette ----------------------------------------
 //
 // A plugin contributes slash commands. The core keeps a small generic set
-// (Move); plugin commands concatenate after array order. v1 keeps the bespoke
-// `/` engine (useSlashMenu) -- this seam only makes its command LIST
-// registry-driven (folding the palette into the menu engine, Seam H, is later).
+// (Move); plugin commands concatenate after array order. The `/` palette is a
+// core `MenuSpec` (Seam H) built from this command list + Move.
 
 export interface CommandSpec {
   id: string;
@@ -336,6 +335,9 @@ export interface CommandSpec {
 // Backspace, the arrows, the structural moves (Mod+Shift+Arrow, Mod+Arrow) and
 // Mod+. -- are off-limits (D7); the registry guards against a collision at load.
 // todos owns Mod+Enter and Mod+D (toggle completion).
+//
+// Backspace-at-caret-start is a separate seam (`caretKeys`): plugins may intercept
+// it before the core's empty-bullet delete. First handler to return true wins.
 
 export interface KeymapSpec {
   id: string;
@@ -344,6 +346,15 @@ export interface KeymapSpec {
   hotkey: string;
   /** Run against the focused node. `ctx` reads live tree/commands. */
   run(nodeId: string, ctx: PluginContext): void;
+}
+
+/** Intercept Backspace at caret-start before the core handler (empty-bullet
+ *  delete). The core only calls `handle` when the caret is at offset 0. */
+export interface CaretKeySpec {
+  id: string;
+  hotkey: "Backspace";
+  /** Return true if this plugin consumed the key. */
+  handle(node: Node, ctx: PluginContext): boolean;
 }
 
 // --- Seam F: row render slots -----------------------------------------------
@@ -363,6 +374,23 @@ export interface SlotSpec {
    *  same stable factory the bullet passes everywhere -- call it inside event
    *  handlers (the checkbox's onCheckedChange), not at render. */
   render(node: Node, getCtx: () => PluginContext): ReactNode;
+}
+
+/** Context the core threads while walking the visible tree for row styling. */
+export interface RowDecorationContext {
+  /** Composed faded state inherited from ancestors within the current view. */
+  ancestorFaded: boolean;
+}
+
+/** Visual-only row styling (CSS data attributes). The core threads `ancestorFaded`
+ *  down the tree; plugins compose fade/completion appearance without mutating
+ *  data. Hot path -- pure, allocation-free. */
+export interface RowDecorationSpec {
+  id: string;
+  /** Whether this row renders with `data-faded="true"`. */
+  rowFaded(node: Node, ctx: RowDecorationContext): boolean;
+  /** Whether this row marks itself completed (strikethrough on the text/dot). */
+  selfCompleted?(node: Node): boolean;
 }
 
 // --- Seam F (header): node-less chrome slots --------------------------------
@@ -511,8 +539,12 @@ export interface PluginDef {
   commands?: CommandSpec[];
   /** Seam D: per-bullet hotkeys (todos' Mod+Enter / Mod+D). */
   keymap?: KeymapSpec[];
+  /** Backspace-at-caret-start interceptors (todos' checkbox demotion). */
+  caretKeys?: CaretKeySpec[];
   /** Seam F: row render slots (the todos checkbox). */
   slots?: SlotSpec[];
+  /** Row visual decoration (todos' completion fade cascade). */
+  rowDecorations?: RowDecorationSpec[];
   /** Seam F (header): node-less header chrome (the daily "Today" button). */
   headerSlots?: HeaderSlotSpec[];
   /** Protected nodes: return true to forbid deleting `nodeId` (the daily

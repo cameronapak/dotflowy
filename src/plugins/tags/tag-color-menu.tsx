@@ -9,7 +9,7 @@ import {
   tagColorsCss,
   useTagColor,
   useTagColorRows,
-} from "../../data/tag-colors";
+} from "./tag-colors";
 
 /**
  * The generated override stylesheet -- one rule per colored tag, keyed by
