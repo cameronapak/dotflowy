@@ -6,16 +6,16 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { CornerUpRightIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { Node } from "../data/schema";
 import type { CommandSpec, PluginContext } from "../plugins/types";
 import { commandSpecs } from "../plugins/registry";
+import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import {
   decorate,
-  getCaretOffset,
   readSource,
   setCaretOffset,
 } from "./inline-code";
+import { SlashMenuList } from "./slash-menu-list";
 
 /**
  * The core's own slash commands. Move is structural (reparent any node), not a
@@ -174,7 +174,7 @@ export function useSlashMenu({
 
   const menu = state
     ? createPortal(
-        <SlashMenu
+        <SlashMenuList
           items={items}
           activeIndex={state.activeIndex}
           x={state.x}
@@ -187,71 +187,6 @@ export function useSlashMenu({
     : null;
 
   return { handleInput, handleKeyDown, close, isOpen: !!state, menu };
-}
-
-function SlashMenu({
-  items,
-  activeIndex,
-  x,
-  y,
-  onHover,
-  onSelect,
-}: {
-  items: CommandSpec[];
-  activeIndex: number;
-  x: number;
-  y: number;
-  onHover: (index: number) => void;
-  onSelect: (index: number) => void;
-}) {
-  return (
-    <div
-      role="listbox"
-      className="bg-popover text-popover-foreground fixed z-50 max-h-72 w-64 overflow-y-auto rounded-md border p-1 shadow-md"
-      style={{ left: x, top: y + 6 }}
-    >
-      {items.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-1.5 text-sm">
-          No commands
-        </div>
-      ) : (
-        items.map((item, i) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="option"
-              aria-selected={i === activeIndex}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-                i === activeIndex && "bg-accent text-accent-foreground",
-              )}
-              // mousedown (not click) so the contentEditable keeps focus.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onSelect(i);
-              }}
-              onMouseEnter={() => onHover(i)}
-            >
-              <Icon className="size-4 shrink-0 opacity-70" />
-              <span className="flex flex-col">
-                <span className="font-medium">{item.label}</span>
-                <span className="text-muted-foreground text-xs">
-                  {item.description}
-                </span>
-              </span>
-            </button>
-          );
-        })
-      )}
-    </div>
-  );
-}
-
-export function wrap(index: number, length: number): number {
-  if (length === 0) return 0;
-  return (index + length) % length;
 }
 
 /**
@@ -272,29 +207,4 @@ function detectSlash(
   const query = before.slice(slashIndex + 1);
   if (/\s/.test(query)) return null;
   return { query, slashIndex };
-}
-
-/** SOURCE-character offset before the collapsed caret within `el`, or null when
- *  there's no collapsed selection inside it. Source-aware (folded links count
- *  their full markdown), so detect/select below slice readSource consistently. */
-export function caretOffset(el: HTMLElement): number | null {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
-  if (!el.contains(sel.getRangeAt(0).endContainer)) return null;
-  return getCaretOffset(el);
-}
-
-/** Viewport coords of the caret, falling back to the element's box. */
-export function caretPosition(el: HTMLElement): { x: number; y: number } {
-  const sel = window.getSelection();
-  if (sel && sel.rangeCount > 0) {
-    const range = sel.getRangeAt(0).cloneRange();
-    range.collapse(true);
-    const rect = range.getBoundingClientRect();
-    if (rect.left || rect.top || rect.height) {
-      return { x: rect.left, y: rect.bottom };
-    }
-  }
-  const box = el.getBoundingClientRect();
-  return { x: box.left, y: box.bottom };
 }
