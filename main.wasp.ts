@@ -52,7 +52,7 @@ export default app({
     onAuthFailedRedirectTo: "/login",
   },
   emailSender: {
-    provider: "Dummy",
+    provider: "SMTP",
   },
   client: {
     rootComponent: App,
