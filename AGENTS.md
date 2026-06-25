@@ -18,10 +18,11 @@ Before substantial work:
 > `bun run dev`. The Cloudflare/D1/wrangler stack and the old `bun`/`vite`
 > commands are being retired (Cloudflare files deleted at Phase 4 cutover).
 >
-> The outline editor source lives under **`legacy/`** for now (it's still
-> TanStack-Start/Router code); **Phase 3** ports it back into `src/`. Until then,
-> the feature sections below describe code at its `legacy/...` (formerly `src/...`)
-> path. This banner and the rest of this doc get rewritten at Phase 4.
+> **Phase 3 (client port) is in progress:** the outline editor lives under
+> **`src/`** again (React Router pages, Wasp client ops at the sync boundary).
+> Run **`wasp start`** (Node 24 + Postgres — `wasp start db` or `DATABASE_URL`).
+> Cloudflare/D1/wrangler retire at Phase 4 cutover (`cloudflare-legacy/` holds
+> the old D1 SQL for reference).
 
 Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to this file.
 
@@ -51,24 +52,22 @@ Substantial plans or design decisions go through `/grill-with-docs` — a relent
 ## Commands
 
 ```sh
-bun run dev        # vite dev on :3000 (or next free port)
-bun run build      # production build (also prerenders /)
-bun run typecheck  # tsc --noEmit
-bun run test:e2e   # playwright (chromium) end-to-end tests
-bun run test:e2e:ui  # same, in Playwright's interactive UI
-bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
-bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
-bun run deploy     # build:cf, then `wrangler deploy`
+wasp start         # Wasp dev (client :3000, server :3001) — needs Node 24 + Postgres
+wasp start db      # managed local Postgres (Docker) for first-time dev
+wasp compile       # regenerate .wasp/out + Prisma client after spec/schema changes
+bun run typecheck  # tsc -b tsconfig.src.json (editor + Wasp server ops under src/)
+bun run test:e2e   # playwright (chromium) against wasp start (:3000)
+bun run test:e2e:ui
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
-**No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change. End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
+**No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change (after `wasp compile` if you touched `schema.prisma` or `*.wasp.ts`). End-to-end behavior is **Playwright** (`e2e/`, chromium-only, **`wasp start` on :3000**, reuses a running one). `e2e/auth.setup.ts` logs in once; specs call `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts Wasp operations** (`/operations/get-nodes`, `/operations/upsert-nodes`, … and plugin ops) with in-memory Maps — so the real `collection.ts`/`api.ts` path runs against mocks, no Postgres seed needed per test. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.src.json`'s `include`, so it doesn't affect `typecheck`.
 
 **Caret in a contentEditable test:** don't use `Home`/`End`/arrow keys (unreliable in macOS Chromium contentEditable) and don't rely on `.click()` (lands *past* the bullet text — the `.node-text` span is wider than its text). Set the Selection range directly via `evaluate` (see the `caretAt` helper in `e2e/enter-split.spec.ts`). `toHaveText` normalizes whitespace — prefer space-free fixture text (`"alphabravo"`) or `allTextContents()` for exact comparison.
 
 ## Generated files
 
-`src/routeTree.gen.ts` is **auto-generated** by the TanStack Start Vite plugin — never hand-edit. After adding/renaming a file in `src/routes/`, run `bun run dev` once to regenerate it, else `typecheck` fails on typed routes.
+Wasp generates `.wasp/out/` (including the SDK and Prisma client). Never hand-edit generated output. Run `wasp compile` after changing `main.wasp.ts`, `*.wasp.ts`, or `schema.prisma`.
 
 ## SPA mode (no SSR)
 

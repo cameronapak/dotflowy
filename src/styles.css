@@ -1,0 +1,760 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Small shared surface used by the auth pages (carried over from the Wasp
+   scaffold's App.css when this became the single Tailwind entry). */
+@utility card {
+  @apply rounded-xl border border-neutral-200 bg-white shadow-sm;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --font-heading: var(--font-sans);
+  --font-sans: "Geist Variable", sans-serif;
+}
+
+:root {
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.27 0 0);
+  --card: oklch(0.99 0 0);
+  --card-foreground: oklch(0.27 0 0);
+  --popover: oklch(0.99 0 0);
+  --popover-foreground: oklch(0.27 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.205 0 0);
+  --foreground: oklch(0.92 0 0);
+  --card: oklch(0.25 0 0);
+  --card-foreground: oklch(0.92 0 0);
+  --popover: oklch(0.25 0 0);
+  --popover-foreground: oklch(0.92 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+    overscroll-behavior: none;
+    /* Was on <html class="[scrollbar-gutter:stable]"> in the TanStack root; the
+       Wasp HTML shell isn't ours to class, so it lives here now. */
+    scrollbar-gutter: stable;
+  }
+}
+
+.subtitle {
+  @apply text-muted-foreground;
+  font-size: 13px;
+  margin: 0 0 32px;
+}
+
+.outline-list,
+.outline-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline-children {
+  padding-left: 24px;
+}
+
+/*
+ * Reveal/hide animation. The wrapper animates grid-template-rows from 1fr
+ * (open) to 0fr (collapsed); the inner list needs overflow:hidden + min-height:0
+ * for the row track to actually clamp it. Children stay mounted in both states
+ * (see OutlineNode) so the hide can animate, not just the reveal.
+ *
+ * Expand is the default state, so the transitions here time the *reveal*; the
+ * collapsed selectors below carry their own shorter transitions so the *hide*
+ * runs faster -- exits should feel quicker and softer than enters.
+ */
+.outline-children-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.outline-children-wrap[data-collapsed="true"] {
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.12s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/*
+ * The reveal grows out of the top-left corner (the parent bullet): the wrapper
+ * clamps height while the list scales up from 0.96 with its origin pinned to
+ * the top-left, so it reads as unfolding from the parent rather than sliding.
+ * Opacity is synced to the height so content fades in *as* the clip edge passes
+ * it -- otherwise solid text gets visibly un-masked, which reads as "clipped".
+ */
+.outline-children-wrap > .outline-children {
+  overflow: hidden;
+  min-height: 0;
+  transform-origin: top left;
+  transition:
+    opacity 0.2s cubic-bezier(0.2, 0, 0, 1),
+    transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.outline-children-wrap[data-collapsed="true"] > .outline-children {
+  opacity: 0;
+  transform: scale(0.96);
+  transition:
+    opacity 0.12s cubic-bezier(0.2, 0, 0, 1),
+    transform 0.12s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.outline-node {
+  margin: 0;
+}
+
+.outline-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.outline-row:hover {
+  background: var(--row-hover);
+}
+
+/*
+ * Completion fade. A row is faded when it's completed or sits under something
+ * completed (data-faded set in OutlineNode). Opacity lives on the row, NOT on
+ * .outline-node, so it never nests with descendant rows -- one uniform fade
+ * level at any depth, never compounding. See ADR 0002.
+ */
+.outline-row[data-faded="true"] {
+  opacity: 0.4;
+}
+
+/*
+ * Tag-filter context dim. While a tag filter is active, a row that's only on
+ * screen as ancestor context for a match below it (not itself a match) is
+ * dimmed so the actual matches read as the foreground. Same opacity lever as
+ * the completion fade, on the row. See ADR 0015.
+ */
+.outline-row[data-context="true"] {
+  opacity: 0.45;
+}
+
+/*
+ * "Acted-upon" pulse. A row briefly tinted bg-card, fading back to transparent,
+ * marks the bullet an action just landed on -- a node you dragged elsewhere, or
+ * the node you jumped to via /move's "Go". Purely visual (the .node-acted class
+ * is added then cleared on animationend in flash-node.ts); never persisted. The
+ * fade keeps card's lightness while dropping alpha to 0 (relative-color `/ 0`),
+ * so it dissolves cleanly instead of graying out through transparent-black.
+ */
+@keyframes node-acted-fade {
+  from {
+    background-color: var(--secondary);
+  }
+  to {
+    background-color: oklch(from var(--secondary) l c h / 0);
+  }
+}
+
+.outline-row.node-acted {
+  animation: node-acted-fade 2.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-row.node-acted {
+    animation: none;
+  }
+}
+
+/*
+ * Collapse/expand chevron. Sits in the left gutter (absolute, so toggling
+ * it never reflows the bullet) and only shows on row hover or while the row
+ * holds focus, except when the row is collapsed, where it stays visible so the
+ * hidden subtree is discoverable. Childless rows render no glyph.
+ */
+.collapse-toggle {
+  position: absolute;
+  left: -15px;
+  top: 2px;
+  width: 16px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  @apply text-muted-foreground;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.collapse-toggle:hover {
+  color: var(--fg);
+}
+
+/*
+ * A single chevron (points right) rotates to point down when expanded, so
+ * open/close reads as one continuous motion instead of an icon swap.
+ */
+.collapse-toggle svg {
+  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.collapse-toggle[data-collapsed="false"] svg {
+  transform: rotate(90deg);
+}
+
+.collapse-toggle[data-has-children="false"] {
+  cursor: default;
+}
+
+.outline-row:hover .collapse-toggle[data-has-children="true"],
+.outline-row:focus-within .collapse-toggle[data-has-children="true"],
+.collapse-toggle[data-collapsed="true"] {
+  opacity: 1;
+}
+
+/*
+ * The chevron lives in the empty left margin, so it can grow its tap target
+ * LEFTWARD (into nothing) for a full 44px width without colliding with the
+ * bullet to its right. Anchored to the chevron's right edge so the boundary
+ * with the bullet stays clean.
+ */
+.collapse-toggle.touch-hitbox::before {
+  left: auto;
+  right: 0;
+  width: 44px;
+}
+
+/*
+ * Touch devices have no hover, so the reveal-on-hover chevron would be an
+ * invisible (if tappable) target. Keep it visible for any parent row so the
+ * collapse affordance is discoverable. Childless rows still render no glyph.
+ */
+@media (hover: none) {
+  .collapse-toggle[data-has-children="true"] {
+    opacity: 1;
+  }
+}
+
+.bullet {
+  @apply size-5 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none mt-1;
+  flex: 0 0 auto;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 99px;
+  /* A touch starting on the dot is a drag (or a tap-to-zoom), never a scroll,
+     so the gesture stays ours. See ADR 0010. */
+  touch-action: none;
+}
+
+.bullet:active {
+  @apply translate-y-px;
+}
+
+/*
+ * Workflowy's zoom affordance: a faint ring behind the dot on hover. The ring
+ * also signifies hidden children -- so only show it when the node is collapsed.
+ * Once expanded, the visible children are the signifier and the ring is noise.
+ */
+.bullet:hover,
+.bullet:has(span[data-has-children="true"][data-collapsed="true"]) {
+  @apply bg-primary/10;
+}
+
+.bullet:hover .bullet-dot {
+  @apply bg-primary;
+}
+
+.bullet-dot {
+  @apply block size-2 rounded-full bg-primary;
+}
+
+.checkbox {
+  flex: 0 0 auto;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.node-text {
+  flex: 1 1 auto;
+  min-height: 24px;
+  padding: 2px 0;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/*
+ * Strikethrough marks a bullet that is itself completed (self-only). The
+ * row-level fade above handles dimming, so we don't also mute the text color
+ * here -- that would double-dim. Faded-by-ancestor children get no strikethrough.
+ */
+.node-text[data-completed="true"] {
+  @apply line-through;
+}
+
+.node-text:empty::before {
+  content: "";
+  display: inline-block;
+}
+
+/* --- Drag to reorder (ADR 0010) --- */
+
+/* While a drag is live: a grab cursor everywhere, and no accidental text
+   selection as the pointer sweeps across rows. */
+body.dragging-active {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.dragging-active * {
+  cursor: grabbing !important;
+}
+
+/* The grabbed row sits in place, dimmed; its subtree hides so we carry one
+   compact row. Both are visual-only and removed on drop (no data change). */
+.outline-row.drag-source {
+  @apply bg-card;
+
+  & > * {
+    @apply opacity-30;
+  }
+}
+
+.outline-node.drag-collapsed > .outline-children-wrap {
+  display: none;
+}
+
+/* The floating label that follows the pointer. */
+.drag-pill {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  max-width: 320px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+
+/* The drop line. Its left edge is indented to the target depth, so the indent
+   itself is the depth feedback. A dot at the left marks the insertion point. */
+.drag-indicator {
+  @apply fixed h-1.5 rounded-full w-full;
+  z-index: 50;
+  pointer-events: none;
+  margin-top: -2px;
+  background: var(--primary);
+}
+
+.outline-empty {
+  @apply text-muted-foreground;
+  padding: 24px 4px;
+  font-size: 13px;
+}
+
+.add-top {
+  margin-top: 16px;
+  background: transparent;
+  border: 1px dashed var(--bullet);
+  @apply text-muted-foreground;
+  padding: 8px;
+  border-radius: 99px;
+  cursor: pointer;
+}
+
+.add-top:hover {
+  @apply text-accent border-accent;
+}
+
+/* --- Zoom view --- */
+
+.breadcrumb {
+  @apply text-muted-foreground;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.breadcrumb .crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.breadcrumb .sep {
+  color: var(--bullet);
+  flex: 0 0 auto;
+}
+
+.breadcrumb a,
+.breadcrumb .crumb-link {
+  @apply text-muted-foreground;
+  text-decoration: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Breadcrumb items are buttons (so we can drive the zoom-out morph), styled
+   to read as links. */
+.breadcrumb .crumb-link {
+  display: inline-block;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  vertical-align: bottom;
+}
+
+.breadcrumb a:hover,
+.breadcrumb .crumb-link:hover {
+  @apply text-primary underline;
+}
+
+/* Home and the collapsed "…" never shrink; only long crumbs truncate. */
+.breadcrumb > .crumb-link {
+  flex: 0 0 auto;
+}
+
+.breadcrumb .crumb {
+  flex: 0 1 auto;
+}
+
+.breadcrumb .crumb-collapsed {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* The "…" control: a small pill that reads as the collapsed middle. */
+.breadcrumb .crumb-ellipsis {
+  @apply inline-flex text-muted-foreground bg-secondary;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.breadcrumb .crumb-ellipsis:hover,
+.breadcrumb .crumb-collapsed:focus-within .crumb-ellipsis {
+  @apply text-primary;
+}
+
+/* Dropdown of hidden ancestors. CSS-driven: shown on hover or keyboard focus. */
+.breadcrumb .crumb-dropdown {
+  @apply absolute shadow-lg rounded-lg bg-card!;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  min-width: 160px;
+  max-width: 280px;
+  padding: 4px;
+}
+
+/* Invisible bridge across the gap between the "…" button and the panel, so the
+   dropdown stays open while the mouse travels from one to the other. */
+.breadcrumb .crumb-dropdown::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 6px;
+}
+
+.breadcrumb .crumb-collapsed:hover .crumb-dropdown,
+.breadcrumb .crumb-collapsed:focus-within .crumb-dropdown {
+  display: flex;
+}
+
+.breadcrumb .crumb-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  @apply text-muted-foreground;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb .crumb-dropdown-item:hover,
+.breadcrumb .crumb-dropdown-item:focus-visible {
+  @apply bg-secondary text-primary;
+}
+
+.zoomed-title {
+  margin: 0 0 14px;
+  font-weight: 600;
+}
+
+.zoomed-title-text {
+  font-size: 24px;
+  line-height: 1.3;
+  /* inline-block gives a tight, atomic snapshot box that wraps the text,
+     matching the pivot list-item's (shrunk) box so the morph is a clean
+     scale + translate rather than a slide from mismatched geometry. The
+     morph name itself is applied dynamically (.vt-morph) to whichever node
+     is the zoom pivot, so it works for both zoom-in and zoom-out. */
+  display: inline-block;
+}
+
+/* A completed zoom root shows full completed styling: line-through (from the
+   shared .node-text rule) plus the fade. The title is an <h2>, not an
+   .outline-row, so it needs its own fade. See ADR 0002 decision 6. */
+.zoomed-title-text[data-completed="true"] {
+  opacity: 0.4;
+}
+
+/* During a zoom, the pivot's text box wraps its text tightly so the title
+   and the list item morph cleanly into each other (no slide from a stretched
+   flex box). Scoped to the active zoom transition so the live layout reverts
+   the moment it ends. */
+:root:active-view-transition-type(zoom) .vt-morph {
+  flex-grow: 0;
+}
+
+/* Zoom morph timing. The group drives position + size; the old/new images
+   crossfade across it, so the pivot text grows/shrinks between bullet and
+   title. */
+::view-transition-group(zoom-target) {
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Keep the rest-of-page crossfade quick so the morph reads as the lead. */
+::view-transition-group(root) {
+  animation-duration: 0.2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .collapse-toggle svg,
+  .outline-children-wrap,
+  .outline-children-wrap > .outline-children {
+    transition: none !important;
+  }
+}
+
+/*
+ * Comfortable touch target WITHOUT width inflation. The gutter controls
+ * (chevron, bullet, checkbox) sit too close to each other -- and to the text
+ * -- to each claim 44px of WIDTH, so two centered 44px boxes used to overlap
+ * and fight over the same taps (later-painted element won, so chevron taps
+ * zoomed). We expand the target VERTICALLY only; each box stays as wide as its
+ * control, so the boxes no longer physically overlap and there's no z-index
+ * race. Width-expansion is opt-in per control where there's room (see the
+ * chevron override below).
+ */
+@utility touch-hitbox {
+  position: relative;
+
+  &:before {
+    content: "";
+    position: absolute;
+    display: block;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    height: 100%;
+    min-height: 44px;
+  }
+}
+
+/* Rich links (ADR 0017, per-link reveal). A link FOLDS to a clean <a> with a
+   trailing external-link icon when the caret isn't on it; it REVEALS to raw
+   `[label](url)` -- decorated, not plain -- when the caret is within/adjacent.
+   At most one link reveals at a time (the one under the caret). */
+.node-link,
+.link-url {
+  color: oklch(0.5 0.18 255);
+}
+
+.node-link {
+  text-decoration-color: oklch(0.5 0.18 255 / 0.5);
+}
+
+.dark .node-link,
+.dark .link-url {
+  color: oklch(0.78 0.13 245);
+}
+
+.dark .node-link {
+  text-decoration-color: oklch(0.78 0.13 245 / 0.5);
+}
+
+.node-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Revealed-link decoration: faint `[]()` punctuation (most-dimmed), normal
+   label, link-color url -- mimicking Obsidian Live Preview. The label/url carry
+   no underline (raw editing mode); only the folded <a> underlines. */
+.md-punct {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.link-label {
+  color: var(--foreground);
+}
+
+/* The external-link affordance: a small icon after a folded link and after a
+   revealed link's source, painted with the current text color via an SVG mask
+   (lucide `external-link`). Not part of textContent, so caret math is unaffected. */
+.node-link[data-link]::after,
+.link-reveal[data-link-reveal]::after {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-left: 0.12em;
+  vertical-align: -0.02em;
+  background-color: currentColor;
+  opacity: 0.75;
+  -webkit-mask: var(--external-link-icon) no-repeat center / contain;
+  mask: var(--external-link-icon) no-repeat center / contain;
+}
+
+.link-reveal[data-link-reveal]::after {
+  color: oklch(0.5 0.18 255);
+}
+
+.dark .link-reveal[data-link-reveal]::after {
+  color: oklch(0.78 0.13 245);
+}
+
+:root {
+  --external-link-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/></svg>');
+}

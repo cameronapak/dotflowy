@@ -1,6 +1,6 @@
 import { app, page, route } from "@wasp.sh/spec";
 import { App } from "./src/app/App" with { type: "ref" };
-import { HomePage } from "./src/app/HomePage" with { type: "ref" };
+import { OutlinePage } from "./src/app/OutlinePage" with { type: "ref" };
 import { LoginPage } from "./src/app/auth/LoginPage" with { type: "ref" };
 import { SignupPage } from "./src/app/auth/SignupPage" with { type: "ref" };
 import { EmailVerificationPage } from "./src/app/auth/EmailVerificationPage" with { type: "ref" };
@@ -11,15 +11,24 @@ import { tagsSpec } from "./src/plugins/tags/tags.wasp";
 import { dailySpec } from "./src/plugins/daily/daily.wasp";
 import { accountSpec } from "./src/account/account.wasp";
 
-// Wasp foundation (PRD docs/PRD-wasp-migration.md): email/password auth + the
-// Prisma data model (Phase 1) and the outline/plugin sync operations (Phase 2).
-// The outline editor UI (routes, components, plugin client code) is ported in
-// Phase 3 — the home route is an auth-gated placeholder until then.
+// Wasp foundation (PRD docs/PRD-wasp-migration.md): email/password auth, the
+// Prisma data model (Phase 1), the outline/plugin sync operations (Phase 2), and
+// the ported outline editor (Phase 3). One auth-gated page serves both `/` (full
+// outline) and `/:nodeId` (zoomed); rootId is route-owned (OutlinePage).
+const outlinePage = page(OutlinePage, { authRequired: true });
+
 export default app({
   name: "dotflowy",
   title: "Dotflowy",
   wasp: { version: "^0.24.0" },
-  head: ["<link rel='icon' href='/favicon.ico' />"],
+  head: [
+    "<link rel='icon' href='/favicon.ico' />",
+    // No-flash theme: a render-blocking script that sets the `dark` class before
+    // first paint. Wasp parses head entries as JSX, so the script body lives in
+    // public/no-flash-theme.js rather than inline (its braces/`</script>` would
+    // break the generated layout). Was an inline <script> in TanStack __root.tsx.
+    "<script src='/no-flash-theme.js'></script>",
+  ],
   auth: {
     userEntity: "User",
     methods: {
@@ -49,7 +58,8 @@ export default app({
     rootComponent: App,
   },
   spec: [
-    route("HomeRoute", "/", page(HomePage, { authRequired: true })),
+    route("HomeRoute", "/", outlinePage),
+    route("NodeRoute", "/:nodeId", outlinePage),
     route("LoginRoute", "/login", page(LoginPage)),
     route("SignupRoute", "/signup", page(SignupPage)),
     route(

@@ -8,10 +8,9 @@
 // IDE support, not the actual compilation.
 //
 // Wasp requires `include`/`exclude` to be exactly these canonical values.
-// The existing outline editor under src/ (components, data, plugins, routes,
-// ...) is still TanStack-Start/Router code; it stays dormant until Phase 3
-// ports it. Wasp's dev build only bundles code reachable from main.wasp.ts, so
-// the dormant files don't affect `wasp start`.
+// The outline editor under src/ (components, data, plugins) is wired through
+// main.wasp.ts (Phase 3). Wasp's dev build only bundles code reachable from
+// the spec, so auth pages and unrelated files are excluded automatically.
 {
   "compilerOptions": {
     "module": "esnext",
