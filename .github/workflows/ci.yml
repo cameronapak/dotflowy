@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main, wasp]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dotflowy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dotflowy
+      SKIP_EMAIL_VERIFICATION_IN_DEV: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Wasp CLI
+        run: curl -sSL https://get.wasp.sh/installer.sh | sh -s -- -v 0.24.0
+
+      - name: Add Wasp to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Configure Wasp env
+        run: |
+          cp .env.server.example .env.server
+          echo "DATABASE_URL=$DATABASE_URL" >> .env.server
+
+      - name: Compile Wasp (generates SDK + applies migrations)
+        run: wasp compile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install chromium --with-deps
+
+      - name: E2E tests
+        run: bun run test:e2e

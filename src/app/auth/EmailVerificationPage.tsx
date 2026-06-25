@@ -1,19 +1,18 @@
-import { Link } from "react-router";
-import { VerifyEmailForm } from "wasp/client/auth";
-import { AuthLayout } from "./AuthLayout";
+import { Link } from "react-router"
+import { FieldDescription } from "../../components/ui/field"
+import { AuthLayout } from "./AuthLayout"
+import { VerifyEmailForm } from "./VerifyEmailForm"
 
 export function EmailVerificationPage() {
   return (
-    <AuthLayout>
+    <AuthLayout
+      title="Verify your email"
+      description="Confirming your address…"
+    >
       <VerifyEmailForm />
-      <br />
-      <span className="text-sm font-medium text-neutral-900">
-        If everything is okay,{" "}
-        <Link to="/login" className="font-semibold underline">
-          go to login
-        </Link>
-        .
-      </span>
+      <FieldDescription>
+        <Link to="/login">Go to login</Link>.
+      </FieldDescription>
     </AuthLayout>
-  );
+  )
 }

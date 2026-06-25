@@ -1,6 +1,6 @@
 # PRD: Dotflowy Platform Migration (Cloudflare → Wasp + Railway)
 
-**Status:** Draft (grill-complete)  
+**Status:** v1 complete (Phases 1–4 shipped on `wasp` branch); v1.1 offline-first next  
 **Author:** Cameron Pak + agent session  
 **Last updated:** 2026-06-25  
 **Repo:** Same repo (`dotflowy`) — in-place restructure  

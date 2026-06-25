@@ -1,20 +1,18 @@
-import { Link } from "react-router";
-import { SignupForm } from "wasp/client/auth";
-import { AuthLayout } from "./AuthLayout";
+import { Link } from "react-router"
+import { FieldDescription } from "../../components/ui/field"
+import { AuthLayout } from "./AuthLayout"
+import { EmailAuthForm } from "./EmailAuthForm"
 
 export function SignupPage() {
   return (
-    <AuthLayout>
-      {/* Email/password only — no extra signup fields in v1. */}
-      <SignupForm />
-      <br />
-      <span className="text-sm font-medium text-neutral-900">
-        Already have an account?{" "}
-        <Link to="/login" className="font-semibold underline">
-          Go to login
-        </Link>
-        .
-      </span>
+    <AuthLayout
+      title="Create an account"
+      description="Email and password — your outline stays private to you"
+    >
+      <EmailAuthForm mode="signup" />
+      <FieldDescription>
+        Already have an account? <Link to="/login">Log in</Link>.
+      </FieldDescription>
     </AuthLayout>
-  );
+  )
 }

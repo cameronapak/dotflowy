@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Dotflowy outline editor on Wasp (React + Node + Prisma), deployed to Railway. Migrating from TanStack Start + Cloudflare — see docs/PRD-wasp-migration.md.",
+  "description": "Dotflowy outline editor on Wasp (React + Node + Prisma), deployed to Railway. See docs/PRD-wasp-migration.md.",
   "license": "MIT",
   "workspaces": [
     ".wasp/out/*",

@@ -1,19 +1,18 @@
-import { Link } from "react-router";
-import { ResetPasswordForm } from "wasp/client/auth";
-import { AuthLayout } from "./AuthLayout";
+import { Link } from "react-router"
+import { FieldDescription } from "../../components/ui/field"
+import { AuthLayout } from "./AuthLayout"
+import { ResetPasswordForm } from "./ResetPasswordForm"
 
 export function PasswordResetPage() {
   return (
-    <AuthLayout>
+    <AuthLayout
+      title="Choose a new password"
+      description="Enter and confirm your new password below"
+    >
       <ResetPasswordForm />
-      <br />
-      <span className="text-sm font-medium text-neutral-900">
-        If everything is okay,{" "}
-        <Link to="/login" className="font-semibold underline">
-          go to login
-        </Link>
-        .
-      </span>
+      <FieldDescription>
+        Done? <Link to="/login">Go to login</Link>.
+      </FieldDescription>
     </AuthLayout>
-  );
+  )
 }
