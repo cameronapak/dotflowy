@@ -62,7 +62,7 @@ export interface NodeCommands {
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
   // Move a bullet (and its subtree) up/down among siblings; at the edge it
-  // outdents one level in that direction. See ADR 0009.
+  // reparents into the parent's adjacent sibling. See ADR 0009.
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   // Delete a bullet and its entire subtree, then focus a neighbor.

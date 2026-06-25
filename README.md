@@ -26,7 +26,7 @@ What works:
 |---|---|
 | `Enter` | Split at the caret into a new sibling below (at the end of an expanded bullet, adds a child at the top instead) |
 | `Tab` / `Shift+Tab` | Indent / outdent |
-| `Cmd/Ctrl+Shift+↑` / `↓` | Move the bullet among siblings; outdent at the edge |
+| `Cmd/Ctrl+Shift+↑` / `↓` | Move the bullet among siblings; at the edge reparent into the parent's adjacent sibling |
 | `Cmd/Ctrl+↑` / `↓` | Collapse / expand |
 | `Cmd/Ctrl+Enter` or `Cmd/Ctrl+D` | Toggle complete |
 | `Cmd/Ctrl+.` / `Cmd/Ctrl+,` | Zoom in / out |

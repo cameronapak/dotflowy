@@ -82,15 +82,15 @@ export function useBulletKeymap({
       },
       {
         // Cmd/Ctrl+Shift+Up: move this bullet up among its siblings; at the
-        // top edge it outdents to before its parent. Default options always
-        // preventDefault, so macOS "extend selection to doc start" never
-        // fires inside the outline. See ADR 0009.
+        // top edge it reparents into the parent's previous sibling. Default
+        // options always preventDefault, so macOS "extend selection to doc start"
+        // never fires inside the outline. See ADR 0009.
         hotkey: "Mod+Shift+ArrowUp",
         callback: () => commands.onMoveUp(node.id),
       },
       {
-        // Cmd/Ctrl+Shift+Down: move down; at the bottom edge it outdents to
-        // after its parent. Mirror of Mod+Shift+ArrowUp.
+        // Cmd/Ctrl+Shift+Down: move down; at the bottom edge it reparents into
+        // the parent's next sibling. Mirror of Mod+Shift+ArrowUp.
         hotkey: "Mod+Shift+ArrowDown",
         callback: () => commands.onMoveDown(node.id),
       },
