@@ -46,6 +46,7 @@ bun run test:e2e:ui  # same, in Playwright's interactive UI
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
 bun run deploy     # build:cf, then `wrangler deploy`
+npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
 **No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change. End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.

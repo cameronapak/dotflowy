@@ -1045,8 +1045,8 @@ function ZoomedTitle({
         contentEditable
         suppressContentEditableWarning
         spellCheck={false}
-        role="textbox"
         aria-label="Title"
+        aria-multiline="true"
         data-completed={node.completed}
         onInput={(e) => {
           const el = e.currentTarget;

@@ -1,0 +1,39 @@
+{
+  "ignore": {
+    "files": [
+      "src/components/ui/sheet.tsx",
+      "src/components/ui/sidebar.tsx",
+      "src/components/ui/skeleton.tsx",
+      "src/components/ui/tooltip.tsx",
+      "src/hooks/use-mobile.ts",
+      "src/components/ui/input-group-text.tsx"
+    ],
+    "overrides": [
+      {
+        "files": ["src/components/inline-code.ts"],
+        "rules": ["react-doctor/dangerous-html-sink"]
+      },
+      {
+        "files": [
+          "src/components/OutlineEditor.tsx",
+          "src/components/OutlineNode.tsx"
+        ],
+        "rules": [
+          "react-doctor/interactive-supports-focus",
+          "react-doctor/no-event-handler",
+          "react-doctor/prefer-tag-over-role",
+          "react-doctor/no-static-element-interactions"
+        ]
+      },
+      {
+        "files": [
+          "src/components/menu-list.tsx",
+          "src/components/slash-menu-list.tsx",
+          "src/components/ui/input-group.tsx",
+          "src/components/ui/input-group-addon.tsx"
+        ],
+        "rules": ["react-doctor/prefer-tag-over-role"]
+      }
+    ]
+  }
+}
