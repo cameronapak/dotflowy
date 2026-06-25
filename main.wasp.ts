@@ -6,11 +6,15 @@ import { SignupPage } from "./src/app/auth/SignupPage" with { type: "ref" };
 import { EmailVerificationPage } from "./src/app/auth/EmailVerificationPage" with { type: "ref" };
 import { RequestPasswordResetPage } from "./src/app/auth/RequestPasswordResetPage" with { type: "ref" };
 import { PasswordResetPage } from "./src/app/auth/PasswordResetPage" with { type: "ref" };
+import { nodesSpec } from "./src/nodes/nodes.wasp";
+import { tagsSpec } from "./src/plugins/tags/tags.wasp";
+import { dailySpec } from "./src/plugins/daily/daily.wasp";
+import { accountSpec } from "./src/account/account.wasp";
 
-// Phase 1 scaffold (PRD docs/PRD-wasp-migration.md). This stands up the Wasp
-// foundation: email/password auth + the Prisma data model. The outline editor
-// (routes, operations, plugin slices) is ported in Phase 2/3 — the home route
-// is an auth-gated placeholder until then.
+// Wasp foundation (PRD docs/PRD-wasp-migration.md): email/password auth + the
+// Prisma data model (Phase 1) and the outline/plugin sync operations (Phase 2).
+// The outline editor UI (routes, components, plugin client code) is ported in
+// Phase 3 — the home route is an auth-gated placeholder until then.
 export default app({
   name: "dotflowy",
   title: "Dotflowy",
@@ -59,5 +63,10 @@ export default app({
       "/email-verification",
       page(EmailVerificationPage),
     ),
+    // Phase 2 operations (nested Spec arrays are flattened by the compiler).
+    nodesSpec,
+    tagsSpec,
+    dailySpec,
+    accountSpec,
   ],
 });
