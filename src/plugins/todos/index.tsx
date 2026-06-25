@@ -11,7 +11,7 @@
 // D+ (Backspace-at-start checkbox demotion), C (`/todo` + `/bullet`), I (`[]` autoformat).
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Checkbox } from "../../components/ui/checkbox";
 import { definePlugin, type PluginContext } from "../types";
 
 // Toggle completion on a node, shared by Mod+Enter and Mod+D. Reads the live

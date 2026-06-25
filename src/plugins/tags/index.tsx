@@ -31,9 +31,6 @@ function tagEl(tok: string): El {
   };
 }
 
-// The `#` autocomplete menu (Seam H). Triggers only when the `#` is at the
-// start or after whitespace AND the query so far is all tag chars (so `a#b` or a
-// `#` mid-punctuation doesn't open) -- stricter than the engine's default match.
 const TAG_CHARS = /^[\p{L}\p{N}_-]+$/u;
 
 function tagMenuMatch(before: string): MenuTrigger | null {
@@ -46,8 +43,6 @@ function tagMenuMatch(before: string): MenuTrigger | null {
   return { query, triggerIndex };
 }
 
-// Each menu option is the tag's own colored chip (`.tag-option` + `data-tag` is
-// painted by the generated TagColorStyles stylesheet, same as inline chips).
 function tagOption(tag: string) {
   return (
     <span className="tag-option" data-tag={tag.slice(1)}>
@@ -56,8 +51,6 @@ function tagOption(tag: string) {
   );
 }
 
-// Open the color picker at the pointer, routed through the generic overlay host
-// (ctx.openOverlay). Shared by chips and filter pills.
 function openColorMenu(
   el: HTMLElement,
   ctx: PluginContext,
@@ -82,15 +75,11 @@ export default definePlugin({
     {
       id: "tag",
       pattern: TAG_PATTERN,
-      // Last: a `#tag` inside a link or code run is already consumed by those.
       precedence: 20,
       render: (tok) => tagEl(tok),
     },
   ],
 
-  // Seam B: a chip click AND-s the tag into the filter; a chip's mousedown
-  // blocks the editing caret (it's inside contentEditable); right-click on a
-  // chip OR a filter pill opens the color picker.
   interactions: [
     {
       selector: ".tag[data-tag]",
@@ -105,19 +94,11 @@ export default definePlugin({
       onContextMenu: openColorMenu,
     },
     {
-      // Filter pills live outside the contentEditable, so no caret to block and
-      // no filter-on-click; only the color picker.
       selector: ".tag-pill[data-tag]",
       onContextMenu: openColorMenu,
     },
   ],
 
-  // Seam G: the `#tag` filter, expressed as a global view transform. Active only
-  // when the `?q=` carries tags; prunes the tree to matches + their ancestor
-  // context (the pure walk stays in ./tags.ts). It's handed the composed
-  // `isHidden` so completed subtrees drop out without this layer knowing about
-  // completion. The core wires the result in as the `filter` prop (still
-  // core-rendered for now -- see ADR 0018's "still core-wired" note).
   viewTransforms: [
     {
       id: "tag-filter",
@@ -128,10 +109,6 @@ export default definePlugin({
     },
   ],
 
-  // Seam H: `#` autocomplete over existing tags (read live from the tree). New
-  // tags are made by just finishing typing -- no "create" row, so the menu only
-  // opens when at least one existing tag matches (openWhenEmpty stays false).
-  // Picking inserts the full tag + a trailing space (it's "finished").
   menus: [
     {
       id: "tag",

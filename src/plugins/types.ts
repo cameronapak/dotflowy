@@ -232,6 +232,8 @@ export interface ViewContext {
 export interface ViewFilter {
   visibleIds: Set<string>;
   matchIds: Set<string>;
+  /** Shown when `matchIds` is empty; plugin-owned copy (the tag filter today). */
+  emptyMessage?: string;
 }
 
 export interface ViewTransform {
@@ -408,6 +410,22 @@ export interface HeaderSlotSpec {
   render(getCtx: () => PluginContext): ReactNode;
 }
 
+// --- Seam F (subheader): contextual chrome below the header -----------------
+//
+// Header slots are persistent actions (the daily "Today" button). Subheader
+// slots are contextual state (the tag filter bar, a future week nav). The core
+// renders every non-null slot into one muted band that collapses with animation
+// when empty and sticks below the header. v1: render all non-null slots; shared
+// row layout (leading/main/trailing regions) is deferred until a second consumer
+// ships.
+
+export interface SubheaderSlotSpec {
+  id: string;
+  /** Return null to contribute nothing. `getCtx` is optional for plugins that
+   *  read route state directly (the tag filter); call it inside handlers only. */
+  render(getCtx: () => PluginContext): ReactNode;
+}
+
 // --- Protected nodes --------------------------------------------------------
 //
 // A plugin can declare a node un-deletable. The core consults the composed
@@ -547,6 +565,8 @@ export interface PluginDef {
   rowDecorations?: RowDecorationSpec[];
   /** Seam F (header): node-less header chrome (the daily "Today" button). */
   headerSlots?: HeaderSlotSpec[];
+  /** Seam F (subheader): contextual chrome below the header (the tag filter). */
+  subheaderSlots?: SubheaderSlotSpec[];
   /** Protected nodes: return true to forbid deleting `nodeId` (the daily
    *  container). Called on the delete path only (client). */
   protects?(nodeId: string): boolean;

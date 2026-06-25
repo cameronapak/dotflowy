@@ -78,12 +78,13 @@ export function insertChildAtStart(
   index: TreeIndex,
   parentId: string | null,
   isTask = false,
+  text = '',
 ): string {
   const id = createId()
   const head = childrenOf(index, parentId)[0] ?? null
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId: null, text: '', isTask }),
+    makeNode({ id, parentId, prevSiblingId: null, text, isTask }),
   )
 
   // The old head now follows the new node.
@@ -226,39 +227,80 @@ interface MoveOpts {
 }
 
 /**
- * Outdent variant used by the move-up edge: the node pops out to become the
- * sibling *immediately before* its old parent (promoted above it), as opposed
- * to `outdent`, which lands it after the parent. Returns true on a real move.
+ * Edge helper for move-up: reparent into the parent's previous sibling as its
+ * last child (Workflowy-style "nudge up" into the uncle subtree).
  */
-function outdentBeforeParent(
+function reparentIntoParentPrevSibling(
   index: TreeIndex,
   node: Node,
   rootId: string | null,
+  isVisible: (n: Node) => boolean,
 ): boolean {
   if (node.parentId === null || node.parentId === rootId) return false
   const parent = index.byId.get(node.parentId)
   if (!parent) return false
 
-  // node's raw next under the old parent relinks to node's old prev.
-  const oldSiblings = childrenOf(index, parent.id)
-  const i = oldSiblings.findIndex((n) => n.id === node.id)
-  const rawNext =
-    i !== -1 && i + 1 < oldSiblings.length ? oldSiblings[i + 1]! : null
-  if (rawNext) update(rawNext.id, { prevSiblingId: node.prevSiblingId })
+  const parentSiblings = childrenOf(index, parent.parentId)
+  const pi = parentSiblings.findIndex((n) => n.id === parent.id)
+  if (pi <= 0) return false
 
-  // node slots in immediately before its old parent, at the parent's level.
-  update(node.id, {
-    parentId: parent.parentId,
-    prevSiblingId: parent.prevSiblingId,
-  })
-  update(parent.id, { prevSiblingId: node.id })
-  return true
+  let uncleId: string | null = null
+  for (let j = pi - 1; j >= 0; j--) {
+    if (isVisible(parentSiblings[j]!)) {
+      uncleId = parentSiblings[j]!.id
+      break
+    }
+  }
+  if (!uncleId) return false
+
+  const uncleChildren = childrenOf(index, uncleId)
+  const afterSiblingId =
+    uncleChildren.length > 0 ? uncleChildren[uncleChildren.length - 1]!.id : null
+
+  const uncle = index.byId.get(uncleId)
+  if (uncle?.collapsed) update(uncle.id, { collapsed: false })
+
+  return moveNode(index, node.id, uncleId, afterSiblingId)
+}
+
+/**
+ * Edge helper for move-down: reparent into the parent's next sibling as its
+ * first child (Workflowy-style "nudge down" into the aunt subtree).
+ */
+function reparentIntoParentNextSibling(
+  index: TreeIndex,
+  node: Node,
+  rootId: string | null,
+  isVisible: (n: Node) => boolean,
+): boolean {
+  if (node.parentId === null || node.parentId === rootId) return false
+  const parent = index.byId.get(node.parentId)
+  if (!parent) return false
+
+  const parentSiblings = childrenOf(index, parent.parentId)
+  const pi = parentSiblings.findIndex((n) => n.id === parent.id)
+  if (pi === -1) return false
+
+  let auntId: string | null = null
+  for (let j = pi + 1; j < parentSiblings.length; j++) {
+    if (isVisible(parentSiblings[j]!)) {
+      auntId = parentSiblings[j]!.id
+      break
+    }
+  }
+  if (!auntId) return false
+
+  const aunt = index.byId.get(auntId)
+  if (aunt?.collapsed) update(aunt.id, { collapsed: false })
+
+  return moveNode(index, node.id, auntId, null)
 }
 
 /**
  * Move `nodeId` up among its siblings. If a visible sibling sits above it,
  * swap with that sibling (same depth, subtree carried). Otherwise (it is the
- * first visible child) outdent to become the sibling before its parent.
+ * first visible child) reparent into the parent's previous sibling as its last
+ * child.
  *
  * Returns true if a move happened. See ADR 0009.
  */
@@ -284,7 +326,7 @@ export function moveUp(
     }
   }
 
-  if (!vp) return outdentBeforeParent(index, node, opts.rootId ?? null)
+  if (!vp) return reparentIntoParentPrevSibling(index, node, opts.rootId ?? null, isVisible)
 
   // Swap: detach node, then re-insert it immediately before vp. A hidden
   // sibling between them stays put (rides along below vp).
@@ -297,8 +339,8 @@ export function moveUp(
 
 /**
  * Move `nodeId` down among its siblings. If a visible sibling sits below it,
- * swap with that sibling. Otherwise (it is the last visible child) outdent to
- * become the sibling after its parent (the existing `outdent` semantics).
+ * swap with that sibling. Otherwise (it is the last visible child) reparent
+ * into the parent's next sibling as its first child.
  *
  * Returns true if a move happened. See ADR 0009.
  */
@@ -325,9 +367,7 @@ export function moveDown(
   }
 
   if (k === -1) {
-    // Edge: don't let a node directly under the zoom root escape the view.
-    if (node.parentId === opts.rootId) return false
-    return outdent(index, nodeId)
+    return reparentIntoParentNextSibling(index, node, opts.rootId ?? null, isVisible)
   }
 
   // Swap: detach node, then re-insert it immediately after vn.

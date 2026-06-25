@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { AccountMenu } from "./account-menu";
 import { BookmarkStar } from "./bookmarks";
 import { ModeToggle } from "./mode-toggle";
 import { NodeSearchButton } from "./node-switcher";
@@ -28,7 +29,7 @@ export function Header({
   getCtx?: () => PluginContext;
 }) {
   return (
-    <header className="sticky top-0 z-10 border-b bg-background">
+    <header className="border-b bg-background">
       {/* Border spans the full viewport; inner row is centered to match the
           720px outline content below. */}
       <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3">
@@ -45,6 +46,7 @@ export function Header({
           <NodeSearchButton />
           <ShowCompletedToggle />
           <ModeToggle />
+          <AccountMenu />
         </div>
       </div>
     </header>

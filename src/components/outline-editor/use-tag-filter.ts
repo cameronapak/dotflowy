@@ -5,8 +5,10 @@ import {
   useRef,
   type RefObject,
 } from "react";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { parseQuery, serializeQuery } from "../../plugins/tags/tags";
+
+type NavigateFn = ReturnType<typeof useNavigate>;
 
 export interface TagFilterControls {
   activeTags: string[];
@@ -24,10 +26,11 @@ export interface TagFilterControls {
  */
 export function useTagFilter(
   rootId: string | null,
-  navigate: ReturnType<typeof useNavigate>,
+  navigate: NavigateFn,
 ): TagFilterControls {
-  const search = useSearch({ strict: false }) as { q?: string };
-  const activeTags = useMemo(() => parseQuery(search.q), [search.q]);
+  const [searchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? undefined;
+  const activeTags = useMemo(() => parseQuery(q), [q]);
   const activeTagsRef = useRef(activeTags);
   activeTagsRef.current = activeTags;
   const rootIdRef = useRef<string | null>(rootId);
@@ -35,23 +38,17 @@ export function useTagFilter(
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
-  // Write the active tags into the `q` param on the current route. Stable
-  // (reads live values through refs), so the chip-click handler and filter bar
-  // never re-bind.
   const setQ = useCallback((tags: string[]) => {
-    const q = serializeQuery(tags);
-    const nextSearch = q ? { q } : {};
+    const serialized = serializeQuery(tags);
+    const search = serialized
+      ? `?${new URLSearchParams({ q: serialized }).toString()}`
+      : "";
     const root = rootIdRef.current;
-    if (root === null) navigateRef.current({ to: "/", search: nextSearch });
-    else
-      navigateRef.current({
-        to: "/$nodeId",
-        params: { nodeId: root },
-        search: nextSearch,
-      });
+    const pathname =
+      root === null ? "/" : `/${encodeURIComponent(root)}`;
+    navigateRef.current({ pathname, search });
   }, []);
-  // Clicking a tag AND-s it into the filter (accretes, never replaces); a
-  // pill's ✕ drops one; clear-all drops the filter.
+
   const addTag = useCallback(
     (tag: string) => {
       const current = activeTagsRef.current;
@@ -66,12 +63,10 @@ export function useTagFilter(
   );
   const clearTags = useCallback(() => setQ([]), [setQ]);
 
-  // Escape clears the filter -- but only when the caret isn't inside a bullet,
-  // so it never eats an in-progress edit (ADR 0015).
   useEffect(() => {
     if (activeTags.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       const active = document.activeElement;
       if (active instanceof HTMLElement && active.classList.contains("node-text"))
         return;

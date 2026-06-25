@@ -15,8 +15,8 @@
 
 import { CalendarArrowDownIcon, CalendarDaysIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
 import { definePlugin, type PluginContext } from '../types'
 import { capture } from '../../data/history'
 import {
@@ -65,9 +65,13 @@ function ensureContainer(index: TreeIndex): string {
  */
 function ensureDay(key: string, containerId: string, index: TreeIndex): string {
   const existing = getDayId(key)
-  if (existing && index.byId.has(existing)) return existing
-  const id = insertChildAtStart(index, containerId)
-  setText(id, formatDayText(key))
+  if (existing && index.byId.has(existing)) {
+    if (!index.byId.get(existing)!.text.trim()) {
+      setText(existing, formatDayText(key))
+    }
+    return existing
+  }
+  const id = insertChildAtStart(index, containerId, false, formatDayText(key))
   setMapping(key, id)
   return id
 }

@@ -4,12 +4,10 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
 import { queryClient } from '../../data/query-client'
 import {
-  kvDelete,
-  kvFetch,
-  kvPut,
-  toKvKeys,
-  toKvRows,
-} from '../../data/kv-api'
+  getDailyIndex,
+  upsertDailyIndex,
+  deleteDailyIndexKeys,
+} from 'wasp/client/operations'
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0019). A row maps a
@@ -21,10 +19,11 @@ import {
  * machine-addressable ("the node for 2026-06-23"), and that identity can't live
  * in mutable text (Seam A's tags/links derive from text precisely because their
  * identity *is* the text). Seam E keeps it off the `Node` schema. A sibling of
- * `nodesCollection`, backed by D1 through the generic /api/kv store (ADR 0024),
- * so daily-note identity syncs across devices.
+ * `nodesCollection`, backed by Postgres through the daily plugin's Wasp
+ * operations (getDailyIndex/upsertDailyIndex/deleteDailyIndexKeys), so
+ * daily-note identity syncs across devices.
  *
- * Mirrors `plugins/tags/tag-colors.ts`: a D1-backed kv collection plus a
+ * Mirrors `plugins/tags/tag-colors.ts`: a Wasp-op-backed collection plus a
  * `subscribeChanges`/`useSyncExternalStore` reactive read (NOT `useLiveQuery`,
  * which hard-fails the `/` prerender -- ADR 0004).
  */
@@ -48,20 +47,26 @@ export const dailyIndexCollection = createCollection(
     id: 'daily-index',
     queryKey: ['kv', KV],
     queryClient,
-    queryFn: () => kvFetch<DailyRow>(KV),
+    queryFn: () => getDailyIndex(),
     getKey: (row: DailyRow) => row.key,
     schema: dailyRowSchema,
     // Insert and update both upsert the whole row (tiny key->value items).
     onInsert: async ({ transaction }) => {
-      await kvPut(KV, toKvRows(transaction))
+      await upsertDailyIndex({
+        rows: transaction.mutations.map((m) => m.modified as DailyRow),
+      })
       return { refetch: false }
     },
     onUpdate: async ({ transaction }) => {
-      await kvPut(KV, toKvRows(transaction))
+      await upsertDailyIndex({
+        rows: transaction.mutations.map((m) => m.modified as DailyRow),
+      })
       return { refetch: false }
     },
     onDelete: async ({ transaction }) => {
-      await kvDelete(KV, toKvKeys(transaction))
+      await deleteDailyIndexKeys({
+        keys: transaction.mutations.map((m) => m.key as string),
+      })
       return { refetch: false }
     },
   }),

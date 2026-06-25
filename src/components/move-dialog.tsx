@@ -5,7 +5,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { BookmarkIcon, HomeIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -193,8 +193,8 @@ function MoveDialogInner({
           // it's easy to spot where it landed. See flash-node.ts.
           requestFlashAfterNav(movedId);
           targetId === null
-            ? navigate({ to: "/" })
-            : navigate({ to: "/$nodeId", params: { nodeId: targetId } });
+            ? navigate("/")
+            : navigate(`/${encodeURIComponent(targetId)}`);
         },
       },
     });

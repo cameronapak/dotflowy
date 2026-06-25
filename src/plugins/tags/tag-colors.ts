@@ -4,7 +4,11 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
 import { normalizeTag } from './tags'
 import { queryClient } from '../../data/query-client'
-import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from '../../data/kv-api'
+import {
+  getTagColors,
+  upsertTagColors,
+  deleteTagColors,
+} from 'wasp/client/operations'
 
 /**
  * Custom tag colors. A tag's color is **chosen**, not derived -- by default a
@@ -12,10 +16,10 @@ import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from '../../data/kv-api'
  * it. The choice is keyed by the *normalized* tag name, so it applies to every
  * instance of that tag everywhere. See docs/DECISIONS.md (tag colors).
  *
- * Backed by D1 through the generic /api/kv side-collection store (ADR 0024),
- * sibling to nodesCollection -- a custom color is shared meaning, not
- * view-state, so it syncs across devices. Empty by default; absence of a row
- * means "no color" (the neutral default).
+ * Backed by Postgres through the tags plugin's Wasp operations
+ * (getTagColors/upsertTagColors/deleteTagColors), sibling to nodesCollection --
+ * a custom color is shared meaning, not view-state, so it syncs across devices.
+ * Empty by default; absence of a row means "no color" (the neutral default).
  *
  * Color is applied through a single generated stylesheet keyed by `data-tag`
  * (see {@link tagColorsCss} and TagColorStyles), NOT a per-instance class -- so
@@ -33,6 +37,50 @@ export const TAG_COLORS = [
   'purple',
   'pink',
 ] as const
+
+/** Light/dark `--tag-*` pairs consumed by {@link tagColorsCss} overrides. */
+export const tagColorPaletteCss = `
+:root {
+  --tag-red: oklch(0.94 0.045 25);
+  --tag-red-fg: oklch(0.48 0.16 25);
+  --tag-orange: oklch(0.94 0.05 55);
+  --tag-orange-fg: oklch(0.48 0.13 50);
+  --tag-amber: oklch(0.95 0.06 90);
+  --tag-amber-fg: oklch(0.47 0.11 85);
+  --tag-green: oklch(0.94 0.06 150);
+  --tag-green-fg: oklch(0.45 0.13 150);
+  --tag-teal: oklch(0.94 0.05 195);
+  --tag-teal-fg: oklch(0.46 0.1 200);
+  --tag-blue: oklch(0.94 0.05 250);
+  --tag-blue-fg: oklch(0.49 0.15 255);
+  --tag-indigo: oklch(0.94 0.05 280);
+  --tag-indigo-fg: oklch(0.49 0.16 280);
+  --tag-purple: oklch(0.94 0.05 310);
+  --tag-purple-fg: oklch(0.49 0.17 310);
+  --tag-pink: oklch(0.94 0.05 345);
+  --tag-pink-fg: oklch(0.49 0.17 345);
+}
+.dark {
+  --tag-red: oklch(0.34 0.055 25);
+  --tag-red-fg: oklch(0.85 0.1 25);
+  --tag-orange: oklch(0.34 0.055 55);
+  --tag-orange-fg: oklch(0.86 0.1 60);
+  --tag-amber: oklch(0.35 0.06 90);
+  --tag-amber-fg: oklch(0.88 0.11 90);
+  --tag-green: oklch(0.34 0.06 150);
+  --tag-green-fg: oklch(0.86 0.11 150);
+  --tag-teal: oklch(0.34 0.055 195);
+  --tag-teal-fg: oklch(0.85 0.09 200);
+  --tag-blue: oklch(0.34 0.06 250);
+  --tag-blue-fg: oklch(0.84 0.11 255);
+  --tag-indigo: oklch(0.34 0.06 280);
+  --tag-indigo-fg: oklch(0.84 0.12 280);
+  --tag-purple: oklch(0.34 0.06 310);
+  --tag-purple-fg: oklch(0.85 0.12 310);
+  --tag-pink: oklch(0.34 0.06 345);
+  --tag-pink-fg: oklch(0.85 0.12 345);
+}
+`.trim()
 
 export type TagColor = (typeof TAG_COLORS)[number]
 
@@ -54,20 +102,26 @@ export const tagColorsCollection = createCollection(
     id: 'tag-colors',
     queryKey: ['kv', KV],
     queryClient,
-    queryFn: () => kvFetch<TagColorRow>(KV),
+    queryFn: () => getTagColors(),
     getKey: (row: TagColorRow) => row.tag,
     schema: tagColorSchema,
     // Insert and update both upsert the whole row (tiny key->value items).
     onInsert: async ({ transaction }) => {
-      await kvPut(KV, toKvRows(transaction))
+      await upsertTagColors({
+        rows: transaction.mutations.map((m) => m.modified as TagColorRow),
+      })
       return { refetch: false }
     },
     onUpdate: async ({ transaction }) => {
-      await kvPut(KV, toKvRows(transaction))
+      await upsertTagColors({
+        rows: transaction.mutations.map((m) => m.modified as TagColorRow),
+      })
       return { refetch: false }
     },
     onDelete: async ({ transaction }) => {
-      await kvDelete(KV, toKvKeys(transaction))
+      await deleteTagColors({
+        tags: transaction.mutations.map((m) => m.key as string),
+      })
       return { refetch: false }
     },
   }),
@@ -101,6 +155,9 @@ export function tagColorsCss(rows: TagColorRow[]): string {
   for (const r of rows) {
     if (TAG_COLOR_SET.has(r.color) && /^[\p{L}\p{N}_-]+$/u.test(r.tag)) {
       lines.push(`[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${r.color});color:var(--tag-${r.color}-fg);border-color:transparent}`);
+      lines.push(
+        `[data-tag="${r.tag}" i][data-tag-pill][data-tag] [data-tag-pill-remove]:hover{background:color-mix(in oklch,var(--tag-${r.color}-fg) 14%,transparent);color:var(--tag-${r.color}-fg)}`,
+      );
     }
   }
   return lines.join('\n');

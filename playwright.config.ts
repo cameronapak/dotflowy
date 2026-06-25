@@ -4,7 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // -- these are behavioral tests (caret/visual-line navigation needs a real
 // browser layout engine), not cross-browser checks. Add more projects only if
 // a bug turns out to be engine-specific.
-const PORT = 3210;
+const PORT = 3000;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,14 +17,23 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "e2e/.auth/user.json",
+      },
+      dependencies: ["setup"],
+      testIgnore: /auth\.setup\.ts/,
+    },
   ],
-  // Boot the Vite dev server for the run; reuse one already running locally so
-  // an open `bun run dev` makes the suite start instantly.
+  // Boot the Wasp dev server (client :3000, server :3001). Reuse a running
+  // `wasp start` locally so an open session makes the suite start instantly.
   webServer: {
-    command: `bun run dev --port ${PORT}`,
+    command: "wasp start",
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });

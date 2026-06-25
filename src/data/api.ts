@@ -1,37 +1,33 @@
 import type { Node } from './schema'
+import {
+  getNodes,
+  upsertNodes,
+  updateNodes as updateNodesAction,
+  deleteNodes as deleteNodesAction,
+} from 'wasp/client/operations'
 
 /**
- * Thin REST client for the D1-backed /api/nodes Worker. Same-origin, so the
- * Cloudflare Access cookie rides along automatically. The collection's mutation
- * handlers (collection.ts) call create/update/delete; the queryFn calls
- * fetchNodes. See docs/DECISIONS.md (D1 sync).
+ * The outline sync boundary (PRD Phase 3). Wraps the Wasp client operations
+ * (generated from src/nodes/operations.ts) so the nodes collection keeps its
+ * fetchNodes / createNodes / updateNodes / deleteNodes interface unchanged —
+ * collection.ts didn't change. The old same-origin /api/nodes Worker fetch is
+ * gone; the Wasp session scopes every call to context.user.id server-side, so
+ * there's no owner header to send. Wire shape is still the legacy epoch-ms
+ * `Node` (schema.ts); operations.ts maps it to Prisma DateTime at the boundary.
  */
 
-const ENDPOINT = '/api/nodes'
-
-async function send(method: string, body: unknown): Promise<void> {
-  const res = await fetch(ENDPOINT, {
-    method,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${method} ${ENDPOINT} -> ${res.status}`)
-}
-
-/** Complete server state for the authenticated user. The query collection
- *  treats this as authoritative, so it must always return every owned node. */
+/** Complete server state for the signed-in user. The query collection treats
+ *  this as authoritative, so it must always return every owned node. */
 export async function fetchNodes(): Promise<Node[]> {
-  const res = await fetch(ENDPOINT)
-  if (!res.ok) throw new Error(`GET ${ENDPOINT} -> ${res.status}`)
-  return (await res.json()) as Node[]
+  return getNodes()
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>
-  send('POST', { nodes })
+  upsertNodes({ nodes })
 
 export const updateNodes = (
   updates: { id: string; changes: Partial<Node> }[],
-): Promise<void> => send('PATCH', { updates })
+): Promise<void> => updateNodesAction({ updates })
 
 export const deleteNodes = (ids: string[]): Promise<void> =>
-  send('DELETE', { ids })
+  deleteNodesAction({ ids })

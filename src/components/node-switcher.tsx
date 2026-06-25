@@ -5,7 +5,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
@@ -180,7 +180,7 @@ function SwitcherDialog({
   function go(nodeId: string) {
     onPicked();
     // Plain nav -- no zoom morph (ADR 0003): a result row isn't the pivot dot.
-    navigate({ to: "/$nodeId", params: { nodeId } });
+    navigate(`/${encodeURIComponent(nodeId)}`);
   }
 
   // Plugin-contributed VIRTUAL rows (Seam J), built from the live query -- the
@@ -192,7 +192,7 @@ function SwitcherDialog({
       index,
       goTo: (id) => {
         onPicked();
-        navigate({ to: "/$nodeId", params: { nodeId: id } });
+        navigate(`/${encodeURIComponent(id)}`);
       },
     });
   }, [q, index, navigate, onPicked]);

@@ -1,15 +1,16 @@
 # Dotflowy OSS
 
-An open-source outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
+An open-source outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [Wasp](https://wasp.sh) (React + Node + Prisma), [TanStack DB](https://tanstack.com/db) on the client, and PostgreSQL on the server.
 
-Local-first at heart, with an optional single-user Cloudflare deployment that syncs your outline across devices via [D1](https://developers.cloudflare.com/d1/), gated by either [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) or a built-in HTTP Basic Auth fallback (so it works before you set Access up).
+**Online-first v1:** edits sync optimistically to Postgres through Wasp queries/actions; the collection re-pulls on tab focus. Full offline-first (OPFS + outbox) is planned for v1.1 — see [`docs/PRD-wasp-migration.md`](docs/PRD-wasp-migration.md).
 
 ## Status
 
-Your outline is stored in a TanStack DB collection. By default that's backed by **Cloudflare D1** through a Worker (`/api/nodes`), scoped to the Access-authenticated user — so it syncs across your devices (it re-pulls on tab focus; real-time push is not built yet). See [the sync design](docs/DECISIONS.md#d1-sync-via-a-worker). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.
+Each signed-in user gets a **private silo** of outline data in PostgreSQL. The editor is a TanStack DB collection mirror (`nodesCollection`) hydrated by `getNodes` and persisted through Wasp actions — the same flat-row model as before, so tree logic and components stayed unchanged through the Cloudflare → Wasp migration.
 
 What works:
 
+- Email/password accounts (sign up, log in, per-user data)
 - Nested bullets with inline editing; collapse / expand subtrees (hover chevron in the gutter)
 - Zoom into any bullet as a temporary root (click its dot), with a breadcrumb trail back out
 - Tasks: a checkbox marks complete; a "show completed" toggle hides done items
@@ -18,7 +19,9 @@ What works:
 - Clicking a `#tag` filters the outline in place; right-click a tag to color it
 - Bookmarks (the header star pins the current zoom view) and a `Cmd/Ctrl+K` quick-switcher to jump anywhere
 - A `/` command palette (to-do, plain bullet, move) and a move-to dialog
-- Dark mode, undo / redo
+- Daily notes, scripture reference chips (route.bible), dark mode, undo / redo
+
+Not built yet: sharing/collaboration, real-time push (sync reconciles on tab focus), offline queue (v1.1).
 
 ### Keyboard
 
@@ -26,7 +29,7 @@ What works:
 |---|---|
 | `Enter` | Split at the caret into a new sibling below (at the end of an expanded bullet, adds a child at the top instead) |
 | `Tab` / `Shift+Tab` | Indent / outdent |
-| `Cmd/Ctrl+Shift+↑` / `↓` | Move the bullet among siblings; outdent at the edge |
+| `Cmd/Ctrl+Shift+↑` / `↓` | Move the bullet among siblings; at the edge reparent into the parent's adjacent sibling |
 | `Cmd/Ctrl+↑` / `↓` | Collapse / expand |
 | `Cmd/Ctrl+Enter` or `Cmd/Ctrl+D` | Toggle complete |
 | `Cmd/Ctrl+.` / `Cmd/Ctrl+,` | Zoom in / out |
@@ -35,85 +38,95 @@ What works:
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo |
 | `Cmd/Ctrl+K` | Open the quick-switcher |
 
-Not built yet: sharing, real-time multi-device push (sync today reconciles on tab focus), multi-user accounts.
-
 ## Stack
 
 | Layer | Choice | Why |
 |---|---|---|
-| Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
-| Data | TanStack DB query collections over Cloudflare D1 | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/DECISIONS.md#d1-sync-via-a-worker)). |
-| Backend | Cloudflare Worker + D1 | One Worker serves the SPA and the `/api/nodes` + `/api/kv` sync APIs; single-user, gated by Cloudflare Access or an HTTP Basic Auth fallback ([the auth gate](docs/DECISIONS.md#the-auth-gate)) |
-| Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
-| Build | Vite 8 | What Start uses |
-| Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
+| Full stack | [Wasp](https://wasp.sh) 0.24 (TS spec) | Auth, Prisma, queries/actions, deploy tooling |
+| Client data | TanStack DB query collections | Optimistic local mirror; keystrokes never wait on the network |
+| Server data | PostgreSQL (Railway in prod) | Multi-user silos, typed plugin tables |
+| Validation | Zod 4 | Drives collection item types |
+| Runtime | Node 24 (Wasp server), Bun (install/scripts) | Wasp requires Node for dev/deploy |
 
 ## Run it
 
+**Prerequisites:** Node 24+, Bun, Docker (optional — for `wasp start db`).
+
 ```sh
 bun install
-bun run dev      # http://localhost:3000 (or next free port)
+cp .env.server.example .env.server   # set DATABASE_URL; see file for dev flags
+wasp start db                        # first time: local Postgres in Docker
+wasp start                           # client :3000, server :3001
 ```
+
+Sign up at `/signup`. With `SKIP_EMAIL_VERIFICATION_IN_DEV=true` in `.env.server`, you can log in immediately (verification links print to the server log otherwise).
 
 Other useful scripts:
 
 ```sh
-bun run build      # production build
-bun run preview    # preview the production build
-bun run typecheck  # tsc --noEmit
-bun run test:e2e   # Playwright end-to-end tests (chromium)
+wasp compile       # after changing main.wasp.ts, *.wasp.ts, or schema.prisma
+bun run typecheck  # tsc -b tsconfig.src.json
+bun run test:e2e   # Playwright (chromium) against wasp start
 ```
 
-## Deploy
+## Deploy (Railway)
 
-The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* the `/api/nodes` + `/api/kv` sync APIs backed by **D1**, gated by **Cloudflare Access** (or an HTTP Basic Auth fallback — [the auth gate](docs/DECISIONS.md#the-auth-gate)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/DECISIONS.md#d1-sync-via-a-worker).
+Production target is **Railway** (Wasp app + managed Postgres). One-time setup:
 
 ```sh
-# local dev (two terminals): Vite HMR + a local Worker/D1 it proxies /api to
-bun run db:migrate:local   # once: create the local D1 schema
-bun run dev:api            # wrangler dev (Worker + local D1) on :8787
-bun run dev                # vite dev (proxies /api -> :8787)
-
-# or a production-like single-server preview
-bun run cf:dev             # build + wrangler dev
-
-# ship it
-bun run db:migrate:remote  # before the first deploy
-bun run deploy             # build + wrangler deploy
+wasp deploy railway launch
 ```
 
-`build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
+Subsequent releases:
 
-**Auth.** The Worker authenticates the single user one of two ways. The simplest, no-dashboard path is **HTTP Basic Auth**: set a secret with `wrangler secret put APP_PASSWORD`, and the browser prompts on first load. The cleaner long-term path is **Cloudflare Access** on a custom domain (a one-time Zero Trust dashboard step); when its email header is present it takes precedence, no code change. Until one of these is in place, the Worker fails closed (the site is locked). See [the auth gate](docs/DECISIONS.md#the-auth-gate).
+```sh
+wasp deploy railway deploy
+```
+
+Wasp sets `DATABASE_URL`, `JWT_SECRET`, and client/server URLs on deploy. Prisma migrations in `migrations/` apply automatically on server start. Configure a real email provider in `main.wasp.ts` before inviting users (dev uses the Dummy sender).
+
+See the [Wasp Railway deploy docs](https://wasp.sh/docs/deployment/deployment-methods/paas) and [`docs/PRD-wasp-migration.md`](docs/PRD-wasp-migration.md) for the migration rationale.
+
+## Founder data migration (D1 → Postgres)
+
+The pre-Wasp deployment used Cloudflare D1. To import that outline into your Wasp account:
+
+```sh
+# 1. Export remote D1 once (needs wrangler login; see cloudflare-legacy/README.md)
+bash scripts/export-d1.sh backups/d1-export.json
+
+# 2. Sign up on the target environment, then import into your user
+wasp compile
+bun scripts/import-d1-export.ts \
+  --file backups/d1-export.json \
+  --owner owner \
+  --user-email you@example.com
+```
+
+Legacy `owner` keys (`owner`, Access email, `local-dev`) map to your Wasp `User.id` via `--user-email` or `--user-id`. Re-run requires `--force` (destructive). Export JSON stays local under `backups/` (gitignored).
 
 ## How it works
 
 ### Data model
 
-Every bullet is one row in a single TanStack DB collection. The outline tree is reconstructed in memory at read time.
+Every bullet is one row. The outline tree is reconstructed in memory at read time.
 
 ```
 Node {
   id, parentId, prevSiblingId,        // tree shape + sibling order
   text, isTask, completed, collapsed, // content + UI state
-  bookmarkedAt,                       // null, or the ms it was pinned (also the bookmark sort key)
-  createdAt, updatedAt
+  bookmarkedAt,                       // null, or the ms it was pinned
+  createdAt, updatedAt                // epoch-ms on the client; DateTime in Postgres
 }
 ```
 
-Sibling order is a linked list via `prevSiblingId` (the Workflowy/Notion approach). Inserting between two bullets is O(1) and never requires renumbering. Reordering is relinking pointers.
-
-See `src/data/tree.ts` for the index builder and `src/data/mutations.ts` for the structural operations — insert, indent / outdent, the fused `moveNode` (drag reorder + reparent), move up / down, delete — plus the field setters (text, task, completed, collapsed, bookmark). Each preserves the linked-list invariant.
-
-### Why flat, not nested
-
-A flat list of rows maps cleanly onto a sync backend. Nested JSON would force deep-merge on every keystroke. Flat rows keep moves cheap and made the move to D1 a `nodes` table, not a rewrite.
+Sibling order is a linked list via `prevSiblingId`. See `src/data/tree.ts` and `src/data/mutations.ts`.
 
 ### Persistence
 
-`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: the `queryFn` GETs the full node set from `/api/nodes` and the mutation handlers POST/PATCH/DELETE through the same Worker, which reads/writes the D1 `nodes` table scoped to the Access-authenticated user. We mutate directly (`collection.insert / update / delete`); writes are optimistic locally and persisted server-side, reconciling across devices on tab focus. See [the sync design](docs/DECISIONS.md#d1-sync-via-a-worker).
+`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: `queryFn` calls Wasp `getNodes`; mutation handlers call `upsertNodes` / `updateNodes` / `deleteNodes` (`src/data/api.ts` → `src/nodes/operations.ts`). Writes are optimistic locally with `{ refetch: false }`; cross-device edits reconcile on window-focus refetch (`src/data/query-client.ts`).
 
-Plugin **side-collections** (tag colors, the daily index) sync the same way, over a generic `/api/kv` store (one `kv` D1 table namespaced by collection) — so a custom tag color or a daily-note follows you across devices too. See [the sync design](docs/DECISIONS.md#d1-sync-via-a-worker).
+Plugin **side-collections** (tag colors, daily index) use typed Prisma tables and their own Wasp operations (`src/plugins/tags/`, `src/plugins/daily/`).
 
 ### Plugins
 
@@ -121,64 +134,39 @@ The editor is a small core extended by **plugins** compiled into the bundle (an 
 
 ## Sync: where it stands
 
-The collection interface is backend-agnostic — that's how the move from `localStorage` to D1 touched only `collection.ts` (the options creator) and added a Worker, leaving every component and the tree logic unchanged.
+**v1 (today):** online-first, reconcile-on-focus, last-write-wins via server `updatedAt`. **v1.1 (planned):** OPFS SQLite cache + offline transaction outbox.
 
-Today, sync is **single-user, near-real-time on tab focus**: optimistic local writes are persisted to D1, and the collection re-pulls server state when you refocus the tab (`refetchOnWindowFocus`). Not yet built:
+A returning user's pre-D1 browser outline is still **imported from localStorage once** on first load against an empty server (`src/data/import-legacy.ts`).
 
-- **Real-time push** — a Durable Object per outline streaming changes over WebSocket, instead of focus-driven refetch.
-- **Multi-user** — Access scopes to one identity; real accounts (sign-up/login) are a larger step.
-
-A returning user's pre-D1 outline is **imported from `localStorage` into D1 once** on first load against an empty server (`src/data/import-legacy.ts`), so the move doesn't strand existing data.
-
-See [the sync design](docs/DECISIONS.md#d1-sync-via-a-worker) for the design and rejected alternatives (incl. why D1 over ElectricSQL).
+Historical Cloudflare Worker + D1 design (superseded): [docs/DECISIONS.md#d1-sync-via-a-worker](docs/DECISIONS.md#d1-sync-via-a-worker).
 
 ## Project layout
 
 ```
+main.wasp.ts          # Wasp app spec (routes, auth, operation slices)
+schema.prisma         # User, Node, TagColor, DailyIndexEntry
+migrations/           # Prisma SQL migrations
 src/
-  routes/
-    __root.tsx        # HTML shell, global CSS, app-wide providers
-    index.tsx         # the outline at the top level
-    $nodeId.tsx       # the same outline zoomed into one bullet
+  app/                # Wasp pages (OutlinePage, auth, App shell)
   components/
-    OutlineEditor.tsx   # thin re-export; implementation in outline-editor/
-    outline-editor/     # editor orchestration, zoom UI, focus + command hooks
-    OutlineNode.tsx     # one bullet + its subtree (memoized, per-node store subscription)
-    node-commands.ts    # NodeCommands type (PluginContext.mutations contract)
-    inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
-    menu-engine.tsx     # generic caret-autocomplete engine (`/` + `#` menus)
-    node-switcher.tsx   # Cmd+K quick-switcher
-    move-dialog.tsx     # the `/move` destination picker
-    bookmarks.tsx       # header star + bookmark browsing
-    use-drag-reorder.ts # bullet-dot drag (reorder + reparent)
-    Header.tsx, paste.ts, flash-node.ts, *-provider.tsx, *-toggle.tsx, ui/
-  data/
-    schema.ts         # zod schema, Node type
-    collection.ts     # TanStack DB query collection over D1 (/api/nodes)
-    api.ts            # REST client for the /api/nodes Worker
-    kv-api.ts         # REST client for the generic /api/kv side-collection store
-    query-client.ts   # shared TanStack Query client (focus refetch = sync)
-    tree.ts           # flat-list -> TreeIndex, trail / id / time helpers
-    tree-store.ts     # per-node subscriptions (useNode / useVisibleChildIds)
-    mutations.ts      # insert / move / delete / field setters
-    history.ts        # undo / redo capture
-    seed.ts           # first-run bootstrap: import legacy localStorage, else seed welcome bullets
-    import-legacy.ts  # one-time pre-D1 localStorage -> D1 outline import
-    useTree.ts        # useLiveQuery hook
-  plugins/            # the editor's plugin layer (see docs/DECISIONS.md)
-    index.ts          # the one ordered array: [code, links, route-bible, tags, todos, daily]
-    core-slash.tsx    # core `/` palette MenuSpec (Seam H), built from Seam C + Move
-    types.ts          # the typed seam contract (definePlugin)
-    registry.ts       # composes every plugin's registrations once at load
-    code/ links/ route-bible/ tags/ todos/ daily/   # one folder per plugin (parsing + side-collections colocated, e.g. tags/tags.ts, tags/tag-colors.ts, todos/show-completed-*.tsx)
-  router.tsx
-  styles.css
-worker/               # Cloudflare Worker: serves the SPA + /api/nodes + /api/kv over D1
-  index.ts            #   fetch handler (Access-scoped CRUD), own tsconfig
-migrations/           # D1 SQL migrations (0001 nodes, 0002 kv)
-wrangler.jsonc        # Worker + assets + D1 binding config
-docs/DECISIONS.md     # the few load-bearing decisions (history in git log)
-vite.config.ts        # SPA mode + /api dev proxy
+    outline-editor/   # editor orchestration, zoom UI, focus + command hooks
+    OutlineNode.tsx   # one bullet + its subtree (memoized, per-node store subscription)
+    node-commands.ts  # NodeCommands type (PluginContext.mutations contract)
+    inline-code.ts    # contentEditable decorate / caret engine (source-offset aware)
+    menu-engine.tsx   # generic caret-autocomplete engine (`/` + `#` menus)
+    node-switcher.tsx # Cmd+K quick-switcher
+    move-dialog.tsx   # the `/move` destination picker
+    bookmarks.tsx     # header star + bookmark browsing
+    use-drag-reorder.ts
+    Header.tsx, paste.ts, flash-node.ts, ui/
+  data/               # schema, collection, api (Wasp op wrappers), tree, mutations, …
+  nodes/              # getNodes / upsertNodes / … (Wasp server ops)
+  plugins/            # code, links, tags, todos, daily, route-bible (+ *.wasp.ts slices)
+  account/            # deleteAccount
+scripts/              # D1 export/import (Phase 4 cutover)
+cloudflare-legacy/    # old D1 SQL + export-only wrangler config
+docs/                 # PRD, DECISIONS
+e2e/                  # Playwright specs
 ```
 
 ## License

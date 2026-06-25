@@ -45,6 +45,21 @@ plugin reads it. Don't generalize this into "plugins can add fields."
 
 ---
 
+## Subheader vs header slot
+
+**Header slots** are persistent actions in the header's right cluster (the daily "Today" button).
+**Subheader slots** are contextual state below the header — the tag filter bar, a future week nav,
+a pomodoro timer. The core renders every non-null subheader slot into one **muted band**
+(`bg-muted/30`) that **collapses with animation** when all slots return null and **sticks with the
+header** as one unit. Header = "do something"; subheader = "here's what's shaping the view."
+
+**Don't** put contextual/filter UI in header slots (wrong semantics, competes with global actions)
+or leave it inline above the outline content (it's chrome, not document). Multi-slot layout within
+the band (leading/main/trailing regions) is deferred until a second consumer ships — v1 renders all
+non-null slots in one flex row.
+
+---
+
 ## No zod defaults in the schema
 
 `src/data/schema.ts` declares **no `.default()` values**. Build every node through `makeNode()` in
@@ -153,7 +168,12 @@ it's the CSS-injection guard.
 
 ## D1 sync via a Worker
 
-One Cloudflare **Worker** (`worker/index.ts`) serves the static SPA *and* the sync API — `/api/nodes`
+> **Superseded (2026-06):** Production now runs on Wasp + PostgreSQL (Railway).
+> See [`docs/PRD-wasp-migration.md`](./PRD-wasp-migration.md). This entry
+> documents the v1 Cloudflare stack and why the client stayed a TanStack DB
+> collection mirror through the migration.
+
+One Cloudflare **Worker** (`worker/index.ts`, removed at cutover) served the static SPA *and* the sync API — `/api/nodes`
 (the outline) and `/api/kv` (plugin side-collections: tag colors, daily index) — both backed by
 **D1**, scoped per owner. `collection.ts` is a TanStack DB `queryCollectionOptions` collection; its
 interface is identical to the old localStorage version, so the tree store, mutations, and

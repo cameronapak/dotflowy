@@ -1,4 +1,4 @@
-import { useParams } from "@tanstack/react-router";
+import { useParams } from "react-router";
 import { BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { toggleBookmark } from "../data/mutations";
@@ -25,8 +25,8 @@ import { Separator } from "./ui/separator";
  */
 export function BookmarkStar() {
   const { index } = useTree();
-  // Loose params: `nodeId` is present on /$nodeId, absent on / (home).
-  const rootId = useParams({ strict: false }).nodeId ?? null;
+  // Loose params: `nodeId` is present on /:nodeId, absent on / (home).
+  const rootId = useParams().nodeId ?? null;
   const current = rootId ? (index.byId.get(rootId) ?? null) : null;
   if (!current) return null;
 

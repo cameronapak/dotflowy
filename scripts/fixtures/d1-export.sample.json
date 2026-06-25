@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "exportedAt": "2026-06-25T00:00:00.000Z",
+  "databaseId": "sample",
+  "owners": {
+    "owner": {
+      "nodes": [
+        {
+          "id": "root-a",
+          "owner": "owner",
+          "parentId": null,
+          "prevSiblingId": null,
+          "text": "Imported root",
+          "isTask": 0,
+          "completed": 0,
+          "collapsed": 0,
+          "bookmarkedAt": null,
+          "createdAt": 1710000000000,
+          "updatedAt": 1710000000000
+        },
+        {
+          "id": "child-b",
+          "owner": "owner",
+          "parentId": "root-a",
+          "prevSiblingId": null,
+          "text": "Child with #tag",
+          "isTask": 1,
+          "completed": 0,
+          "collapsed": 0,
+          "bookmarkedAt": null,
+          "createdAt": 1710000001000,
+          "updatedAt": 1710000001000
+        }
+      ],
+      "tagColors": [{ "tag": "tag", "color": "blue" }],
+      "dailyIndex": [{ "key": "2026-06-25", "nodeId": "daily-1" }]
+    }
+  }
+}

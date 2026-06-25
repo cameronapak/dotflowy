@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import superjson from "superjson";
 
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
@@ -15,7 +16,7 @@ export interface SeedNode {
   bookmarkedAt?: number | null;
 }
 
-/** A full node row as the /api/nodes Worker speaks it -- real booleans, all
+/** A full node row as the Wasp `getNodes` query returns — real booleans, all
  *  fields present. Mirrors the client `Node` type (src/data/schema.ts). */
 interface ApiNode {
   id: string;
@@ -28,6 +29,16 @@ interface ApiNode {
   bookmarkedAt: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+interface TagColorRow {
+  tag: string;
+  color: string;
+}
+
+interface DailyRow {
+  key: string;
+  nodeId: string;
 }
 
 function toNode(n: SeedNode): ApiNode {
@@ -45,109 +56,106 @@ function toNode(n: SeedNode): ApiNode {
   };
 }
 
+function parseArgs<T>(route: Route): T {
+  const raw = route.request().postData();
+  if (!raw) return {} as T;
+  return superjson.parse(raw) as T;
+}
+
+function replyOp(route: Route, data: unknown) {
+  return route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(superjson.serialize(data)),
+  });
+}
+
 /**
- * Seed a known outline by intercepting the `/api/nodes` Worker with an
- * in-memory mock, so the app's TanStack DB query collection loads exactly this
- * tree and the editor's seed-if-empty effect sees a non-empty store and stays
- * out of the way.
+ * Seed a known outline by intercepting Wasp operations with an in-memory mock,
+ * so the app's TanStack DB query collection loads exactly this tree and the
+ * editor's seed-if-empty effect sees a non-empty store and stays out of the way.
  *
- * Since the D1 move (ADR 0023) the app reads nodes from the Worker, not
- * localStorage -- so the old localStorage seed was a no-op. This mock mirrors
- * `worker/index.ts`'s contract exactly:
- *   - GET    -> the COMPLETE node set (the queryFn treats it as authoritative)
- *   - POST   -> upsert `{ nodes }`
- *   - PATCH  -> apply `{ updates: [{ id, changes }] }`
- *   - DELETE -> drop `{ ids }`
- * so the real `collection.ts` -> `api.ts` query/mutation path is exercised end
- * to end; only D1 is swapped for a Map. The Worker's own SQL is covered by
- * `typecheck:worker` plus manual verification (docs/DECISIONS.md (D1 sync)), not here.
- *
- * The store is scoped to this test's `page`. Playwright gives each test its own
- * page/context, so two tests never share state -- stronger isolation than a
- * single shared local D1 would give under `fullyParallel`. Register before
- * `page.goto(...)` (every spec does) so the collection's first GET is mocked.
+ * Mirrors the server semantics from src/nodes/operations.ts and the plugin
+ * side-collections (tag colors, daily index) — only Postgres is swapped for
+ * Maps. The store is scoped to this test's `page`, so `fullyParallel` tests
+ * never share state. Register before `page.goto(...)` (every spec does) so the
+ * collection's first query is mocked.
  */
 export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> {
-  const store = new Map<string, ApiNode>();
-  for (const n of nodes) store.set(n.id, toNode(n));
+  const nodeStore = new Map<string, ApiNode>();
+  for (const n of nodes) nodeStore.set(n.id, toNode(n));
 
-  const reply = (route: Route, data: unknown) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(data),
-    });
+  const tagColors = new Map<string, TagColorRow>();
+  const dailyIndex = new Map<string, DailyRow>();
 
-  await page.route(
-    (url) => url.pathname === "/api/nodes",
-    async (route) => {
-      const req = route.request();
-      switch (req.method()) {
-        case "GET":
-          return reply(route, [...store.values()]);
-        case "POST": {
-          const { nodes: incoming } = req.postDataJSON() as { nodes: ApiNode[] };
-          for (const n of incoming ?? []) store.set(n.id, n);
-          return reply(route, { ok: true });
-        }
-        case "PATCH": {
-          const { updates } = req.postDataJSON() as {
-            updates: { id: string; changes: Partial<ApiNode> }[];
-          };
-          for (const u of updates ?? []) {
-            const cur = store.get(u.id);
-            if (cur) store.set(u.id, { ...cur, ...u.changes });
-          }
-          return reply(route, { ok: true });
-        }
-        case "DELETE": {
-          const { ids } = req.postDataJSON() as { ids: string[] };
-          for (const id of ids ?? []) store.delete(id);
-          return reply(route, { ok: true });
-        }
-        default:
-          return route.fulfill({ status: 405, body: "{}" });
-      }
-    },
-  );
+  await page.route("**/operations/get-nodes", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    return replyOp(route, [...nodeStore.values()]);
+  });
 
-  // The plugin side-collections (tag colors, daily index) are now D1-backed too
-  // (ADR 0024), so every spec's app load GETs /api/kv per collection and the
-  // daily specs WRITE through it (a failed write would roll back the optimistic
-  // insert). Mock the generic kv store per collection namespace, starting empty.
-  const kv = new Map<string, Map<string, unknown>>();
-  const ns = (collection: string) => {
-    let m = kv.get(collection);
-    if (!m) kv.set(collection, (m = new Map()));
-    return m;
-  };
+  await page.route("**/operations/upsert-nodes", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { nodes: incoming } = parseArgs<{ nodes: ApiNode[] }>(route);
+    for (const n of incoming ?? []) nodeStore.set(n.id, n);
+    return replyOp(route, undefined);
+  });
 
-  await page.route(
-    (url) => url.pathname === "/api/kv",
-    async (route) => {
-      const req = route.request();
-      const collection = new URL(req.url()).searchParams.get("collection") ?? "";
-      const m = ns(collection);
-      switch (req.method()) {
-        case "GET":
-          return reply(route, [...m.values()]);
-        case "POST": {
-          const { rows } = req.postDataJSON() as {
-            rows: { key: string; value: unknown }[];
-          };
-          for (const r of rows ?? []) m.set(r.key, r.value);
-          return reply(route, { ok: true });
-        }
-        case "DELETE": {
-          const { keys } = req.postDataJSON() as { keys: string[] };
-          for (const k of keys ?? []) m.delete(k);
-          return reply(route, { ok: true });
-        }
-        default:
-          return route.fulfill({ status: 405, body: "{}" });
-      }
-    },
-  );
+  await page.route("**/operations/update-nodes", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { updates } = parseArgs<{
+      updates: { id: string; changes: Partial<ApiNode> }[];
+    }>(route);
+    for (const u of updates ?? []) {
+      const cur = nodeStore.get(u.id);
+      if (cur) nodeStore.set(u.id, { ...cur, ...u.changes });
+    }
+    return replyOp(route, undefined);
+  });
+
+  await page.route("**/operations/delete-nodes", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { ids } = parseArgs<{ ids: string[] }>(route);
+    for (const id of ids ?? []) nodeStore.delete(id);
+    return replyOp(route, undefined);
+  });
+
+  await page.route("**/operations/get-tag-colors", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    return replyOp(route, [...tagColors.values()]);
+  });
+
+  await page.route("**/operations/upsert-tag-colors", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { rows } = parseArgs<{ rows: TagColorRow[] }>(route);
+    for (const r of rows ?? []) tagColors.set(r.tag, r);
+    return replyOp(route, undefined);
+  });
+
+  await page.route("**/operations/delete-tag-colors", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { tags } = parseArgs<{ tags: string[] }>(route);
+    for (const tag of tags ?? []) tagColors.delete(tag);
+    return replyOp(route, undefined);
+  });
+
+  await page.route("**/operations/get-daily-index", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    return replyOp(route, [...dailyIndex.values()]);
+  });
+
+  await page.route("**/operations/upsert-daily-index", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { rows } = parseArgs<{ rows: DailyRow[] }>(route);
+    for (const r of rows ?? []) dailyIndex.set(r.key, r);
+    return replyOp(route, undefined);
+  });
+
+  await page.route("**/operations/delete-daily-index-keys", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const { keys } = parseArgs<{ keys: string[] }>(route);
+    for (const key of keys ?? []) dailyIndex.delete(key);
+    return replyOp(route, undefined);
+  });
 }
 
 /**

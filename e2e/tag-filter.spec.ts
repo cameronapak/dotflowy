@@ -29,9 +29,9 @@ test.describe("tag filtering (plugin Seam B)", () => {
     // The chip is decorated by the tags plugin's token render.
     await page.locator('.tag[data-tag="work"]').first().click();
 
-    // The click AND-s the tag into the URL-driven filter (ctx.nav.filterTag).
+    // The click AND-s the tag into the URL-driven filter (tags plugin).
     await expect(page).toHaveURL(/q=%23work/);
-    await expect(page.locator(".tag-filter-bar")).toBeVisible();
+    await expect(page.locator('[aria-label="Tag filter"]')).toBeVisible();
 
     // Matching nodes stay; the untagged one is pruned out of the render.
     await expect(row(page, "a").first()).toBeVisible();
@@ -53,5 +53,20 @@ test.describe("tag filtering (plugin Seam B)", () => {
     await expect(
       page.locator('[role="menu"][aria-label="Color for #work"]'),
     ).toBeVisible();
+  });
+
+  test("clicking Clear collapses the filter subheader", async ({ page }) => {
+    await load(page);
+
+    await page.locator('.tag[data-tag="work"]').first().click();
+    await expect(page.locator('[aria-label="Tag filter"]')).toBeVisible();
+
+    await page.getByRole("button", { name: "Clear" }).click();
+    await expect(page).not.toHaveURL(/q=/);
+    await expect(page.locator('[aria-label="Tag filter"]')).toHaveCount(0);
+
+    const subheader = page.locator('[aria-label="Active filters"]');
+    await expect(subheader).toHaveCSS("padding-top", "0px");
+    await expect(subheader).toHaveCSS("padding-bottom", "0px");
   });
 });

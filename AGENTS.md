@@ -10,6 +10,13 @@ Before substantial work:
 
 # Project Guidance
 
+> [!IMPORTANT]
+> **Wasp migration complete (Phase 4).** The app runs on **Wasp + PostgreSQL**
+> (Railway in prod). Start with **`wasp start`** (Node 24 + Postgres —
+> `wasp start db` or `DATABASE_URL`), not legacy Cloudflare/wrangler commands.
+> D1 export/import: `scripts/export-d1.sh` / `scripts/import-d1-export.ts`
+> (`cloudflare-legacy/` keeps the old D1 schema + export-only wrangler config).
+
 Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to this file.
 
 `README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) — read that when a rule below points at it.
@@ -38,46 +45,47 @@ Substantial plans or design decisions go through `/grill-with-docs` — a relent
 ## Commands
 
 ```sh
-bun run dev        # vite dev on :3000 (or next free port)
-bun run build      # production build (also prerenders /)
-bun run typecheck  # tsc --noEmit
-bun run test:e2e   # playwright (chromium) end-to-end tests
-bun run test:e2e:ui  # same, in Playwright's interactive UI
-bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
-bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
-bun run deploy     # build:cf, then `wrangler deploy`
+wasp start         # Wasp dev (client :3000, server :3001) — needs Node 24 + Postgres
+wasp start db      # managed local Postgres (Docker) for first-time dev
+wasp compile       # regenerate .wasp/out + Prisma client after spec/schema changes
+bun run typecheck  # tsc -b tsconfig.src.json (editor + Wasp server ops under src/)
+bun run test:e2e   # playwright (chromium) against wasp start (:3000)
+bun run test:e2e:ui
+bash scripts/export-d1.sh backups/d1-export.json   # one-time pre-cutover D1 backup
+bun scripts/import-d1-export.ts --file backups/d1-export.json --user-email you@example.com
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
-**No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change. End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
+**No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change (after `wasp compile` if you touched `schema.prisma` or `*.wasp.ts`). End-to-end behavior is **Playwright** (`e2e/`, chromium-only, **`wasp start` on :3000**, reuses a running one). `e2e/auth.setup.ts` logs in once; specs call `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts Wasp operations** (`/operations/get-nodes`, `/operations/upsert-nodes`, … and plugin ops) with in-memory Maps — so the real `collection.ts`/`api.ts` path runs against mocks, no Postgres seed needed per test. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.src.json`'s `include`, so it doesn't affect `typecheck`.
 
 **Caret in a contentEditable test:** don't use `Home`/`End`/arrow keys (unreliable in macOS Chromium contentEditable) and don't rely on `.click()` (lands *past* the bullet text — the `.node-text` span is wider than its text). Set the Selection range directly via `evaluate` (see the `caretAt` helper in `e2e/enter-split.spec.ts`). `toHaveText` normalizes whitespace — prefer space-free fixture text (`"alphabravo"`) or `allTextContents()` for exact comparison.
 
 ## Generated files
 
-`src/routeTree.gen.ts` is **auto-generated** by the TanStack Start Vite plugin — never hand-edit. After adding/renaming a file in `src/routes/`, run `bun run dev` once to regenerate it, else `typecheck` fails on typed routes.
+Wasp generates `.wasp/out/` (including the SDK and Prisma client). Never hand-edit generated output. Run `wasp compile` after changing `main.wasp.ts`, `*.wasp.ts`, or `schema.prisma`.
 
 ## SPA mode (no SSR)
 
-Don't run code that touches `nodesCollection` during a server/render pass. Why: [the SPA/no-SSR constraint in `docs/DECISIONS.md`](./docs/DECISIONS.md#d1-sync-via-a-worker).
+Don't run code that touches `nodesCollection` during a server/render pass. Why: [the SPA/no-SSR constraint in `docs/DECISIONS.md`](./docs/DECISIONS.md#d1-sync-via-a-worker) (historical ADR; constraint still applies on Wasp).
 
-## Deploying to Cloudflare (Worker + D1 sync)
+## Deploying to Railway (Wasp + Postgres)
 
-**One Worker** (`worker/index.ts`) on **Cloudflare Workers** (not Pages) serves the static SPA (via `ASSETS`) and the **D1**-backed sync API: `/api/nodes` (outline) and `/api/kv` (plugin side-collections). Design + rejected alternatives: [D1 sync via a Worker](./docs/DECISIONS.md#d1-sync-via-a-worker) and [the auth gate](./docs/DECISIONS.md#the-auth-gate).
+**Wasp** serves the React SPA and Wasp **queries/actions** on Node/Express, backed by **PostgreSQL** (Railway in prod). Auth is email/password; every operation scopes to `context.user.id`. Design: [`docs/PRD-wasp-migration.md`](./docs/PRD-wasp-migration.md).
 
-- **`_shell.html` → `index.html` copy is load-bearing.** SPA mode emits `dist/client/_shell.html`, but Static Assets serves `index.html` for root + SPA fallback. `build:cf` copies it; don't point wrangler at a dir without that copy.
-- **`run_worker_first: true`** routes *every* request through the Worker (so it can gate the document load for Basic Auth). The non-`/api` branch serves assets via `env.ASSETS.fetch`, which still applies `single-page-application` fallback for `/$nodeId` routes.
-- **Identity = three-tier `authorize()`** (in order): (1) `Cf-Access-Authenticated-User-Email` → owner = that email (Cloudflare Access, preferred); (2) `localhost` → `local-dev` (dev only); (3) prod without Access → **HTTP Basic Auth** against the `APP_PASSWORD` secret, owner `APP_OWNER` (default `'owner'`), **fail-closed if the secret is unset**. Gating every path (not just `/api`) is what triggers the browser's Basic Auth prompt — a `fetch()` 401 won't. **Never relax a tier to trust a client-supplied owner.**
-- **The Worker is typechecked separately** (`bun run typecheck:worker`, `worker/tsconfig.json` with `@cloudflare/workers-types`); it lives in `worker/` so its runtime types don't clash with the app's DOM lib. Don't move it under `src/`.
-- **Dev loop:** run `bun run dev` (Vite) *and* `bun run dev:api` (`wrangler dev` on :8787, Worker + local D1); first time `bun run db:migrate:local`. `bun run cf:dev` is a production-like single-server preview.
-- **Migrations** in `migrations/`; `bun run db:migrate:local` / `:remote`. Run `:remote` **before** the first `bun run deploy`.
-- **The SPA/no-SSR rule still holds:** the React app stays a pure static SPA; D1 work lives in the Worker's `/api/*` handlers, never the render pass.
+- **One-time:** `wasp deploy railway launch` (provisions app + Postgres, sets env vars).
+- **Ship:** `wasp deploy railway deploy`.
+- **Migrations:** Prisma migrations in `migrations/` apply on server start — commit them before deploy.
+- **Email:** `main.wasp.ts` uses the Dummy sender in dev; switch to a real provider before production signup.
+- **Founder cutover:** export D1 with `bash scripts/export-d1.sh`, import with `bun scripts/import-d1-export.ts` (see `cloudflare-legacy/README.md`).
+- **The SPA/no-SSR rule still holds:** never touch `nodesCollection` during a server/render pass.
+
+Historical Cloudflare Worker + D1 deploy notes: [D1 sync via a Worker](./docs/DECISIONS.md#d1-sync-via-a-worker) (superseded at Phase 4).
 
 ## Data layer gotchas
 
-- **Nodes live in D1, not localStorage** ([D1 sync](./docs/DECISIONS.md#d1-sync-via-a-worker)). `nodesCollection` is a TanStack DB query collection over `/api/nodes` (`collection.ts` + `api.ts` + `query-client.ts`); the interface is unchanged, so store/mutations/components didn't change. **Side-collections are D1-backed too** over a generic `/api/kv?collection=<name>` store (`kv-api.ts`) — tag colors live in `plugins/tags/tag-colors.ts`, the daily index in `plugins/daily/daily-index.ts`; each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
-- **First-run bootstrap = import-or-seed.** On mount `OutlineEditor` calls `bootstrapOutline()` (`seed.ts`): `importLegacyNodes()` first (one-time pre-D1 localStorage → D1 migration into an *empty* D1, guarded by a `dotflowy-oss:d1-imported` flag, non-destructive), then `seedIfEmpty()` only if nothing imported. Keep the **single guard in `bootstrapOutline`** — splitting it races import vs. seed under StrictMode. Covered by `e2e/import-legacy.spec.ts`.
-- **e2e seeds through the API, not localStorage** (`seedOutline` mocks `/api/nodes`). Don't reintroduce a localStorage node seed for the live store. (The import spec writes the legacy localStorage shape on purpose.)
+- **Nodes live in Postgres, not localStorage.** `nodesCollection` is a TanStack DB query collection over Wasp `getNodes` (`collection.ts` + `api.ts` + `query-client.ts`); mutations call `upsertNodes` / `updateNodes` / `deleteNodes`. **Side-collections** live in `plugins/tags/tag-colors.ts` and `plugins/daily/daily-index.ts` — typed Prisma tables via plugin Wasp operations, not the old generic `/api/kv` store. The old `dotflowy-oss:*` localStorage keys are no longer read for the live store.
+- **First-run bootstrap = import-or-seed (per userId).** On mount `useBootstrapOutline` calls `bootstrapOutline(userId)` (`seed.ts`): `importLegacyNodes()` first (one-time pre-D1 localStorage → server migration into an *empty* silo, guarded by `dotflowy-oss:d1-imported`), then `seedIfEmpty()` only if nothing imported. Guards reset on auth change. Keep the **single guard in `bootstrapOutline`** — splitting it races import vs. seed under StrictMode. Covered by `e2e/import-legacy.spec.ts`.
+- **e2e seeds through mocked Wasp operations**, not localStorage (`seedOutline` in `e2e/fixtures.ts`). Don't reintroduce a localStorage node seed for the live store.
 - **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [No zod defaults](./docs/DECISIONS.md#no-zod-defaults-in-the-schema).
 - **Mutations operate on the live `TreeIndex`.** Every `mutations.ts` function takes the current index and mutates `nodesCollection` directly. The editor passes `focusIndex.current` (a ref) into the `useMemo`-stable `commands` object, which is how its closures read live values. [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
 - **Per-node subscriptions, not a threaded index.** Components read the **tree store** (`tree-store.ts`): `useNode(id)`, `useVisibleChildIds(parentId, showCompleted)`, `useTreeIndex()`. `OutlineNode` takes a `nodeId` and reads its own slice, so a keystroke re-renders only the changed bullet. **Don't pass `node`/`index` as props to `OutlineNode`.** [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
@@ -94,7 +102,7 @@ Inline Tailwind classes, not a separate CSS file (separate CSS only for the view
 - **Enter splits the bullet at the caret.** Text left of the caret stays; text right moves to a new sibling below, focused at its *start* (the lone exception to the end-of-text `pendingFocus` default — `pendingFocusAtStart`). Caret-at-end is the empty-tail case, so Enter at the end of an expanded parent still dives in. One undo step. `e2e/enter-split.spec.ts`.
 - **Keyboard expand/collapse is directional, not a toggle:** `Cmd+↓` opens a closed bullet, `Cmd+↑` closes an open one, everything else is a silent no-op; both always `preventDefault`, one level, focus stays.
 - **Arrow Up/Down crosses bullets from the edge *visual line*, preserving the caret column** (rect comparison, not text offset; lands via `caretPositionFromPoint`). The neighbor walk (`findVisibleNeighbor` → `flattenVisible`) **must mirror render visibility** (skip completed when `showCompleted` is off) or focus silently no-ops.
-- **Cmd+Shift+↑/↓ moves a bullet among *visible* siblings; at the edge it outdents one level** (never dives into a sibling subtree, no-op past the zoom root). `moveUp`/`moveDown` in `mutations.ts`.
+- **Cmd+Shift+↑/↓ moves a bullet among *visible* siblings; at the edge it reparents into the parent's adjacent sibling as a child** (no-op when there is no aunt/uncle, or when the node sits directly under the zoom root). `moveUp`/`moveDown` in `mutations.ts`.
 - **Dragging the bullet dot reorders *and* reparents in one drop** (mouse + touch; y picks the gap, x picks depth). Lives in `use-drag-reorder.ts`, runs imperatively on the hot path. The dot still zooms on a plain click (a movement threshold + `consumeClick()` split drag from click).
 - **A moved bullet flashes then fades** (`flash-node.ts`, `.outline-row.node-acted`) as an acted-upon signifier — every keyboard/drag move sets `pendingFlash` alongside `pendingFocus`; `/move`'s "Go" flashes across a navigation via `requestFlashAfterNav`/`consumeFlashAfterNav`. `e2e/move-flash.spec.ts`.
 
@@ -102,7 +110,7 @@ Inline Tailwind classes, not a separate CSS file (separate CSS only for the view
 
 Clicking a bullet zooms it to a temporary root. Two rules:
 - **The dot zooms (click) and drags (press + move); collapse/expand is the hover chevron** in the left gutter. Don't move zoom onto the collapse control.
-- **`rootId` is route-owned** (`routes/index.tsx` → `null`, `routes/$nodeId.tsx` → `nodeId`); don't add editor-local zoom state.
+- **`rootId` is route-owned** (`OutlinePage`: `/` → `null`, `/:nodeId` → `nodeId`); don't add editor-local zoom state.
 
 It's URL-driven via the route; the pivot morphs with a `view-transition-name`. Screenshots can't verify view transitions — see *Verifying UI changes* below.
 
@@ -112,7 +120,7 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 ## Node quick-switcher (Cmd+K search)
 
-**Cmd+K** (or the header magnifier on touch) opens a Fuse.js fuzzy jump over every node's text, navigating to the picked node's zoom view; it also renders **plugin-contributed virtual actions** (Seam J). The whole feature is `node-switcher.tsx`, mounted **once in `__root.tsx`** and reached via `openNodeSwitcher()`. The listener is **capture-phase** (fires inside a contentEditable); cmdk's own filter is **off** (Fuse drives the list, with a second non-highlighted `aliases` key). Empty query lists bookmarks; a matching query also shows an "Actions" group. **No `Node` field, no migration.**
+**Cmd+K** (or the header magnifier on touch) opens a Fuse.js fuzzy jump over every node's text, navigating to the picked node's zoom view; it also renders **plugin-contributed virtual actions** (Seam J). The whole feature is `node-switcher.tsx`, mounted **once in `App.tsx`** and reached via `openNodeSwitcher()`. The listener is **capture-phase** (fires inside a contentEditable); cmdk's own filter is **off** (Fuse drives the list, with a second non-highlighted `aliases` key). Empty query lists bookmarks; a matching query also shows an "Actions" group. **No `Node` field, no migration.**
 
 ## Plugins (`src/plugins`)
 
@@ -139,7 +147,7 @@ Seams wired today (each row: the contract, who owns it):
 | **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`), core (`/` via `core-slash.tsx`) |
 | **I** input | `input.onPaste` (replacement string) + `input.autoformat` (rewrite just-typed text). | links (paste), todos (`[]`) |
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
-| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op); **plugin styles seam** (static CSS, currently no consumer). | tags (picker), daily (container) |
+| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op). | tags (picker), daily (container) |
 
 Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+G+H · **todos** C+D+caretKeys+F+rowDecorations+G+I · **daily** C+F(header)+F(row)+J+protected.
 
@@ -147,9 +155,9 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 ## Tag filtering + colors (`src/plugins/tags/`)
 
-`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The filter is a Seam-G transform (`buildTagFilter`); the click is Seam-B delegated (`onClick → ctx.nav.filterTag`). Pure logic in `src/plugins/tags/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
+`#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** URL sync, escape-to-clear, and the filter bar live in `outline-editor/use-tag-filter.ts` + `tag-filter-bar.tsx`; the filter transform is Seam G (`buildTagFilter`); chip click is Seam B (`onClick → ctx.nav.filterTag`). Pure logic in `src/plugins/tags/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
 
-**Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, D1-backed via `/api/kv`) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `__root.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/DECISIONS.md#custom-tag-colors).
+**Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, Postgres via Wasp `getTagColors`/`upsertTagColors`) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `App.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/DECISIONS.md#custom-tag-colors).
 
 ## Rich links (`src/plugins/links/`)
 
@@ -161,7 +169,7 @@ The landmine: a focused bullet can hold **folded** links, so `el.textContent` is
 
 Tasks/completion are the todos plugin's concept — checkboxes, hide-completed, fade cascade, `/todo`/`/bullet`, `[]` autoformat, Mod+Enter/D. The `completed`/`isTask` **fields** stay on `Node` (the one named exception in DECISIONS.md) but all behavior lives here.
 
-- **Show completed** is plugin-owned UI state: `show-completed-provider.tsx` (persisted preference, mounted in `__root.tsx`) and `show-completed-toggle.tsx` (header control — imported explicitly in `Header.tsx` to preserve action order).
+- **Show completed** is plugin-owned UI state: `show-completed-provider.tsx` (persisted preference, mounted in `App.tsx`) and `show-completed-toggle.tsx` (header control — imported explicitly in `Header.tsx` to preserve action order).
 - **Seam G** hide-completed reads `showCompleted` from the provider via `ViewContext`.
 - **`NodeCommands`** (the promoted mutation surface plugins call via `ctx.mutations`) is typed in `src/components/node-commands.ts` — not on `OutlineNode`, so `plugins/types.ts` doesn't import a React component.
 
@@ -184,8 +192,12 @@ A Bible ref in `node.text` renders as a chip opening [route.bible](https://route
 
 ## Environment gotcha: adding a React-importing dependency
 
-`bun add`-ing a package that imports React (e.g. `lucide-react`) while `bun run dev` is running may crash with "Invalid hook call / multiple copies of React" — a stale Vite dep-optimize cache, not a code bug. Fix: stop the server, `rm -rf node_modules/.vite`, restart.
+`bun add`-ing a package that imports React (e.g. `lucide-react`) while **`wasp start`** is running may crash with "Invalid hook call / multiple copies of React" — a stale Vite dep-optimize cache, not a code bug. Fix: stop the server, `rm -rf node_modules/.vite`, restart.
 
 ## Verifying UI changes
 
 Screenshots **cannot capture view-transition overlays** (they show the settled DOM, so a morph always looks "done"). Verify transitions by instrumenting `document.startViewTransition` and asserting on which element holds `view-transition-name`.
+
+# Wasp Knowledge
+
+Wasp knowledge can be found at @.claude/wasp/general-wasp-knowledge.md
