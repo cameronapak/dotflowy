@@ -1,0 +1,24 @@
+# dotflowy reverse proxy — serves Wasp SPA + proxies API/auth to Node server
+# PORT is injected by the Zo service manager (HTTP service).
+
+:{$PORT} {
+	# Wasp API + auth routes → Node server (localhost:3001)
+	@waspApi path /operations/* /auth/* /api/*
+	reverse_proxy @waspApi 127.0.0.1:3001
+
+	# Static SPA assets
+	@static {
+		path /assets/* /favicon.ico /no-flash-theme.js /robots.txt
+	}
+	handle @static {
+		root * "/home/workspace/1. Projects/dotflowy/.wasp/out/web-app/build"
+		file_server
+	}
+
+	# Everything else → SPA fallback (200.html = Wasp's SPA entry)
+	handle {
+		root * "/home/workspace/1. Projects/dotflowy/.wasp/out/web-app/build"
+		try_files {path} /200.html
+		file_server
+	}
+}
