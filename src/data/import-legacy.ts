@@ -1,3 +1,4 @@
+import * as errore from 'errore'
 import { nodesCollection } from './collection'
 import { now } from './tree'
 import type { Node } from './schema'
@@ -19,9 +20,12 @@ import type { Node } from './schema'
  *    device).
  *
  * Non-destructive: the legacy key is left intact as a backup. Returns true only
- * when it actually wrote nodes, so the caller skips the first-run seed. The
- * single-run / StrictMode guarding lives in the one caller (bootstrapOutline in
- * seed.ts), so this needs no in-flight guard of its own. See docs/DECISIONS.md (D1 sync).
+ * when it actually wrote nodes (so the caller skips the first-run seed), false
+ * otherwise. bootstrapOutline gates on a failed initial load BEFORE calling us,
+ * so by here the collection is ready and an empty D1 is genuinely empty -- we
+ * never mark IMPORTED_FLAG against an outage. The single-run / StrictMode
+ * guarding lives in that one caller, so this needs no in-flight guard of its
+ * own. See docs/DECISIONS.md (D1 sync).
  */
 const LEGACY_KEY = 'dotflowy-oss:nodes'
 const IMPORTED_FLAG = 'dotflowy-oss:d1-imported'
@@ -52,15 +56,13 @@ export async function importLegacyNodes(): Promise<boolean> {
 function readLegacyNodes(): Node[] {
   const raw = localStorage.getItem(LEGACY_KEY)
   if (!raw) return []
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return []
-  }
+  // Sync boundary (JSON.parse on a possibly-corrupt blob): errore.try turns the
+  // throw into a value so the parse failure falls through to the [] fallback.
+  const parsed = errore.try(() => JSON.parse(raw) as Record<string, unknown>)
+  if (parsed instanceof Error) return []
   if (!parsed || typeof parsed !== 'object') return []
   const out: Node[] = []
-  for (const entry of Object.values(parsed as Record<string, unknown>)) {
+  for (const entry of Object.values(parsed)) {
     const node = normalizeNode((entry as { data?: unknown } | null)?.data)
     if (node) out.push(node)
   }

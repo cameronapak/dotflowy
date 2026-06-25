@@ -1,7 +1,8 @@
 import { appendChild } from './mutations'
 import { createId, makeNode, now } from './tree'
-import { nodesCollection } from './collection'
+import { nodesCollection, nodesLoadError } from './collection'
 import { importLegacyNodes } from './import-legacy'
+import { BootstrapError } from './errors'
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
@@ -15,12 +16,30 @@ let bootstrapped = false
  * seeded (genuinely new user). Import wins when present, so we never stack
  * welcome bullets on top of imported data. Called once on mount; see
  * import-legacy.ts and docs/DECISIONS.md (D1 sync).
+ *
+ * Bail BEFORE seeding/importing if the initial load failed. The query adapter
+ * calls markReady() even on a failed fetch, so `toArrayWhenReady()` resolves
+ * EMPTY rather than rejecting (see nodesLoadError) -- without this gate a
+ * returning user who opens the app during a server outage would have welcome
+ * bullets seeded over their real (just-unreachable) outline, and the one-time
+ * legacy-import flag would be set against a write that rolls back. We surface
+ * the failure as a value (errore convention); the caller logs it.
  */
-export async function bootstrapOutline(): Promise<void> {
+export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return
   bootstrapped = true
-  const imported = await importLegacyNodes()
-  if (!imported) await seedIfEmpty()
+  // Wait for the first load to settle. The .catch covers the rare paths where
+  // preload() actually rejects (a synchronous sync-init throw); the common
+  // 500/offline case resolves here and is caught by the nodesLoadError gate.
+  const ready = await nodesCollection
+    .toArrayWhenReady()
+    .catch((e) => new BootstrapError({ cause: e }))
+  if (ready instanceof Error) return ready
+  const loadError = nodesLoadError()
+  if (loadError) return new BootstrapError({ cause: loadError })
+
+  if (await importLegacyNodes()) return
+  await seedIfEmpty()
 }
 
 // One-shot guard, set synchronously before the first await. The old
@@ -36,7 +55,12 @@ let seedStarted = false
  * collection's initial load (`toArrayWhenReady`) before deciding, so it only
  * seeds when the server genuinely has no nodes for this user — never on the
  * brief "empty before the first fetch resolves" window the D1-backed query
- * collection passes through. Returns true if it seeded.
+ * collection passes through. Returns true if it seeded, false otherwise.
+ *
+ * The failed-load case is handled upstream in bootstrapOutline (the query
+ * adapter resolves this empty on failure, so seeding here would clobber a
+ * just-unreachable outline). By the time bootstrap calls us the collection is
+ * already ready, so this await resolves instantly.
  *
  * The component calls this once on mount; the inserts persist to D1 through the
  * collection's normal mutation path. See docs/DECISIONS.md (D1 sync).

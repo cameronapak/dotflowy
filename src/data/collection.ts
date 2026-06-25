@@ -57,3 +57,19 @@ export const nodesCollection = createCollection(
     },
   }),
 )
+
+/**
+ * The initial-load error, if the first `fetchNodes` settled in error, else null.
+ *
+ * Why this exists: the query-db-collection adapter calls `markReady()` even when
+ * the fetch FAILS (it logs the error, then unblocks the collection), so
+ * `toArrayWhenReady()` RESOLVES with an empty array on a server 500 / offline /
+ * auth failure -- it neither rejects nor hangs. An empty array therefore means
+ * "server is genuinely empty" OR "the load failed" -- indistinguishable from the
+ * collection alone. Reading the underlying query state is the only way to tell
+ * them apart, which first-run bootstrap needs so it doesn't seed welcome bullets
+ * on top of a transient outage (see seed.ts).
+ */
+export function nodesLoadError(): Error | null {
+  return queryClient.getQueryState(['nodes'])?.error ?? null
+}
