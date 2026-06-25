@@ -234,12 +234,25 @@ function reparentIntoParentPrevSibling(
   index: TreeIndex,
   node: Node,
   rootId: string | null,
+  isVisible: (n: Node) => boolean,
 ): boolean {
   if (node.parentId === null || node.parentId === rootId) return false
   const parent = index.byId.get(node.parentId)
-  if (!parent?.prevSiblingId) return false
+  if (!parent) return false
 
-  const uncleId = parent.prevSiblingId
+  const parentSiblings = childrenOf(index, parent.parentId)
+  const pi = parentSiblings.findIndex((n) => n.id === parent.id)
+  if (pi <= 0) return false
+
+  let uncleId: string | null = null
+  for (let j = pi - 1; j >= 0; j--) {
+    if (isVisible(parentSiblings[j]!)) {
+      uncleId = parentSiblings[j]!.id
+      break
+    }
+  }
+  if (!uncleId) return false
+
   const uncleChildren = childrenOf(index, uncleId)
   const afterSiblingId =
     uncleChildren.length > 0 ? uncleChildren[uncleChildren.length - 1]!.id : null
@@ -258,6 +271,7 @@ function reparentIntoParentNextSibling(
   index: TreeIndex,
   node: Node,
   rootId: string | null,
+  isVisible: (n: Node) => boolean,
 ): boolean {
   if (node.parentId === null || node.parentId === rootId) return false
   const parent = index.byId.get(node.parentId)
@@ -265,13 +279,21 @@ function reparentIntoParentNextSibling(
 
   const parentSiblings = childrenOf(index, parent.parentId)
   const pi = parentSiblings.findIndex((n) => n.id === parent.id)
-  const aunt =
-    pi !== -1 && pi + 1 < parentSiblings.length ? parentSiblings[pi + 1]! : null
-  if (!aunt) return false
+  if (pi === -1) return false
 
-  if (aunt.collapsed) update(aunt.id, { collapsed: false })
+  let auntId: string | null = null
+  for (let j = pi + 1; j < parentSiblings.length; j++) {
+    if (isVisible(parentSiblings[j]!)) {
+      auntId = parentSiblings[j]!.id
+      break
+    }
+  }
+  if (!auntId) return false
 
-  return moveNode(index, node.id, aunt.id, null)
+  const aunt = index.byId.get(auntId)
+  if (aunt?.collapsed) update(aunt.id, { collapsed: false })
+
+  return moveNode(index, node.id, auntId, null)
 }
 
 /**
@@ -304,7 +326,7 @@ export function moveUp(
     }
   }
 
-  if (!vp) return reparentIntoParentPrevSibling(index, node, opts.rootId ?? null)
+  if (!vp) return reparentIntoParentPrevSibling(index, node, opts.rootId ?? null, isVisible)
 
   // Swap: detach node, then re-insert it immediately before vp. A hidden
   // sibling between them stays put (rides along below vp).
@@ -345,7 +367,7 @@ export function moveDown(
   }
 
   if (k === -1) {
-    return reparentIntoParentNextSibling(index, node, opts.rootId ?? null)
+    return reparentIntoParentNextSibling(index, node, opts.rootId ?? null, isVisible)
   }
 
   // Swap: detach node, then re-insert it immediately after vn.

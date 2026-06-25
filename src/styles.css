@@ -5,9 +5,6 @@
 
 /* Small shared surface used by the auth pages (carried over from the Wasp
    scaffold's App.css when this became the single Tailwind entry). */
-@utility card {
-  @apply rounded-xl border border-neutral-200 bg-white shadow-sm;
-}
 
 @theme inline {
   --color-background: var(--background);

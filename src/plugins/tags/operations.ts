@@ -4,6 +4,7 @@ import type {
   UpsertTagColors,
   DeleteTagColors,
 } from 'wasp/server/operations'
+import { normalizeTag } from './tags'
 
 /**
  * Custom tag colors (Seam E side-collection, PRD Phase 2). Replaces the
@@ -12,6 +13,27 @@ import type {
  * (legacy/data/tag-colors.ts); `userId`/`updatedAt` stay server-side.
  */
 export type TagColorRow = { tag: string; color: string }
+
+const TAG_COLOR_SET = new Set([
+  'red',
+  'orange',
+  'amber',
+  'green',
+  'teal',
+  'blue',
+  'indigo',
+  'purple',
+  'pink',
+])
+
+const SAFE_TAG_RE = /^[\p{L}\p{N}_-]+$/u
+
+function sanitizeRow(row: TagColorRow): TagColorRow | null {
+  const tag = normalizeTag(row.tag)
+  if (!tag || !SAFE_TAG_RE.test(tag)) return null
+  if (!TAG_COLOR_SET.has(row.color)) return null
+  return { tag, color: row.color }
+}
 
 export const getTagColors: GetTagColors<void, TagColorRow[]> = async (
   _args,
@@ -34,10 +56,12 @@ export const upsertTagColors: UpsertTagColors<
   const userId = context.user.id
   if (!rows?.length) return
   for (const r of rows) {
+    const safe = sanitizeRow(r)
+    if (!safe) continue
     await context.entities.TagColor.upsert({
-      where: { userId_tag: { userId, tag: r.tag } },
-      create: { userId, tag: r.tag, color: r.color },
-      update: { color: r.color },
+      where: { userId_tag: { userId, tag: safe.tag } },
+      create: { userId, tag: safe.tag, color: safe.color },
+      update: { color: safe.color },
     })
   }
 }

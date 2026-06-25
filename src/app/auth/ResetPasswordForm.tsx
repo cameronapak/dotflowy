@@ -19,6 +19,10 @@ export function ResetPasswordForm() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const passwordMismatch =
+    !!passwordConfirmation && password !== passwordConfirmation
+  const fieldError = passwordMismatch ? "Passwords don't match." : null
+  const formError = error && !passwordMismatch ? error : null
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -31,7 +35,7 @@ export function ResetPasswordForm() {
       )
       return
     }
-    if (password !== passwordConfirmation) {
+    if (passwordMismatch) {
       setError("Passwords don't match.")
       return
     }
@@ -64,7 +68,7 @@ export function ResetPasswordForm() {
             disabled={isLoading}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            aria-invalid={!!error}
+            aria-invalid={passwordMismatch}
           />
         </Field>
         <Field>
@@ -79,10 +83,11 @@ export function ResetPasswordForm() {
             disabled={isLoading}
             value={passwordConfirmation}
             onChange={(e) => setPasswordConfirmation(e.target.value)}
-            aria-invalid={!!error}
+            aria-invalid={passwordMismatch}
           />
         </Field>
-        {error && <FieldError>{error}</FieldError>}
+        {fieldError && <FieldError>{fieldError}</FieldError>}
+        {formError && <FieldError>{formError}</FieldError>}
         {success && <FieldDescription>{success}</FieldDescription>}
         <Button type="submit" className="w-full" disabled={isLoading}>
           {isLoading ? "Resetting…" : "Reset password"}

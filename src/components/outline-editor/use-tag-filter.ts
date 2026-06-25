@@ -66,7 +66,7 @@ export function useTagFilter(
   useEffect(() => {
     if (activeTags.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       const active = document.activeElement;
       if (active instanceof HTMLElement && active.classList.contains("node-text"))
         return;

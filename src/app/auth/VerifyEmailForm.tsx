@@ -10,11 +10,11 @@ export function VerifyEmailForm() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const started = useRef(false)
+  const startedForToken = useRef<string | null | undefined>(undefined)
 
   useEffect(() => {
-    if (started.current) return
-    started.current = true
+    if (startedForToken.current === token) return
+    startedForToken.current = token
 
     async function run() {
       if (!token) {

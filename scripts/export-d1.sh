@@ -28,10 +28,9 @@ rows() {
 DATABASE_ID="$(jq -r '.database_id' "$D1_CONFIG")"
 EXPORTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-owners_json="$(rows "SELECT DISTINCT owner FROM nodes ORDER BY owner")"
-if [ "$(echo "$owners_json" | jq 'length')" -eq 0 ]; then
-  owners_json="$(rows "SELECT DISTINCT owner FROM kv ORDER BY owner")"
-fi
+owners_json="$(jq -s 'add | unique_by(.owner)' \
+  <(rows "SELECT DISTINCT owner FROM nodes ORDER BY owner") \
+  <(rows "SELECT DISTINCT owner FROM kv ORDER BY owner"))"
 
 owners_obj="{}"
 while IFS= read -r owner; do

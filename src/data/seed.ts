@@ -4,10 +4,10 @@ import { nodesCollection, nodesLoadError } from './collection'
 import { importLegacyNodes } from './import-legacy'
 import { BootstrapError } from './errors'
 
-// Per-userId guards (PRD US-1): reset when auth changes so a second account
-// on the same tab gets its own import-or-seed pass. StrictMode double-mount
-// still bails on the same userId — only one chain runs per user.
+// Completed bootstrap for this user (StrictMode + revisits). A monotonic run
+// token cancels stale async chains when auth switches before await points finish.
 let bootstrappedUserId: string | null = null
+let bootstrapRunId = 0
 
 /**
  * First-run bootstrap. Exactly one of two things happens: a legacy localStorage
@@ -20,23 +20,26 @@ export async function bootstrapOutline(
   userId: string,
 ): Promise<BootstrapError | void> {
   if (bootstrappedUserId === userId) return
-  bootstrappedUserId = userId
-  // Wait for the first load to settle. The .catch covers the rare paths where
-  // preload() actually rejects (a synchronous sync-init throw); the common
-  // 500/offline case resolves here and is caught by the nodesLoadError gate.
+  const runId = ++bootstrapRunId
+  const alive = () => runId === bootstrapRunId
+
   const ready = await nodesCollection
     .toArrayWhenReady()
     .catch((e) => new BootstrapError({ cause: e }))
+  if (!alive()) return
   if (ready instanceof Error) return ready
   const loadError = nodesLoadError()
   if (loadError) return new BootstrapError({ cause: loadError })
 
-  if (await importLegacyNodes()) return
-  await seedIfEmpty(userId)
+  if (await importLegacyNodes()) {
+    if (!alive()) return
+    bootstrappedUserId = userId
+    return
+  }
+  await seedIfEmpty(userId, alive)
+  if (!alive()) return
+  bootstrappedUserId = userId
 }
-
-// Per-userId seed guard — same StrictMode race as bootstrappedUserId above.
-let seedStartedUserId: string | null = null
 
 /**
  * Seed the outline on first run. Idempotent and async-safe: it awaits the
@@ -44,19 +47,21 @@ let seedStartedUserId: string | null = null
  * seeds when the server genuinely has no nodes for this user — never on the
  * brief "empty before the first fetch resolves" window.
  */
-async function seedIfEmpty(userId: string): Promise<boolean> {
-  if (seedStartedUserId === userId) return false
-  seedStartedUserId = userId
+async function seedIfEmpty(
+  userId: string,
+  alive: () => boolean,
+): Promise<void> {
+  if (!alive()) return
 
   const existing = await nodesCollection.toArrayWhenReady()
-  if (existing.length > 0) return false
+  if (!alive()) return
+  if (existing.length > 0) return
 
-  // Three sibling top-level bullets, one with a child, so the user lands
-  // on something that demonstrates the structure immediately.
   const aId = createId()
   const bId = createId()
   const cId = createId()
 
+  if (!alive()) return
   nodesCollection.insert(
     makeNode({
       id: aId,
@@ -83,8 +88,5 @@ async function seedIfEmpty(userId: string): Promise<boolean> {
     }),
   )
 
-  // A child under the welcome bullet to show nesting.
   appendChild(aId, null, 'This is a sub-bullet. Collapse its parent with the dot.')
-
-  return true
 }

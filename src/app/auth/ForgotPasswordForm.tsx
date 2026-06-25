@@ -25,10 +25,8 @@ export function ForgotPasswordForm() {
       await requestPasswordReset({ email })
       setSuccess("Check your email for a password reset link.")
       setEmail("")
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong"
-      setError(message)
+    } catch {
+      setError("Could not send a password reset email. Please try again.")
     } finally {
       setIsLoading(false)
     }

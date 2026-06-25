@@ -81,13 +81,37 @@ function printHelp(): void {
 Requires DATABASE_URL (from .env.server) and \`wasp compile\` first.`)
 }
 
+function isOwnerExport(value: unknown): value is D1OwnerExport {
+  if (!value || typeof value !== 'object') return false
+  const o = value as Record<string, unknown>
+  return (
+    Array.isArray(o.nodes) &&
+    Array.isArray(o.tagColors) &&
+    Array.isArray(o.dailyIndex)
+  )
+}
+
 function loadExport(path: string): D1ExportFile | Error {
   const raw = errore.try(() => readFileSync(path, 'utf8'))
   if (raw instanceof Error) return raw
-  const parsed = errore.try(() => JSON.parse(raw) as D1ExportFile)
+  const parsed = errore.try(() => JSON.parse(raw) as unknown)
   if (parsed instanceof Error) return parsed
-  if (parsed.version !== 1 || !parsed.owners) return new Error('Invalid export file')
-  return parsed
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    (parsed as D1ExportFile).version !== 1 ||
+    typeof (parsed as D1ExportFile).owners !== 'object' ||
+    (parsed as D1ExportFile).owners === null ||
+    Array.isArray((parsed as D1ExportFile).owners)
+  ) {
+    return new Error('Invalid export file')
+  }
+  for (const payload of Object.values((parsed as D1ExportFile).owners)) {
+    if (!isOwnerExport(payload)) {
+      return new Error('Invalid export file: malformed owner payload')
+    }
+  }
+  return parsed as D1ExportFile
 }
 
 function pickOwner(exportFile: D1ExportFile, ownerArg: string | null): string | Error {
@@ -142,11 +166,22 @@ async function importOwnerData(
   data: D1OwnerExport,
   force: boolean,
 ): Promise<Error | { nodes: number; tagColors: number; dailyIndex: number }> {
-  const existingNodes = await prisma.node.count({ where: { userId } })
-  if (existingNodes > 0 && !force) {
-    return new Error(
-      `User already has ${existingNodes} node(s). Re-run with --force to replace.`,
-    )
+  const [existingNodes, existingTagColors, existingDailyIndex] =
+    await Promise.all([
+      prisma.node.count({ where: { userId } }),
+      prisma.tagColor.count({ where: { userId } }),
+      prisma.dailyIndexEntry.count({ where: { userId } }),
+    ])
+  if (!force) {
+    const parts: string[] = []
+    if (existingNodes > 0) parts.push(`${existingNodes} node(s)`)
+    if (existingTagColors > 0) parts.push(`${existingTagColors} tag color(s)`)
+    if (existingDailyIndex > 0) parts.push(`${existingDailyIndex} daily index row(s)`)
+    if (parts.length > 0) {
+      return new Error(
+        `User already has ${parts.join(', ')}. Re-run with --force to replace.`,
+      )
+    }
   }
 
   await prisma.$transaction(async (tx) => {

@@ -1,1 +1,0 @@
-{"root":["./main.wasp.ts","./src/account/account.wasp.ts","./src/nodes/nodes.wasp.ts","./src/plugins/daily/daily.wasp.ts","./src/plugins/tags/tags.wasp.ts","./.wasp/out/types/spec/register.ts"],"errors":true,"version":"5.9.3"}

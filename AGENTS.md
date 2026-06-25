@@ -50,7 +50,6 @@ wasp start db      # managed local Postgres (Docker) for first-time dev
 wasp compile       # regenerate .wasp/out + Prisma client after spec/schema changes
 bun run typecheck  # tsc -b tsconfig.src.json (editor + Wasp server ops under src/)
 bun run test:e2e   # playwright (chromium) against wasp start (:3000)
-# CI: .github/workflows/ci.yml — disabled (workflow_dispatch only); run typecheck/e2e locally
 bun run test:e2e:ui
 bash scripts/export-d1.sh backups/d1-export.json   # one-time pre-cutover D1 backup
 bun scripts/import-d1-export.ts --file backups/d1-export.json --user-email you@example.com

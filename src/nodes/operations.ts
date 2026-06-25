@@ -150,20 +150,18 @@ export const updateNodes: UpdateNodes<
   if (!updates?.length) return
 
   for (const { id, changes } of updates) {
-    const row = await context.entities.Node.findFirst({
-      where: { id, userId },
-      select: { updatedAt: true },
-    })
-    if (!row) continue
-    if (
-      typeof changes.updatedAt === 'number' &&
-      changes.updatedAt < row.updatedAt.getTime()
-    ) {
-      continue // stale write — last-write-wins drops it
-    }
     const data = toUpdateData(changes)
     if (Object.keys(data).length === 0) continue
-    await context.entities.Node.update({ where: { id }, data })
+    await context.entities.Node.updateMany({
+      where: {
+        id,
+        userId,
+        ...(typeof changes.updatedAt === 'number'
+          ? { updatedAt: { lte: new Date(changes.updatedAt) } }
+          : {}),
+      },
+      data,
+    })
   }
 }
 

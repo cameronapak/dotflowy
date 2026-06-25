@@ -42,7 +42,8 @@ model Node {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyIndexEntries DailyIndexEntry[]
 
   @@index([userId])
   @@index([userId, parentId])
@@ -70,15 +71,15 @@ model TagColor {
 
 // Plugin side-collection: per-user daily-note identity (src/plugins/daily).
 // `key` is a local date "YYYY-MM-DD" or the "container" sentinel; `nodeId`
-// points at the owning Node. The nodeId -> Node FK behaviour (onDelete SetNull
-// vs Cascade) is an open question (PRD Appendix C), so nodeId is a plain
-// column for now rather than a Prisma relation.
+// points at the owning Node and cascades on node delete.
 model DailyIndexEntry {
   userId String
   key    String
   nodeId String
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 
   @@id([userId, key])
+  @@index([nodeId])
 }

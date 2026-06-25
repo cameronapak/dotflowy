@@ -25,7 +25,11 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "skipLibCheck": true,
     "allowJs": true,
-    "outDir": ".wasp/out/user"
+    "outDir": ".wasp/out/user",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src"],
   "exclude": ["**/*.wasp.ts"]

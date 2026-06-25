@@ -8,9 +8,9 @@ function modifier() {
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
-const nestedUnder = (page: Page, ancestorId: string, nodeId: string) =>
+const directChildOf = (page: Page, parentId: string, nodeId: string) =>
   page.locator(
-    `li[data-node-id="${ancestorId}"] li[data-node-id="${nodeId}"]`,
+    `li[data-node-id="${parentId}"] ul.outline-children > li[data-node-id="${nodeId}"]`,
   );
 
 /**
@@ -46,8 +46,11 @@ test.describe("keyboard move edge: reparent into parent's sibling", () => {
     await text(page, "first").click();
     await page.keyboard.press(`${modifier()}+Shift+ArrowUp`);
 
-    await expect(nestedUnder(page, "uncle", "first")).toBeVisible();
-    await expect(nestedUnder(page, "parent", "first")).toHaveCount(0);
+    await expect(directChildOf(page, "uncle", "first")).toBeVisible();
+    await expect(directChildOf(page, "parent", "first")).toHaveCount(0);
+    await expect(
+      directChildOf(page, "uncle", "first").locator("..").locator("> li").last(),
+    ).toHaveAttribute("data-node-id", "first");
     await expect(text(page, "first")).toBeFocused();
   });
 
@@ -59,8 +62,11 @@ test.describe("keyboard move edge: reparent into parent's sibling", () => {
     await text(page, "last").click();
     await page.keyboard.press(`${modifier()}+Shift+ArrowDown`);
 
-    await expect(nestedUnder(page, "aunt", "last")).toBeVisible();
-    await expect(nestedUnder(page, "parent", "last")).toHaveCount(0);
+    await expect(directChildOf(page, "aunt", "last")).toBeVisible();
+    await expect(directChildOf(page, "parent", "last")).toHaveCount(0);
+    await expect(
+      directChildOf(page, "aunt", "last").locator("..").locator("> li").first(),
+    ).toHaveAttribute("data-node-id", "last");
     await expect(text(page, "last")).toBeFocused();
   });
 });

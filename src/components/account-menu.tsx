@@ -19,8 +19,12 @@ export function AccountMenu() {
   const email = user?.identities.email?.id
 
   async function handleLogout() {
-    await logout()
-    navigate("/login")
+    try {
+      await logout()
+      navigate("/login")
+    } catch {
+      console.error("Logout failed")
+    }
   }
 
   return (

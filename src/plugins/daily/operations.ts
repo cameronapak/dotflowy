@@ -1,4 +1,4 @@
-import { HttpError } from 'wasp/server'
+import { HttpError, prisma } from 'wasp/server'
 import type {
   GetDailyIndex,
   UpsertDailyIndex,
@@ -26,7 +26,7 @@ export const getDailyIndex: GetDailyIndex<void, DailyRow[]> = async (
 }
 
 /** Upsert mappings by `(userId, key)` — the compound id carries `userId`, so a
- *  plain Prisma upsert is ownership-safe. */
+ *  plain Prisma upsert is ownership-safe. All rows commit in one transaction. */
 export const upsertDailyIndex: UpsertDailyIndex<
   { rows: DailyRow[] },
   void
@@ -34,13 +34,15 @@ export const upsertDailyIndex: UpsertDailyIndex<
   if (!context.user) throw new HttpError(401)
   const userId = context.user.id
   if (!rows?.length) return
-  for (const r of rows) {
-    await context.entities.DailyIndexEntry.upsert({
-      where: { userId_key: { userId, key: r.key } },
-      create: { userId, key: r.key, nodeId: r.nodeId },
-      update: { nodeId: r.nodeId },
-    })
-  }
+  await prisma.$transaction(
+    rows.map((r) =>
+      prisma.dailyIndexEntry.upsert({
+        where: { userId_key: { userId, key: r.key } },
+        create: { userId, key: r.key, nodeId: r.nodeId },
+        update: { nodeId: r.nodeId },
+      }),
+    ),
+  )
 }
 
 export const deleteDailyIndexKeys: DeleteDailyIndexKeys<
