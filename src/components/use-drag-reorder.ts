@@ -340,6 +340,12 @@ export function useDragReorder(deps: DragDeps) {
       document.addEventListener("pointerup", onUp);
       document.addEventListener("pointercancel", onUp);
     },
+    // startDrag must stay referentially stable (it rides in the memoized
+    // commands, ADR 0014). onMove/onUp are recreated each render but read only
+    // refs (state.current, depsRef.current), so the mount-render closures behave
+    // identically; cleanup removes the exact stored references. Adding them
+    // would churn startDrag for zero correctness gain.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
     [],
   );
 

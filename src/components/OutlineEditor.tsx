@@ -91,6 +91,15 @@ interface OutlineEditorProps {
   rootId: string | null;
 }
 
+// Delegated mousedown for the content container (Seam B). Chips/links live in
+// the contentEditable, so a plain mousedown would drop an editing caret; we
+// block that when the pointer is over a plugin surface and let onContentClick
+// route it. Reads only the event + a module import (no local state), so it sits
+// at module scope -- one binding, not a per-render allocation.
+function onContentMouseDown(e: ReactMouseEvent) {
+  if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
+}
+
 /**
  * Top-level outline editor. Owns:
  *  - reading the live tree
@@ -171,9 +180,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // to whichever plugin owns the surface under the pointer (registry.ts). The
   // core has zero feature knowledge -- a folded link opens, a tag chip filters,
   // a right-click picks a color, all decided by the plugins. See ADR 0018.
-  const onContentMouseDown = (e: ReactMouseEvent) => {
-    if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
-  };
+  // (onContentMouseDown is pure and lives at module scope above.)
   const onContentClick = (e: ReactMouseEvent) => {
     dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
@@ -249,7 +256,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       search: activeTagsRef.current,
       openOverlay: (node) => setOverlayNode(node),
     }),
-    [commands, navigateZoom, addTag, setQ],
+    // activeTagsRef is a stable ref (read at call time); listing the ref itself
+    // -- not activeTagsRef.current -- keeps pluginCtx referentially stable.
+    [commands, navigateZoom, addTag, setQ, activeTagsRef],
   );
 
   // The pruned visible-set for the active filter (matches + ancestor context),
@@ -686,6 +695,10 @@ function useZoomNavigation({
     el.focus({ preventScroll: true });
     placeCaretAtEnd(el);
     el.scrollIntoView({ block: "nearest" });
+    // Mount-only by design: the editor remounts per zoom view (route key), so
+    // the captured values are current at mount. Re-running on any of them would
+    // re-steal focus mid-edit -- not a staleness bug.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
 
   // /move's "Go" jumps to the destination's zoom view and asks us to focus and
@@ -699,6 +712,9 @@ function useZoomNavigation({
     placeCaretAtEnd(el);
     el.scrollIntoView({ block: "nearest" });
     flashRow(el.closest(".outline-row"));
+    // Mount-only by design (see above): consumeFlashAfterNav is a one-shot read
+    // and refs are stable, so there is nothing reactive to re-run on.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
 
   return { navigateZoom, pivotId };
@@ -888,6 +904,12 @@ function useNodeCommands({
         navigateZoom(id, id);
       },
     }),
+    // commands MUST keep stable identity (a prop on every memoized OutlineNode,
+    // ADR 0014). Every live value it touches is read through a ref at call time
+    // (focusIndex/refs/pendingFocus/...), so the only real deps are the three
+    // stable callbacks; the flagged ref.current captures can't be listed and
+    // would defeat the pattern.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
     [navigateZoom, startDrag, consumeClick],
   );
 }

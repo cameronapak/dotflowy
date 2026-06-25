@@ -77,7 +77,9 @@ export function useMenus({
   const entries = useMemo<MenuEntry[]>(() => {
     if (!open || !spec) return [];
     return spec.entries(open.trigger, node, ctx());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ctx is a referentially-stable factory read at call time; recompute only
+    // when the open menu / node changes, not on ctx identity.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, [open, spec, node]);
 
   // "Open" only counts when there's something to show (or the spec opts into an

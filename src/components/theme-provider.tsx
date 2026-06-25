@@ -37,7 +37,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
     if (stored && stored !== theme) setThemeState(stored);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Mount-only: read the stored theme once. `theme` is compared against its
+    // mount-time default; re-running would fight setTheme.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
 
   useEffect(() => {
