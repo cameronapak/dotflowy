@@ -127,6 +127,10 @@ test.describe("daily notes", () => {
   }) => {
     await load(page);
     await todayButton(page).click(); // create today's note
+    // Let the create+zoom settle before going home: the daily nav is async
+    // (fire-and-forget from the click), so without this wait it can race the
+    // home nav and land last, leaving us on the day. See the other Today tests.
+    await expect(page).toHaveURL(/\/[^/]+$/);
     await goHome(page);
 
     await page.keyboard.press(`${modifier()}+k`);
@@ -322,6 +326,8 @@ test.describe("daily notes", () => {
   }) => {
     await load(page);
     await todayButton(page).click();
+    // Settle the async create+zoom before going home (see the other Today tests).
+    await expect(page).toHaveURL(/\/[^/]+$/);
     await goHome(page);
 
     // Force-delete (Mod+Shift+Backspace) the protected container: a no-op.

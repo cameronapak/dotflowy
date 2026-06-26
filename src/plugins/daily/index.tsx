@@ -29,6 +29,7 @@ import {
   moveNode,
   setText,
 } from '../../data/mutations'
+import { runStructural } from '../../data/structural'
 import {
   nodesCollection,
   resyncNodes,
@@ -96,7 +97,7 @@ async function ensureContainer(index: TreeIndex): Promise<string | null> {
   const after = tops.length ? tops[tops.length - 1]!.id : null
   const ok = await ensureNodeExists(
     winner,
-    () => appendChild(null, after, 'Daily', winner),
+    () => runStructural(() => appendChild(null, after, 'Daily', winner)),
     !won,
   )
   setMapping(CONTAINER_KEY, winner)
@@ -127,7 +128,10 @@ async function ensureDay(
   const { winner, won } = await claimMapping(key, candidate)
   const ok = await ensureNodeExists(
     winner,
-    () => insertChildAtStart(index, containerId, false, formatDayText(key), winner),
+    () =>
+      runStructural(() =>
+        insertChildAtStart(index, containerId, false, formatDayText(key), winner),
+      ),
     !won,
   )
   setMapping(key, winner)
@@ -233,10 +237,13 @@ export default definePlugin({
           return
         }
         if (todayId === nodeId) return // can't move today's note under itself
-        capture(ctx.tree, nodeId)
         const kids = childrenOf(ctx.tree, todayId)
         const after = kids.length ? kids[kids.length - 1]!.id : null
-        if (moveNode(ctx.tree, nodeId, todayId, after)) {
+        const moved = runStructural(() => {
+          capture(ctx.tree, nodeId)
+          return moveNode(ctx.tree, nodeId, todayId, after)
+        })
+        if (moved) {
           toast.success('Moved to Today', {
             action: { label: 'Go', onClick: () => ctx.nav.zoom(todayId) },
           })

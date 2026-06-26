@@ -43,6 +43,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { bootstrapOutline } from "../data/seed";
+import { runStructural } from "../data/structural";
 import { capture, drop, redo, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
@@ -211,20 +212,21 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
       null,
     getListEl: () => listRef.current,
-    onMove: (id, newParentId, afterSiblingId) => {
-      capture(focusIndex.current, id);
-      const moved = moveNode(
-        focusIndex.current,
-        id,
-        newParentId,
-        afterSiblingId,
-      );
-      if (moved) {
-        pendingFocus.current = id;
-        // Tint the row it landed on so the eye can find what just moved.
-        pendingFlash.current = id;
-      } else drop();
-    },
+    onMove: (id, newParentId, afterSiblingId) =>
+      runStructural(() => {
+        capture(focusIndex.current, id);
+        const moved = moveNode(
+          focusIndex.current,
+          id,
+          newParentId,
+          afterSiblingId,
+        );
+        if (moved) {
+          pendingFocus.current = id;
+          // Tint the row it landed on so the eye can find what just moved.
+          pendingFlash.current = id;
+        } else drop();
+      }),
   });
   // Stable references (useCallback([]) inside the hook), safe to close over in
   // the memoized commands below.
@@ -327,13 +329,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             registerRef={registerRef}
             getCtx={pluginCtx}
             onTextChange={(text) => setText(zoomedNode.id, text)}
-            onAddChild={() => {
-              const newId = insertChildAtStart(
-                focusIndex.current,
-                zoomedNode.id,
-              );
-              pendingFocus.current = newId;
-            }}
+            onAddChild={() =>
+              runStructural(() => {
+                const newId = insertChildAtStart(
+                  focusIndex.current,
+                  zoomedNode.id,
+                );
+                pendingFocus.current = newId;
+              })
+            }
             onArrowDown={() => commands.onMoveFocus(zoomedNode.id, "down")}
           />
         )}
@@ -364,18 +368,20 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                 type="button"
                 size="icon-sm"
                 variant="outline"
-                onClick={() => {
-                  const siblings = childrenOf(focusIndex.current, rootId);
-                  const afterId = siblings.length
-                    ? siblings[siblings.length - 1]!.id
-                    : null;
-                  const newId = insertSibling(
-                    focusIndex.current,
-                    rootId,
-                    afterId,
-                  );
-                  pendingFocus.current = newId;
-                }}
+                onClick={() =>
+                  runStructural(() => {
+                    const siblings = childrenOf(focusIndex.current, rootId);
+                    const afterId = siblings.length
+                      ? siblings[siblings.length - 1]!.id
+                      : null;
+                    const newId = insertSibling(
+                      focusIndex.current,
+                      rootId,
+                      afterId,
+                    );
+                    pendingFocus.current = newId;
+                  })
+                }
               >
                 <PlusIcon />
               </Button>
@@ -483,20 +489,25 @@ function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
   // native contentEditable undo (preventDefault). The focused id is handed in so
   // redo can return focus where the action left it; the restored id becomes the
   // next pending focus.
+  // undo/redo replay a snapshot as a mix of insert/update/delete -- the same
+  // multi-node relink a structural mutation does, so they ride the same atomic
+  // batch (one frame, held until echo). See runStructural / PLAN.md.
   useHotkey(
     "Mod+Z",
-    () => {
-      const focusId = undo(focusIndex.current, findFocusedId());
-      if (focusId) pendingFocus.current = focusId;
-    },
+    () =>
+      runStructural(() => {
+        const focusId = undo(focusIndex.current, findFocusedId());
+        if (focusId) pendingFocus.current = focusId;
+      }),
     { preventDefault: true },
   );
   useHotkey(
     "Mod+Shift+Z",
-    () => {
-      const focusId = redo(focusIndex.current, findFocusedId());
-      if (focusId) pendingFocus.current = focusId;
-    },
+    () =>
+      runStructural(() => {
+        const focusId = redo(focusIndex.current, findFocusedId());
+        if (focusId) pendingFocus.current = focusId;
+      }),
     { preventDefault: true },
   );
 
@@ -681,102 +692,108 @@ function useNodeCommands({
         setText(id, text);
       },
 
-      onEnter: (id, caretOffset) => {
-        const node = focusIndex.current.byId.get(id);
-        if (!node) return;
-        capture(focusIndex.current, id);
-        const offset = Math.max(0, Math.min(caretOffset, node.text.length));
-        const before = node.text.slice(0, offset);
-        const after = node.text.slice(offset);
-        const caretAtEnd = after.length === 0;
-        // Pressing Enter at the end of an open (expanded, has-children) bullet
-        // adds a child at the top of its list rather than a sibling -- you're
-        // diving into the thing you just finished naming. Anywhere else keeps
-        // the plain new-sibling.
-        const isOpen =
-          !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
-        if (caretAtEnd && isOpen) {
-          pendingFocus.current = insertChildAtStart(
+      onEnter: (id, caretOffset) =>
+        runStructural(() => {
+          const node = focusIndex.current.byId.get(id);
+          if (!node) return;
+          capture(focusIndex.current, id);
+          const offset = Math.max(0, Math.min(caretOffset, node.text.length));
+          const before = node.text.slice(0, offset);
+          const after = node.text.slice(offset);
+          const caretAtEnd = after.length === 0;
+          // Pressing Enter at the end of an open (expanded, has-children) bullet
+          // adds a child at the top of its list rather than a sibling -- you're
+          // diving into the thing you just finished naming. Anywhere else keeps
+          // the plain new-sibling.
+          const isOpen =
+            !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
+          if (caretAtEnd && isOpen) {
+            pendingFocus.current = insertChildAtStart(
+              focusIndex.current,
+              id,
+              node.isTask,
+            );
+            return;
+          }
+          // Split at the caret: text left of it stays on this node, text to its
+          // right seeds the new sibling. (Caret at the end is just `after === ""`.)
+          const newId = insertSibling(
             focusIndex.current,
+            node.parentId,
             id,
             node.isTask,
+            after,
           );
-          return;
-        }
-        // Split at the caret: text left of it stays on this node, text to its
-        // right seeds the new sibling. (Caret at the end is just `after === ""`.)
-        const newId = insertSibling(
-          focusIndex.current,
-          node.parentId,
-          id,
-          node.isTask,
-          after,
-        );
-        if (!caretAtEnd) {
-          setText(id, before);
-          // Caret sits before the moved text, where the split happened.
-          pendingFocusAtStart.current = true;
-        }
-        pendingFocus.current = newId;
-      },
+          if (!caretAtEnd) {
+            setText(id, before);
+            // Caret sits before the moved text, where the split happened.
+            pendingFocusAtStart.current = true;
+          }
+          pendingFocus.current = newId;
+        }),
 
-      onIndent: (id) => {
-        // Moving the node reparents it into a different <ul>, which remounts
-        // its contentEditable and drops focus. Re-focus it after the render.
-        capture(focusIndex.current, id);
-        if (indent(focusIndex.current, id)) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
-        } else drop(); // no move happened; discard the redundant undo point
-      },
+      onIndent: (id) =>
+        runStructural(() => {
+          // Moving the node reparents it into a different <ul>, which remounts
+          // its contentEditable and drops focus. Re-focus it after the render.
+          capture(focusIndex.current, id);
+          if (indent(focusIndex.current, id)) {
+            pendingFocus.current = id;
+            pendingFlash.current = id;
+          } else drop(); // no move happened; discard the redundant undo point
+        }),
 
-      onOutdent: (id) => {
-        // Don't let a direct child of the zoom root outdent past it; that
-        // would move it out of the visible subtree and look like it vanished.
-        const node = focusIndex.current.byId.get(id);
-        if (node && node.parentId === rootIdRef.current) return;
-        // Same remount-drops-focus issue as indent; re-focus on a real move.
-        capture(focusIndex.current, id);
-        if (outdent(focusIndex.current, id)) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
-        } else drop();
-      },
+      onOutdent: (id) =>
+        runStructural(() => {
+          // Don't let a direct child of the zoom root outdent past it; that
+          // would move it out of the visible subtree and look like it vanished.
+          const node = focusIndex.current.byId.get(id);
+          if (node && node.parentId === rootIdRef.current) return;
+          // Same remount-drops-focus issue as indent; re-focus on a real move.
+          capture(focusIndex.current, id);
+          if (outdent(focusIndex.current, id)) {
+            pendingFocus.current = id;
+            pendingFlash.current = id;
+          } else drop();
+        }),
 
-      onMoveUp: (id) => {
-        // Reorder/outdent remounts the contentEditable; re-focus on a real move.
-        capture(focusIndex.current, id);
-        const moved = moveUp(focusIndex.current, id, {
-          isVisible: (n) => !isHiddenRef.current(n),
-          rootId: rootIdRef.current,
-        });
-        if (moved) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
-        } else drop();
-      },
+      onMoveUp: (id) =>
+        runStructural(() => {
+          // Reorder/outdent remounts the contentEditable; re-focus on a real move.
+          capture(focusIndex.current, id);
+          const moved = moveUp(focusIndex.current, id, {
+            isVisible: (n) => !isHiddenRef.current(n),
+            rootId: rootIdRef.current,
+          });
+          if (moved) {
+            pendingFocus.current = id;
+            pendingFlash.current = id;
+          } else drop();
+        }),
 
-      onMoveDown: (id) => {
-        capture(focusIndex.current, id);
-        const moved = moveDown(focusIndex.current, id, {
-          isVisible: (n) => !isHiddenRef.current(n),
-          rootId: rootIdRef.current,
-        });
-        if (moved) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
-        } else drop();
-      },
+      onMoveDown: (id) =>
+        runStructural(() => {
+          capture(focusIndex.current, id);
+          const moved = moveDown(focusIndex.current, id, {
+            isVisible: (n) => !isHiddenRef.current(n),
+            rootId: rootIdRef.current,
+          });
+          if (moved) {
+            pendingFocus.current = id;
+            pendingFlash.current = id;
+          } else drop();
+        }),
 
-      onDeleteNode: (id) => {
-        // A plugin can protect a node from deletion (the daily container). The
-        // core no-ops here -- the single funnel every delete path flows through.
-        if (isProtected(id)) return;
-        capture(focusIndex.current, id);
-        const focusId = removeNode(focusIndex.current, id);
-        if (focusId) pendingFocus.current = focusId;
-        else drop(); // node didn't exist; nothing was deleted
-      },
+      onDeleteNode: (id) =>
+        runStructural(() => {
+          // A plugin can protect a node from deletion (the daily container). The
+          // core no-ops here -- the single funnel every delete path flows through.
+          if (isProtected(id)) return;
+          capture(focusIndex.current, id);
+          const focusId = removeNode(focusIndex.current, id);
+          if (focusId) pendingFocus.current = focusId;
+          else drop(); // node didn't exist; nothing was deleted
+        }),
 
       onToggleCompleted: (id, completed) => {
         capture(focusIndex.current, id);

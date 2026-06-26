@@ -4,6 +4,7 @@ import type { Node } from './schema'
 import { createNodes, deleteNodes, updateNodes } from './api'
 import { connectSyncSocket } from './realtime'
 import type { ChangeOp, ServerMessage } from './realtime'
+import { buildTreeIndex, now } from './tree'
 
 /**
  * Single source of truth for all outline nodes.
@@ -15,12 +16,15 @@ import type { ChangeOp, ServerMessage } from './realtime'
  * refetch. A reconnect resumes from the last applied seq (or falls back to a
  * fresh snapshot). Why a DO + WebSocket: docs/DECISIONS.md (per-user DO sync).
  *
- * The WRITE path is unchanged: optimistic mutations still POST/PATCH/DELETE
- * /api/nodes, each handler returning `{ refetch: false }` (the socket echoes the
- * persisted change back, which reconciles idempotently -- no need to skip the
- * originator). A transaction can carry several mutations (a structural move
- * relinks multiple siblings), so every handler maps over `transaction.mutations`
- * rather than reading `[0]`; the Worker batches them into one DO round trip.
+ * The WRITE path has two lanes. FIELD edits (text, completed, ...) take the
+ * optimistic handlers below: insert -> onInsert -> POST, update -> onUpdate ->
+ * PATCH, each returning `{ refetch: false }` (the socket echoes the persisted
+ * change back, reconciling idempotently). STRUCTURAL edits bypass the handlers
+ * via `runStructural` (structural.ts), which batches all their writes into one
+ * `POST /api/nodes {ops}` and holds the overlay until the echo (`waitForSeq`
+ * here) -- so an insert-and-repoint can't tear across two requests. See
+ * docs/DECISIONS.md (Atomic structural writes). Either way a handler maps over
+ * `transaction.mutations` (a field op can still carry several), never `[0]`.
  *
  * The collection interface (insert / update / delete / subscribeChanges /
  * toArray / toArrayWhenReady) is unchanged, so the tree store, mutations, and
@@ -51,6 +55,52 @@ export function resyncNodes(): void {
   resyncFn?.()
 }
 
+/**
+ * The highest change-frame `seq` this client has applied (snapshot, resume, or
+ * live change). A module-level mirror of the sync cursor so `waitForSeq` can be
+ * awaited from outside the sync closure. Starts at 0 (nothing applied).
+ */
+let appliedSeq = 0
+type SeqWaiter = { seq: number; resolve: () => void }
+const seqWaiters = new Set<SeqWaiter>()
+
+/** Advance the applied cursor and release any waiters it satisfies. Monotonic:
+ *  a lower/equal seq (a redundant frame) is ignored. Called wherever a frame is
+ *  applied (live change, resume, snapshot). */
+function advanceAppliedSeq(seq: number): void {
+  if (seq <= appliedSeq) return
+  appliedSeq = seq
+  // Deleting the current entry mid-iteration is safe for a Set.
+  for (const w of seqWaiters) {
+    if (appliedSeq >= w.seq) {
+      seqWaiters.delete(w)
+      w.resolve()
+    }
+  }
+}
+
+/**
+ * Resolve once this client has applied change-frame `seq` (the originator's own
+ * echo, a resume gap, or a superseding snapshot all advance the cursor past it).
+ * `runStructural` awaits this so a structural transaction stays optimistic until
+ * its write echoes back — never reverting to a pre-op state a fast follow-up
+ * edit could read (PLAN.md, P2).
+ *
+ * On timeout it RESOLVES (never rejects): a snapshot/resync may have superseded
+ * the seq, or the socket is wedged; either way we fall back to trusting the
+ * synced snapshot rather than hanging the transaction forever.
+ */
+export function waitForSeq(seq: number, timeoutMs = 8000): Promise<void> {
+  if (appliedSeq >= seq) return Promise.resolve()
+  return new Promise((resolve) => {
+    const waiter: SeqWaiter = { seq, resolve }
+    seqWaiters.add(waiter)
+    setTimeout(() => {
+      if (seqWaiters.delete(waiter)) resolve()
+    }, timeoutMs)
+  })
+}
+
 /** Resolve once `id` is present in the collection (live delta or snapshot).
  *  Used by the daily claim loser-path so navigation doesn't zoom to a node
  *  that hasn't replicated locally yet. */
@@ -75,6 +125,72 @@ export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
       clearTimeout(timer)
       sub.unsubscribe()
       resolve()
+    }
+  })
+}
+
+/**
+ * Heal a shattered sibling order.
+ *
+ * Order within a parent is a `prevSiblingId` linked list, rebuilt at read time
+ * by buildTreeIndex (tree.ts). A write race (a structural move/insert relinking
+ * pointers against a stale TreeIndex, or an optimistic edit reconciling with the
+ * sync echo) can persist a broken chain: two siblings sharing one
+ * `prevSiblingId` (a "fan"), or a pointer to a node that is no longer a sibling
+ * (a "dangle"). buildTreeIndex tolerates that by appending the unreachable nodes
+ * as orphans, BUT a contiguous orphan block can no longer be reordered -- both
+ * keyboard moves and drag relink within the block without ever re-threading it
+ * into the head chain, so every move is a silent no-op (and survives refresh,
+ * since the broken pointers are persisted).
+ *
+ * The repair: adopt the exact order buildTreeIndex already renders as canonical,
+ * and rewrite only the `prevSiblingId` pointers that disagree with it. Nothing
+ * visibly reorders -- the orphaned nodes simply become movable again. It's
+ * idempotent: clean data yields zero fixes, so it auto-corrects any future
+ * corruption on the next snapshot and is a no-op forever after.
+ *
+ * Returns the minimal set of pointer corrections.
+ */
+function siblingChainRepairs(
+  nodes: Node[],
+): Array<{ id: string; prevSiblingId: string | null }> {
+  const index = buildTreeIndex(nodes)
+  const fixes: Array<{ id: string; prevSiblingId: string | null }> = []
+  for (const children of index.childrenByParent.values()) {
+    let prev: string | null = null
+    for (const child of children) {
+      if ((child.prevSiblingId ?? null) !== prev) {
+        fixes.push({ id: child.id, prevSiblingId: prev })
+      }
+      prev = child.id
+    }
+  }
+  return fixes
+}
+
+/** Apply sibling-chain repairs as one optimistic transaction (so the Worker
+ *  persists them in a single round trip and the socket echoes them back). Runs
+ *  in a microtask, after the snapshot commit has settled, and never throws into
+ *  the sync path. */
+function healSiblingChains(nodes: Node[]): void {
+  let fixes: ReturnType<typeof siblingChainRepairs>
+  try {
+    fixes = siblingChainRepairs(nodes)
+  } catch {
+    return
+  }
+  if (fixes.length === 0) return
+  queueMicrotask(() => {
+    try {
+      for (const fix of fixes) {
+        nodesCollection.update(fix.id, (draft) => {
+          draft.prevSiblingId = fix.prevSiblingId
+          draft.updatedAt = now()
+        })
+      }
+    } catch {
+      // A node may have been deleted between snapshot and microtask; a failed
+      // heal is harmless -- the next snapshot retries.
     }
   })
 }
@@ -112,6 +228,8 @@ export const nodesCollection = createCollection({
         }
         metadata?.collection.set('cursor', seq)
         commit()
+        // Release any runStructural transaction awaiting its own echo (P2).
+        advanceAppliedSeq(seq)
       }
 
       const socket = connectSyncSocket({
@@ -130,8 +248,15 @@ export const nodesCollection = createCollection({
             for (const n of msg.nodes) write({ type: 'insert', value: n })
             metadata?.collection.set('cursor', msg.seq)
             commit()
+            // A fresh snapshot supersedes every earlier seq (and may be the
+            // resolution a runStructural transaction is waiting on after a
+            // reconnect), so advance the cursor to it.
+            advanceAppliedSeq(msg.seq)
             initialError = null
             ensureReady()
+            // Self-heal any persisted sibling-chain corruption now that the full
+            // outline is in hand (deferred so it writes outside this commit).
+            healSiblingChains(msg.nodes)
           } else if (msg.type === 'resume') {
             // The gap since our cursor. Empty = already current; the cursor is
             // unchanged so there's nothing to write.
