@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import {
   Outlet,
   createRootRoute,
@@ -14,6 +14,7 @@ import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
+import { clearIdentity, initClientLog, setIdentity } from '../lib/log'
 import { LEGACY_THEME_KEY, THEME_KEY } from '../lib/storage-keys'
 import '../styles.css'
 
@@ -52,6 +53,11 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  // Start the SPA logger once, in the browser (effects don't run at prerender).
+  useEffect(() => {
+    initClientLog()
+  }, [])
+
   return (
     <RootDocument>
       <ThemeProvider>
@@ -79,6 +85,15 @@ function RootComponent() {
  */
 function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
   const { data: session, isPending } = useSession()
+
+  // Stamp the signed-in user onto every client log so per-user bugs are
+  // traceable; clear it on sign-out.
+  const userId = session?.user.id ?? null
+  useEffect(() => {
+    if (userId) setIdentity({ userId })
+    else clearIdentity()
+  }, [userId])
+
   if (isPending) return null
   if (!session) return <AuthScreen />
   return <>{children}</>
