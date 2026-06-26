@@ -78,6 +78,8 @@ Substantial plans or design decisions go through `/grill-with-docs` — a relent
 ```sh
 bun run dev        # vite dev on :3000 (or next free port)
 bun run build      # production build (also prerenders /)
+bun run lint       # oxlint over src + worker (correctness = error)
+bun run lint:fix   # oxlint --fix (autofixable rules only)
 bun run typecheck  # tsc --noEmit
 bun run test:e2e   # playwright (chromium) end-to-end tests
 bun run test:e2e:ui  # same, in Playwright's interactive UI
@@ -87,7 +89,7 @@ bun run deploy     # build:cf, then `wrangler deploy`
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
-**No unit-test runner and no linter** — `typecheck` is the only static gate; run it after any change. End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
+**No unit-test runner.** Two static gates: **`oxlint`** (`.oxlintrc.json`, VoidZero's Oxc linter — `correctness` category as errors, `react` plugin on; scoped to `src` + `worker`, mirroring `typecheck`'s boundary, with `src/routeTree.gen.ts` ignored) and **`typecheck`** — run both after any change. `oxlint` is lint-only by choice (no formatter); `jsx-a11y` is off for now because the contentEditable/click-handler-heavy editor would false-positive on day one (easy opt-in later). End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
 
 **Caret in a contentEditable test:** don't use `Home`/`End`/arrow keys (unreliable in macOS Chromium contentEditable) and don't rely on `.click()` (lands *past* the bullet text — the `.node-text` span is wider than its text). Set the Selection range directly via `evaluate` (see the `caretAt` helper in `e2e/enter-split.spec.ts`). `toHaveText` normalizes whitespace — prefer space-free fixture text (`"alphabravo"`) or `allTextContents()` for exact comparison.
 

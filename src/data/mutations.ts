@@ -478,9 +478,7 @@ export function removeNode(
   // itself, its old next sibling needs to point at node.prevSiblingId.
   if (i !== -1 && i + 1 < siblings.length) {
     const nextSibling = siblings[i + 1]!
-    if (nextSibling.id !== focusId || focusId === nextSibling.id) {
-      update(nextSibling.id, { prevSiblingId: node.prevSiblingId })
-    }
+    update(nextSibling.id, { prevSiblingId: node.prevSiblingId })
   }
 
   for (const id of toDelete) nodesCollection.delete(id)
