@@ -149,7 +149,7 @@ pays the React-root cost.
 ## Custom tag colors
 
 A `#tag`'s color is **chosen and stored** (not derived from the name), defaulting to a neutral
-outline. It lives in a side-collection synced over `/api/kv` (see *D1 sync via a Worker*) and is
+outline. It lives in a side-collection synced over `/api/kv` (see *Sync via a per-user Durable Object*) and is
 painted by **one generated stylesheet keyed on `data-tag`** (`TagColorStyles`, mounted once in
 `__root.tsx`).
 
@@ -166,27 +166,45 @@ it's the CSS-injection guard.
 
 ---
 
-## D1 sync via a Worker
+## Sync via a per-user Durable Object
 
 One Cloudflare **Worker** (`worker/index.ts`) serves the static SPA *and* the sync API — `/api/nodes`
-(the outline) and `/api/kv` (plugin side-collections: tag colors, daily index) — both backed by
-**D1**, scoped per owner. `collection.ts` is a TanStack DB `queryCollectionOptions` collection; its
-interface is identical to the old localStorage version, so the tree store, mutations, and
-components never changed. Sync is *near-real-time on tab focus* (`refetchOnWindowFocus`), not live
-push.
+(the outline) and `/api/kv` (plugin side-collections: tag colors, daily index). Each `/api` request
+is routed to the caller's **Durable Object** (`UserOutlineDO`, `worker/outline-do.ts`), whose
+colocated **SQLite** holds that user's entire outline plus the side-collections. Inside a per-user
+DO the `owner` column is gone — the DO *is* the scope — and its single thread serializes a user's
+edits across devices, so there is no last-write-wins reconciliation. `collection.ts` is still a
+TanStack DB `queryCollectionOptions` collection over the unchanged `/api/*` contract, so the tree
+store, mutations, and components never changed. Sync is *near-real-time on tab focus*
+(`refetchOnWindowFocus`), not live push.
 
-**Why it's not in the code:** the hard fact that shapes everything is **the browser cannot reach D1
-directly** — D1 is a Worker binding. "Use D1" is therefore not a config swap; it requires the
-server tier. And why D1 at all, when the README once sketched Postgres + ElectricSQL? Electric
-gives real-time out of the box but isn't Cloudflare-native (must be hosted elsewhere) — off-goal
-for an all-Cloudflare personal deploy.
+**The DO routing key must never be an email.** A DO name is *permanent* (no rename), so keying it
+off a mutable value would orphan a user's whole outline on an email or auth-provider change.
+`resolveUserId()` returns a **constant** today — the app is single-user behind the auth gate — and
+becomes the stable `session.user.id` when real accounts land. Do NOT "fix" it to route off
+`authorize()`'s `owner`/email; that reintroduces exactly the orphaning this avoids.
+
+**D1 is kept, but demoted — it is no longer the outline store.** It serves two roles: (1) the
+**source for the one-time, non-destructive import** of a user's pre-DO rows into their DO
+(`ensureSeeded` reads D1; the DO marks itself `seeded` and never re-imports), and (2) the reserved
+home for a future identity store. The `migrations/` SQL files (and `db:migrate:*`) still apply to
+that D1; the DO's own schema is created in its constructor, so it has **no SQL migration file** —
+its wrangler migration is the `new_sqlite_classes` tag.
+
+**Why a DO over D1-direct, or ElectricSQL/Postgres?** The browser can reach neither D1 nor a DO
+directly — both are Worker bindings, so any of them needs the server tier. A per-user DO *also*
+gives colocated storage (sub-ms reads next to compute), a single-writer thread that removes
+conflict reconciliation, and the natural home for future per-user real-time (WebSocket Hibernation)
+and subtree sharing. Electric gives real-time out of the box but isn't Cloudflare-native (must be
+hosted elsewhere) — off-goal for an all-Cloudflare deploy.
 
 **The SPA / no-SSR constraint lives here too:** the React app is a pure static SPA — never run code
 that touches `nodesCollection` during a server/render pass (the tree store skips its subscription
 on the server; hooks supply `getServerSnapshot` so `/` prerenders cleanly).
 
-**Don't:** reach for ElectricSQL or a separate Postgres backend (off the all-Cloudflare goal); try
-to query D1 from the client (impossible); have a `queryFn` return a *partial* node set (the
+**Don't:** key the DO off an email/owner (permanent-name orphaning); reach for ElectricSQL or a
+separate Postgres backend (off the all-Cloudflare goal); try to query D1 or a DO from the client
+(impossible — both are Worker bindings); have the `/api/nodes` GET return a *partial* node set (the
 collection deletes the rest); or extract a generic `createKvCollection<T>` factory for
 side-collections — each must pass its **concrete** zod schema inline, or schema inference falls
 through to `Record<string, unknown>`.

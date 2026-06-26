@@ -27,5 +27,13 @@
       "database_name": "dotflowy-db",
       "database_id": "da326dc6-b043-4df9-a277-08e9fad1d749"
     }
-  ]
+  ],
+  // One Durable Object per user: USER_OUTLINE holds the user's whole outline +
+  // side-collections in colocated SQLite. The Worker routes each /api request to
+  // the caller's DO. See docs/DECISIONS.md.
+  "durable_objects": {
+    "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }]
+  },
+  // SQLite-backed DO storage requires `new_sqlite_classes` (not new_classes).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }]
 }
