@@ -83,7 +83,7 @@ async function seedIfEmpty(): Promise<boolean> {
       id: aId,
       parentId: null,
       prevSiblingId: null,
-      text: 'Welcome to Dotflowy OSS',
+      text: 'Welcome to Dotflowy',
       createdAt: now(),
     }),
   )

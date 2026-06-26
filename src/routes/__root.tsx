@@ -14,6 +14,7 @@ import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
+import { LEGACY_THEME_KEY, THEME_KEY } from '../lib/storage-keys'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -21,7 +22,17 @@ import '../styles.css'
 const noFlashThemeScript = `
 (function () {
   try {
-    var t = localStorage.getItem('dotflowy-oss:theme') || 'system';
+    var key = '${THEME_KEY}';
+    var legacy = '${LEGACY_THEME_KEY}';
+    var t = localStorage.getItem(key);
+    if (!t) {
+      t = localStorage.getItem(legacy);
+      if (t) {
+        localStorage.setItem(key, t);
+        localStorage.removeItem(legacy);
+      }
+    }
+    t = t || 'system';
     var dark = t === 'dark' || (t === 'system' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
     if (dark) document.documentElement.classList.add('dark');
@@ -34,7 +45,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'Dotflowy OSS' },
+      { title: 'Dotflowy' },
     ],
   }),
   component: RootComponent,
