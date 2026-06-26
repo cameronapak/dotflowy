@@ -163,4 +163,40 @@ test.describe("atomic structural writes", () => {
     const alphaKids = persisted.filter((n) => n.parentId === "alpha");
     expect(alphaKids).toHaveLength(4);
   });
+
+  test("structural batches never overlap on the wire, so the DO can't reorder them (P1)", async ({
+    page,
+  }) => {
+    // P1's atomicity only holds the fan off if the DO also sees rapid batches in
+    // client-call order: the seq is assigned in ARRIVAL order, and two edits that
+    // both repoint the same follower would fan if the later batch landed first.
+    // Separate fetches give no ordering guarantee (HTTP/2 multiplexing), so the
+    // client serializes batch POSTs (api.ts `batchTail`). Prove it: with a slow
+    // batch response, a second batch must not be in flight until the first lands.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const isBatch = (req: { url(): string; method(): string; postDataJSON(): unknown }) =>
+      req.url().includes("/api/nodes") &&
+      req.method() === "POST" &&
+      Boolean((req.postDataJSON() as { ops?: unknown } | null)?.ops);
+    page.on("request", (req) => {
+      if (isBatch(req)) maxInFlight = Math.max(maxInFlight, ++inFlight);
+    });
+    page.on("requestfinished", (req) => {
+      if (isBatch(req)) inFlight -= 1;
+    });
+
+    await seedOutline(page, STANDARD_TREE, { postDelayMs: 300 });
+    await page.goto("/");
+    await expect(text(page, "alpha")).toBeVisible();
+
+    // Same two rapid inserts as the echo-gap test, but here we watch the wire.
+    await caretAtEnd(page, "alpha");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+
+    // Both batches settle; at no point were two batch POSTs in flight at once.
+    await expect.poll(() => inFlight).toBe(0);
+    expect(maxInFlight).toBe(1);
+  });
 });

@@ -251,6 +251,14 @@ corrupted; the damage clustered in create/delete-heavy areas.)
   marks a *direct* transaction and retains after completion) has its optimistic overlay **dropped on
   completion unless its echo has already landed** (`recomputeOptimisticState`, `state.js`). Without
   the wait the view would briefly revert to pre-op, and a fast follow-up edit would re-create a fan.
+- **P3 (serialize on the wire):** `persistBatch` (`api.ts`) chains every batch POST off the previous
+  one's response (`batchTail`) so the DO receives rapid batches in client-call order. P1/P2 keep the
+  *local* state consistent, but two quick edits open independent transactions whose `mutationFn`s
+  fire **concurrent** fetches — and separate requests have no ordering guarantee (HTTP/2 muxing). The
+  DO stamps each frame's `seq` in arrival order, so a later batch landing first would let its repoint
+  of a shared follower be overwritten by the earlier batch's stale one — a persisted fan, the exact
+  bug, despite atomic frames. Serializing makes logical order == persisted order; the overlay is
+  already on screen so the added round-trip is invisible.
 
 **The structural-vs-field split is deliberate.** Only tree-shape ops route through `runStructural`
 (insert/indent/outdent/move/reparent/remove, history undo/redo restore, the daily get-or-create).
@@ -266,8 +274,10 @@ parent's chain broken.
 
 **Don't:** route field edits through `runStructural` (per-keystroke echo-await = janky typing);
 remove the `waitForSeq` ("the POST already returned 200") — that reintroduces the revert window;
-split a structural op's writes back into per-type handler calls (the original tear); or drop
-`healSiblingChains` until the tripwire has been silent in prod for weeks.
+unserialize `persistBatch` ("each batch is atomic, so order doesn't matter") — concurrent batches
+can reach the DO out of order and persist a fan (P3); split a structural op's writes back into
+per-type handler calls (the original tear); or drop `healSiblingChains` until the tripwire has been
+silent in prod for weeks.
 
 ---
 

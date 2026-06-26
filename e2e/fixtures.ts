@@ -73,9 +73,13 @@ function toNode(n: SeedNode): ApiNode {
 export async function seedOutline(
   page: Page,
   nodes: SeedNode[],
-  opts: { echoDelayMs?: number } = {},
+  opts: { echoDelayMs?: number; postDelayMs?: number } = {},
 ): Promise<void> {
   const echoDelayMs = opts.echoDelayMs ?? 0;
+  // Delay only the structural-batch POST *response* (not its echo). Opens a
+  // window to prove the client serializes batches: a second batch must not be
+  // in flight until the first response lands. Mirrors a slow DO round-trip.
+  const postDelayMs = opts.postDelayMs ?? 0;
   const store = new Map<string, ApiNode>();
   for (const n of nodes) store.set(n.id, toNode(n));
 
@@ -149,7 +153,11 @@ export async function seedOutline(
               if (op.op === "delete") store.delete(op.key);
               else store.set(op.value.id, op.value);
             }
-            return reply(route, { seq: broadcast(body.ops) });
+            const at = broadcast(body.ops);
+            if (postDelayMs > 0) {
+              await new Promise((r) => setTimeout(r, postDelayMs));
+            }
+            return reply(route, { seq: at });
           }
           // Legacy upsert path (the first-run seed).
           const ops: ApiChangeOp[] = (body.nodes ?? []).map((n) => ({

@@ -27,13 +27,7 @@ async function send(method: string, body: unknown): Promise<void> {
   if (!res.ok) throw new Error(`${method} ${ENDPOINT} -> ${res.status}`)
 }
 
-/**
- * Persist a structural mutation as one atomic batch. The DO applies every op and
- * commits a SINGLE change frame, returning its sequence number; the caller
- * (`runStructural`) waits for that seq to echo back before dropping its
- * optimistic overlay. All-or-nothing: a failed request rolls the whole op back.
- */
-export async function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
+async function sendBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -41,6 +35,32 @@ export async function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
   })
   if (!res.ok) throw new Error(`POST ${ENDPOINT} (batch) -> ${res.status}`)
   return (await res.json()) as { seq: number }
+}
+
+// Serializes structural batches so the DO receives them in client-call order.
+// The DO assigns each frame's `seq` in arrival order, but two rapid structural
+// edits open independent transactions whose `mutationFn`s fire concurrently —
+// nothing pins separate fetches to send order (HTTP/2 multiplexing, the Worker
+// dispatch). If batch B reached the DO before batch A, B's repoint of a shared
+// follower would be overwritten by A's stale one, re-creating the very fan this
+// whole change exists to kill. Each batch waits for the previous one's HTTP
+// response (sent only after the DO has committed it) before leaving the client,
+// so logical order == persisted order. The overlay is already on screen, so the
+// added latency is invisible. `.catch` keeps one failed batch from wedging the
+// queue while still rejecting the caller's promise (its transaction rolls back).
+let batchTail: Promise<unknown> = Promise.resolve()
+
+/**
+ * Persist a structural mutation as one atomic batch. The DO applies every op and
+ * commits a SINGLE change frame, returning its sequence number; the caller
+ * (`runStructural`) waits for that seq to echo back before dropping its
+ * optimistic overlay. All-or-nothing: a failed request rolls the whole op back.
+ * Calls are serialized (see `batchTail`) so concurrent edits persist in order.
+ */
+export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
+  const run = batchTail.then(() => sendBatch(ops))
+  batchTail = run.catch(() => {})
+  return run
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>
