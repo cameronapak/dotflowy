@@ -50,7 +50,6 @@ import {
   getCaretOffset,
   readSource,
   revealLinkAtCaret,
-  setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";

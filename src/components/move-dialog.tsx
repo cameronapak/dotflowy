@@ -192,9 +192,11 @@ function MoveDialogInner({
           // Flash + focus the moved node once the destination view mounts, so
           // it's easy to spot where it landed. See flash-node.ts.
           requestFlashAfterNav(movedId);
-          targetId === null
-            ? navigate({ to: "/" })
-            : navigate({ to: "/$nodeId", params: { nodeId: targetId } });
+          if (targetId === null) {
+            navigate({ to: "/" });
+          } else {
+            navigate({ to: "/$nodeId", params: { nodeId: targetId } });
+          }
         },
       },
     });

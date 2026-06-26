@@ -22,28 +22,6 @@ export function hasLink(text: string): boolean {
   return new RegExp(LINK_PATTERN).test(text);
 }
 
-/** A single parsed link occurrence. `start`/`end` index into the source text. */
-interface ParsedLink {
-  label: string;
-  url: string;
-  start: number;
-  end: number;
-}
-
-/** Every link in the text, in document order. */
-function parseLinks(text: string): ParsedLink[] {
-  const out: ParsedLink[] = [];
-  for (const m of text.matchAll(LINK_RE())) {
-    out.push({
-      label: m[1] ?? "",
-      url: m[2] ?? "",
-      start: m.index ?? 0,
-      end: (m.index ?? 0) + m[0].length,
-    });
-  }
-  return out;
-}
-
 /** Flatten links to their label text -- the projection used for fuzzy search
  *  and for clean display in result rows (ADR 0017). */
 export function stripLinks(text: string): string {
