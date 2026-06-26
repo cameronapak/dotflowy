@@ -6,10 +6,10 @@ import { z } from 'zod'
  * Storage strategy: flat list in a single TanStack DB collection.
  * The tree is reconstructed in memory at read time from parentId pointers.
  *
- * Why flat, not nested? Flat maps cleanly onto a sync backend later
- * (ElectricSQL / Postgres rows), keeps moves/repagination cheap, and
- * means we never have to deep-merge trees on every keystroke. The
- * outline render is a simple recursive walk over an index.
+ * Why flat, not nested? Flat maps cleanly onto a row-based sync backend
+ * (today the per-user Durable Object's `nodes` table), keeps moves/
+ * repagination cheap, and means we never have to deep-merge trees on
+ * every keystroke. The outline render is a simple recursive walk over an index.
  *
  * Ordering: prevSiblingId forms a linked list within each parent.
  * This is the Workflowy/Notion approach: inserting between two

@@ -2,36 +2,45 @@
 
 /**
  * Cloudflare Worker: serves the static SPA (via the ASSETS binding) and the
- * /api/nodes sync API backed by D1.
+ * sync API — /api/nodes (the outline) and /api/kv (plugin side-collections).
+ * Each request is routed to the current user's Durable Object (UserOutlineDO),
+ * whose colocated SQLite holds that user's entire outline. See docs/DECISIONS.md.
  *
- * Routing: `run_worker_first: ["/api/*"]` in wrangler.jsonc means this Worker
- * only runs for /api/* — every other path is served directly from static
- * assets (with the SPA fallback to index.html). The non-/api branch below is
- * just a safety net for the navigation case.
+ * Identity today: the app is single-user behind Cloudflare Access / Basic Auth,
+ * so `authorize()` still gates every request and `resolveUserId()` routes
+ * everyone to one constant-named DO. A DO name is *permanent*, so it must never
+ * be keyed by a mutable value like an email — when Better Auth lands,
+ * `resolveUserId` returns the stable `session.user.id` and nothing else in the
+ * data path changes.
  *
- * Identity: the app sits behind Cloudflare Access (configured on the zone), so
- * every request that reaches this Worker in production carries a verified
- * `Cf-Access-Authenticated-User-Email` header. Every row is scoped to that
- * email via the `owner` column. Locally (`wrangler dev`) there is no Access in
- * front, so we fall back to a fixed dev owner — gated on the request hostname
- * being localhost, which production traffic can never present (Access fronts
- * the real hostname). Hardening path: validate the Access JWT signature
- * (`Cf-Access-Jwt-Assertion`) against the team's JWKS. See docs/DECISIONS.md (D1 sync).
+ * D1 is kept only as (1) the source for the one-time, non-destructive import of
+ * a user's legacy rows into their DO (`ensureSeeded`), and (2) the future home
+ * of Better Auth's identity tables. Locally (`wrangler dev`) there is no Access
+ * in front, so we fall back to a fixed dev owner gated on the localhost
+ * hostname, which production traffic can never present.
  */
+
+import { UserOutlineDO } from './outline-do'
+import type { Node } from './outline-do'
+
+// Re-export the DO class so the Workers runtime can instantiate it (the
+// wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
+export { UserOutlineDO }
 
 interface Env {
   DB: D1Database
   ASSETS: Fetcher
+  USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>
   /** Shared secret for the HTTP Basic Auth fallback gate (set via
    *  `wrangler secret put APP_PASSWORD`). Unset -> the app is locked. */
   APP_PASSWORD?: string
-  /** Owner key to scope data under when authed via Basic Auth. Defaults to
-   *  'owner'; set it to your future Access email so a later switch to Access
-   *  keeps the same rows. */
+  /** Owner key the legacy D1 rows are scoped under, read once during the
+   *  one-time import. Defaults to 'owner'. */
   APP_OWNER?: string
 }
 
-/** A row as stored in SQLite — booleans are 0/1 integers. */
+/** A legacy D1 node row (booleans as 0/1). Only read during the one-time import
+ *  of pre-DO data into a user's Durable Object. */
 interface NodeRow {
   id: string
   parentId: string | null
@@ -45,39 +54,11 @@ interface NodeRow {
   updatedAt: number
 }
 
-/** A node as the client speaks it — booleans are real booleans. */
-interface Node {
-  id: string
-  parentId: string | null
-  prevSiblingId: string | null
-  text: string
-  isTask: boolean
-  completed: boolean
-  collapsed: boolean
-  bookmarkedAt: number | null
-  createdAt: number
-  updatedAt: number
-}
-
 const DEV_OWNER = 'local-dev'
 
-// Plugin side-collections backed by the generic `kv` table (ADR 0024). The
-// allowlist stops a client writing arbitrary collection namespaces.
+// Plugin side-collections backed by the kv store. The allowlist stops a client
+// writing arbitrary collection namespaces.
 const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
-
-/** Columns a client is allowed to write, mapped to their bool-ness. */
-const BOOL_COLUMNS = new Set(['isTask', 'completed', 'collapsed'])
-const WRITABLE_COLUMNS = new Set([
-  'parentId',
-  'prevSiblingId',
-  'text',
-  'isTask',
-  'completed',
-  'collapsed',
-  'bookmarkedAt',
-  'createdAt',
-  'updatedAt',
-])
 
 function basicAuthChallenge(): Response {
   return new Response('Authentication required', {
@@ -87,19 +68,14 @@ function basicAuthChallenge(): Response {
 }
 
 /**
- * Resolve the request's owner, or return a Response that denies it.
+ * Resolve the request's owner, or return a Response that denies it. Three tiers,
+ * in order: (1) **Cloudflare Access** (`Cf-Access-Authenticated-User-Email`);
+ * (2) **local dev** gated on a localhost hostname; (3) **HTTP Basic Auth**
+ * against `env.APP_PASSWORD`, **fail-closed if unset**. Owner is `env.APP_OWNER`
+ * (default 'owner'), independent of the typed username.
  *
- * Three tiers, in order:
- *  1. **Cloudflare Access** (preferred / future): a verified
- *     `Cf-Access-Authenticated-User-Email` header → owner = that email.
- *  2. **Local dev**: no Access in front of `wrangler dev`, gated on a localhost
- *     hostname (prod traffic can't present one) → owner = DEV_OWNER.
- *  3. **Production without Access**: a single-user **HTTP Basic Auth** gate
- *     (`env.APP_PASSWORD`, set via `wrangler secret put`). The browser prompts
- *     on the document load and then sends the header on every request, incl. the
- *     `/api` fetches. **Fail closed** if the secret is unset. Owner is
- *     `env.APP_OWNER` (default 'owner') — independent of the typed username, so
- *     any username works and the data stays unified. See ADR 0023 / 0025.
+ * This still gates *access*. The DO routing key is derived separately in
+ * `resolveUserId` so the partition key is never an email (see the file header).
  */
 function authorize(request: Request, env: Env, url: URL): { owner: string } | Response {
   const email = request.headers.get('Cf-Access-Authenticated-User-Email')
@@ -121,6 +97,21 @@ function authorize(request: Request, env: Env, url: URL): { owner: string } | Re
   const pass = decoded.slice(decoded.indexOf(':') + 1)
   if (!decoded || pass !== expected) return basicAuthChallenge()
   return { owner: env.APP_OWNER || 'owner' }
+}
+
+/**
+ * The Durable Object name for the current user's outline.
+ *
+ * LOCKED DECISION: a DO name is permanent and cannot be renamed, so it must
+ * never be an email or any value that can change — keying by email would orphan
+ * a user's whole outline on an email or auth-provider change. Until Better Auth
+ * ships a stable `user.id`, the app is single-user, so we route everyone to one
+ * constant-named DO. Better Auth replaces the constant with `session.user.id`;
+ * nothing else in the data path changes. Do NOT key this off `owner`/email.
+ */
+const SINGLE_USER_ID = 'default'
+function resolveUserId(_request: Request, _owner: string): string {
+  return SINGLE_USER_ID
 }
 
 function rowToNode(r: NodeRow): Node {
@@ -145,98 +136,67 @@ function json(data: unknown, status = 200): Response {
   })
 }
 
-function toSqlValue(key: string, value: unknown): unknown {
-  if (BOOL_COLUMNS.has(key)) return value ? 1 : 0
-  return value ?? null
-}
-
-/** Build a scoped UPDATE from a partial change set. Column names come only from
- *  the WRITABLE_COLUMNS allowlist, so the dynamic SQL can't be injected. */
-function buildUpdate(
+/**
+ * One-time, non-destructive copy of the owner's legacy D1 rows into their DO.
+ * Idempotent — the DO marks itself seeded and short-circuits thereafter. Runs
+ * on reads only (the client always GETs before it writes). Remove this and the
+ * D1 node/kv tables once every user is migrated.
+ */
+async function ensureSeeded(
+  stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
   owner: string,
-  id: string,
-  changes: Record<string, unknown>,
-): D1PreparedStatement | null {
-  const sets: string[] = []
-  const vals: unknown[] = []
-  for (const [k, v] of Object.entries(changes)) {
-    if (!WRITABLE_COLUMNS.has(k)) continue
-    sets.push(`${k} = ?`)
-    vals.push(toSqlValue(k, v))
-  }
-  if (!sets.length) return null
-  vals.push(id, owner)
-  return env.DB.prepare(
-    `UPDATE nodes SET ${sets.join(', ')} WHERE id = ? AND owner = ?`,
-  ).bind(...vals)
-}
-
-async function handleNodes(
-  request: Request,
-  env: Env,
-  owner: string,
-): Promise<Response> {
-  switch (request.method) {
-    case 'GET': {
-      // queryFn treats this as COMPLETE server state, so it must return every
-      // node the user owns (filtering happens client-side / per zoom view).
-      const { results } = await env.DB.prepare(
+): Promise<void> {
+  if (await stub.isSeeded()) return
+  let nodeRows: NodeRow[] = []
+  let kvRows: { collection: string; key: string; value: string }[] = []
+  try {
+    nodeRows = (
+      await env.DB.prepare(
         'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE owner = ?',
       )
         .bind(owner)
         .all<NodeRow>()
-      return json(results.map(rowToNode))
-    }
+    ).results
+    kvRows = (
+      await env.DB.prepare('SELECT collection, key, value FROM kv WHERE owner = ?')
+        .bind(owner)
+        .all<{ collection: string; key: string; value: string }>()
+    ).results
+  } catch (err) {
+    // No legacy tables (fresh deploy / dev with un-migrated D1) -> nothing to
+    // import. Any OTHER D1 error: rethrow so we DON'T mark the DO seeded and the
+    // import retries on the next load instead of silently hiding real data.
+    if (!/no such table/i.test(String(err))) throw err
+  }
+  await stub.seed({
+    nodes: nodeRows.map(rowToNode),
+    kv: kvRows.map((r) => ({ collection: r.collection, key: r.key, value: JSON.parse(r.value) })),
+  })
+}
+
+async function handleNodes(
+  request: Request,
+  stub: DurableObjectStub<UserOutlineDO>,
+): Promise<Response> {
+  switch (request.method) {
+    case 'GET':
+      return json(await stub.getNodes())
     case 'POST': {
       const { nodes } = (await request.json()) as { nodes: Node[] }
-      if (!nodes?.length) return json({ ok: true })
-      // Upsert (idempotent re-insert of your own nodes); the owner guard on the
-      // conflict path stops one owner overwriting another's row.
-      const stmt = env.DB.prepare(
-        `INSERT INTO nodes (id, owner, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
-           isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
-           bookmarkedAt=excluded.bookmarkedAt, updatedAt=excluded.updatedAt
-         WHERE nodes.owner = excluded.owner`,
-      )
-      await env.DB.batch(
-        nodes.map((n) =>
-          stmt.bind(
-            n.id,
-            owner,
-            n.parentId,
-            n.prevSiblingId,
-            n.text,
-            n.isTask ? 1 : 0,
-            n.completed ? 1 : 0,
-            n.collapsed ? 1 : 0,
-            n.bookmarkedAt,
-            n.createdAt,
-            n.updatedAt,
-          ),
-        ),
-      )
+      if (nodes?.length) await stub.upsertNodes(nodes)
       return json({ ok: true })
     }
     case 'PATCH': {
       const { updates } = (await request.json()) as {
         updates: { id: string; changes: Record<string, unknown> }[]
       }
-      if (!updates?.length) return json({ ok: true })
-      const stmts = updates
-        .map((u) => buildUpdate(env, owner, u.id, u.changes))
-        .filter((s): s is D1PreparedStatement => s !== null)
-      if (stmts.length) await env.DB.batch(stmts)
+      if (updates?.length) await stub.patchNodes(updates)
       return json({ ok: true })
     }
     case 'DELETE': {
       const { ids } = (await request.json()) as { ids: string[] }
-      if (!ids?.length) return json({ ok: true })
-      const stmt = env.DB.prepare('DELETE FROM nodes WHERE id = ? AND owner = ?')
-      await env.DB.batch(ids.map((id) => stmt.bind(id, owner)))
+      if (ids?.length) await stub.deleteNodes(ids)
       return json({ ok: true })
     }
     default:
@@ -244,57 +204,24 @@ async function handleNodes(
   }
 }
 
-/**
- * Generic key/value store for the plugin side-collections (tag colors, the
- * daily index). One table, namespaced by `collection`; `value` is the
- * JSON-stringified item. The client api computes each row's `key` from the
- * collection's getKey (kv-api.ts), so the Worker stores it opaquely. GET returns
- * the COMPLETE set for one collection (the query collection treats it as
- * authoritative). See docs/DECISIONS.md (D1 sync).
- */
 async function handleKv(
   request: Request,
-  env: Env,
-  owner: string,
+  stub: DurableObjectStub<UserOutlineDO>,
   collection: string,
 ): Promise<Response> {
   switch (request.method) {
-    case 'GET': {
-      const { results } = await env.DB.prepare(
-        'SELECT value FROM kv WHERE owner = ? AND collection = ?',
-      )
-        .bind(owner, collection)
-        .all<{ value: string }>()
-      return json(results.map((r) => JSON.parse(r.value)))
-    }
+    case 'GET':
+      return json(await stub.getKv(collection))
     case 'POST': {
-      // Upsert. Insert and update both land here (the items are tiny key->value
-      // rows, so we store the whole value rather than diffing).
       const { rows } = (await request.json()) as {
         rows: { key: string; value: unknown }[]
       }
-      if (!rows?.length) return json({ ok: true })
-      const stmt = env.DB.prepare(
-        `INSERT INTO kv (owner, collection, key, value, updatedAt)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(owner, collection, key) DO UPDATE SET
-           value = excluded.value, updatedAt = excluded.updatedAt`,
-      )
-      const ts = Date.now()
-      await env.DB.batch(
-        rows.map((r) =>
-          stmt.bind(owner, collection, r.key, JSON.stringify(r.value), ts),
-        ),
-      )
+      if (rows?.length) await stub.upsertKv(collection, rows)
       return json({ ok: true })
     }
     case 'DELETE': {
       const { keys } = (await request.json()) as { keys: string[] }
-      if (!keys?.length) return json({ ok: true })
-      const stmt = env.DB.prepare(
-        'DELETE FROM kv WHERE owner = ? AND collection = ? AND key = ?',
-      )
-      await env.DB.batch(keys.map((k) => stmt.bind(owner, collection, k)))
+      if (keys?.length) await stub.deleteKv(collection, keys)
       return json({ ok: true })
     }
     default:
@@ -308,24 +235,28 @@ export default {
 
     // Gate EVERY path (incl. the document + assets), not just /api — a fetch()
     // 401 won't trigger the browser's Basic Auth prompt, only a navigation
-    // does. Requires `run_worker_first: true` in wrangler.jsonc so the Worker
-    // sees the document request.
+    // does. Requires `run_worker_first: true` in wrangler.jsonc.
     const auth = authorize(request, env, url)
     if (auth instanceof Response) return auth
     const { owner } = auth
 
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
+    const userId = resolveUserId(request, owner)
+    const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
+
     try {
       if (url.pathname === '/api/nodes') {
-        return await handleNodes(request, env, owner)
+        if (request.method === 'GET') await ensureSeeded(stub, env, owner)
+        return await handleNodes(request, stub)
       }
       if (url.pathname === '/api/kv') {
         const collection = url.searchParams.get('collection')
         if (!collection || !KV_COLLECTIONS.has(collection)) {
           return json({ error: 'unknown collection' }, 400)
         }
-        return await handleKv(request, env, owner, collection)
+        if (request.method === 'GET') await ensureSeeded(stub, env, owner)
+        return await handleKv(request, stub, collection)
       }
     } catch (err) {
       return json({ error: String(err) }, 500)
