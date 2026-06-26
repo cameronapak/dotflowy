@@ -175,12 +175,16 @@ test.describe("atomic structural writes", () => {
     // batch response, a second batch must not be in flight until the first lands.
     let inFlight = 0;
     let maxInFlight = 0;
+    let batchCount = 0;
     const isBatch = (req: { url(): string; method(): string; postDataJSON(): unknown }) =>
       req.url().includes("/api/nodes") &&
       req.method() === "POST" &&
       Boolean((req.postDataJSON() as { ops?: unknown } | null)?.ops);
     page.on("request", (req) => {
-      if (isBatch(req)) maxInFlight = Math.max(maxInFlight, ++inFlight);
+      if (isBatch(req)) {
+        batchCount += 1;
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+      }
     });
     page.on("requestfinished", (req) => {
       if (isBatch(req)) inFlight -= 1;
@@ -197,6 +201,9 @@ test.describe("atomic structural writes", () => {
 
     // Both batches settle; at no point were two batch POSTs in flight at once.
     await expect.poll(() => inFlight).toBe(0);
+    // Assert TWO batches were actually observed — `maxInFlight === 1` alone
+    // false-passes if the second edit silently dropped its batch.
+    expect(batchCount).toBe(2);
     expect(maxInFlight).toBe(1);
   });
 });

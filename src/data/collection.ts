@@ -65,8 +65,8 @@ type SeqWaiter = { seq: number; resolve: () => void }
 const seqWaiters = new Set<SeqWaiter>()
 
 /** Advance the applied cursor and release any waiters it satisfies. Monotonic:
- *  a lower/equal seq (a redundant frame) is ignored. Called wherever a frame is
- *  applied (live change, resume, snapshot). */
+ *  a lower/equal seq (a redundant frame) is ignored. Called wherever a LIVE
+ *  frame is applied (live change, resume). Snapshots use `resetAppliedSeq`. */
 function advanceAppliedSeq(seq: number): void {
   if (seq <= appliedSeq) return
   appliedSeq = seq
@@ -76,6 +76,24 @@ function advanceAppliedSeq(seq: number): void {
       seqWaiters.delete(w)
       w.resolve()
     }
+  }
+}
+
+/** Reset the cursor to a snapshot's seq and release EVERY pending waiter.
+ *  A snapshot is full server truth, so it supersedes the stream regardless of
+ *  direction — and seqs are scoped per Durable Object/user, so a same-page
+ *  account switch (sign-out/sign-in is SPA-internal, no reload) can hand us a
+ *  LOWER seq than the previous user's. `advanceAppliedSeq` would ignore that
+ *  (it's monotonic) and leave the cursor stuck high, so `waitForSeq` would
+ *  resolve instantly and silently drop the P2 echo-hold for the new outline.
+ *  Setting (not advancing) and resolving all waiters makes any in-flight
+ *  structural tx trust the snapshot — the same fallback `waitForSeq`'s timeout
+ *  already takes. */
+function resetAppliedSeq(seq: number): void {
+  appliedSeq = seq
+  for (const w of seqWaiters) {
+    seqWaiters.delete(w)
+    w.resolve()
   }
 }
 
@@ -250,8 +268,9 @@ export const nodesCollection = createCollection({
             commit()
             // A fresh snapshot supersedes every earlier seq (and may be the
             // resolution a runStructural transaction is waiting on after a
-            // reconnect), so advance the cursor to it.
-            advanceAppliedSeq(msg.seq)
+            // reconnect or a same-page account switch), so reset the cursor to
+            // it — even if it's LOWER than what a prior outline left behind.
+            resetAppliedSeq(msg.seq)
             initialError = null
             ensureReady()
             // Self-heal any persisted sibling-chain corruption now that the full

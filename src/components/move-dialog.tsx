@@ -15,7 +15,7 @@ import { moveNode } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
-import { capture } from "../data/history";
+import { capture, drop } from "../data/history";
 import { cn } from "@/lib/utils";
 import { setMoveDialogOpener } from "./move-dialog-opener";
 import {
@@ -180,7 +180,12 @@ function MoveDialogInner({
       const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
       return moveNode(index, movedId, targetId, after);
     });
-    if (!moved) return;
+    // A no-op move (already at the exact destination) still captured an undo
+    // point; discard it so Cmd+Z doesn't look dead and redo history survives.
+    if (!moved) {
+      drop();
+      return;
+    }
     // Stay put -- moving shouldn't navigate you away. Confirm with a toast, and
     // offer a "Go" action to jump to the destination's zoom view on demand
     // (plain nav, no morph -- ADR 0003 -- since no pivot dot is involved).
