@@ -63,8 +63,9 @@ const WRITABLE_COLUMNS = new Set([
 // are duplicated, not shared — same as Node/NodeRow above).
 
 /** One node mutation in a change frame. Upserts carry the full node (insert for a
- *  new id, update for an existing one); deletes carry just the key. */
-type ChangeOp =
+ *  new id, update for an existing one); deletes carry just the key. Exported so
+ *  the Worker can type the atomic-batch request body it forwards to applyBatch. */
+export type ChangeOp =
   | { op: 'insert'; value: Node }
   | { op: 'update'; value: Node }
   | { op: 'delete'; key: string }
@@ -182,34 +183,67 @@ export class UserOutlineDO extends DurableObject<Env> {
     return rows.map(rowToNode)
   }
 
+  /** Upsert one node into SQLite and return the change op describing it (insert
+   *  for a new id, update for an existing one). Shared by upsertNodes (one frame
+   *  per call) and applyBatch (many ops, one frame). One indexed point-lookup
+   *  picks insert vs update so the broadcast carries the right ChangeMessage
+   *  type (the client's sync layer distinguishes them). */
+  private putNode(n: Node): ChangeOp {
+    const existed =
+      this.sql.exec('SELECT 1 FROM nodes WHERE id = ?', n.id).toArray().length > 0
+    this.sql.exec(
+      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
+         isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
+         bookmarkedAt=excluded.bookmarkedAt, updatedAt=excluded.updatedAt`,
+      n.id,
+      n.parentId,
+      n.prevSiblingId,
+      n.text,
+      n.isTask ? 1 : 0,
+      n.completed ? 1 : 0,
+      n.collapsed ? 1 : 0,
+      n.bookmarkedAt,
+      n.createdAt,
+      n.updatedAt,
+    )
+    return { op: existed ? 'update' : 'insert', value: n }
+  }
+
+  /** Delete one node from SQLite and return its delete op. Shared by deleteNodes
+   *  and applyBatch. */
+  private deleteNodeRow(id: string): ChangeOp {
+    this.sql.exec('DELETE FROM nodes WHERE id = ?', id)
+    return { op: 'delete', key: id }
+  }
+
   upsertNodes(nodes: Node[]): void {
-    const ops: ChangeOp[] = []
-    for (const n of nodes) {
-      // Insert vs update so the broadcast carries the right ChangeMessage type
-      // (the client's sync layer distinguishes them). One indexed point-lookup.
-      const existed =
-        this.sql.exec('SELECT 1 FROM nodes WHERE id = ?', n.id).toArray().length > 0
-      this.sql.exec(
-        `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
-           isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
-           bookmarkedAt=excluded.bookmarkedAt, updatedAt=excluded.updatedAt`,
-        n.id,
-        n.parentId,
-        n.prevSiblingId,
-        n.text,
-        n.isTask ? 1 : 0,
-        n.completed ? 1 : 0,
-        n.collapsed ? 1 : 0,
-        n.bookmarkedAt,
-        n.createdAt,
-        n.updatedAt,
-      )
-      ops.push({ op: existed ? 'update' : 'insert', value: n })
+    this.commitChange(nodes.map((n) => this.putNode(n)))
+  }
+
+  /**
+   * Apply a heterogeneous batch of ops (insert/update/delete) as ONE atomic
+   * frame: all SQL runs in this single-threaded DO call, then a single
+   * commitChange assigns one seq and emits one broadcast. This is the structural
+   * write path — an insert-and-repoint (or delete-and-repoint) lands all-or-
+   * nothing, so no reader ever observes a half-relinked sibling chain. Returns
+   * the seq the frame committed at (the current seq if the batch was empty),
+   * which the originating client waits for before dropping its optimistic
+   * overlay (so a fast follow-up edit can't read a reverted state).
+   *
+   * Insert/update ops carry the full post-mutation node (an upsert); the DO
+   * recomputes insert-vs-update from row existence, so the client's op type is
+   * advisory. Apply order follows the array, but within one frame the ops are
+   * absolute (keyed by id), so the final state is order-independent.
+   */
+  applyBatch(ops: ChangeOp[]): number {
+    const out: ChangeOp[] = []
+    for (const op of ops) {
+      out.push(op.op === 'delete' ? this.deleteNodeRow(op.key) : this.putNode(op.value))
     }
-    this.commitChange(ops)
+    return this.commitChange(out)
   }
 
   patchNodes(updates: { id: string; changes: Record<string, unknown> }[]): void {
@@ -239,12 +273,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   deleteNodes(ids: string[]): void {
-    const ops: ChangeOp[] = []
-    for (const id of ids) {
-      this.sql.exec('DELETE FROM nodes WHERE id = ?', id)
-      ops.push({ op: 'delete', key: id })
-    }
-    this.commitChange(ops)
+    this.commitChange(ids.map((id) => this.deleteNodeRow(id)))
   }
 
   // --- realtime sync (WebSocket Hibernation) ---------------------------------
@@ -271,13 +300,15 @@ export class UserOutlineDO extends DurableObject<Env> {
    * Record a batch of ops at a new seq, prune the changelog to its window, and
    * broadcast the change to every connected device. Called at the end of each
    * node mutation. A no-op for an empty batch (e.g. a patch that touched no
-   * writable columns), so the seq only advances on real changes.
+   * writable columns), so the seq only advances on real changes; returns the
+   * committed seq (or the unchanged current seq for an empty batch) so the
+   * atomic-batch path can report it to the originating client.
    *
    * Broadcasting is free (outgoing WS); the send runs inside the DO window the
    * triggering write already opened, so it adds negligible billed duration.
    */
-  private commitChange(ops: ChangeOp[]): void {
-    if (!ops.length) return
+  private commitChange(ops: ChangeOp[]): number {
+    if (!ops.length) return this.currentSeq()
     const seq = this.bumpSeq()
     this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', seq, JSON.stringify(ops))
     this.sql.exec('DELETE FROM changelog WHERE seq <= ?', seq - CHANGELOG_KEEP)
@@ -290,6 +321,7 @@ export class UserOutlineDO extends DurableObject<Env> {
         // already gone
       }
     }
+    return seq
   }
 
   /**

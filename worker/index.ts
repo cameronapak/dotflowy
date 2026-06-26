@@ -18,7 +18,7 @@
  */
 
 import { UserOutlineDO } from './outline-do'
-import type { Node } from './outline-do'
+import type { ChangeOp, Node } from './outline-do'
 import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
 
@@ -149,8 +149,17 @@ async function handleNodes(
     case 'GET':
       return json(await stub.getNodes())
     case 'POST': {
-      const { nodes } = (await request.json()) as { nodes: Node[] }
-      if (nodes?.length) await stub.upsertNodes(nodes)
+      const body = (await request.json()) as { ops?: ChangeOp[]; nodes?: Node[] }
+      // Atomic-batch path: a single structural mutation arrives as a list of ops
+      // and persists as ONE DO frame (one seq, one broadcast). Reply with that
+      // seq so the client can hold its optimistic overlay until the frame echoes
+      // back — closing the half-applied / reverted-state window. See PLAN.md.
+      if (body.ops) {
+        return json({ seq: await stub.applyBatch(body.ops) })
+      }
+      // Legacy upsert path: the first-run seed and any pre-batch client. Kept for
+      // back-compat during rollout.
+      if (body.nodes?.length) await stub.upsertNodes(body.nodes)
       return json({ ok: true })
     }
     case 'PATCH': {
