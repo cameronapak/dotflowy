@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { moveNode } from "../data/mutations";
+import { runStructural } from "../data/structural";
 import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture } from "../data/history";
@@ -172,11 +173,13 @@ function MoveDialogInner({
     if (!nodeId) return;
     const movedId = nodeId;
     onOpenChange(false);
-    capture(index, nodeId);
-    // Append as the last child of the destination (or last top-level for Home).
-    const siblings = childrenOf(index, targetId);
-    const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
-    const moved = moveNode(index, nodeId, targetId, after);
+    const moved = runStructural(() => {
+      capture(index, movedId);
+      // Append as the last child of the destination (or last top-level for Home).
+      const siblings = childrenOf(index, targetId);
+      const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
+      return moveNode(index, movedId, targetId, after);
+    });
     if (!moved) return;
     // Stay put -- moving shouldn't navigate you away. Confirm with a toast, and
     // offer a "Go" action to jump to the destination's zoom view on demand

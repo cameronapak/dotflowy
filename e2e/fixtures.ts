@@ -1,4 +1,4 @@
-import type { Page, Route } from "@playwright/test";
+import type { Page, Route, WebSocketRoute } from "@playwright/test";
 
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
@@ -29,6 +29,13 @@ interface ApiNode {
   createdAt: number;
   updatedAt: number;
 }
+
+/** One op in a change frame, as the DO broadcasts and the batch POST carries.
+ *  Mirrors `ChangeOp` in src/data/realtime.ts. */
+type ApiChangeOp =
+  | { op: "insert"; value: ApiNode }
+  | { op: "update"; value: ApiNode }
+  | { op: "delete"; key: string };
 
 function toNode(n: SeedNode): ApiNode {
   return {
@@ -63,9 +70,36 @@ function toNode(n: SeedNode): ApiNode {
  * page/context, so two tests never share state. Register before `page.goto(...)`
  * (every spec does) so the collection's first sync is mocked.
  */
-export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> {
+export async function seedOutline(
+  page: Page,
+  nodes: SeedNode[],
+  opts: { echoDelayMs?: number; postDelayMs?: number } = {},
+): Promise<void> {
+  const echoDelayMs = opts.echoDelayMs ?? 0;
+  // Delay only the structural-batch POST *response* (not its echo). Opens a
+  // window to prove the client serializes batches: a second batch must not be
+  // in flight until the first response lands. Mirrors a slow DO round-trip.
+  const postDelayMs = opts.postDelayMs ?? 0;
   const store = new Map<string, ApiNode>();
   for (const n of nodes) store.set(n.id, toNode(n));
+
+  // Realtime-faithful mock of the DO: every mutation commits a monotonic change
+  // frame and is broadcast back. We mirror that -- each write bumps `seq`,
+  // applies to `store`, and echoes a `change` frame over the open sync socket,
+  // optionally after `echoDelayMs` (which reproduces the gap between an op's HTTP
+  // response and its WS echo). The structural batch path additionally returns its
+  // seq so the client can hold its optimistic overlay until the echo lands.
+  let seq = 0;
+  let socket: WebSocketRoute | null = null;
+  const broadcast = (ops: ApiChangeOp[]): number => {
+    seq += 1;
+    const at = seq;
+    const frame = JSON.stringify({ type: "change", seq: at, ops });
+    const deliver = () => socket?.send(frame);
+    if (echoDelayMs > 0) setTimeout(deliver, echoDelayMs);
+    else deliver();
+    return at;
+  };
 
   const reply = (route: Route, data: unknown) =>
     route.fulfill({
@@ -108,23 +142,56 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
         case "GET":
           return reply(route, [...store.values()]);
         case "POST": {
-          const { nodes: incoming } = req.postDataJSON() as { nodes: ApiNode[] };
-          for (const n of incoming ?? []) store.set(n.id, n);
+          const body = req.postDataJSON() as {
+            ops?: ApiChangeOp[];
+            nodes?: ApiNode[];
+          };
+          // Atomic structural batch: apply every op, commit ONE frame, reply with
+          // its seq (mirrors the DO's applyBatch -> { seq }).
+          if (body.ops) {
+            for (const op of body.ops) {
+              if (op.op === "delete") store.delete(op.key);
+              else store.set(op.value.id, op.value);
+            }
+            const at = broadcast(body.ops);
+            if (postDelayMs > 0) {
+              await new Promise((r) => setTimeout(r, postDelayMs));
+            }
+            return reply(route, { seq: at });
+          }
+          // Legacy upsert path (the first-run seed).
+          const ops: ApiChangeOp[] = (body.nodes ?? []).map((n) => ({
+            op: "insert",
+            value: n,
+          }));
+          for (const n of body.nodes ?? []) store.set(n.id, n);
+          if (ops.length) broadcast(ops);
           return reply(route, { ok: true });
         }
         case "PATCH": {
           const { updates } = req.postDataJSON() as {
             updates: { id: string; changes: Partial<ApiNode> }[];
           };
+          const ops: ApiChangeOp[] = [];
           for (const u of updates ?? []) {
             const cur = store.get(u.id);
-            if (cur) store.set(u.id, { ...cur, ...u.changes });
+            if (cur) {
+              const next = { ...cur, ...u.changes };
+              store.set(u.id, next);
+              ops.push({ op: "update", value: next });
+            }
           }
+          if (ops.length) broadcast(ops);
           return reply(route, { ok: true });
         }
         case "DELETE": {
           const { ids } = req.postDataJSON() as { ids: string[] };
-          for (const id of ids ?? []) store.delete(id);
+          const ops: ApiChangeOp[] = [];
+          for (const id of ids ?? []) {
+            store.delete(id);
+            ops.push({ op: "delete", key: id });
+          }
+          if (ops.length) broadcast(ops);
           return reply(route, { ok: true });
         }
         default:
@@ -184,16 +251,18 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
   );
 
   // The live client loads the outline over a WebSocket (/api/sync), not a GET.
-  // Reply to `hello` with a full snapshot from the seeded store so the
-  // collection becomes ready and the editor mounts.
+  // Hold the socket so writes can echo their change frames back here; reply to
+  // `hello` with a full snapshot at the current seq (a reconnect resumes from
+  // committed state, exactly like the DO's snapshot path).
   await page.routeWebSocket(
     (url) => url.pathname === "/api/sync",
     (ws) => {
+      socket = ws;
       ws.onMessage(() =>
         ws.send(
           JSON.stringify({
             type: "snapshot",
-            seq: 0,
+            seq,
             nodes: [...store.values()],
           }),
         ),
