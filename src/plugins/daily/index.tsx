@@ -13,7 +13,11 @@
 // capture/pending-focus semantics are editor-edit concerns a get-or-create that
 // navigates away doesn't want.
 
-import { CalendarArrowDownIcon, CalendarDaysIcon } from 'lucide-react'
+import {
+  CalendarArrowDownIcon,
+  CalendarDaysIcon,
+  Loader2Icon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -45,6 +49,10 @@ import {
   setMapping,
   useDailyDate,
 } from './daily-index'
+import {
+  useDailyNavigationPending,
+  withDailyNavigation,
+} from './pending'
 
 // --- get-or-create ----------------------------------------------------------
 
@@ -135,9 +143,11 @@ async function getOrCreateDay(
   key: string,
   index: TreeIndex,
 ): Promise<string | null> {
-  const containerId = await ensureContainer(index)
-  if (!containerId) return null
-  return ensureDay(key, containerId, index)
+  return withDailyNavigation(async () => {
+    const containerId = await ensureContainer(index)
+    if (!containerId) return null
+    return ensureDay(key, containerId, index)
+  })
 }
 
 /** get-or-create the day, then zoom to it (the Today button + future picker). */
@@ -153,14 +163,18 @@ async function goToDate(key: string, ctx: PluginContext): Promise<void> {
 // --- header slot: the "Today" button ----------------------------------------
 
 function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
+  const pending = useDailyNavigationPending()
   return (
     <Button
       variant="ghost"
       size="icon-sm"
+      disabled={pending}
+      aria-busy={pending}
+      data-daily-nav-pending={pending ? '' : undefined}
       onClick={() => void goToDate(localDateKey(), getCtx())}
     >
-      <CalendarDaysIcon />
-      <span className="sr-only">Today's daily note</span>
+      {pending ? <Loader2Icon className="animate-spin" /> : <CalendarDaysIcon />}
+      <span className="sr-only">Today&apos;s daily note</span>
     </Button>
   )
 }
