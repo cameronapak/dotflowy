@@ -387,10 +387,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 }
 
 /**
- * First-run bootstrap: import a pre-D1 localStorage outline if present, else
- * seed the welcome bullets. Both await the collection's initial D1 load and
- * no-op unless the server is empty (seed.ts / import-legacy.ts), so this is
- * safe to call unconditionally on mount.
+ * First-run bootstrap: seed the welcome bullets when the outline is empty. It
+ * awaits the collection's initial load and no-ops unless the server is empty
+ * (seed.ts), so this is safe to call unconditionally on mount.
  *
  * bootstrapOutline returns a BootstrapError as a value (errore convention) when
  * the initial D1 load failed -- it detects that deliberately, because the query

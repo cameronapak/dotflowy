@@ -131,7 +131,7 @@ Today, sync is **per-user, near-real-time on tab focus**: each signed-in user's 
 - **Real-time push** — the per-user Durable Object *streaming* changes over WebSocket, instead of focus-driven refetch. (The DO already holds the data; the live-push layer is the remaining piece.)
 - **Sharing** — a node + subtree shared with another user (a future "mount" pointer; see [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object)).
 
-A returning user's pre-sync outline is **imported from `localStorage` once** on first load against an empty server (`src/data/import-legacy.ts`); separately, the Worker does a one-time non-destructive copy of any pre-DO D1 rows into the user's Durable Object. Neither strands existing data.
+A returning owner's pre-DO outline is carried over **server-side**: the Worker does a one-time, non-destructive copy of any pre-DO D1 rows into the owner's Durable Object on first read (`ensureSeeded`). There is no client-side `localStorage` migration — localStorage is browser-scoped but accounts are per-user, so importing it would leak one browser's leftover outline into every new account that signed in there.
 
 See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object) for the design and rejected alternatives (incl. why a Durable Object over D1-direct or ElectricSQL).
 
@@ -170,8 +170,7 @@ src/
     mutations.ts      # insert / move / delete / field setters
     history.ts        # undo / redo capture
     tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection (synced via /api/kv)
-    seed.ts           # first-run bootstrap: import legacy localStorage, else seed welcome bullets
-    import-legacy.ts  # one-time pre-sync localStorage -> store outline import
+    seed.ts           # first-run bootstrap: seed welcome bullets when the outline is empty
     useTree.ts        # useLiveQuery hook
   plugins/            # the editor's plugin layer (see docs/DECISIONS.md)
     index.ts          # the one ordered array: [code, links, tags, todos, daily]

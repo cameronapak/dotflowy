@@ -1,29 +1,30 @@
 import { appendChild } from './mutations'
 import { createId, makeNode, now } from './tree'
 import { nodesCollection, nodesLoadError } from './collection'
-import { importLegacyNodes } from './import-legacy'
 import { BootstrapError } from './errors'
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
-// double-mounted effect can't run two competing chains — which would otherwise
-// race the legacy import against the seed on the same empty collection.
+// double-mounted effect can't run two competing seed chains on the same empty
+// collection.
 let bootstrapped = false
 
 /**
- * First-run bootstrap. Exactly one of two things happens: a pre-D1 outline in
- * localStorage is imported into D1 (returning user), or the welcome bullets are
- * seeded (genuinely new user). Import wins when present, so we never stack
- * welcome bullets on top of imported data. Called once on mount; see
- * import-legacy.ts and docs/DECISIONS.md (D1 sync).
+ * First-run bootstrap: seed the welcome bullets when the outline is genuinely
+ * empty (a brand-new account). There is no client-side data migration — a
+ * returning owner's pre-DO outline is carried over SERVER-side by the Worker
+ * (`ensureSeeded` in worker/index.ts copies the legacy D1 rows into the owner's
+ * DO on first read). The old localStorage import was removed: localStorage is
+ * browser-scoped, but accounts are per-user, so importing it would leak one
+ * browser's leftover outline into every new account that signs in there. Called
+ * once on mount; see docs/DECISIONS.md (per-user DO sync).
  *
- * Bail BEFORE seeding/importing if the initial load failed. The query adapter
- * calls markReady() even on a failed fetch, so `toArrayWhenReady()` resolves
- * EMPTY rather than rejecting (see nodesLoadError) -- without this gate a
- * returning user who opens the app during a server outage would have welcome
- * bullets seeded over their real (just-unreachable) outline, and the one-time
- * legacy-import flag would be set against a write that rolls back. We surface
- * the failure as a value (errore convention); the caller logs it.
+ * Bail BEFORE seeding if the initial load failed. The query adapter calls
+ * markReady() even on a failed fetch, so `toArrayWhenReady()` resolves EMPTY
+ * rather than rejecting (see nodesLoadError) -- without this gate a returning
+ * user who opens the app during a server outage would have welcome bullets
+ * seeded over their real (just-unreachable) outline. We surface the failure as
+ * a value (errore convention); the caller logs it.
  */
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return
@@ -38,7 +39,6 @@ export async function bootstrapOutline(): Promise<BootstrapError | void> {
   const loadError = nodesLoadError()
   if (loadError) return new BootstrapError({ cause: loadError })
 
-  if (await importLegacyNodes()) return
   await seedIfEmpty()
 }
 

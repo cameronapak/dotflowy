@@ -9,6 +9,10 @@
   // Better Auth (worker/auth.ts) imports node:crypto; nodejs_compat polyfills
   // Node built-ins on the Workers runtime.
   "compatibility_flags": ["nodejs_compat"],
+  // Custom domain declared in code so it survives a fresh deploy instead of
+  // living only in the Cloudflare dashboard. The default *.workers.dev URL stays
+  // active alongside it.
+  "routes": [{ "pattern": "app.dotflowy.com", "custom_domain": true }],
   "assets": {
     // TanStack Start SPA build output. `build:cf` copies _shell.html ->
     // index.html in here so the root and the SPA fallback resolve.
