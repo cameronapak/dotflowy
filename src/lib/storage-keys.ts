@@ -1,0 +1,18 @@
+export const THEME_KEY = "dotflowy:theme";
+export const SHOW_COMPLETED_KEY = "dotflowy:show-completed";
+
+export const LEGACY_THEME_KEY = "dotflowy-oss:theme";
+export const LEGACY_SHOW_COMPLETED_KEY = "dotflowy-oss:show-completed";
+
+export function readStorageMigrated(
+  key: string,
+  legacyKey: string,
+): string | null {
+  const value = localStorage.getItem(key);
+  if (value !== null) return value;
+  const legacy = localStorage.getItem(legacyKey);
+  if (legacy === null) return null;
+  localStorage.setItem(key, legacy);
+  localStorage.removeItem(legacyKey);
+  return legacy;
+}

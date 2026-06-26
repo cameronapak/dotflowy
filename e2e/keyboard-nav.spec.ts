@@ -18,7 +18,7 @@ async function load(
     // first render; setting it after navigation wouldn't flip showCompleted off
     // until a reload.
     await page.addInitScript(() => {
-      window.localStorage.setItem("dotflowy-oss:show-completed", "false");
+      window.localStorage.setItem("dotflowy:show-completed", "false");
     });
   }
   await page.goto("/");

@@ -1,10 +1,10 @@
 {
-  "name": "dotflowy-oss",
+  "name": "dotflowy",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An open-source, local-first Dotflowy outline editor built with TanStack Start and TanStack DB.",
-  "license": "MIT",
+  "description": "A local-first outline editor built with TanStack Start and TanStack DB.",
+  "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "dev": "vite dev",
     "dev:api": "wrangler dev --port 8787",

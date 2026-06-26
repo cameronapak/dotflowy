@@ -5,13 +5,16 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import {
+  LEGACY_SHOW_COMPLETED_KEY,
+  readStorageMigrated,
+  SHOW_COMPLETED_KEY,
+} from "../lib/storage-keys";
 
 interface ShowCompletedState {
   showCompleted: boolean;
   setShowCompleted: (next: boolean) => void;
 }
-
-const STORAGE_KEY = "dotflowy-oss:show-completed";
 
 const ShowCompletedContext = createContext<ShowCompletedState | null>(null);
 
@@ -20,7 +23,8 @@ const showCompletedListeners = new Set<() => void>();
 function subscribeShowCompleted(onStoreChange: () => void) {
   showCompletedListeners.add(onStoreChange);
   const onStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) onStoreChange();
+    if (e.key === SHOW_COMPLETED_KEY || e.key === LEGACY_SHOW_COMPLETED_KEY)
+      onStoreChange();
   };
   window.addEventListener("storage", onStorage);
   return () => {
@@ -30,7 +34,10 @@ function subscribeShowCompleted(onStoreChange: () => void) {
 }
 
 function getShowCompletedSnapshot(): boolean {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  const stored = readStorageMigrated(
+    SHOW_COMPLETED_KEY,
+    LEGACY_SHOW_COMPLETED_KEY,
+  );
   if (stored === null) return true;
   return stored === "true";
 }
@@ -65,7 +72,7 @@ export function ShowCompletedProvider({
   );
 
   const setShowCompleted = useCallback((next: boolean) => {
-    localStorage.setItem(STORAGE_KEY, String(next));
+    localStorage.setItem(SHOW_COMPLETED_KEY, String(next));
     notifyShowCompletedListeners();
   }, []);
 

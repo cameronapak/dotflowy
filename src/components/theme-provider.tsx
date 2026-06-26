@@ -6,6 +6,11 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import {
+  LEGACY_THEME_KEY,
+  readStorageMigrated,
+  THEME_KEY,
+} from "../lib/storage-keys";
 
 type Theme = "dark" | "light" | "system";
 
@@ -14,7 +19,6 @@ interface ThemeProviderState {
   setTheme: (theme: Theme) => void;
 }
 
-const STORAGE_KEY = "dotflowy-oss:theme";
 const VALID_THEMES = new Set<Theme>(["dark", "light", "system"]);
 
 const ThemeProviderContext = createContext<ThemeProviderState | null>(null);
@@ -24,7 +28,7 @@ const themeListeners = new Set<() => void>();
 function subscribeTheme(onStoreChange: () => void) {
   themeListeners.add(onStoreChange);
   const onStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) onStoreChange();
+    if (e.key === THEME_KEY || e.key === LEGACY_THEME_KEY) onStoreChange();
   };
   window.addEventListener("storage", onStorage);
   return () => {
@@ -34,7 +38,7 @@ function subscribeTheme(onStoreChange: () => void) {
 }
 
 function getThemeSnapshot(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  const stored = readStorageMigrated(THEME_KEY, LEGACY_THEME_KEY);
   if (stored && VALID_THEMES.has(stored as Theme)) return stored as Theme;
   return "system";
 }
@@ -84,7 +88,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   const setTheme = useCallback((next: Theme) => {
-    localStorage.setItem(STORAGE_KEY, next);
+    localStorage.setItem(THEME_KEY, next);
     notifyThemeListeners();
   }, []);
 

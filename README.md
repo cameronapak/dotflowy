@@ -1,6 +1,6 @@
-# Dotflowy OSS
+# Dotflowy
 
-An open-source outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
+An outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
 
 Local-first at heart, with an optional Cloudflare deployment that syncs your outline across devices via a per-user [Durable Object](https://developers.cloudflare.com/durable-objects/), behind email + password accounts ([Better Auth](https://www.better-auth.com)).
 
@@ -190,4 +190,4 @@ vite.config.ts        # SPA mode + /api dev proxy
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+Copyright © FAITH TOOLS SOFTWARE SOLUTIONS, LLC. Released under the [O'Saasy License](./LICENSE). Source is available for learning, modification, and self-hosting; offering a competing hosted SaaS product is reserved to the copyright holder.
