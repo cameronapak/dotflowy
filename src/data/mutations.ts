@@ -72,6 +72,10 @@ export function insertSibling(
  * current head (if any) down. Used when pressing Enter on a zoomed node's
  * title: the new bullet should appear directly under the title.
  *
+ * `id` lets a caller supply the node id up front (the daily plugin mints it
+ * before an atomic claim, so the winner inserts the node under the id the claim
+ * settled on). Defaults to a fresh id.
+ *
  * Returns the new node's id so the editor can focus it.
  */
 export function insertChildAtStart(
@@ -79,8 +83,8 @@ export function insertChildAtStart(
   parentId: string | null,
   isTask = false,
   text = '',
+  id = createId(),
 ): string {
-  const id = createId()
   const head = childrenOf(index, parentId)[0] ?? null
 
   nodesCollection.insert(
@@ -98,14 +102,16 @@ export function insertChildAtStart(
  * first-run seed, where we don't have a live TreeIndex in scope and the
  * caller knows the parent is empty or has a known last child.
  *
- * Pass `prevSiblingId` explicitly so seed code owns the wiring.
+ * Pass `prevSiblingId` explicitly so seed code owns the wiring. `id` lets a
+ * caller supply the node id up front (the daily plugin's claimed container id);
+ * defaults to a fresh id.
  */
 export function appendChild(
   parentId: string | null,
   prevSiblingId: string | null = null,
   text = '',
+  id = createId(),
 ): string {
-  const id = createId()
   nodesCollection.insert(
     makeNode({ id, parentId, prevSiblingId, text }),
   )

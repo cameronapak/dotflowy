@@ -13,7 +13,11 @@
 // capture/pending-focus semantics are editor-edit concerns a get-or-create that
 // navigates away doesn't want.
 
-import { CalendarArrowDownIcon, CalendarDaysIcon } from 'lucide-react'
+import {
+  CalendarArrowDownIcon,
+  CalendarDaysIcon,
+  Loader2Icon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,9 +29,15 @@ import {
   moveNode,
   setText,
 } from '../../data/mutations'
-import { childrenOf, type TreeIndex } from '../../data/tree'
+import {
+  nodesCollection,
+  resyncNodes,
+  waitForNode,
+} from '../../data/collection'
+import { childrenOf, createId, type TreeIndex } from '../../data/tree'
 import {
   CONTAINER_KEY,
+  claimMapping,
   formatDayBadge,
   formatDayRelative,
   formatDayText,
@@ -39,31 +49,73 @@ import {
   setMapping,
   useDailyDate,
 } from './daily-index'
+import {
+  useDailyNavigationPending,
+  withDailyNavigation,
+} from './pending'
 
 // --- get-or-create ----------------------------------------------------------
 
+// Both get-or-creates are CLAIM-FIRST: when the local replica shows the
+// container/day absent, mint a candidate id and run it through the atomic
+// `claimMapping`. The claim winner id is authoritative; if the node row is
+// still missing after a resync/wait (orphaned kv mapping), materialize it
+// locally under that id. The fast path (already in the local replica) stays
+// synchronous-quick with no network round-trip. See daily-index.ts.
+
+function hasNode(id: string): boolean {
+  return nodesCollection.toArray.some((n) => n.id === id)
+}
+
+/** Wait for a remote replica when we lost the claim; otherwise materialize now. */
+async function ensureNodeExists(
+  nodeId: string,
+  materialize: () => void,
+  awaitRemote: boolean,
+): Promise<boolean> {
+  if (hasNode(nodeId)) return true
+  if (awaitRemote) {
+    resyncNodes()
+    await waitForNode(nodeId, 1500).catch(() => {})
+    if (hasNode(nodeId)) return true
+  }
+  materialize()
+  return hasNode(nodeId)
+}
+
 /**
  * The single "Daily" container, created lazily at the end of the top level.
- * Self-healing: a mapping that points at a node which no longer exists is
- * rebuilt (the container is protected, so this is belt-and-suspenders).
+ * Atomic-claim guarded so two devices first-using daily can't each mint one.
  */
-function ensureContainer(index: TreeIndex): string {
+async function ensureContainer(index: TreeIndex): Promise<string | null> {
   const existing = getContainerId()
   if (existing && index.byId.has(existing)) return existing
+  const candidate = createId()
+  const { winner, won } = await claimMapping(CONTAINER_KEY, candidate)
   const tops = childrenOf(index, null)
   const after = tops.length ? tops[tops.length - 1]!.id : null
-  const id = appendChild(null, after, 'Daily')
-  setMapping(CONTAINER_KEY, id)
-  return id
+  const ok = await ensureNodeExists(
+    winner,
+    () => appendChild(null, after, 'Daily', winner),
+    !won,
+  )
+  setMapping(CONTAINER_KEY, winner)
+  return ok ? winner : null
 }
 
 /**
  * The note for `key`, created as the FIRST child of the container (newest day
  * on top) if missing. Text seeds to the full date; the badge shows the relative
- * label. v1 caveat: creating an out-of-order past day (via a future picker)
- * still lands on top -- acceptable until the picker ships its own ordering.
+ * label. The atomic claim makes "create today" idempotent across devices: a
+ * loser reuses the winner's node instead of minting a duplicate. v1 caveat:
+ * creating an out-of-order past day (via a future picker) still lands on top --
+ * acceptable until the picker ships its own ordering.
  */
-function ensureDay(key: string, containerId: string, index: TreeIndex): string {
+async function ensureDay(
+  key: string,
+  containerId: string,
+  index: TreeIndex,
+): Promise<string | null> {
   const existing = getDayId(key)
   if (existing && index.byId.has(existing)) {
     if (!index.byId.get(existing)!.text.trim()) {
@@ -71,35 +123,58 @@ function ensureDay(key: string, containerId: string, index: TreeIndex): string {
     }
     return existing
   }
-  const id = insertChildAtStart(index, containerId, false, formatDayText(key))
-  setMapping(key, id)
-  return id
+  const candidate = createId()
+  const { winner, won } = await claimMapping(key, candidate)
+  const ok = await ensureNodeExists(
+    winner,
+    () => insertChildAtStart(index, containerId, false, formatDayText(key), winner),
+    !won,
+  )
+  setMapping(key, winner)
+  return ok ? winner : null
 }
 
 /** Ensure the container + the day exist and return the day's node id (no nav).
  *  Takes just the tree index (not a `PluginContext`) so the Today button, the
  *  `/` command, AND the Cmd+K virtual action (Seam J -- which has no
- *  `PluginContext`) all reuse the exact same get-or-create (ADR 0019/0022). */
-function getOrCreateDay(key: string, index: TreeIndex): string {
-  return ensureDay(key, ensureContainer(index), index)
+ *  `PluginContext`) all reuse the exact same get-or-create (ADR 0019/0022).
+ *  Async: it may round-trip the atomic claim before the node id is settled. */
+async function getOrCreateDay(
+  key: string,
+  index: TreeIndex,
+): Promise<string | null> {
+  return withDailyNavigation(async () => {
+    const containerId = await ensureContainer(index)
+    if (!containerId) return null
+    return ensureDay(key, containerId, index)
+  })
 }
 
 /** get-or-create the day, then zoom to it (the Today button + future picker). */
-function goToDate(key: string, ctx: PluginContext): void {
-  ctx.nav.zoom(getOrCreateDay(key, ctx.tree))
+async function goToDate(key: string, ctx: PluginContext): Promise<void> {
+  const dayId = await getOrCreateDay(key, ctx.tree)
+  if (!dayId) {
+    toast.error("Couldn't open today's daily note")
+    return
+  }
+  ctx.nav.zoom(dayId)
 }
 
 // --- header slot: the "Today" button ----------------------------------------
 
 function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
+  const pending = useDailyNavigationPending()
   return (
     <Button
       variant="ghost"
       size="icon-sm"
-      onClick={() => goToDate(localDateKey(), getCtx())}
+      disabled={pending}
+      aria-busy={pending}
+      data-daily-nav-pending={pending ? '' : undefined}
+      onClick={() => void goToDate(localDateKey(), getCtx())}
     >
-      <CalendarDaysIcon />
-      <span className="sr-only">Today's daily note</span>
+      {pending ? <Loader2Icon className="animate-spin" /> : <CalendarDaysIcon />}
+      <span className="sr-only">Today&apos;s daily note</span>
     </Button>
   )
 }
@@ -151,8 +226,12 @@ export default definePlugin({
       icon: CalendarArrowDownIcon,
       keywords: ['today', 'daily', 'journal'],
       available: () => true,
-      run: (nodeId, ctx) => {
-        const todayId = getOrCreateDay(localDateKey(), ctx.tree)
+      run: async (nodeId, ctx) => {
+        const todayId = await getOrCreateDay(localDateKey(), ctx.tree)
+        if (!todayId) {
+          toast.error("Couldn't open today's daily note")
+          return
+        }
         if (todayId === nodeId) return // can't move today's note under itself
         capture(ctx.tree, nodeId)
         const kids = childrenOf(ctx.tree, todayId)
@@ -203,7 +282,11 @@ export default definePlugin({
         label: 'Go to Today',
         hint: "Creates today's daily note",
         icon: CalendarDaysIcon,
-        run: () => ctx.goTo(getOrCreateDay(key, ctx.index)),
+        run: () =>
+          void getOrCreateDay(key, ctx.index).then((id) => {
+            if (id) ctx.goTo(id)
+            else toast.error("Couldn't open today's daily note")
+          }),
       },
     ]
   },

@@ -69,6 +69,7 @@ import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { Subheader } from "./Subheader";
+import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import { useShowCompleted } from "./show-completed-provider";
 import { openMoveDialog } from "./move-dialog-opener";
 import { Button } from "./ui/button";
@@ -296,7 +297,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   return (
     <>
-      <div className="sticky top-0 z-10">
+      <div className="sticky top-0 z-10 relative">
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}
@@ -305,6 +306,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           />
         </Header>
         <Subheader getCtx={pluginCtx} />
+        <DailyNavigationProgress />
       </div>
       {/* Tag chips live inside the bullets' contentEditable, so the click that
           filters is captured here (mousedown blocks the editing caret). */}

@@ -46,26 +46,22 @@ function toNode(n: SeedNode): ApiNode {
 }
 
 /**
- * Seed a known outline by intercepting the `/api/nodes` Worker with an
- * in-memory mock, so the app's TanStack DB query collection loads exactly this
- * tree and the editor's seed-if-empty effect sees a non-empty store and stays
- * out of the way.
+ * Seed a known outline by intercepting the `/api/nodes` Worker and `/api/sync`
+ * WebSocket with in-memory mocks, so the app's custom-sync collection loads
+ * exactly this tree and the editor's seed-if-empty effect sees a non-empty store
+ * and stays out of the way.
  *
- * Since the D1 move (ADR 0023) the app reads nodes from the Worker, not
- * localStorage -- so the old localStorage seed was a no-op. This mock mirrors
- * `worker/index.ts`'s contract exactly:
- *   - GET    -> the COMPLETE node set (the queryFn treats it as authoritative)
- *   - POST   -> upsert `{ nodes }`
- *   - PATCH  -> apply `{ updates: [{ id, changes }] }`
- *   - DELETE -> drop `{ ids }`
- * so the real `collection.ts` -> `api.ts` query/mutation path is exercised end
- * to end; only D1 is swapped for a Map. The Worker's own SQL is covered by
- * `typecheck:worker` plus manual verification (docs/DECISIONS.md (D1 sync)), not here.
+ * The app reads nodes over a WebSocket (`/api/sync`), not a GET — writes still
+ * ride the REST mock below. This mirrors `worker/index.ts`'s contract:
+ *   - GET/POST/PATCH/DELETE `/api/nodes` — mutation path (unchanged)
+ *   - WS `/api/sync` — `hello` → `snapshot` from the seeded store
+ * so the real `collection.ts` → `api.ts` + `realtime.ts` path is exercised end
+ * to end; only the DO is swapped for a Map. The Worker's own SQL is covered by
+ * `typecheck:worker` plus manual verification (docs/DECISIONS.md), not here.
  *
  * The store is scoped to this test's `page`. Playwright gives each test its own
- * page/context, so two tests never share state -- stronger isolation than a
- * single shared local D1 would give under `fullyParallel`. Register before
- * `page.goto(...)` (every spec does) so the collection's first GET is mocked.
+ * page/context, so two tests never share state. Register before `page.goto(...)`
+ * (every spec does) so the collection's first sync is mocked.
  */
 export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> {
   const store = new Map<string, ApiNode>();
@@ -158,6 +154,18 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
         case "GET":
           return reply(route, [...m.values()]);
         case "POST": {
+          // `?op=claim` mirrors the DO's atomic get-or-create: insert only if
+          // the key is absent, return the authoritative value (pre-existing
+          // wins). The per-page Map IS the single source, so two claims for the
+          // same key here resolve to one winner -- exactly as the real DO does.
+          if (new URL(req.url()).searchParams.get("op") === "claim") {
+            const { key, value } = req.postDataJSON() as {
+              key: string;
+              value: unknown;
+            };
+            if (!m.has(key)) m.set(key, value);
+            return reply(route, { value: m.get(key) });
+          }
           const { rows } = req.postDataJSON() as {
             rows: { key: string; value: unknown }[];
           };
@@ -172,6 +180,24 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
         default:
           return route.fulfill({ status: 405, body: "{}" });
       }
+    },
+  );
+
+  // The live client loads the outline over a WebSocket (/api/sync), not a GET.
+  // Reply to `hello` with a full snapshot from the seeded store so the
+  // collection becomes ready and the editor mounts.
+  await page.routeWebSocket(
+    (url) => url.pathname === "/api/sync",
+    (ws) => {
+      ws.onMessage(() =>
+        ws.send(
+          JSON.stringify({
+            type: "snapshot",
+            seq: 0,
+            nodes: [...store.values()],
+          }),
+        ),
+      );
     },
   );
 }

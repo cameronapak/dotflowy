@@ -58,6 +58,10 @@ test.describe("daily notes", () => {
     await load(page);
 
     await todayButton(page).click();
+    // get-or-create is now async (an atomic claim round-trip on first create),
+    // so wait for the zoom nav to settle before capturing the URL.
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await expect(page).not.toHaveURL(/\/$/);
     const firstUrl = page.url();
 
     await goHome(page);
@@ -146,6 +150,171 @@ test.describe("daily notes", () => {
     await hit.click();
     await expect(page).toHaveURL(/\/[^/]+$/);
     await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+  });
+
+  test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
+    page,
+  }) => {
+    // Simulate the race: this device's local daily-index replica is empty (it
+    // GETs an empty /api/kv below), so it thinks today is absent and CLAIMS --
+    // but another device already created the container + today's note, so the
+    // atomic claim returns THEIR winning ids. The device must adopt those, not
+    // mint duplicates. We pre-seed the winners as real nodes (so navigation +
+    // badge resolve) and force ?op=claim to return them.
+    const d = new Date();
+    const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(d.getDate()).padStart(2, "0")}`;
+    const winners: Record<string, string> = {
+      container: "race-container",
+      [todayKey]: "race-today",
+    };
+
+    await seedOutline(page, [
+      ...STANDARD_TREE,
+      {
+        id: "race-container",
+        parentId: null,
+        prevSiblingId: "charlie",
+        text: "Daily",
+      },
+      {
+        id: "race-today",
+        parentId: "race-container",
+        prevSiblingId: null,
+        text: `Note for ${d.getFullYear()}`,
+      },
+    ]);
+
+    // Override only `?op=claim` to return the pre-existing winners; everything
+    // else (the empty daily-index GET, the setMapping POST) falls through to the
+    // seedOutline mock -- which is what keeps the local replica "stale".
+    await page.route(
+      (url) => url.pathname === "/api/kv",
+      async (route) => {
+        const req = route.request();
+        if (
+          req.method() === "POST" &&
+          new URL(req.url()).searchParams.get("op") === "claim"
+        ) {
+          const { key } = req.postDataJSON() as { key: string };
+          const nodeId = winners[key];
+          if (nodeId) {
+            return route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ value: { key, nodeId } }),
+            });
+          }
+        }
+        return route.fallback();
+      },
+    );
+
+    await page.goto("/");
+    await expect(
+      page.locator('li[data-node-id="alpha"] > .outline-row > .node-text'),
+    ).toBeVisible();
+
+    await todayButton(page).click();
+
+    // Adopted the winner -> zoomed to race-today, never a freshly minted id.
+    await expect(page).toHaveURL(/race-today$/);
+
+    await goHome(page);
+    // Exactly one day badge and one "Daily" container: no duplicate was created
+    // despite this device having claimed.
+    await expect(page.locator("[data-daily-date]")).toHaveCount(1);
+    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+    await expect(rowWithText(page, "Daily")).toHaveCount(1);
+    await expect(page.locator('li[data-node-id="race-today"]')).toHaveCount(1);
+  });
+
+  test("orphaned kv mapping materializes the node instead of zooming to a ghost", async ({
+    page,
+  }) => {
+    // daily-index points at ids with no matching outline rows (stale mapping).
+    // Today must create those nodes under the claimed ids, not show the
+    // "That bullet doesn't exist" empty state.
+    const d = new Date();
+    const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(d.getDate()).padStart(2, "0")}`;
+    const orphans = {
+      container: "ghost-container",
+      [todayKey]: "ghost-today",
+    };
+
+    await seedOutline(page, STANDARD_TREE);
+
+    const kvStore = new Map<string, { key: string; nodeId: string }>([
+      ["container", { key: "container", nodeId: orphans.container }],
+      [todayKey, { key: todayKey, nodeId: orphans[todayKey] }],
+    ]);
+
+    await page.route(
+      (url) => url.pathname === "/api/kv",
+      async (route) => {
+        const req = route.request();
+        const collection = new URL(req.url()).searchParams.get("collection");
+        if (collection !== "daily-index") return route.fallback();
+
+        switch (req.method()) {
+          case "GET":
+            return route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify([...kvStore.values()]),
+            });
+          case "POST": {
+            if (new URL(req.url()).searchParams.get("op") === "claim") {
+              const { key, value } = req.postDataJSON() as {
+                key: string;
+                value: { key: string; nodeId: string };
+              };
+              if (!kvStore.has(key)) kvStore.set(key, value);
+              return route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ value: kvStore.get(key) }),
+              });
+            }
+            const { rows } = req.postDataJSON() as {
+              rows: { key: string; value: { key: string; nodeId: string } }[];
+            };
+            for (const r of rows ?? []) kvStore.set(r.key, r.value);
+            return route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ ok: true }),
+            });
+          }
+          default:
+            return route.fallback();
+        }
+      },
+    );
+
+    await page.goto("/");
+    await expect(
+      page.locator('li[data-node-id="alpha"] > .outline-row > .node-text'),
+    ).toBeVisible();
+
+    await todayButton(page).click();
+
+    await expect(page).toHaveURL(/ghost-today$/);
+    await expect(page.getByText("That bullet doesn't exist")).toHaveCount(0);
+    const year = String(d.getFullYear());
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+    await goHome(page);
+    await expect(page.locator('li[data-node-id="ghost-container"]')).toHaveCount(
+      1,
+    );
+    await expect(page.locator('li[data-node-id="ghost-today"]')).toHaveCount(1);
+    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
   });
 
   test("the Daily container resists deletion; ordinary nodes still delete", async ({
