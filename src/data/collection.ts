@@ -13,8 +13,7 @@ import type { ChangeOp, ServerMessage } from './realtime'
  * streams a `snapshot` (the full outline), then every edit on any of the user's
  * devices arrives as a `change` delta and is applied live -- no window-focus
  * refetch. A reconnect resumes from the last applied seq (or falls back to a
- * fresh snapshot). Why a DO + WebSocket: docs/DECISIONS.md (per-user DO sync)
- * and docs/realtime-push-plan.md.
+ * fresh snapshot). Why a DO + WebSocket: docs/DECISIONS.md (per-user DO sync).
  *
  * The WRITE path is unchanged: optimistic mutations still POST/PATCH/DELETE
  * /api/nodes, each handler returning `{ refetch: false }` (the socket echoes the
@@ -50,6 +49,34 @@ export function nodesLoadError(): Error | null {
 let resyncFn: (() => void) | null = null
 export function resyncNodes(): void {
   resyncFn?.()
+}
+
+/** Resolve once `id` is present in the collection (live delta or snapshot).
+ *  Used by the daily claim loser-path so navigation doesn't zoom to a node
+ *  that hasn't replicated locally yet. */
+export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
+  if (nodesCollection.toArray.some((n) => n.id === id)) return Promise.resolve()
+
+  return new Promise((resolve, reject) => {
+    let sub: ReturnType<typeof nodesCollection.subscribeChanges>
+    const timer = setTimeout(() => {
+      sub.unsubscribe()
+      reject(new Error(`node ${id} not synced within ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    sub = nodesCollection.subscribeChanges(() => {
+      if (!nodesCollection.toArray.some((n) => n.id === id)) return
+      clearTimeout(timer)
+      sub.unsubscribe()
+      resolve()
+    })
+
+    if (nodesCollection.toArray.some((n) => n.id === id)) {
+      clearTimeout(timer)
+      sub.unsubscribe()
+      resolve()
+    }
+  })
 }
 
 export const nodesCollection = createCollection({

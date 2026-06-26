@@ -19,12 +19,12 @@ let bootstrapped = false
  * browser's leftover outline into every new account that signs in there. Called
  * once on mount; see docs/DECISIONS.md (per-user DO sync).
  *
- * Bail BEFORE seeding if the initial load failed. The query adapter calls
- * markReady() even on a failed fetch, so `toArrayWhenReady()` resolves EMPTY
- * rather than rejecting (see nodesLoadError) -- without this gate a returning
- * user who opens the app during a server outage would have welcome bullets
- * seeded over their real (just-unreachable) outline. We surface the failure as
- * a value (errore convention); the caller logs it.
+ * Bail BEFORE seeding if the initial sync failed. The custom-sync adapter calls
+ * markReady() even when the socket can't reach the server, so `toArrayWhenReady()`
+ * resolves EMPTY rather than rejecting (see nodesLoadError) -- without this gate
+ * a returning user who opens the app during a server outage would have welcome
+ * bullets seeded over their real (just-unreachable) outline. We surface the
+ * failure as a value (errore convention); the caller logs it.
  */
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return
@@ -54,16 +54,15 @@ let seedStarted = false
  * Seed the outline on first run. Idempotent and async-safe: it awaits the
  * collection's initial load (`toArrayWhenReady`) before deciding, so it only
  * seeds when the server genuinely has no nodes for this user — never on the
- * brief "empty before the first fetch resolves" window the D1-backed query
- * collection passes through. Returns true if it seeded, false otherwise.
+ * brief "empty before the first sync resolves" window. Returns true if it
+ * seeded, false otherwise.
  *
- * The failed-load case is handled upstream in bootstrapOutline (the query
- * adapter resolves this empty on failure, so seeding here would clobber a
- * just-unreachable outline). By the time bootstrap calls us the collection is
- * already ready, so this await resolves instantly.
+ * The failed-sync case is handled upstream in bootstrapOutline. By the time
+ * bootstrap calls us the collection is already ready, so this await resolves
+ * instantly.
  *
- * The component calls this once on mount; the inserts persist to D1 through the
- * collection's normal mutation path. See docs/DECISIONS.md (D1 sync).
+ * The component calls this once on mount; the inserts persist through the
+ * collection's normal mutation path. See docs/DECISIONS.md (per-user DO sync).
  */
 async function seedIfEmpty(): Promise<boolean> {
   if (seedStarted) return false

@@ -3,7 +3,6 @@ import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
 import { queryClient } from '../../data/query-client'
-import { resyncNodes } from '../../data/collection'
 import {
   kvDelete,
   kvFetch,
@@ -183,19 +182,6 @@ export async function claimMapping(
     return { winner: candidate, won: true }
   }
   return { winner: row.nodeId, won: row.nodeId === candidate }
-}
-
-/**
- * Reconcile the outline against server truth so a node another device created
- * (the winner of a claim this device lost) becomes locally present before we
- * navigate to it. Triggers a socket resync (a fresh snapshot); best effort -- if
- * the winner's write hasn't reached the server yet it self-heals on the next
- * live delta. With real-time push the winner's insert usually already arrived,
- * so this is a belt-and-suspenders safety net.
- */
-export function refetchNodes(): Promise<void> {
-  resyncNodes()
-  return Promise.resolve()
 }
 
 /** True iff `nodeId` is the daily container -- the protection predicate (Seam:

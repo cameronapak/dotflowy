@@ -104,8 +104,9 @@ function json(data: unknown, status = 200): Response {
 /**
  * One-time, non-destructive copy of the owner's legacy D1 rows into their DO.
  * Idempotent — the DO marks itself seeded and short-circuits thereafter. Runs
- * on reads only (the client always GETs before it writes). Remove this and the
- * D1 node/kv tables once every user is migrated.
+ * on the owner's first GET (including the `/api/sync` WebSocket upgrade) before
+ * the initial snapshot. Remove this and the D1 node/kv tables once every user
+ * is migrated.
  */
 async function ensureSeeded(
   stub: DurableObjectStub<UserOutlineDO>,

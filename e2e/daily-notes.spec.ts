@@ -231,6 +231,92 @@ test.describe("daily notes", () => {
     await expect(page.locator('li[data-node-id="race-today"]')).toHaveCount(1);
   });
 
+  test("orphaned kv mapping materializes the node instead of zooming to a ghost", async ({
+    page,
+  }) => {
+    // daily-index points at ids with no matching outline rows (stale mapping).
+    // Today must create those nodes under the claimed ids, not show the
+    // "That bullet doesn't exist" empty state.
+    const d = new Date();
+    const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(d.getDate()).padStart(2, "0")}`;
+    const orphans = {
+      container: "ghost-container",
+      [todayKey]: "ghost-today",
+    };
+
+    await seedOutline(page, STANDARD_TREE);
+
+    const kvStore = new Map<string, { key: string; nodeId: string }>([
+      ["container", { key: "container", nodeId: orphans.container }],
+      [todayKey, { key: todayKey, nodeId: orphans[todayKey] }],
+    ]);
+
+    await page.route(
+      (url) => url.pathname === "/api/kv",
+      async (route) => {
+        const req = route.request();
+        const collection = new URL(req.url()).searchParams.get("collection");
+        if (collection !== "daily-index") return route.fallback();
+
+        switch (req.method()) {
+          case "GET":
+            return route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify([...kvStore.values()]),
+            });
+          case "POST": {
+            if (new URL(req.url()).searchParams.get("op") === "claim") {
+              const { key, value } = req.postDataJSON() as {
+                key: string;
+                value: { key: string; nodeId: string };
+              };
+              if (!kvStore.has(key)) kvStore.set(key, value);
+              return route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ value: kvStore.get(key) }),
+              });
+            }
+            const { rows } = req.postDataJSON() as {
+              rows: { key: string; value: { key: string; nodeId: string } }[];
+            };
+            for (const r of rows ?? []) kvStore.set(r.key, r.value);
+            return route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ ok: true }),
+            });
+          }
+          default:
+            return route.fallback();
+        }
+      },
+    );
+
+    await page.goto("/");
+    await expect(
+      page.locator('li[data-node-id="alpha"] > .outline-row > .node-text'),
+    ).toBeVisible();
+
+    await todayButton(page).click();
+
+    await expect(page).toHaveURL(/ghost-today$/);
+    await expect(page.getByText("That bullet doesn't exist")).toHaveCount(0);
+    const year = String(d.getFullYear());
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+    await goHome(page);
+    await expect(page.locator('li[data-node-id="ghost-container"]')).toHaveCount(
+      1,
+    );
+    await expect(page.locator('li[data-node-id="ghost-today"]')).toHaveCount(1);
+    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+  });
+
   test("the Daily container resists deletion; ordinary nodes still delete", async ({
     page,
   }) => {

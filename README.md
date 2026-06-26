@@ -6,7 +6,7 @@ Local-first at heart, with an optional Cloudflare deployment that syncs your out
 
 ## Status
 
-Your outline is stored in a TanStack DB collection. By default that's backed by a per-user **Cloudflare Durable Object** (its colocated SQLite) through a Worker (`/api/nodes`) — so it syncs across your devices (it re-pulls on tab focus; real-time push is not built yet). See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.
+Your outline is stored in a TanStack DB collection. By default that's backed by a per-user **Cloudflare Durable Object** (its colocated SQLite) through a Worker — writes go to `/api/nodes`, live reads over `/api/sync` (WebSocket) — so edits show up on your other tabs/devices without refocusing. See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.
 
 What works:
 
@@ -35,7 +35,7 @@ What works:
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo |
 | `Cmd/Ctrl+K` | Open the quick-switcher |
 
-Not built yet: sharing, real-time multi-device push (sync today reconciles on tab focus), email verification.
+Not built yet: sharing, email verification.
 
 ## Stack
 
@@ -126,12 +126,11 @@ The editor is a small core extended by **plugins** compiled into the bundle (an 
 
 The collection interface is backend-agnostic — that's how moving the backend (localStorage → D1 → a per-user Durable Object) touched only `collection.ts` and the Worker, leaving every component and the tree logic unchanged.
 
-Today, sync is **per-user, near-real-time on tab focus**: each signed-in user's optimistic local writes are persisted to *their* Durable Object (keyed by Better Auth's `user.id`), and the collection re-pulls server state when you refocus the tab (`refetchOnWindowFocus`). Not yet built:
+Today, **nodes sync live** over a per-user WebSocket (`/api/sync`): optimistic writes still POST/PATCH/DELETE `/api/nodes`, and the DO broadcasts deltas to every connected tab/device. **Side-collections** (tag colors, daily index) still reconcile on tab focus (`refetchOnWindowFocus`). Not yet built:
 
-- **Real-time push** — the per-user Durable Object *streaming* changes over WebSocket, instead of focus-driven refetch. (The DO already holds the data; the live-push layer is the remaining piece.)
 - **Sharing** — a node + subtree shared with another user (a future "mount" pointer; see [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object)).
 
-A returning owner's pre-DO outline is carried over **server-side**: the Worker does a one-time, non-destructive copy of any pre-DO D1 rows into the owner's Durable Object on first read (`ensureSeeded`). There is no client-side `localStorage` migration — localStorage is browser-scoped but accounts are per-user, so importing it would leak one browser's leftover outline into every new account that signed in there.
+A returning owner's pre-DO outline is carried over **server-side**: the Worker does a one-time, non-destructive copy of any pre-DO D1 rows into the owner's Durable Object on first `/api/sync` connect (`ensureSeeded`). There is no client-side `localStorage` migration — localStorage is browser-scoped but accounts are per-user, so importing it would leak one browser's leftover outline into every new account that signed in there.
 
 See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object) for the design and rejected alternatives (incl. why a Durable Object over D1-direct or ElectricSQL).
 
