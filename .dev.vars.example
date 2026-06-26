@@ -1,0 +1,5 @@
+# Local-only Worker secrets for `wrangler dev`. Copy to `.dev.vars` (gitignored)
+# and fill in. In production set these with `wrangler secret put <NAME>`.
+
+# Better Auth signing secret. Generate one: `openssl rand -base64 32`
+BETTER_AUTH_SECRET=replace-me

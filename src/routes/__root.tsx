@@ -12,6 +12,8 @@ import { MoveDialog } from '../components/move-dialog'
 import { TagColorStyles } from '../plugins/tags/tag-color-menu'
 import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
+import { AuthScreen } from '../components/auth-screen'
+import { useSession } from '../lib/auth-client'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -42,17 +44,33 @@ function RootComponent() {
   return (
     <RootDocument>
       <ThemeProvider>
-        <ShowCompletedProvider>
-          <Outlet />
-          <NodeSwitcher />
-          <MoveDialog />
-          <TagColorStyles />
-          <PluginStyles />
-          <Toaster />
-        </ShowCompletedProvider>
+        <AuthGate>
+          <ShowCompletedProvider>
+            <Outlet />
+            <NodeSwitcher />
+            <MoveDialog />
+            <TagColorStyles />
+            <PluginStyles />
+          </ShowCompletedProvider>
+        </AuthGate>
+        {/* Outside the gate so auth-screen errors can still toast. */}
+        <Toaster />
       </ThemeProvider>
     </RootDocument>
   )
+}
+
+/**
+ * Gate the whole app behind a Better Auth session. The shell is public so this
+ * renders the login screen for signed-out visitors; only the editor (and the
+ * data API it hits) require a session. While the session is still loading we
+ * render nothing to avoid flashing the login screen at an authed user.
+ */
+function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
+  const { data: session, isPending } = useSession()
+  if (isPending) return null
+  if (!session) return <AuthScreen />
+  return <>{children}</>
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {

@@ -2,7 +2,7 @@
 
 An open-source outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
 
-Local-first at heart, with an optional single-user Cloudflare deployment that syncs your outline across devices via a per-user [Durable Object](https://developers.cloudflare.com/durable-objects/), gated by either [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) or a built-in HTTP Basic Auth fallback (so it works before you set Access up).
+Local-first at heart, with an optional Cloudflare deployment that syncs your outline across devices via a per-user [Durable Object](https://developers.cloudflare.com/durable-objects/), behind email + password accounts ([Better Auth](https://www.better-auth.com)).
 
 ## Status
 
@@ -35,7 +35,7 @@ What works:
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo |
 | `Cmd/Ctrl+K` | Open the quick-switcher |
 
-Not built yet: sharing, real-time multi-device push (sync today reconciles on tab focus), multi-user accounts.
+Not built yet: sharing, real-time multi-device push (sync today reconciles on tab focus), email verification.
 
 ## Stack
 
@@ -43,7 +43,8 @@ Not built yet: sharing, real-time multi-device push (sync today reconciles on ta
 |---|---|---|
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
 | Data | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object)). |
-| Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object; single-user, gated by Cloudflare Access or an HTTP Basic Auth fallback ([the auth gate](docs/DECISIONS.md#the-auth-gate)) |
+| Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/DECISIONS.md#the-auth-gate)) |
+| Auth | Better Auth (email + password) | Self-serve signup; its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1 |
 | Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
 | Build | Vite 8 | What Start uses |
 | Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
@@ -66,11 +67,12 @@ bun run test:e2e   # Playwright end-to-end tests (chromium)
 
 ## Deploy
 
-The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, gated by **Cloudflare Access** (or an HTTP Basic Auth fallback — [the auth gate](docs/DECISIONS.md#the-auth-gate)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object).
+The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, behind **Better Auth** accounts ([the auth gate](docs/DECISIONS.md#the-auth-gate)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object).
 
 ```sh
 # local dev (two terminals): Vite HMR + a local Worker (DO + D1) it proxies /api to
-bun run db:migrate:local   # once: create the local D1 schema (the DO's import source)
+cp .dev.vars.example .dev.vars   # once: add a BETTER_AUTH_SECRET (openssl rand -base64 32)
+bun run db:migrate:local   # once: apply the local D1 schema (auth tables + the DO import source)
 bun run dev:api            # wrangler dev (Worker + DO + local D1) on :8787
 bun run dev                # vite dev (proxies /api -> :8787)
 
@@ -78,13 +80,14 @@ bun run dev                # vite dev (proxies /api -> :8787)
 bun run cf:dev             # build + wrangler dev
 
 # ship it
+wrangler secret put BETTER_AUTH_SECRET   # once: the auth signing secret
 bun run db:migrate:remote  # before the first deploy
 bun run deploy             # build + wrangler deploy
 ```
 
 `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
 
-**Auth.** The Worker authenticates the single user one of two ways. The simplest, no-dashboard path is **HTTP Basic Auth**: set a secret with `wrangler secret put APP_PASSWORD`, and the browser prompts on first load. The cleaner long-term path is **Cloudflare Access** on a custom domain (a one-time Zero Trust dashboard step); when its email header is present it takes precedence, no code change. Until one of these is in place, the Worker fails closed (the site is locked). See [the auth gate](docs/DECISIONS.md#the-auth-gate).
+**Auth.** Identity is **Better Auth** (email + password self-serve signup), sessions in D1. The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/DECISIONS.md#the-auth-gate).
 
 ## How it works
 
@@ -123,10 +126,10 @@ The editor is a small core extended by **plugins** compiled into the bundle (an 
 
 The collection interface is backend-agnostic — that's how moving the backend (localStorage → D1 → a per-user Durable Object) touched only `collection.ts` and the Worker, leaving every component and the tree logic unchanged.
 
-Today, sync is **single-user, near-real-time on tab focus**: optimistic local writes are persisted to the user's Durable Object, and the collection re-pulls server state when you refocus the tab (`refetchOnWindowFocus`). Not yet built:
+Today, sync is **per-user, near-real-time on tab focus**: each signed-in user's optimistic local writes are persisted to *their* Durable Object (keyed by Better Auth's `user.id`), and the collection re-pulls server state when you refocus the tab (`refetchOnWindowFocus`). Not yet built:
 
 - **Real-time push** — the per-user Durable Object *streaming* changes over WebSocket, instead of focus-driven refetch. (The DO already holds the data; the live-push layer is the remaining piece.)
-- **Multi-user** — the gate scopes to one identity today; real accounts (sign-up/login) are a larger step.
+- **Sharing** — a node + subtree shared with another user (a future "mount" pointer; see [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object)).
 
 A returning user's pre-sync outline is **imported from `localStorage` once** on first load against an empty server (`src/data/import-legacy.ts`); separately, the Worker does a one-time non-destructive copy of any pre-DO D1 rows into the user's Durable Object. Neither strands existing data.
 
@@ -140,7 +143,12 @@ src/
     __root.tsx        # HTML shell, global CSS, app-wide providers
     index.tsx         # the outline at the top level
     $nodeId.tsx       # the same outline zoomed into one bullet
+  lib/
+    auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOut)
+    utils.ts          # cn() and small helpers
   components/
+    auth-screen.tsx     # login / signup screen (shown by the root AuthGate when signed out)
+    sign-out-button.tsx # header sign-out control
     OutlineEditor.tsx   # reads tree, focus + command dispatch, the zoom view
     OutlineNode.tsx     # one bullet + its subtree (memoized, per-node store subscription)
     inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
@@ -173,10 +181,11 @@ src/
   router.tsx
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + /api/kv to per-user DOs
-  index.ts            #   auth gate + resolveUserId + routes /api to the user's DO (own tsconfig)
+  index.ts            #   session gate + resolveUserId + routes /api to the user's DO (own tsconfig)
+  auth.ts             #   createAuth(env): Better Auth (email + password), sessions in D1
   outline-do.ts       #   UserOutlineDO: per-user SQLite (nodes + kv), the outline store
-migrations/           # D1 SQL migrations (0001 nodes, 0002 kv) — now the DO import source
-wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings
+migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth)
+wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
 docs/DECISIONS.md     # the few load-bearing decisions (history in git log)
 vite.config.ts        # SPA mode + /api dev proxy
 ```

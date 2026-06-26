@@ -180,16 +180,18 @@ store, mutations, and components never changed. Sync is *near-real-time on tab f
 
 **The DO routing key must never be an email.** A DO name is *permanent* (no rename), so keying it
 off a mutable value would orphan a user's whole outline on an email or auth-provider change.
-`resolveUserId()` returns a **constant** today — the app is single-user behind the auth gate — and
-becomes the stable `session.user.id` when real accounts land. Do NOT "fix" it to route off
-`authorize()`'s `owner`/email; that reintroduces exactly the orphaning this avoids.
+`resolveUserId()` returns the session's stable **`session.user.id`** (the lone exception is the
+owner-continuity bridge, which maps one configured account back to the `'default'` DO — see [the
+auth gate](#the-auth-gate)). Do NOT "fix" it to route off the email; that reintroduces exactly the
+orphaning this avoids.
 
-**D1 is kept, but demoted — it is no longer the outline store.** It serves two roles: (1) the
-**source for the one-time, non-destructive import** of a user's pre-DO rows into their DO
-(`ensureSeeded` reads D1; the DO marks itself `seeded` and never re-imports), and (2) the reserved
-home for a future identity store. The `migrations/` SQL files (and `db:migrate:*`) still apply to
-that D1; the DO's own schema is created in its constructor, so it has **no SQL migration file** —
-its wrangler migration is the `new_sqlite_classes` tag.
+**D1 is kept, but demoted — it is no longer the outline store.** It serves two roles: (1) the home of
+**Better Auth's identity tables** (`user`/`session`/`account`/`verification`; see [the auth
+gate](#the-auth-gate)), and (2) the **source for the one-time, non-destructive import** of the
+owner's pre-DO rows into the `'default'` DO (`ensureSeeded` reads D1; the DO marks itself `seeded`
+and never re-imports). The `migrations/` SQL files (and `db:migrate:*`) still apply to that D1; the
+DO's own schema is created in its constructor, so it has **no SQL migration file** — its wrangler
+migration is the `new_sqlite_classes` tag.
 
 **Why a DO over D1-direct, or ElectricSQL/Postgres?** The browser can reach neither D1 nor a DO
 directly — both are Worker bindings, so any of them needs the server tier. A per-user DO *also*
@@ -213,18 +215,30 @@ through to `Record<string, unknown>`.
 
 ## The auth gate
 
-The Worker authenticates the single user via a three-tier `authorize()`, in order: (1) **Cloudflare
-Access** email header (preferred); (2) **localhost** → `local-dev` owner (dev only); (3) **HTTP
-Basic Auth** against the `APP_PASSWORD` secret, **fail-closed if unset**. The Worker gates **every
-path** (`run_worker_first: true`), not just `/api/*`.
+Identity is **Better Auth** (`worker/auth.ts`): email + password self-serve signup, sessions in D1.
+Better Auth's `user` table IS the global identity store and `user.id` is the stable, permanent key
+the Worker routes each user's outline Durable Object by. The Worker builds auth **per request**
+(`createAuth(env)`) because the D1 binding only exists inside `fetch` — it cannot be a module
+singleton.
 
-**Why it's not in the code:** gating every path looks unnecessary — why challenge static-asset
-requests? Because **a `fetch()` that gets a 401 does not trigger the browser's Basic Auth prompt —
-only a document navigation does.** So the Worker must challenge the `/` document load; the browser
-then caches the credentials and sends them on every asset and `/api` fetch automatically. Gate only
-`/api` and the prompt never appears.
+**The shell is public; only the data API is gated.** The Worker serves the static SPA (so the login
+screen can load) and `/api/auth/*` (Better Auth's own handler) without a session; `/api/nodes` and
+`/api/kv` require a valid session (`auth.api.getSession`) and 401 otherwise. The client gates the
+editor behind `useSession()` (root `AuthGate`) and shows the login screen when signed out. This
+**replaced** the old three-tier `authorize()` (Cloudflare Access + localhost + HTTP Basic Auth, in
+`git log`): Access can't do public self-serve signup, which a multi-tenant product needs.
 
-**Don't:** gate only `/api/*` (auth silently never prompts); remove the Basic Auth tier (the app is
-unusable until Access is configured, which needs a custom domain + dashboard); or relax any tier to
-trust a client-supplied owner. Access stays tier-1 and supersedes the Basic Auth gate with no code
-change once it's set up.
+**Owner-continuity bridge.** The pre-auth outline lives in the constant `'default'` DO (seeded from
+legacy D1). Setting the `OWNER_USER_ID` secret to the owner's `user.id` maps that one account back
+to `'default'`, carrying their existing data over with **zero copy** — everyone else routes to their
+own `user.id` DO. `ensureSeeded` (the legacy D1 import) therefore runs only for the `'default'` DO;
+new users start empty. Removable once that data is wherever it belongs.
+
+**node:crypto** — Better Auth needs it, so wrangler sets `compatibility_flags: ["nodejs_compat"]`.
+
+**Known gap (v1):** no email-verification requirement — no transactional email is wired yet, so
+`requireEmailVerification` is off. Harden when an email sender (e.g. Resend) lands.
+
+**Don't:** key the DO off the email (permanent-name orphaning — use `user.id`); make `createAuth` a
+module singleton (the D1 binding is request-scoped); gate the static shell (the login screen must
+load); or relax the `/api/*` session check to trust a client-supplied id.

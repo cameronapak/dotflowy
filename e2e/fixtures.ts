@@ -78,6 +78,32 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
       body: JSON.stringify(data),
     });
 
+  // The app is gated behind a Better Auth session (root AuthGate). The editor
+  // only mounts once `useSession()` resolves to a session, so mock the
+  // get-session endpoint with a fixed authed user. Without this the specs would
+  // see the login screen instead of the outline. (Auth itself is verified
+  // live against `wrangler dev`, not here.)
+  await page.route(
+    (url) => url.pathname === "/api/auth/get-session",
+    (route) =>
+      reply(route, {
+        session: {
+          id: "test-session",
+          userId: "test-user",
+          token: "test-token",
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        },
+        user: {
+          id: "test-user",
+          email: "test@example.com",
+          name: "Test User",
+          emailVerified: true,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+      }),
+  );
+
   await page.route(
     (url) => url.pathname === "/api/nodes",
     async (route) => {
