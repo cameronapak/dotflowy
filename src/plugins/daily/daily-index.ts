@@ -3,9 +3,11 @@ import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { z } from 'zod'
 import { queryClient } from '../../data/query-client'
+import { resyncNodes } from '../../data/collection'
 import {
   kvDelete,
   kvFetch,
+  kvGetOrCreate,
   kvPut,
   toKvKeys,
   toKvRows,
@@ -155,6 +157,45 @@ export function setMapping(key: string, nodeId: string): void {
   } else {
     dailyIndexCollection.insert({ key, nodeId })
   }
+}
+
+/**
+ * Atomic, server-authoritative claim of a `key -> nodeId` mapping. Mints nothing
+ * itself — the caller supplies a `candidate` node id, and this returns the
+ * AUTHORITATIVE winner plus whether this caller won (so it should create the
+ * node under `candidate`). Two devices with a stale replica both miss the key
+ * locally and both claim; the single-threaded DO lets exactly one win, killing
+ * the duplicate-daily-note race at the source.
+ *
+ * This is the errore boundary over the throwing kv client: on a network/server
+ * failure it logs and degrades to the optimistic local path (treats `candidate`
+ * as the winner), so the feature keeps working — the rare failure window just
+ * reopens the pre-fix race, no worse than before the claim existed.
+ */
+export async function claimMapping(
+  key: string,
+  candidate: string,
+): Promise<{ winner: string; won: boolean }> {
+  const row = await kvGetOrCreate<DailyRow>(KV, key, { key, nodeId: candidate })
+    .catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))
+  if (row instanceof Error) {
+    console.warn(`daily: claim "${key}" failed, creating locally:`, row.message)
+    return { winner: candidate, won: true }
+  }
+  return { winner: row.nodeId, won: row.nodeId === candidate }
+}
+
+/**
+ * Reconcile the outline against server truth so a node another device created
+ * (the winner of a claim this device lost) becomes locally present before we
+ * navigate to it. Triggers a socket resync (a fresh snapshot); best effort -- if
+ * the winner's write hasn't reached the server yet it self-heals on the next
+ * live delta. With real-time push the winner's insert usually already arrived,
+ * so this is a belt-and-suspenders safety net.
+ */
+export function refetchNodes(): Promise<void> {
+  resyncNodes()
+  return Promise.resolve()
 }
 
 /** True iff `nodeId` is the daily container -- the protection predicate (Seam:

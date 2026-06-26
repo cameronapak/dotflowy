@@ -43,6 +43,29 @@ export const kvDelete = (
   keys: string[],
 ): Promise<void> => send(collection, 'DELETE', { keys })
 
+/**
+ * Atomic, server-authoritative get-or-create on one kv key. Insert `value` only
+ * if the key is absent (server-side, in the single-threaded DO), then return the
+ * AUTHORITATIVE value — the pre-existing one wins. Lets two devices racing to
+ * create the same key (today's daily note) converge on one winner.
+ *
+ * Throws on a non-OK response like the rest of this client (its caller — the
+ * daily plugin's `claimMapping` — is the errore boundary that handles it).
+ */
+export async function kvGetOrCreate<T>(
+  collection: string,
+  key: string,
+  value: T,
+): Promise<T> {
+  const res = await fetch(`${url(collection)}&op=claim`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key, value }),
+  })
+  if (!res.ok) throw new Error(`claim ${url(collection)} ${key} -> ${res.status}`)
+  return ((await res.json()) as { value: T }).value
+}
+
 // --- Mutation-transaction shaping --------------------------------------------
 // A side-collection's onInsert/onUpdate both upsert the WHOLE value (the items
 // are tiny key->value rows), and onDelete sends the keys. These map a query

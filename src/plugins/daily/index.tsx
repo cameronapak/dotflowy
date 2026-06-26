@@ -25,9 +25,10 @@ import {
   moveNode,
   setText,
 } from '../../data/mutations'
-import { childrenOf, type TreeIndex } from '../../data/tree'
+import { childrenOf, createId, type TreeIndex } from '../../data/tree'
 import {
   CONTAINER_KEY,
+  claimMapping,
   formatDayBadge,
   formatDayRelative,
   formatDayText,
@@ -36,34 +37,53 @@ import {
   getDayKey,
   isContainerNode,
   localDateKey,
+  refetchNodes,
   setMapping,
   useDailyDate,
 } from './daily-index'
 
 // --- get-or-create ----------------------------------------------------------
 
+// Both get-or-creates are CLAIM-FIRST: when the local replica shows the
+// container/day absent, mint a candidate id and run it through the atomic
+// `claimMapping`. Exactly one racing device wins and creates the node under the
+// claimed id; a loser adopts the winner and (if the winner's node isn't local
+// yet) refetches to self-heal. The fast path (already in the local replica)
+// stays synchronous-quick with no network round-trip. See daily-index.ts.
+
 /**
  * The single "Daily" container, created lazily at the end of the top level.
- * Self-healing: a mapping that points at a node which no longer exists is
- * rebuilt (the container is protected, so this is belt-and-suspenders).
+ * Atomic-claim guarded so two devices first-using daily can't each mint one.
  */
-function ensureContainer(index: TreeIndex): string {
+async function ensureContainer(index: TreeIndex): Promise<string> {
   const existing = getContainerId()
   if (existing && index.byId.has(existing)) return existing
-  const tops = childrenOf(index, null)
-  const after = tops.length ? tops[tops.length - 1]!.id : null
-  const id = appendChild(null, after, 'Daily')
-  setMapping(CONTAINER_KEY, id)
-  return id
+  const candidate = createId()
+  const { winner, won } = await claimMapping(CONTAINER_KEY, candidate)
+  if (won) {
+    const tops = childrenOf(index, null)
+    const after = tops.length ? tops[tops.length - 1]!.id : null
+    appendChild(null, after, 'Daily', winner)
+  } else if (!index.byId.has(winner)) {
+    await refetchNodes()
+  }
+  setMapping(CONTAINER_KEY, winner)
+  return winner
 }
 
 /**
  * The note for `key`, created as the FIRST child of the container (newest day
  * on top) if missing. Text seeds to the full date; the badge shows the relative
- * label. v1 caveat: creating an out-of-order past day (via a future picker)
- * still lands on top -- acceptable until the picker ships its own ordering.
+ * label. The atomic claim makes "create today" idempotent across devices: a
+ * loser reuses the winner's node instead of minting a duplicate. v1 caveat:
+ * creating an out-of-order past day (via a future picker) still lands on top --
+ * acceptable until the picker ships its own ordering.
  */
-function ensureDay(key: string, containerId: string, index: TreeIndex): string {
+async function ensureDay(
+  key: string,
+  containerId: string,
+  index: TreeIndex,
+): Promise<string> {
   const existing = getDayId(key)
   if (existing && index.byId.has(existing)) {
     if (!index.byId.get(existing)!.text.trim()) {
@@ -71,22 +91,29 @@ function ensureDay(key: string, containerId: string, index: TreeIndex): string {
     }
     return existing
   }
-  const id = insertChildAtStart(index, containerId, false, formatDayText(key))
-  setMapping(key, id)
-  return id
+  const candidate = createId()
+  const { winner, won } = await claimMapping(key, candidate)
+  if (won) {
+    insertChildAtStart(index, containerId, false, formatDayText(key), winner)
+  } else if (!index.byId.has(winner)) {
+    await refetchNodes()
+  }
+  setMapping(key, winner)
+  return winner
 }
 
 /** Ensure the container + the day exist and return the day's node id (no nav).
  *  Takes just the tree index (not a `PluginContext`) so the Today button, the
  *  `/` command, AND the Cmd+K virtual action (Seam J -- which has no
- *  `PluginContext`) all reuse the exact same get-or-create (ADR 0019/0022). */
-function getOrCreateDay(key: string, index: TreeIndex): string {
-  return ensureDay(key, ensureContainer(index), index)
+ *  `PluginContext`) all reuse the exact same get-or-create (ADR 0019/0022).
+ *  Async: it may round-trip the atomic claim before the node id is settled. */
+async function getOrCreateDay(key: string, index: TreeIndex): Promise<string> {
+  return ensureDay(key, await ensureContainer(index), index)
 }
 
 /** get-or-create the day, then zoom to it (the Today button + future picker). */
-function goToDate(key: string, ctx: PluginContext): void {
-  ctx.nav.zoom(getOrCreateDay(key, ctx.tree))
+async function goToDate(key: string, ctx: PluginContext): Promise<void> {
+  ctx.nav.zoom(await getOrCreateDay(key, ctx.tree))
 }
 
 // --- header slot: the "Today" button ----------------------------------------
@@ -96,7 +123,7 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
     <Button
       variant="ghost"
       size="icon-sm"
-      onClick={() => goToDate(localDateKey(), getCtx())}
+      onClick={() => void goToDate(localDateKey(), getCtx())}
     >
       <CalendarDaysIcon />
       <span className="sr-only">Today's daily note</span>
@@ -151,8 +178,8 @@ export default definePlugin({
       icon: CalendarArrowDownIcon,
       keywords: ['today', 'daily', 'journal'],
       available: () => true,
-      run: (nodeId, ctx) => {
-        const todayId = getOrCreateDay(localDateKey(), ctx.tree)
+      run: async (nodeId, ctx) => {
+        const todayId = await getOrCreateDay(localDateKey(), ctx.tree)
         if (todayId === nodeId) return // can't move today's note under itself
         capture(ctx.tree, nodeId)
         const kids = childrenOf(ctx.tree, todayId)
@@ -203,7 +230,7 @@ export default definePlugin({
         label: 'Go to Today',
         hint: "Creates today's daily note",
         icon: CalendarDaysIcon,
-        run: () => ctx.goTo(getOrCreateDay(key, ctx.index)),
+        run: () => void getOrCreateDay(key, ctx.index).then((id) => ctx.goTo(id)),
       },
     ]
   },

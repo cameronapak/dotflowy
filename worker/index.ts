@@ -178,6 +178,16 @@ async function handleKv(
     case 'GET':
       return json(await stub.getKv(collection))
     case 'POST': {
+      // `?op=claim` is the atomic get-or-create: insert the value only if the
+      // key is absent, return the authoritative one. Used by the daily plugin to
+      // race-safely create today's note / the container (the DO serializes it).
+      if (new URL(request.url).searchParams.get('op') === 'claim') {
+        const { key, value } = (await request.json()) as {
+          key: string
+          value: unknown
+        }
+        return json({ value: await stub.getOrCreateKv(collection, key, value) })
+      }
       const { rows } = (await request.json()) as {
         rows: { key: string; value: unknown }[]
       }
@@ -221,6 +231,19 @@ export default {
         request.method === 'GET' && userId === OWNER_DO_ID
           ? ensureSeeded(stub, env)
           : Promise.resolve()
+
+      // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
+      // hibernation-accepts it and streams outline changes. The session is
+      // already validated above, so the socket only ever opens for an authed
+      // user. Seed first (owner only) so the DO's initial snapshot includes any
+      // imported legacy rows — the live client no longer GETs /api/nodes.
+      if (url.pathname === '/api/sync') {
+        if (request.headers.get('Upgrade') !== 'websocket') {
+          return json({ error: 'expected a websocket upgrade' }, 426)
+        }
+        await maybeSeed
+        return await stub.fetch(request)
+      }
 
       if (url.pathname === '/api/nodes') {
         await maybeSeed

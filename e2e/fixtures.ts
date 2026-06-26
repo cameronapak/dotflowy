@@ -158,6 +158,18 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
         case "GET":
           return reply(route, [...m.values()]);
         case "POST": {
+          // `?op=claim` mirrors the DO's atomic get-or-create: insert only if
+          // the key is absent, return the authoritative value (pre-existing
+          // wins). The per-page Map IS the single source, so two claims for the
+          // same key here resolve to one winner -- exactly as the real DO does.
+          if (new URL(req.url()).searchParams.get("op") === "claim") {
+            const { key, value } = req.postDataJSON() as {
+              key: string;
+              value: unknown;
+            };
+            if (!m.has(key)) m.set(key, value);
+            return reply(route, { value: m.get(key) });
+          }
           const { rows } = req.postDataJSON() as {
             rows: { key: string; value: unknown }[];
           };
@@ -172,6 +184,29 @@ export async function seedOutline(page: Page, nodes: SeedNode[]): Promise<void> 
         default:
           return route.fulfill({ status: 405, body: "{}" });
       }
+    },
+  );
+
+  // The live client loads the outline over a WebSocket (/api/sync), not a GET --
+  // realtime sync (docs/realtime-push-plan.md). The app sends a `hello`; reply
+  // with a full snapshot from the seeded store so the collection becomes ready
+  // and the editor mounts. Single-page specs need no live deltas: optimistic
+  // mutations update the UI and writes still persist through the REST mock above,
+  // so the socket only has to bootstrap. Not calling connectToServer() keeps this
+  // fully mocked -- there is no real Worker in e2e. (The real socket is exercised
+  // by a live two-context test against wrangler dev, not here.)
+  await page.routeWebSocket(
+    (url) => url.pathname === "/api/sync",
+    (ws) => {
+      ws.onMessage(() =>
+        ws.send(
+          JSON.stringify({
+            type: "snapshot",
+            seq: 0,
+            nodes: [...store.values()],
+          }),
+        ),
+      );
     },
   );
 }

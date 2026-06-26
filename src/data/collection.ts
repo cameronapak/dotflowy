@@ -1,75 +1,145 @@
 import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { nodeSchema } from './schema'
 import type { Node } from './schema'
-import { queryClient } from './query-client'
-import { createNodes, deleteNodes, fetchNodes, updateNodes } from './api'
+import { createNodes, deleteNodes, updateNodes } from './api'
+import { connectSyncSocket } from './realtime'
+import type { ChangeOp, ServerMessage } from './realtime'
 
 /**
  * Single source of truth for all outline nodes.
  *
- * Backed by Cloudflare D1 through a TanStack DB query collection: the queryFn
- * GETs the full node set for the authenticated user (Cloudflare Access scopes
- * it by email), and the mutation handlers POST/PATCH/DELETE through the
- * same-origin /api/nodes Worker. Mutations apply optimistically and are
- * persisted server-side; each handler returns `{ refetch: false }` so a
- * keystroke does NOT trigger a full re-GET (the editor fires many small
- * writes). Cross-device edits reconcile on window-focus refetch — see
- * query-client.ts. Why D1: docs/DECISIONS.md (D1 sync).
+ * Backed by a per-user Durable Object over a real-time WebSocket (realtime.ts ->
+ * /api/sync). This is a TanStack DB *custom sync* collection: on connect the DO
+ * streams a `snapshot` (the full outline), then every edit on any of the user's
+ * devices arrives as a `change` delta and is applied live -- no window-focus
+ * refetch. A reconnect resumes from the last applied seq (or falls back to a
+ * fresh snapshot). Why a DO + WebSocket: docs/DECISIONS.md (per-user DO sync)
+ * and docs/realtime-push-plan.md.
  *
- * A transaction can carry several mutations (a structural move relinks
- * multiple siblings), so every handler maps over `transaction.mutations`
- * rather than reading `[0]`; the Worker batches them into one D1 round trip.
+ * The WRITE path is unchanged: optimistic mutations still POST/PATCH/DELETE
+ * /api/nodes, each handler returning `{ refetch: false }` (the socket echoes the
+ * persisted change back, which reconciles idempotently -- no need to skip the
+ * originator). A transaction can carry several mutations (a structural move
+ * relinks multiple siblings), so every handler maps over `transaction.mutations`
+ * rather than reading `[0]`; the Worker batches them into one DO round trip.
  *
  * The collection interface (insert / update / delete / subscribeChanges /
- * toArray / toArrayWhenReady) is identical to the old localStorage collection,
- * so the tree store, mutations, and components are unchanged — ADR 0014 still
- * holds, and the backend-swap promise in the README is realized here.
+ * toArray / toArrayWhenReady) is unchanged, so the tree store, mutations, and
+ * components don't care that the adapter swapped from query-collection to a live
+ * socket.
  *
  * We let the schema drive the item type via inference rather than passing
  * `<Node>` to createCollection (the schema overload keys off StandardSchemaV1;
  * an explicit generic routes inference down the wrong branch).
  */
-export const nodesCollection = createCollection(
-  queryCollectionOptions({
-    id: 'nodes',
-    queryKey: ['nodes'],
-    queryClient,
-    queryFn: fetchNodes,
-    getKey: (node: Node) => node.id,
-    schema: nodeSchema,
-    onInsert: async ({ transaction }) => {
-      await createNodes(transaction.mutations.map((m) => m.modified as Node))
-      return { refetch: false }
-    },
-    onUpdate: async ({ transaction }) => {
-      await updateNodes(
-        transaction.mutations.map((m) => ({
-          id: m.key as string,
-          changes: m.changes as Partial<Node>,
-        })),
-      )
-      return { refetch: false }
-    },
-    onDelete: async ({ transaction }) => {
-      await deleteNodes(transaction.mutations.map((m) => m.key as string))
-      return { refetch: false }
-    },
-  }),
-)
 
-/**
- * The initial-load error, if the first `fetchNodes` settled in error, else null.
- *
- * Why this exists: the query-db-collection adapter calls `markReady()` even when
- * the fetch FAILS (it logs the error, then unblocks the collection), so
- * `toArrayWhenReady()` RESOLVES with an empty array on a server 500 / offline /
- * auth failure -- it neither rejects nor hangs. An empty array therefore means
- * "server is genuinely empty" OR "the load failed" -- indistinguishable from the
- * collection alone. Reading the underlying query state is the only way to tell
- * them apart, which first-run bootstrap needs so it doesn't seed welcome bullets
- * on top of a transient outage (see seed.ts).
- */
+/** The initial-load error, if the first sync failed, else null. The socket calls
+ *  markReady() even when it can't reach the server (so the app doesn't hang),
+ *  which would otherwise leave the collection ready+empty -- indistinguishable
+ *  from a genuinely empty new account. First-run bootstrap reads this to avoid
+ *  seeding welcome bullets over a real-but-unreachable outline (see seed.ts).
+ *  Cleared the moment a real snapshot arrives (a recovered socket). */
+let initialError: Error | null = null
 export function nodesLoadError(): Error | null {
-  return queryClient.getQueryState(['nodes'])?.error ?? null
+  return initialError
 }
+
+/** Force the outline to reconcile against server truth now (a fresh snapshot).
+ *  Used by the daily plugin's claim loser-path; a no-op before the socket
+ *  connects (or during the `/` prerender). */
+let resyncFn: (() => void) | null = null
+export function resyncNodes(): void {
+  resyncFn?.()
+}
+
+export const nodesCollection = createCollection({
+  id: 'nodes',
+  getKey: (node: Node) => node.id,
+  schema: nodeSchema,
+  sync: {
+    // Updates carry only changed fields (a PATCH) OR a full row (an upsert);
+    // partial merges both correctly.
+    rowUpdateMode: 'partial',
+    sync: ({ begin, write, commit, markReady, truncate, metadata }) => {
+      // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
+      // any defensive server-side read resolves empty instead of hanging.
+      if (typeof window === 'undefined') {
+        markReady()
+        return () => {}
+      }
+
+      let ready = false
+      const ensureReady = () => {
+        if (ready) return
+        ready = true
+        markReady()
+      }
+      const getCursor = (): number | null =>
+        (metadata?.collection.get('cursor') as number | undefined) ?? null
+
+      const applyOps = (ops: ChangeOp[], seq: number): void => {
+        begin()
+        for (const op of ops) {
+          if (op.op === 'delete') write({ type: 'delete', key: op.key })
+          else write({ type: op.op, value: op.value })
+        }
+        metadata?.collection.set('cursor', seq)
+        commit()
+      }
+
+      const socket = connectSyncSocket({
+        getCursor,
+        onInitialError: (err) => {
+          initialError = err
+          ensureReady()
+        },
+        onMessage: (msg: ServerMessage) => {
+          if (msg.type === 'snapshot') {
+            // Replace the whole collection: truncate, then write the full set.
+            // Idempotent on first connect (empty) and on a resync past the
+            // changelog window. The cursor survives truncate (separate store).
+            begin()
+            truncate()
+            for (const n of msg.nodes) write({ type: 'insert', value: n })
+            metadata?.collection.set('cursor', msg.seq)
+            commit()
+            initialError = null
+            ensureReady()
+          } else if (msg.type === 'resume') {
+            // The gap since our cursor. Empty = already current; the cursor is
+            // unchanged so there's nothing to write.
+            for (const frame of msg.changes) applyOps(frame.ops, frame.seq)
+            initialError = null
+            ensureReady()
+          } else {
+            // A live change broadcast from this or another device.
+            applyOps(msg.ops, msg.seq)
+          }
+        },
+      })
+      resyncFn = socket.resync
+
+      return () => {
+        resyncFn = null
+        socket.close()
+      }
+    },
+  },
+  onInsert: async ({ transaction }) => {
+    await createNodes(transaction.mutations.map((m) => m.modified as Node))
+    return { refetch: false }
+  },
+  onUpdate: async ({ transaction }) => {
+    await updateNodes(
+      transaction.mutations.map((m) => ({
+        id: m.key as string,
+        changes: m.changes as Partial<Node>,
+      })),
+    )
+    return { refetch: false }
+  },
+  onDelete: async ({ transaction }) => {
+    await deleteNodes(transaction.mutations.map((m) => m.key as string))
+    return { refetch: false }
+  },
+})
