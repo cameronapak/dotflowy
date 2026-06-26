@@ -252,3 +252,37 @@ new users start empty. Removable once that data is wherever it belongs.
 **Don't:** key the DO off the email (permanent-name orphaning — use `user.id`); make `createAuth` a
 module singleton (the D1 binding is request-scoped); gate the static shell (the login screen must
 load); or relax the `/api/*` session check to trust a client-supplied id.
+
+---
+
+## Structured logging (evlog)
+
+Observability is **evlog**, wired through its runtime-specific entries — `evlog/workers` in
+`worker/index.ts`, `evlog/client` in `src/lib/log.ts` — **not** the documented `evlog/nitro`
+TanStack Start integration. Console drain only: the Worker emits one structured wide event per
+`/api` request (visible in `wrangler tail`), and the SPA logs to the browser console with uncaught
+errors + unhandled rejections auto-captured and the session `user.id` stamped via `setIdentity`.
+evlog is the **logging** layer only — control flow stays errore (errors as values; see the Error
+Handling rule in `AGENTS.md`); we never adopt evlog's throw-based `createError()`.
+
+**Why it's not in the code:** evlog's headline TanStack Start setup is a Nitro v3 module +
+`nitro.config.ts` + a root-route `evlogErrorHandler` + `useRequest().context.log`, all of which
+assume a **Nitro server in the request path**. This app has none — it's **SPA mode** (no SSR, see
+the constraint under *Sync via a per-user Durable Object*) served as static assets, and every
+`/api/*` request is handled by the **Cloudflare Worker**, not Nitro. Wired the documented way, the
+Nitro module and the root-route middleware **never execute** — dead code that reads like working
+observability (evlog's own docs say the integration is "not for SPA mode"). So the logger lives
+where the server actually is: the Worker (`evlog/workers` auto-extracts method/path/cf-ray and
+flushes async drains via `ctx.waitUntil`) and the browser (`evlog/client`, internally gated by
+`isBrowser()`, so it no-ops during the build-time prerender of `/`).
+
+**Console-only is the v1 floor, not the ceiling.** Client logs are ephemeral (devtools only); to
+land them somewhere an agent can read *after the fact*, add a `transport` to `initLog` pointing at
+an `/api/logs` route on the Worker that re-logs them into `wrangler tail` (`evlog/http` →
+`createHttpLogDrain`). One route, deliberately deferred.
+
+**Don't:** add `nitro.config.ts` / the `evlog/nitro` module / a root-route `evlogErrorHandler`
+(all inert under SPA + Workers); replace errore returns with evlog's `createError()`/throw (it
+fights the whole codebase — evlog logs, errore controls flow); or create a logger for static-asset
+requests (the Worker short-circuits non-`/api` to `env.ASSETS` *before* building one — keep that
+order, asset serving is high-volume and uninteresting).

@@ -17,6 +17,8 @@
  * non-destructive import into the owner's DO (`ensureSeeded`).
  */
 
+import { createWorkersLogger, initWorkersLogger } from 'evlog/workers'
+import type { AuditableLogger } from 'evlog'
 import { UserOutlineDO } from './outline-do'
 import type { Node } from './outline-do'
 import { createAuth } from './auth'
@@ -25,6 +27,11 @@ import type { AuthEnv } from './auth'
 // Re-export the DO class so the Workers runtime can instantiate it (the
 // wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
 export { UserOutlineDO }
+
+// One structured logger per isolate; no drain configured, so it writes to the
+// console -> visible in `wrangler tail` and the CF dashboard. Swap in an HTTP
+// drain (Axiom/PostHog/etc.) here later without touching the request path.
+initWorkersLogger({ env: { service: 'dotflowy-worker' } })
 
 interface Env extends AuthEnv {
   DB: D1Database
@@ -205,62 +212,102 @@ async function handleKv(
   }
 }
 
+/** The custom fields this Worker accumulates onto each request's wide event
+ *  (method/path/cf-ray/status are handled by evlog). */
+type ApiLogFields = {
+  user: { id: string }
+  outlineDO: string
+  error: { message: string }
+}
+
+/**
+ * Route an authenticated `/api/*` request to the caller's Durable Object.
+ * Everything here is gated by a valid Better Auth session (the public static
+ * shell is served before we reach this). `log` is the request's wide event —
+ * we accumulate user / DO / error context on it; `fetch` emits it once with the
+ * final status.
+ */
+async function routeApi(
+  request: Request,
+  env: Env,
+  url: URL,
+  log: AuditableLogger<ApiLogFields>,
+): Promise<Response> {
+  const auth = createAuth(env)
+
+  // Better Auth owns everything under /api/auth/* (sign-up/in/out, session).
+  if (url.pathname.startsWith('/api/auth/')) return auth.handler(request)
+
+  // Identity = the validated session's stable user id. No session -> 401.
+  const session = await auth.api.getSession({ headers: request.headers })
+  if (!session) return json({ error: 'unauthorized' }, 401)
+  log.set({ user: { id: session.user.id } })
+
+  const userId = resolveUserId(session.user.id, env)
+  log.set({ outlineDO: userId })
+  const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
+
+  try {
+    // Only the owner's DO ('default') has legacy D1 rows to import; new users
+    // start empty, so skip the import (and its D1 query) for them.
+    const maybeSeed =
+      request.method === 'GET' && userId === OWNER_DO_ID
+        ? ensureSeeded(stub, env)
+        : Promise.resolve()
+
+    // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
+    // hibernation-accepts it and streams outline changes. The session is
+    // already validated above, so the socket only ever opens for an authed
+    // user. Seed first (owner only) so the DO's initial snapshot includes any
+    // imported legacy rows — the live client no longer GETs /api/nodes.
+    if (url.pathname === '/api/sync') {
+      if (request.headers.get('Upgrade') !== 'websocket') {
+        return json({ error: 'expected a websocket upgrade' }, 426)
+      }
+      await maybeSeed
+      return await stub.fetch(request)
+    }
+
+    if (url.pathname === '/api/nodes') {
+      await maybeSeed
+      return await handleNodes(request, stub)
+    }
+    if (url.pathname === '/api/kv') {
+      const collection = url.searchParams.get('collection')
+      if (!collection || !KV_COLLECTIONS.has(collection)) {
+        return json({ error: 'unknown collection' }, 400)
+      }
+      await maybeSeed
+      return await handleKv(request, stub, collection)
+    }
+  } catch (err) {
+    log.set({ error: { message: String(err) } })
+    return json({ error: String(err) }, 500)
+  }
+  return json({ error: 'not found' }, 404)
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url)
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve
-    // them without instantiating auth — only the data API is gated, below.
+    // them without instantiating auth (or a logger) — only the data API is
+    // gated and logged, below.
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
-    const auth = createAuth(env)
-
-    // Better Auth owns everything under /api/auth/* (sign-up/in/out, session).
-    if (url.pathname.startsWith('/api/auth/')) return auth.handler(request)
-
-    // Identity = the validated session's stable user id. No session -> 401.
-    const session = await auth.api.getSession({ headers: request.headers })
-    if (!session) return json({ error: 'unauthorized' }, 401)
-
-    const userId = resolveUserId(session.user.id, env)
-    const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
-
-    try {
-      // Only the owner's DO ('default') has legacy D1 rows to import; new users
-      // start empty, so skip the import (and its D1 query) for them.
-      const maybeSeed =
-        request.method === 'GET' && userId === OWNER_DO_ID
-          ? ensureSeeded(stub, env)
-          : Promise.resolve()
-
-      // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
-      // hibernation-accepts it and streams outline changes. The session is
-      // already validated above, so the socket only ever opens for an authed
-      // user. Seed first (owner only) so the DO's initial snapshot includes any
-      // imported legacy rows — the live client no longer GETs /api/nodes.
-      if (url.pathname === '/api/sync') {
-        if (request.headers.get('Upgrade') !== 'websocket') {
-          return json({ error: 'expected a websocket upgrade' }, 426)
-        }
-        await maybeSeed
-        return await stub.fetch(request)
-      }
-
-      if (url.pathname === '/api/nodes') {
-        await maybeSeed
-        return await handleNodes(request, stub)
-      }
-      if (url.pathname === '/api/kv') {
-        const collection = url.searchParams.get('collection')
-        if (!collection || !KV_COLLECTIONS.has(collection)) {
-          return json({ error: 'unknown collection' }, 400)
-        }
-        await maybeSeed
-        return await handleKv(request, stub, collection)
-      }
-    } catch (err) {
-      return json({ error: String(err) }, 500)
-    }
-    return json({ error: 'not found' }, 404)
+    // One wide event per API request: method / path / cf-ray are auto-extracted;
+    // routeApi adds user / DO / error context; we emit the final status here.
+    // `executionCtx` lets a future async drain finish via waitUntil.
+    const log = createWorkersLogger<ApiLogFields>(request, {
+      executionCtx: ctx,
+    })
+    const response = await routeApi(request, env, url, log)
+    log.emit({ status: response.status })
+    return response
   },
 } satisfies ExportedHandler<Env>

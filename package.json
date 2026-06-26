@@ -37,6 +37,7 @@
     "cnfast": "^0.0.8",
     "date-fns": "^4.4.0",
     "errore": "^0.14.1",
+    "evlog": "^2.19.2",
     "fuse.js": "^7.4.2",
     "grab-bcv": "^0.1.5",
     "lucide-react": "^1.21.0",
