@@ -1,11 +1,11 @@
 import {
-  useCallback,
   useEffect,
-  useMemo,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type MutableRefObject,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -100,6 +100,13 @@ function onContentMouseDown(e: ReactMouseEvent) {
   if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
 }
 
+/** Keep a ref aligned with the latest render value without touching .current during render. */
+function useSyncRef<T>(ref: MutableRefObject<T>, value: T) {
+  useLayoutEffect(() => {
+    ref.current = value;
+  });
+}
+
 /**
  * Top-level outline editor. Owns:
  *  - reading the live tree
@@ -116,8 +123,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Live handle to the current tree for the stable command/drag closures (the
   // ref pattern every live value uses, so `commands` keeps its identity across
   // renders -- a prop on every memoized OutlineNode. See ADR 0014).
-  const focusIndex = useRef<TreeIndex>(index);
-  focusIndex.current = index;
+  const focusIndex = useRef(index);
+  useSyncRef(focusIndex, index);
 
   // First-run import-or-seed bootstrap; safe to run on mount. See seed.ts.
   useBootstrapOutline();
@@ -126,30 +133,25 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // Seam G (ADR 0018): the composed per-node visibility predicate. The core no
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
-  // hide (hide-completed today). Memoized so it stays referentially stable
-  // across keystrokes, which keeps useVisibleChildIds' cache warm and every
-  // memoized OutlineNode from re-rendering on a sibling's keystroke (ADR 0014).
-  // Depends on the whole view context for forward-correctness, though today's
-  // only hide rule reads showCompleted.
-  const viewCtx = useMemo<ViewContext>(
-    () => ({ showCompleted, search: routeSearch, rootId }),
-    [showCompleted, routeSearch, rootId],
-  );
-  const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
-  // Live handle for the stable command closures + drag (mirrors the ref pattern
-  // the other live values use, so `commands` keeps its identity -- ADR 0014).
+  // hide (hide-completed today). React Compiler keeps this stable across
+  // keystrokes so useVisibleChildIds' cache stays warm (ADR 0014).
+  const viewCtx: ViewContext = { showCompleted, search: routeSearch, rootId };
+  const isHidden = composeHidden(viewCtx);
   const isHiddenRef = useRef(isHidden);
-  isHiddenRef.current = isHidden;
+  useSyncRef(isHiddenRef, isHidden);
 
-  const rootIdRef = useRef<string | null>(rootId);
-  rootIdRef.current = rootId;
+  const rootIdRef = useRef(rootId);
+  useSyncRef(rootIdRef, rootId);
 
   // Focus plumbing: the id->contentEditable registry, the post-render focus/
   // flash pass, and undo/redo (which restore focus where the action left it).
-  // The refs are returned so the command closures + drag can write them. See
-  // useOutlineFocus.
-  const { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash } =
-    useOutlineFocus(focusIndex);
+  const {
+    refs,
+    registerRef,
+    requestFocus,
+    requestFocusAtStart,
+    requestFlash,
+  } = useOutlineFocus(focusIndex);
 
   // The top-level <ul>, so the drag indicator knows how wide to draw.
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -220,9 +222,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         afterSiblingId,
       );
       if (moved) {
-        pendingFocus.current = id;
+        requestFocus(id);
         // Tint the row it landed on so the eye can find what just moved.
-        pendingFlash.current = id;
+        requestFlash(id);
       } else drop();
     },
   });
@@ -240,9 +242,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     rootIdRef,
     isHiddenRef,
     refs,
-    pendingFocus,
-    pendingFocusAtStart,
-    pendingFlash,
+    requestFocus,
+    requestFocusAtStart,
+    requestFlash,
     navigateZoom,
     startDrag,
     consumeClick,
@@ -250,28 +252,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // PluginContext factory (ADR 0018 D8): the promoted command set + tree reads +
   // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
-  // live values (focusIndex/activeTagsRef) at call time; stable identity.
-  const pluginCtx = useCallback(
-    (): PluginContext => ({
-      tree: focusIndex.current,
-      mutations: commands,
-      nav: {
-        zoom: (id) => navigateZoom(id, id),
-      },
-      openOverlay: (node) => setOverlayNode(node),
-    }),
-    [commands, navigateZoom],
-  );
+  // live values at call time; React Compiler keeps this stable.
+  const pluginCtx = (): PluginContext => ({
+    tree: focusIndex.current,
+    mutations: commands,
+    nav: {
+      zoom: (id) => navigateZoom(id, id),
+    },
+    openOverlay: (node) => setOverlayNode(node),
+  });
 
   // The pruned visible-set for the active filter (matches + ancestor context),
   // or null when no filter. Now a plugin-contributed Seam-G transform (the tags
   // plugin's tag-filter), composed in registry.buildViewFilter -- the core no
   // longer imports buildTagFilter directly. Render-time only, never mutates a
   // node (ADR 0015). The composed isHidden is passed so it prunes hidden nodes.
-  const filter = useMemo(
-    () => buildViewFilter(index, viewCtx, isHidden),
-    [index, viewCtx, isHidden],
-  );
+  const filter = buildViewFilter(index, viewCtx, isHidden);
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
   // Top-level roots start the fade cascade fresh: a completed ancestor above
@@ -332,7 +328,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                 focusIndex.current,
                 zoomedNode.id,
               );
-              pendingFocus.current = newId;
+              requestFocus(newId);
             }}
             onArrowDown={() => commands.onMoveFocus(zoomedNode.id, "down")}
           />
@@ -374,7 +370,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     rootId,
                     afterId,
                   );
-                  pendingFocus.current = newId;
+                  requestFocus(newId);
                 }}
               >
                 <PlusIcon />
@@ -417,14 +413,13 @@ interface OutlineFocus {
    *  so focus logic treats titles and list items uniformly. */
   refs: RefObject<Map<string, HTMLSpanElement | null>>;
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
-  /** The node to focus after the next render (most-recently inserted/moved). */
-  pendingFocus: RefObject<string | null>;
+  /** Queue focus on a node after the next render. */
+  requestFocus: (id: string) => void;
   /** When an Enter-split moved text into the new bullet, land the caret at its
-   *  START, not its end (every other pending-focus wants the end). */
-  pendingFocusAtStart: RefObject<boolean>;
-  /** Like pendingFocus, but pulses the row's background to mark a just-moved
-   *  node (set after a drag/keyboard move). */
-  pendingFlash: RefObject<string | null>;
+   *  START, not its end (every other requestFocus wants the end). */
+  requestFocusAtStart: () => void;
+  /** Pulse the row's background to mark a just-moved node. */
+  requestFlash: (id: string) => void;
 }
 
 /**
@@ -434,19 +429,28 @@ interface OutlineFocus {
  * are returned so the command closures and drag can write them. See ADR 0014.
  */
 function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
-  // The refs registry. Lazy-init the Map once: useRef has no lazy-initializer
-  // form, so passing `new Map()` directly would rebuild and discard it on every
-  // render. (react-doctor/rerender-lazy-ref-init.)
-  const refs = useRef<Map<string, HTMLSpanElement | null>>(null!);
-  if (!refs.current) refs.current = new Map();
-  const registerRef = useCallback((id: string, el: HTMLSpanElement | null) => {
+  // Stable Map instance via useState lazy init — avoids touching ref.current
+  // during render (react-hooks-js/refs) while keeping one map for the editor.
+  const [refsMap] = useState(() => new Map<string, HTMLSpanElement | null>());
+  const refs = useRef(refsMap);
+  const registerRef = (id: string, el: HTMLSpanElement | null) => {
     if (el) refs.current.set(id, el);
     else refs.current.delete(id);
-  }, []);
+  };
 
   const pendingFocus = useRef<string | null>(null);
   const pendingFocusAtStart = useRef(false);
   const pendingFlash = useRef<string | null>(null);
+
+  const requestFocus = (id: string) => {
+    pendingFocus.current = id;
+  };
+  const requestFocusAtStart = () => {
+    pendingFocusAtStart.current = true;
+  };
+  const requestFlash = (id: string) => {
+    pendingFlash.current = id;
+  };
 
   // After every render, if a focus is pending and the target exists, focus it;
   // likewise flash a just-moved row. Both run post-render because the target row
@@ -471,13 +475,13 @@ function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
 
   // The currently-focused bullet id, by reverse-looking-up the registry (covers
   // list items and the zoomed title). Null when focus is outside the outline.
-  const findFocusedId = useCallback((): string | null => {
+  const findFocusedId = (): string | null => {
     const active = document.activeElement;
     for (const [id, el] of refs.current) {
       if (el === active) return id;
     }
     return null;
-  }, []);
+  };
 
   // Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z: undo/redo, owning history over the browser's
   // native contentEditable undo (preventDefault). The focused id is handed in so
@@ -500,7 +504,13 @@ function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
     { preventDefault: true },
   );
 
-  return { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash };
+  return {
+    refs,
+    registerRef,
+    requestFocus,
+    requestFocusAtStart,
+    requestFlash,
+  };
 }
 
 interface ZoomNavigationArgs {
@@ -535,11 +545,11 @@ function useZoomNavigation({
   const location = useLocation();
   const pivotId = location.state.pivotId ?? null;
   const pivotIdRef = useRef<string | null>(pivotId);
-  pivotIdRef.current = pivotId;
+  useSyncRef(pivotIdRef, pivotId);
   const rootIdRef = useRef<string | null>(rootId);
-  rootIdRef.current = rootId;
+  useSyncRef(rootIdRef, rootId);
   const navigateRef = useRef(navigate);
-  navigateRef.current = navigate;
+  useSyncRef(navigateRef, navigate);
 
   /**
    * Navigate to a new zoom root with a shared-element morph. `pivot` is the
@@ -547,8 +557,7 @@ function useZoomNavigation({
    * the current root when zooming out (title -> list item). We name the pivot in
    * the OUTGOING view here; the incoming view names it declaratively.
    */
-  const navigateZoom = useCallback(
-    (toRootId: string | null, pivot: string) => {
+  const navigateZoom = (toRootId: string | null, pivot: string) => {
       const navigate = navigateRef.current;
       // Zooming out reveals the trail: expand any collapsed ancestor between the
       // node we're leaving and the destination root, so the pivot is actually
@@ -579,9 +588,7 @@ function useZoomNavigation({
       };
       if (toRootId === null) navigate({ to: "/", ...opts });
       else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
-    },
-    [focusIndex, refs],
-  );
+  };
 
   // Cmd/Ctrl+,: zoom out one level -- navigate to the current root's parent,
   // with the current root as the morph pivot (title -> list item). No-op at the
@@ -647,9 +654,9 @@ interface NodeCommandsArgs {
   rootIdRef: RefObject<string | null>;
   isHiddenRef: RefObject<(node: Node) => boolean>;
   refs: RefObject<Map<string, HTMLSpanElement | null>>;
-  pendingFocus: RefObject<string | null>;
-  pendingFocusAtStart: RefObject<boolean>;
-  pendingFlash: RefObject<string | null>;
+  requestFocus: (id: string) => void;
+  requestFocusAtStart: () => void;
+  requestFlash: (id: string) => void;
   navigateZoom: (toRootId: string | null, pivot: string) => void;
   startDrag: ReturnType<typeof useDragReorder>["startDrag"];
   consumeClick: ReturnType<typeof useDragReorder>["consumeClick"];
@@ -665,15 +672,14 @@ function useNodeCommands({
   rootIdRef,
   isHiddenRef,
   refs,
-  pendingFocus,
-  pendingFocusAtStart,
-  pendingFlash,
+  requestFocus,
+  requestFocusAtStart,
+  requestFlash,
   navigateZoom,
   startDrag,
   consumeClick,
 }: NodeCommandsArgs): NodeCommands {
-  return useMemo<NodeCommands>(
-    () => ({
+  return {
       onTextChange: (id, text) => {
         // Coalesce a run of keystrokes on one bullet into a single undo step,
         // capturing the pre-typing state on the first keystroke of the run.
@@ -696,10 +702,8 @@ function useNodeCommands({
         const isOpen =
           !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
         if (caretAtEnd && isOpen) {
-          pendingFocus.current = insertChildAtStart(
-            focusIndex.current,
-            id,
-            node.isTask,
+          requestFocus(
+            insertChildAtStart(focusIndex.current, id, node.isTask),
           );
           return;
         }
@@ -715,9 +719,9 @@ function useNodeCommands({
         if (!caretAtEnd) {
           setText(id, before);
           // Caret sits before the moved text, where the split happened.
-          pendingFocusAtStart.current = true;
+          requestFocusAtStart();
         }
-        pendingFocus.current = newId;
+        requestFocus(newId);
       },
 
       onIndent: (id) => {
@@ -725,8 +729,8 @@ function useNodeCommands({
         // its contentEditable and drops focus. Re-focus it after the render.
         capture(focusIndex.current, id);
         if (indent(focusIndex.current, id)) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
+          requestFocus(id);
+          requestFlash(id);
         } else drop(); // no move happened; discard the redundant undo point
       },
 
@@ -738,8 +742,8 @@ function useNodeCommands({
         // Same remount-drops-focus issue as indent; re-focus on a real move.
         capture(focusIndex.current, id);
         if (outdent(focusIndex.current, id)) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
+          requestFocus(id);
+          requestFlash(id);
         } else drop();
       },
 
@@ -751,8 +755,8 @@ function useNodeCommands({
           rootId: rootIdRef.current,
         });
         if (moved) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
+          requestFocus(id);
+          requestFlash(id);
         } else drop();
       },
 
@@ -763,8 +767,8 @@ function useNodeCommands({
           rootId: rootIdRef.current,
         });
         if (moved) {
-          pendingFocus.current = id;
-          pendingFlash.current = id;
+          requestFocus(id);
+          requestFlash(id);
         } else drop();
       },
 
@@ -774,7 +778,7 @@ function useNodeCommands({
         if (isProtected(id)) return;
         capture(focusIndex.current, id);
         const focusId = removeNode(focusIndex.current, id);
-        if (focusId) pendingFocus.current = focusId;
+        if (focusId) requestFocus(focusId);
         else drop(); // node didn't exist; nothing was deleted
       },
 
@@ -825,15 +829,7 @@ function useNodeCommands({
         if (consumeClick()) return;
         navigateZoom(id, id);
       },
-    }),
-    // commands MUST keep stable identity (a prop on every memoized OutlineNode,
-    // ADR 0014). Every live value it touches is read through a ref at call time
-    // (focusIndex/refs/pendingFocus/...), so the only real deps are the three
-    // stable callbacks; the flagged ref.current captures can't be listed and
-    // would defeat the pattern.
-    // eslint-disable-next-line react-doctor/exhaustive-deps
-    [navigateZoom, startDrag, consumeClick],
-  );
+  };
 }
 
 /**

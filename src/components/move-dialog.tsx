@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -130,40 +129,32 @@ function MoveDialogInner({
   // Candidate destinations: every node except the one being moved and its own
   // subtree (you can't move a branch into itself -- `moveNode` guards this too,
   // but listing those rows would be a dead press). Built only while open.
-  const candidates = useMemo(() => {
-    if (!nodeId) return [];
-    const excluded = subtreeIds(index, nodeId);
-    return Array.from(index.byId.values()).filter(
-      (n) => !excluded.has(n.id) && n.text.trim() !== "",
-    );
-  }, [index, nodeId]);
+  const candidates = !nodeId
+    ? []
+    : Array.from(index.byId.values()).filter(
+        (n) =>
+          !subtreeIds(index, nodeId).has(n.id) && n.text.trim() !== "",
+      );
 
-  const fuse = useMemo(
-    () => (open ? new Fuse(candidates, FUSE_OPTIONS) : null),
-    [open, candidates],
-  );
+  const fuse = open ? new Fuse(candidates, FUSE_OPTIONS) : null;
 
   const q = query.trim();
 
   // null => empty-query mode (show bookmarks, mirroring the quick-switcher).
   // Otherwise the Fuse hits over every candidate.
-  const results = useMemo<Hit[] | null>(() => {
-    if (!q || !fuse) return null;
-    return fuse
-      .search(q, { limit: RESULT_LIMIT })
-      .map((r) => ({ node: r.item, matches: r.matches }));
-  }, [q, fuse]);
+  const results: Hit[] | null =
+    q && fuse
+      ? fuse
+          .search(q, { limit: RESULT_LIMIT })
+          .map((r) => ({ node: r.item, matches: r.matches }))
+      : null;
 
   // Bookmarked destinations for the empty-query state, newest first. Drawn from
   // `candidates` (not all nodes), so the moved node and its own subtree are
   // already excluded -- you can't bookmark-jump a branch into itself.
-  const bookmarks = useMemo(
-    () =>
-      candidates
-        .filter((n) => n.bookmarkedAt != null)
-        .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0)),
-    [candidates],
-  );
+  const bookmarks = candidates
+    .filter((n) => n.bookmarkedAt != null)
+    .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0));
 
   // "Home" shows on an empty query or when the text looks like the word.
   const showHome = q === "" || "home".includes(q.toLowerCase());

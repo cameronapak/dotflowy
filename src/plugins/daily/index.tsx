@@ -74,10 +74,17 @@ async function ensureNodeExists(
   awaitRemote: boolean,
 ): Promise<boolean> {
   if (hasNode(nodeId)) return true
-  if (awaitRemote) {
-    resyncNodes()
-    await waitForNode(nodeId, 1500).catch(() => {})
-    if (hasNode(nodeId)) return true
+  if (!awaitRemote) {
+    materialize()
+    return hasNode(nodeId)
+  }
+  resyncNodes()
+  if (hasNode(nodeId)) return true
+  try {
+    await waitForNode(nodeId, 1500)
+    return true
+  } catch {
+    // Timed out waiting for the winner's replica — materialize locally.
   }
   materialize()
   return hasNode(nodeId)

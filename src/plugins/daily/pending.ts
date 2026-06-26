@@ -18,12 +18,12 @@ function getSnapshot(): boolean {
   return pendingDepth > 0
 }
 
-export function beginDailyNavigation(): void {
+function beginDailyNavigation(): void {
   pendingDepth += 1
   notify()
 }
 
-export function endDailyNavigation(): void {
+function endDailyNavigation(): void {
   pendingDepth = Math.max(0, pendingDepth - 1)
   notify()
 }

@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { CornerUpRightIcon } from "lucide-react";
 import type { Node } from "../data/schema";
@@ -82,15 +77,12 @@ export function useSlashMenu({
 }) {
   const [state, setState] = useState<SlashState | null>(null);
 
-  const items = useMemo(
-    () => (state ? filterCommands(node, state.query) : []),
-    [state, node],
-  );
+  const items = state ? filterCommands(node, state.query) : [];
 
-  const close = useCallback(() => setState(null), []);
+  const close = () => setState(null);
 
   // Re-evaluate the trigger after every input. Opens, updates, or closes.
-  const handleInput = useCallback(() => {
+  const handleInput = () => {
     const el = getEl();
     if (!el) return;
     const hit = detectSlash(el);
@@ -107,10 +99,9 @@ export function useSlashMenu({
       x: pos.x,
       y: pos.y,
     }));
-  }, [getEl]);
+  };
 
-  const select = useCallback(
-    (index: number) => {
+  const select = (index: number) => {
       const el = getEl();
       if (!el || !state) return;
       const list = filterCommands(node, state.query);
@@ -130,14 +121,11 @@ export function useSlashMenu({
       setCaretOffset(el, state.slashIndex);
       setState(null);
       item.run(node.id, ctx());
-    },
-    [getEl, state, node, ctx, onTextChange],
-  );
+  };
 
   // Intercept navigation keys while open. Returns true if it consumed the
   // event, so the caller skips its own Enter/Tab/Arrow handling.
-  const handleKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLElement>): boolean => {
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLElement>): boolean => {
       if (!state) return false;
       switch (e.key) {
         case "ArrowDown":
@@ -168,9 +156,7 @@ export function useSlashMenu({
         default:
           return false;
       }
-    },
-    [state, items.length, select],
-  );
+  };
 
   const menu = state
     ? createPortal(

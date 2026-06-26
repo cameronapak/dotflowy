@@ -1,7 +1,55 @@
-import { useState, type FormEvent } from "react";
+import { useReducer, type FormEvent } from "react";
 import { signIn, signUp } from "../lib/auth-client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+
+type AuthMode = "signin" | "signup";
+
+type AuthState = {
+  mode: AuthMode;
+  name: string;
+  email: string;
+  password: string;
+  error: string | null;
+  busy: boolean;
+};
+
+type AuthAction =
+  | { type: "set-mode"; mode: AuthMode }
+  | { type: "set-name"; name: string }
+  | { type: "set-email"; email: string }
+  | { type: "set-password"; password: string }
+  | { type: "submit-start" }
+  | { type: "submit-error"; error: string }
+  | { type: "submit-end" };
+
+const initialAuthState: AuthState = {
+  mode: "signin",
+  name: "",
+  email: "",
+  password: "",
+  error: null,
+  busy: false,
+};
+
+function authReducer(state: AuthState, action: AuthAction): AuthState {
+  switch (action.type) {
+    case "set-mode":
+      return { ...state, mode: action.mode, error: null };
+    case "set-name":
+      return { ...state, name: action.name };
+    case "set-email":
+      return { ...state, email: action.email };
+    case "set-password":
+      return { ...state, password: action.password };
+    case "submit-start":
+      return { ...state, error: null, busy: true };
+    case "submit-error":
+      return { ...state, error: action.error, busy: false };
+    case "submit-end":
+      return { ...state, busy: false };
+  }
+}
 
 /**
  * The unauthenticated view. Email + password, with a sign in / sign up toggle.
@@ -10,19 +58,13 @@ import { Input } from "./ui/input";
  * app shell is public (worker/index.ts), so this loads without a session.
  */
 export function AuthScreen() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
+  const [state, dispatch] = useReducer(authReducer, initialAuthState);
+  const { mode, name, email, password, error, busy } = state;
   const isSignup = mode === "signup";
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    setBusy(true);
+    dispatch({ type: "submit-start" });
     try {
       const res = isSignup
         ? await signUp.email({
@@ -32,13 +74,19 @@ export function AuthScreen() {
           })
         : await signIn.email({ email, password });
       if (res.error) {
-        setError(res.error.message ?? "Something went wrong. Try again.");
+        dispatch({
+          type: "submit-error",
+          error: res.error.message ?? "Something went wrong. Try again.",
+        });
+        return;
       }
       // On success the session store updates and the gate swaps in the editor.
+      dispatch({ type: "submit-end" });
     } catch {
-      setError("Network error. Check your connection and try again.");
-    } finally {
-      setBusy(false);
+      dispatch({
+        type: "submit-error",
+        error: "Network error. Check your connection and try again.",
+      });
     }
   }
 
@@ -59,7 +107,9 @@ export function AuthScreen() {
               placeholder="Name"
               autoComplete="name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) =>
+                dispatch({ type: "set-name", name: e.target.value })
+              }
             />
           )}
           <Input
@@ -68,7 +118,9 @@ export function AuthScreen() {
             autoComplete="email"
             required
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "set-email", email: e.target.value })
+            }
           />
           <Input
             type="password"
@@ -77,7 +129,9 @@ export function AuthScreen() {
             required
             minLength={8}
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) =>
+              dispatch({ type: "set-password", password: e.target.value })
+            }
           />
 
           {error && <p className="text-sm text-destructive">{error}</p>}
@@ -92,10 +146,12 @@ export function AuthScreen() {
           <button
             type="button"
             className="font-medium text-foreground underline-offset-4 hover:underline"
-            onClick={() => {
-              setMode(isSignup ? "signin" : "signup");
-              setError(null);
-            }}
+            onClick={() =>
+              dispatch({
+                type: "set-mode",
+                mode: isSignup ? "signin" : "signup",
+              })
+            }
           >
             {isSignup ? "Sign in" : "Create an account"}
           </button>

@@ -1,10 +1,4 @@
-import {
-  createContext,
-  use,
-  useCallback,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
+import { createContext, use, useSyncExternalStore } from "react";
 import {
   LEGACY_SHOW_COMPLETED_KEY,
   readStorageMigrated,
@@ -50,6 +44,11 @@ function notifyShowCompletedListeners() {
   for (const l of showCompletedListeners) l();
 }
 
+function setShowCompleted(next: boolean) {
+  localStorage.setItem(SHOW_COMPLETED_KEY, String(next));
+  notifyShowCompletedListeners();
+}
+
 /**
  * Global "Show completed" preference (Workflowy's header toggle). When false,
  * completed bullets and their entire subtrees are hidden from the outline. This
@@ -71,15 +70,7 @@ export function ShowCompletedProvider({
     getShowCompletedServerSnapshot,
   );
 
-  const setShowCompleted = useCallback((next: boolean) => {
-    localStorage.setItem(SHOW_COMPLETED_KEY, String(next));
-    notifyShowCompletedListeners();
-  }, []);
-
-  const value = useMemo(
-    () => ({ showCompleted, setShowCompleted }),
-    [showCompleted, setShowCompleted],
-  );
+  const value = { showCompleted, setShowCompleted };
 
   return (
     <ShowCompletedContext.Provider value={value}>

@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useRef, type PointerEvent } from "react";
+import { Fragment, useEffect, useRef, type PointerEvent } from "react";
 import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
@@ -87,20 +87,17 @@ export interface NodeCommands {
 
 /**
  * Thin reactive wrapper: reads this node from the shared store and renders the
- * body only when it exists. Memoized so a parent re-render skips it when its
- * (stable) props are unchanged; its own `useNode` subscription still re-renders
- * it when THIS node's data changes. The early return lives here -- before any
- * other hooks -- so the rules of hooks hold while still letting a deleted node
- * (id present in a parent's stale snapshot) render nothing. See ADR 0014.
+ * body only when it exists. React Compiler memoizes the output; its own
+ * `useNode` subscription still re-renders it when THIS node's data changes.
+ * The early return lives here -- before any other hooks -- so the rules of
+ * hooks hold while still letting a deleted node (id present in a parent's
+ * stale snapshot) render nothing. See ADR 0014.
  */
-export const OutlineNode = memo(function OutlineNode({
-  nodeId,
-  ...rest
-}: OutlineNodeProps) {
+export function OutlineNode({ nodeId, ...rest }: OutlineNodeProps) {
   const node = useNode(nodeId);
   if (!node) return null;
   return <OutlineNodeBody node={node} {...rest} />;
-});
+}
 
 function OutlineNodeBody({
   node,
