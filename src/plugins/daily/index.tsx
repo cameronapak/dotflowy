@@ -22,7 +22,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { definePlugin, type PluginContext } from '../types'
-import { capture } from '../../data/history'
+import { capture, drop } from '../../data/history'
 import {
   appendChild,
   insertChildAtStart,
@@ -243,11 +243,15 @@ export default definePlugin({
           capture(ctx.tree, nodeId)
           return moveNode(ctx.tree, nodeId, todayId, after)
         })
-        if (moved) {
-          toast.success('Moved to Today', {
-            action: { label: 'Go', onClick: () => ctx.nav.zoom(todayId) },
-          })
+        // No-op move (already last child of today) still captured an undo
+        // point; drop it so Cmd+Z isn't a dead step and redo history survives.
+        if (!moved) {
+          drop()
+          return
         }
+        toast.success('Moved to Today', {
+          action: { label: 'Go', onClick: () => ctx.nav.zoom(todayId) },
+        })
       },
     },
   ],
