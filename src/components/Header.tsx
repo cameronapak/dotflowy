@@ -3,6 +3,7 @@ import { BookmarkStar } from "./bookmarks";
 import { ModeToggle } from "./mode-toggle";
 import { NodeSearchButton } from "./node-switcher";
 import { ShowCompletedToggle } from "./show-completed-toggle";
+import { SignOutButton } from "./sign-out-button";
 import { headerSlots } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 
@@ -45,6 +46,7 @@ export function Header({
           <NodeSearchButton />
           <ShowCompletedToggle />
           <ModeToggle />
+          <SignOutButton />
         </div>
       </div>
     </header>

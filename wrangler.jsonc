@@ -1,10 +1,14 @@
 {
   // Cloudflare Workers deploy config. One Worker serves the static SPA AND the
-  // /api/nodes sync API backed by D1. See docs/DECISIONS.md (D1 sync).
+  // sync API. The outline lives in a per-user Durable Object; D1 holds Better
+  // Auth's identity tables + the legacy import source. See docs/DECISIONS.md.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dotflowy",
   "main": "worker/index.ts",
   "compatibility_date": "2026-06-23",
+  // Better Auth (worker/auth.ts) imports node:crypto; nodejs_compat polyfills
+  // Node built-ins on the Workers runtime.
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     // TanStack Start SPA build output. `build:cf` copies _shell.html ->
     // index.html in here so the root and the SPA fallback resolve.
@@ -14,11 +18,11 @@
     // Any unmatched path (e.g. /$nodeId zoom routes) serves index.html so the
     // client router takes over.
     "not_found_handling": "single-page-application",
-    // Run the Worker first for EVERY request (not just /api/*) so it can gate
-    // the document load behind the Basic Auth challenge — a fetch() 401 won't
-    // pop the browser's login prompt, only a navigation does. The Worker's
-    // non-/api branch then serves assets via env.ASSETS (SPA fallback intact).
-    // See ADR 0025.
+    // Run the Worker first for EVERY request. The static shell is public (it
+    // serves the Better Auth login screen), so the Worker's first line short-
+    // circuits non-/api requests to env.ASSETS (SPA fallback intact) without
+    // touching auth; only /api/* is session-gated. Worker-first keeps a single
+    // routing path and lets the asset/SPA fallback flow through env.ASSETS.
     "run_worker_first": true
   },
   "d1_databases": [

@@ -1,10 +1,10 @@
 import type { Node } from './schema'
 
 /**
- * Thin REST client for the D1-backed /api/nodes Worker. Same-origin, so the
- * Cloudflare Access cookie rides along automatically. The collection's mutation
- * handlers (collection.ts) call create/update/delete; the queryFn calls
- * fetchNodes. See docs/DECISIONS.md (D1 sync).
+ * Thin REST client for the /api/nodes Worker (which routes to the user's
+ * Durable Object). Same-origin, so the Better Auth session cookie rides along
+ * automatically. The collection's mutation handlers (collection.ts) call
+ * create/update/delete; the queryFn calls fetchNodes. See docs/DECISIONS.md.
  */
 
 const ENDPOINT = '/api/nodes'

@@ -6,36 +6,37 @@
  * Each request is routed to the current user's Durable Object (UserOutlineDO),
  * whose colocated SQLite holds that user's entire outline. See docs/DECISIONS.md.
  *
- * Identity today: the app is single-user behind Cloudflare Access / Basic Auth,
- * so `authorize()` still gates every request and `resolveUserId()` routes
- * everyone to one constant-named DO. A DO name is *permanent*, so it must never
- * be keyed by a mutable value like an email — when Better Auth lands,
- * `resolveUserId` returns the stable `session.user.id` and nothing else in the
- * data path changes.
+ * Identity = Better Auth (worker/auth.ts), email + password self-serve signup,
+ * sessions in D1. The static shell is PUBLIC (the login screen must load); only
+ * the data API (/api/nodes, /api/kv) is gated, by a valid session. The DO
+ * routing key is the session's stable `user.id` — a DO name is *permanent*, so
+ * it must never be an email or any value that can change (see resolveUserId).
  *
- * D1 is kept only as (1) the source for the one-time, non-destructive import of
- * a user's legacy rows into their DO (`ensureSeeded`), and (2) the future home
- * of Better Auth's identity tables. Locally (`wrangler dev`) there is no Access
- * in front, so we fall back to a fixed dev owner gated on the localhost
- * hostname, which production traffic can never present.
+ * D1 holds (1) Better Auth's identity tables (user/session/account), and (2) the
+ * pre-DO legacy outline rows, kept only as the source for the one-time,
+ * non-destructive import into the owner's DO (`ensureSeeded`).
  */
 
 import { UserOutlineDO } from './outline-do'
 import type { Node } from './outline-do'
+import { createAuth } from './auth'
+import type { AuthEnv } from './auth'
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
 // wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
 export { UserOutlineDO }
 
-interface Env {
+interface Env extends AuthEnv {
   DB: D1Database
   ASSETS: Fetcher
   USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>
-  /** Shared secret for the HTTP Basic Auth fallback gate (set via
-   *  `wrangler secret put APP_PASSWORD`). Unset -> the app is locked. */
-  APP_PASSWORD?: string
+  /** The owner's Better Auth `user.id`. When set, that one account routes to
+   *  the constant 'default' DO (where the pre-auth outline already lives), so
+   *  the owner's existing data carries over with zero copy. Everyone else
+   *  routes to their own `user.id`. See resolveUserId. */
+  OWNER_USER_ID?: string
   /** Owner key the legacy D1 rows are scoped under, read once during the
-   *  one-time import. Defaults to 'owner'. */
+   *  one-time import into the owner's DO. Defaults to 'owner'. */
   APP_OWNER?: string
 }
 
@@ -54,64 +55,28 @@ interface NodeRow {
   updatedAt: number
 }
 
-const DEV_OWNER = 'local-dev'
-
 // Plugin side-collections backed by the kv store. The allowlist stops a client
 // writing arbitrary collection namespaces.
 const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
 
-function basicAuthChallenge(): Response {
-  return new Response('Authentication required', {
-    status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="dotflowy", charset="UTF-8"' },
-  })
-}
-
 /**
- * Resolve the request's owner, or return a Response that denies it. Three tiers,
- * in order: (1) **Cloudflare Access** (`Cf-Access-Authenticated-User-Email`);
- * (2) **local dev** gated on a localhost hostname; (3) **HTTP Basic Auth**
- * against `env.APP_PASSWORD`, **fail-closed if unset**. Owner is `env.APP_OWNER`
- * (default 'owner'), independent of the typed username.
- *
- * This still gates *access*. The DO routing key is derived separately in
- * `resolveUserId` so the partition key is never an email (see the file header).
- */
-function authorize(request: Request, env: Env, url: URL): { owner: string } | Response {
-  const email = request.headers.get('Cf-Access-Authenticated-User-Email')
-  if (email) return { owner: email }
-
-  const host = url.hostname
-  if (host === 'localhost' || host === '127.0.0.1') return { owner: DEV_OWNER }
-
-  const expected = env.APP_PASSWORD
-  if (!expected) return basicAuthChallenge() // not configured -> locked
-  const [scheme, encoded] = (request.headers.get('Authorization') ?? '').split(' ')
-  if (scheme !== 'Basic' || !encoded) return basicAuthChallenge()
-  let decoded = ''
-  try {
-    decoded = atob(encoded)
-  } catch {
-    return basicAuthChallenge()
-  }
-  const pass = decoded.slice(decoded.indexOf(':') + 1)
-  if (!decoded || pass !== expected) return basicAuthChallenge()
-  return { owner: env.APP_OWNER || 'owner' }
-}
-
-/**
- * The Durable Object name for the current user's outline.
+ * The Durable Object name for the signed-in user's outline.
  *
  * LOCKED DECISION: a DO name is permanent and cannot be renamed, so it must
  * never be an email or any value that can change — keying by email would orphan
- * a user's whole outline on an email or auth-provider change. Until Better Auth
- * ships a stable `user.id`, the app is single-user, so we route everyone to one
- * constant-named DO. Better Auth replaces the constant with `session.user.id`;
- * nothing else in the data path changes. Do NOT key this off `owner`/email.
+ * a user's whole outline on an email or auth-provider change. We key by the
+ * session's stable `user.id`. Do NOT key this off the email.
+ *
+ * The one exception is the owner-continuity bridge: the pre-auth outline lives
+ * in the constant 'default' DO (seeded from legacy D1). Setting OWNER_USER_ID to
+ * the owner's `user.id` maps that one account back to 'default', carrying their
+ * existing data over with zero copy. Removable once that data is wherever it
+ * belongs.
  */
-const SINGLE_USER_ID = 'default'
-function resolveUserId(_request: Request, _owner: string): string {
-  return SINGLE_USER_ID
+const OWNER_DO_ID = 'default'
+function resolveUserId(sessionUserId: string, env: Env): string {
+  if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID) return OWNER_DO_ID
+  return sessionUserId
 }
 
 function rowToNode(r: NodeRow): Node {
@@ -145,9 +110,9 @@ function json(data: unknown, status = 200): Response {
 async function ensureSeeded(
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
-  owner: string,
 ): Promise<void> {
   if (await stub.isSeeded()) return
+  const owner = env.APP_OWNER || 'owner'
   let nodeRows: NodeRow[] = []
   let kvRows: { collection: string; key: string; value: string }[] = []
   try {
@@ -233,21 +198,32 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
-    // Gate EVERY path (incl. the document + assets), not just /api — a fetch()
-    // 401 won't trigger the browser's Basic Auth prompt, only a navigation
-    // does. Requires `run_worker_first: true` in wrangler.jsonc.
-    const auth = authorize(request, env, url)
-    if (auth instanceof Response) return auth
-    const { owner } = auth
-
+    // The static shell + assets are PUBLIC so the login screen can load. Serve
+    // them without instantiating auth — only the data API is gated, below.
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
-    const userId = resolveUserId(request, owner)
+    const auth = createAuth(env)
+
+    // Better Auth owns everything under /api/auth/* (sign-up/in/out, session).
+    if (url.pathname.startsWith('/api/auth/')) return auth.handler(request)
+
+    // Identity = the validated session's stable user id. No session -> 401.
+    const session = await auth.api.getSession({ headers: request.headers })
+    if (!session) return json({ error: 'unauthorized' }, 401)
+
+    const userId = resolveUserId(session.user.id, env)
     const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
 
     try {
+      // Only the owner's DO ('default') has legacy D1 rows to import; new users
+      // start empty, so skip the import (and its D1 query) for them.
+      const maybeSeed =
+        request.method === 'GET' && userId === OWNER_DO_ID
+          ? ensureSeeded(stub, env)
+          : Promise.resolve()
+
       if (url.pathname === '/api/nodes') {
-        if (request.method === 'GET') await ensureSeeded(stub, env, owner)
+        await maybeSeed
         return await handleNodes(request, stub)
       }
       if (url.pathname === '/api/kv') {
@@ -255,7 +231,7 @@ export default {
         if (!collection || !KV_COLLECTIONS.has(collection)) {
           return json({ error: 'unknown collection' }, 400)
         }
-        if (request.method === 'GET') await ensureSeeded(stub, env, owner)
+        await maybeSeed
         return await handleKv(request, stub, collection)
       }
     } catch (err) {
