@@ -95,6 +95,13 @@ npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.co
 
 `src/routeTree.gen.ts` is **auto-generated** by the TanStack Start Vite plugin — never hand-edit. After adding/renaming a file in `src/routes/`, run `bun run dev` once to regenerate it, else `typecheck` fails on typed routes.
 
+## React Compiler
+
+**On.** `babel-plugin-react-compiler` runs over every component at build *and* dev (health-checked 137/137 compile, no incompatible libs). It auto-memoizes, so it's **additive** to the hand-tuned `memo`/`useMemo` in the editor — don't rip those out to "let the compiler do it"; they still gate the contentEditable hot path and removing them is a behavior-risky refactor the compiler doesn't make safe.
+
+- **Wiring gotcha (Vite 8 / Rolldown).** `@vitejs/plugin-react` v6 uses the native Oxc transform, **not** Babel — there is no `viteReact({ babel })` option (it silently no-ops). The compiler runs through a separate `@rolldown/plugin-babel` plugin fed `reactCompilerPreset()`, listed **after** `viteReact()` in `vite.config.ts`. Peer deps: `@rolldown/plugin-babel`, `@babel/core`, `babel-plugin-react-compiler` (pin `@rolldown/plugin-babel` to `^0.2`; `0.1.x` has a broken `workspace:*` manifest that bun won't resolve).
+- **Verifying it ran:** an unminified build (`bunx vite build --minify false`) leaves the compiler's `$[i]` cache-slot accesses readable in the editor chunk (the `_c` helper is renamed by bundling, so grep `$[` not `_c`).
+
 ## SPA mode (no SSR)
 
 Don't run code that touches `nodesCollection` during a server/render pass. Why: [the SPA/no-SSR constraint in `docs/DECISIONS.md`](./docs/DECISIONS.md#sync-via-a-per-user-durable-object).

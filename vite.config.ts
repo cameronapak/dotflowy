@@ -1,7 +1,8 @@
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import viteReact from "@vitejs/plugin-react";
+import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
 // which matters because TanStack DB's localStorage collection reads
@@ -26,6 +27,16 @@ export default defineConfig({
     }),
     // Order matters: react's plugin must come after Start's.
     viteReact(),
+    // React Compiler auto-memoizes components/hooks at build time, so the
+    // editor's per-keystroke re-renders stay scoped without hand-written
+    // memo/useMemo everywhere. React 19 ships the compiler runtime in-tree,
+    // so no extra runtime package is needed. Health-checked: 137/137
+    // components compile, no incompatible libraries.
+    //
+    // On Vite 8 / Rolldown, plugin-react uses the native Oxc transform (no
+    // Babel), so the compiler runs through @rolldown/plugin-babel via the
+    // reactCompilerPreset helper rather than a viteReact `babel` option.
+    babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
   resolve: {
