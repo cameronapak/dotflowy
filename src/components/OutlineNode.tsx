@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
+import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
 import { autoformat, rowSlots } from "../plugins/registry";
 import { useSlashMenu } from "./slash-menu";
@@ -187,6 +188,21 @@ function OutlineNodeBody({
     const el = textRef.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === node.text) return;
+    // While THIS bullet is focused the contentEditable DOM is the source of
+    // truth -- onInput already wrote the latest text. A store change that just
+    // echoes the network back (node.text === the last synced/echoed value) is a
+    // lagging or out-of-order echo of our own keystrokes; repainting it here is
+    // what scrambles characters and jumps the caret mid-type, so skip it. A
+    // LOCAL change (undo/redo, a programmatic setText) carries a value that does
+    // NOT match the echo, so it falls through and still repaints. Reconciliation
+    // for the skipped case happens on blur (onBlur re-reads the DOM). See
+    // collection.ts `echoedText`.
+    if (
+      document.activeElement === el &&
+      echoedTextFor(node.id) === node.text
+    ) {
+      return;
+    }
     // A focused bullet reveals the link under its caret (per-link); a blurred
     // one folds every link. The focus/blur handlers own the swap when only
     // focus changes; this effect handles store-driven text changes (mount,

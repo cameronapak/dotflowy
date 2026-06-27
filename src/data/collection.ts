@@ -64,6 +64,22 @@ let appliedSeq = 0
 type SeqWaiter = { seq: number; resolve: () => void }
 const seqWaiters = new Set<SeqWaiter>()
 
+/**
+ * The last `text` value the SYNC channel applied for each node id (a live change
+ * or resume frame -- i.e. the server's echo of some edit). The focused bullet
+ * uses this to tell an echo-driven store change from a local one: while you are
+ * typing, the contentEditable DOM is authoritative, so a store change whose text
+ * equals the echo we just received is the network reflecting your own (possibly
+ * stale or out-of-order) keystrokes back -- repainting it mid-type is exactly
+ * what scrambles characters and jumps the caret. A LOCAL change (undo/redo, a
+ * slash insert) carries a value that does NOT match the latest echo, so it still
+ * repaints. See OutlineNode's store-sync effect.
+ */
+const echoedText = new Map<string, string>()
+export function echoedTextFor(id: string): string | undefined {
+  return echoedText.get(id)
+}
+
 /** Advance the applied cursor and release any waiters it satisfies. Monotonic:
  *  a lower/equal seq (a redundant frame) is ignored. Called wherever a LIVE
  *  frame is applied (live change, resume). Snapshots use `resetAppliedSeq`. */
@@ -241,8 +257,13 @@ export const nodesCollection = createCollection({
       const applyOps = (ops: ChangeOp[], seq: number): void => {
         begin()
         for (const op of ops) {
-          if (op.op === 'delete') write({ type: 'delete', key: op.key })
-          else write({ type: op.op, value: op.value })
+          if (op.op === 'delete') {
+            write({ type: 'delete', key: op.key })
+            echoedText.delete(op.key)
+          } else {
+            write({ type: op.op, value: op.value })
+            echoedText.set(op.value.id, op.value.text)
+          }
         }
         metadata?.collection.set('cursor', seq)
         commit()

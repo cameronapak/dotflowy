@@ -66,9 +66,68 @@ export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
 export const createNodes = (nodes: Node[]): Promise<void> =>
   send('POST', { nodes })
 
-export const updateNodes = (
+// --- Field-edit PATCH: serialize + coalesce ---------------------------------
+//
+// FIELD edits (text, completed, collapsed, isTask, bookmark) each open their own
+// optimistic transaction -> onUpdate -> updateNodes. Sending one PATCH per call
+// has two costs on the per-keystroke text path:
+//
+//   1) Races. Nothing pins independent fetches to call order (HTTP/2 muxing,
+//      Worker dispatch), so PATCH("ab") can reach the DO AFTER PATCH("abc").
+//      Last-writer-wins then persists the stale "ab" and broadcasts it as the
+//      newest seq -- the echo overwrites the live row with older text and the
+//      "c" is lost (and survives refresh). This is the field-edit twin of the
+//      P3 fan that `persistBatch` serializes away for structural writes.
+//   2) Cost. One Worker + Durable Object invocation (a SQL write + a broadcast)
+//      PER CHARACTER. A 40-character bullet billed 40 round trips.
+//
+// The fix is the same `batchTail` discipline, plus coalescing: while a PATCH is
+// in flight, every later field change MERGES into a pending map (field-wise
+// last-write-wins -- correct because a PATCH carries only changed columns), and
+// when the in-flight request returns we flush the merged latest as ONE ordered
+// PATCH. Order is guaranteed (one request at a time) and a burst of N keystrokes
+// costs ~1 request per round trip instead of N -- the bulk of the savings, with
+// no artificial debounce latency (the optimistic overlay is already on screen).
+//
+// This deliberately does NOT await the echo (the text path must stay snappy,
+// per docs/DECISIONS.md); the overlay still drops on the PATCH ack. The
+// companion client guard (the focused bullet ignores echo-driven repaints, see
+// collection.ts `echoedText` + OutlineNode) keeps that ack/echo gap from ever
+// touching the DOM you're typing into.
+let fieldInFlight: Promise<unknown> = Promise.resolve()
+let fieldPending: Map<string, Partial<Node>> | null = null
+let fieldFlush: Promise<void> | null = null
+
+function scheduleFieldFlush(): Promise<void> {
+  if (fieldFlush) return fieldFlush
+  fieldFlush = fieldInFlight
+    // A failed prior batch must not wedge the queue; its own caller already
+    // rejected (rolling back that transaction). Swallow here so the next flush
+    // still runs.
+    .catch(() => {})
+    .then(() => {
+      const batch = fieldPending
+      fieldPending = null
+      fieldFlush = null
+      if (!batch || batch.size === 0) return
+      const updates = [...batch].map(([id, changes]) => ({ id, changes }))
+      const run = send('PATCH', { updates })
+      fieldInFlight = run
+      return run
+    })
+  return fieldFlush
+}
+
+export function updateNodes(
   updates: { id: string; changes: Partial<Node> }[],
-): Promise<void> => send('PATCH', { updates })
+): Promise<void> {
+  if (!fieldPending) fieldPending = new Map()
+  for (const u of updates) {
+    const prev = fieldPending.get(u.id)
+    fieldPending.set(u.id, prev ? { ...prev, ...u.changes } : { ...u.changes })
+  }
+  return scheduleFieldFlush()
+}
 
 export const deleteNodes = (ids: string[]): Promise<void> =>
   send('DELETE', { ids })
