@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -160,20 +161,33 @@ function SwitcherDialog({
   const { index } = useTree();
   const navigate = useNavigate();
 
-  const nodes = Array.from(index.byId.values());
+  const nodes = useMemo(() => Array.from(index.byId.values()), [index]);
 
   // Build the Fuse index only while open. When closed we skip the work; when
   // open the outline isn't being edited, so `nodes` is stable.
-  const fuse = open ? buildFuse(nodes) : null;
+  //
+  // Manually memoized despite React Compiler: the compiler folds this into one
+  // reactive scope keyed on `query` too, so without the memo the entire Fuse
+  // INDEX rebuilds on every keystroke (verified in the compiled output). Keyed
+  // on [open, nodes] so typing only re-runs `results` (the cheap search) below.
+  const fuse = useMemo(
+    () => (open ? buildFuse(nodes) : null),
+    [open, nodes],
+  );
 
   const q = query.trim();
 
-  // null => empty-query mode (show bookmarks). Otherwise the Fuse hits.
+  // null => empty-query mode (show bookmarks). Otherwise the Fuse hits. Left
+  // un-memoized: it depends on `q`, so re-running per keystroke is correct.
   const results = !q || !fuse ? null : fuse.search(q, { limit: RESULT_LIMIT });
 
-  const bookmarks = nodes
-    .filter((n) => n.bookmarkedAt != null)
-    .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0));
+  const bookmarks = useMemo(
+    () =>
+      nodes
+        .filter((n) => n.bookmarkedAt != null)
+        .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0)),
+    [nodes],
+  );
 
   function go(nodeId: string) {
     onPicked();
