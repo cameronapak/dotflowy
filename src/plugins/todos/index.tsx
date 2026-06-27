@@ -37,7 +37,7 @@ export default definePlugin({
       render: (node, getCtx) =>
         node.isTask ? (
           <Checkbox
-            className="checkbox touch-hitbox"
+            className="checkbox touch-hitbox border-muted-foreground"
             checked={node.completed}
             onCheckedChange={(checked) =>
               getCtx().mutations.onToggleCompleted(node.id, checked)
@@ -62,7 +62,11 @@ export default definePlugin({
   // node. Every bullet is completable (not just tasks). Wired on the bullet AND
   // the zoomed title, so the keys work wherever a node is focused.
   keymap: [
-    { id: "toggle-completed-enter", hotkey: "Mod+Enter", run: toggleCompletion },
+    {
+      id: "toggle-completed-enter",
+      hotkey: "Mod+Enter",
+      run: toggleCompletion,
+    },
     { id: "toggle-completed-d", hotkey: "Mod+D", run: toggleCompletion },
   ],
 

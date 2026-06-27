@@ -1,70 +1,37 @@
 /**
- * REST client for the generic /api/kv side-collection store (ADR 0024). Each
- * plugin side-collection (tag colors, the daily index) is one `collection`
+ * Throw-based client for the generic /api/kv side-collection store (ADR 0024).
+ * Each plugin side-collection (tag colors, the daily index) is one `collection`
  * namespace; `value` is the full item object, `key` is the collection's getKey.
- * Same-origin, so the Cloudflare Access cookie rides along. Consumed by the
- * createKvCollection factory (kv-collection.ts).
+ *
+ * These are thin SHELLS over the Effect transport core in kv-client-effect.ts:
+ * each runs the matching Effect program through `runPromise`, so every kv write
+ * inherits the core's retry (exponential backoff), 8s timeout, typed errors, and
+ * response-shape validation — instead of the bespoke bare-fetch they used to be.
+ *
+ * They keep THROWING on failure on purpose: TanStack DB mutation handlers signal
+ * failure by throwing (a throw triggers optimistic rollback), so the consumers
+ * (tag-colors.ts, daily-index.ts onInsert/onUpdate/onDelete) need a rejecting
+ * promise, not an Effect value. The throw is now Effect-backed, not hand-rolled.
+ *
+ * Same-origin, so the Better Auth session cookie rides along automatically. See
+ * AGENTS.md "Error Handling" for the errore -> Effect direction.
  */
 
-const ENDPOINT = '/api/kv'
-
-const url = (collection: string) =>
-  `${ENDPOINT}?collection=${encodeURIComponent(collection)}`
-
-async function send(
-  collection: string,
-  method: string,
-  body: unknown,
-): Promise<void> {
-  const res = await fetch(url(collection), {
-    method,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${method} ${url(collection)} -> ${res.status}`)
-}
+import { kvDeleteE, kvFetchE, kvPutE, runPromise } from './kv-client-effect'
 
 /** Complete state for one collection (the query collection treats it as
  *  authoritative, so the Worker returns every owned row). */
-export async function kvFetch<T>(collection: string): Promise<T[]> {
-  const res = await fetch(url(collection))
-  if (!res.ok) throw new Error(`GET ${url(collection)} -> ${res.status}`)
-  return (await res.json()) as T[]
-}
+export const kvFetch = <T>(collection: string): Promise<T[]> =>
+  runPromise(kvFetchE<T>(collection))
 
 /** Upsert rows (insert + update both map here — the items are tiny). */
 export const kvPut = (
   collection: string,
   rows: { key: string; value: unknown }[],
-): Promise<void> => send(collection, 'POST', { rows })
+): Promise<void> => runPromise(kvPutE(collection, rows))
 
-export const kvDelete = (
-  collection: string,
-  keys: string[],
-): Promise<void> => send(collection, 'DELETE', { keys })
-
-/**
- * Atomic, server-authoritative get-or-create on one kv key. Insert `value` only
- * if the key is absent (server-side, in the single-threaded DO), then return the
- * AUTHORITATIVE value — the pre-existing one wins. Lets two devices racing to
- * create the same key (today's daily note) converge on one winner.
- *
- * Throws on a non-OK response like the rest of this client (its caller — the
- * daily plugin's `claimMapping` — is the errore boundary that handles it).
- */
-export async function kvGetOrCreate<T>(
-  collection: string,
-  key: string,
-  value: T,
-): Promise<T> {
-  const res = await fetch(`${url(collection)}&op=claim`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ key, value }),
-  })
-  if (!res.ok) throw new Error(`claim ${url(collection)} ${key} -> ${res.status}`)
-  return ((await res.json()) as { value: T }).value
-}
+export const kvDelete = (collection: string, keys: string[]): Promise<void> =>
+  runPromise(kvDeleteE(collection, keys))
 
 // --- Mutation-transaction shaping --------------------------------------------
 // A side-collection's onInsert/onUpdate both upsert the WHOLE value (the items

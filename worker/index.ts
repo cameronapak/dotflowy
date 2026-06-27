@@ -23,9 +23,17 @@
  * unambiguous 500s without collapsing known validation errors into the same bucket.
  */
 
-import { Data, Effect } from 'effect'
+import { Data, Effect, Schema } from 'effect'
 import { UserOutlineDO } from './outline-do'
-import type { ChangeOp, Node } from './outline-do'
+import type { Node } from './wire'
+import {
+  KvClaimBody,
+  KvDeleteBody,
+  KvUpsertBody,
+  NodesDeleteBody,
+  NodesPatchBody,
+  NodesPostBody,
+} from './wire'
 import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
 
@@ -128,6 +136,19 @@ class UnknownCollection extends Data.TaggedError('UnknownCollection')<{ collecti
 }
 
 /**
+ * The request body failed validation at the trust boundary — malformed JSON, or
+ * a shape the route's Effect Schema (worker/wire.ts) rejected (e.g. an op missing
+ * its `value`). Caught at the outer boundary as a 400, so a bad body never
+ * reaches the DO and dereferences `undefined` deep inside the SQLite write loop
+ * (which would surface as a 500 from inside storage). See docs/adr/0014.
+ */
+class BadRequest extends Data.TaggedError('BadRequest')<{ reason: string }> {
+  get message() {
+    return `bad request: ${this.reason}`
+  }
+}
+
+/**
  * /api/sync was reached without a WebSocket Upgrade header. The caller must
  * open a proper WebSocket connection — plain HTTP is not accepted on this route.
  */
@@ -221,80 +242,101 @@ function ensureSeededE(
 }
 
 // --- Route handlers ---------------------------------------------------------
-// These return plain Responses (including their own 4xx) and are wrapped at
-// the call site with Effect.promise — their own thrown errors become defects.
+// These return Effects whose typed error channel carries only `BadRequest` (a
+// validation failure → 400). Real DO/runtime throws stay defects → 500. The DO
+// write methods below operate only on already-decoded input, so they stay total.
 
-async function handleNodes(
+/**
+ * Parse a request's JSON body and decode it against `schema`, failing with a
+ * typed `BadRequest` on either malformed JSON or a shape the schema rejects.
+ * This is the trust-boundary gate (the schemas live in worker/wire.ts): a bad
+ * body is rejected here, before it can reach the DO and fault mid-write.
+ */
+function decodeBody<S extends Schema.Top>(
   request: Request,
-  stub: DurableObjectStub<UserOutlineDO>,
-): Promise<Response> {
-  switch (request.method) {
-    case 'GET':
-      return json(await stub.getNodes())
-    case 'POST': {
-      const body = (await request.json()) as { ops?: ChangeOp[]; nodes?: Node[] }
-      // Atomic-batch path: a single structural mutation arrives as a list of ops
-      // and persists as ONE DO frame (one seq, one broadcast). Reply with that
-      // seq so the client can hold its optimistic overlay until the frame echoes
-      // back — closing the half-applied / reverted-state window. See PLAN.md.
-      if (body.ops) {
-        return json({ seq: await stub.applyBatch(body.ops) })
-      }
-      // Legacy upsert path: the first-run seed and any pre-batch client. Kept for
-      // back-compat during rollout.
-      if (body.nodes?.length) await stub.upsertNodes(body.nodes)
-      return json({ ok: true })
-    }
-    case 'PATCH': {
-      const { updates } = (await request.json()) as {
-        updates: { id: string; changes: Record<string, unknown> }[]
-      }
-      if (updates?.length) await stub.patchNodes(updates)
-      return json({ ok: true })
-    }
-    case 'DELETE': {
-      const { ids } = (await request.json()) as { ids: string[] }
-      if (ids?.length) await stub.deleteNodes(ids)
-      return json({ ok: true })
-    }
-    default:
-      return json({ error: 'method not allowed' }, 405)
-  }
+  schema: S,
+): Effect.Effect<S['Type'], BadRequest, S['DecodingServices']> {
+  return Effect.gen(function* () {
+    const raw = yield* Effect.tryPromise({
+      try: () => request.json(),
+      catch: () => new BadRequest({ reason: 'malformed JSON body' }),
+    })
+    return yield* Schema.decodeUnknownEffect(schema)(raw).pipe(
+      Effect.mapError((issue) => new BadRequest({ reason: issue.message })),
+    )
+  })
 }
 
-async function handleKv(
+function handleNodes(
+  request: Request,
+  stub: DurableObjectStub<UserOutlineDO>,
+): Effect.Effect<Response, BadRequest> {
+  return Effect.gen(function* () {
+    switch (request.method) {
+      case 'GET':
+        return json(yield* Effect.promise(() => stub.getNodes()))
+      case 'POST': {
+        const { ops, nodes } = yield* decodeBody(request, NodesPostBody)
+        // Atomic-batch path: a single structural mutation arrives as a list of
+        // ops and persists as ONE DO frame (one seq, one broadcast). Reply with
+        // that seq so the client can hold its optimistic overlay until the frame
+        // echoes back — closing the half-applied / reverted-state window.
+        if (ops) {
+          const seq = yield* Effect.promise(() => stub.applyBatch(ops))
+          return json({ seq })
+        }
+        // Legacy upsert path: the first-run seed and any pre-batch client. Kept
+        // for back-compat during rollout.
+        if (nodes?.length) yield* Effect.promise(() => stub.upsertNodes(nodes))
+        return json({ ok: true })
+      }
+      case 'PATCH': {
+        const { updates } = yield* decodeBody(request, NodesPatchBody)
+        if (updates.length) yield* Effect.promise(() => stub.patchNodes(updates))
+        return json({ ok: true })
+      }
+      case 'DELETE': {
+        const { ids } = yield* decodeBody(request, NodesDeleteBody)
+        if (ids.length) yield* Effect.promise(() => stub.deleteNodes(ids))
+        return json({ ok: true })
+      }
+      default:
+        return json({ error: 'method not allowed' }, 405)
+    }
+  })
+}
+
+function handleKv(
   request: Request,
   stub: DurableObjectStub<UserOutlineDO>,
   collection: string,
-): Promise<Response> {
-  switch (request.method) {
-    case 'GET':
-      return json(await stub.getKv(collection))
-    case 'POST': {
-      // `?op=claim` is the atomic get-or-create: insert the value only if the
-      // key is absent, return the authoritative one. Used by the daily plugin to
-      // race-safely create today's note / the container (the DO serializes it).
-      if (new URL(request.url).searchParams.get('op') === 'claim') {
-        const { key, value } = (await request.json()) as {
-          key: string
-          value: unknown
+): Effect.Effect<Response, BadRequest> {
+  return Effect.gen(function* () {
+    switch (request.method) {
+      case 'GET':
+        return json(yield* Effect.promise(() => stub.getKv(collection)))
+      case 'POST': {
+        // `?op=claim` is the atomic get-or-create: insert the value only if the
+        // key is absent, return the authoritative one. Used by the daily plugin
+        // to race-safely create today's note / container (the DO serializes it).
+        if (new URL(request.url).searchParams.get('op') === 'claim') {
+          const { key, value } = yield* decodeBody(request, KvClaimBody)
+          const claimed = yield* Effect.promise(() => stub.getOrCreateKv(collection, key, value))
+          return json({ value: claimed })
         }
-        return json({ value: await stub.getOrCreateKv(collection, key, value) })
+        const { rows } = yield* decodeBody(request, KvUpsertBody)
+        if (rows.length) yield* Effect.promise(() => stub.upsertKv(collection, rows))
+        return json({ ok: true })
       }
-      const { rows } = (await request.json()) as {
-        rows: { key: string; value: unknown }[]
+      case 'DELETE': {
+        const { keys } = yield* decodeBody(request, KvDeleteBody)
+        if (keys.length) yield* Effect.promise(() => stub.deleteKv(collection, keys))
+        return json({ ok: true })
       }
-      if (rows?.length) await stub.upsertKv(collection, rows)
-      return json({ ok: true })
+      default:
+        return json({ error: 'method not allowed' }, 405)
     }
-    case 'DELETE': {
-      const { keys } = (await request.json()) as { keys: string[] }
-      if (keys?.length) await stub.deleteKv(collection, keys)
-      return json({ ok: true })
-    }
-    default:
-      return json({ error: 'method not allowed' }, 405)
-  }
+  })
 }
 
 // --- Main API pipeline ------------------------------------------------------
@@ -310,7 +352,7 @@ function handleApiRequest(
   request: Request,
   url: URL,
   env: Env,
-): Effect.Effect<Response, UnknownCollection | UpgradeRequired | RouteNotFound> {
+): Effect.Effect<Response, UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest> {
   return Effect.gen(function* () {
     const auth = createAuth(env)
 
@@ -350,7 +392,7 @@ function handleApiRequest(
 
     if (url.pathname === '/api/nodes') {
       yield* maybeSeed
-      return yield* Effect.promise(() => handleNodes(request, stub))
+      return yield* handleNodes(request, stub)
     }
 
     if (url.pathname === '/api/kv') {
@@ -359,7 +401,7 @@ function handleApiRequest(
         return yield* Effect.fail(new UnknownCollection({ collection }))
       }
       yield* maybeSeed
-      return yield* Effect.promise(() => handleKv(request, stub, collection))
+      return yield* handleKv(request, stub, collection)
     }
 
     return yield* Effect.fail(new RouteNotFound({ path: url.pathname }))
@@ -380,6 +422,9 @@ export default {
     // mapping exhaustive and the 500 path reserved for genuine surprises.
     return Effect.runPromise(
       handleApiRequest(request, url, env).pipe(
+        Effect.catchTag('BadRequest', (e) =>
+          Effect.succeed(json({ error: e.message }, 400)),
+        ),
         Effect.catchTag('UnknownCollection', (e) =>
           Effect.succeed(json({ error: e.message }, 400)),
         ),

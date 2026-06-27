@@ -4,6 +4,19 @@ An outline editor in the spirit of [Workflowy](https://workflowy.com). Built wit
 
 Local-first at heart, with an optional Cloudflare deployment that syncs your outline across devices via a per-user [Durable Object](https://developers.cloudflare.com/durable-objects/), behind email + password accounts ([Better Auth](https://www.better-auth.com)).
 
+![GitHub Stars](https://www.shieldcn.dev/github/stars/cameronapak/dotflowy.svg?variant=secondary&size=sm)
+![Package mgr · Bun](https://www.shieldcn.dev/badge/Package_mgr-Bun-000000.svg?logo=bun&variant=branded&size=sm)
+![Language · TypeScript](https://www.shieldcn.dev/badge/Language-TypeScript-3178C6.svg?logo=typescript&variant=branded&size=sm)
+![Bundler · Vite](https://www.shieldcn.dev/badge/Bundler-Vite-646CFF.svg?logo=vite&variant=branded&size=sm)
+![Tests · Playwright](https://www.shieldcn.dev/badge/Tests-Playwright-2EAD33.svg?logo=playwright&variant=branded&size=sm)
+![Hosting · Cloudflare Workers](https://www.shieldcn.dev/badge/Hosting-Cloudflare_Workers-F38020.svg?logo=cloudflare&variant=branded&size=sm)
+![TanStack Query](https://www.shieldcn.dev/badge/Stack-TanStack_Query-FF4154.svg?logo=reactquery&variant=branded&size=sm)
+![Better Auth](https://www.shieldcn.dev/badge/Stack-Better_Auth-000000.svg?logo=ri%3ARiShieldKeyholeFill&variant=branded&size=sm)
+![React](https://www.shieldcn.dev/badge/Stack-React-61DAFB.svg?logo=react&variant=branded&size=sm)
+![Zod](https://www.shieldcn.dev/badge/Stack-Zod-3E67B1.svg?logo=zod&variant=branded&size=sm)
+![Tailwind CSS](https://www.shieldcn.dev/badge/Stack-Tailwind_CSS-06B6D4.svg?logo=tailwindcss&variant=branded&size=sm)
+![Agent-friendly AGENTS.md](https://www.shieldcn.dev/badge/Agent--friendly-AGENTS.md-D97757.svg?variant=secondary&size=sm)
+
 ## Status
 
 Your outline is stored in a TanStack DB collection. By default that's backed by a per-user **Cloudflare Durable Object** (its colocated SQLite) through a Worker — writes go to `/api/nodes`, live reads over `/api/sync` (WebSocket) — so edits show up on your other tabs/devices without refocusing. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.

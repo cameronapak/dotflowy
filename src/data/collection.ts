@@ -1,9 +1,11 @@
 import { createCollection } from '@tanstack/react-db'
+import { Effect, Fiber, Stream } from 'effect'
 import { nodeSchema } from './schema'
 import type { Node } from './schema'
 import { createNodes, deleteNodes, updateNodes } from './api'
-import { connectSyncSocket } from './realtime'
-import type { ChangeOp, ServerMessage } from './realtime'
+import { makeSyncStream } from './realtime'
+import type { ChangeOp, ServerMessage, SyncEvent } from './realtime'
+import { appRuntime } from './runtime'
 import { buildTreeIndex, now } from './tree'
 import { chainDisagreements } from './sibling-chain'
 
@@ -268,49 +270,68 @@ export const nodesCollection = createCollection({
         advanceAppliedSeq(seq)
       }
 
-      const socket = connectSyncSocket({
-        getCursor,
-        onInitialError: (err) => {
-          initialError = err
+      // Apply one decoded server frame. Unchanged from the old onMessage body —
+      // it just runs on the sync fiber now (driven by Stream.runForEach below).
+      const applyMessage = (msg: ServerMessage): void => {
+        if (msg.type === 'snapshot') {
+          // Replace the whole collection: truncate, then write the full set.
+          // Idempotent on first connect (empty) and on a resync past the
+          // changelog window. The cursor survives truncate (separate store).
+          begin()
+          truncate()
+          for (const n of msg.nodes) write({ type: 'insert', value: n })
+          metadata?.collection.set('cursor', msg.seq)
+          commit()
+          // A fresh snapshot supersedes every earlier seq (and may be the
+          // resolution a runStructural transaction is waiting on after a
+          // reconnect or a same-page account switch), so reset the cursor to
+          // it — even if it's LOWER than what a prior outline left behind.
+          resetAppliedSeq(msg.seq)
+          initialError = null
           ensureReady()
-        },
-        onMessage: (msg: ServerMessage) => {
-          if (msg.type === 'snapshot') {
-            // Replace the whole collection: truncate, then write the full set.
-            // Idempotent on first connect (empty) and on a resync past the
-            // changelog window. The cursor survives truncate (separate store).
-            begin()
-            truncate()
-            for (const n of msg.nodes) write({ type: 'insert', value: n })
-            metadata?.collection.set('cursor', msg.seq)
-            commit()
-            // A fresh snapshot supersedes every earlier seq (and may be the
-            // resolution a runStructural transaction is waiting on after a
-            // reconnect or a same-page account switch), so reset the cursor to
-            // it — even if it's LOWER than what a prior outline left behind.
-            resetAppliedSeq(msg.seq)
-            initialError = null
-            ensureReady()
-            // Self-heal any persisted sibling-chain corruption now that the full
-            // outline is in hand (deferred so it writes outside this commit).
-            healSiblingChains(msg.nodes)
-          } else if (msg.type === 'resume') {
-            // The gap since our cursor. Empty = already current; the cursor is
-            // unchanged so there's nothing to write.
-            for (const frame of msg.changes) applyOps(frame.ops, frame.seq)
-            initialError = null
-            ensureReady()
-          } else {
-            // A live change broadcast from this or another device.
-            applyOps(msg.ops, msg.seq)
-          }
-        },
-      })
-      resyncFn = socket.resync
+          // Self-heal any persisted sibling-chain corruption now that the full
+          // outline is in hand (deferred so it writes outside this commit).
+          healSiblingChains(msg.nodes)
+        } else if (msg.type === 'resume') {
+          // The gap since our cursor. Empty = already current; the cursor is
+          // unchanged so there's nothing to write.
+          for (const frame of msg.changes) applyOps(frame.ops, frame.seq)
+          initialError = null
+          ensureReady()
+        } else {
+          // A live change broadcast from this or another device.
+          applyOps(msg.ops, msg.seq)
+        }
+      }
+
+      // Allocate the producer synchronously (state only, no services), so the
+      // resync bridge is wired before sync() returns; then fork the consuming
+      // fiber onto the app runtime. The fiber drains the event stream for the
+      // session; the cleanup interrupts it, which closes the WebSocket via the
+      // socket's scope finalizer.
+      const { events, resync } = Effect.runSync(
+        makeSyncStream(Effect.sync(getCursor)),
+      )
+      resyncFn = () => {
+        appRuntime.runFork(resync)
+      }
+
+      const fiber = appRuntime.runFork(
+        Stream.runForEach(events, (event: SyncEvent) =>
+          Effect.sync(() => {
+            if (event._tag === 'InitialError') {
+              initialError = event.error
+              ensureReady()
+            } else {
+              applyMessage(event.message)
+            }
+          }),
+        ),
+      )
 
       return () => {
         resyncFn = null
-        socket.close()
+        appRuntime.runFork(Fiber.interrupt(fiber))
       }
     },
   },

@@ -24,7 +24,7 @@ let bootstrapped = false
  * resolves EMPTY rather than rejecting (see nodesLoadError) -- without this gate
  * a returning user who opens the app during a server outage would have welcome
  * bullets seeded over their real (just-unreachable) outline. We surface the
- * failure as a value (errore convention); the caller logs it.
+ * failure as a value (not a throw); the caller logs it.
  */
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return
