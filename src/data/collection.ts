@@ -5,6 +5,7 @@ import { createNodes, deleteNodes, updateNodes } from './api'
 import { connectSyncSocket } from './realtime'
 import type { ChangeOp, ServerMessage } from './realtime'
 import { buildTreeIndex, now } from './tree'
+import { chainDisagreements } from './sibling-chain'
 
 /**
  * Single source of truth for all outline nodes.
@@ -191,12 +192,8 @@ export function siblingChainRepairs(
   const index = buildTreeIndex(nodes)
   const fixes: Array<{ id: string; prevSiblingId: string | null }> = []
   for (const children of index.childrenByParent.values()) {
-    let prev: string | null = null
-    for (const child of children) {
-      if ((child.prevSiblingId ?? null) !== prev) {
-        fixes.push({ id: child.id, prevSiblingId: prev })
-      }
-      prev = child.id
+    for (const d of chainDisagreements(children)) {
+      fixes.push({ id: d.id, prevSiblingId: d.expectedPrev })
     }
   }
   return fixes

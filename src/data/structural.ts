@@ -4,6 +4,7 @@ import { persistBatch } from './api'
 import type { ChangeOp } from './realtime'
 import type { Node } from './schema'
 import { buildTreeIndex, childrenOf } from './tree'
+import { chainDisagreements } from './sibling-chain'
 
 /**
  * The single choke point for STRUCTURAL outline edits — any mutation that
@@ -85,22 +86,18 @@ function assertTouchedChainsClean(mutations: readonly MutationLike[]): void {
       if (live) parents.add(live.parentId)
     }
     for (const parentId of parents) {
-      const children = childrenOf(index, parentId)
-      let prev: string | null = null
-      for (const child of children) {
-        if ((child.prevSiblingId ?? null) !== prev) {
-          console.error(
-            '[structural] sibling-chain invariant broken after a structural write',
-            {
-              parent: parentId,
-              node: child.id,
-              expectedPrev: prev,
-              actualPrev: child.prevSiblingId ?? null,
-            },
-          )
-          return
-        }
-        prev = child.id
+      const [bad] = chainDisagreements(childrenOf(index, parentId))
+      if (bad) {
+        console.error(
+          '[structural] sibling-chain invariant broken after a structural write',
+          {
+            parent: parentId,
+            node: bad.id,
+            expectedPrev: bad.expectedPrev,
+            actualPrev: bad.actualPrev,
+          },
+        )
+        return
       }
     }
   } catch (err) {

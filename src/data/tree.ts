@@ -1,4 +1,5 @@
 import type { Node } from './schema'
+import { orderSiblings } from './sibling-chain'
 
 export type { Node } from './schema'
 
@@ -33,34 +34,10 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     else childrenByParent.set(key, [node])
   }
 
-  // Each parent's child list is built by following the prevSiblingId
-  // linked list starting from the head (child whose prevSiblingId is null).
+  // Each parent's child list is ordered by following the prevSiblingId chain;
+  // orderSiblings (sibling-chain.ts) owns that walk and the orphan-append.
   for (const [parentKey, unsorted] of childrenByParent) {
-    if (unsorted.length <= 1) continue
-
-    const byPrev = new Map<string | null, Node>()
-    for (const n of unsorted) byPrev.set(n.prevSiblingId, n)
-
-    const ordered: Node[] = []
-    const idsInChain = new Set<string>()
-    let cursor: string | null = null
-    // Guard against cycles / corruption with an iteration cap.
-    let guard = unsorted.length + 1
-    while (guard-- > 0) {
-      const next = byPrev.get(cursor)
-      if (!next) break
-      ordered.push(next)
-      idsInChain.add(next.id)
-      cursor = next.id
-    }
-
-    // Any nodes orphaned by a broken pointer chain get appended in
-    // arrival order. Better than dropping them silently.
-    for (const n of unsorted) {
-      if (!idsInChain.has(n.id)) ordered.push(n)
-    }
-
-    childrenByParent.set(parentKey, ordered)
+    childrenByParent.set(parentKey, orderSiblings(unsorted))
   }
 
   return { childrenByParent, byId }
