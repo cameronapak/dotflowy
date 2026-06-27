@@ -9,7 +9,7 @@ import { QueryClient } from '@tanstack/query-core'
  * The kv side-collections stay query collections, so `refetchOnWindowFocus` is
  * still their cross-device cadence: switch back to a tab and they re-pull,
  * picking up tag colors / daily mappings created on another device. See
- * docs/DECISIONS.md (per-user DO sync).
+ * docs/adr/0008-sync-via-a-per-user-durable-object.md.
  */
 export const queryClient = new QueryClient({
   defaultOptions: {

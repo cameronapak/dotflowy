@@ -9,7 +9,7 @@ import type { Node } from './schema'
  * which holds the TanStack DB sync primitives.
  *
  * Budget: idle hibernated sockets cost nothing and outgoing broadcasts are free,
- * so this is ~$0 over the base plan (see docs/DECISIONS.md). The cost trap is
+ * so this is ~$0 over the base plan (see docs/adr/0008-sync-via-a-per-user-durable-object.md). The cost trap is
  * the legacy `ws.accept()` on the server, which we never use.
  *
  * Browser-only: collection.ts guards the `/` prerender, so this never runs

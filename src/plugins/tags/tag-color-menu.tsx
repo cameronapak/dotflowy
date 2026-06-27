@@ -34,7 +34,7 @@ export function TagColorStyles() {
  * by right-clicking a tag chip or filter pill (the tags plugin's Seam-B
  * interaction routes it through ctx.openOverlay); picking applies to every
  * instance of the tag. Anchored at the pointer, dismissed on outside click or
- * Escape. See docs/DECISIONS.md (tag colors) and ADR 0018.
+ * Escape. See docs/adr/0007-custom-tag-colors.md.
  */
 export function TagColorMenu({
   tag,

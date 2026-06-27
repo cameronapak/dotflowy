@@ -67,6 +67,12 @@
       "skillPath": "packages/react-db/skills/react-db/SKILL.md",
       "computedHash": "bea666abfdf61cd0c355ebb620880b707fb7ac797823d36390ee2951fa513dcc"
     },
+    "setup-matt-pocock-skills": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/setup-matt-pocock-skills/SKILL.md",
+      "computedHash": "400da4521ed701c99e8824ae7b71c7859632ee91481b3715890036cf8aec6857"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",

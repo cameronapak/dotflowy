@@ -6,7 +6,7 @@ Local-first at heart, with an optional Cloudflare deployment that syncs your out
 
 ## Status
 
-Your outline is stored in a TanStack DB collection. By default that's backed by a per-user **Cloudflare Durable Object** (its colocated SQLite) through a Worker — writes go to `/api/nodes`, live reads over `/api/sync` (WebSocket) — so edits show up on your other tabs/devices without refocusing. See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.
+Your outline is stored in a TanStack DB collection. By default that's backed by a per-user **Cloudflare Durable Object** (its colocated SQLite) through a Worker — writes go to `/api/nodes`, live reads over `/api/sync` (WebSocket) — so edits show up on your other tabs/devices without refocusing. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md). The flat-row data model means swapping the backend is a collection-options change, not a rewrite.
 
 What works:
 
@@ -42,8 +42,8 @@ Not built yet: sharing, email verification.
 | Layer | Choice | Why |
 |---|---|---|
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
-| Data | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object)). |
-| Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/DECISIONS.md#the-auth-gate)) |
+| Data | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
+| Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md)) |
 | Auth | Better Auth (email + password) | Self-serve signup; its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1 |
 | Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
 | Build | Vite 8 | What Start uses |
@@ -67,7 +67,7 @@ bun run test:e2e   # Playwright end-to-end tests (chromium)
 
 ## Deploy
 
-The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, behind **Better Auth** accounts ([the auth gate](docs/DECISIONS.md#the-auth-gate)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object).
+The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, behind **Better Auth** accounts ([the auth gate](docs/adr/0011-the-auth-gate.md)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
 ```sh
 # local dev (two terminals): Vite HMR + a local Worker (DO + D1) it proxies /api to
@@ -87,7 +87,7 @@ bun run deploy             # build + wrangler deploy
 
 `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
 
-**Auth.** Identity is **Better Auth** (email + password self-serve signup), sessions in D1. The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/DECISIONS.md#the-auth-gate).
+**Auth.** Identity is **Better Auth** (email + password self-serve signup), sessions in D1. The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/adr/0011-the-auth-gate.md).
 
 ## How it works
 
@@ -114,13 +114,13 @@ A flat list of rows maps cleanly onto a sync backend. Nested JSON would force de
 
 ### Persistence
 
-`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: the `queryFn` GETs the full node set from `/api/nodes` and the mutation handlers POST/PATCH/DELETE through the same Worker, which **routes each request to the caller's Durable Object** and reads/writes the `nodes` table in its colocated SQLite. We mutate directly (`collection.insert / update / delete`); writes are optimistic locally and persisted server-side, reconciling across devices on tab focus. See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object).
+`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: the `queryFn` GETs the full node set from `/api/nodes` and the mutation handlers POST/PATCH/DELETE through the same Worker, which **routes each request to the caller's Durable Object** and reads/writes the `nodes` table in its colocated SQLite. We mutate directly (`collection.insert / update / delete`); writes are optimistic locally and persisted server-side, reconciling across devices on tab focus. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
-Plugin **side-collections** (tag colors, the daily index) sync the same way, over a generic `/api/kv` store (one `kv` table in the same DO, namespaced by collection) — so a custom tag color or a daily-note follows you across devices too. See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object).
+Plugin **side-collections** (tag colors, the daily index) sync the same way, over a generic `/api/kv` store (one `kv` table in the same DO, namespaced by collection) — so a custom tag color or a daily-note follows you across devices too. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
 ### Plugins
 
-The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/DECISIONS.md#plugin-architecture).
+The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/adr/0001-plugin-architecture.md).
 
 ## Sync: where it stands
 
@@ -128,11 +128,11 @@ The collection interface is backend-agnostic — that's how moving the backend (
 
 Today, **nodes sync live** over a per-user WebSocket (`/api/sync`): optimistic writes still POST/PATCH/DELETE `/api/nodes`, and the DO broadcasts deltas to every connected tab/device. **Side-collections** (tag colors, daily index) still reconcile on tab focus (`refetchOnWindowFocus`). Not yet built:
 
-- **Sharing** — a node + subtree shared with another user (a future "mount" pointer; see [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object)).
+- **Sharing** — a node + subtree shared with another user (a future "mount" pointer; see [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)).
 
 A returning owner's pre-DO outline is carried over **server-side**: the Worker does a one-time, non-destructive copy of any pre-DO D1 rows into the owner's Durable Object on first `/api/sync` connect (`ensureSeeded`). There is no client-side `localStorage` migration — localStorage is browser-scoped but accounts are per-user, so importing it would leak one browser's leftover outline into every new account that signed in there.
 
-See [the sync design](docs/DECISIONS.md#sync-via-a-per-user-durable-object) for the design and rejected alternatives (incl. why a Durable Object over D1-direct or ElectricSQL).
+See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md) for the design and rejected alternatives (incl. why a Durable Object over D1-direct or ElectricSQL).
 
 ## Project layout
 
@@ -171,7 +171,7 @@ src/
     tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection (synced via /api/kv)
     seed.ts           # first-run bootstrap: seed welcome bullets when the outline is empty
     useTree.ts        # useLiveQuery hook
-  plugins/            # the editor's plugin layer (see docs/DECISIONS.md)
+  plugins/            # the editor's plugin layer (see docs/adr/0001-plugin-architecture.md)
     index.ts          # the one ordered array: [code, links, tags, todos, daily]
     types.ts          # the typed seam contract (definePlugin)
     registry.ts       # composes every plugin's registrations once at load
@@ -184,7 +184,7 @@ worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + 
   outline-do.ts       #   UserOutlineDO: per-user SQLite (nodes + kv), the outline store
 migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth)
 wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
-docs/DECISIONS.md     # the few load-bearing decisions (history in git log)
+docs/adr/             # one ADR per load-bearing decision (history in git log)
 vite.config.ts        # SPA mode + /api dev proxy
 ```
 

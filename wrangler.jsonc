@@ -1,7 +1,7 @@
 {
   // Cloudflare Workers deploy config. One Worker serves the static SPA AND the
   // sync API. The outline lives in a per-user Durable Object; D1 holds Better
-  // Auth's identity tables + the legacy import source. See docs/DECISIONS.md.
+  // Auth's identity tables + the legacy import source. See docs/adr/0011-the-auth-gate.md.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dotflowy",
   "main": "worker/index.ts",
@@ -40,7 +40,7 @@
   ],
   // One Durable Object per user: USER_OUTLINE holds the user's whole outline +
   // side-collections in colocated SQLite. The Worker routes each /api request to
-  // the caller's DO. See docs/DECISIONS.md.
+  // the caller's DO. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
   "durable_objects": {
     "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }]
   },

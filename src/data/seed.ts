@@ -17,7 +17,7 @@ let bootstrapped = false
  * DO on first read). The old localStorage import was removed: localStorage is
  * browser-scoped, but accounts are per-user, so importing it would leak one
  * browser's leftover outline into every new account that signs in there. Called
- * once on mount; see docs/DECISIONS.md (per-user DO sync).
+ * once on mount; see docs/adr/0008-sync-via-a-per-user-durable-object.md.
  *
  * Bail BEFORE seeding if the initial sync failed. The custom-sync adapter calls
  * markReady() even when the socket can't reach the server, so `toArrayWhenReady()`
@@ -62,7 +62,7 @@ let seedStarted = false
  * instantly.
  *
  * The component calls this once on mount; the inserts persist through the
- * collection's normal mutation path. See docs/DECISIONS.md (per-user DO sync).
+ * collection's normal mutation path. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
  */
 async function seedIfEmpty(): Promise<boolean> {
   if (seedStarted) return false

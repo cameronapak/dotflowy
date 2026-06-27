@@ -4,7 +4,7 @@
  * Cloudflare Worker: serves the static SPA (via the ASSETS binding) and the
  * sync API — /api/nodes (the outline) and /api/kv (plugin side-collections).
  * Each request is routed to the current user's Durable Object (UserOutlineDO),
- * whose colocated SQLite holds that user's entire outline. See docs/DECISIONS.md.
+ * whose colocated SQLite holds that user's entire outline. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
  *
  * Identity = Better Auth (worker/auth.ts), email + password self-serve signup,
  * sessions in D1. The static shell is PUBLIC (the login screen must load); only

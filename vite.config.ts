@@ -16,7 +16,7 @@ export default defineConfig({
     // Dev only: proxy the data API to a locally-running Worker + D1
     // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
     // UI while the real /api/nodes path is served by the Worker against a local
-    // D1. In production the same Worker serves both. See docs/DECISIONS.md (D1 sync).
+    // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
     proxy: {
       "/api": "http://localhost:8787",
     },

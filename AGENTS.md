@@ -46,11 +46,25 @@ The MCP server returns "not initialized." Ask the user: *"I notice this project 
 For any file search or grep in the current git-indexed directory, use fff tools.
 <!-- fff:end -->
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles using the default label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
 # Project Guidance
 
 Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to this file.
 
-`README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) — read that when a rule below points at it.
+`README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live as numbered ADRs in [`docs/adr/`](./docs/adr/) — read the one a rule below points at.
 
 ## Error Handling
 
@@ -67,11 +81,11 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 
 ## Planning and design
 
-Substantial plans or design decisions go through `/grill-with-docs` — a relentless interview that *sharpens* the decision. It does **not** mint a doc per decision.
+Substantial plans or design decisions go through `/grill-with-docs` — a relentless interview that *sharpens* the decision, recording docs (ADRs, and a glossary if one is warranted) via `/domain-modeling` as they crystallise.
 
-- A decision earns a written record **only if an agent reading the code alone would get it wrong** — the *why* is non-obvious and the obvious "fix" breaks something. Those few live in [`docs/DECISIONS.md`](./docs/DECISIONS.md) (one file, scannable in one pass).
+- A decision earns an **ADR** in [`docs/adr/`](./docs/adr/) when it is hard to reverse, surprising without context, and the result of a real trade-off — the bar and the file shape are in the `domain-modeling` skill's `ADR-FORMAT.md`. ADRs are numbered sequentially (`0001-slug.md`); the dotflowy set captures the calls an agent would get wrong from the code alone (the per-node tree store, atomic structural writes, the per-user DO, and so on).
 - If the code already makes the call obvious, the code is the doc — don't write it down.
-- When a decision changes, edit its entry in place (or delete it). History — including superseded decisions and their rejected alternatives — is in `git log`, not a pile of superseding files.
+- When a decision changes, edit its ADR in place (or mark it superseded). History — including superseded decisions and their rejected alternatives — is in `git log`.
 
 ## Commands
 
@@ -106,11 +120,11 @@ npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.co
 
 ## SPA mode (no SSR)
 
-Don't run code that touches `nodesCollection` during a server/render pass. Why: [the SPA/no-SSR constraint in `docs/DECISIONS.md`](./docs/DECISIONS.md#sync-via-a-per-user-durable-object).
+Don't run code that touches `nodesCollection` during a server/render pass. Why: [the SPA/no-SSR constraint](./docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
 ## Deploying to Cloudflare (Worker + per-user Durable Objects)
 
-**One Worker** (`worker/index.ts`) on **Cloudflare Workers** (not Pages) serves the static SPA (via `ASSETS`) and the sync API — `/api/nodes` (outline) and `/api/kv` (plugin side-collections) — **routed to a per-user Durable Object** (`UserOutlineDO`, `worker/outline-do.ts`) whose colocated SQLite holds that user's outline. D1 holds Better Auth's identity tables + the legacy import source. Design + rejected alternatives: [per-user DO sync](./docs/DECISIONS.md#sync-via-a-per-user-durable-object) and [the auth gate](./docs/DECISIONS.md#the-auth-gate).
+**One Worker** (`worker/index.ts`) on **Cloudflare Workers** (not Pages) serves the static SPA (via `ASSETS`) and the sync API — `/api/nodes` (outline) and `/api/kv` (plugin side-collections) — **routed to a per-user Durable Object** (`UserOutlineDO`, `worker/outline-do.ts`) whose colocated SQLite holds that user's outline. D1 holds Better Auth's identity tables + the legacy import source. Design + rejected alternatives: [per-user DO sync](./docs/adr/0008-sync-via-a-per-user-durable-object.md) and [the auth gate](./docs/adr/0011-the-auth-gate.md).
 
 - **`_shell.html` → `index.html` copy is load-bearing.** SPA mode emits `dist/client/_shell.html`, but Static Assets serves `index.html` for root + SPA fallback. `build:cf` copies it; don't point wrangler at a dir without that copy.
 - **`run_worker_first: true`** routes *every* request through the Worker, but the **static shell is public** — the Worker's first line short-circuits non-`/api` requests to `env.ASSETS.fetch` (SPA fallback for `/$nodeId` intact) *before* touching auth, so the login screen loads. Only `/api/*` is gated.
@@ -123,14 +137,14 @@ Don't run code that touches `nodesCollection` during a server/render pass. Why: 
 
 ## Data layer gotchas
 
-- **Nodes live in a per-user Durable Object's SQLite** ([per-user DO sync](./docs/DECISIONS.md#sync-via-a-per-user-durable-object)). `nodesCollection` is a TanStack DB *custom sync* collection over `/api/sync` (`collection.ts` + `realtime.ts`); **field** writes PATCH `/api/nodes` (`api.ts`), **structural** writes go through `runStructural` as one atomic batch POST `{ops}` (see the next bullet). **Side-collections (`tag-colors.ts`, `daily-index.ts`) ride the same DO** as query collections over `/api/kv?collection=<name>` (`kv-api.ts` + `query-client.ts`); each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
-- **Structural edits are atomic; field edits are direct.** Any tree-shape mutation (insert/indent/outdent/move/reparent/remove, undo/redo restore, daily get-or-create) MUST be wrapped in `runStructural` (`structural.ts`) so all its `nodesCollection` writes land as ONE batch (`POST /api/nodes {ops}` → DO `applyBatch` → one frame) AND the optimistic overlay is held until that frame's echo (`waitForSeq`) — both are load-bearing; removing either reintroduces the sibling-chain corruption. **Field edits** (`setText`, `toggleCompleted/Collapsed`, `setIsTask`, `toggleBookmark`) stay direct — single-field PATCH, already atomic, and the keystroke path must NOT await an echo. Wrap at the editor `commands`/history/plugin call sites, not inside `mutations.ts` (keeps it pure; `runStructural` self-guards nesting). Why: [Atomic structural writes](./docs/DECISIONS.md#atomic-structural-writes).
+- **Nodes live in a per-user Durable Object's SQLite** ([per-user DO sync](./docs/adr/0008-sync-via-a-per-user-durable-object.md)). `nodesCollection` is a TanStack DB *custom sync* collection over `/api/sync` (`collection.ts` + `realtime.ts`); **field** writes PATCH `/api/nodes` (`api.ts`), **structural** writes go through `runStructural` as one atomic batch POST `{ops}` (see the next bullet). **Side-collections (`tag-colors.ts`, `daily-index.ts`) ride the same DO** as query collections over `/api/kv?collection=<name>` (`kv-api.ts` + `query-client.ts`); each passes its **concrete** zod schema inline (a generic factory loses schema inference). The old `dotflowy-oss:*` localStorage keys are no longer read.
+- **Structural edits are atomic; field edits are direct.** Any tree-shape mutation (insert/indent/outdent/move/reparent/remove, undo/redo restore, daily get-or-create) MUST be wrapped in `runStructural` (`structural.ts`) so all its `nodesCollection` writes land as ONE batch (`POST /api/nodes {ops}` → DO `applyBatch` → one frame) AND the optimistic overlay is held until that frame's echo (`waitForSeq`) — both are load-bearing; removing either reintroduces the sibling-chain corruption. **Field edits** (`setText`, `toggleCompleted/Collapsed`, `setIsTask`, `toggleBookmark`) stay direct — single-field PATCH, already atomic, and the keystroke path must NOT await an echo. Wrap at the editor `commands`/history/plugin call sites, not inside `mutations.ts` (keeps it pure; `runStructural` self-guards nesting). Why: [Atomic structural writes](./docs/adr/0009-atomic-structural-writes.md).
 - **First-run bootstrap = seed-if-empty.** On mount `OutlineEditor` calls `bootstrapOutline()` (`seed.ts`), which seeds the welcome bullets only when the outline is genuinely empty (a brand-new account). **There is no client-side data migration:** the old localStorage import was removed because localStorage is browser-scoped but accounts are per-user, so it leaked one browser's leftover outline into every new account that signed in there. A returning owner's pre-DO data is carried over **server-side** instead — the Worker does a one-time non-destructive copy of any pre-DO **D1** rows into the owner's DO on first `/api/sync` connect (`ensureSeeded`), and the DO marks itself `seeded` and never re-imports.
 - **e2e seeds through the API, not localStorage** (`seedOutline` mocks `/api/nodes` and `/api/sync`). Don't reintroduce a localStorage node seed for the live store.
-- **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [No zod defaults](./docs/DECISIONS.md#no-zod-defaults-in-the-schema).
-- **Mutations operate on the live `TreeIndex`.** Every `mutations.ts` function takes the current index and mutates `nodesCollection` directly. The `useMemo`-stable `commands` object reads live values at **event time** through module getters — `getTreeIndex()` for the tree, `getViewRootId()`/`getViewIsHidden()` for view state — never this render's values, which is what keeps `commands` referentially stable. [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
-- **Per-node subscriptions, not a threaded index.** Components read the **tree store** (`tree-store.ts`): `useNode(id)`, `useVisibleChildIds(parentId, showCompleted)`, `useTreeIndex()`. `OutlineNode` takes a `nodeId` and reads its own slice, so a keystroke re-renders only the changed bullet. **Don't pass `node`/`index` as props to `OutlineNode`.** [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
-- **Ephemeral view state mirrors the tree store.** `view-state.ts` mirrors `tree-store.ts` for the zoom root + visibility prune (`getViewRootId()`/`getViewIsHidden()`): **render reads use the `rootId` prop / `isHidden` memo directly; event-time reads (drag, commands, zoom, hotkeys) use the getters — never the reverse.** Writes happen in `useSyncViewState`'s effect, not during render, so the editor stays React-Compiler-eligible (no ref-during-render bailout). [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
+- **Build nodes via `makeNode()` in `tree.ts`** — don't add zod `.default()` values to `schema.ts`. Why: [No zod defaults](./docs/adr/0003-no-zod-defaults-in-the-schema.md).
+- **Mutations operate on the live `TreeIndex`.** Every `mutations.ts` function takes the current index and mutates `nodesCollection` directly. The `useMemo`-stable `commands` object reads live values at **event time** through module getters — `getTreeIndex()` for the tree, `getViewRootId()`/`getViewIsHidden()` for view state — never this render's values, which is what keeps `commands` referentially stable. [Tree store](./docs/adr/0004-localized-rendering-via-the-tree-store.md).
+- **Per-node subscriptions, not a threaded index.** Components read the **tree store** (`tree-store.ts`): `useNode(id)`, `useVisibleChildIds(parentId, showCompleted)`, `useTreeIndex()`. `OutlineNode` takes a `nodeId` and reads its own slice, so a keystroke re-renders only the changed bullet. **Don't pass `node`/`index` as props to `OutlineNode`.** [Tree store](./docs/adr/0004-localized-rendering-via-the-tree-store.md).
+- **Ephemeral view state mirrors the tree store.** `view-state.ts` mirrors `tree-store.ts` for the zoom root + visibility prune (`getViewRootId()`/`getViewIsHidden()`): **render reads use the `rootId` prop / `isHidden` memo directly; event-time reads (drag, commands, zoom, hotkeys) use the getters — never the reverse.** Writes happen in `useSyncViewState`'s effect, not during render, so the editor stays React-Compiler-eligible (no ref-during-render bailout). [Tree store](./docs/adr/0004-localized-rendering-via-the-tree-store.md).
 
 ## Styling
 
@@ -138,7 +152,7 @@ Inline Tailwind classes, not a separate CSS file (separate CSS only for the view
 
 ## Editor internals (OutlineEditor + OutlineNode)
 
-- **`OutlineNode` = a `memo`'d wrapper + `OutlineNodeBody`.** The wrapper calls `useNode(nodeId)` and early-returns when the node is gone; keep all other hooks in the body (rules-of-hooks). The memo only pays off while `commands`/`registerRef`/`pivotId`/`showCompleted` stay referentially stable — never pass a fresh object/callback per render. [Tree store](./docs/DECISIONS.md#localized-rendering-via-the-tree-store).
+- **`OutlineNode` = a `memo`'d wrapper + `OutlineNodeBody`.** The wrapper calls `useNode(nodeId)` and early-returns when the node is gone; keep all other hooks in the body (rules-of-hooks). The memo only pays off while `commands`/`registerRef`/`pivotId`/`showCompleted` stay referentially stable — never pass a fresh object/callback per render. [Tree store](./docs/adr/0004-localized-rendering-via-the-tree-store.md).
 - **contentEditable text sync is manual.** The `node-text`/title spans are contentEditable, not controlled React. Stored text is written to the DOM only when it differs (to avoid clobbering the caret); `onInput` pushes to the store. Don't convert to React-controlled text.
 - **The `refs` registry maps node id → contentEditable span.** List bullets register under their own id; the zoomed **title registers under `rootId`**. So `refs.current.get(id)` works whether that node is a title or a list item — focus, pending-focus, and the zoom morph all rely on this.
 - **Enter splits the bullet at the caret.** Text left of the caret stays; text right moves to a new sibling below, focused at its *start* (the lone exception to the end-of-text `pendingFocus` default — `pendingFocusAtStart`). Caret-at-end is the empty-tail case, so Enter at the end of an expanded parent still dives in. One undo step. `e2e/enter-split.spec.ts`.
@@ -166,7 +180,7 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 ## Plugins (`src/plugins`)
 
-The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
+The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/adr/0001-plugin-architecture.md); React-widget token mode: [React token widgets](./docs/adr/0006-react-token-widgets.md).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
@@ -200,13 +214,13 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 `#tags` are **parsed from `node.text`**, never stored. Each renders as a clickable chip (Seam A token); a plain click AND-s that tag into a **URL-driven filter** (`?q=#a #b`) scoped to the zoom `rootId`, re-rendering a **pruned tree** (matches + dimmed ancestor context, everything else hidden). **Filtering is render-time only — it never mutates `collapsed`.** The tags plugin owns the full filter stack: URL sync, escape-to-clear, the subheader pill bar (Seam F-subheader), the Seam-G transform (`buildTagFilter`), and chip click routing (Seam B). Pure logic in `src/data/tags.ts`. `#` autocomplete is the tags plugin's Seam-H menu. v1 is click-driven, tags-only (no free text, no `@`-mentions).
 
-**Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, synced via `/api/kv`, now per-user DO storage) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `__root.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/DECISIONS.md#custom-tag-colors).
+**Colors** are *chosen* per tag name (not derived) and stored in the `tagColorsCollection` side-collection (Seam E, synced via `/api/kv`, now per-user DO storage) — so they sync and apply to every instance. Painted by **one generated stylesheet** keyed on `data-tag` (`TagColorStyles`, mounted once in `__root.tsx`), so recoloring is an O(1) DOM write with **zero React re-renders**. The picker (`TagColorMenu`) opens on **right-click** (Seam-B `onContextMenu` → `ctx.openOverlay`); the generator skips unsafe tag names (no CSS injection). Why: [Custom tag colors](./docs/adr/0007-custom-tag-colors.md).
 
 ## Rich links (`src/plugins/links/`)
 
 Markdown `[label](url)` **parsed from `node.text`** (Seam A+B+I token), the only construct that **folds**: reveal is **per-link** (Obsidian Live Preview style) — a link shows raw only when the caret is within/adjacent (source offset ∈ `[start, end]`); every other link folds to a clean `<a contenteditable="false">`. At most one reveals at a time.
 
-The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/DECISIONS.md#rich-links-the-source-offset-caret).
+The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/adr/0005-rich-links-source-offset-caret.md).
 
 ## Daily notes (`src/plugins/daily/`)
 
@@ -219,10 +233,10 @@ A daily note is a normal node addressed by a date; the header **Today button** n
 
 ## Scripture references (`src/plugins/route-bible/`)
 
-A Bible ref in `node.text` renders as a chip opening [route.bible](https://route.bible) (Seam A widget + Seam B click — the links shape minus the fold). **No `Node` field, no migration.** Widget mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
+A Bible ref in `node.text` renders as a chip opening [route.bible](https://route.bible) (Seam A widget + Seam B click — the links shape minus the fold). **No `Node` field, no migration.** Widget mode: [React token widgets](./docs/adr/0006-react-token-widgets.md).
 
 - **Liberal regex PROPOSES, `grab-bcv` DISPOSES.** `BIBLE_REF_PATTERN` (`bible.ts`) requires a chapter, verse optional, and over-matches on purpose; `resolveBibleRef(tok)` runs the candidate through grab-bcv's `tryParsePassage` and returns null for non-references (the core then renders raw text). Dependency is **`grab-bcv`** (parse + `toResolverUrl`), not `@route-bible/core`.
-- **A real-TSX atomic widget** ([React token widgets](./docs/DECISIONS.md#react-token-widgets)): `render` returns a `WidgetEl` + `component: BibleChip`; the core serializes it to a `<dotflowy-widget>` atom and mounts `BibleChip` (`chip.tsx`) — lucide icons + Tailwind, **no plugin CSS**. `readSource` reads `data-src`; the caret jumps over it.
+- **A real-TSX atomic widget** ([React token widgets](./docs/adr/0006-react-token-widgets.md)): `render` returns a `WidgetEl` + `component: BibleChip`; the core serializes it to a `<dotflowy-widget>` atom and mounts `BibleChip` (`chip.tsx`) — lucide icons + Tailwind, **no plugin CSS**. `readSource` reads `data-src`; the caret jumps over it.
 - v1 is liberal by explicit call (accepts `Matthew 5 minutes` → `Matthew 5`); tightening is a one-line regex change. Covered by `e2e/route-bible.spec.ts`.
 
 ## Environment gotcha: adding a React-importing dependency
