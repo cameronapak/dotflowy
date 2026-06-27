@@ -185,7 +185,7 @@ export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
  *
  * Returns the minimal set of pointer corrections.
  */
-function siblingChainRepairs(
+export function siblingChainRepairs(
   nodes: Node[],
 ): Array<{ id: string; prevSiblingId: string | null }> {
   const index = buildTreeIndex(nodes)
