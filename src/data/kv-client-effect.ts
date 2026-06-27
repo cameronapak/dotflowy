@@ -2,11 +2,11 @@ import { Data, Duration, Effect, Schedule } from 'effect'
 
 /**
  * Effect v4 pilot — a typed-error, retrying, time-bounded variant of the kv
- * REST client. Lives alongside the throwing kv-api.ts; nothing imports it yet.
- * See `claimMapping` (daily-index.ts) for the intended call site: it's the one
- * boundary that already degrades to an errore-style value on failure, so it's
- * the natural place to prove Effect's typed-error + retry ergonomics against
- * real I/O without touching the throw-based TanStack DB mutation path.
+ * REST client. Lives alongside the throwing kv-api.ts. See `claimMapping`
+ * (daily-index.ts) for the intended call site: it's the one boundary that
+ * already degrades to an errore-style value on failure, so it's the natural
+ * place to prove Effect's typed-error + retry ergonomics against real I/O
+ * without touching the throw-based TanStack DB mutation path.
  *
  * Design notes (Effect v4, beta.90):
  *  - Domain errors are tagged classes via `Data.Error`. `Effect.catchTag`
@@ -18,6 +18,9 @@ import { Data, Duration, Effect, Schedule } from 'effect'
  *    backoff at a bounded attempt count.
  *  - Timeout: `Effect.timeoutOrElse({ duration, orElse })` turns a timeout into
  *    a `KvTimeoutError`, keeping the error channel typed.
+ *  - Recovery: `Effect.match({ onFailure, onSuccess })` is the v4 way to
+ *    convert all errors to a degraded value inside the pipeline, so
+ *    `runPromise` never rejects and the caller sees only plain success.
  */
 
 const ENDPOINT = '/api/kv'
