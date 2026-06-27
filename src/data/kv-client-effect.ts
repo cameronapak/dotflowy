@@ -79,11 +79,16 @@ function request({ collection, method, body, suffix }: FetchArgs): Effect.Effect
 > {
   const u = suffix ? `${url(collection)}${suffix}` : url(collection)
   return Effect.tryPromise({
-    try: () =>
+    // The signal comes from Effect's runtime: `Effect.timeoutOrElse` aborts it
+    // on timeout, and `Effect.retry` aborts the current attempt before the next
+    // one starts. Passing it to fetch cancels the in-flight request instead of
+    // leaving it running with its result discarded.
+    try: (signal) =>
       fetch(u, {
         method,
         headers: { 'content-type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal,
       }),
     catch: (cause) => new KvTransportError({ collection, cause }),
   }).pipe(
@@ -109,9 +114,21 @@ export function kvFetchE<T>(
   return request({ collection, method: 'GET' }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
-        try: () => res.json() as Promise<T[]>,
+        try: () => res.json() as Promise<unknown>,
         catch: (cause) => new KvTransportError({ collection, cause }),
       }),
+    ),
+    // Validate the parsed shape before the cast: a non-array body is a contract
+    // violation (server bug / proxy 200 with an HTML error page), not a success.
+    Effect.flatMap((data) =>
+      Array.isArray(data)
+        ? Effect.succeed(data as T[])
+        : Effect.fail(
+            new KvTransportError({
+              collection,
+              cause: new Error(`expected an array, got ${typeof data}`),
+            }),
+          ),
     ),
   )
 }
@@ -155,11 +172,25 @@ export function kvGetOrCreateE<T>(
   }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
-        try: () => res.json() as Promise<{ value: T }>,
+        try: () => res.json() as Promise<unknown>,
         catch: (cause) => new KvTransportError({ collection, cause }),
       }),
     ),
-    Effect.map((r) => r.value),
+    // Validate the { value: T } envelope before unwrapping: a missing/malformed
+    // value would otherwise surface as `undefined` success and deref badly at
+    // the caller (claimMapping reads row.nodeId). Coerce to a transport error so
+    // the errore boundary degrades instead of returning garbage.
+    Effect.flatMap((data) => {
+      if (typeof data !== 'object' || data === null || !('value' in data)) {
+        return Effect.fail(
+          new KvTransportError({
+            collection,
+            cause: new Error(`expected { value } envelope, got ${typeof data}`),
+          }),
+        )
+      }
+      return Effect.succeed((data as { value: T }).value)
+    }),
   )
 }
 
