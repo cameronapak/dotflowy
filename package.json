@@ -23,7 +23,7 @@
     "test": "bun test src",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "repos:update-effect": "git subtree pull --prefix=repos/effect https://github.com/Effect-TS/effect.git main --squash"
+    "repos:update-effect": "git subtree pull --prefix=repos/effect-smol https://github.com/Effect-TS/effect-smol.git main --squash"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
