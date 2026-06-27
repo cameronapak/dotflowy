@@ -15,5 +15,8 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["."]
+  "include": ["."],
+  // Worker unit tests (*.test.ts) use bun:test + Bun globals; they're typechecked
+  // on their own via tsconfig.test.json, not here (workers-types has no Bun lib).
+  "exclude": ["**/*.test.ts"]
 }

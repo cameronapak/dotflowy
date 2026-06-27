@@ -2,20 +2,12 @@
 
 import { DurableObject } from 'cloudflare:workers'
 
-/** A node as the client speaks it — booleans are real booleans. Mirrors the
- *  `Node` type in src/data/schema.ts. */
-export interface Node {
-  id: string
-  parentId: string | null
-  prevSiblingId: string | null
-  text: string
-  isTask: boolean
-  completed: boolean
-  collapsed: boolean
-  bookmarkedAt: number | null
-  createdAt: number
-  updatedAt: number
-}
+import type { ChangeOp, Node } from './wire'
+
+// The wire types (`Node`, `ChangeOp`) are schema-derived in ./wire — the Worker's
+// single source of truth for both the type and its boundary validation. Re-export
+// them so existing importers (worker/index.ts) keep resolving them from here.
+export type { ChangeOp, Node }
 
 /** A row as stored in the DO's SQLite — booleans are 0/1 integers, and there is
  *  no `owner` column: the DO instance *is* the owner scope. */
@@ -62,15 +54,9 @@ const WRITABLE_COLUMNS = new Set([
 // in src/data/realtime.ts (the two live behind different tsconfigs, so the types
 // are duplicated, not shared — same as Node/NodeRow above).
 
-/** One node mutation in a change frame. Upserts carry the full node (insert for a
- *  new id, update for an existing one); deletes carry just the key. Exported so
- *  the Worker can type the atomic-batch request body it forwards to applyBatch. */
-export type ChangeOp =
-  | { op: 'insert'; value: Node }
-  | { op: 'update'; value: Node }
-  | { op: 'delete'; key: string }
-
-/** A committed batch of ops at a monotonic sequence number. */
+/** A committed batch of ops at a monotonic sequence number. Also the unit
+ *  `recordChange` returns to `broadcastChange` — the SQL commit and the WS
+ *  broadcast are now two steps so the broadcast only fires post-commit. */
 interface ChangeFrame {
   seq: number
   ops: ChangeOp[]
@@ -219,61 +205,79 @@ export class UserOutlineDO extends DurableObject<Env> {
     return { op: 'delete', key: id }
   }
 
-  upsertNodes(nodes: Node[]): void {
-    this.commitChange(nodes.map((n) => this.putNode(n)))
+  upsertNodes(nodes: readonly Node[]): void {
+    this.broadcastChange(
+      this.ctx.storage.transactionSync(() =>
+        this.recordChange(nodes.map((n) => this.putNode(n))),
+      ),
+    )
   }
 
   /**
    * Apply a heterogeneous batch of ops (insert/update/delete) as ONE atomic
-   * frame: all SQL runs in this single-threaded DO call, then a single
-   * commitChange assigns one seq and emits one broadcast. This is the structural
-   * write path — an insert-and-repoint (or delete-and-repoint) lands all-or-
-   * nothing, so no reader ever observes a half-relinked sibling chain. Returns
-   * the seq the frame committed at (the current seq if the batch was empty),
-   * which the originating client waits for before dropping its optimistic
-   * overlay (so a fast follow-up edit can't read a reverted state).
+   * frame: every SQL write — the ops AND the seq bump / changelog row — runs
+   * inside a single `transactionSync`, so a throw on any op rolls the whole batch
+   * back; only on full commit does `broadcastChange` emit one frame (one seq).
+   * This is the structural write path — an insert-and-repoint (or delete-and-
+   * repoint) lands all-or-nothing, so no reader ever observes a half-relinked
+   * sibling chain, even if an op faults mid-loop. Returns the seq the frame
+   * committed at (the current seq if the batch was empty), which the originating
+   * client waits for before dropping its optimistic overlay (so a fast follow-up
+   * edit can't read a reverted state). See docs/adr/0009 and docs/adr/0014.
    *
    * Insert/update ops carry the full post-mutation node (an upsert); the DO
    * recomputes insert-vs-update from row existence, so the client's op type is
    * advisory. Apply order follows the array, but within one frame the ops are
    * absolute (keyed by id), so the final state is order-independent.
    */
-  applyBatch(ops: ChangeOp[]): number {
-    const out: ChangeOp[] = []
-    for (const op of ops) {
-      out.push(op.op === 'delete' ? this.deleteNodeRow(op.key) : this.putNode(op.value))
-    }
-    return this.commitChange(out)
+  applyBatch(ops: readonly ChangeOp[]): number {
+    return this.broadcastChange(
+      this.ctx.storage.transactionSync(() => {
+        const out: ChangeOp[] = []
+        for (const op of ops) {
+          out.push(op.op === 'delete' ? this.deleteNodeRow(op.key) : this.putNode(op.value))
+        }
+        return this.recordChange(out)
+      }),
+    )
   }
 
-  patchNodes(updates: { id: string; changes: Record<string, unknown> }[]): void {
-    const ops: ChangeOp[] = []
-    for (const u of updates) {
-      const sets: string[] = []
-      const vals: SqlVal[] = []
-      for (const [k, v] of Object.entries(u.changes)) {
-        if (!WRITABLE_COLUMNS.has(k)) continue
-        sets.push(`${k} = ?`)
-        vals.push(toSqlValue(k, v))
-      }
-      if (!sets.length) continue
-      vals.push(u.id)
-      this.sql.exec(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`, ...vals)
-      // Broadcast the full post-patch row (canonical booleans, every field) so a
-      // remote client applies an unambiguous update regardless of rowUpdateMode.
-      const row = this.sql
-        .exec(
-          'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE id = ?',
-          u.id,
-        )
-        .toArray()[0] as unknown as NodeRow | undefined
-      if (row) ops.push({ op: 'update', value: rowToNode(row) })
-    }
-    this.commitChange(ops)
+  patchNodes(updates: readonly { id: string; changes: Record<string, unknown> }[]): void {
+    this.broadcastChange(
+      this.ctx.storage.transactionSync(() => {
+        const ops: ChangeOp[] = []
+        for (const u of updates) {
+          const sets: string[] = []
+          const vals: SqlVal[] = []
+          for (const [k, v] of Object.entries(u.changes)) {
+            if (!WRITABLE_COLUMNS.has(k)) continue
+            sets.push(`${k} = ?`)
+            vals.push(toSqlValue(k, v))
+          }
+          if (!sets.length) continue
+          vals.push(u.id)
+          this.sql.exec(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`, ...vals)
+          // Broadcast the full post-patch row (canonical booleans, every field) so
+          // a remote client applies an unambiguous update regardless of rowUpdateMode.
+          const row = this.sql
+            .exec(
+              'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE id = ?',
+              u.id,
+            )
+            .toArray()[0] as unknown as NodeRow | undefined
+          if (row) ops.push({ op: 'update', value: rowToNode(row) })
+        }
+        return this.recordChange(ops)
+      }),
+    )
   }
 
-  deleteNodes(ids: string[]): void {
-    this.commitChange(ids.map((id) => this.deleteNodeRow(id)))
+  deleteNodes(ids: readonly string[]): void {
+    this.broadcastChange(
+      this.ctx.storage.transactionSync(() =>
+        this.recordChange(ids.map((id) => this.deleteNodeRow(id))),
+      ),
+    )
   }
 
   // --- realtime sync (WebSocket Hibernation) ---------------------------------
@@ -297,31 +301,48 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   /**
-   * Record a batch of ops at a new seq, prune the changelog to its window, and
-   * broadcast the change to every connected device. Called at the end of each
-   * node mutation. A no-op for an empty batch (e.g. a patch that touched no
-   * writable columns), so the seq only advances on real changes; returns the
-   * committed seq (or the unchanged current seq for an empty batch) so the
-   * atomic-batch path can report it to the originating client.
+   * Record a batch of ops at a new seq and prune the changelog to its window —
+   * the SQL half of a commit, run INSIDE the caller's `transactionSync` alongside
+   * the row writes so the seq bump and the changelog row roll back with the ops
+   * on any fault. A no-op for an empty batch (e.g. a patch that touched no
+   * writable columns), so the seq only advances on real changes. Returns the
+   * frame (committed seq + ops) for `broadcastChange` to emit once the
+   * transaction has committed.
+   */
+  private recordChange(ops: ChangeOp[]): ChangeFrame {
+    if (!ops.length) return { seq: this.currentSeq(), ops }
+    const seq = this.bumpSeq()
+    this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', seq, JSON.stringify(ops))
+    this.sql.exec('DELETE FROM changelog WHERE seq <= ?', seq - CHANGELOG_KEEP)
+    return { seq, ops }
+  }
+
+  /**
+   * Broadcast a committed frame to every connected device, and return its seq.
+   * Runs AFTER `recordChange`'s `transactionSync` has committed — events only go
+   * out for state that durably landed, never for a batch that rolled back. A
+   * no-op for an empty frame (nothing changed, so nobody is notified).
    *
    * Broadcasting is free (outgoing WS); the send runs inside the DO window the
    * triggering write already opened, so it adds negligible billed duration.
    */
-  private commitChange(ops: ChangeOp[]): number {
-    if (!ops.length) return this.currentSeq()
-    const seq = this.bumpSeq()
-    this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', seq, JSON.stringify(ops))
-    this.sql.exec('DELETE FROM changelog WHERE seq <= ?', seq - CHANGELOG_KEEP)
-    const data = JSON.stringify({ type: 'change', seq, ops } satisfies ServerMessage)
-    for (const ws of this.ctx.getWebSockets()) {
-      // A socket can race a close; the runtime will fire webSocketClose for it.
-      try {
-        ws.send(data)
-      } catch {
-        // already gone
+  private broadcastChange(frame: ChangeFrame): number {
+    if (frame.ops.length) {
+      const data = JSON.stringify({
+        type: 'change',
+        seq: frame.seq,
+        ops: frame.ops,
+      } satisfies ServerMessage)
+      for (const ws of this.ctx.getWebSockets()) {
+        // A socket can race a close; the runtime will fire webSocketClose for it.
+        try {
+          ws.send(data)
+        } catch {
+          // already gone
+        }
       }
     }
-    return seq
+    return frame.seq
   }
 
   /**
@@ -418,7 +439,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       .map((r) => JSON.parse(r.value))
   }
 
-  upsertKv(collection: string, rows: { key: string; value: unknown }[]): void {
+  upsertKv(collection: string, rows: readonly { key: string; value: unknown }[]): void {
     const ts = Date.now()
     for (const r of rows) {
       this.sql.exec(
@@ -433,7 +454,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     }
   }
 
-  deleteKv(collection: string, keys: string[]): void {
+  deleteKv(collection: string, keys: readonly string[]): void {
     for (const k of keys)
       this.sql.exec('DELETE FROM kv WHERE collection = ? AND key = ?', collection, k)
   }

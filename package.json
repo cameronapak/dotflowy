@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "test": "bun test src",
+    "test": "bun test src worker/",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "repos:update-effect": "git subtree pull --prefix=repos/effect-smol https://github.com/Effect-TS/effect-smol.git main --squash"
