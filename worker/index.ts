@@ -115,16 +115,13 @@ function json(data: unknown, status = 200): Response {
  * environment without the legacy migrations applied. The seed import simply
  * skips; the DO starts from whatever state it already has.
  */
-class SeedLegacyTablesAbsent extends Data.Error<Record<string, never>> {
-  static readonly _tag = 'SeedLegacyTablesAbsent' as const
-}
+class SeedLegacyTablesAbsent extends Data.TaggedError('SeedLegacyTablesAbsent')<{}> {}
 
 /**
  * The `?collection=` parameter is missing or not in the KV_COLLECTIONS
  * allow-list. The client sent a collection name we don't serve.
  */
-class UnknownCollection extends Data.Error<{ collection: string | null }> {
-  static readonly _tag = 'UnknownCollection' as const
+class UnknownCollection extends Data.TaggedError('UnknownCollection')<{ collection: string | null }> {
   get message() {
     return `unknown kv collection: ${this.collection ?? '(none)'}`
   }
@@ -134,14 +131,10 @@ class UnknownCollection extends Data.Error<{ collection: string | null }> {
  * /api/sync was reached without a WebSocket Upgrade header. The caller must
  * open a proper WebSocket connection — plain HTTP is not accepted on this route.
  */
-class UpgradeRequired extends Data.Error<Record<string, never>> {
-  static readonly _tag = 'UpgradeRequired' as const
-}
+class UpgradeRequired extends Data.TaggedError('UpgradeRequired')<{}> {}
 
 /** The request URL didn't match any /api/* route we own. */
-class RouteNotFound extends Data.Error<{ path: string }> {
-  static readonly _tag = 'RouteNotFound' as const
-}
+class RouteNotFound extends Data.TaggedError('RouteNotFound')<{ path: string }> {}
 
 // --- ensureSeededE ----------------------------------------------------------
 
@@ -165,7 +158,7 @@ function ensureSeededE(
   // Fetch both legacy tables in parallel. The `SeedLegacyTablesAbsent` typed
   // error signals the expected "no legacy tables" case; any other thrown error
   // is promoted to a defect so the DO stays un-seeded and retries on next load.
-  const queryLegacyData = Effect.async<
+  const queryLegacyData = Effect.callback<
     { nodeRows: NodeRow[]; kvRows: { collection: string; key: string; value: string }[] },
     SeedLegacyTablesAbsent
   >((resume) => {
