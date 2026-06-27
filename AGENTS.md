@@ -109,8 +109,30 @@ bun run test:e2e:ui  # same, in Playwright's interactive UI
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
 bun run deploy     # build:cf, then `wrangler deploy`
+bun run repos:update-effect  # pull latest Effect v4 source into repos/effect (git subtree)
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
+
+## Vendored Repositories
+
+This project vendors external repositories under `repos/` to give agents direct source access.
+
+**Rules:**
+- Treat `repos/` as **read-only reference material** — never edit files there unless explicitly asked.
+- **Do not import from `repos/`** — application code imports from normal package dependencies (`effect`, etc.).
+- Prefer examples and patterns from vendored source over guesses or web search.
+- Do not add `repos/` paths to `tsconfig.json` includes — they are excluded intentionally.
+
+### `repos/effect` — Effect v4 source
+
+Effect v4 is **post-training-cutoff** for most models. Always consult this subtree when writing Effect code.
+
+1. **Read `repos/effect/AGENTS.md` first** — it's the Effect team's agent instructions for the repo (no `LLMS.md` exists yet in this checkout; update when it appears).
+2. **Explore `repos/effect/packages/effect/src/`** for idiomatic patterns, module structure, and API signatures.
+3. **Check tests** in `repos/effect/packages/effect/test/` to see how APIs are exercised in practice.
+4. Treat `repos/effect` as the source of truth for Effect v4 — supersedes any pre-training knowledge of Effect v3.
+
+To update: `bun run repos:update-effect`
 
 **Unit tests run on `bun test`** (`bun run test`, scoped to `src` so it never grabs the Playwright `e2e/*.spec.ts`), co-located as `src/**/*.test.ts`. They cover **pure logic only** (`tags.ts`, `links.ts`, `tree.ts`, and other side-effect-free modules) — **behavior/integration stays Playwright** (don't unit-test the contentEditable/caret/collection/DO path; you'd only end up mocking the world). For `Node`/`TreeIndex` fixtures use `makeNode()` from `tree.ts`, the canonical partial-node builder — not ad-hoc casts. Test files are **excluded from the app `tsconfig.json`** so `bun:test` and Bun globals never leak into the browser typecheck, and are checked on their own via **`typecheck:test`** (`tsconfig.test.json`, `types: ["bun"]`), mirroring `typecheck:worker`. Plus the two static gates: **`oxlint`** (`.oxlintrc.json`, VoidZero's Oxc linter — `correctness` category as errors, `react` plugin on; scoped to `src` + `worker`, mirroring `typecheck`'s boundary, with `src/routeTree.gen.ts` ignored) and **`typecheck`** — run them all after any change. `oxlint` is lint-only by choice (no formatter); `jsx-a11y` is off for now because the contentEditable/click-handler-heavy editor would false-positive on day one (easy opt-in later). End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert `{nodes}` **or** atomic batch `{ops}`→`{seq}` / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) **and is realtime-faithful**: every write bumps a `seq` and echoes a `{type:'change',seq,ops}` frame over the `/api/sync` WebSocket mock — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. `seedOutline(page, nodes, { echoDelayMs, postDelayMs })` can delay the echo (`echoDelayMs`, to reproduce the optimistic-overlay/echo gap — the structural batch path holds its overlay across it) or the batch POST *response* (`postDelayMs`, to prove rapid batches serialize on the wire and can't reach the DO out of order) — both in `atomic-structural-writes.spec.ts`. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
 
