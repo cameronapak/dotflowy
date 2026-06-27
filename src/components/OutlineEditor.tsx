@@ -395,7 +395,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
  * awaits the collection's initial load and no-ops unless the server is empty
  * (seed.ts), so this is safe to call unconditionally on mount.
  *
- * bootstrapOutline returns a BootstrapError as a value (errore convention) when
+ * bootstrapOutline returns a BootstrapError as a value (not a throw) when
  * the initial D1 load failed -- it detects that deliberately, because the query
  * adapter resolves an empty array (and logs its own error) rather than rejecting
  * on a 500/offline. We log here too for a single, app-level "bootstrap skipped

@@ -1,4 +1,3 @@
-import * as errore from 'errore'
 import type { Node } from './schema'
 
 /**
@@ -73,15 +72,17 @@ function syncUrl(): string {
 
 function decodeFrame(data: unknown): ServerMessage | null {
   if (typeof data !== 'string') return null
-  const parsed = errore.try({
-    try: () => JSON.parse(data) as ServerMessage,
-    catch: (e) => new Error('malformed sync frame', { cause: e }),
-  })
-  if (parsed instanceof Error) {
-    console.warn('realtime:', parsed.message)
+  // A local sync JSON.parse-or-null: a malformed frame is dropped with a warn.
+  // Plain try/catch by choice — Effect's runtime per inbound frame would be
+  // overkill on this hot path, and there's no typed error worth modelling for a
+  // discard. (Full Effect Schema validation of the frame shape is a separate,
+  // higher-value pass — see ADR 0012 / the wire-validation candidate.)
+  try {
+    return JSON.parse(data) as ServerMessage
+  } catch (e) {
+    console.warn('realtime: malformed sync frame', e)
     return null
   }
-  return parsed
 }
 
 /**

@@ -11,12 +11,7 @@ import {
   toKvRows,
 } from '../../data/kv-api'
 import { Effect } from 'effect'
-import {
-  kvGetOrCreateE,
-  type KvTimeoutError,
-  type KvTransportError,
-  type KvResponseError,
-} from '../../data/kv-client-effect'
+import { kvGetOrCreateE } from '../../data/kv-client-effect'
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0019). A row maps a
@@ -172,7 +167,7 @@ export function setMapping(key: string, nodeId: string): void {
  * locally and both claim; the single-threaded DO lets exactly one win, killing
  * the duplicate-daily-note race at the source.
  *
- * This is the errore boundary over the Effect kv client: on a network/server
+ * This is the boundary that degrades to a value on failure: on a network/server
  * failure it logs and degrades to the optimistic local path (treats `candidate`
  * as the winner), so the feature keeps working — the rare failure window just
  * reopens the pre-fix race, no worse than before the claim existed.

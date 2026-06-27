@@ -1,12 +1,12 @@
 import { Data, Duration, Effect, Schedule } from 'effect'
 
 /**
- * Effect v4 pilot — a typed-error, retrying, time-bounded variant of the kv
- * REST client. Lives alongside the throwing kv-api.ts. See `claimMapping`
- * (daily-index.ts) for the intended call site: it's the one boundary that
- * already degrades to an errore-style value on failure, so it's the natural
- * place to prove Effect's typed-error + retry ergonomics against real I/O
- * without touching the throw-based TanStack DB mutation path.
+ * The Effect transport core for the /api/kv side-collections — a typed-error,
+ * retrying, time-bounded kv REST client. Two shells consume it: the throwing
+ * kv-api.ts (kvFetch/kvPut/kvDelete run these programs through `runPromise`, so
+ * the TanStack DB mutation path keeps its throw contract) and `claimMapping`
+ * (daily-index.ts), which consumes the program directly and degrades to a plain
+ * value on failure. See docs/adr/0012-effect-replaces-errore.md.
  *
  * Design notes (Effect v4, beta.90):
  *  - Domain errors are tagged classes via `Data.TaggedError('Tag')<{}>`.
@@ -184,7 +184,7 @@ export function kvGetOrCreateE<T>(
     // Validate the { value: T } envelope before unwrapping: a missing/malformed
     // value would otherwise surface as `undefined` success and deref badly at
     // the caller (claimMapping reads row.nodeId). Coerce to a transport error so
-    // the errore boundary degrades instead of returning garbage.
+    // claimMapping's boundary degrades instead of returning garbage.
     Effect.flatMap((data) => {
       if (typeof data !== 'object' || data === null || !('value' in data)) {
         return Effect.fail(

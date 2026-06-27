@@ -78,14 +78,12 @@ Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to thi
 
 ## Error Handling
 
-This codebase uses the errore.org convention. ALWAYS read the errore skill before editing any code.
+**Effect replaced errore** ([ADR 0012](./docs/adr/0012-effect-replaces-errore.md)). Effect's typed-error channel is the error model; the errore.org library is fully removed from `src/` and dropped from `package.json`. Don't reintroduce it. The value-as-error pattern (return `Error | T`, check `instanceof Error`) still appears where it fits (e.g. `bootstrapOutline`), but the error type is now an Effect `Data.TaggedError`, not an errore class. See `kv-client-effect.ts` for the Effect v4 patterns in use (`Data.TaggedError` tagged errors, `Schedule.both` retry, `Effect.timeoutOrElse`); the Worker (`worker/index.ts`) is already a full Effect pipeline.
 
-Effect v4 (beta) is adopted at **one** boundary for now: `src/data/kv-client-effect.ts`, exercised by `claimMapping` in `src/plugins/daily/daily-index.ts`. The split is deliberate and load-bearing — do not blur it:
+The Effect transport **core** for the kv side-collections is `src/data/kv-client-effect.ts` (retry + 8s timeout + typed errors + response-shape validation). Two shells consume it:
 
-- The **kv-api.ts throw-based contract stays**. TanStack DB mutation handlers signal failure by throwing (a throw triggers optimistic rollback), so `kvFetch`/`kvPut`/`kvDelete` must keep throwing. Do not convert them to Effect.
-- `claimMapping` has **no TanStack caller** (it's an awaitable from a click handler), so it speaks Effect's typed-error channel via `kvGetOrCreateE` and degrades to the errore-style `Error | T` union at its own boundary (the daily-note feature keeps working on failure).
-
-When editing either file, preserve its side of the split. See `kv-client-effect.ts` for the Effect v4 patterns in use (`Data.Error` tagged errors, `Schedule.both` retry, `Effect.timeoutOrElse`).
+- **`src/data/kv-api.ts` is a throw-shell over the core.** `kvFetch`/`kvPut`/`kvDelete` run the matching Effect program through `runPromise`, so every kv write inherits the core's robustness. They MUST keep throwing — TanStack DB mutation handlers signal failure by throwing (a throw triggers optimistic rollback), so consumers need a rejecting promise, not an Effect value — but the throw is now Effect-backed, not bespoke fetch. Keep them throwing; don't reintroduce a hand-rolled fetch.
+- **`claimMapping` (daily-index.ts) consumes the Effect program directly.** It has no TanStack caller (an awaitable from a click handler), so it routes `kvGetOrCreateE` through `Effect.match` and degrades to a plain value at its own boundary (the daily-note feature keeps working on failure).
 
 ## Documentation Freshness
 
