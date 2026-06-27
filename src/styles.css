@@ -240,10 +240,10 @@
  */
 @keyframes node-acted-fade {
   from {
-    background-color: var(--secondary);
+    background-color: var(--muted);
   }
   to {
-    background-color: oklch(from var(--secondary) l c h / 0);
+    background-color: oklch(from var(--muted) l c h / 0);
   }
 }
 
