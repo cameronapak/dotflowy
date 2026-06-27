@@ -70,6 +70,13 @@ Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to thi
 
 This codebase uses the errore.org convention. ALWAYS read the errore skill before editing any code.
 
+Effect v4 (beta) is adopted at **one** boundary for now: `src/data/kv-client-effect.ts`, exercised by `claimMapping` in `src/plugins/daily/daily-index.ts`. The split is deliberate and load-bearing — do not blur it:
+
+- The **kv-api.ts throw-based contract stays**. TanStack DB mutation handlers signal failure by throwing (a throw triggers optimistic rollback), so `kvFetch`/`kvPut`/`kvDelete` must keep throwing. Do not convert them to Effect.
+- `claimMapping` has **no TanStack caller** (it's an awaitable from a click handler), so it speaks Effect's typed-error channel via `kvGetOrCreateE` and degrades to the errore-style `Error | T` union at its own boundary (the daily-note feature keeps working on failure).
+
+When editing either file, preserve its side of the split. See `kv-client-effect.ts` for the Effect v4 patterns in use (`Data.Error` tagged errors, `Schedule.both` retry, `Effect.timeoutOrElse`).
+
 ## Documentation Freshness
 
 Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false about an objective fact (repo structure, paths, commands, tooling, workflow constraints proven by the repo), fix it in the same change.
