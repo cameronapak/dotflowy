@@ -7,7 +7,7 @@ import type { ChangeOp } from './realtime'
  * automatically. The collection's mutation handlers (collection.ts) call
  * create/update/delete on the write path; the initial snapshot + live reads now
  * arrive over the sync socket (realtime.ts), not a GET here. See
- * docs/DECISIONS.md.
+ * docs/adr/0008-sync-via-a-per-user-durable-object.md.
  *
  * STRUCTURAL writes (insert/delete a bullet — anything that relinks the sibling
  * chain) go through `persistBatch` instead: one request carrying every op, so
@@ -90,7 +90,7 @@ export const createNodes = (nodes: Node[]): Promise<void> =>
 // no artificial debounce latency (the optimistic overlay is already on screen).
 //
 // This deliberately does NOT await the echo (the text path must stay snappy,
-// per docs/DECISIONS.md); the overlay still drops on the PATCH ack. The
+// per docs/adr/0010-field-edits-serialize-coalesce-ignore-echoes.md); the overlay still drops on the PATCH ack. The
 // companion client guard (the focused bullet ignores echo-driven repaints, see
 // collection.ts `echoedText` + OutlineNode) keeps that ack/echo gap from ever
 // touching the DOM you're typing into.

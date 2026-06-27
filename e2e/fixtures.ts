@@ -64,7 +64,7 @@ function toNode(n: SeedNode): ApiNode {
  *   - WS `/api/sync` — `hello` → `snapshot` from the seeded store
  * so the real `collection.ts` → `api.ts` + `realtime.ts` path is exercised end
  * to end; only the DO is swapped for a Map. The Worker's own SQL is covered by
- * `typecheck:worker` plus manual verification (docs/DECISIONS.md), not here.
+ * `typecheck:worker` plus manual verification (docs/adr/0008-sync-via-a-per-user-durable-object.md), not here.
  *
  * The store is scoped to this test's `page`. Playwright gives each test its own
  * page/context, so two tests never share state. Register before `page.goto(...)`

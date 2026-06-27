@@ -14,7 +14,7 @@ import { buildTreeIndex, now } from './tree'
  * streams a `snapshot` (the full outline), then every edit on any of the user's
  * devices arrives as a `change` delta and is applied live -- no window-focus
  * refetch. A reconnect resumes from the last applied seq (or falls back to a
- * fresh snapshot). Why a DO + WebSocket: docs/DECISIONS.md (per-user DO sync).
+ * fresh snapshot). Why a DO + WebSocket: docs/adr/0008-sync-via-a-per-user-durable-object.md.
  *
  * The WRITE path has two lanes. FIELD edits (text, completed, ...) take the
  * optimistic handlers below: insert -> onInsert -> POST, update -> onUpdate ->
@@ -23,7 +23,7 @@ import { buildTreeIndex, now } from './tree'
  * via `runStructural` (structural.ts), which batches all their writes into one
  * `POST /api/nodes {ops}` and holds the overlay until the echo (`waitForSeq`
  * here) -- so an insert-and-repoint can't tear across two requests. See
- * docs/DECISIONS.md (Atomic structural writes). Either way a handler maps over
+ * docs/adr/0009-atomic-structural-writes.md. Either way a handler maps over
  * `transaction.mutations` (a field op can still carry several), never `[0]`.
  *
  * The collection interface (insert / update / delete / subscribeChanges /

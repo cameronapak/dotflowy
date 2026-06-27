@@ -4,7 +4,7 @@
  * Better Auth: the app's identity layer. Email + password self-serve signup,
  * sessions in D1. Better Auth's `user` table IS the global identity store and
  * `user.id` is the stable, permanent key the Worker routes each user's outline
- * Durable Object by (see resolveUserId in index.ts). See docs/DECISIONS.md.
+ * Durable Object by (see resolveUserId in index.ts). See docs/adr/0011-the-auth-gate.md.
  *
  * Why a per-request factory and not a module singleton: the D1 binding only
  * exists inside `fetch(request, env)`, so auth MUST be constructed from `env`
@@ -34,7 +34,7 @@ export function createAuth(env: AuthEnv) {
     emailAndPassword: {
       enabled: true,
       // v1 has no transactional email wired, so signup can't gate on a
-      // verification link yet. Tracked as a known gap (docs/DECISIONS.md).
+      // verification link yet. Tracked as a known gap (docs/adr/0011-the-auth-gate.md).
       requireEmailVerification: false,
     },
     // Dev serves the SPA from Vite (:3000) and proxies /api to the Worker, so
