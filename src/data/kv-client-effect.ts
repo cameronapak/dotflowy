@@ -9,7 +9,7 @@ import { Data, Duration, Effect, Schedule } from 'effect'
  * without touching the throw-based TanStack DB mutation path.
  *
  * Design notes (Effect v4, beta.90):
- *  - Domain errors are tagged classes via `Data.Error`. `Effect.catchTag`
+ *  - Domain errors are tagged classes via `Data.TaggedError('Tag')<{}>`.
  *    routes on the `_tag` discriminator.
  *  - `Effect.tryPromise` lifts `fetch` into the Effect world. Its `catch` maps
  *    the untyped rejection to our `KvTransportError`.
@@ -30,25 +30,27 @@ const url = (collection: string) =>
 
 // --- Domain errors ----------------------------------------------------------
 
-export class KvTransportError extends Data.Error<{ collection: string; cause: unknown }> {
-  static readonly _tag = 'KvTransportError' as const
+export class KvTransportError extends Data.TaggedError('KvTransportError')<{
+  collection: string
+  cause: unknown
+}> {
   get message() {
     return `kv '${this.collection}' request failed`
   }
 }
 
-export class KvResponseError extends Data.Error<{
+export class KvResponseError extends Data.TaggedError('KvResponseError')<{
   collection: string
   status: number
 }> {
-  static readonly _tag = 'KvResponseError' as const
   get message() {
     return `kv '${this.collection}' -> HTTP ${this.status}`
   }
 }
 
-export class KvTimeoutError extends Data.Error<{ collection: string }> {
-  static readonly _tag = 'KvTimeoutError' as const
+export class KvTimeoutError extends Data.TaggedError('KvTimeoutError')<{
+  collection: string
+}> {
   get message() {
     return `kv '${this.collection}' timed out`
   }
