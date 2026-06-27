@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -70,6 +69,22 @@ const BOOKMARKS_HEADING = (
     Bookmarks
   </div>
 );
+
+// One pass over the nodes (skip empties, project to the searchable shape), then
+// index. Module scope: pure, and a single iteration over potentially many nodes.
+function buildFuse(nodes: Node[]): Fuse<Searchable> {
+  const searchable: Searchable[] = [];
+  for (const n of nodes) {
+    if (n.text.trim() !== "") {
+      searchable.push({
+        node: n,
+        text: stripLinks(n.text),
+        aliases: searchAliases(n),
+      });
+    }
+  }
+  return new Fuse(searchable, FUSE_OPTIONS);
+}
 
 /**
  * Outer shell: owns open/query state and the global hotkey, but reads NO data.
@@ -145,36 +160,20 @@ function SwitcherDialog({
   const { index } = useTree();
   const navigate = useNavigate();
 
-  const nodes = useMemo(() => Array.from(index.byId.values()), [index]);
+  const nodes = Array.from(index.byId.values());
 
   // Build the Fuse index only while open. When closed we skip the work; when
   // open the outline isn't being edited, so `nodes` is stable.
-  const fuse = useMemo(() => {
-    if (!open) return null;
-    const searchable: Searchable[] = [];
-    for (const n of nodes) {
-      if (n.text.trim() !== "") {
-        searchable.push({ node: n, text: stripLinks(n.text), aliases: searchAliases(n) });
-      }
-    }
-    return new Fuse(searchable, FUSE_OPTIONS);
-  }, [open, nodes]);
+  const fuse = open ? buildFuse(nodes) : null;
 
   const q = query.trim();
 
   // null => empty-query mode (show bookmarks). Otherwise the Fuse hits.
-  const results = useMemo(() => {
-    if (!q || !fuse) return null;
-    return fuse.search(q, { limit: RESULT_LIMIT });
-  }, [q, fuse]);
+  const results = !q || !fuse ? null : fuse.search(q, { limit: RESULT_LIMIT });
 
-  const bookmarks = useMemo(
-    () =>
-      nodes
-        .filter((n) => n.bookmarkedAt != null)
-        .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0)),
-    [nodes],
-  );
+  const bookmarks = nodes
+    .filter((n) => n.bookmarkedAt != null)
+    .sort((a, b) => (b.bookmarkedAt ?? 0) - (a.bookmarkedAt ?? 0));
 
   function go(nodeId: string) {
     onPicked();
@@ -185,16 +184,15 @@ function SwitcherDialog({
   // Plugin-contributed VIRTUAL rows (Seam J), built from the live query -- the
   // daily plugin's "Go to Today" when today's note doesn't exist yet. Each runs
   // its own action (create + navigate) on pick. Empty for an empty query.
-  const actions = useMemo<SearchAction[]>(() => {
-    if (!q) return [];
-    return searchActions(q, {
-      index,
-      goTo: (id) => {
-        onPicked();
-        navigate({ to: "/$nodeId", params: { nodeId: id } });
-      },
-    });
-  }, [q, index, navigate, onPicked]);
+  const actions: SearchAction[] = q
+    ? searchActions(q, {
+        index,
+        goTo: (id) => {
+          onPicked();
+          navigate({ to: "/$nodeId", params: { nodeId: id } });
+        },
+      })
+    : [];
 
   return (
     <CommandDialog

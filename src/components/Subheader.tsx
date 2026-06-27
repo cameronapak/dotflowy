@@ -24,6 +24,10 @@ export function Subheader({
   const [open, setOpen] = useState(false);
   const [height, setHeight] = useState(0);
 
+  // Kept as useCallback (not redundant despite React Compiler): it's a
+  // dependency of the useLayoutEffects below, so oxlint's exhaustive-deps gate
+  // (compiler-unaware) requires a stable identity. Removing it trips two
+  // correctness errors. See react-doctor/react-compiler-no-manual-memoization.
   const measure = useCallback(() => {
     const content = contentRef.current;
     const shell = shellRef.current;

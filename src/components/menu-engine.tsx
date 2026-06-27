@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { Node } from "../data/schema";
 import type {
@@ -73,24 +68,19 @@ export function useMenus({
     : null;
 
   // The entries for the open menu, recomputed as the query changes. Reads the
-  // live tree/commands through ctx(); keyed on the open state + this node.
-  const entries = useMemo<MenuEntry[]>(() => {
-    if (!open || !spec) return [];
-    return spec.entries(open.trigger, node, ctx());
-    // ctx is a referentially-stable factory read at call time; recompute only
-    // when the open menu / node changes, not on ctx identity.
-    // eslint-disable-next-line react-doctor/exhaustive-deps
-  }, [open, spec, node]);
+  // live tree/commands through ctx() (a referentially-stable factory).
+  const entries: MenuEntry[] =
+    open && spec ? spec.entries(open.trigger, node, ctx()) : [];
 
   // "Open" only counts when there's something to show (or the spec opts into an
   // empty state), so a brand-new `#tag`'s Enter is never swallowed.
   const isOpen = open !== null && (entries.length > 0 || !!spec?.openWhenEmpty);
 
-  const close = useCallback(() => setOpen(null), []);
+  const close = () => setOpen(null);
 
   // Re-evaluate the triggers after every input. The first spec whose trigger is
   // live AND has something to open wins; otherwise the menu closes.
-  const handleInput = useCallback(() => {
+  const handleInput = () => {
     const el = getEl();
     if (!el) return setOpen(null);
     const caret = caretOffset(el);
@@ -116,70 +106,60 @@ export function useMenus({
       return;
     }
     setOpen(null);
-  }, [getEl, node, ctx]);
+  };
 
-  const pick = useCallback(
-    (index: number) => {
-      const el = getEl();
-      if (!el || !open) return;
-      const entry = entries[index];
-      if (!entry) return setOpen(null);
-      // Splice the replacement over the trigger + query span, in SOURCE space so
-      // a folded link elsewhere on the line keeps its url. The engine owns this;
-      // the entry just says what to insert + where the caret lands + an optional
-      // side effect (a slash command's mutation).
-      const source = readSource(el);
-      const t = open.trigger;
-      const end = t.triggerIndex + 1 + t.query.length;
-      const newText =
-        source.slice(0, t.triggerIndex) + entry.replacement + source.slice(end);
-      const caret = t.triggerIndex + (entry.caret ?? entry.replacement.length);
-      onTextChange(newText);
-      decorate(el, newText, caret, false);
-      setCaretOffset(el, caret);
-      setOpen(null);
-      entry.after?.();
-    },
-    [getEl, open, entries, onTextChange],
-  );
+  const pick = (index: number) => {
+    const el = getEl();
+    if (!el || !open) return;
+    const entry = entries[index];
+    if (!entry) return setOpen(null);
+    // Splice the replacement over the trigger + query span, in SOURCE space so
+    // a folded link elsewhere on the line keeps its url. The engine owns this;
+    // the entry just says what to insert + where the caret lands + an optional
+    // side effect (a slash command's mutation).
+    const source = readSource(el);
+    const t = open.trigger;
+    const end = t.triggerIndex + 1 + t.query.length;
+    const newText =
+      source.slice(0, t.triggerIndex) + entry.replacement + source.slice(end);
+    const caret = t.triggerIndex + (entry.caret ?? entry.replacement.length);
+    onTextChange(newText);
+    decorate(el, newText, caret, false);
+    setCaretOffset(el, caret);
+    setOpen(null);
+    entry.after?.();
+  };
 
   // Intercept navigation keys while open. Returns true if it consumed the event,
   // so the caller skips its own Enter/Tab/Arrow handling.
-  const handleKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLElement>): boolean => {
-      if (!isOpen || !open) return false;
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setOpen((s) =>
-            s
-              ? { ...s, activeIndex: wrap(s.activeIndex + 1, entries.length) }
-              : s,
-          );
-          return true;
-        case "ArrowUp":
-          e.preventDefault();
-          setOpen((s) =>
-            s
-              ? { ...s, activeIndex: wrap(s.activeIndex - 1, entries.length) }
-              : s,
-          );
-          return true;
-        case "Enter":
-        case "Tab":
-          e.preventDefault();
-          pick(open.activeIndex);
-          return true;
-        case "Escape":
-          e.preventDefault();
-          setOpen(null);
-          return true;
-        default:
-          return false;
-      }
-    },
-    [isOpen, open, entries.length, pick],
-  );
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLElement>): boolean => {
+    if (!isOpen || !open) return false;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setOpen((s) =>
+          s ? { ...s, activeIndex: wrap(s.activeIndex + 1, entries.length) } : s,
+        );
+        return true;
+      case "ArrowUp":
+        e.preventDefault();
+        setOpen((s) =>
+          s ? { ...s, activeIndex: wrap(s.activeIndex - 1, entries.length) } : s,
+        );
+        return true;
+      case "Enter":
+      case "Tab":
+        e.preventDefault();
+        pick(open.activeIndex);
+        return true;
+      case "Escape":
+        e.preventDefault();
+        setOpen(null);
+        return true;
+      default:
+        return false;
+    }
+  };
 
   const menu =
     isOpen && open

@@ -1,11 +1,4 @@
-import {
-  createContext,
-  use,
-  useCallback,
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
+import { createContext, use, useEffect, useSyncExternalStore } from "react";
 import {
   LEGACY_THEME_KEY,
   readStorageMigrated,
@@ -51,6 +44,13 @@ function notifyThemeListeners() {
   for (const l of themeListeners) l();
 }
 
+// Module scope: reads no component state, so it's a single stable function
+// instead of one rebuilt per render (react-doctor/prefer-module-scope-pure-function).
+function setTheme(next: Theme) {
+  localStorage.setItem(THEME_KEY, next);
+  notifyThemeListeners();
+}
+
 /**
  * Applies the resolved theme to <html>. "system" follows the OS preference.
  * Kept in sync with the inline no-flash script in __root.tsx (same storage key
@@ -87,12 +87,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
 
-  const setTheme = useCallback((next: Theme) => {
-    localStorage.setItem(THEME_KEY, next);
-    notifyThemeListeners();
-  }, []);
-
-  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
+  const value = { theme, setTheme };
 
   return (
     <ThemeProviderContext.Provider value={value}>
