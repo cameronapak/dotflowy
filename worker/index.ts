@@ -14,9 +14,16 @@
  *
  * D1 holds (1) Better Auth's identity tables (user/session/account), and (2) the
  * pre-DO legacy outline rows, kept only as the source for the one-time,
- * non-destructive import into the owner's DO (`ensureSeeded`).
+ * non-destructive import into the owner's DO (`ensureSeededE`).
+ *
+ * Error handling: typed domain errors flow through Effect's error channel and
+ * are mapped to HTTP status codes in one place at the outer boundary. Unexpected
+ * failures (DO errors, network errors) become Effect *defects* — they bypass the
+ * typed channel and are caught by the `runPromise().catch()` fallback, giving
+ * unambiguous 500s without collapsing known validation errors into the same bucket.
  */
 
+import { Data, Effect } from 'effect'
 import { UserOutlineDO } from './outline-do'
 import type { ChangeOp, Node } from './outline-do'
 import { createAuth } from './auth'
@@ -101,45 +108,128 @@ function json(data: unknown, status = 200): Response {
   })
 }
 
+// --- Typed domain errors ----------------------------------------------------
+
 /**
- * One-time, non-destructive copy of the owner's legacy D1 rows into their DO.
- * Idempotent — the DO marks itself seeded and short-circuits thereafter. Runs
- * on the owner's first GET (including the `/api/sync` WebSocket upgrade) before
- * the initial snapshot. Remove this and the D1 node/kv tables once every user
- * is migrated.
+ * The legacy D1 tables don't exist — expected on a clean deploy or a dev
+ * environment without the legacy migrations applied. The seed import simply
+ * skips; the DO starts from whatever state it already has.
  */
-async function ensureSeeded(
+class SeedLegacyTablesAbsent extends Data.Error<Record<string, never>> {
+  static readonly _tag = 'SeedLegacyTablesAbsent' as const
+}
+
+/**
+ * The `?collection=` parameter is missing or not in the KV_COLLECTIONS
+ * allow-list. The client sent a collection name we don't serve.
+ */
+class UnknownCollection extends Data.Error<{ collection: string | null }> {
+  static readonly _tag = 'UnknownCollection' as const
+  get message() {
+    return `unknown kv collection: ${this.collection ?? '(none)'}`
+  }
+}
+
+/**
+ * /api/sync was reached without a WebSocket Upgrade header. The caller must
+ * open a proper WebSocket connection — plain HTTP is not accepted on this route.
+ */
+class UpgradeRequired extends Data.Error<Record<string, never>> {
+  static readonly _tag = 'UpgradeRequired' as const
+}
+
+/** The request URL didn't match any /api/* route we own. */
+class RouteNotFound extends Data.Error<{ path: string }> {
+  static readonly _tag = 'RouteNotFound' as const
+}
+
+// --- ensureSeededE ----------------------------------------------------------
+
+/**
+ * Effect-native one-time D1 → DO import. Returns `Effect<void, never>`:
+ *
+ * - `SeedLegacyTablesAbsent` (no legacy tables on a fresh deploy) is absorbed
+ *   here — the seed call is skipped and the DO starts empty/as-is, which is
+ *   the correct behaviour.
+ * - A *real* D1 failure (network error, malformed SQL, unexpected table error)
+ *   is promoted to an Effect *defect* via `Effect.die` so the DO is NOT marked
+ *   seeded — the import will retry on the next load rather than silently losing
+ *   the owner's pre-DO data.
+ */
+function ensureSeededE(
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
-): Promise<void> {
-  if (await stub.isSeeded()) return
-  const owner = env.APP_OWNER || 'owner'
-  let nodeRows: NodeRow[] = []
-  let kvRows: { collection: string; key: string; value: string }[] = []
-  try {
-    nodeRows = (
-      await env.DB.prepare(
+): Effect.Effect<void> {
+  const owner = env.APP_OWNER ?? 'owner'
+
+  // Fetch both legacy tables in parallel. The `SeedLegacyTablesAbsent` typed
+  // error signals the expected "no legacy tables" case; any other thrown error
+  // is promoted to a defect so the DO stays un-seeded and retries on next load.
+  const queryLegacyData = Effect.async<
+    { nodeRows: NodeRow[]; kvRows: { collection: string; key: string; value: string }[] },
+    SeedLegacyTablesAbsent
+  >((resume) => {
+    Promise.all([
+      env.DB.prepare(
         'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE owner = ?',
       )
         .bind(owner)
-        .all<NodeRow>()
-    ).results
-    kvRows = (
-      await env.DB.prepare('SELECT collection, key, value FROM kv WHERE owner = ?')
+        .all<NodeRow>(),
+      env.DB.prepare('SELECT collection, key, value FROM kv WHERE owner = ?')
         .bind(owner)
-        .all<{ collection: string; key: string; value: string }>()
-    ).results
-  } catch (err) {
-    // No legacy tables (fresh deploy / dev with un-migrated D1) -> nothing to
-    // import. Any OTHER D1 error: rethrow so we DON'T mark the DO seeded and the
-    // import retries on the next load instead of silently hiding real data.
-    if (!/no such table/i.test(String(err))) throw err
-  }
-  await stub.seed({
-    nodes: nodeRows.map(rowToNode),
-    kv: kvRows.map((r) => ({ collection: r.collection, key: r.key, value: JSON.parse(r.value) })),
+        .all<{ collection: string; key: string; value: string }>(),
+    ]).then(
+      ([nodeResult, kvResult]) =>
+        resume(
+          Effect.succeed({
+            nodeRows: nodeResult.results,
+            kvRows: kvResult.results,
+          }),
+        ),
+      (err) => {
+        if (/no such table/i.test(String(err))) {
+          // Expected on fresh deploys — no legacy rows to import.
+          resume(Effect.fail(new SeedLegacyTablesAbsent()))
+        } else {
+          // Real D1 failure — promote to defect so we don't mark the DO seeded.
+          resume(Effect.die(err))
+        }
+      },
+    )
+  })
+
+  return Effect.gen(function* () {
+    const seeded = yield* Effect.promise(() => stub.isSeeded())
+    if (seeded) return
+
+    const data = yield* queryLegacyData.pipe(
+      // Absorb the expected no-tables case: produce empty seed data so the
+      // stub.seed() call still runs and marks the DO seeded, preventing
+      // repeated D1 queries on every subsequent request.
+      Effect.catchTag('SeedLegacyTablesAbsent', () =>
+        Effect.succeed({
+          nodeRows: [] as NodeRow[],
+          kvRows: [] as { collection: string; key: string; value: string }[],
+        }),
+      ),
+    )
+
+    yield* Effect.promise(() =>
+      stub.seed({
+        nodes: data.nodeRows.map(rowToNode),
+        kv: data.kvRows.map((r) => ({
+          collection: r.collection,
+          key: r.key,
+          value: JSON.parse(r.value) as unknown,
+        })),
+      }),
+    )
   })
 }
+
+// --- Route handlers ---------------------------------------------------------
+// These return plain Responses (including their own 4xx) and are wrapped at
+// the call site with Effect.promise — their own thrown errors become defects.
 
 async function handleNodes(
   request: Request,
@@ -214,6 +304,75 @@ async function handleKv(
   }
 }
 
+// --- Main API pipeline ------------------------------------------------------
+
+/**
+ * Routes an authenticated /api/* request. Returns an Effect whose typed error
+ * channel carries only the *expected* validation failures — callers can
+ * exhaustively handle them with `Effect.catchTag`. Unexpected failures (DO
+ * errors, D1 errors, runtime throws) escape as defects and surface as 500s via
+ * the `runPromise().catch()` in `fetch`.
+ */
+function handleApiRequest(
+  request: Request,
+  url: URL,
+  env: Env,
+): Effect.Effect<Response, UnknownCollection | UpgradeRequired | RouteNotFound> {
+  return Effect.gen(function* () {
+    const auth = createAuth(env)
+
+    // Better Auth owns everything under /api/auth/* (sign-up/in/out, session).
+    if (url.pathname.startsWith('/api/auth/')) {
+      return yield* Effect.promise(() => auth.handler(request))
+    }
+
+    // Identity = the validated session's stable user id. No session → 401.
+    const session = yield* Effect.promise(() =>
+      auth.api.getSession({ headers: request.headers }),
+    )
+    if (!session) return json({ error: 'unauthorized' }, 401)
+
+    const userId = resolveUserId(session.user.id, env)
+    const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
+
+    // Only the owner's DO ('default') has legacy D1 rows to import; new users
+    // start empty, so skip the import (and its D1 query) for them.
+    const maybeSeed =
+      request.method === 'GET' && userId === OWNER_DO_ID
+        ? ensureSeededE(stub, env)
+        : Effect.sync(() => {})
+
+    // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
+    // hibernation-accepts it and streams outline changes. The session is
+    // already validated above, so the socket only ever opens for an authed
+    // user. Seed first (owner only) so the DO's initial snapshot includes any
+    // imported legacy rows — the live client no longer GETs /api/nodes.
+    if (url.pathname === '/api/sync') {
+      if (request.headers.get('Upgrade') !== 'websocket') {
+        return yield* Effect.fail(new UpgradeRequired())
+      }
+      yield* maybeSeed
+      return yield* Effect.promise(() => stub.fetch(request))
+    }
+
+    if (url.pathname === '/api/nodes') {
+      yield* maybeSeed
+      return yield* Effect.promise(() => handleNodes(request, stub))
+    }
+
+    if (url.pathname === '/api/kv') {
+      const collection = url.searchParams.get('collection')
+      if (!collection || !KV_COLLECTIONS.has(collection)) {
+        return yield* Effect.fail(new UnknownCollection({ collection }))
+      }
+      yield* maybeSeed
+      return yield* Effect.promise(() => handleKv(request, stub, collection))
+    }
+
+    return yield* Effect.fail(new RouteNotFound({ path: url.pathname }))
+  })
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -222,54 +381,22 @@ export default {
     // them without instantiating auth — only the data API is gated, below.
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
-    const auth = createAuth(env)
-
-    // Better Auth owns everything under /api/auth/* (sign-up/in/out, session).
-    if (url.pathname.startsWith('/api/auth/')) return auth.handler(request)
-
-    // Identity = the validated session's stable user id. No session -> 401.
-    const session = await auth.api.getSession({ headers: request.headers })
-    if (!session) return json({ error: 'unauthorized' }, 401)
-
-    const userId = resolveUserId(session.user.id, env)
-    const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
-
-    try {
-      // Only the owner's DO ('default') has legacy D1 rows to import; new users
-      // start empty, so skip the import (and its D1 query) for them.
-      const maybeSeed =
-        request.method === 'GET' && userId === OWNER_DO_ID
-          ? ensureSeeded(stub, env)
-          : Promise.resolve()
-
-      // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
-      // hibernation-accepts it and streams outline changes. The session is
-      // already validated above, so the socket only ever opens for an authed
-      // user. Seed first (owner only) so the DO's initial snapshot includes any
-      // imported legacy rows — the live client no longer GETs /api/nodes.
-      if (url.pathname === '/api/sync') {
-        if (request.headers.get('Upgrade') !== 'websocket') {
-          return json({ error: 'expected a websocket upgrade' }, 426)
-        }
-        await maybeSeed
-        return await stub.fetch(request)
-      }
-
-      if (url.pathname === '/api/nodes') {
-        await maybeSeed
-        return await handleNodes(request, stub)
-      }
-      if (url.pathname === '/api/kv') {
-        const collection = url.searchParams.get('collection')
-        if (!collection || !KV_COLLECTIONS.has(collection)) {
-          return json({ error: 'unknown collection' }, 400)
-        }
-        await maybeSeed
-        return await handleKv(request, stub, collection)
-      }
-    } catch (err) {
-      return json({ error: String(err) }, 500)
-    }
-    return json({ error: 'not found' }, 404)
+    // Run the typed pipeline. Typed errors (validation) are caught here and
+    // mapped to exact HTTP status codes. Defects (unexpected DO/D1 failures)
+    // fall through to the Promise rejection handler, keeping the status code
+    // mapping exhaustive and the 500 path reserved for genuine surprises.
+    return Effect.runPromise(
+      handleApiRequest(request, url, env).pipe(
+        Effect.catchTag('UnknownCollection', (e) =>
+          Effect.succeed(json({ error: e.message }, 400)),
+        ),
+        Effect.catchTag('UpgradeRequired', () =>
+          Effect.succeed(json({ error: 'expected a websocket upgrade' }, 426)),
+        ),
+        Effect.catchTag('RouteNotFound', () =>
+          Effect.succeed(json({ error: 'not found' }, 404)),
+        ),
+      ),
+    ).catch((err) => json({ error: String(err) }, 500))
   },
 } satisfies ExportedHandler<Env>
