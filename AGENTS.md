@@ -119,7 +119,7 @@ bun run test:e2e:ui  # same, in Playwright's interactive UI
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
 bun run deploy     # build:cf, then `wrangler deploy`
-bun run repos:update-effect  # pull latest Effect v4 source into repos/effect (git subtree)
+bun run repos:update-effect  # pull latest Effect v4 source into repos/effect-smol (git subtree)
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
@@ -133,14 +133,14 @@ This project vendors external repositories under `repos/` to give agents direct 
 - Prefer examples and patterns from vendored source over guesses or web search.
 - Do not add `repos/` paths to `tsconfig.json` includes — they are excluded intentionally.
 
-### `repos/effect` — Effect v4 source
+### `repos/effect-smol` — Effect v4 source
 
 Effect v4 is **post-training-cutoff** for most models. Always consult this subtree when writing Effect code.
 
-1. **Read `repos/effect/AGENTS.md` first** — it's the Effect team's agent instructions for the repo (no `LLMS.md` exists yet in this checkout; update when it appears).
-2. **Explore `repos/effect/packages/effect/src/`** for idiomatic patterns, module structure, and API signatures.
-3. **Check tests** in `repos/effect/packages/effect/test/` to see how APIs are exercised in practice.
-4. Treat `repos/effect` as the source of truth for Effect v4 — supersedes any pre-training knowledge of Effect v3.
+1. **Read `repos/effect-smol/AGENTS.md` and `repos/effect-smol/LLMS.md` first** — the Effect team's agent instructions for the repo.
+2. **Explore `repos/effect-smol/packages/effect/src/`** for idiomatic patterns, module structure, and API signatures.
+3. **Check tests** in `repos/effect-smol/packages/effect/test/` to see how APIs are exercised in practice.
+4. Treat `repos/effect-smol` as the source of truth for Effect v4 — supersedes any pre-training knowledge of Effect v3.
 
 To update: `bun run repos:update-effect`
 
