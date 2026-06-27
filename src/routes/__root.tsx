@@ -14,6 +14,7 @@ import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
+import { FAVICON_DARK, FAVICON_LIGHT } from '../lib/favicon'
 import { LEGACY_THEME_KEY, THEME_KEY } from '../lib/storage-keys'
 import '../styles.css'
 
@@ -36,6 +37,8 @@ const noFlashThemeScript = `
     var dark = t === 'dark' || (t === 'system' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
     if (dark) document.documentElement.classList.add('dark');
+    var favicon = document.getElementById('dotflowy-favicon');
+    if (favicon) favicon.href = dark ? '${FAVICON_DARK}' : '${FAVICON_LIGHT}';
   } catch (e) {}
 })();
 `
@@ -88,6 +91,12 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" className="[scrollbar-gutter:stable]">
       <head>
+        <link
+          rel="icon"
+          type="image/svg+xml"
+          href={FAVICON_LIGHT}
+          id="dotflowy-favicon"
+        />
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
         <HeadContent />
       </head>
