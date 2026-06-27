@@ -46,6 +46,16 @@ The MCP server returns "not initialized." Ask the user: *"I notice this project 
 For any file search or grep in the current git-indexed directory, use fff tools.
 <!-- fff:end -->
 
+## Vendored Effect v4 source
+
+The project vendors the Effect v4 source at `repos/effect-smol/` (via `git subtree`).
+
+- **Read-only reference.** Treat it as the source of truth for Effect v4 APIs, patterns, tests, and module structure. Never `node_modules/effect/` — always `repos/effect-smol/packages/effect/src/`.
+- **Do NOT import from `repos/`.** Application and worker code continue to `import { Effect } from "effect"` from the normal npm dependency. The vendored copy is for agent reference only, not bundling.
+- **Do NOT edit files under `repos/`.**
+- Before writing Effect code, read `repos/effect-smol/AGENTS.md` and `repos/effect-smol/packages/effect/src/.patterns/effect.md` for v4 idioms (e.g. `Effect.fnUntraced`, `Effect.callback` not `Effect.async`, `Data.TaggedError("Tag")<{}>`, no `async/await`, use `Effect.gen`).
+- Update with: `bun run repos:update-effect` (pulls from `Effect-TS/effect-smol.git main`).
+
 ## Agent skills
 
 ### Issue tracker
