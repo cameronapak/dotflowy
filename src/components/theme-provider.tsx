@@ -1,4 +1,5 @@
 import { createContext, use, useEffect, useSyncExternalStore } from "react";
+import { setFavicon } from "../lib/favicon";
 import {
   LEGACY_THEME_KEY,
   readStorageMigrated,
@@ -65,6 +66,7 @@ function applyTheme(theme: Theme) {
         : "light"
       : theme;
   root.classList.toggle("dark", resolved === "dark");
+  setFavicon(resolved);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
