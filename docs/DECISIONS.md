@@ -108,6 +108,19 @@ stays React-Compiler-eligible (a ref written during render bails the compiler on
 - Read `getTreeIndex()`/`getViewRootId()`/`getViewIsHidden()` *during render*, or re-add a mirror ref
   written during render — render must use the reactive React value; the getters are event-time only.
 
+**The editor keeps its manual memos even though React Compiler is on.** react-doctor flags
+`commands`, `pluginCtx`, `viewCtx`, `isHidden`, `filter`, and `navigateZoom` in `OutlineEditor` as
+"redundant manual memoization." They are **not** — measured 2026-06-26 on a 300-node flat outline:
+deleting all of them fans a single keystroke out from ~2 `OutlineNode` re-renders to ~600 (every
+visible bullet). The reason is non-obvious: `commands` and `navigateZoom` get their referential
+stability from `useMemo`/`useCallback` **inside the `useNodeCommands` / `useZoomNavigation` helper
+hooks**, and the compiler **does not memoize across a custom hook's return boundary** — without the
+manual memo the helper returns a fresh object every render, busting `OutlineNode`'s `memo`. (The
+unminified build confirms it: `OutlineEditor` itself compiles, but `useNodeCommands` does not, so its
+return is uncached.) Keep these memos; they are permanent accepted react-doctor findings. The fix is
+**not** "let the compiler do it" — only inlining the helper hooks into the compiled component would
+let the compiler reach them, a larger and riskier refactor with no user-facing benefit.
+
 ---
 
 ## Rich links: the source-offset caret
