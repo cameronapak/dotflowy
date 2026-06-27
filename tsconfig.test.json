@@ -1,0 +1,13 @@
+{
+  // Unit tests run under `bun test` (script: `test`). They live co-located as
+  // src/**/*.test.ts and are EXCLUDED from the app tsconfig so `bun:test`
+  // imports and Bun globals never leak into the browser app's typecheck.
+  // This file typechecks them on their own, mirroring typecheck:worker.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "exclude": []
+}

@@ -19,6 +19,8 @@
     "lint:fix": "oxlint src worker --fix",
     "typecheck": "tsc --noEmit",
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "test": "bun test src",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
@@ -55,6 +57,7 @@
     "@rolldown/plugin-babel": "0.2.3",
     "@tailwindcss/vite": "^4.3.1",
     "@types/babel__core": "^7.20.5",
+    "@types/bun": "^1.3.14",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
