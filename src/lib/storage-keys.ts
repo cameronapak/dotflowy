@@ -1,4 +1,5 @@
 export const THEME_KEY = "dotflowy:theme";
+export const THEME_PRESET_KEY = "dotflowy:theme-preset";
 export const SHOW_COMPLETED_KEY = "dotflowy:show-completed";
 
 export const LEGACY_THEME_KEY = "dotflowy-oss:theme";

@@ -165,10 +165,10 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 ## Plugins (`src/plugins`)
 
-The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
+The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, `route-bible`, and `themes` are themselves plugins (dogfooded), so the core carries no feature-specific branches. (`themes` is the proof a non-editor, chrome-only plugin fits the same surface — it touches no token/interaction seam, only the header slot.) Design rationale: [Plugin architecture](./docs/DECISIONS.md#plugin-architecture); React-widget token mode: [React token widgets](./docs/DECISIONS.md#react-token-widgets).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
-- **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
+- **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily, themes]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
 - **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
@@ -181,7 +181,7 @@ Seams wired today (each row: the contract, who owns it):
 | **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`) |
 | **E** side-collection | plugin-owned data, no `Node` field (see Tag colors, below). | tags |
 | **F** row slot | `{position:"row:before-text", render(node,getCtx)}`, real JSX. | todos (checkbox) |
-| **F** header slot | `{id, render(getCtx)}`, real JSX, no node — persistent actions in the header's right cluster. | daily ("Today") |
+| **F** header slot | `{id, render(getCtx)}`, real JSX, no node — persistent actions in the header's right cluster. | daily ("Today"), themes (picker) |
 | **F** subheader slot | `{id, render(getCtx)}`, real JSX, no node — contextual chrome below the header (collapses + animates when every slot returns null; sticks with the header). | tags (filter bar) |
 | **G** view transform | per-node `hidesNode` predicate (composed into the one `isHidden`) + optional global `buildFilter`. Core no longer hardcodes `completed`. | todos (hide-completed), tags (`?q=`) |
 | **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`) |
@@ -189,7 +189,7 @@ Seams wired today (each row: the contract, who owns it):
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
 | — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op). | tags (picker), daily (container) |
 
-Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
+Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected · **themes** F(header).
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineNode`; the `/` palette still runs `useSlashMenu` (only its command *list* is registry-driven).
 
@@ -223,6 +223,14 @@ A Bible ref in `node.text` renders as a chip opening [route.bible](https://route
 - **Liberal regex PROPOSES, `grab-bcv` DISPOSES.** `BIBLE_REF_PATTERN` (`bible.ts`) requires a chapter, verse optional, and over-matches on purpose; `resolveBibleRef(tok)` runs the candidate through grab-bcv's `tryParsePassage` and returns null for non-references (the core then renders raw text). Dependency is **`grab-bcv`** (parse + `toResolverUrl`), not `@route-bible/core`.
 - **A real-TSX atomic widget** ([React token widgets](./docs/DECISIONS.md#react-token-widgets)): `render` returns a `WidgetEl` + `component: BibleChip`; the core serializes it to a `<dotflowy-widget>` atom and mounts `BibleChip` (`chip.tsx`) — lucide icons + Tailwind, **no plugin CSS**. `readSource` reads `data-src`; the caret jumps over it.
 - v1 is liberal by explicit call (accepts `Matthew 5 minutes` → `Matthew 5`); tightening is a one-line regex change. Covered by `e2e/route-bible.spec.ts`.
+
+## Color themes (`src/plugins/themes/`)
+
+A header **picker** (Seam F-header) swaps the whole UI between a curated set of [tweakcn](https://tweakcn.com) color themes plus the built-in neutral `default`. Works because the app uses shadcn semantic tokens everywhere (zero raw colors in `src/components`/`src/plugins`), so a theme is just CSS-variable values. **No `Node` field, no migration, no `Cmd+K` action.**
+
+- **A theme = a `data-theme` value; switching = one attribute swap, zero React re-render.** The core treats the preset id as **opaque**: `theme-provider.tsx` persists it (`THEME_PRESET_KEY`), exposes `useThemePreset()` + `previewThemePreset()`, and the `__root.tsx` no-flash script mirrors it to `html[data-theme]` **before first paint** (alongside the existing `.dark` toggle). The plugin owns the *catalog* (`presets.ts`) and the *picker* (`theme-picker.tsx`); the core never enumerates which themes exist.
+- **`themes.css` is `import`ed from `index.tsx`, NOT shipped via the `styles`/`PluginStyles` seam.** That seam mounts via React (after first paint), so a persisted preset would flash the default palette on load. The JS import folds the CSS into the bundled first-paint stylesheet. Selectors are `html[data-theme="x"]` (and `…x.dark`) — higher specificity than styles.css `:root`/`.dark`, so they win regardless of bundle order. **Don't move this CSS to the pluginStyles seam.**
+- **`themes.css` is generated** from the tweakcn registry (`src/plugins/themes/README.md` has the regen script). Font / `--spacing` / letter-spacing vars are dropped on purpose: the app stays on Geist at its native density — only colors, `--radius`, and `--shadow-*` are themed. Covered by `e2e/theme-picker.spec.ts` (apply+persist, and the no-flash first-paint attribute).
 
 ## Environment gotcha: adding a React-importing dependency
 

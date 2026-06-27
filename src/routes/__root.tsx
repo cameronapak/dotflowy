@@ -15,11 +15,14 @@ import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
 import { FAVICON_DARK, FAVICON_LIGHT } from '../lib/favicon'
-import { LEGACY_THEME_KEY, THEME_KEY } from '../lib/storage-keys'
+import { LEGACY_THEME_KEY, THEME_KEY, THEME_PRESET_KEY } from '../lib/storage-keys'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
-// the resolution logic in theme-provider.tsx (same storage key).
+// the resolution logic in theme-provider.tsx (same storage keys): the mode
+// (light/dark) toggles `.dark`; the color preset sets `data-theme`, which the
+// bundled themes-plugin CSS keys on. The preset id is treated as opaque here --
+// the core never enumerates which presets exist (the plugin owns the catalog).
 const noFlashThemeScript = `
 (function () {
   try {
@@ -39,6 +42,10 @@ const noFlashThemeScript = `
     if (dark) document.documentElement.classList.add('dark');
     var favicon = document.getElementById('dotflowy-favicon');
     if (favicon) favicon.href = dark ? '${FAVICON_DARK}' : '${FAVICON_LIGHT}';
+    var preset = localStorage.getItem('${THEME_PRESET_KEY}');
+    if (preset && /^[a-z0-9-]+$/.test(preset) && preset !== 'default') {
+      document.documentElement.setAttribute('data-theme', preset);
+    }
   } catch (e) {}
 })();
 `

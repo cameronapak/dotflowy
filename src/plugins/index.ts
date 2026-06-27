@@ -10,7 +10,16 @@ import daily from "./daily";
 import links from "./links";
 import routeBible from "./route-bible";
 import tags from "./tags";
+import themes from "./themes";
 import todos from "./todos";
 import type { PluginDef } from "./types";
 
-export const plugins: PluginDef[] = [code, links, routeBible, tags, todos, daily];
+export const plugins: PluginDef[] = [
+  code,
+  links,
+  routeBible,
+  tags,
+  todos,
+  daily,
+  themes,
+];
