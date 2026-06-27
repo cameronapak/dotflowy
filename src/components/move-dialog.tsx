@@ -131,6 +131,12 @@ function MoveDialogInner({
   // Candidate destinations: every node except the one being moved and its own
   // subtree (you can't move a branch into itself -- `moveNode` guards this too,
   // but listing those rows would be a dead press). Built only while open.
+  //
+  // Manually memoized despite React Compiler: the compiler folds this into one
+  // reactive scope keyed on `query` too, so without the memo the subtree walk,
+  // candidate filter, and Fuse INDEX all rebuild on every keystroke (verified
+  // in the compiled output). Keyed on [index, nodeId] so typing only re-runs
+  // `results` (the cheap search) below.
   const candidates = useMemo(() => {
     if (!nodeId) return [];
     const excluded = subtreeIds(index, nodeId);
@@ -147,13 +153,14 @@ function MoveDialogInner({
   const q = query.trim();
 
   // null => empty-query mode (show bookmarks, mirroring the quick-switcher).
-  // Otherwise the Fuse hits over every candidate.
-  const results = useMemo<Hit[] | null>(() => {
-    if (!q || !fuse) return null;
-    return fuse
-      .search(q, { limit: RESULT_LIMIT })
-      .map((r) => ({ node: r.item, matches: r.matches }));
-  }, [q, fuse]);
+  // Otherwise the Fuse hits over every candidate. Left un-memoized: it depends
+  // on `q`, so re-running per keystroke is correct.
+  const results: Hit[] | null =
+    !q || !fuse
+      ? null
+      : fuse
+          .search(q, { limit: RESULT_LIMIT })
+          .map((r) => ({ node: r.item, matches: r.matches }));
 
   // Bookmarked destinations for the empty-query state, newest first. Drawn from
   // `candidates` (not all nodes), so the moved node and its own subtree are

@@ -71,6 +71,22 @@ const BOOKMARKS_HEADING = (
   </div>
 );
 
+// One pass over the nodes (skip empties, project to the searchable shape), then
+// index. Module scope: pure, and a single iteration over potentially many nodes.
+function buildFuse(nodes: Node[]): Fuse<Searchable> {
+  const searchable: Searchable[] = [];
+  for (const n of nodes) {
+    if (n.text.trim() !== "") {
+      searchable.push({
+        node: n,
+        text: stripLinks(n.text),
+        aliases: searchAliases(n),
+      });
+    }
+  }
+  return new Fuse(searchable, FUSE_OPTIONS);
+}
+
 /**
  * Outer shell: owns open/query state and the global hotkey, but reads NO data.
  * The data-driven dialog ({@link SwitcherDialog}, which calls `useTree`) is
@@ -149,24 +165,21 @@ function SwitcherDialog({
 
   // Build the Fuse index only while open. When closed we skip the work; when
   // open the outline isn't being edited, so `nodes` is stable.
-  const fuse = useMemo(() => {
-    if (!open) return null;
-    const searchable: Searchable[] = [];
-    for (const n of nodes) {
-      if (n.text.trim() !== "") {
-        searchable.push({ node: n, text: stripLinks(n.text), aliases: searchAliases(n) });
-      }
-    }
-    return new Fuse(searchable, FUSE_OPTIONS);
-  }, [open, nodes]);
+  //
+  // Manually memoized despite React Compiler: the compiler folds this into one
+  // reactive scope keyed on `query` too, so without the memo the entire Fuse
+  // INDEX rebuilds on every keystroke (verified in the compiled output). Keyed
+  // on [open, nodes] so typing only re-runs `results` (the cheap search) below.
+  const fuse = useMemo(
+    () => (open ? buildFuse(nodes) : null),
+    [open, nodes],
+  );
 
   const q = query.trim();
 
-  // null => empty-query mode (show bookmarks). Otherwise the Fuse hits.
-  const results = useMemo(() => {
-    if (!q || !fuse) return null;
-    return fuse.search(q, { limit: RESULT_LIMIT });
-  }, [q, fuse]);
+  // null => empty-query mode (show bookmarks). Otherwise the Fuse hits. Left
+  // un-memoized: it depends on `q`, so re-running per keystroke is correct.
+  const results = !q || !fuse ? null : fuse.search(q, { limit: RESULT_LIMIT });
 
   const bookmarks = useMemo(
     () =>
@@ -185,16 +198,15 @@ function SwitcherDialog({
   // Plugin-contributed VIRTUAL rows (Seam J), built from the live query -- the
   // daily plugin's "Go to Today" when today's note doesn't exist yet. Each runs
   // its own action (create + navigate) on pick. Empty for an empty query.
-  const actions = useMemo<SearchAction[]>(() => {
-    if (!q) return [];
-    return searchActions(q, {
-      index,
-      goTo: (id) => {
-        onPicked();
-        navigate({ to: "/$nodeId", params: { nodeId: id } });
-      },
-    });
-  }, [q, index, navigate, onPicked]);
+  const actions: SearchAction[] = q
+    ? searchActions(q, {
+        index,
+        goTo: (id) => {
+          onPicked();
+          navigate({ to: "/$nodeId", params: { nodeId: id } });
+        },
+      })
+    : [];
 
   return (
     <CommandDialog

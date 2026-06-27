@@ -60,9 +60,16 @@ export function normalizeTag(tag: string): string {
 
 /** Every distinct tag used anywhere in the outline, sorted -- the autocomplete
  *  corpus. Case-folded dedupe keeps the first-seen casing. */
-export function collectAllTags(index: TreeIndex): string[] {
+/**
+ * Every distinct tag in the outline, sorted. `excludeId` drops one node's
+ * contribution -- the `#` autocomplete passes the node being edited so it offers
+ * tags from OTHER nodes and never the brand-new tag you're mid-typing (which is
+ * already in the live tree). Without this the menu would match a tag to itself.
+ */
+export function collectAllTags(index: TreeIndex, excludeId?: string): string[] {
   const seen = new Map<string, string>()
   for (const node of index.byId.values()) {
+    if (node.id === excludeId) continue
     for (const tag of parseTags(node.text)) {
       const key = tag.toLowerCase()
       if (!seen.has(key)) seen.set(key, tag)

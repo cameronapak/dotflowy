@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { CornerUpRightIcon } from "lucide-react";
 import type { Node } from "../data/schema";
@@ -82,15 +77,12 @@ export function useSlashMenu({
 }) {
   const [state, setState] = useState<SlashState | null>(null);
 
-  const items = useMemo(
-    () => (state ? filterCommands(node, state.query) : []),
-    [state, node],
-  );
+  const items = state ? filterCommands(node, state.query) : [];
 
-  const close = useCallback(() => setState(null), []);
+  const close = () => setState(null);
 
   // Re-evaluate the trigger after every input. Opens, updates, or closes.
-  const handleInput = useCallback(() => {
+  const handleInput = () => {
     const el = getEl();
     if (!el) return;
     const hit = detectSlash(el);
@@ -107,70 +99,60 @@ export function useSlashMenu({
       x: pos.x,
       y: pos.y,
     }));
-  }, [getEl]);
+  };
 
-  const select = useCallback(
-    (index: number) => {
-      const el = getEl();
-      if (!el || !state) return;
-      const list = filterCommands(node, state.query);
-      const item = list[index];
-      if (!item) {
-        setState(null);
-        return;
-      }
-      // Strip the "/query" the user typed, then run the command. Work in
-      // SOURCE space (readSource, not textContent) so a folded link elsewhere
-      // on the line keeps its url instead of flattening to its label.
-      const text = readSource(el);
-      const end = state.slashIndex + 1 + state.query.length;
-      const newText = text.slice(0, state.slashIndex) + text.slice(end);
-      onTextChange(newText);
-      decorate(el, newText, state.slashIndex, false);
-      setCaretOffset(el, state.slashIndex);
+  const select = (index: number) => {
+    const el = getEl();
+    if (!el || !state) return;
+    const list = filterCommands(node, state.query);
+    const item = list[index];
+    if (!item) {
       setState(null);
-      item.run(node.id, ctx());
-    },
-    [getEl, state, node, ctx, onTextChange],
-  );
+      return;
+    }
+    // Strip the "/query" the user typed, then run the command. Work in
+    // SOURCE space (readSource, not textContent) so a folded link elsewhere
+    // on the line keeps its url instead of flattening to its label.
+    const text = readSource(el);
+    const end = state.slashIndex + 1 + state.query.length;
+    const newText = text.slice(0, state.slashIndex) + text.slice(end);
+    onTextChange(newText);
+    decorate(el, newText, state.slashIndex, false);
+    setCaretOffset(el, state.slashIndex);
+    setState(null);
+    item.run(node.id, ctx());
+  };
 
   // Intercept navigation keys while open. Returns true if it consumed the
   // event, so the caller skips its own Enter/Tab/Arrow handling.
-  const handleKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLElement>): boolean => {
-      if (!state) return false;
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setState((s) =>
-            s
-              ? { ...s, activeIndex: wrap(s.activeIndex + 1, items.length) }
-              : s,
-          );
-          return true;
-        case "ArrowUp":
-          e.preventDefault();
-          setState((s) =>
-            s
-              ? { ...s, activeIndex: wrap(s.activeIndex - 1, items.length) }
-              : s,
-          );
-          return true;
-        case "Enter":
-        case "Tab":
-          e.preventDefault();
-          select(state.activeIndex);
-          return true;
-        case "Escape":
-          e.preventDefault();
-          setState(null);
-          return true;
-        default:
-          return false;
-      }
-    },
-    [state, items.length, select],
-  );
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLElement>): boolean => {
+    if (!state) return false;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setState((s) =>
+          s ? { ...s, activeIndex: wrap(s.activeIndex + 1, items.length) } : s,
+        );
+        return true;
+      case "ArrowUp":
+        e.preventDefault();
+        setState((s) =>
+          s ? { ...s, activeIndex: wrap(s.activeIndex - 1, items.length) } : s,
+        );
+        return true;
+      case "Enter":
+      case "Tab":
+        e.preventDefault();
+        select(state.activeIndex);
+        return true;
+      case "Escape":
+        e.preventDefault();
+        setState(null);
+        return true;
+      default:
+        return false;
+    }
+  };
 
   const menu = state
     ? createPortal(

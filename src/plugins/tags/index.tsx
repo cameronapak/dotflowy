@@ -149,9 +149,12 @@ export default definePlugin({
       id: "tag",
       trigger: "#",
       match: tagMenuMatch,
-      entries: (trigger, _node, ctx) => {
+      entries: (trigger, node, ctx) => {
         const q = trigger.query.toLowerCase();
-        const all = collectAllTags(ctx.tree);
+        // Exclude the node being edited: its text already holds the in-progress
+        // tag (live tree), so the corpus must be OTHER nodes' tags or the menu
+        // would offer the brand-new tag you're typing as a match for itself.
+        const all = collectAllTags(ctx.tree, node.id);
         const matches = q
           ? all.filter((t) => t.slice(1).toLowerCase().includes(q))
           : all;

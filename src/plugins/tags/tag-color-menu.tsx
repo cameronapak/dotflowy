@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import {
  */
 export function TagColorStyles() {
   const rows = useTagColorRows();
-  const overrides = useMemo(() => tagColorsCss(rows), [rows]);
+  const overrides = tagColorsCss(rows);
   return (
     <>
       <style data-tag-palette>{tagColorPaletteCss}</style>

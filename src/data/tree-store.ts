@@ -54,8 +54,13 @@ function subscribe(cb: () => void): () => void {
   }
 }
 
-/** The current shared index. Touching it starts the subscription on first use. */
-function getTreeIndex(): TreeIndex {
+/**
+ * The current shared index, read live OUTSIDE render (event handlers, command
+ * closures, drag, undo/redo). Render reads must use {@link useTreeIndex} /
+ * {@link useNode} instead, so they stay reactive. Touching it starts the
+ * subscription on first use.
+ */
+export function getTreeIndex(): TreeIndex {
   ensureStarted()
   return index
 }
