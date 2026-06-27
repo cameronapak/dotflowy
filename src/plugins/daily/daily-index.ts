@@ -6,11 +6,17 @@ import { queryClient } from '../../data/query-client'
 import {
   kvDelete,
   kvFetch,
-  kvGetOrCreate,
   kvPut,
   toKvKeys,
   toKvRows,
 } from '../../data/kv-api'
+import { Effect } from 'effect'
+import {
+  kvGetOrCreateE,
+  type KvTimeoutError,
+  type KvTransportError,
+  type KvResponseError,
+} from '../../data/kv-client-effect'
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0019). A row maps a
@@ -166,17 +172,29 @@ export function setMapping(key: string, nodeId: string): void {
  * locally and both claim; the single-threaded DO lets exactly one win, killing
  * the duplicate-daily-note race at the source.
  *
- * This is the errore boundary over the throwing kv client: on a network/server
+ * This is the errore boundary over the Effect kv client: on a network/server
  * failure it logs and degrades to the optimistic local path (treats `candidate`
  * as the winner), so the feature keeps working — the rare failure window just
  * reopens the pre-fix race, no worse than before the claim existed.
+ *
+ * Why Effect here (and throwing everywhere else in the kv path): the TanStack
+ * DB mutation handlers signal failure by THROWING (a throw triggers optimistic
+ * rollback), so the rest of kv-api.ts stays throw-based on purpose. claimMapping
+ * has no TanStack caller — it's an awaitable from a click handler — so it can
+ * speak Effect's typed-error channel directly and route with catchTag, proving
+ * the ergonomics on real I/O. See kv-client-effect.ts.
  */
 export async function claimMapping(
   key: string,
   candidate: string,
 ): Promise<{ winner: string; won: boolean }> {
-  const row = await kvGetOrCreate<DailyRow>(KV, key, { key, nodeId: candidate })
-    .catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))))
+  const row = await Effect.runPromise(
+    kvGetOrCreateE<DailyRow>(KV, key, { key, nodeId: candidate }),
+  ).then(
+    (r) => r,
+    (e: KvTransportError | KvResponseError | KvTimeoutError | unknown) =>
+      e instanceof Error ? e : new Error(String(e)),
+  )
   if (row instanceof Error) {
     console.warn(`daily: claim "${key}" failed, creating locally:`, row.message)
     return { winner: candidate, won: true }
