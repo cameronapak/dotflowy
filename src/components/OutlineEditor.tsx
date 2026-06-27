@@ -27,6 +27,7 @@ import {
   PlusIcon,
 } from "lucide-react";
 import { useTree } from "../data/useTree";
+import { getTreeIndex } from "../data/tree-store";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import {
   indent,
@@ -114,11 +115,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
 
-  // Live handle to the current tree for the stable command/drag closures (the
-  // ref pattern every live value uses, so `commands` keeps its identity across
-  // renders -- a prop on every memoized OutlineNode. See ADR 0014).
-  const focusIndex = useRef<TreeIndex>(index);
-  focusIndex.current = index;
+  // Event-time reads of the live tree go through tree-store's getTreeIndex()
+  // (same value as `index`, read at call time), so the stable command/drag
+  // closures don't depend on this render's `index` and `commands` keeps its
+  // identity across renders -- a prop on every memoized OutlineNode (ADR 0014).
+  // Render reads below use `index` from useTree() so they stay reactive.
 
   // First-run import-or-seed bootstrap; safe to run on mount. See seed.ts.
   useBootstrapOutline();
@@ -150,7 +151,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The refs are returned so the command closures + drag can write them. See
   // useOutlineFocus.
   const { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash } =
-    useOutlineFocus(focusIndex);
+    useOutlineFocus();
 
   // The top-level <ul>, so the drag indicator knows how wide to draw.
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -163,7 +164,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     rootId,
     isHidden,
     refs,
-    focusIndex,
     navigate,
   });
 
@@ -205,7 +205,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // live values through getters (the same ref pattern the commands use), and
   // commits through the one fused `moveNode` mutation. See ADR 0010.
   const drag = useDragReorder({
-    getIndex: () => focusIndex.current,
+    getIndex: getTreeIndex,
     getRootId: () => rootIdRef.current,
     getIsHidden: () => isHiddenRef.current,
     getRowEl: (id) =>
@@ -214,13 +214,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     getListEl: () => listRef.current,
     onMove: (id, newParentId, afterSiblingId) =>
       runStructural(() => {
-        capture(focusIndex.current, id);
-        const moved = moveNode(
-          focusIndex.current,
-          id,
-          newParentId,
-          afterSiblingId,
-        );
+        const index = getTreeIndex();
+        capture(index, id);
+        const moved = moveNode(index, id, newParentId, afterSiblingId);
         if (moved) {
           pendingFocus.current = id;
           // Tint the row it landed on so the eye can find what just moved.
@@ -238,7 +234,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // live value it needs is read through a ref or is itself stable. See
   // useNodeCommands.
   const commands = useNodeCommands({
-    focusIndex,
     rootIdRef,
     isHiddenRef,
     refs,
@@ -252,10 +247,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // PluginContext factory (ADR 0018 D8): the promoted command set + tree reads +
   // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
-  // live values (focusIndex/activeTagsRef) at call time; stable identity.
+  // the live tree via getTreeIndex() at call time; stable identity.
   const pluginCtx = useCallback(
     (): PluginContext => ({
-      tree: focusIndex.current,
+      tree: getTreeIndex(),
       mutations: commands,
       nav: {
         zoom: (id) => navigateZoom(id, id),
@@ -332,7 +327,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             onAddChild={() =>
               runStructural(() => {
                 const newId = insertChildAtStart(
-                  focusIndex.current,
+                  getTreeIndex(),
                   zoomedNode.id,
                 );
                 pendingFocus.current = newId;
@@ -370,12 +365,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                 variant="outline"
                 onClick={() =>
                   runStructural(() => {
-                    const siblings = childrenOf(focusIndex.current, rootId);
+                    const siblings = childrenOf(getTreeIndex(), rootId);
                     const afterId = siblings.length
                       ? siblings[siblings.length - 1]!.id
                       : null;
                     const newId = insertSibling(
-                      focusIndex.current,
+                      getTreeIndex(),
                       rootId,
                       afterId,
                     );
@@ -439,7 +434,7 @@ interface OutlineFocus {
  * left it on). Split out of OutlineEditor so the body stays readable; the refs
  * are returned so the command closures and drag can write them. See ADR 0014.
  */
-function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
+function useOutlineFocus(): OutlineFocus {
   // The refs registry. Lazy-init the Map once: useRef has no lazy-initializer
   // form, so passing `new Map()` directly would rebuild and discard it on every
   // render. (react-doctor/rerender-lazy-ref-init.)
@@ -496,7 +491,7 @@ function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
     "Mod+Z",
     () =>
       runStructural(() => {
-        const focusId = undo(focusIndex.current, findFocusedId());
+        const focusId = undo(getTreeIndex(), findFocusedId());
         if (focusId) pendingFocus.current = focusId;
       }),
     { preventDefault: true },
@@ -505,7 +500,7 @@ function useOutlineFocus(focusIndex: RefObject<TreeIndex>): OutlineFocus {
     "Mod+Shift+Z",
     () =>
       runStructural(() => {
-        const focusId = redo(focusIndex.current, findFocusedId());
+        const focusId = redo(getTreeIndex(), findFocusedId());
         if (focusId) pendingFocus.current = focusId;
       }),
     { preventDefault: true },
@@ -519,7 +514,6 @@ interface ZoomNavigationArgs {
   rootId: string | null;
   isHidden: (node: Node) => boolean;
   refs: RefObject<Map<string, HTMLSpanElement | null>>;
-  focusIndex: RefObject<TreeIndex>;
   navigate: ReturnType<typeof useNavigate>;
 }
 
@@ -534,7 +528,6 @@ function useZoomNavigation({
   rootId,
   isHidden,
   refs,
-  focusIndex,
   navigate,
 }: ZoomNavigationArgs): {
   navigateZoom: (toRootId: string | null, pivot: string) => void;
@@ -564,7 +557,7 @@ function useZoomNavigation({
       // Zooming out reveals the trail: expand any collapsed ancestor between the
       // node we're leaving and the destination root, so the pivot is actually
       // visible when we land (otherwise a collapsed parent hides where you were).
-      revealAncestorsToRoot(focusIndex.current, pivot, toRootId);
+      revealAncestorsToRoot(getTreeIndex(), pivot, toRootId);
       if (prefersReducedMotion()) {
         // No morph, but still carry the pivot so the new view restores focus.
         const state = { pivotId: pivot };
@@ -591,7 +584,7 @@ function useZoomNavigation({
       if (toRootId === null) navigate({ to: "/", ...opts });
       else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
     },
-    [focusIndex, refs],
+    [refs],
   );
 
   // Cmd/Ctrl+,: zoom out one level -- navigate to the current root's parent,
@@ -602,7 +595,7 @@ function useZoomNavigation({
     () => {
       const currentRoot = rootIdRef.current;
       if (currentRoot === null) return;
-      const node = focusIndex.current.byId.get(currentRoot);
+      const node = getTreeIndex().byId.get(currentRoot);
       navigateZoom(node?.parentId ?? null, currentRoot);
     },
     { preventDefault: true },
@@ -654,7 +647,6 @@ function useZoomNavigation({
 }
 
 interface NodeCommandsArgs {
-  focusIndex: RefObject<TreeIndex>;
   rootIdRef: RefObject<string | null>;
   isHiddenRef: RefObject<(node: Node) => boolean>;
   refs: RefObject<Map<string, HTMLSpanElement | null>>;
@@ -672,7 +664,6 @@ interface NodeCommandsArgs {
  * through a ref or is itself stable. See ADR 0014.
  */
 function useNodeCommands({
-  focusIndex,
   rootIdRef,
   isHiddenRef,
   refs,
@@ -688,15 +679,15 @@ function useNodeCommands({
       onTextChange: (id, text) => {
         // Coalesce a run of keystrokes on one bullet into a single undo step,
         // capturing the pre-typing state on the first keystroke of the run.
-        capture(focusIndex.current, id, `text:${id}`);
+        capture(getTreeIndex(), id, `text:${id}`);
         setText(id, text);
       },
 
       onEnter: (id, caretOffset) =>
         runStructural(() => {
-          const node = focusIndex.current.byId.get(id);
+          const node = getTreeIndex().byId.get(id);
           if (!node) return;
-          capture(focusIndex.current, id);
+          capture(getTreeIndex(), id);
           const offset = Math.max(0, Math.min(caretOffset, node.text.length));
           const before = node.text.slice(0, offset);
           const after = node.text.slice(offset);
@@ -706,10 +697,10 @@ function useNodeCommands({
           // diving into the thing you just finished naming. Anywhere else keeps
           // the plain new-sibling.
           const isOpen =
-            !node.collapsed && childrenOf(focusIndex.current, id).length > 0;
+            !node.collapsed && childrenOf(getTreeIndex(), id).length > 0;
           if (caretAtEnd && isOpen) {
             pendingFocus.current = insertChildAtStart(
-              focusIndex.current,
+              getTreeIndex(),
               id,
               node.isTask,
             );
@@ -718,7 +709,7 @@ function useNodeCommands({
           // Split at the caret: text left of it stays on this node, text to its
           // right seeds the new sibling. (Caret at the end is just `after === ""`.)
           const newId = insertSibling(
-            focusIndex.current,
+            getTreeIndex(),
             node.parentId,
             id,
             node.isTask,
@@ -736,8 +727,8 @@ function useNodeCommands({
         runStructural(() => {
           // Moving the node reparents it into a different <ul>, which remounts
           // its contentEditable and drops focus. Re-focus it after the render.
-          capture(focusIndex.current, id);
-          if (indent(focusIndex.current, id)) {
+          capture(getTreeIndex(), id);
+          if (indent(getTreeIndex(), id)) {
             pendingFocus.current = id;
             pendingFlash.current = id;
           } else drop(); // no move happened; discard the redundant undo point
@@ -747,11 +738,11 @@ function useNodeCommands({
         runStructural(() => {
           // Don't let a direct child of the zoom root outdent past it; that
           // would move it out of the visible subtree and look like it vanished.
-          const node = focusIndex.current.byId.get(id);
+          const node = getTreeIndex().byId.get(id);
           if (node && node.parentId === rootIdRef.current) return;
           // Same remount-drops-focus issue as indent; re-focus on a real move.
-          capture(focusIndex.current, id);
-          if (outdent(focusIndex.current, id)) {
+          capture(getTreeIndex(), id);
+          if (outdent(getTreeIndex(), id)) {
             pendingFocus.current = id;
             pendingFlash.current = id;
           } else drop();
@@ -760,8 +751,8 @@ function useNodeCommands({
       onMoveUp: (id) =>
         runStructural(() => {
           // Reorder/outdent remounts the contentEditable; re-focus on a real move.
-          capture(focusIndex.current, id);
-          const moved = moveUp(focusIndex.current, id, {
+          capture(getTreeIndex(), id);
+          const moved = moveUp(getTreeIndex(), id, {
             isVisible: (n) => !isHiddenRef.current(n),
             rootId: rootIdRef.current,
           });
@@ -773,8 +764,8 @@ function useNodeCommands({
 
       onMoveDown: (id) =>
         runStructural(() => {
-          capture(focusIndex.current, id);
-          const moved = moveDown(focusIndex.current, id, {
+          capture(getTreeIndex(), id);
+          const moved = moveDown(getTreeIndex(), id, {
             isVisible: (n) => !isHiddenRef.current(n),
             rootId: rootIdRef.current,
           });
@@ -789,19 +780,19 @@ function useNodeCommands({
           // A plugin can protect a node from deletion (the daily container). The
           // core no-ops here -- the single funnel every delete path flows through.
           if (isProtected(id)) return;
-          capture(focusIndex.current, id);
-          const focusId = removeNode(focusIndex.current, id);
+          capture(getTreeIndex(), id);
+          const focusId = removeNode(getTreeIndex(), id);
           if (focusId) pendingFocus.current = focusId;
           else drop(); // node didn't exist; nothing was deleted
         }),
 
       onToggleCompleted: (id, completed) => {
-        capture(focusIndex.current, id);
+        capture(getTreeIndex(), id);
         toggleCompleted(id, completed);
       },
 
       onSetTask: (id, isTask) => {
-        capture(focusIndex.current, id);
+        capture(getTreeIndex(), id);
         setIsTask(id, isTask);
       },
 
@@ -809,13 +800,13 @@ function useNodeCommands({
       onRequestMove: (id) => openMoveDialog(id),
 
       onToggleCollapsed: (id, collapsed) => {
-        capture(focusIndex.current, id);
+        capture(getTreeIndex(), id);
         toggleCollapsed(id, collapsed);
       },
 
       onMoveFocus: (id, direction, x) => {
         const target = findVisibleNeighbor(
-          focusIndex.current,
+          getTreeIndex(),
           rootIdRef.current,
           id,
           direction,
@@ -844,10 +835,10 @@ function useNodeCommands({
       },
     }),
     // commands MUST keep stable identity (a prop on every memoized OutlineNode,
-    // ADR 0014). Every live value it touches is read through a ref at call time
-    // (focusIndex/refs/pendingFocus/...), so the only real deps are the three
-    // stable callbacks; the flagged ref.current captures can't be listed and
-    // would defeat the pattern.
+    // ADR 0014). The live tree is read via getTreeIndex() at call time and the
+    // other live values through refs (rootIdRef/refs/pendingFocus/...), so the
+    // only real deps are the three stable callbacks; the flagged ref.current
+    // captures can't be listed and would defeat the pattern.
     // eslint-disable-next-line react-doctor/exhaustive-deps
     [navigateZoom, startDrag, consumeClick],
   );
