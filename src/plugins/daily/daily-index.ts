@@ -188,17 +188,24 @@ export async function claimMapping(
   key: string,
   candidate: string,
 ): Promise<{ winner: string; won: boolean }> {
+  /**
+   * Route every typed kv error to a single degraded outcome *inside* the Effect
+   * pipeline, then runPromise never rejects — caller sees only plain success.
+   * This is the whole point of the Effect boundary: error shape is known at the
+   * type level, and the recovery is expressed as a program transform, not a
+   * catch-block after the fact.
+   */
   const row = await Effect.runPromise(
-    kvGetOrCreateE<DailyRow>(KV, key, { key, nodeId: candidate }),
-  ).then(
-    (r) => r,
-    (e: KvTransportError | KvResponseError | KvTimeoutError | unknown) =>
-      e instanceof Error ? e : new Error(String(e)),
+    kvGetOrCreateE<DailyRow>(KV, key, { key, nodeId: candidate }).pipe(
+      Effect.match({
+        onFailure: (e) => {
+          console.warn(`daily: claim "${key}" failed, creating locally:`, e.message)
+          return { key, nodeId: candidate } satisfies DailyRow
+        },
+        onSuccess: (r) => r,
+      }),
+    ),
   )
-  if (row instanceof Error) {
-    console.warn(`daily: claim "${key}" failed, creating locally:`, row.message)
-    return { winner: candidate, won: true }
-  }
   return { winner: row.nodeId, won: row.nodeId === candidate }
 }
 
