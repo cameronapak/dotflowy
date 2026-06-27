@@ -28,6 +28,11 @@ import {
 } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { getTreeIndex } from "../data/tree-store";
+import {
+  getViewIsHidden,
+  getViewRootId,
+  useSyncViewState,
+} from "../data/view-state";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
 import {
   indent,
@@ -138,13 +143,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [showCompleted, routeSearch, rootId],
   );
   const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
-  // Live handle for the stable command closures + drag (mirrors the ref pattern
-  // the other live values use, so `commands` keeps its identity -- ADR 0014).
-  const isHiddenRef = useRef(isHidden);
-  isHiddenRef.current = isHidden;
-
-  const rootIdRef = useRef<string | null>(rootId);
-  rootIdRef.current = rootId;
+  // Mirror the live view state (zoom root + visibility prune) into view-state's
+  // module singleton, so the stable command/drag/zoom closures read it at EVENT
+  // time without depending on this render -- the same seam getTreeIndex() gives
+  // the tree (ADR 0014). The write runs in an effect, so nothing writes a ref
+  // during render. Render reads below use `rootId`/`isHidden` directly.
+  useSyncViewState(rootId, isHidden);
 
   // Focus plumbing: the id->contentEditable registry, the post-render focus/
   // flash pass, and undo/redo (which restore focus where the action left it).
@@ -206,8 +210,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // commits through the one fused `moveNode` mutation. See ADR 0010.
   const drag = useDragReorder({
     getIndex: getTreeIndex,
-    getRootId: () => rootIdRef.current,
-    getIsHidden: () => isHiddenRef.current,
+    getRootId: getViewRootId,
+    getIsHidden: getViewIsHidden,
     getRowEl: (id) =>
       (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
       null,
@@ -234,8 +238,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // live value it needs is read through a ref or is itself stable. See
   // useNodeCommands.
   const commands = useNodeCommands({
-    rootIdRef,
-    isHiddenRef,
     refs,
     pendingFocus,
     pendingFocusAtStart,
@@ -538,12 +540,15 @@ function useZoomNavigation({
   // node's element so the browser morphs it across the navigation.
   const location = useLocation();
   const pivotId = location.state.pivotId ?? null;
+  // pivotId is read only at event time (navigateZoom's morph-retarget), so
+  // mirror it into a ref written AFTER commit -- not during render -- so nothing
+  // here trips the React Compiler's ref-during-render bailout. One reader, so a
+  // ref is the right size; rootId/isHidden get view-state's store because drag +
+  // commands + zoom all read them.
   const pivotIdRef = useRef<string | null>(pivotId);
-  pivotIdRef.current = pivotId;
-  const rootIdRef = useRef<string | null>(rootId);
-  rootIdRef.current = rootId;
-  const navigateRef = useRef(navigate);
-  navigateRef.current = navigate;
+  useEffect(() => {
+    pivotIdRef.current = pivotId;
+  }, [pivotId]);
 
   /**
    * Navigate to a new zoom root with a shared-element morph. `pivot` is the
@@ -553,7 +558,6 @@ function useZoomNavigation({
    */
   const navigateZoom = useCallback(
     (toRootId: string | null, pivot: string) => {
-      const navigate = navigateRef.current;
       // Zooming out reveals the trail: expand any collapsed ancestor between the
       // node we're leaving and the destination root, so the pivot is actually
       // visible when we land (otherwise a collapsed parent hides where you were).
@@ -584,7 +588,10 @@ function useZoomNavigation({
       if (toRootId === null) navigate({ to: "/", ...opts });
       else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
     },
-    [refs],
+    // navigate is stable (useNavigate with no args returns a referentially
+    // stable callback), so navigateZoom -- and therefore commands -- keeps its
+    // identity across renders. refs is a stable ref object.
+    [refs, navigate],
   );
 
   // Cmd/Ctrl+,: zoom out one level -- navigate to the current root's parent,
@@ -593,7 +600,7 @@ function useZoomNavigation({
   useHotkey(
     "Mod+,",
     () => {
-      const currentRoot = rootIdRef.current;
+      const currentRoot = getViewRootId();
       if (currentRoot === null) return;
       const node = getTreeIndex().byId.get(currentRoot);
       navigateZoom(node?.parentId ?? null, currentRoot);
@@ -647,8 +654,6 @@ function useZoomNavigation({
 }
 
 interface NodeCommandsArgs {
-  rootIdRef: RefObject<string | null>;
-  isHiddenRef: RefObject<(node: Node) => boolean>;
   refs: RefObject<Map<string, HTMLSpanElement | null>>;
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
@@ -664,8 +669,6 @@ interface NodeCommandsArgs {
  * through a ref or is itself stable. See ADR 0014.
  */
 function useNodeCommands({
-  rootIdRef,
-  isHiddenRef,
   refs,
   pendingFocus,
   pendingFocusAtStart,
@@ -739,7 +742,7 @@ function useNodeCommands({
           // Don't let a direct child of the zoom root outdent past it; that
           // would move it out of the visible subtree and look like it vanished.
           const node = getTreeIndex().byId.get(id);
-          if (node && node.parentId === rootIdRef.current) return;
+          if (node && node.parentId === getViewRootId()) return;
           // Same remount-drops-focus issue as indent; re-focus on a real move.
           capture(getTreeIndex(), id);
           if (outdent(getTreeIndex(), id)) {
@@ -753,8 +756,8 @@ function useNodeCommands({
           // Reorder/outdent remounts the contentEditable; re-focus on a real move.
           capture(getTreeIndex(), id);
           const moved = moveUp(getTreeIndex(), id, {
-            isVisible: (n) => !isHiddenRef.current(n),
-            rootId: rootIdRef.current,
+            isVisible: (n) => !getViewIsHidden()(n),
+            rootId: getViewRootId(),
           });
           if (moved) {
             pendingFocus.current = id;
@@ -766,8 +769,8 @@ function useNodeCommands({
         runStructural(() => {
           capture(getTreeIndex(), id);
           const moved = moveDown(getTreeIndex(), id, {
-            isVisible: (n) => !isHiddenRef.current(n),
-            rootId: rootIdRef.current,
+            isVisible: (n) => !getViewIsHidden()(n),
+            rootId: getViewRootId(),
           });
           if (moved) {
             pendingFocus.current = id;
@@ -807,10 +810,10 @@ function useNodeCommands({
       onMoveFocus: (id, direction, x) => {
         const target = findVisibleNeighbor(
           getTreeIndex(),
-          rootIdRef.current,
+          getViewRootId(),
           id,
           direction,
-          isHiddenRef.current,
+          getViewIsHidden(),
         );
         if (target) {
           const el = refs.current.get(target);
@@ -835,10 +838,11 @@ function useNodeCommands({
       },
     }),
     // commands MUST keep stable identity (a prop on every memoized OutlineNode,
-    // ADR 0014). The live tree is read via getTreeIndex() at call time and the
-    // other live values through refs (rootIdRef/refs/pendingFocus/...), so the
-    // only real deps are the three stable callbacks; the flagged ref.current
-    // captures can't be listed and would defeat the pattern.
+    // ADR 0014). The live tree is read via getTreeIndex() and the live view
+    // state via getViewRootId()/getViewIsHidden() (view-state.ts) at call time,
+    // and the remaining live values through refs (refs/pendingFocus/...), so the
+    // only real deps are the three stable callbacks; the module getters and the
+    // flagged ref captures can't be listed and would defeat the pattern.
     // eslint-disable-next-line react-doctor/exhaustive-deps
     [navigateZoom, startDrag, consumeClick],
   );
