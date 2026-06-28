@@ -478,6 +478,56 @@ export function moveManyNodes(
 }
 
 /**
+ * Indent a contiguous sibling run (node multi-selection's Tab -- ADR 0018): move
+ * every selected root to become the last children of the run's PREVIOUS sibling,
+ * preserving order. No-op (returns 0) when the run is already the first child of
+ * its parent (no previous sibling to indent under). The new parent is expanded if
+ * collapsed so the indented run stays visible (mirrors single-node `indent`).
+ * Reuses `moveManyNodes`, so it's the same rebuild-between-moves batch; wrap the
+ * whole call in `runStructural` so it lands as ONE atomic frame (ADR 0009).
+ */
+export function indentManyNodes(rootIds: string[]): number {
+  if (rootIds.length === 0) return 0
+  const index = buildTreeIndex(nodesCollection.toArray)
+  // The run is contiguous, so the first root's prev sibling sits OUTSIDE it --
+  // the node everything indents under. Absent => first child => can't indent.
+  const targetId = index.byId.get(rootIds[0]!)?.prevSiblingId
+  if (!targetId) return 0
+  if (index.byId.get(targetId)?.collapsed) update(targetId, { collapsed: false })
+  return moveManyNodes(targetId, rootIds)
+}
+
+/**
+ * Outdent a contiguous sibling run (node multi-selection's Shift+Tab -- ADR 0018):
+ * move every selected root up one level, landing them immediately after their
+ * former shared parent, in order. No-op (returns 0) when the run is already
+ * top-level. The zoom-root boundary is the CALLER's guard (it owns view state),
+ * mirroring single-node `onOutdent`. Like `moveManyNodes` it rebuilds the index
+ * between moves so the sibling chain stays intact -- looping over a stale snapshot
+ * would land later roots before earlier ones (each lands "right after the parent",
+ * displacing the prior). Wrap in `runStructural` (ADR 0009).
+ */
+export function outdentManyNodes(rootIds: string[]): number {
+  if (rootIds.length === 0) return 0
+  const start = buildTreeIndex(nodesCollection.toArray)
+  const oldParentId = start.byId.get(rootIds[0]!)?.parentId
+  if (!oldParentId) return 0 // already top-level -> can't outdent
+  const newParentId = start.byId.get(oldParentId)?.parentId ?? null
+  let moved = 0
+  // `after` walks forward from the old parent: each root lands right after the
+  // previously-moved one, so the run keeps its order at the new level.
+  let after: string = oldParentId
+  for (const id of rootIds) {
+    const index = buildTreeIndex(nodesCollection.toArray)
+    if (moveNode(index, id, newParentId, after)) {
+      moved++
+      after = id
+    }
+  }
+  return moved
+}
+
+/**
  * Delete a node. Children are deleted recursively (Workflowy behavior:
  * deleting a parent deletes its subtree). Returns the id to focus
  * afterwards: the next sibling if any, else the previous sibling, else

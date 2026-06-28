@@ -1,7 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react'
+import { nodesCollection } from './collection'
 import { getTreeIndex } from './tree-store'
 import { getViewIsHidden, getViewRootId } from './view-state'
-import { childrenOf, type Node, type TreeIndex } from './tree'
+import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from './tree'
 
 /**
  * Node multi-selection state (ADR 0018). A second editing mode where whole
@@ -80,8 +81,11 @@ function recomputeEdges() {
  * focus has scrolled out of the visible set) the run collapses to the anchor.
  * Clears entirely if the anchor is gone.
  */
-function selectRange(anchorId: string, focusId: string) {
-  const index = getTreeIndex()
+function selectRange(
+  anchorId: string,
+  focusId: string,
+  index: TreeIndex = getTreeIndex(),
+) {
   const anchor = index.byId.get(anchorId)
   if (!anchor) {
     clearSelection()
@@ -138,30 +142,21 @@ function selectionEdgeOf(id: string): SelectionEdge | null {
   return edgeByRoot.get(id) ?? null
 }
 
-/** Select exactly `nodeId` and its subtree (Cmd+A rung 2 / a fresh single
- *  selection). Anchor and focus both land on it. */
+/** Select exactly `nodeId` and its subtree -- the fresh single-root selection
+ *  used by BOTH entry paths: Cmd+A rung 2, and the first Shift+arrow press from a
+ *  focused bullet. Entering deliberately selects just the node under the caret
+ *  (never extends to a sibling or climbs to the parent); extension/depth-walk is
+ *  for subsequent presses via {@link extendSelection}. Anchor and focus both land
+ *  on it. */
 export function selectSingle(nodeId: string) {
   selectRange(nodeId, nodeId)
 }
 
 /**
- * Enter selection from a focused bullet via Shift+arrow: anchor on `nodeId`,
- * then move the focus end one step in `direction`. At a boundary the extend is a
- * no-op, so the result is just `[nodeId]` -- you always at least select the
- * current node and enter selection mode. Entering deliberately does NOT climb to
- * the parent / dive to a child (`allowClimb: false`): the first press selects the
- * node under the caret, never jumps off it; the depth-walk is for subsequent
- * (while-selected) presses.
- */
-export function startSelection(nodeId: string, direction: 'up' | 'down') {
-  selectRange(nodeId, nodeId)
-  extendSelection(direction, false)
-}
-
-/**
- * Move the focus end one visible sibling in `direction` (Shift+arrow). Reversing
- * direction shrinks back toward the anchor before extending the other way -- a
- * property of the anchor/focus model, not special-cased.
+ * Move the focus end one visible sibling in `direction` (Shift+arrow), once a
+ * selection already exists. Reversing direction shrinks back toward the anchor
+ * before extending the other way -- a property of the anchor/focus model, not
+ * special-cased.
  *
  * At the first/last visible sibling the run can't extend further among siblings.
  * For a MULTI-root run that edge stays a no-op -- the run never spans parents
@@ -171,9 +166,8 @@ export function startSelection(nodeId: string, direction: 'up' | 'down') {
  * NOT the rejected visual-flatten range (which spanned parents with multiple
  * roots). Climbing stops at the zoom root (you can't select the view root or
  * escape the zoom); diving needs an expanded node with a visible child.
- * `allowClimb` is false on entry (see {@link startSelection}).
  */
-export function extendSelection(direction: 'up' | 'down', allowClimb = true) {
+export function extendSelection(direction: 'up' | 'down') {
   const s = state
   if (!s) return
   const index = getTreeIndex()
@@ -186,7 +180,7 @@ export function extendSelection(direction: 'up' | 'down', allowClimb = true) {
     return
   }
   // Sibling boundary. Single-root selections walk by depth; multi-root no-ops.
-  if (!allowClimb || s.rootIds.length !== 1) return
+  if (s.rootIds.length !== 1) return
   if (direction === 'up') {
     // Climb to the parent. A visible node always has a visible parent, so no
     // hidden check is needed. Stop at the zoom root (parentId === the view root,
@@ -229,6 +223,21 @@ export function isWholeViewSelected(): boolean {
     s.rootIds[0] === sibs[0]!.id &&
     s.rootIds[s.rootIds.length - 1] === sibs[sibs.length - 1]!.id
   )
+}
+
+/**
+ * Re-derive the selection (parentId + rootIds + edges) from the LIVE collection,
+ * keeping the same anchor/focus. Call after a structural mutation that relocates
+ * the selected run (indent/outdent) so the next Shift+arrow or indent reads the
+ * run's NEW parent. Reads `nodesCollection` directly rather than the tree store,
+ * so it's correct synchronously inside the same `runStructural` batch -- before
+ * the store's subscription has rebuilt. The ids and their order are unchanged by
+ * an indent/outdent, so the edges land identically; only `parentId` shifts.
+ */
+export function refreshSelection() {
+  const s = state
+  if (!s) return
+  selectRange(s.anchorId, s.focusId, buildTreeIndex(nodesCollection.toArray))
 }
 
 /** Clear the selection (Escape, a click, a focus, after an op). */

@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import type { Node } from "../data/schema";
 import { keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
-import { selectSingle, startSelection } from "../data/selection-state";
+import { selectSingle } from "../data/selection-state";
 import { getCaretOffset } from "./inline-code";
 import type { NodeCommands } from "./OutlineNode";
 
@@ -131,32 +131,35 @@ export function useBulletKeymap({
       },
       {
         // Shift+ArrowUp from the top visual line: ENTER node multi-selection
-        // (ADR 0018). Anchor on this node, extend the focus end up one sibling.
-        // From a wrapped bullet's interior it falls through to native shift
-        // text-selection (preventDefault opted out), mirroring ArrowUp's
-        // edge-line rule. Selection mode has no caret, so we blur the bullet.
+        // (ADR 0018) on THIS node only -- the first press selects the focused
+        // node; a subsequent Shift+arrow extends the run (handled while-selected
+        // in selection-mode.tsx). From a wrapped bullet's interior it falls
+        // through to native shift text-selection (preventDefault opted out),
+        // mirroring ArrowUp's edge-line rule. Selection mode has no caret, so we
+        // blur the bullet.
         hotkey: "Shift+ArrowUp",
         callback: (e) => {
           const el = textRef.current;
           if (!el || !atLineStart(el)) return;
           e.preventDefault();
           e.stopPropagation();
-          startSelection(node.id, "up");
+          selectSingle(node.id);
           el.blur();
           window.getSelection()?.removeAllRanges();
         },
         options: { preventDefault: false, stopPropagation: false },
       },
       {
-        // Shift+ArrowDown from the last visual line: ENTER node multi-selection,
-        // extending down one sibling. Mirror of Shift+ArrowUp.
+        // Shift+ArrowDown from the last visual line: same single-node entry as
+        // Shift+ArrowUp (entry is direction-agnostic -- it selects the focused
+        // node; the next press extends). Mirror of Shift+ArrowUp's edge gate.
         hotkey: "Shift+ArrowDown",
         callback: (e) => {
           const el = textRef.current;
           if (!el || !atLineEnd(el)) return;
           e.preventDefault();
           e.stopPropagation();
-          startSelection(node.id, "down");
+          selectSingle(node.id);
           el.blur();
           window.getSelection()?.removeAllRanges();
         },

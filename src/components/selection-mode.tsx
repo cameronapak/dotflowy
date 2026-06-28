@@ -16,9 +16,13 @@ import { toast } from "sonner";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewIsHidden, getViewRootId } from "../data/view-state";
 import { findVisibleNeighbor, lastVisibleDescendant } from "../data/visible-order";
-import { removeManyNodes } from "../data/mutations";
+import {
+  indentManyNodes,
+  outdentManyNodes,
+  removeManyNodes,
+} from "../data/mutations";
 import { runStructural } from "../data/structural";
-import { capture } from "../data/history";
+import { capture, drop } from "../data/history";
 import { outlineToMarkdown } from "../data/markdown";
 import {
   clearSelection,
@@ -27,6 +31,7 @@ import {
   getSelectionState,
   isSelectionActive,
   isWholeViewSelected,
+  refreshSelection,
   selectAllInView,
   subscribeSelection,
 } from "../data/selection-state";
@@ -62,6 +67,8 @@ export interface SelectionOps {
   copy: () => void;
   remove: () => void;
   move: () => void;
+  indent: () => void;
+  outdent: () => void;
   caretAbove: () => void;
   caretBelow: () => void;
   exitToCaret: () => void;
@@ -141,6 +148,37 @@ function makeSelectionOps({
     clearSelection();
   };
 
+  // Tab: indent the whole run under the first root's previous sibling, as ONE
+  // atomic batch (ADR 0009). The selection PERSISTS (the moved run stays
+  // selected) -- refreshSelection re-derives its new parent so the next Tab /
+  // Shift+arrow reads accurate state. A no-op (run is already a first child)
+  // discards the redundant undo point.
+  const indent = () => {
+    const ids = getSelectionRootIds();
+    if (ids.length === 0) return;
+    runStructural(() => {
+      capture(getTreeIndex(), ids[0]!);
+      if (indentManyNodes(ids)) refreshSelection();
+      else drop();
+    });
+  };
+
+  // Shift+Tab: outdent the whole run one level (mirror of indent). A run sitting
+  // directly under the zoom root must not escape it (would look like it vanished),
+  // mirroring single-node onOutdent's guard; that's a no-op.
+  const outdent = () => {
+    const ids = getSelectionRootIds();
+    if (ids.length === 0) return;
+    const state = getSelectionState();
+    if (!state || state.parentId === null || state.parentId === getViewRootId())
+      return;
+    runStructural(() => {
+      capture(getTreeIndex(), ids[0]!);
+      if (outdentManyNodes(ids)) refreshSelection();
+      else drop();
+    });
+  };
+
   // Plain Up: drop the caret onto the visible row just ABOVE the top of the
   // selection (visual motion, even though selection is sibling-scoped).
   const caretAbove = () => {
@@ -180,7 +218,7 @@ function makeSelectionOps({
     focusNode(id);
   };
 
-  return { copy, remove, move, caretAbove, caretBelow, exitToCaret };
+  return { copy, remove, move, indent, outdent, caretAbove, caretBelow, exitToCaret };
 }
 
 /**
@@ -259,10 +297,13 @@ export function useSelectionMode({
         ops.caretAbove();
         return;
       }
-      // Tab indent/outdent of a selection is Ship 3; swallow it so focus can't
-      // escape the selection in the meantime.
+      // Tab indents the whole run, Shift+Tab outdents it (ADR 0018) -- one atomic
+      // batch each; the selection persists so you can keep nudging. preventDefault
+      // either way so focus can't tab out of the selection.
       if (e.key === "Tab") {
         e.preventDefault();
+        if (e.shiftKey) ops.outdent();
+        else ops.indent();
         return;
       }
       // A printable key is a NO-OP; the selection persists. Never replace-on-type

@@ -24,16 +24,17 @@ operation is ever ambiguous; the rejection is specifically of **multi-root** ran
 **Caret and selection are mutually exclusive.** While nodes are selected there is no text caret;
 while you have a caret you're editing one bullet. The transitions are the whole interaction:
 
-- **Enter via `Shift+↑/↓`** from a focused bullet: anchor/focus model. The start node is the fixed
-  **anchor**; Shift+arrow moves the **focus** end; the selection is the inclusive sibling range
-  between them. Reversing direction **shrinks back toward the anchor** before extending the other
-  way. At the first/last sibling a **multi-root** run can't extend further — that edge is a **no-op**,
-  never jumping into another parent's run. A **single-root** selection instead **walks by depth**
-  there: Shift+↑ selects the **parent**, Shift+↓ dives into the **first visible child** (climbing
-  stops at the zoom root — the view root isn't a selectable node — and a collapsed/childless node
-  can't dive). That keeps the selection one unambiguous subtree, so it is *not* the rejected
-  multi-parent visual range. Entering (the very first press) deliberately does **not** climb/dive —
-  it selects the node under the caret, never jumps off it; the depth walk is for subsequent presses.
+- **Enter via `Shift+↑/↓`** from a focused bullet: anchor/focus model. The **first press selects
+  ONLY the focused node** (it enters selection mode on that one node — direction-agnostic, the same
+  as `Cmd+A` rung 2; it never extends to a sibling or jumps off the node). That node is the fixed
+  **anchor**; **subsequent** Shift+arrow presses move the **focus** end, the selection being the
+  inclusive sibling range between anchor and focus. Reversing direction **shrinks back toward the
+  anchor** before extending the other way. At the first/last sibling a **multi-root** run can't
+  extend further — that edge is a **no-op**, never jumping into another parent's run. A **single-root**
+  selection instead **walks by depth** there: Shift+↑ selects the **parent**, Shift+↓ dives into the
+  **first visible child** (climbing stops at the zoom root — the view root isn't a selectable node —
+  and a collapsed/childless node can't dive). That keeps the selection one unambiguous subtree, so it
+  is *not* the rejected multi-parent visual range.
 - **Enter via `Cmd+A` — a bounded 3-rung ladder:** (1) all text in the bullet (native), (2) this
   node + its subtree, (3) the whole current view (the zoom root's subtree). The rung is **derived
   from the current selection state, not a press counter** (counters desync the instant the user does
@@ -43,17 +44,21 @@ while you have a caret you're editing one bullet. The transitions are the whole 
   design.
 - **While selected:** plain `↑/↓` drops the caret onto the visible row just *above the top* / *below
   the bottom* of the selection (the existing visual neighbor walk — caret motion is visual even
-  though selection is sibling-scoped). A printable `[a-zA-Z]` key is a **no-op; the selection
-  persists** — it must **never** replace-on-type the way a text editor does, or a stray keypress
-  would delete whole subtrees. `Escape` clears → caret returns; a click clears → normal edit.
+  though selection is sibling-scoped). `Tab`/`Shift+Tab` **indent/outdent the whole run** (see
+  Operations); the selection **persists** so you can keep nudging. A printable `[a-zA-Z]` key is a
+  **no-op; the selection persists** — it must **never** replace-on-type the way a text editor does,
+  or a stray keypress would delete whole subtrees. `Escape` clears → caret returns; a click clears →
+  normal edit.
 
 **Operations (this ADR's v1):** **Copy as Markdown** (`Cmd+C`, reuses the ADR 0017 serializer over
-the selected roots) and **Delete** (`Backspace`/`Delete`, loops `removeNode` over the selected roots
-inside one `runStructural` batch). **Deferred:** Tab indent/outdent, drag, cut, paste — paste needs
-a node-clipboard format and insertion logic that doesn't exist, and drag is a single-node imperative
-system (`use-drag-reorder.ts`) that needs real surgery to carry a selection. Copy + delete is the
-coherent minimal set (shipping copy without delete would confuse — the most-expected key is
-Backspace).
+the selected roots), **Delete** (`Backspace`/`Delete`, `removeManyNodes` over the selected roots
+inside one `runStructural` batch), and **Indent / Outdent** (`Tab` / `Shift+Tab`, `indentManyNodes` /
+`outdentManyNodes`). Indent moves the run under the first root's previous sibling; outdent lands it
+immediately after its former parent (a no-op at the zoom-root boundary). Both are one `runStructural`
+batch and **keep the selection** (`refreshSelection` re-derives the run's new parent so the next
+nudge reads accurate state). **Deferred:** drag, cut, paste — paste needs a node-clipboard format and
+insertion logic that doesn't exist, and drag is a single-node imperative system
+(`use-drag-reorder.ts`) that needs real surgery to carry a selection.
 
 **The actions menu, and `runMany`.** When a selection exists, a menu **auto-appears anchored to the
 selection's top row**, reusing `SlashMenuList`'s rendering (no second menu look); `Escape` dismisses

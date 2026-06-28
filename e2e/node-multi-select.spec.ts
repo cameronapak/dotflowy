@@ -45,18 +45,41 @@ async function focus(page: Page, id: string) {
 }
 
 test.describe("Node multi-selection", () => {
+  test("the first Shift+arrow press selects ONLY the focused node (entry never extends)", async ({
+    page,
+  }) => {
+    await load(page);
+    await focus(page, "d");
+
+    // Cursor on d, Shift+Up: d alone becomes selected -- entry does NOT reach up
+    // into c. The caret is gone (selection mode has no caret).
+    await page.keyboard.press("Shift+ArrowUp");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "c")).not.toHaveAttribute("data-selected", /.*/);
+    await expect(focused(page)).toHaveCount(0);
+
+    // The SECOND press is what extends the run upward -> [c, d].
+    await page.keyboard.press("Shift+ArrowUp");
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+  });
+
   test("Shift+Down extends the run, Shift+Up shrinks toward the anchor", async ({
     page,
   }) => {
     await load(page);
     await focus(page, "a");
 
-    // Enter selection: anchor a, focus moves down to b -> [a, b].
+    // First press enters selection on the focused node only.
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(li(page, "a")).toHaveAttribute("data-selected", "single");
+    // Caret is gone while selecting.
+    await expect(focused(page)).toHaveCount(0);
+
+    // Extend down -> [a, b].
     await page.keyboard.press("Shift+ArrowDown");
     await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
     await expect(li(page, "b")).toHaveAttribute("data-selected", "bottom");
-    // Caret is gone while selecting.
-    await expect(focused(page)).toHaveCount(0);
 
     // Extend to [a, b, c].
     await page.keyboard.press("Shift+ArrowDown");
@@ -117,6 +140,59 @@ test.describe("Node multi-selection", () => {
     await expect(li(page, "aaa")).toHaveAttribute("data-selected", "single");
   });
 
+  test("Tab indents the selected run under the previous sibling; Shift+Tab outdents it back", async ({
+    page,
+  }) => {
+    await load(page); // FLAT: alpha, bravo, charlie, delta
+    await focus(page, "d");
+    await page.keyboard.press("Shift+ArrowUp"); // enter -> [d]
+    await page.keyboard.press("Shift+ArrowUp"); // extend -> [c, d] -- anchor d, focus c
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+
+    // Tab: c and d become children of b, in order, and STAY selected.
+    await page.keyboard.press("Tab");
+    await expect(li(page, "b").locator('li[data-node-id="c"]')).toBeVisible();
+    await expect(li(page, "b").locator('li[data-node-id="d"]')).toBeVisible();
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+    // Only alpha + bravo remain at the top level now.
+    await expect(
+      page.locator(".outline-list > li[data-node-id]"),
+    ).toHaveCount(2);
+
+    // Shift+Tab: outdent back to the top level, right after b, still selected.
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+      page.locator(".outline-list > li[data-node-id]"),
+    ).toHaveCount(4);
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+    expect(await orderedTexts(page)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+      "delta",
+    ]);
+  });
+
+  test("Tab is a no-op when the run starts at the first child (nothing to indent under)", async ({
+    page,
+  }) => {
+    await load(page);
+    await focus(page, "a"); // first sibling -- no previous sibling to indent under
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
+
+    await page.keyboard.press("Tab");
+    // Nothing moved; the selection persists at the top level.
+    await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "b")).toHaveAttribute("data-selected", "bottom");
+    await expect(
+      page.locator(".outline-list > li[data-node-id]"),
+    ).toHaveCount(4);
+  });
+
   test("Cmd+A ladder: text -> node -> whole view", async ({ page }) => {
     await load(page);
     await focus(page, "a");
@@ -147,7 +223,8 @@ test.describe("Node multi-selection", () => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await load(page);
     await focus(page, "a");
-    await page.keyboard.press("Shift+ArrowDown"); // [a, b]
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
     await page.keyboard.press(`${MOD}+c`);
     await expect(page.getByText("Copied as Markdown")).toBeVisible();
@@ -160,7 +237,8 @@ test.describe("Node multi-selection", () => {
   }) => {
     await load(page);
     await focus(page, "b");
-    await page.keyboard.press("Shift+ArrowDown"); // [b, c]
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [b]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [b, c]
 
     await page.keyboard.press("Backspace");
     expect(await orderedTexts(page)).toEqual(["alpha", "delta"]);
@@ -179,7 +257,8 @@ test.describe("Node multi-selection", () => {
   test("Escape clears the selection and returns the caret", async ({ page }) => {
     await load(page);
     await focus(page, "a");
-    await page.keyboard.press("Shift+ArrowDown"); // [a, b], focus end = b
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b], focus end = b
 
     await page.keyboard.press("Escape");
     await expect(li(page, "a")).not.toHaveAttribute("data-selected", /.*/);
@@ -191,7 +270,8 @@ test.describe("Node multi-selection", () => {
   test("a printable key never replaces the selection", async ({ page }) => {
     await load(page);
     await focus(page, "a");
-    await page.keyboard.press("Shift+ArrowDown"); // [a, b]
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
     await page.keyboard.press("x");
     // Selection persists; no text was replaced.
@@ -208,7 +288,8 @@ test.describe("Node multi-selection", () => {
   test("a click leaves selection mode", async ({ page }) => {
     await load(page);
     await focus(page, "a");
-    await page.keyboard.press("Shift+ArrowDown"); // [a, b]
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
     await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
 
     await text(page, "d").click();
@@ -221,7 +302,8 @@ test.describe("Node multi-selection", () => {
   }) => {
     await load(page);
     await focus(page, "a");
-    await page.keyboard.press("Shift+ArrowDown"); // [a, b]
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
     const menu = page.getByRole("listbox");
     // Anchor to the label: "Send to Today"'s description also contains "Move".
@@ -248,7 +330,8 @@ test.describe("Node multi-selection", () => {
   }) => {
     await load(page);
     await focus(page, "a");
-    await page.keyboard.press("Shift+ArrowDown"); // [a, b]
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
+    await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
     // The actions menu auto-appears anchored to the selection's top row.
     const menu = page.getByRole("listbox");
