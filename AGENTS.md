@@ -120,7 +120,7 @@ bun run test       # bun test over src + worker/ (pure-logic unit tests)
 bun run test:e2e   # playwright (chromium) end-to-end tests
 bun run test:e2e:ui  # same, in Playwright's interactive UI
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
-bun run cf:dev     # build:cf, then `wrangler dev` (local Workers preview)
+bun run cf:dev     # watch loop (scripts/cf-dev.ts): build:cf + wrangler dev, rebuilds on src/ changes
 bun run deploy     # build:cf, then `wrangler deploy`
 bun run repos:update-effect  # pull latest Effect v4 source into repos/effect-smol (git subtree)
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
@@ -264,7 +264,7 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 Markdown `[label](url)` **parsed from `node.text`** (Seam A+B+I token), the only construct that **folds**: reveal is **per-link** (Obsidian Live Preview style) — a link shows raw only when the caret is within/adjacent (source offset ∈ `[start, end]`); every other link folds to a clean `<a contenteditable="false">`. At most one reveals at a time.
 
-The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/adr/0005-rich-links-source-offset-caret.md).
+The landmine: a focused bullet can hold **folded** links, so `el.textContent` is no longer the source. The core is **source-offset-aware** — **`readSource(el)`** (inline-code.ts) reconstructs the markdown (`data-src` for folded `<a>`, `textContent` otherwise) and replaces `el.textContent` in `onInput`/paste **and the slash/tag menus** (else a `/cmd` on a folded-link line drops its url); **`getCaretOffset`/`setCaretOffset`** speak SOURCE offsets, counting a folded link's `data-src-len`. Reveal reflow is a `selectionchange` watcher (`watchCaretReveal`) live only while focused; all of this early-returns on link-free lines (the 99% case). A folded `<a>` leads with the host's favicon (`favicon.im/{host}`, inside the anchor so a click on it opens too) and trails the external-link icon. Folded links open on click (Seam-B `window.open`); creation is hand-typed or paste (Seam-I `input.onPaste`, http(s) only, URLs percent-encoded). Pasting a link with no selection appends a trailing space so the caret lands past it and the link folds immediately (selection-wrap keeps the end-of-link caret). Search indexes `stripLinks(node.text)`. Why: [Rich links: the source-offset caret](./docs/adr/0005-rich-links-source-offset-caret.md).
 
 ## Daily notes (`src/plugins/daily/`)
 

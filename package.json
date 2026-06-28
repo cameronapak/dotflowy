@@ -11,7 +11,7 @@
     "build": "vite build",
     "build:cf": "vite build && cp dist/client/_shell.html dist/client/index.html",
     "preview": "vite preview",
-    "cf:dev": "bun run build:cf && wrangler dev --port 8787",
+    "cf:dev": "bun scripts/cf-dev.ts",
     "deploy": "bun run build:cf && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply dotflowy-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply dotflowy-db --remote",
