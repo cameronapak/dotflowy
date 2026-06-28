@@ -330,13 +330,11 @@ const protectPredicates = plugins
 
 /** The protection on `nodeId`, or null if no plugin protects it. The first
  *  matching plugin wins (load order); a bare `true` normalizes to an empty
- *  descriptor. Consulted by the core's single delete entry point (OutlineEditor's
- *  `onDeleteNode`) -- which skips the removal, shakes the row (`rejectRow`), and
- *  toasts `reason` -- by the blur heal, which restores `canonicalText` (+ shake
- *  + `blankReason` toast) when the node is left empty, by `onSetTask`, which
- *  blocks turning it into a to-do (+ shake + `taskReason` toast), and by the row
- *  render, which shows a lock when this is non-null. The core reads the
- *  descriptor but never authors it. */
+ *  descriptor (the core's default copy then carries every message). The
+ *  enforcement lives in `components/protection.tsx` (`guardProtected` on the
+ *  delete / to-do / complete command paths, `signalRejection` on the blur heal)
+ *  and the lock render reads {@link isProtected}; this just resolves the
+ *  descriptor. The plugin authors only the overrides it cares about. ADR 0015. */
 export function getProtection(nodeId: string): NodeProtection | null {
   for (const p of protectPredicates) {
     const r = p(nodeId);

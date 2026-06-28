@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useRef, type PointerEvent } from "react";
-import { ChevronRight, Lock } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
@@ -20,6 +20,7 @@ import {
 import { hasLink } from "../data/links";
 import { pasteIntoBullet } from "./paste";
 import { healProtectedText } from "./protected-text";
+import { ProtectedLock } from "./protection";
 
 interface OutlineNodeProps {
   // The node id. The node itself and its visible children are read reactively
@@ -269,15 +270,7 @@ function OutlineNodeBody({
         {beforeTextSlots.map((slot) => (
           <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
         ))}
-        {protectedNode && (
-          <span
-            className="protected-lock"
-            title="Protected node"
-            aria-label="Protected node"
-          >
-            <Lock size={12} strokeWidth={2.5} />
-          </span>
-        )}
+        {protectedNode && <ProtectedLock size={12} />}
         <span
           ref={(el) => {
             textRef.current = el;

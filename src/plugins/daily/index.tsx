@@ -3,7 +3,7 @@
 // two new ones this feature introduced:
 //
 //   - Seam F (header): the "Today" button (ADR 0020) -- node-less chrome.
-//   - Protected nodes: the "Daily" container can't be deleted (ADR 0021).
+//   - Protected nodes: the "Daily" container can't be deleted (ADR 0015).
 //   - Seam F (row): the date badge on each day note.
 //
 // Identity lives in a side-collection (`daily-index.ts`), never on the `Node`
@@ -17,25 +17,25 @@ import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
   Loader2Icon,
-} from 'lucide-react'
-import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { definePlugin, type PluginContext } from '../types'
-import { capture, drop } from '../../data/history'
+} from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { definePlugin, type PluginContext } from "../types";
+import { capture, drop } from "../../data/history";
 import {
   appendChild,
   insertChildAtStart,
   moveNode,
   setText,
-} from '../../data/mutations'
-import { runStructural } from '../../data/structural'
+} from "../../data/mutations";
+import { runStructural } from "../../data/structural";
 import {
   nodesCollection,
   resyncNodes,
   waitForNode,
-} from '../../data/collection'
-import { childrenOf, createId, type TreeIndex } from '../../data/tree'
+} from "../../data/collection";
+import { childrenOf, createId, type TreeIndex } from "../../data/tree";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
@@ -51,11 +51,8 @@ import {
   setMapping,
   subscribeDailyIndex,
   useDailyDate,
-} from './daily-index'
-import {
-  useDailyNavigationPending,
-  withDailyNavigation,
-} from './pending'
+} from "./daily-index";
+import { useDailyNavigationPending, withDailyNavigation } from "./pending";
 
 // --- get-or-create ----------------------------------------------------------
 
@@ -67,7 +64,7 @@ import {
 // synchronous-quick with no network round-trip. See daily-index.ts.
 
 function hasNode(id: string): boolean {
-  return nodesCollection.toArray.some((n) => n.id === id)
+  return nodesCollection.toArray.some((n) => n.id === id);
 }
 
 /** Wait for a remote replica when we lost the claim; otherwise materialize now. */
@@ -76,14 +73,14 @@ async function ensureNodeExists(
   materialize: () => void,
   awaitRemote: boolean,
 ): Promise<boolean> {
-  if (hasNode(nodeId)) return true
+  if (hasNode(nodeId)) return true;
   if (awaitRemote) {
-    resyncNodes()
-    await waitForNode(nodeId, 1500).catch(() => {})
-    if (hasNode(nodeId)) return true
+    resyncNodes();
+    await waitForNode(nodeId, 1500).catch(() => {});
+    if (hasNode(nodeId)) return true;
   }
-  materialize()
-  return hasNode(nodeId)
+  materialize();
+  return hasNode(nodeId);
 }
 
 /**
@@ -91,19 +88,22 @@ async function ensureNodeExists(
  * Atomic-claim guarded so two devices first-using daily can't each mint one.
  */
 async function ensureContainer(index: TreeIndex): Promise<string | null> {
-  const existing = getContainerId()
-  if (existing && index.byId.has(existing)) return existing
-  const candidate = createId()
-  const { winner, won } = await claimMapping(CONTAINER_KEY, candidate)
-  const tops = childrenOf(index, null)
-  const after = tops.length ? tops[tops.length - 1]!.id : null
+  const existing = getContainerId();
+  if (existing && index.byId.has(existing)) return existing;
+  const candidate = createId();
+  const { winner, won } = await claimMapping(CONTAINER_KEY, candidate);
+  const tops = childrenOf(index, null);
+  const after = tops.length ? tops[tops.length - 1]!.id : null;
   const ok = await ensureNodeExists(
     winner,
-    () => runStructural(() => appendChild(null, after, DAILY_CONTAINER_TEXT, winner)),
+    () =>
+      runStructural(() =>
+        appendChild(null, after, DAILY_CONTAINER_TEXT, winner),
+      ),
     !won,
-  )
-  setMapping(CONTAINER_KEY, winner)
-  return ok ? winner : null
+  );
+  setMapping(CONTAINER_KEY, winner);
+  return ok ? winner : null;
 }
 
 /**
@@ -119,25 +119,31 @@ async function ensureDay(
   containerId: string,
   index: TreeIndex,
 ): Promise<string | null> {
-  const existing = getDayId(key)
+  const existing = getDayId(key);
   if (existing && index.byId.has(existing)) {
     if (!index.byId.get(existing)!.text.trim()) {
-      setText(existing, formatDayText(key))
+      setText(existing, formatDayText(key));
     }
-    return existing
+    return existing;
   }
-  const candidate = createId()
-  const { winner, won } = await claimMapping(key, candidate)
+  const candidate = createId();
+  const { winner, won } = await claimMapping(key, candidate);
   const ok = await ensureNodeExists(
     winner,
     () =>
       runStructural(() =>
-        insertChildAtStart(index, containerId, false, formatDayText(key), winner),
+        insertChildAtStart(
+          index,
+          containerId,
+          false,
+          formatDayText(key),
+          winner,
+        ),
       ),
     !won,
-  )
-  setMapping(key, winner)
-  return ok ? winner : null
+  );
+  setMapping(key, winner);
+  return ok ? winner : null;
 }
 
 /** Ensure the container + the day exist and return the day's node id (no nav).
@@ -150,60 +156,64 @@ async function getOrCreateDay(
   index: TreeIndex,
 ): Promise<string | null> {
   return withDailyNavigation(async () => {
-    const containerId = await ensureContainer(index)
-    if (!containerId) return null
-    return ensureDay(key, containerId, index)
-  })
+    const containerId = await ensureContainer(index);
+    if (!containerId) return null;
+    return ensureDay(key, containerId, index);
+  });
 }
 
 /** get-or-create the day, then zoom to it (the Today button + future picker). */
 async function goToDate(key: string, ctx: PluginContext): Promise<void> {
-  const dayId = await getOrCreateDay(key, ctx.tree)
+  const dayId = await getOrCreateDay(key, ctx.tree);
   if (!dayId) {
-    toast.error("Couldn't open today's daily note")
-    return
+    toast.error("Couldn't open today's daily note");
+    return;
   }
-  ctx.nav.zoom(dayId)
+  ctx.nav.zoom(dayId);
 }
 
 // --- header slot: the "Today" button ----------------------------------------
 
 function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
-  const pending = useDailyNavigationPending()
+  const pending = useDailyNavigationPending();
   return (
     <Button
       variant="ghost"
       size="icon-sm"
       disabled={pending}
       aria-busy={pending}
-      data-daily-nav-pending={pending ? '' : undefined}
+      data-daily-nav-pending={pending ? "" : undefined}
       onClick={() => void goToDate(localDateKey(), getCtx())}
     >
-      {pending ? <Loader2Icon className="animate-spin" /> : <CalendarDaysIcon />}
+      {pending ? (
+        <Loader2Icon className="animate-spin" />
+      ) : (
+        <CalendarDaysIcon />
+      )}
       <span className="sr-only">Today&apos;s daily note</span>
     </Button>
-  )
+  );
 }
 
 // --- row slot: the date badge -----------------------------------------------
 
 function DailyBadge({ nodeId }: { nodeId: string }) {
-  const key = useDailyDate(nodeId)
-  if (!key) return null
+  const key = useDailyDate(nodeId);
+  if (!key) return null;
   return (
     <Badge variant="secondary" className="shrink-0 mt-1" data-daily-date={key}>
       {formatDayBadge(key)}
     </Badge>
-  )
+  );
 }
 
 export default definePlugin({
-  id: 'daily',
+  id: "daily",
 
   // Seam F (header): jump to today, creating it on first use. Reads ctx lazily.
   headerSlots: [
     {
-      id: 'daily-today',
+      id: "daily-today",
       render: (getCtx) => <TodayButton getCtx={getCtx} />,
     },
   ],
@@ -212,8 +222,8 @@ export default definePlugin({
   // Renders only on a day note (useDailyDate returns null otherwise).
   slots: [
     {
-      id: 'daily-date-badge',
-      position: 'row:before-text',
+      id: "daily-date-badge",
+      position: "row:before-text",
       render: (node) => <DailyBadge nodeId={node.id} />,
     },
   ],
@@ -226,34 +236,34 @@ export default definePlugin({
   // stays the general mover.
   commands: [
     {
-      id: 'send-to-today',
-      label: 'Send to Today',
+      id: "send-to-today",
+      label: "Send to Today",
       description: "Move this node under today's daily note",
       icon: CalendarArrowDownIcon,
-      keywords: ['today', 'daily', 'journal'],
+      keywords: ["today", "daily", "journal"],
       available: () => true,
       run: async (nodeId, ctx) => {
-        const todayId = await getOrCreateDay(localDateKey(), ctx.tree)
+        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
         if (!todayId) {
-          toast.error("Couldn't open today's daily note")
-          return
+          toast.error("Couldn't open today's daily note");
+          return;
         }
-        if (todayId === nodeId) return // can't move today's note under itself
-        const kids = childrenOf(ctx.tree, todayId)
-        const after = kids.length ? kids[kids.length - 1]!.id : null
+        if (todayId === nodeId) return; // can't move today's note under itself
+        const kids = childrenOf(ctx.tree, todayId);
+        const after = kids.length ? kids[kids.length - 1]!.id : null;
         const moved = runStructural(() => {
-          capture(ctx.tree, nodeId)
-          return moveNode(ctx.tree, nodeId, todayId, after)
-        })
+          capture(ctx.tree, nodeId);
+          return moveNode(ctx.tree, nodeId, todayId, after);
+        });
         // No-op move (already last child of today) still captured an undo
         // point; drop it so Cmd+Z isn't a dead step and redo history survives.
         if (!moved) {
-          drop()
-          return
+          drop();
+          return;
         }
-        toast.success('Moved to Today', {
-          action: { label: 'Go', onClick: () => ctx.nav.zoom(todayId) },
-        })
+        toast.success("Moved to Today", {
+          action: { label: "Go", onClick: () => ctx.nav.zoom(todayId) },
+        });
       },
     },
   ],
@@ -285,16 +295,16 @@ export default definePlugin({
   // Matched (a second Fuse key) but never highlighted -- the row still shows the
   // date text. "Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping.
   searchAliases: (node) => {
-    const key = getDayKey(node.id)
-    return key ? [formatDayBadge(key)] : []
+    const key = getDayKey(node.id);
+    return key ? [formatDayBadge(key)] : [];
   },
 
   // Seam J: a parenthetical suffix on the picker row so a day note reads
   // "Tuesday, June 23, 2026 (Today)" -- relative labels only (a date would just
   // echo the text). Display-only; the alias above is what actually matches.
   searchAnnotation: (node) => {
-    const key = getDayKey(node.id)
-    return key ? formatDayRelative(key) : null
+    const key = getDayKey(node.id);
+    return key ? formatDayRelative(key) : null;
   },
 
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
@@ -302,23 +312,23 @@ export default definePlugin({
   // Picking it creates the note + container, then navigates. This is the "search
   // today even if it isn't there" half (ADR 0022).
   searchActions: (query, ctx) => {
-    const q = query.trim().toLowerCase()
-    if (q.length < 2 || !'today'.startsWith(q)) return []
-    const key = localDateKey()
-    const existing = getDayId(key)
-    if (existing && ctx.index.byId.has(existing)) return []
+    const q = query.trim().toLowerCase();
+    if (q.length < 2 || !"today".startsWith(q)) return [];
+    const key = localDateKey();
+    const existing = getDayId(key);
+    if (existing && ctx.index.byId.has(existing)) return [];
     return [
       {
-        key: 'daily-go-today',
-        label: 'Go to Today',
+        key: "daily-go-today",
+        label: "Go to Today",
         hint: "Creates today's daily note",
         icon: CalendarDaysIcon,
         run: () =>
           void getOrCreateDay(key, ctx.index).then((id) => {
-            if (id) ctx.goTo(id)
-            else toast.error("Couldn't open today's daily note")
+            if (id) ctx.goTo(id);
+            else toast.error("Couldn't open today's daily note");
           }),
       },
-    ]
+    ];
   },
-})
+});

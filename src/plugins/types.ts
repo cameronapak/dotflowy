@@ -377,29 +377,32 @@ export interface HeaderSlotSpec {
 
 // --- Protected nodes --------------------------------------------------------
 //
-// A plugin can forbid deleting a node it owns (the daily container). Returning a
-// descriptor (not just `true`) lets it carry the human-facing details the core
-// has no business inventing: the *why* for a rejected-delete toast, and the
-// canonical name to restore if the node is blanked.
+// A plugin marks a node protected (`protects`); the CORE owns what that means
+// and enforces every rule uniformly (no delete / blank / to-do / complete) --
+// see components/protection.tsx and ADR 0015. So returning a bare `true` is
+// enough: the core supplies generic rejection copy. This descriptor only lets a
+// plugin OVERRIDE the human-facing details when it cares -- per-action toast copy
+// and the canonical name to restore if the node is blanked. Every field is
+// optional; the core never depends on the plugin filling them in.
 
 export interface NodeProtection {
-  /** Concise message shown (as a toast) when a delete of this node is rejected.
-   *  Omit for a silent block. */
+  /** General "why" toasted for any rejected action, overriding the core default.
+   *  Also the message for a rejected delete specifically. Per-action fields below
+   *  override it for their action. */
   reason?: string;
   /** Canonical text restored when the node is emptied -- a protected node can't
-   *  be left nameless. Omit for protected nodes with no fixed name. */
+   *  be left nameless. Omit for protected nodes with no fixed name (then a blank
+   *  is just blocked at the delete/edit level, with nothing to restore). */
   canonicalText?: string;
-  /** Message toasted when the emptied node is healed back to `canonicalText`,
-   *  if it should differ from the delete `reason` ("needs a name" vs "can't be
-   *  deleted"). Falls back to `reason` when omitted. */
+  /** Override the toast when an emptied node is healed back to `canonicalText`
+   *  ("needs a name" vs the general reason). Falls back to `reason`, then the
+   *  core default. */
   blankReason?: string;
-  /** Message toasted when turning this node into a to-do is rejected -- a
-   *  protected node is structural and stays plain text. Falls back to `reason`
-   *  when omitted. */
+  /** Override the toast when turning this node into a to-do is rejected. Falls
+   *  back to `reason`, then the core default. */
   taskReason?: string;
-  /** Message toasted when marking this node done is rejected -- a protected
-   *  node is structural (completing it would strike through its whole subtree).
-   *  Falls back to `reason` when omitted. */
+  /** Override the toast when marking this node done is rejected. Falls back to
+   *  `reason`, then the core default. */
   completeReason?: string;
 }
 
@@ -426,7 +429,7 @@ export interface SubheaderSlotSpec {
 // "this id is protected", never why. Protection blocks the STRUCTURE-changing
 // actions: delete, blank-out (heals on blur), to-do conversion, and completion.
 // A protected node is still freely editable, renamable, and can take children.
-// First consumer: the Daily Notes plugin's container (ADR 0019/0021).
+// First consumer: the Daily Notes plugin's container (ADR 0015).
 
 // --- Seam H: caret autocomplete menus ---------------------------------------
 //
@@ -557,11 +560,12 @@ export interface PluginDef {
   headerSlots?: HeaderSlotSpec[];
   /** Seam F (subheader): contextual chrome below the header (the tag filter). */
   subheaderSlots?: SubheaderSlotSpec[];
-  /** Protected nodes: forbid deleting `nodeId` (the daily container). Return
-   *  `false` to allow, or `true` / a {@link NodeProtection} to protect. The
-   *  descriptor lets the plugin supply the *why* (a rejected-delete toast) and a
-   *  canonical name to restore if the node is blanked -- the core never invents
-   *  either. Called on the delete + blank-on-blur paths only (client). */
+  /** Protected nodes: mark `nodeId` protected (the daily container is the first
+   *  consumer). Return `false` to allow, or `true` / a {@link NodeProtection} to
+   *  protect. `true` is enough -- the core enforces every rule (no delete / blank
+   *  / to-do / complete) with default copy; the descriptor only OVERRIDES the
+   *  copy + canonical name when the plugin cares. Consulted on the delete,
+   *  blank-on-blur, to-do, and completion paths (client). */
   protects?(nodeId: string): boolean | NodeProtection;
   /** Subscribe to changes in this plugin's protection state, so a node's lock
    *  affordance can render reactively. A plugin whose `protects` depends on

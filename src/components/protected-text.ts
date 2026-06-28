@@ -10,10 +10,9 @@
  * A no-op for unprotected nodes, protected nodes with no canonical name, and
  * non-empty text -- the 99% case -- so it's cheap to call from every blur.
  */
-import { toast } from "sonner";
 import { setText } from "../data/mutations";
 import { getProtection } from "../plugins/registry";
-import { rejectRow } from "./flash-node";
+import { signalRejection } from "./protection";
 
 /**
  * If `id` is a protected node left blank, restore its canonical text (store +
@@ -31,8 +30,8 @@ export function healProtectedText(
   if (!canonical || text.trim() !== "") return null;
   setText(id, canonical);
   el.textContent = canonical;
-  rejectRow(el.closest(".outline-row"));
-  const message = protection.blankReason ?? protection.reason;
-  if (message) toast.error(message, { id: "protected-blank" });
+  // Restored, not deleted -- but a blank is still a rejected edit, so it gets
+  // the same shake + toast as the other blocked actions (core owns the copy).
+  signalRejection(el.closest(".outline-row"), protection, "blank");
   return canonical;
 }

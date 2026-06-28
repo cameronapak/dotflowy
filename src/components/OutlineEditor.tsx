@@ -20,13 +20,7 @@ import {
   useHotkeys,
   type UseHotkeyDefinition,
 } from "@tanstack/react-hotkeys";
-import {
-  ChevronRight,
-  HomeIcon,
-  Lock,
-  MoreHorizontal,
-  PlusIcon,
-} from "lucide-react";
+import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { getTreeIndex } from "../data/tree-store";
 import {
@@ -73,15 +67,14 @@ import {
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
-  getProtection,
   keymapSpecs,
   useIsProtected,
 } from "../plugins/registry";
 import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
-import { consumeFlashAfterNav, flashRow, rejectRow } from "./flash-node";
+import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { healProtectedText } from "./protected-text";
-import { toast } from "sonner";
+import { guardProtected, ProtectedLock } from "./protection";
 import { Header } from "./Header";
 import { Subheader } from "./Subheader";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
@@ -680,8 +673,11 @@ function useNodeCommands({
   startDrag,
   consumeClick,
 }: NodeCommandsArgs): NodeCommands {
-  return useMemo<NodeCommands>(
-    () => ({
+  return useMemo<NodeCommands>(() => {
+    // The `.outline-row` element for a node, for the protection-rejection shake.
+    const rowOf = (id: string) =>
+      refs.current.get(id)?.closest(".outline-row") ?? null;
+    return {
       onTextChange: (id, text) => {
         // Coalesce a run of keystrokes on one bullet into a single undo step,
         // capturing the pre-typing state on the first keystroke of the run.
@@ -783,18 +779,11 @@ function useNodeCommands({
 
       onDeleteNode: (id) =>
         runStructural(() => {
-          // A plugin can protect a node from deletion (the daily container). The
-          // core no-ops here -- the single funnel every delete path flows through
-          // -- but shakes the row and toasts the plugin's reason so the block
-          // reads as intentional, not a dropped keystroke. The node isn't
-          // removed, so its row still exists.
-          const protection = getProtection(id);
-          if (protection) {
-            rejectRow(refs.current.get(id)?.closest(".outline-row") ?? null);
-            if (protection.reason)
-              toast.error(protection.reason, { id: "protected-delete" });
-            return;
-          }
+          // A protected node can't be deleted. This is the single funnel every
+          // delete path flows through, so the core enforces it here: shake the
+          // row + toast why (guardProtected), and bail before removing anything.
+          // The node isn't removed, so its row still exists.
+          if (guardProtected(id, "delete", rowOf(id))) return;
           capture(getTreeIndex(), id);
           // Focus the row directly ABOVE the deleted one (Workflowy backspace
           // behavior), computed before the mutation so the neighbor still
@@ -814,40 +803,20 @@ function useNodeCommands({
         }),
 
       onToggleCompleted: (id, completed) => {
-        // A protected node is structural (the daily container holds the day
-        // notes), so it can't be marked done -- completing it would strike
-        // through its whole subtree. Reject with the same shake + toast as a
-        // blocked delete. This funnel catches every completion path (Mod+Enter /
-        // Mod+D on a bullet OR the zoomed title, the todos checkbox). Un-marking
-        // (completed=false) is always allowed. See ADR 0021.
-        if (completed) {
-          const protection = getProtection(id);
-          if (protection) {
-            rejectRow(refs.current.get(id)?.closest(".outline-row") ?? null);
-            const message = protection.completeReason ?? protection.reason;
-            if (message) toast.error(message, { id: "protected-complete" });
-            return;
-          }
-        }
+        // A protected node can't be marked done (completing it would strike
+        // through its whole subtree). This funnel catches every completion path
+        // (Mod+Enter / Mod+D on a bullet OR the zoomed title, the todos
+        // checkbox). Un-marking (completed=false) is always allowed. See ADR 0015.
+        if (completed && guardProtected(id, "complete", rowOf(id))) return;
         capture(getTreeIndex(), id);
         toggleCompleted(id, completed);
       },
 
       onSetTask: (id, isTask) => {
-        // A protected node is structural (the daily container holds the day
-        // notes) and stays a plain text node -- it can't become a to-do. Reject
-        // the conversion with the same shake + toast as a blocked delete; this
-        // funnel catches every task-creation path (`/todo`, the `[]`
-        // autoformat). Un-tasking (isTask=false) is always allowed.
-        if (isTask) {
-          const protection = getProtection(id);
-          if (protection) {
-            rejectRow(refs.current.get(id)?.closest(".outline-row") ?? null);
-            const message = protection.taskReason ?? protection.reason;
-            if (message) toast.error(message, { id: "protected-task" });
-            return;
-          }
-        }
+        // A protected node stays a plain text node -- it can't become a to-do.
+        // This funnel catches every task-creation path (`/todo`, the `[]`
+        // autoformat). Un-tasking (isTask=false) is always allowed. See ADR 0015.
+        if (isTask && guardProtected(id, "task", rowOf(id))) return;
         capture(getTreeIndex(), id);
         setIsTask(id, isTask);
       },
@@ -889,7 +858,8 @@ function useNodeCommands({
         if (consumeClick()) return;
         navigateZoom(id, id);
       },
-    }),
+    };
+  },
     // commands MUST keep stable identity (a prop on every memoized OutlineNode,
     // ADR 0014). The live tree is read via getTreeIndex() and the live view
     // state via getViewRootId()/getViewIsHidden() (view-state.ts) at call time,
@@ -932,7 +902,8 @@ function ZoomedTitle({
   const caretWatchRef = useRef<(() => void) | null>(null);
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
   // node just as on a list bullet, so it wears the same lock when zoomed in.
-  // Reactive: the daily index loads async (mirrors OutlineNode). See ADR 0021.
+  // Reactive: a plugin's protection can load async (mirrors OutlineNode). See
+  // ADR 0015.
   const protectedNode = useIsProtected(node.id);
 
   useEffect(() => {
@@ -963,15 +934,7 @@ function ZoomedTitle({
 
   return (
     <h2 className="zoomed-title">
-      {protectedNode && (
-        <span
-          className="protected-lock"
-          title="Protected node"
-          aria-label="Protected node"
-        >
-          <Lock size={16} strokeWidth={2.5} />
-        </span>
-      )}
+      {protectedNode && <ProtectedLock size={16} />}
       <span
         ref={(el) => {
           ref.current = el;
