@@ -34,6 +34,11 @@ import { kvGetOrCreateE } from '../../data/kv-client-effect'
 /** Sentinel key for the container row (not a valid `YYYY-MM-DD`, so no clash). */
 export const CONTAINER_KEY = 'container'
 
+/** Canonical display name of the "Daily" container. Used both when seeding it
+ *  and to restore it if a user blanks the row (it's protected, so it can't be
+ *  left nameless). Cosmetic -- identity is the side-collection, never the text. */
+export const DAILY_CONTAINER_TEXT = 'Daily'
+
 const dailyRowSchema = z.object({
   /** `YYYY-MM-DD` (local) for a day, or {@link CONTAINER_KEY}. */
   key: z.string(),

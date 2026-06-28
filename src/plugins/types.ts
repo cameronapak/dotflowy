@@ -375,6 +375,30 @@ export interface HeaderSlotSpec {
   render(getCtx: () => PluginContext): ReactNode;
 }
 
+// --- Protected nodes --------------------------------------------------------
+//
+// A plugin can forbid deleting a node it owns (the daily container). Returning a
+// descriptor (not just `true`) lets it carry the human-facing details the core
+// has no business inventing: the *why* for a rejected-delete toast, and the
+// canonical name to restore if the node is blanked.
+
+export interface NodeProtection {
+  /** Concise message shown (as a toast) when a delete of this node is rejected.
+   *  Omit for a silent block. */
+  reason?: string;
+  /** Canonical text restored when the node is emptied -- a protected node can't
+   *  be left nameless. Omit for protected nodes with no fixed name. */
+  canonicalText?: string;
+  /** Message toasted when the emptied node is healed back to `canonicalText`,
+   *  if it should differ from the delete `reason` ("needs a name" vs "can't be
+   *  deleted"). Falls back to `reason` when omitted. */
+  blankReason?: string;
+  /** Message toasted when turning this node into a to-do is rejected -- a
+   *  protected node is structural and stays plain text. Falls back to `reason`
+   *  when omitted. */
+  taskReason?: string;
+}
+
 // --- Seam F (subheader): contextual chrome below the header -----------------
 //
 // Header slots are persistent actions (the daily "Today" button). Subheader
@@ -528,9 +552,12 @@ export interface PluginDef {
   headerSlots?: HeaderSlotSpec[];
   /** Seam F (subheader): contextual chrome below the header (the tag filter). */
   subheaderSlots?: SubheaderSlotSpec[];
-  /** Protected nodes: return true to forbid deleting `nodeId` (the daily
-   *  container). Called on the delete path only (client). */
-  protects?(nodeId: string): boolean;
+  /** Protected nodes: forbid deleting `nodeId` (the daily container). Return
+   *  `false` to allow, or `true` / a {@link NodeProtection} to protect. The
+   *  descriptor lets the plugin supply the *why* (a rejected-delete toast) and a
+   *  canonical name to restore if the node is blanked -- the core never invents
+   *  either. Called on the delete + blank-on-blur paths only (client). */
+  protects?(nodeId: string): boolean | NodeProtection;
   /** Seam G: render-time view transforms (hide-completed, the tag filter). */
   viewTransforms?: ViewTransform[];
   /** Seam H: caret autocomplete menus (the `#` tag menu). */

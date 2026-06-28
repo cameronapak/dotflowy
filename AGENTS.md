@@ -204,7 +204,7 @@ Inline Tailwind classes, not a separate CSS file (separate CSS only for the view
 - **Arrow Up/Down crosses bullets from the edge *visual line*, preserving the caret column** (rect comparison, not text offset; lands via `caretPositionFromPoint`). The neighbor walk (`findVisibleNeighbor` → `flattenVisible`) **must mirror render visibility** (skip completed when `showCompleted` is off) or focus silently no-ops.
 - **Cmd+Shift+↑/↓ moves a bullet among *visible* siblings; at the edge it reparents into the parent's adjacent sibling as a child** (no-op when there is no aunt/uncle, or when the node sits directly under the zoom root). `moveUp`/`moveDown` in `mutations.ts`.
 - **Dragging the bullet dot reorders *and* reparents in one drop** (mouse + touch; y picks the gap, x picks depth). Lives in `use-drag-reorder.ts`, runs imperatively on the hot path. The dot still zooms on a plain click (a movement threshold + `consumeClick()` split drag from click).
-- **A moved bullet flashes then fades** (`flash-node.ts`, `.outline-row.node-acted`) as an acted-upon signifier — every keyboard/drag move sets `pendingFlash` alongside `pendingFocus`; `/move`'s "Go" flashes across a navigation via `requestFlashAfterNav`/`consumeFlashAfterNav`. `e2e/move-flash.spec.ts`.
+- **A moved bullet flashes then fades** (`flash-node.ts`, `.outline-row.node-acted`) as an acted-upon signifier — every keyboard/drag move sets `pendingFlash` alongside `pendingFocus`; `/move`'s "Go" flashes across a navigation via `requestFlashAfterNav`/`consumeFlashAfterNav`. `e2e/move-flash.spec.ts`. The sibling **`rejectRow`** (`.outline-row.node-rejected`) shakes a row side-to-side when a *rejected* action lands on it (a protected node's delete) — same one-shot-class mechanic, with a destructive-tint pulse fallback under `prefers-reduced-motion`. `e2e/daily-notes.spec.ts`.
 
 ## Zoom + view transitions
 
@@ -226,7 +226,7 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 
 The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/adr/0001-plugin-architecture.md); React-widget token mode: [React token widgets](./docs/adr/0006-react-token-widgets.md).
 
-- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
+- **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `NodeProtection`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
 - **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
 
@@ -246,7 +246,7 @@ Seams wired today (each row: the contract, who owns it):
 | **H** caret menu | `MenuSpec` (`trigger` + `entries`), driven by the generic `useMenus` engine. | tags (`#`) |
 | **I** input | `input.onPaste` (replacement string) + `input.autoformat` (rewrite just-typed text). | links (paste), todos (`[]`) |
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
-| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id)` (delete-only no-op). | tags (picker), daily (container) |
+| — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id) → boolean \| NodeProtection` — rejected delete shakes the row (`rejectRow`) + toasts `reason`; blanking heals on blur (restore `canonicalText` + shake + `blankReason` toast, via `getProtection`/`healProtectedText`); `onSetTask` blocks to-do conversion (+ `taskReason` toast); a muted lock (`.protected-lock`) leads the text. | tags (picker), daily (container) |
 
 Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **todos** C+D+F+G+I · **daily** C+F(header)+F(row)+J+protected.
 
@@ -271,7 +271,7 @@ The landmine: a focused bullet can hold **folded** links, so `el.textContent` is
 A daily note is a normal node addressed by a date; the header **Today button** navigates to today's, creating it on first use. **No `Node` field, no migration, no route.**
 
 - **Identity is a side-collection.** `dailyIndexCollection` (`daily-index.ts`) maps a key → `nodeId`: a **local** date `YYYY-MM-DD` (use `localDateKey()`, **not** `toISOString` — day boundary is local midnight) or the `container` sentinel. Never derive a day from `node.text`.
-- **Structure.** Days are children of one auto-created **"Daily" container** (a **protected node**, since `removeNode` cascades). New days insert at the top (newest-first). `goToDate(key, ctx)` is get-or-create, idempotent and self-healing; creation uses low-level `mutations.ts` primitives directly (not `ctx.mutations` — wrong capture/focus semantics for a navigate-away create).
+- **Structure.** Days are children of one auto-created **"Daily" container** (a **protected node**, since `removeNode` cascades — its `protects` descriptor supplies the rejected-delete toast and the `DAILY_CONTAINER_TEXT` name that's restored if the row is blanked). New days insert at the top (newest-first). `goToDate(key, ctx)` is get-or-create, idempotent and self-healing; creation uses low-level `mutations.ts` primitives directly (not `ctx.mutations` — wrong capture/focus semantics for a navigate-away create).
 - **Display.** Text is seeded to the full date ("Tuesday, June 23, 2026"); a `<Badge>` row slot shows a relative label (Today/Yesterday/Jun 23), driven by the mapping (always correct).
 - **Seam C** "Send to Today" (labeled to avoid shadowing `/move`); **Seam J** aliases each day with its relative label, adds a "Go to Today" virtual action (create-when-absent), and a `(Today)` picker annotation. Covered by `e2e/daily-notes.spec.ts`.
 

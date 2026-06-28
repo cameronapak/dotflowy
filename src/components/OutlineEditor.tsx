@@ -67,12 +67,14 @@ import {
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
-  isProtected,
+  getProtection,
   keymapSpecs,
 } from "../plugins/registry";
 import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
-import { consumeFlashAfterNav, flashRow } from "./flash-node";
+import { consumeFlashAfterNav, flashRow, rejectRow } from "./flash-node";
+import { healProtectedText } from "./protected-text";
+import { toast } from "sonner";
 import { Header } from "./Header";
 import { Subheader } from "./Subheader";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
@@ -781,11 +783,32 @@ function useNodeCommands({
       onDeleteNode: (id) =>
         runStructural(() => {
           // A plugin can protect a node from deletion (the daily container). The
-          // core no-ops here -- the single funnel every delete path flows through.
-          if (isProtected(id)) return;
+          // core no-ops here -- the single funnel every delete path flows through
+          // -- but shakes the row and toasts the plugin's reason so the block
+          // reads as intentional, not a dropped keystroke. The node isn't
+          // removed, so its row still exists.
+          const protection = getProtection(id);
+          if (protection) {
+            rejectRow(refs.current.get(id)?.closest(".outline-row") ?? null);
+            if (protection.reason)
+              toast.error(protection.reason, { id: "protected-delete" });
+            return;
+          }
           capture(getTreeIndex(), id);
+          // Focus the row directly ABOVE the deleted one (Workflowy backspace
+          // behavior), computed before the mutation so the neighbor still
+          // exists. Fall back to removeNode's structural pick (next sibling /
+          // parent) only when nothing is above -- the first visible row.
+          const above = findVisibleNeighbor(
+            getTreeIndex(),
+            getViewRootId(),
+            id,
+            "up",
+            getViewIsHidden(),
+          );
           const focusId = removeNode(getTreeIndex(), id);
-          if (focusId) pendingFocus.current = focusId;
+          const target = above ?? focusId;
+          if (target) pendingFocus.current = target;
           else drop(); // node didn't exist; nothing was deleted
         }),
 
@@ -795,6 +818,20 @@ function useNodeCommands({
       },
 
       onSetTask: (id, isTask) => {
+        // A protected node is structural (the daily container holds the day
+        // notes) and stays a plain text node -- it can't become a to-do. Reject
+        // the conversion with the same shake + toast as a blocked delete; this
+        // funnel catches every task-creation path (`/todo`, the `[]`
+        // autoformat). Un-tasking (isTask=false) is always allowed.
+        if (isTask) {
+          const protection = getProtection(id);
+          if (protection) {
+            rejectRow(refs.current.get(id)?.closest(".outline-row") ?? null);
+            const message = protection.taskReason ?? protection.reason;
+            if (message) toast.error(message, { id: "protected-task" });
+            return;
+          }
+        }
         capture(getTreeIndex(), id);
         setIsTask(id, isTask);
       },
@@ -968,7 +1005,10 @@ function ZoomedTitle({
           caretWatchRef.current?.();
           caretWatchRef.current = null;
           const text = readSource(el);
-          if (hasLink(text)) {
+          // A protected node left empty heals: restore its name + shake/toast.
+          const restored = healProtectedText(node.id, text, el);
+          if (restored !== null) syncedRef.current = restored;
+          else if (hasLink(text)) {
             decorate(el, text, null, false);
             syncedRef.current = text;
           }

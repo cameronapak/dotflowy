@@ -39,3 +39,24 @@ export function flashRow(row: Element | null) {
     { once: true },
   );
 }
+
+/**
+ * Shake a row side-to-side to signal a *rejected* action -- the bullet can't be
+ * deleted (a protected node). The "no" gesture a password field gives a wrong
+ * entry. Mirrors `flashRow`'s one-shot-class mechanic: add `.node-rejected`,
+ * clear it on animationend so it can re-trigger. Under `prefers-reduced-motion`
+ * the CSS swaps the shake for a brief destructive-tint pulse (which still emits
+ * animationend) -- so reduced-motion users still get feedback, not silence.
+ */
+export function rejectRow(row: Element | null) {
+  if (!(row instanceof HTMLElement)) return;
+  row.classList.remove("node-rejected");
+  // Force a reflow so re-adding the class restarts the animation from the top.
+  void row.offsetWidth;
+  row.classList.add("node-rejected");
+  row.addEventListener(
+    "animationend",
+    () => row.classList.remove("node-rejected"),
+    { once: true },
+  );
+}

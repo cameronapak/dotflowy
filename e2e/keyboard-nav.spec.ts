@@ -157,4 +157,27 @@ test.describe("keyboard arrow navigation", () => {
     await page.keyboard.press("ArrowUp");
     await expect(text(page, "alpha")).toBeFocused();
   });
+
+  test("backspacing an empty bullet away focuses the row ABOVE, not below", async ({
+    page,
+  }) => {
+    // Workflowy behavior: deleting a bullet by emptying it lands the caret on
+    // the previous row, never the next one. Regression for focus jumping down.
+    await load(page, [
+      { id: "above", parentId: null, prevSiblingId: null, text: "above" },
+      { id: "mid", parentId: null, prevSiblingId: "above", text: "" },
+      { id: "below", parentId: null, prevSiblingId: "mid", text: "below" },
+    ]);
+
+    await text(page, "mid").click();
+    await expect(text(page, "mid")).toBeFocused();
+
+    // Backspace at the start of the now-empty bullet deletes it.
+    await page.keyboard.press("Backspace");
+
+    // It's gone, and focus moved UP to "above" -- not down to "below".
+    await expect(page.locator('li[data-node-id="mid"]')).toHaveCount(0);
+    await expect(text(page, "above")).toBeFocused();
+    await expect(text(page, "below")).not.toBeFocused();
+  });
 });

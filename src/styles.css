@@ -211,6 +211,23 @@
 }
 
 /*
+ * Protected-node lock. A muted glyph leading the text of a node a plugin
+ * forbids deleting (the daily "Daily" container) -- a quiet, always-on
+ * signifier, not a control. Sits in its own column between the bullet and the
+ * text (the row's `gap` spaces it); `align-self: center` lands it on the name.
+ * Decorative, so it carries a title tooltip but no pointer affordance.
+ */
+.protected-lock {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  cursor: help;
+  user-select: none;
+}
+
+/*
  * Completion fade. A row is faded when it's completed or sits under something
  * completed (data-faded set in OutlineNode). Opacity lives on the row, NOT on
  * .outline-node, so it never nests with descendant rows -- one uniform fade
@@ -254,6 +271,50 @@
 @media (prefers-reduced-motion: reduce) {
   .outline-row.node-acted {
     animation: none;
+  }
+}
+
+/*
+ * "Rejected" shake. A protected node (the Daily container) can't be deleted;
+ * rather than silently no-op, the row shakes side-to-side -- the same "no" a
+ * password field gives a wrong entry. One-shot class (`.node-rejected`), added
+ * then cleared on animationend in flash-node.ts. Under reduced-motion the shake
+ * is swapped for a single destructive-tint pulse (below) so those users still
+ * get a signal; that pulse also emits animationend, so the class still clears.
+ */
+@keyframes node-rejected-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  45%,
+  75% {
+    transform: translateX(-5px);
+  }
+  30%,
+  60%,
+  90% {
+    transform: translateX(5px);
+  }
+}
+
+.outline-row.node-rejected {
+  animation: node-rejected-shake 0.4s ease-in-out;
+}
+
+@keyframes node-rejected-pulse {
+  from {
+    background-color: oklch(from var(--destructive) l c h / 0.18);
+  }
+  to {
+    background-color: oklch(from var(--destructive) l c h / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-row.node-rejected {
+    animation: node-rejected-pulse 0.5s ease-out;
   }
 }
 

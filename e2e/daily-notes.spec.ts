@@ -52,6 +52,118 @@ test.describe("daily notes", () => {
     await expect(badge).toHaveText("Today");
   });
 
+  test("deleting the protected Daily container shakes it instead of removing it", async ({
+    page,
+  }) => {
+    await load(page);
+
+    // Materialize the protected container (+ today's note), then go home so the
+    // "Daily" container row sits in the list.
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    const container = rowWithText(page, "Daily");
+    await expect(container).toBeVisible();
+
+    // The protected row wears an always-on lock signifier.
+    await expect(container.locator(".protected-lock")).toBeVisible();
+
+    // Focus the container's own text and fire the subtree-delete hotkey
+    // (Mod+Shift+Backspace -> the single onDeleteNode funnel).
+    await container.locator(".node-text").click();
+    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+
+    // It refuses: the row carries the one-shot reject class bound to the shake
+    // keyframe (confirms rejectRow wired through the isProtected branch), and
+    // the container is still present -- nothing was deleted.
+    await expect(container).toHaveClass(/node-rejected/);
+    await expect(
+      container.evaluate((el) => getComputedStyle(el).animationName),
+    ).resolves.toBe("node-rejected-shake");
+    await expect(container).toBeVisible();
+
+    // ...and a toast spells out *why* it can't go (the plugin's reason).
+    await expect(page.getByText(/can't be deleted/i)).toBeVisible();
+
+    // The class clears itself when the animation ends (so it can re-trigger).
+    await expect(container).not.toHaveClass(/node-rejected/, { timeout: 4000 });
+  });
+
+  test("blanking the protected Daily container restores its name and explains on blur", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    // The container's id is a UUID; capture it so we can target the row even
+    // while its text is momentarily empty.
+    const containerId = await rowWithText(page, "Daily").evaluate(
+      (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+    );
+    expect(containerId).not.toBe("");
+    const containerText = page.locator(
+      `li[data-node-id="${containerId}"] > .outline-row > .node-text`,
+    );
+
+    // Select the whole word and delete it through the real input path (selecting
+    // the contents directly -- arrow/select-all keys are unreliable in macOS
+    // Chromium contentEditable; see enter-split.spec).
+    await containerText.click();
+    await containerText.evaluate((el) => {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    // Editing is unfought: the field is allowed to sit empty mid-edit (no
+    // silent instant snap-back that would hide the reason).
+    await expect(containerText).toHaveText("");
+
+    // Blur by focusing another bullet -> the name heals AND a toast explains
+    // why, so the restore isn't a mystery.
+    await page
+      .locator('li[data-node-id="alpha"] > .outline-row > .node-text')
+      .click();
+    await expect(containerText).toHaveText("Daily");
+    await expect(page.getByText(/needs a name/i)).toBeVisible();
+  });
+
+  test("the protected Daily container can't be turned into a to-do", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    const containerId = await rowWithText(page, "Daily").evaluate(
+      (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+    );
+    expect(containerId).not.toBe("");
+    const containerRow = page.locator(
+      `li[data-node-id="${containerId}"] > .outline-row`,
+    );
+
+    // Run /todo on the container (the conversion the daily plugin forbids).
+    await containerRow.locator(".node-text").click();
+    await page.keyboard.type(" /todo");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.getByRole("option", { name: /Turn into a To-do/i }).click();
+
+    // Rejected: it stays a plain bullet (no checkbox) and a toast explains why.
+    await expect(containerRow.locator(".checkbox")).toHaveCount(0);
+    await expect(page.getByText(/can't be a to-do/i)).toBeVisible();
+    // ...and it still wears its lock, now leading the text.
+    await expect(containerRow.locator(".protected-lock")).toBeVisible();
+  });
+
   test("clicking Today twice reuses the same note (no duplicates)", async ({
     page,
   }) => {

@@ -17,6 +17,7 @@ import type {
   InteractionEvent,
   KeymapSpec,
   MenuSpec,
+  NodeProtection,
   PasteInput,
   PluginContext,
   SearchAction,
@@ -326,11 +327,26 @@ const protectPredicates = plugins
   .map((p) => p.protects)
   .filter((f): f is NonNullable<typeof f> => f != null);
 
-/** True iff any plugin protects `nodeId` from deletion. Consulted by the core's
- *  single delete entry point (OutlineEditor's `onDeleteNode`), which no-ops when
- *  this returns true. The core never learns *why* a node is protected. */
+/** The protection on `nodeId`, or null if no plugin protects it. The first
+ *  matching plugin wins (load order); a bare `true` normalizes to an empty
+ *  descriptor. Consulted by the core's single delete entry point (OutlineEditor's
+ *  `onDeleteNode`) -- which skips the removal, shakes the row (`rejectRow`), and
+ *  toasts `reason` -- by the blur heal, which restores `canonicalText` (+ shake
+ *  + `blankReason` toast) when the node is left empty, by `onSetTask`, which
+ *  blocks turning it into a to-do (+ shake + `taskReason` toast), and by the row
+ *  render, which shows a lock when this is non-null. The core reads the
+ *  descriptor but never authors it. */
+export function getProtection(nodeId: string): NodeProtection | null {
+  for (const p of protectPredicates) {
+    const r = p(nodeId);
+    if (r) return r === true ? {} : r;
+  }
+  return null;
+}
+
+/** True iff any plugin protects `nodeId` from deletion. */
 export function isProtected(nodeId: string): boolean {
-  return protectPredicates.some((p) => p(nodeId));
+  return getProtection(nodeId) !== null;
 }
 
 // --- Seam J: search providers ----------------------------------------------

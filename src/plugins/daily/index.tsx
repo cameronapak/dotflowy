@@ -38,6 +38,7 @@ import {
 import { childrenOf, createId, type TreeIndex } from '../../data/tree'
 import {
   CONTAINER_KEY,
+  DAILY_CONTAINER_TEXT,
   claimMapping,
   formatDayBadge,
   formatDayRelative,
@@ -97,7 +98,7 @@ async function ensureContainer(index: TreeIndex): Promise<string | null> {
   const after = tops.length ? tops[tops.length - 1]!.id : null
   const ok = await ensureNodeExists(
     winner,
-    () => runStructural(() => appendChild(null, after, 'Daily', winner)),
+    () => runStructural(() => appendChild(null, after, DAILY_CONTAINER_TEXT, winner)),
     !won,
   )
   setMapping(CONTAINER_KEY, winner)
@@ -257,8 +258,19 @@ export default definePlugin({
   ],
 
   // Protected nodes: the container can't be deleted -- it guards every day note
-  // and everything written under them (removeNode cascades the subtree).
-  protects: (nodeId) => isContainerNode(nodeId),
+  // and everything written under them (removeNode cascades the subtree). The
+  // descriptor carries the rejected-delete toast copy and the name to restore if
+  // the row is blanked (it can't be left nameless).
+  protects: (nodeId) =>
+    isContainerNode(nodeId)
+      ? {
+          reason:
+            "The Daily list can't be deleted. It holds all your daily notes.",
+          blankReason: "The Daily list needs a name.",
+          taskReason: "The Daily list can't be a to-do.",
+          canonicalText: DAILY_CONTAINER_TEXT,
+        }
+      : false,
 
   // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
   // switcher and the /move picker, even though the node's text is the full date.

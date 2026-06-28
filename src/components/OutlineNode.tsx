@@ -1,11 +1,11 @@
 import { Fragment, memo, useEffect, useRef, type PointerEvent } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Lock } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
-import { autoformat, rowSlots } from "../plugins/registry";
+import { autoformat, isProtected, rowSlots } from "../plugins/registry";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
 import { useBulletKeymap } from "./use-bullet-keymap";
@@ -19,6 +19,7 @@ import {
 } from "./inline-code";
 import { hasLink } from "../data/links";
 import { pasteIntoBullet } from "./paste";
+import { healProtectedText } from "./protected-text";
 
 interface OutlineNodeProps {
   // The node id. The node itself and its visible children are read reactively
@@ -261,6 +262,15 @@ function OutlineNodeBody({
         {beforeTextSlots.map((slot) => (
           <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
         ))}
+        {isProtected(node.id) && (
+          <span
+            className="protected-lock"
+            title="Protected node"
+            aria-label="Protected node"
+          >
+            <Lock size={12} strokeWidth={2.5} />
+          </span>
+        )}
         <span
           ref={(el) => {
             textRef.current = el;
@@ -347,10 +357,14 @@ function OutlineNodeBody({
             menus.close();
             caretWatchRef.current?.();
             caretWatchRef.current = null;
-            // Fold: re-render every link in this bullet as a clean <a>.
             const el = e.currentTarget;
             const text = readSource(el);
-            if (hasLink(text)) {
+            // A protected node left empty heals: restore its name + shake/toast.
+            const restored = healProtectedText(node.id, text, el);
+            if (restored !== null) {
+              syncedRef.current = restored;
+            } else if (hasLink(text)) {
+              // Fold: re-render every link in this bullet as a clean <a>.
               decorate(el, text, null, false);
               syncedRef.current = text;
             }
