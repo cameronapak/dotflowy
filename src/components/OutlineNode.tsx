@@ -1,4 +1,11 @@
-import { Fragment, memo, useEffect, useRef, type PointerEvent } from "react";
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type PointerEvent,
+} from "react";
 import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
@@ -187,12 +194,37 @@ function OutlineNodeBody({
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
 
+  // First population of a freshly-mounted span: ALWAYS write the stored text
+  // here, synchronously before paint and before FocusPass's passive el.focus()
+  // can claim the span. A reparent (move/outdent/drag) unmounts OutlineNodeBody
+  // at the old position and mounts a fresh instance at the new one -- empty
+  // <span>, syncedRef back to null -- and every move also sets pendingFocus, so
+  // FocusPass focuses that empty span. The update effect's focused-skip guard
+  // below is load-bearing for the keystroke path (it stops a lagging echo from
+  // repainting mid-type), but it is unsafe until onInput has populated the DOM,
+  // which never happens on a fresh mount. Seeding the span here -- a layout
+  // effect, so pre-paint and ahead of any passive focus -- means the guard is
+  // never reached on mount, the text is never missing, and the caret logic in
+  // FocusPass runs against a populated node. See ADR 0014 (per-node store) and
+  // the move reparent in mutations.ts.
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    decorate(el, node.text, null, false);
+    syncedRef.current = node.text;
+    // Mount-only: the update effect below owns every subsequent reconciliation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Push stored text into the contentEditable as formatted HTML when it
-  // changes from something OTHER than this bullet's own typing -- initial
-  // mount, undo, a programmatic setText. The guard (syncedRef === node.text)
-  // makes the common echo-after-keystroke a no-op: onInput already decorated
-  // and recorded the text, so the store round-trip rebuilds nothing and the
-  // caret never moves. We skip mid-composition; compositionend re-syncs.
+  // changes from something OTHER than this bullet's own typing -- undo, a
+  // programmatic setText, an echo that carries a genuinely different value.
+  // The guard (syncedRef === node.text) makes the common echo-after-keystroke
+  // a no-op: onInput already decorated and recorded the text, so the store
+  // round-trip rebuilds nothing and the caret never moves. We skip
+  // mid-composition; compositionend re-syncs. (Initial mount is owned by the
+  // layout effect above, so on the first render syncedRef already === node.text
+  // and this early-returns.)
   useEffect(() => {
     const el = textRef.current;
     if (!el || composingRef.current) return;
@@ -206,10 +238,7 @@ function OutlineNodeBody({
     // NOT match the echo, so it falls through and still repaints. Reconciliation
     // for the skipped case happens on blur (onBlur re-reads the DOM). See
     // collection.ts `echoedText`.
-    if (
-      document.activeElement === el &&
-      echoedTextFor(node.id) === node.text
-    ) {
+    if (document.activeElement === el && echoedTextFor(node.id) === node.text) {
       return;
     }
     // A focused bullet reveals the link under its caret (per-link); a blurred

@@ -9,15 +9,14 @@ const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
 const nestedUnder = (page: Page, ancestorId: string, nodeId: string) =>
-  page.locator(
-    `li[data-node-id="${ancestorId}"] li[data-node-id="${nodeId}"]`,
-  );
+  page.locator(`li[data-node-id="${ancestorId}"] li[data-node-id="${nodeId}"]`);
 
 /**
  *   - Uncle
  *       - existing
  *   - Parent
  *       - first
+ *           - grandchild
  *       - last
  *   - Aunt
  *       - cousin
@@ -33,6 +32,12 @@ const TREE: SeedNode[] = [
     text: "existing",
   },
   { id: "first", parentId: "parent", prevSiblingId: null, text: "first" },
+  {
+    id: "grandchild",
+    parentId: "first",
+    prevSiblingId: null,
+    text: "grandchild",
+  },
   { id: "last", parentId: "parent", prevSiblingId: "first", text: "last" },
   { id: "cousin", parentId: "aunt", prevSiblingId: null, text: "cousin" },
 ];
@@ -63,4 +68,37 @@ test.describe("keyboard move edge: reparent into parent's sibling", () => {
     await expect(nestedUnder(page, "parent", "last")).toHaveCount(0);
     await expect(text(page, "last")).toBeFocused();
   });
+
+  // Invariant: a reparent (move/outdent/drag) unmounts OutlineNodeBody at the
+  // old position and mounts a fresh contentEditable span at the new one, then
+  // re-focuses it. The moved node must keep showing its own text. The previous
+  // tests here only checked placement + focus, never text content -- so they
+  // would pass even with a blanked span (an empty contentEditable is still
+  // "visible" and focusable). This locks the text-survival invariant directly.
+  // (`first` is seeded with a child so both the parent and its subtree exercise
+  // the remount path.) See ADR 0014.
+  for (const move of [
+    {
+      id: "first",
+      key: `${modifier()}+Shift+ArrowUp`,
+      label: "move up",
+    },
+    {
+      id: "last",
+      key: `${modifier()}+Shift+ArrowDown`,
+      label: "move down",
+    },
+  ] as const) {
+    test(`${move.label}: the moved node keeps its own text while focused`, async ({
+      page,
+    }) => {
+      await seedOutline(page, TREE);
+      await page.goto("/");
+      await text(page, move.id).click();
+      await page.keyboard.press(move.key);
+
+      await expect(text(page, move.id)).toBeFocused();
+      await expect(text(page, move.id)).toHaveText(move.id);
+    });
+  }
 });
