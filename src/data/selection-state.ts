@@ -148,29 +148,60 @@ export function selectSingle(nodeId: string) {
  * Enter selection from a focused bullet via Shift+arrow: anchor on `nodeId`,
  * then move the focus end one step in `direction`. At a boundary the extend is a
  * no-op, so the result is just `[nodeId]` -- you always at least select the
- * current node and enter selection mode.
+ * current node and enter selection mode. Entering deliberately does NOT climb to
+ * the parent / dive to a child (`allowClimb: false`): the first press selects the
+ * node under the caret, never jumps off it; the depth-walk is for subsequent
+ * (while-selected) presses.
  */
 export function startSelection(nodeId: string, direction: 'up' | 'down') {
   selectRange(nodeId, nodeId)
-  extendSelection(direction)
+  extendSelection(direction, false)
 }
 
 /**
  * Move the focus end one visible sibling in `direction` (Shift+arrow). Reversing
  * direction shrinks back toward the anchor before extending the other way -- a
- * property of the anchor/focus model, not special-cased. At the first/last
- * visible sibling, extending toward that edge is a no-op (never crosses into
- * another parent's run).
+ * property of the anchor/focus model, not special-cased.
+ *
+ * At the first/last visible sibling the run can't extend further among siblings.
+ * For a MULTI-root run that edge stays a no-op -- the run never spans parents
+ * (ADR 0018). For a SINGLE-root selection it instead MOVES by depth: Up selects
+ * the parent, Down dives into the first visible child. The selection stays one
+ * unambiguous subtree, so every operation on it is still well-defined -- this is
+ * NOT the rejected visual-flatten range (which spanned parents with multiple
+ * roots). Climbing stops at the zoom root (you can't select the view root or
+ * escape the zoom); diving needs an expanded node with a visible child.
+ * `allowClimb` is false on entry (see {@link startSelection}).
  */
-export function extendSelection(direction: 'up' | 'down') {
+export function extendSelection(direction: 'up' | 'down', allowClimb = true) {
   const s = state
   if (!s) return
-  const sibs = visibleSiblings(getTreeIndex(), s.parentId)
+  const index = getTreeIndex()
+  const sibs = visibleSiblings(index, s.parentId)
   const fi = sibs.findIndex((n) => n.id === s.focusId)
   if (fi === -1) return
   const ni = direction === 'down' ? fi + 1 : fi - 1
-  if (ni < 0 || ni >= sibs.length) return // boundary no-op
-  selectRange(s.anchorId, sibs[ni]!.id)
+  if (ni >= 0 && ni < sibs.length) {
+    selectRange(s.anchorId, sibs[ni]!.id)
+    return
+  }
+  // Sibling boundary. Single-root selections walk by depth; multi-root no-ops.
+  if (!allowClimb || s.rootIds.length !== 1) return
+  if (direction === 'up') {
+    // Climb to the parent. A visible node always has a visible parent, so no
+    // hidden check is needed. Stop at the zoom root (parentId === the view root,
+    // or null at the top level) -- the view root isn't a selectable node.
+    if (s.parentId === null || s.parentId === getViewRootId()) return
+    selectSingle(s.parentId)
+  } else {
+    // Dive into the first visible child. Collapsed nodes render no children, so
+    // there's nothing to move into.
+    const node = index.byId.get(s.focusId)
+    if (!node || node.collapsed) return
+    const kids = visibleSiblings(index, s.focusId)
+    if (kids.length === 0) return
+    selectSingle(kids[0]!.id)
+  }
 }
 
 /**

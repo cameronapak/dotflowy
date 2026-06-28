@@ -10,6 +10,15 @@ const FLAT: SeedNode[] = [
   { id: "d", parentId: null, prevSiblingId: "c", text: "delta" },
 ];
 
+// A single-child chain -- the simplest shape to reason about the depth walk at a
+// sibling boundary (Shift+Up climbs to the parent, Shift+Down dives to the child)
+// with no siblings around to extend into instead.
+const CHAIN: SeedNode[] = [
+  { id: "a", parentId: null, prevSiblingId: null, text: "alpha" },
+  { id: "aa", parentId: "a", prevSiblingId: null, text: "alphaalpha" },
+  { id: "aaa", parentId: "aa", prevSiblingId: null, text: "alphaalphaalpha" },
+];
+
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
@@ -73,6 +82,39 @@ test.describe("Node multi-selection", () => {
     await expect(li(page, "d")).toHaveAttribute("data-selected", "single");
     await page.keyboard.press("Shift+ArrowDown");
     await expect(li(page, "d")).toHaveAttribute("data-selected", "single");
+  });
+
+  test("at the sibling boundary, a single-root selection climbs to the parent and dives back into the child", async ({
+    page,
+  }) => {
+    await load(page, CHAIN);
+    await focus(page, "aaa");
+
+    // First press selects the focused node itself -- entering never climbs.
+    await page.keyboard.press("Shift+ArrowUp");
+    await expect(li(page, "aaa")).toHaveAttribute("data-selected", "single");
+
+    // No upper sibling -> the selection moves UP to the parent (the child stays
+    // tinted as the parent's implied subtree, but only the root carries an edge).
+    await page.keyboard.press("Shift+ArrowUp");
+    await expect(li(page, "aa")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "aaa")).not.toHaveAttribute("data-selected", /.*/);
+
+    // Climb again to the top-level grandparent.
+    await page.keyboard.press("Shift+ArrowUp");
+    await expect(li(page, "a")).toHaveAttribute("data-selected", "single");
+
+    // At the top level there is no parent to climb to -> no-op.
+    await page.keyboard.press("Shift+ArrowUp");
+    await expect(li(page, "a")).toHaveAttribute("data-selected", "single");
+
+    // Shift+Down dives back into the first visible child, one level per press.
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(li(page, "aa")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "a")).not.toHaveAttribute("data-selected", /.*/);
+
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(li(page, "aaa")).toHaveAttribute("data-selected", "single");
   });
 
   test("Cmd+A ladder: text -> node -> whole view", async ({ page }) => {

@@ -17,7 +17,9 @@ delete, indent, move, copy — only has an unambiguous meaning on a single-paren
 makes "indent these into what?" and "move this run where?" undefined, and creates the paradox of
 selecting a node together with its own descendant. Sibling-scoping is the deliberate simplification
 of Workflowy's "shift+down just keeps going down visually," traded for operations that are never
-ambiguous.
+ambiguous. The one allowed cross-level move is a **single-root** selection walking by depth at a
+sibling boundary (climb to parent / dive to first child) — it's still exactly one subtree, so no
+operation is ever ambiguous; the rejection is specifically of **multi-root** ranges that span parents.
 
 **Caret and selection are mutually exclusive.** While nodes are selected there is no text caret;
 while you have a caret you're editing one bullet. The transitions are the whole interaction:
@@ -25,8 +27,13 @@ while you have a caret you're editing one bullet. The transitions are the whole 
 - **Enter via `Shift+↑/↓`** from a focused bullet: anchor/focus model. The start node is the fixed
   **anchor**; Shift+arrow moves the **focus** end; the selection is the inclusive sibling range
   between them. Reversing direction **shrinks back toward the anchor** before extending the other
-  way. At the first/last sibling, Shift toward that edge is a **no-op** — it never jumps into
-  another parent's run.
+  way. At the first/last sibling a **multi-root** run can't extend further — that edge is a **no-op**,
+  never jumping into another parent's run. A **single-root** selection instead **walks by depth**
+  there: Shift+↑ selects the **parent**, Shift+↓ dives into the **first visible child** (climbing
+  stops at the zoom root — the view root isn't a selectable node — and a collapsed/childless node
+  can't dive). That keeps the selection one unambiguous subtree, so it is *not* the rejected
+  multi-parent visual range. Entering (the very first press) deliberately does **not** climb/dive —
+  it selects the node under the caret, never jumps off it; the depth walk is for subsequent presses.
 - **Enter via `Cmd+A` — a bounded 3-rung ladder:** (1) all text in the bullet (native), (2) this
   node + its subtree, (3) the whole current view (the zoom root's subtree). The rung is **derived
   from the current selection state, not a press counter** (counters desync the instant the user does
@@ -75,5 +82,6 @@ moving (focus) edge; composes with the faded/completed and filter-dimmed states.
 (`accent` vs a `primary` tint vs a dedicated `--selection`) is a polish call made by eye in both
 themes at build time.
 
-**Don't:** use a visual-flatten selection; loop `run(nodeId)` over a set; let typing replace a
+**Don't:** use a multi-root visual-flatten range that spans parents (a single-root depth walk at a
+boundary is fine — it stays one subtree); loop `run(nodeId)` over a set; let typing replace a
 selection; thread selection through props; or route the batch delete outside `runStructural`.
