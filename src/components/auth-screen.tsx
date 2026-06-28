@@ -23,6 +23,10 @@ export function AuthScreen() {
     e.preventDefault();
     setError(null);
     setBusy(true);
+    // try/catch (not try/finally): the catch is total and never re-throws, so
+    // `setBusy(false)` always runs after the block -- equivalent to a finally,
+    // but React Compiler can't yet lower a TryStatement with a finalizer, so a
+    // finally here opts the whole component out of compilation.
     try {
       const res = isSignup
         ? await signUp.email({
@@ -37,9 +41,8 @@ export function AuthScreen() {
       // On success the session store updates and the gate swaps in the editor.
     } catch {
       setError("Network error. Check your connection and try again.");
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   }
 
   return (

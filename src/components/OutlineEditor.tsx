@@ -211,7 +211,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     getRootId: getViewRootId,
     getIsHidden: getViewIsHidden,
     getRowEl: (id) =>
-      (refs.current.get(id)?.closest(".outline-row") as HTMLElement | null) ??
+      (refs.get(id)?.closest(".outline-row") as HTMLElement | null) ??
       null,
     getListEl: () => listRef.current,
     onMove: (id, newParentId, afterSiblingId) =>
@@ -414,7 +414,7 @@ function useBootstrapOutline() {
 interface OutlineFocus {
   /** id -> contentEditable span. The zoomed title registers under rootId too,
    *  so focus logic treats titles and list items uniformly. */
-  refs: RefObject<Map<string, HTMLSpanElement | null>>;
+  refs: Map<string, HTMLSpanElement | null>;
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
   /** The node to focus after the next render (most-recently inserted/moved). */
   pendingFocus: RefObject<string | null>;
@@ -433,15 +433,21 @@ interface OutlineFocus {
  * are returned so the command closures and drag can write them. See ADR 0014.
  */
 function useOutlineFocus(): OutlineFocus {
-  // The refs registry. Lazy-init the Map once: useRef has no lazy-initializer
-  // form, so passing `new Map()` directly would rebuild and discard it on every
-  // render. (react-doctor/rerender-lazy-ref-init.)
-  const refs = useRef<Map<string, HTMLSpanElement | null>>(null!);
-  if (!refs.current) refs.current = new Map();
+  // The refs registry: a stable, mutable id->span Map. useState's lazy
+  // initializer builds it exactly once and the identity never changes -- we
+  // only ever mutate the Map in place (set/delete), never replace it via the
+  // setter -- so it behaves exactly like a ref but WITHOUT reading/writing a
+  // ref during render. That ref-in-render is what a lazy-init useRef
+  // (`if (!refs) refs = new Map()`) does, and it bails this hook
+  // out of React Compiler optimization (react-hooks-js/refs).
+  const [refs] = useState(() => new Map<string, HTMLSpanElement | null>());
+  // `refs` is a stable useState Map (never replaced), so listing it keeps this
+  // callback's identity stable -- registerRef is a prop on every memoized
+  // OutlineNode, so it MUST stay referentially stable (ADR 0014).
   const registerRef = useCallback((id: string, el: HTMLSpanElement | null) => {
-    if (el) refs.current.set(id, el);
-    else refs.current.delete(id);
-  }, []);
+    if (el) refs.set(id, el);
+    else refs.delete(id);
+  }, [refs]);
 
   const pendingFocus = useRef<string | null>(null);
   const pendingFocusAtStart = useRef(false);
@@ -452,7 +458,7 @@ function useOutlineFocus(): OutlineFocus {
   // only exists after the structural mutation's render.
   useEffect(() => {
     if (pendingFocus.current) {
-      const el = refs.current.get(pendingFocus.current);
+      const el = refs.get(pendingFocus.current);
       if (el) {
         el.focus();
         if (pendingFocusAtStart.current) placeCaretAtStart(el);
@@ -462,7 +468,7 @@ function useOutlineFocus(): OutlineFocus {
       pendingFocusAtStart.current = false;
     }
     if (pendingFlash.current) {
-      const el = refs.current.get(pendingFlash.current);
+      const el = refs.get(pendingFlash.current);
       flashRow(el?.closest(".outline-row") ?? null);
       pendingFlash.current = null;
     }
@@ -472,11 +478,11 @@ function useOutlineFocus(): OutlineFocus {
   // list items and the zoomed title). Null when focus is outside the outline.
   const findFocusedId = useCallback((): string | null => {
     const active = document.activeElement;
-    for (const [id, el] of refs.current) {
+    for (const [id, el] of refs) {
       if (el === active) return id;
     }
     return null;
-  }, []);
+  }, [refs]);
 
   // Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z: undo/redo, owning history over the browser's
   // native contentEditable undo (preventDefault). The focused id is handed in so
@@ -511,7 +517,7 @@ interface ZoomNavigationArgs {
   index: TreeIndex;
   rootId: string | null;
   isHidden: (node: Node) => boolean;
-  refs: RefObject<Map<string, HTMLSpanElement | null>>;
+  refs: Map<string, HTMLSpanElement | null>;
   navigate: ReturnType<typeof useNavigate>;
 }
 
@@ -568,11 +574,11 @@ function useZoomNavigation({
       // Retarget the morph name from this view's current pivot onto the new one.
       const prev = pivotIdRef.current;
       if (prev && prev !== pivot) {
-        const prevEl = refs.current.get(prev);
+        const prevEl = refs.get(prev);
         prevEl?.style.removeProperty("view-transition-name");
         prevEl?.classList.remove("vt-morph");
       }
-      const el = refs.current.get(pivot);
+      const el = refs.get(pivot);
       if (el) {
         el.style.setProperty("view-transition-name", "zoom-target");
         el.classList.add("vt-morph");
@@ -619,7 +625,7 @@ function useZoomNavigation({
       const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
       if (firstChild) targetId = firstChild.id;
     }
-    const el = refs.current.get(targetId);
+    const el = refs.get(targetId);
     if (!el) return;
     el.focus({ preventScroll: true });
     placeCaretAtEnd(el);
@@ -635,7 +641,7 @@ function useZoomNavigation({
   useEffect(() => {
     const flashId = consumeFlashAfterNav();
     if (!flashId) return;
-    const el = refs.current.get(flashId);
+    const el = refs.get(flashId);
     if (!el) return;
     el.focus({ preventScroll: true });
     placeCaretAtEnd(el);
@@ -650,7 +656,7 @@ function useZoomNavigation({
 }
 
 interface NodeCommandsArgs {
-  refs: RefObject<Map<string, HTMLSpanElement | null>>;
+  refs: Map<string, HTMLSpanElement | null>;
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
   pendingFlash: RefObject<string | null>;
@@ -676,7 +682,7 @@ function useNodeCommands({
   return useMemo<NodeCommands>(() => {
     // The `.outline-row` element for a node, for the protection-rejection shake.
     const rowOf = (id: string) =>
-      refs.current.get(id)?.closest(".outline-row") ?? null;
+      refs.get(id)?.closest(".outline-row") ?? null;
     return {
       onTextChange: (id, text) => {
         // Coalesce a run of keystrokes on one bullet into a single undo step,
@@ -838,7 +844,7 @@ function useNodeCommands({
           getViewIsHidden(),
         );
         if (target) {
-          const el = refs.current.get(target);
+          const el = refs.get(target);
           if (el) {
             el.focus();
             if (x != null) placeCaretAtColumn(el, direction, x);

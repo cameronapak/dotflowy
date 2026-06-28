@@ -383,31 +383,66 @@ function OutlineNodeBody({
       </div>
 
       {hasChildren && (
-        // Children stay mounted while collapsed so the reveal/hide can animate
-        // (the grid-rows trick needs both states present). The wrapper clamps
-        // height to 0 when collapsed; the editor's visible-order walk skips
-        // collapsed subtrees independently, so hidden rows are inert.
-        <div
-          className="outline-children-wrap"
-          data-collapsed={effectiveCollapsed}
-        >
-          <ul className="outline-children" aria-hidden={effectiveCollapsed}>
-            {visibleChildIds.map((childId) => (
-              <OutlineNode
-                key={childId}
-                nodeId={childId}
-                commands={commands}
-                pluginCtx={pluginCtx}
-                registerRef={registerRef}
-                pivotId={pivotId}
-                ancestorCompleted={faded}
-                isHidden={isHidden}
-                filter={filter}
-              />
-            ))}
-          </ul>
-        </div>
+        <OutlineNodeChildren
+          childIds={visibleChildIds}
+          collapsed={effectiveCollapsed}
+          ancestorCompleted={faded}
+          commands={commands}
+          pluginCtx={pluginCtx}
+          registerRef={registerRef}
+          pivotId={pivotId}
+          isHidden={isHidden}
+          filter={filter}
+        />
       )}
     </li>
+  );
+}
+
+/**
+ * The recursive child list for one bullet: the collapse-animation wrapper plus
+ * the mapped child `OutlineNode`s. Split out of `OutlineNodeBody` so that body
+ * stays focused on the single bullet's own row and behavior, while this piece
+ * owns the tree descent. Children stay mounted while collapsed so the
+ * reveal/hide can animate (the grid-rows trick needs both states present); the
+ * wrapper clamps height to 0 when collapsed, and the editor's visible-order walk
+ * skips collapsed subtrees independently, so hidden rows are inert.
+ */
+function OutlineNodeChildren({
+  childIds,
+  collapsed,
+  ancestorCompleted,
+  commands,
+  pluginCtx,
+  registerRef,
+  pivotId,
+  isHidden,
+  filter,
+}: {
+  childIds: string[];
+  collapsed: boolean;
+  ancestorCompleted: boolean;
+} & Pick<
+  OutlineNodeProps,
+  "commands" | "pluginCtx" | "registerRef" | "pivotId" | "isHidden" | "filter"
+>) {
+  return (
+    <div className="outline-children-wrap" data-collapsed={collapsed}>
+      <ul className="outline-children" aria-hidden={collapsed}>
+        {childIds.map((childId) => (
+          <OutlineNode
+            key={childId}
+            nodeId={childId}
+            commands={commands}
+            pluginCtx={pluginCtx}
+            registerRef={registerRef}
+            pivotId={pivotId}
+            ancestorCompleted={ancestorCompleted}
+            isHidden={isHidden}
+            filter={filter}
+          />
+        ))}
+      </ul>
+    </div>
   );
 }

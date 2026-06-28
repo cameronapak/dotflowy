@@ -7,9 +7,8 @@ export function DailyNavigationProgress() {
   if (!pending) return null
 
   return (
-    <div
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-0.5 overflow-hidden"
-      role="status"
+    <output
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-20 block h-0.5 overflow-hidden"
       aria-live="polite"
     >
       <span className="sr-only">Opening today&apos;s note…</span>
@@ -22,6 +21,6 @@ export function DailyNavigationProgress() {
           ease: 'easeInOut',
         }}
       />
-    </div>
+    </output>
   )
 }

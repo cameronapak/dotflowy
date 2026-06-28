@@ -19,7 +19,7 @@ export function Subheader({
   getCtx?: () => PluginContext;
 }) {
   const reduceMotion = useReducedMotion();
-  const contentRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [height, setHeight] = useState(0);
@@ -75,9 +75,8 @@ export function Subheader({
         ref={shellRef}
         className={cn("bg-muted/30", open && "border-b border-border")}
       >
-        <div
+        <section
           ref={contentRef}
-          role="region"
           aria-label="Active filters"
           className={cn(
             "mx-auto flex max-w-[720px] flex-wrap items-center gap-2",
@@ -87,7 +86,7 @@ export function Subheader({
           {subheaderSlots.map((s) => (
             <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
           ))}
-        </div>
+        </section>
       </div>
     </motion.div>
   );
