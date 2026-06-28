@@ -436,8 +436,15 @@ h2 > span.protected-lock {
 
 .checkbox {
   flex: 0 0 auto;
-  margin-top: 6px;
   cursor: pointer;
+}
+
+/* The list row is `align-items: flex-start`, so the checkbox needs a nudge onto
+   the text baseline. The zoomed title is flex-centered (and renders the same
+   checkbox via the title slot), so it must NOT inherit this -- scope it to the
+   row. Mirrors the daily badge's row-only `mt-1`. */
+.outline-row .checkbox {
+  margin-top: 6px;
 }
 
 .node-text {

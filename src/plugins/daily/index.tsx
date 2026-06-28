@@ -197,9 +197,21 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
   );
 }
 
-// --- row slot: the date badge -----------------------------------------------
+// --- slot: the date badge ---------------------------------------------------
 
-function DailyBadge({ nodeId }: { nodeId: string }) {
+// Rendered in two homes (Seam F): the list bullet (`placement="row"`) and the
+// zoomed page title (`placement="title"`). The only visual difference is the
+// vertical nudge -- the outline row top-aligns its children so the badge needs
+// `mt-1` to land on the text baseline, while `.zoomed-title` is flex-centered
+// so it needs none. Same size in both: a small pill reads as a label beside the
+// big title, consistent with the row.
+function DailyBadge({
+  nodeId,
+  placement,
+}: {
+  nodeId: string;
+  placement: "row" | "title";
+}) {
   const key = useDailyDate(nodeId);
   if (!key) return null;
   const isToday = key === localDateKey();
@@ -207,7 +219,8 @@ function DailyBadge({ nodeId }: { nodeId: string }) {
     <Badge
       variant={isToday ? "default" : "secondary"}
       className={cn([
-        "shrink-0 mt-1 border!",
+        "shrink-0 border!",
+        placement === "row" && "mt-1",
         isToday ? "border-transparent" : "border-border",
       ])}
       data-daily-date={key}
@@ -236,7 +249,12 @@ export default definePlugin({
     {
       id: "daily-date-badge",
       position: "row:before-text",
-      render: (node) => <DailyBadge nodeId={node.id} />,
+      render: (node) => <DailyBadge nodeId={node.id} placement="row" />,
+    },
+    {
+      id: "daily-date-badge-title",
+      position: "title:before-text",
+      render: (node) => <DailyBadge nodeId={node.id} placement="title" />,
     },
   ],
 

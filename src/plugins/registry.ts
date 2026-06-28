@@ -333,7 +333,7 @@ for (const k of keymapSpecs) {
   }
 }
 
-// --- Seam F: row render slots ----------------------------------------------
+// --- Seam F: node render slots ---------------------------------------------
 
 const slotSpecs: SlotSpec[] = plugins.flatMap((p) => p.slots ?? []);
 
@@ -348,9 +348,10 @@ for (const s of slotSpecs) {
   else slotsByPosition.set(s.position, [s]);
 }
 
-/** The row slots registered at `position`, in plugin/array order. Returns a
- *  referentially stable array (precomputed), safe to read on the hot path. */
-export function rowSlots(position: SlotPosition): readonly SlotSpec[] {
+/** The slots registered at `position` (a list-row or zoomed-title position), in
+ *  plugin/array order. Returns a referentially stable array (precomputed), safe
+ *  to read on the hot path. */
+export function slotsAt(position: SlotPosition): readonly SlotSpec[] {
   return slotsByPosition.get(position) ?? EMPTY_SLOTS;
 }
 

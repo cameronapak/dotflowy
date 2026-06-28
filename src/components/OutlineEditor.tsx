@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -68,6 +69,7 @@ import {
   dispatchClick,
   dispatchContextMenu,
   keymapSpecs,
+  slotsAt,
   useIsProtected,
   useViewFilter,
 } from "../plugins/registry";
@@ -953,6 +955,12 @@ function ZoomedTitle({
   // ADR 0015.
   const protectedNode = useIsProtected(node.id);
 
+  // Plugin slots for the zoomed title (Seam F): the same decorations a list
+  // bullet gets at `row:before-text` -- the daily date badge, the todos checkbox
+  // -- rendered before the text here too. Stable array (precomputed in the
+  // registry). Mirrors OutlineNode's order: slots, then the lock, then the text.
+  const beforeTextSlots = slotsAt("title:before-text");
+
   useEffect(() => {
     const el = ref.current;
     if (!el || composingRef.current) return;
@@ -981,6 +989,9 @@ function ZoomedTitle({
 
   return (
     <h2 className="zoomed-title">
+      {beforeTextSlots.map((slot) => (
+        <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
+      ))}
       {protectedNode && <ProtectedLock size={16} />}
       <span
         ref={(el) => {

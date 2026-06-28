@@ -14,7 +14,9 @@
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import { definePlugin, type PluginContext } from "../types";
+import { type Node } from "../../data/tree";
 
 // Toggle completion on a node, shared by Mod+Enter and Mod+D. Reads the live
 // node off the tree so it flips relative to the current state.
@@ -24,26 +26,59 @@ function toggleCompletion(nodeId: string, ctx: PluginContext) {
   ctx.mutations.onToggleCompleted(nodeId, !node.completed);
 }
 
+// Seam F: the checkbox, before the text on a task. Rendered in two homes -- the
+// list bullet (`placement="row"`) and the zoomed page title (`placement="title"`).
+// Unlike the daily badge, the checkbox is NOT size-constant across the two: the
+// title text is a 24px h2, so a compact 16px control reads as undersized next to
+// it; the title checkbox scales up to sit with the larger text (the row keeps the
+// compact one). Null on a plain bullet. The handler reads ctx lazily (getCtx) so
+// nothing is allocated at render time.
+function TaskCheckbox({
+  node,
+  getCtx,
+  placement,
+}: {
+  node: Node;
+  getCtx: () => PluginContext;
+  placement: "row" | "title";
+}) {
+  if (!node.isTask) return null;
+  return (
+    <Checkbox
+      className={cn(
+        "checkbox touch-hitbox border-muted-foreground",
+        // Larger control + a little more breathing room next to the 24px title
+        // (the title's flex gap alone reads tight at that text size).
+        placement === "title" && "size-5 me-1",
+      )}
+      checked={node.completed}
+      onCheckedChange={(checked) =>
+        getCtx().mutations.onToggleCompleted(node.id, checked)
+      }
+    />
+  );
+}
+
 export default definePlugin({
   id: "todos",
 
-  // Seam F: the checkbox, rendered between the bullet dot and the text on a
-  // task. Returns null for a plain bullet (no checkbox). The handler reads ctx
-  // lazily (getCtx) so nothing is allocated at render time.
+  // Seam F: the checkbox, before the text on a task -- between the dot and the
+  // text on a list bullet, and leading the page title when zoomed in. See
+  // TaskCheckbox for the per-placement sizing.
   slots: [
     {
       id: "todo-checkbox",
       position: "row:before-text",
-      render: (node, getCtx) =>
-        node.isTask ? (
-          <Checkbox
-            className="checkbox touch-hitbox border-muted-foreground"
-            checked={node.completed}
-            onCheckedChange={(checked) =>
-              getCtx().mutations.onToggleCompleted(node.id, checked)
-            }
-          />
-        ) : null,
+      render: (node, getCtx) => (
+        <TaskCheckbox node={node} getCtx={getCtx} placement="row" />
+      ),
+    },
+    {
+      id: "todo-checkbox-title",
+      position: "title:before-text",
+      render: (node, getCtx) => (
+        <TaskCheckbox node={node} getCtx={getCtx} placement="title" />
+      ),
     },
   ],
 

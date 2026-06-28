@@ -29,6 +29,21 @@ async function goHome(page: Page) {
   await expect(page).toHaveURL(/\/$/);
 }
 
+// Open the Cmd+K node switcher and type a query. cmdk autofocuses its input a
+// beat AFTER the dialog mounts; when Cmd+K fires right after a navigation, the
+// editor's post-nav focus effect can win that race and the dialog input never
+// takes focus, so typed keys land on the outline and are dropped (harmless at
+// human speed — seconds pass before you type — but deterministic at test speed).
+// Click the input to deterministically own focus, confirm it stuck, then type.
+async function openSwitcherAndType(page: Page, text: string) {
+  await page.keyboard.press(`${modifier()}+k`);
+  const input = page.getByPlaceholder("Search nodes...");
+  await expect(input).toBeVisible();
+  await input.click();
+  await expect(input).toBeFocused();
+  await page.keyboard.type(text);
+}
+
 test.describe("daily notes", () => {
   test("Today creates the Daily container + today's note and zooms in", async ({
     page,
@@ -98,6 +113,23 @@ test.describe("daily notes", () => {
     // It's the past day's badge: not "Today", and without the today-only hook.
     await expect(badge).not.toHaveText("Today");
     await expect(badge).not.toHaveAttribute("data-daily-today");
+  });
+
+  test("the zoomed-in day note carries its date badge in the title", async ({
+    page,
+  }) => {
+    await load(page);
+
+    // Today zooms INTO today's note, so it's the page title (h2), not a list
+    // bullet. The badge is a title slot (Seam F, `title:before-text`), so it must
+    // render here too -- with the same primary "today" treatment.
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+
+    const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
+    await expect(titleBadge).toBeVisible();
+    await expect(titleBadge).toContainText("Today");
+    await expect(titleBadge).toHaveAttribute("data-daily-today", "");
   });
 
   test("deleting the protected Daily container shakes it instead of removing it", async ({
@@ -350,9 +382,7 @@ test.describe("daily notes", () => {
   }) => {
     await load(page);
 
-    await page.keyboard.press(`${modifier()}+k`);
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.keyboard.type("today");
+    await openSwitcherAndType(page, "today");
 
     // The virtual (non-node) action -- today's note doesn't exist yet.
     const go = page.getByRole("option", { name: /Go to Today/ });
@@ -379,9 +409,7 @@ test.describe("daily notes", () => {
     await expect(page).toHaveURL(/\/[^/]+$/);
     await goHome(page);
 
-    await page.keyboard.press(`${modifier()}+k`);
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.keyboard.type("today");
+    await openSwitcherAndType(page, "today");
 
     // The create-action is suppressed (the note exists)...
     await expect(

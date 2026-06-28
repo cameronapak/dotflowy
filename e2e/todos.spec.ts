@@ -70,6 +70,29 @@ test.describe("todos plugin", () => {
     await expect(text(page, "a")).toHaveAttribute("data-completed", "false");
   });
 
+  test("the checkbox renders in the zoomed-in title and toggles there (Seam F title slot)", async ({
+    page,
+  }) => {
+    await load(page);
+
+    // Zoom into the task so it becomes the page title (h2), not a list bullet.
+    // The checkbox is a title slot (`title:before-text`), so it must render here
+    // too -- and stay interactive.
+    await page.locator('li[data-node-id="c"] > .outline-row .bullet').click();
+    const title = page.locator("h2.zoomed-title");
+    await expect(title.locator(".node-text")).toContainText("buy milk");
+
+    const titleCheckbox = title.locator(".checkbox");
+    await expect(titleCheckbox).toBeVisible();
+
+    // Clicking it completes the zoomed node (same handler as the row checkbox).
+    await titleCheckbox.click();
+    await expect(title.locator(".node-text")).toHaveAttribute(
+      "data-completed",
+      "true",
+    );
+  });
+
   test("`/todo` makes a task and `/bullet` reverts it (Seam C)", async ({
     page,
   }) => {

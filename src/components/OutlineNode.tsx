@@ -5,7 +5,7 @@ import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
-import { autoformat, rowSlots, useIsProtected } from "../plugins/registry";
+import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
 import { useBulletKeymap } from "./use-bullet-keymap";
@@ -167,7 +167,7 @@ function OutlineNodeBody({
   // Plugin row slots for this bullet (Seam F): the todos checkbox renders here
   // when the node is a task. Stable array (precomputed in the registry), so it
   // never perturbs this memoized node's render.
-  const beforeTextSlots = rowSlots("row:before-text");
+  const beforeTextSlots = slotsAt("row:before-text");
 
   // Whether a plugin protects this node (the daily container) -- drives the
   // lock affordance below. Reactive: the daily index loads async, so this must

@@ -361,15 +361,18 @@ export interface KeymapSpec {
   run(nodeId: string, ctx: PluginContext): void;
 }
 
-// --- Seam F: row render slots -----------------------------------------------
+// --- Seam F: node render slots ----------------------------------------------
 //
-// A plugin renders a REAL React node (D10) into a named position in a bullet's
-// row -- the todos checkbox, between the bullet dot and the text. The core
-// renders whatever the matching slots return, in plugin/array order; a slot
-// returns null to contribute nothing for a given node (the checkbox only shows
-// on a task). Unlike a token (Seam A, El descriptor), a slot is plain JSX.
+// A plugin renders a REAL React node (D10) into a named position decorating a
+// node -- the todos checkbox / the daily date badge, before the text. The same
+// node renders in TWO paths: a list bullet (`row:`, OutlineNode) and the zoomed
+// page title (`title:`, OutlineEditor's ZoomedTitle). A slot opts into either or
+// both by registering one spec per position. The core renders whatever the
+// matching slots return, in plugin/array order; a slot returns null to
+// contribute nothing for a given node (the checkbox only shows on a task).
+// Unlike a token (Seam A, El descriptor), a slot is plain JSX.
 
-export type SlotPosition = "row:before-text";
+export type SlotPosition = "row:before-text" | "title:before-text";
 
 export interface SlotSpec {
   id: string;
