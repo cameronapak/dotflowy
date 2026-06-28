@@ -73,7 +73,16 @@ function toNode(n: SeedNode): ApiNode {
 export async function seedOutline(
   page: Page,
   nodes: SeedNode[],
-  opts: { echoDelayMs?: number; postDelayMs?: number } = {},
+  opts: {
+    echoDelayMs?: number;
+    postDelayMs?: number;
+    /** Pre-seed plugin side-collections, keyed by collection namespace (e.g.
+     *  `"daily-index"`). Each row is stored as `key -> value` exactly as a write
+     *  would land, so the app's first GET returns it. Lets a spec start with a
+     *  side-collection already populated (e.g. an existing Daily container) to
+     *  exercise the async-load path that a fresh, navigation-free load hits. */
+    kv?: Record<string, { key: string; value: unknown }[]>;
+  } = {},
 ): Promise<void> {
   const echoDelayMs = opts.echoDelayMs ?? 0;
   // Delay only the structural-batch POST *response* (not its echo). Opens a
@@ -205,6 +214,11 @@ export async function seedOutline(
   // daily specs WRITE through it (a failed write would roll back the optimistic
   // insert). Mock the generic kv store per collection namespace, starting empty.
   const kv = new Map<string, Map<string, unknown>>();
+  for (const [collection, rows] of Object.entries(opts.kv ?? {})) {
+    const m = new Map<string, unknown>();
+    for (const r of rows) m.set(r.key, r.value);
+    kv.set(collection, m);
+  }
   const ns = (collection: string) => {
     let m = kv.get(collection);
     if (!m) kv.set(collection, (m = new Map()));

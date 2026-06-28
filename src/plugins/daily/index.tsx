@@ -49,6 +49,7 @@ import {
   isContainerNode,
   localDateKey,
   setMapping,
+  subscribeDailyIndex,
   useDailyDate,
 } from './daily-index'
 import {
@@ -268,9 +269,16 @@ export default definePlugin({
             "The Daily list can't be deleted. It holds all your daily notes.",
           blankReason: "The Daily list needs a name.",
           taskReason: "The Daily list can't be a to-do.",
+          completeReason: "The Daily list can't be completed.",
           canonicalText: DAILY_CONTAINER_TEXT,
         }
       : false,
+
+  // `isContainerNode` reads the daily index, which loads async -- so the
+  // container's lock must re-render when the `container -> nodeId` mapping
+  // resolves. Without this the core's `useIsProtected` only re-evaluates on an
+  // unrelated re-render (e.g. zoom), so the lock appears late.
+  protectsChanged: subscribeDailyIndex,
 
   // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
   // switcher and the /move picker, even though the node's text is the full date.

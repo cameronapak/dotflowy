@@ -90,6 +90,37 @@ test.describe("daily notes", () => {
     await expect(container).not.toHaveClass(/node-rejected/, { timeout: 4000 });
   });
 
+  test("an existing Daily container shows its lock on first load, before any zoom", async ({
+    page,
+  }) => {
+    // The container is already here from a prior session: a real outline node
+    // PLUS the daily-index `container -> nodeId` mapping that marks it protected.
+    // That mapping loads async (the kv GET), and this load never navigates -- so
+    // the lock must appear when the index resolves, NOT only after a re-render
+    // forced by zooming in and back out. (The bug this guards: a render-time
+    // `isProtected` read with no subscription to the index, so the lock showed
+    // late.) The other protection specs always navigate first, masking it.
+    await seedOutline(
+      page,
+      [{ id: "daily-container", parentId: null, prevSiblingId: null, text: "Daily" }],
+      {
+        kv: {
+          "daily-index": [
+            {
+              key: "container",
+              value: { key: "container", nodeId: "daily-container" },
+            },
+          ],
+        },
+      },
+    );
+    await page.goto("/");
+
+    const container = rowWithText(page, "Daily");
+    await expect(container).toBeVisible();
+    await expect(container.locator(".protected-lock")).toBeVisible();
+  });
+
   test("blanking the protected Daily container restores its name and explains on blur", async ({
     page,
   }) => {
@@ -162,6 +193,61 @@ test.describe("daily notes", () => {
     await expect(page.getByText(/can't be a to-do/i)).toBeVisible();
     // ...and it still wears its lock, now leading the text.
     await expect(containerRow.locator(".protected-lock")).toBeVisible();
+  });
+
+  test("the protected Daily container can't be completed", async ({ page }) => {
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    const containerId = await rowWithText(page, "Daily").evaluate(
+      (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+    );
+    expect(containerId).not.toBe("");
+    const containerRow = page.locator(
+      `li[data-node-id="${containerId}"] > .outline-row`,
+    );
+    const containerText = containerRow.locator(".node-text");
+
+    // Mod+Enter (the completion hotkey, Seam D) on the container: completing it
+    // would strike through every day note under it, so the daily plugin forbids
+    // it. The single onToggleCompleted funnel rejects.
+    await containerText.click();
+    await page.keyboard.press(`${modifier()}+Enter`);
+
+    // Rejected: it stays un-done, the row shakes, and a toast explains why.
+    await expect(containerText).toHaveAttribute("data-completed", "false");
+    await expect(containerRow).toHaveClass(/node-rejected/);
+    await expect(page.getByText(/can't be completed/i)).toBeVisible();
+  });
+
+  test("the protected Daily container can't be completed when zoomed in as the title", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    // Zoom INTO the container so it becomes the page title (not a list bullet).
+    await rowWithText(page, "Daily").locator(".bullet").click();
+    const title = page.locator("h2.zoomed-title");
+    const titleText = title.locator(".node-text");
+    await expect(titleText).toHaveText("Daily");
+    // The protection affordance follows the node when zoomed: the title wears
+    // the same lock.
+    await expect(title.locator(".protected-lock")).toBeVisible();
+
+    // The completion rule applies to the zoomed node too: Mod+Enter on the
+    // title routes through the same funnel and is rejected.
+    await titleText.click();
+    await page.keyboard.press(`${modifier()}+Enter`);
+
+    await expect(titleText).toHaveAttribute("data-completed", "false");
+    await expect(page.getByText(/can't be completed/i)).toBeVisible();
   });
 
   test("clicking Today twice reuses the same note (no duplicates)", async ({

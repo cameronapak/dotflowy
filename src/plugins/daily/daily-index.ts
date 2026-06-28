@@ -242,7 +242,12 @@ function ensureStarted() {
   })
 }
 
-function subscribe(cb: () => void): () => void {
+/** Subscribe to any change in the daily index (rebuilt on every collection
+ *  change, including the initial fetch resolving). Drives the reactive date
+ *  badge AND the container's protection lock (Seam: `protectsChanged`) -- the
+ *  lock must re-render when the `container -> nodeId` mapping arrives, not only
+ *  after an unrelated re-render. Returns an unsubscribe. */
+export function subscribeDailyIndex(cb: () => void): () => void {
   ensureStarted()
   listeners.add(cb)
   return () => {
@@ -267,5 +272,5 @@ export function useDailyDate(nodeId: string): string | null {
     )
     return row ? row.key : null
   }, [nodeId])
-  return useSyncExternalStore(subscribe, getSnapshot, () => null)
+  return useSyncExternalStore(subscribeDailyIndex, getSnapshot, () => null)
 }

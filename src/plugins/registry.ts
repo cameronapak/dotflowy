@@ -4,6 +4,7 @@
 // combined regex + dispatch from here, staying generic over which plugins
 // exist; this file is the only place that knows the plugin set for tokens.
 
+import { useEffect, useState } from "react";
 import { plugins } from "./index";
 import { registerWidget } from "../components/plugin-widget";
 import type { Node, TreeIndex } from "../data/tree";
@@ -344,9 +345,48 @@ export function getProtection(nodeId: string): NodeProtection | null {
   return null;
 }
 
-/** True iff any plugin protects `nodeId` from deletion. */
+/** True iff any plugin protects `nodeId` from deletion. Event-time read (delete,
+ *  blur heal, set-task). The row render uses {@link useIsProtected} so the lock
+ *  tracks async protection state. */
 export function isProtected(nodeId: string): boolean {
   return getProtection(nodeId) !== null;
+}
+
+// Every plugin that can change its protection state asynchronously (array
+// order). A plugin whose protection is static (decidable at first render)
+// provides none, and never perturbs `useIsProtected`.
+const protectSubscribers = plugins
+  .map((p) => p.protectsChanged)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
+/** Fan-in over every plugin's `protectsChanged`; one notify -> the caller
+ *  re-evaluates protection. Module-level (referentially stable) so it's safe as
+ *  a `useSyncExternalStore` subscribe. */
+function subscribeProtection(onChange: () => void): () => void {
+  const unsubs = protectSubscribers.map((sub) => sub(onChange));
+  return () => {
+    for (const u of unsubs) u();
+  };
+}
+
+/** Reactive {@link isProtected}: re-renders the caller when any plugin's
+ *  protection state changes (e.g. the daily index resolving its container
+ *  mapping after fetch). Use this in render; without it a node's lock only
+ *  re-evaluates on an unrelated re-render.
+ *
+ *  The live read (`isProtected` -> a plugin's collection accessor) runs in an
+ *  effect, never in render: touching a lazy collection during render would
+ *  start its sync mid-render (a setState-in-render warning). Starts `false`
+ *  (prerender-safe, like `useDailyDate`) and resolves post-mount. */
+export function useIsProtected(nodeId: string): boolean {
+  const [protectedNode, setProtectedNode] = useState(false);
+  useEffect(() => {
+    const update = () => setProtectedNode(isProtected(nodeId));
+    const unsubscribe = subscribeProtection(update);
+    update();
+    return unsubscribe;
+  }, [nodeId]);
+  return protectedNode;
 }
 
 // --- Seam J: search providers ----------------------------------------------

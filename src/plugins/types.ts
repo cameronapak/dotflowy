@@ -397,6 +397,10 @@ export interface NodeProtection {
    *  protected node is structural and stays plain text. Falls back to `reason`
    *  when omitted. */
   taskReason?: string;
+  /** Message toasted when marking this node done is rejected -- a protected
+   *  node is structural (completing it would strike through its whole subtree).
+   *  Falls back to `reason` when omitted. */
+  completeReason?: string;
 }
 
 // --- Seam F (subheader): contextual chrome below the header -----------------
@@ -417,11 +421,12 @@ export interface SubheaderSlotSpec {
 
 // --- Protected nodes --------------------------------------------------------
 //
-// A plugin can declare a node un-deletable. The core consults the composed
-// predicate on its delete path and no-ops on a protected node -- it knows "this
-// id is protected", never why. Protection is DELETE-ONLY: a protected node is
-// still editable, renamable, and can take children. First consumer: the Daily
-// Notes plugin's container (ADR 0019/0021).
+// A plugin can declare a node protected. The core consults the composed
+// predicate on its mutation paths and no-ops on a protected node -- it knows
+// "this id is protected", never why. Protection blocks the STRUCTURE-changing
+// actions: delete, blank-out (heals on blur), to-do conversion, and completion.
+// A protected node is still freely editable, renamable, and can take children.
+// First consumer: the Daily Notes plugin's container (ADR 0019/0021).
 
 // --- Seam H: caret autocomplete menus ---------------------------------------
 //
@@ -558,6 +563,13 @@ export interface PluginDef {
    *  canonical name to restore if the node is blanked -- the core never invents
    *  either. Called on the delete + blank-on-blur paths only (client). */
   protects?(nodeId: string): boolean | NodeProtection;
+  /** Subscribe to changes in this plugin's protection state, so a node's lock
+   *  affordance can render reactively. A plugin whose `protects` depends on
+   *  async/reactive state (e.g. the daily index resolving its container
+   *  mapping after fetch) provides this; the core re-evaluates `protects` on
+   *  each notification. Returns an unsubscribe. Omit when protection is static
+   *  (decidable synchronously, correct at first render). */
+  protectsChanged?(cb: () => void): () => void;
   /** Seam G: render-time view transforms (hide-completed, the tag filter). */
   viewTransforms?: ViewTransform[];
   /** Seam H: caret autocomplete menus (the `#` tag menu). */

@@ -227,6 +227,14 @@
   user-select: none;
 }
 
+h2 > span.protected-lock {
+  gap: 0px;
+  --size-of-bullet: 20px;
+  --size-of-gap: 6px;
+  width: calc(var(--size-of-bullet) + var(--size-of-gap));
+  justify-content: center;
+}
+
 /*
  * Completion fade. A row is faded when it's completed or sits under something
  * completed (data-faded set in OutlineNode). Opacity lives on the row, NOT on
@@ -665,6 +673,15 @@ body.dragging-active * {
 .zoomed-title {
   margin: 0 0 14px;
   font-weight: 600;
+  /* Flex so a protected node's leading lock (.protected-lock) sits in its own
+     column and centers on the big title text -- mirroring how .outline-row
+     places the same glyph. Single-child (unprotected) titles are unaffected: no
+     lock, no gap. The pivot text is a non-growing flex item here just as it is
+     in the list row, so the zoom morph's two endpoints stay geometrically
+     consistent (see .vt-morph below). */
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .zoomed-title-text {

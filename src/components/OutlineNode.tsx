@@ -5,7 +5,7 @@ import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
-import { autoformat, isProtected, rowSlots } from "../plugins/registry";
+import { autoformat, rowSlots, useIsProtected } from "../plugins/registry";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
 import { useBulletKeymap } from "./use-bullet-keymap";
@@ -168,6 +168,13 @@ function OutlineNodeBody({
   // never perturbs this memoized node's render.
   const beforeTextSlots = rowSlots("row:before-text");
 
+  // Whether a plugin protects this node (the daily container) -- drives the
+  // lock affordance below. Reactive: the daily index loads async, so this must
+  // re-render when the `container -> nodeId` mapping resolves, not only on an
+  // unrelated re-render (the old bare `isProtected(node.id)` read made the lock
+  // appear late, only after a zoom).
+  const protectedNode = useIsProtected(node.id);
+
   // Plugin caret menus (ADR 0018 Seam H): typing a trigger char ("#") opens an
   // autocomplete driven by the plugin that registered it (the tags plugin's tag
   // menu). The engine is generic; it coexists with the slash menu -- different
@@ -262,7 +269,7 @@ function OutlineNodeBody({
         {beforeTextSlots.map((slot) => (
           <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
         ))}
-        {isProtected(node.id) && (
+        {protectedNode && (
           <span
             className="protected-lock"
             title="Protected node"

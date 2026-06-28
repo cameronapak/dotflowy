@@ -23,6 +23,7 @@ import {
 import {
   ChevronRight,
   HomeIcon,
+  Lock,
   MoreHorizontal,
   PlusIcon,
 } from "lucide-react";
@@ -33,7 +34,12 @@ import {
   getViewRootId,
   useSyncViewState,
 } from "../data/view-state";
-import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
+import {
+  buildTrail,
+  childrenOf,
+  type Node,
+  type TreeIndex,
+} from "../data/tree";
 import {
   indent,
   insertChildAtStart,
@@ -69,6 +75,7 @@ import {
   dispatchContextMenu,
   getProtection,
   keymapSpecs,
+  useIsProtected,
 } from "../plugins/registry";
 import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
@@ -173,8 +180,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     navigate,
   });
 
-
-
   // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
   // plain mousedown would place an editing caret; we block that and route the
   // click to the filter instead. On touch a transient caret may flash before
@@ -204,8 +209,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const onContentContextMenu = (e: ReactMouseEvent) => {
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
   };
-
-
 
   // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
   // live values through getters (the same ref pattern the commands use), and
@@ -279,8 +282,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // the current view (when zoomed) contributes nothing. Apply the composed
   // visibility prune (hide-completed when the toggle is off), and -- while
   // filtering -- keep only the ones on a path to a match.
-  const topLevel = childrenOf(index, rootId)
-    .filter((n) => !isHidden(n) && (!filter || filter.visibleIds.has(n.id)));
+  const topLevel = childrenOf(index, rootId).filter(
+    (n) => !isHidden(n) && (!filter || filter.visibleIds.has(n.id)),
+  );
   const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const trail = buildTrail(index, rootId);
 
@@ -330,10 +334,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             onTextChange={(text) => setText(zoomedNode.id, text)}
             onAddChild={() =>
               runStructural(() => {
-                const newId = insertChildAtStart(
-                  getTreeIndex(),
-                  zoomedNode.id,
-                );
+                const newId = insertChildAtStart(getTreeIndex(), zoomedNode.id);
                 pendingFocus.current = newId;
               })
             }
@@ -813,6 +814,21 @@ function useNodeCommands({
         }),
 
       onToggleCompleted: (id, completed) => {
+        // A protected node is structural (the daily container holds the day
+        // notes), so it can't be marked done -- completing it would strike
+        // through its whole subtree. Reject with the same shake + toast as a
+        // blocked delete. This funnel catches every completion path (Mod+Enter /
+        // Mod+D on a bullet OR the zoomed title, the todos checkbox). Un-marking
+        // (completed=false) is always allowed. See ADR 0021.
+        if (completed) {
+          const protection = getProtection(id);
+          if (protection) {
+            rejectRow(refs.current.get(id)?.closest(".outline-row") ?? null);
+            const message = protection.completeReason ?? protection.reason;
+            if (message) toast.error(message, { id: "protected-complete" });
+            return;
+          }
+        }
         capture(getTreeIndex(), id);
         toggleCompleted(id, completed);
       },
@@ -914,6 +930,10 @@ function ZoomedTitle({
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
+  // node just as on a list bullet, so it wears the same lock when zoomed in.
+  // Reactive: the daily index loads async (mirrors OutlineNode). See ADR 0021.
+  const protectedNode = useIsProtected(node.id);
 
   useEffect(() => {
     const el = ref.current;
@@ -943,6 +963,15 @@ function ZoomedTitle({
 
   return (
     <h2 className="zoomed-title">
+      {protectedNode && (
+        <span
+          className="protected-lock"
+          title="Protected node"
+          aria-label="Protected node"
+        >
+          <Lock size={16} strokeWidth={2.5} />
+        </span>
+      )}
       <span
         ref={(el) => {
           ref.current = el;
