@@ -4,7 +4,9 @@ import {
   encodeUrlForMarkdown,
   hasLink,
   isHttpUrl,
+  sanitizeLinkLabel,
   stripLinks,
+  swapLinkLabel,
 } from './links'
 
 describe('hasLink', () => {
@@ -74,6 +76,59 @@ describe('encodeUrlForMarkdown', () => {
   test('leaves other characters alone', () => {
     expect(encodeUrlForMarkdown('http://x.com/path?a=1&b=2')).toBe(
       'http://x.com/path?a=1&b=2',
+    )
+  })
+})
+
+describe('sanitizeLinkLabel', () => {
+  test('strips `]` (fatal to the label grammar)', () => {
+    expect(sanitizeLinkLabel('Foo ] bar')).toBe('Foo  bar'.replace(/\s+/g, ' '))
+    expect(sanitizeLinkLabel('a]b]c')).toBe('abc')
+  })
+
+  test('collapses whitespace and trims', () => {
+    expect(sanitizeLinkLabel('  Hello   \n  World  ')).toBe('Hello World')
+  })
+
+  test('keeps `[` and `(` `)` (only `]` breaks a label)', () => {
+    expect(sanitizeLinkLabel('Foo [bar] (baz)')).toBe('Foo [bar (baz)')
+  })
+
+  test('an all-junk title collapses to empty (caller keeps the placeholder)', () => {
+    expect(sanitizeLinkLabel('   \n\t ')).toBe('')
+    expect(sanitizeLinkLabel(']]]')).toBe('')
+  })
+})
+
+describe('swapLinkLabel', () => {
+  const url = 'https://anthropic.com'
+
+  test('swaps the label of the verbatim placeholder, first occurrence', () => {
+    const text = `see [${url}](${url}) now`
+    expect(swapLinkLabel(text, url, url, 'Anthropic')).toBe(
+      'see [Anthropic](https://anthropic.com) now',
+    )
+  })
+
+  test('returns null when the placeholder is gone (label was edited)', () => {
+    // The user already renamed the label, so the exact `[url](url)` is absent.
+    const edited = `[My link](${url}) `
+    expect(swapLinkLabel(edited, url, url, 'Anthropic')).toBeNull()
+  })
+
+  test('only the first placeholder is touched when the url repeats', () => {
+    const text = `[${url}](${url}) and [${url}](${url})`
+    expect(swapLinkLabel(text, url, url, 'A')).toBe(
+      `[A](${url}) and [${url}](${url})`,
+    )
+  })
+
+  test('matches against the ENCODED url half (parens case)', () => {
+    const raw = 'https://en.wikipedia.org/wiki/Foo_(bar)'
+    const enc = encodeUrlForMarkdown(raw)
+    const text = `[${raw}](${enc}) tail`
+    expect(swapLinkLabel(text, enc, raw, 'Foo (bar)')).toBe(
+      `[Foo (bar)](${enc}) tail`,
     )
   })
 })

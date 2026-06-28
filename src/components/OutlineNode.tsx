@@ -328,7 +328,7 @@ function OutlineNodeBody({
           }}
           onPaste={(e) => {
             const el = e.currentTarget;
-            const next = pasteIntoBullet(e, el, (t) =>
+            const next = pasteIntoBullet(e, el, node.id, pluginCtx, (t) =>
               commands.onTextChange(node.id, t),
             );
             if (next !== null) syncedRef.current = next;

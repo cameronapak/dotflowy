@@ -72,6 +72,15 @@ test.describe("Rich links fold and reveal", () => {
     await expect(anchor).toHaveText("Anthropic");
     await expect(anchor).toHaveAttribute("href", "https://anthropic.com");
 
+    // It leads with the host's favicon (Google s2/favicons), inside the anchor
+    // so a click on it still opens the link. The img carries no text, so the
+    // anchor's text stays the label.
+    const favicon = anchor.locator("img.link-favicon");
+    await expect(favicon).toHaveAttribute(
+      "src",
+      "https://www.google.com/s2/favicons?domain=anthropic.com&sz=64",
+    );
+
     // Focus reveals the literal markdown for editing, and the <a> is gone.
     await focusBullet(page, "n");
     await expect(text(page, "n")).toHaveText(LINK);
@@ -220,7 +229,29 @@ test.describe("Click caret near a folded link", () => {
 });
 
 test.describe("Creating links by paste", () => {
-  test("pasting a bare URL into an empty bullet auto-links it", async ({
+  // Mirror of readSource: a folded <a> contributes its data-src, every other
+  // node its textContent. A just-pasted link folds immediately, so the raw
+  // markdown lives only in data-src (plus the trailing space we append).
+  const readSrc = (page: Page, id: string) =>
+    text(page, id).evaluate((el: HTMLElement) => {
+      let out = "";
+      const visit = (n: Node) => {
+        if (n.nodeType === 3) {
+          out += n.textContent ?? "";
+          return;
+        }
+        const e = n as HTMLElement;
+        if (e.hasAttribute?.("data-link") && e.hasAttribute("data-src")) {
+          out += e.getAttribute("data-src") ?? "";
+          return;
+        }
+        n.childNodes.forEach(visit);
+      };
+      el.childNodes.forEach(visit);
+      return out;
+    });
+
+  test("pasting a bare URL auto-links it and folds it immediately", async ({
     page,
   }) => {
     await load(page, [
@@ -230,15 +261,14 @@ test.describe("Creating links by paste", () => {
     await focusBullet(page, "n");
     await pasteInto(text(page, "n"), { plain: "https://example.com" });
 
-    // Focused, so we see the raw markdown.
-    await expect(text(page, "n")).toHaveText(
-      "[https://example.com](https://example.com)",
-    );
-    // Blur -> folds, label is the URL itself.
-    await blurActive(page);
-    await expect(text(page, "n").locator("a[data-link]")).toHaveAttribute(
-      "href",
-      "https://example.com",
+    // Folds on the spot even while focused: the trailing space puts the caret
+    // PAST the link, so it's no longer the revealed one. No click-away needed.
+    const anchor = text(page, "n").locator("a[data-link]");
+    await expect(anchor).toHaveText("https://example.com");
+    await expect(anchor).toHaveAttribute("href", "https://example.com");
+    // Source is the link plus the appended space.
+    expect(await readSrc(page, "n")).toBe(
+      "[https://example.com](https://example.com) ",
     );
   });
 
@@ -262,7 +292,7 @@ test.describe("Creating links by paste", () => {
     await expect(text(page, "n")).toHaveText(LINK);
   });
 
-  test("pasting a rich link (single anchor) inserts [title](url)", async ({
+  test("pasting a rich link (single anchor) inserts [title](url) and folds it", async ({
     page,
   }) => {
     await load(page, [
@@ -275,7 +305,10 @@ test.describe("Creating links by paste", () => {
       plain: "Anthropic",
     });
 
-    await expect(text(page, "n")).toHaveText(LINK);
+    const anchor = text(page, "n").locator("a[data-link]");
+    await expect(anchor).toHaveText("Anthropic");
+    await expect(anchor).toHaveAttribute("href", "https://anthropic.com");
+    expect(await readSrc(page, "n")).toBe(`${LINK} `);
   });
 
   test("URLs with parens are percent-encoded so the link still parses", async ({
@@ -290,15 +323,86 @@ test.describe("Creating links by paste", () => {
       plain: "https://en.wikipedia.org/wiki/Foo_(bar)",
     });
 
-    // Focused: raw markdown shows the encoded url.
-    await expect(text(page, "n")).toHaveText(
-      "[https://en.wikipedia.org/wiki/Foo_(bar)](https://en.wikipedia.org/wiki/Foo_%28bar%29)",
-    );
-    // Folds cleanly to one anchor with the encoded href.
-    await blurActive(page);
-    await expect(text(page, "n").locator("a[data-link]")).toHaveAttribute(
+    // Folds immediately to one anchor with the encoded href.
+    const anchor = text(page, "n").locator("a[data-link]");
+    await expect(anchor).toHaveAttribute(
       "href",
       "https://en.wikipedia.org/wiki/Foo_%28bar%29",
+    );
+    // Source keeps the literal label, the encoded url, and the trailing space.
+    expect(await readSrc(page, "n")).toBe(
+      "[https://en.wikipedia.org/wiki/Foo_(bar)](https://en.wikipedia.org/wiki/Foo_%28bar%29) ",
+    );
+  });
+
+  // Title unfurl (ADR 0016): after a bare-url paste, /api/unfurl is asked for the
+  // page title and it's swapped into the label. The verbatim-match-or-drop logic
+  // is unit-tested (swapLinkLabel, links.test.ts); these two cover the live
+  // fetch -> swap / fallback integration through the real plugin path.
+  test("pasting a bare URL fetches its title and swaps it into the label", async ({
+    page,
+  }) => {
+    // Hold the unfurl response until we release it, so we can observe the
+    // in-flight spinner state before the title lands.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    await page.route(
+      (url) => url.pathname === "/api/unfurl",
+      async (route) => {
+        await gate;
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ title: "Anthropic" }),
+        });
+      },
+    );
+
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "" },
+    ]);
+    await focusBullet(page, "n");
+    await pasteInto(text(page, "n"), { plain: "https://anthropic.com" });
+
+    // In flight: the folded link wears the spinner class and still shows the url.
+    const anchor = text(page, "n").locator("a[data-link]");
+    await expect(anchor).toHaveClass(/link-unfurling/);
+    await expect(anchor).toHaveText("https://anthropic.com");
+
+    release(); // let the title come back
+
+    // The label swaps to the fetched title, the spinner clears, and the source
+    // carries the new label (+ the trailing space).
+    const swapped = text(page, "n").locator("a[data-link]");
+    await expect(swapped).toHaveText("Anthropic");
+    await expect(swapped).not.toHaveClass(/link-unfurling/);
+    expect(await readSrc(page, "n")).toBe("[Anthropic](https://anthropic.com) ");
+  });
+
+  test("a failed title fetch keeps the url placeholder", async ({ page }) => {
+    await page.route(
+      (url) => url.pathname === "/api/unfurl",
+      (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ title: null }),
+        }),
+    );
+
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "" },
+    ]);
+    await focusBullet(page, "n");
+    await pasteInto(text(page, "n"), { plain: "https://anthropic.com" });
+
+    // Nothing swaps, the spinner clears, the url-label placeholder stands -- it
+    // is the graceful fallback, already a working folded link.
+    const anchor = text(page, "n").locator("a[data-link]");
+    await expect(anchor).toHaveText("https://anthropic.com");
+    await expect(anchor).not.toHaveClass(/link-unfurling/);
+    expect(await readSrc(page, "n")).toBe(
+      "[https://anthropic.com](https://anthropic.com) ",
     );
   });
 });

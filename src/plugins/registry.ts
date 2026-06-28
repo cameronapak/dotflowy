@@ -16,6 +16,7 @@ import { registerWidget } from "../components/plugin-widget";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
 import type { Node, TreeIndex } from "../data/tree";
 import type {
+  AfterPasteInput,
   AutoformatInput,
   AutoformatResult,
   CommandSpec,
@@ -278,6 +279,15 @@ export function autoformat(input: AutoformatInput): AutoformatResult | null {
     if (r != null) return r;
   }
   return null;
+}
+
+/** Fire every plugin's post-paste side effect (array order) after the core's
+ *  sync insert (ADR 0016). Not a "first wins" -- each plugin self-gates on
+ *  whether the inserted string is its own (the links plugin's title unfurl). */
+export function afterPaste(input: AfterPasteInput, ctx: PluginContext): void {
+  for (const spec of inputSpecs) {
+    spec!.afterPaste?.(input, ctx);
+  }
 }
 
 // --- Seam C: the `/` command palette ---------------------------------------

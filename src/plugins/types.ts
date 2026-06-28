@@ -271,6 +271,17 @@ export interface PasteInput {
   hasSelection: boolean;
 }
 
+/** What an `afterPaste` side effect is told once the sync insert has landed: the
+ *  exact string that was inserted, the node it landed in (a bullet id, or the
+ *  zoomed title's rootId), and the contentEditable element (so a plugin can
+ *  decorate the just-inserted DOM -- e.g. a loading affordance on a folded
+ *  link). Async follow-up work writes back through `ctx.mutations`. ADR 0016. */
+export interface AfterPasteInput {
+  inserted: string;
+  nodeId: string;
+  el: HTMLElement;
+}
+
 /** What an autoformat transform is told: the just-typed SOURCE text and the
  *  node it's in (so it can gate on type, e.g. only plain bullets). */
 export interface AutoformatInput {
@@ -299,6 +310,15 @@ export interface InputSpec {
    * wins (todos owns the `[]`/`[ ]` task marker).
    */
   autoformat?: (input: AutoformatInput) => AutoformatResult | null;
+  /**
+   * A side effect fired AFTER a paste's sync insert has landed and re-decorated
+   * (ADR 0016). Unlike `onPaste` (pure, returns the string to insert), this may
+   * do async work and write back through `ctx.mutations` -- the links plugin
+   * uses it to fetch a pasted URL's title and swap it into the label. Every
+   * plugin's `afterPaste` runs (array order); each self-gates on whether the
+   * inserted string is its own. Keep it cheap when it isn't yours.
+   */
+  afterPaste?: (input: AfterPasteInput, ctx: PluginContext) => void;
 }
 
 // --- Seam C: the `/` command palette ----------------------------------------

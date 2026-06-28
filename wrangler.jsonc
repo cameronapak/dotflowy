@@ -45,5 +45,16 @@
     "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }]
   },
   // SQLite-backed DO storage requires `new_sqlite_classes` (not new_classes).
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }],
+  // Per-user rate limit for the link-title unfurl endpoint (ADR 0016). The
+  // endpoint fetches user-supplied URLs server-side; keyed on user.id, it caps
+  // the scanner-abuse vector the auth gate alone leaves open. period must be
+  // 10 or 60. Kept off the outline DO so the DO stays single-purpose.
+  "ratelimits": [
+    {
+      "name": "UNFURL_LIMIT",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ]
 }

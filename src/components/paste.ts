@@ -15,7 +15,8 @@
 // splice into source space directly, then re-decorate.
 
 import type { ClipboardEvent } from "react";
-import { pasteReplacement } from "../plugins/registry";
+import { afterPaste, pasteReplacement } from "../plugins/registry";
+import type { PluginContext } from "../plugins/types";
 import {
   decorate,
   getSelectionRange,
@@ -27,10 +28,17 @@ import {
  * Handle a paste into a (focused) contentEditable bullet/title. Returns the new
  * source text on success (so the caller can update its synced-text ref), or
  * null if there was no clipboard to read.
+ *
+ * `nodeId` + `getCtx` let plugins run a post-paste side effect (Seam I's
+ * `afterPaste`, ADR 0016) -- e.g. the links plugin fetching a pasted URL's title
+ * and swapping it into the label. `getCtx` is the same stable PluginContext
+ * factory used everywhere; it's only called when a paste actually happened.
  */
 export function pasteIntoBullet(
   e: ClipboardEvent<HTMLElement>,
   el: HTMLElement,
+  nodeId: string,
+  getCtx: () => PluginContext,
   onText: (text: string) => void,
 ): string | null {
   const cd = e.clipboardData;
@@ -70,5 +78,8 @@ export function pasteIntoBullet(
   // (a just-pasted link shows raw until the user clicks away). See ADR 0017.
   decorate(el, next, caret, false);
   setCaretOffset(el, caret);
+  // Post-paste side effects, now that the DOM reflects the insert (so a plugin
+  // can decorate the just-folded link). Plugins self-gate on the inserted text.
+  afterPaste({ inserted, nodeId, el }, getCtx());
   return next;
 }

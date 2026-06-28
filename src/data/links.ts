@@ -50,3 +50,37 @@ export function encodeUrlForMarkdown(url: string): string {
     .replace(/\(/g, "%28")
     .replace(/\)/g, "%29");
 }
+
+// --- Title unfurl (ADR 0016) -----------------------------------------------
+// A pasted bare URL inserts the placeholder `[url](url)`; a Worker fetches the
+// page title and the label is swapped in async. These two pure helpers own the
+// client half: make a fetched title safe to live in a `[label](url)` label, and
+// perform the verbatim-match-or-drop swap. DOM-free, side-effect-free, tested.
+
+/** Make a fetched page title safe to use as a link LABEL. The label grammar is
+ *  `[^\]]*`, so a literal `]` is fatal -- it would close the label early and
+ *  corrupt every token after it on the line. Strip `]`, collapse whitespace
+ *  (titles arrive multi-line), and trim. May return "" -- the caller keeps the
+ *  url placeholder when it does. */
+export function sanitizeLinkLabel(title: string): string {
+  return title.replace(/]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Verbatim-match-or-drop label swap (ADR 0016). Find the FIRST occurrence of
+ *  the exact placeholder token `[oldLabel](encodedUrl)` in `text` and replace
+ *  its label with `newLabel`, returning the new text. Returns null when the
+ *  placeholder is gone (the user edited the label, or the bullet changed) -- the
+ *  signal to keep whatever is there now. No parsing, no fuzzy match: we only
+ *  ever touch a label we know we inserted and that is still byte-for-byte present. */
+export function swapLinkLabel(
+  text: string,
+  encodedUrl: string,
+  oldLabel: string,
+  newLabel: string,
+): string | null {
+  const oldToken = `[${oldLabel}](${encodedUrl})`;
+  const at = text.indexOf(oldToken);
+  if (at < 0) return null;
+  const newToken = `[${newLabel}](${encodedUrl})`;
+  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
+}

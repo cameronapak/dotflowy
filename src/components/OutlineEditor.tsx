@@ -1019,7 +1019,7 @@ function ZoomedTitle({
         }}
         onPaste={(e) => {
           const el = e.currentTarget;
-          const next = pasteIntoBullet(e, el, onTextChange);
+          const next = pasteIntoBullet(e, el, node.id, getCtx, onTextChange);
           if (next !== null) syncedRef.current = next;
         }}
         onFocus={(e) => {

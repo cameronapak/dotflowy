@@ -36,6 +36,7 @@ import {
 } from './wire'
 import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
+import { isHttpUrlString, unfurlTitle } from './unfurl'
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
 // wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
@@ -53,6 +54,8 @@ interface Env extends AuthEnv {
   /** Owner key the legacy D1 rows are scoped under, read once during the
    *  one-time import into the owner's DO. Defaults to 'owner'. */
   APP_OWNER?: string
+  /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
+  UNFURL_LIMIT: RateLimit
 }
 
 /** A legacy D1 node row (booleans as 0/1). Only read during the one-time import
@@ -368,6 +371,23 @@ function handleApiRequest(
     if (!session) return json({ error: 'unauthorized' }, 401)
 
     const userId = resolveUserId(session.user.id, env)
+
+    // Link title unfurl (ADR 0016): fetch a pasted URL's <title> server-side so
+    // a bare-url link can upgrade its label. DO-independent, so it runs before
+    // the per-user stub is resolved. The ONLY 400 is a missing / non-http(s)
+    // `url` param; every other "no title" reason (blocked target, non-HTML,
+    // unreachable, timeout) is a 200 `{title:null}` from unfurlTitle. Per-user
+    // rate-limited (the fetch is an authenticated SSRF surface).
+    if (url.pathname === '/api/unfurl') {
+      const target = url.searchParams.get('url')
+      if (!target || !isHttpUrlString(target)) {
+        return yield* Effect.fail(new BadRequest({ reason: 'missing or non-http(s) url param' }))
+      }
+      const { success } = yield* Effect.promise(() => env.UNFURL_LIMIT.limit({ key: userId }))
+      if (!success) return json({ error: 'rate limited' }, 429)
+      return json({ title: yield* Effect.promise(() => unfurlTitle(target)) })
+    }
+
     const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
 
     // Only the owner's DO ('default') has legacy D1 rows to import; new users
