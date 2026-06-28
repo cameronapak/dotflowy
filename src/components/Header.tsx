@@ -1,17 +1,16 @@
 import { Fragment, type ReactNode } from "react";
 import { BookmarkStar } from "./bookmarks";
-import { ModeToggle } from "./mode-toggle";
+import { HeaderMoreMenu } from "./header-more-menu";
 import { NodeSearchButton } from "./node-switcher";
-import { ShowCompletedToggle } from "./show-completed-toggle";
-import { SignOutButton } from "./sign-out-button";
 import { headerSlots } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 
 /**
  * App header row: breadcrumb trail on the left (passed as children, since it's
- * owned by OutlineEditor's zoom logic), theme switcher on the right. The
- * breadcrumb still renders its Home button at the top level, so the header is
- * present on every view including the home page.
+ * owned by OutlineEditor's zoom logic), action cluster on the right (search +
+ * the contextual bookmark star + plugin header slots, with secondary actions in
+ * the "More" overflow menu). The breadcrumb still renders its Home button at the
+ * top level, so the header is present on every view including the home page.
  *
  * Horizontal padding matches the outline content's `p-6` so the row aligns
  * with the bullets below it.
@@ -36,7 +35,9 @@ export function Header({
         <div className="min-w-0 flex-1">{children}</div>
         {/* Right cluster: plugin header slots lead (the daily Today button),
             then the focused-node action (BookmarkStar renders itself + its
-            trailing divider only when zoomed), then the global actions. */}
+            trailing divider only when zoomed), then search, and finally the
+            "More" overflow holding the secondary set-once actions (theme, show
+            completed, sign out). See header-more-menu.tsx for the v1/v2 split. */}
         <div className="flex shrink-0 items-center gap-1">
           {getCtx &&
             headerSlots.map((s) => (
@@ -44,9 +45,7 @@ export function Header({
             ))}
           <BookmarkStar />
           <NodeSearchButton />
-          <ShowCompletedToggle />
-          <ModeToggle />
-          <SignOutButton />
+          <HeaderMoreMenu />
         </div>
       </div>
     </header>
