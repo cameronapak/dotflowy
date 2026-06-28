@@ -5,6 +5,6 @@ import { createAuthClient } from "better-auth/react";
  * origin and the default basePath (/api/auth) matches the Worker's route. The
  * app is a pure SPA, so this is only ever used in the browser.
  */
-export const authClient = createAuthClient();
+const authClient = createAuthClient();
 
 export const { signIn, signUp, signOut, useSession } = authClient;

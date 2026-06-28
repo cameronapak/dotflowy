@@ -8,7 +8,7 @@ let navigateRef: NavigateFn | null = null;
 let rootIdRef: string | null = null;
 
 /** Binds live route writers for chip-click handlers outside React hooks. */
-export function bindTagFilterNav(navigate: NavigateFn, rootId: string | null) {
+function bindTagFilterNav(navigate: NavigateFn, rootId: string | null) {
   navigateRef = navigate;
   rootIdRef = rootId;
 }

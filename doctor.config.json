@@ -1,6 +1,7 @@
 {
   "ignore": {
     "files": [
+      "repos/**",
       "src/components/ui/sheet.tsx",
       "src/components/ui/sidebar.tsx",
       "src/components/ui/skeleton.tsx",

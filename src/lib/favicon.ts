@@ -1,7 +1,7 @@
 export const FAVICON_LIGHT = "/favicon-light.svg";
 export const FAVICON_DARK = "/favicon-dark.svg";
 
-export function faviconHref(resolved: "light" | "dark") {
+function faviconHref(resolved: "light" | "dark") {
   return resolved === "dark" ? FAVICON_DARK : FAVICON_LIGHT;
 }
 

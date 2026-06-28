@@ -47,7 +47,7 @@ export type Node = Schema.Schema.Type<typeof NodeSchema>
 const InsertOp = Schema.Struct({ op: Schema.Literal('insert'), value: NodeSchema })
 const UpdateOp = Schema.Struct({ op: Schema.Literal('update'), value: NodeSchema })
 const DeleteOp = Schema.Struct({ op: Schema.Literal('delete'), key: Schema.String })
-export const ChangeOpSchema = Schema.Union([InsertOp, UpdateOp, DeleteOp])
+const ChangeOpSchema = Schema.Union([InsertOp, UpdateOp, DeleteOp])
 export type ChangeOp = Schema.Schema.Type<typeof ChangeOpSchema>
 
 // --- Request-body schemas (the /api/nodes + /api/kv trust boundary) ----------

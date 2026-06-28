@@ -38,7 +38,7 @@ const DEFAULT_REASON: Record<ProtectionKind, string> = {
 
 /** The message to toast for a rejected `kind` on this protection: the per-action
  *  override, then the general `reason`, then the core default. */
-export function protectionMessage(
+function protectionMessage(
   protection: NodeProtection,
   kind: ProtectionKind,
 ): string {
