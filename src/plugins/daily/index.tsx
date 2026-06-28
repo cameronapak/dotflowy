@@ -17,6 +17,7 @@ import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
   Loader2Icon,
+  SunIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ import {
   useDailyDate,
 } from "./daily-index";
 import { useDailyNavigationPending, withDailyNavigation } from "./pending";
+import { cn } from "@/lib/utils";
 
 // --- get-or-create ----------------------------------------------------------
 
@@ -200,8 +202,18 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
 function DailyBadge({ nodeId }: { nodeId: string }) {
   const key = useDailyDate(nodeId);
   if (!key) return null;
+  const isToday = key === localDateKey();
   return (
-    <Badge variant="secondary" className="shrink-0 mt-1" data-daily-date={key}>
+    <Badge
+      variant={isToday ? "default" : "secondary"}
+      className={cn([
+        "shrink-0 mt-1 border!",
+        isToday ? "border-transparent" : "border-border",
+      ])}
+      data-daily-date={key}
+      data-daily-today={isToday ? "" : undefined}
+    >
+      {isToday && <SunIcon className="shrink-0" />}
       {formatDayBadge(key)}
     </Badge>
   );

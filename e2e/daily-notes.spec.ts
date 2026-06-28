@@ -50,6 +50,54 @@ test.describe("daily notes", () => {
     const badge = page.locator("[data-daily-date]");
     await expect(badge).toBeVisible();
     await expect(badge).toHaveText("Today");
+    // Today's badge wears the distinct (primary) treatment -- the data hook the
+    // variant swap sets only when the key is today.
+    await expect(badge).toHaveAttribute("data-daily-today", "");
+  });
+
+  test("only today's note gets the distinct badge; other days stay plain", async ({
+    page,
+  }) => {
+    // A day note from the past renders the muted badge (its short date) with NO
+    // `data-daily-today` hook -- the primary highlight is reserved for today.
+    // Seeded like the lock test: a real node PLUS its daily-index mapping.
+    const d = new Date();
+    d.setDate(d.getDate() - 10);
+    const pastKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(d.getDate()).padStart(2, "0")}`;
+
+    await seedOutline(
+      page,
+      [
+        { id: "daily-container", parentId: null, prevSiblingId: null, text: "Daily" },
+        {
+          id: "past-day",
+          parentId: "daily-container",
+          prevSiblingId: null,
+          text: "A past day",
+        },
+      ],
+      {
+        kv: {
+          "daily-index": [
+            {
+              key: "container",
+              value: { key: "container", nodeId: "daily-container" },
+            },
+            { key: pastKey, value: { key: pastKey, nodeId: "past-day" } },
+          ],
+        },
+      },
+    );
+    await page.goto("/");
+
+    const badge = page.locator("[data-daily-date]");
+    await expect(badge).toBeVisible();
+    // It's the past day's badge: not "Today", and without the today-only hook.
+    await expect(badge).not.toHaveText("Today");
+    await expect(badge).not.toHaveAttribute("data-daily-today");
   });
 
   test("deleting the protected Daily container shakes it instead of removing it", async ({
