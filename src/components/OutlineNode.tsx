@@ -13,6 +13,7 @@ import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
+import { clearSelection, useSelectionEdge } from "../data/selection-state";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
 import { useBulletKeymap } from "./use-bullet-keymap";
@@ -183,6 +184,14 @@ function OutlineNodeBody({
   // appear late, only after a zoom).
   const protectedNode = useIsProtected(node.id);
 
+  // This node's slot in a node multi-selection (ADR 0018), read as its OWN
+  // slice: only rows entering/leaving the selection re-render, never a sibling's
+  // (the same per-node-render isolation `useIsProtected` gives -- ADR 0014).
+  // Drives the slab tint + rounded outer corners on the `<li>` below; null on a
+  // node that isn't a selected root (a selected root's `<li>` background already
+  // tints its whole subtree, so descendants need no per-row marker).
+  const selectionEdge = useSelectionEdge(node.id);
+
   // Plugin caret menus (ADR 0001 Seam H): typing a trigger char ("#") opens an
   // autocomplete driven by the plugin that registered it (the tags plugin's tag
   // menu). The engine is generic; it coexists with the slash menu -- different
@@ -265,7 +274,11 @@ function OutlineNodeBody({
   });
 
   return (
-    <li className="outline-node" data-node-id={node.id}>
+    <li
+      className="outline-node"
+      data-node-id={node.id}
+      data-selected={selectionEdge ?? undefined}
+    >
       <div className="outline-row" data-faded={faded} data-context={isContext}>
         <button
           type="button"
@@ -363,6 +376,10 @@ function OutlineNodeBody({
             if (next !== null) syncedRef.current = next;
           }}
           onFocus={(e) => {
+            // A caret and a node selection are mutually exclusive (ADR 0018):
+            // focusing any bullet leaves selection mode. Covers "click clears ->
+            // normal edit" and the caret landing after a while-selected arrow.
+            clearSelection();
             // Per-link reveal: watch the caret so exactly the link it's on shows
             // raw markdown (ADR 0005). The watcher lives only while focused.
             const el = e.currentTarget;

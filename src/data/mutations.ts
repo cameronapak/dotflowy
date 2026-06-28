@@ -2,6 +2,7 @@ import { nodesCollection } from './collection'
 import {
   type Node,
   type TreeIndex,
+  buildTreeIndex,
   childrenOf,
   createId,
   makeNode,
@@ -440,6 +441,43 @@ export function moveNode(
 }
 
 /**
+ * Move several nodes to be the last children of `targetId`, in the given order
+ * (node multi-selection's Move + daily's Send to Today -- ADR 0018). Returns how
+ * many actually moved.
+ *
+ * Each node is appended after the previously-moved one, so the run keeps its
+ * relative order under the target. The index is REBUILT from the live collection
+ * before each `moveNode` (the prior move already applied optimistically to
+ * `nodesCollection`), so sibling-chain relinks read accurate state -- looping
+ * `moveNode` over a stale snapshot would tear the chain when the moved nodes
+ * were siblings of each other. Wrap the whole call in `runStructural` so the N
+ * moves land as ONE atomic batch (ADR 0009).
+ */
+export function moveManyNodes(
+  targetId: string | null,
+  ids: string[],
+): number {
+  let moved = 0
+  // `after` walks forward: start at the target's current last child, then each
+  // successful move becomes the predecessor of the next.
+  const firstSiblings = childrenOf(
+    buildTreeIndex(nodesCollection.toArray),
+    targetId,
+  )
+  let after: string | null = firstSiblings.length
+    ? firstSiblings[firstSiblings.length - 1]!.id
+    : null
+  for (const id of ids) {
+    const index = buildTreeIndex(nodesCollection.toArray)
+    if (moveNode(index, id, targetId, after)) {
+      moved++
+      after = id
+    }
+  }
+  return moved
+}
+
+/**
  * Delete a node. Children are deleted recursively (Workflowy behavior:
  * deleting a parent deletes its subtree). Returns the id to focus
  * afterwards: the next sibling if any, else the previous sibling, else
@@ -486,6 +524,21 @@ export function removeNode(
   // focusId may have been deleted if it was in the subtree (it isn't, by
   // construction: focus is a sibling or ancestor), so it's safe.
   return focusId
+}
+
+/**
+ * Delete several nodes and their subtrees (node multi-selection's Delete --
+ * ADR 0018). The index is REBUILT from the live collection before each
+ * `removeNode`, so the sibling-chain relink reads accurate state: deleting a run
+ * of contiguous siblings off ONE stale snapshot would dangle the chain (each
+ * delete repoints the follower to the just-deleted node's prev). Order-agnostic
+ * with the rebuild. Wrap in `runStructural` so the whole set is one atomic batch.
+ * Focus handling is the caller's (computed before deletion).
+ */
+export function removeManyNodes(ids: string[]): void {
+  for (const id of ids) {
+    removeNode(buildTreeIndex(nodesCollection.toArray), id)
+  }
 }
 
 export function setText(nodeId: string, text: string) {

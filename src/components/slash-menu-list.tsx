@@ -1,5 +1,17 @@
+import type { ComponentType } from "react";
 import { cn } from "@/lib/utils";
-import type { CommandSpec } from "../plugins/types";
+
+/** The minimal item shape this list renders: an id, the two text lines, and a
+ *  leading icon. `CommandSpec` satisfies it, and so do the synthetic core items
+ *  the node-selection actions menu builds (ADR 0018) -- both reuse this one menu
+ *  look. The parent owns what a pick DOES (via `onSelect(index)`), so the item
+ *  needs no `run`. */
+export interface MenuListItem {
+  id: string;
+  label: string;
+  description: string;
+  icon: ComponentType<{ className?: string }>;
+}
 
 export function SlashMenuList({
   items,
@@ -9,7 +21,7 @@ export function SlashMenuList({
   onHover,
   onSelect,
 }: {
-  items: CommandSpec[];
+  items: MenuListItem[];
   activeIndex: number;
   x: number;
   y: number;

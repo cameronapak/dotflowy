@@ -27,6 +27,7 @@ import { capture, drop } from "../../data/history";
 import {
   appendChild,
   insertChildAtStart,
+  moveManyNodes,
   moveNode,
   setText,
 } from "../../data/mutations";
@@ -36,7 +37,12 @@ import {
   resyncNodes,
   waitForNode,
 } from "../../data/collection";
-import { childrenOf, createId, type TreeIndex } from "../../data/tree";
+import {
+  buildTreeIndex,
+  childrenOf,
+  createId,
+  type TreeIndex,
+} from "../../data/tree";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
@@ -292,6 +298,33 @@ export default definePlugin({
           return;
         }
         toast.success("Moved to Today", {
+          action: { label: "Go", onClick: () => ctx.nav.zoom(todayId) },
+        });
+      },
+      // Node multi-selection (ADR 0018): move every selected root under today's
+      // note in ONE batch + ONE navigation. Resolve today once (get-or-create),
+      // drop today itself if it's in the selection, then append the run as
+      // today's last children (moveManyNodes rebuilds the index per move so the
+      // sibling chain stays intact). Capture against the LIVE tree -- AFTER the
+      // day may have just been created -- so undo restores the moves without
+      // deleting the new day note.
+      runMany: async (ids, ctx) => {
+        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
+        if (!todayId) {
+          toast.error("Couldn't open today's daily note");
+          return;
+        }
+        const targets = ids.filter((id) => id !== todayId);
+        if (targets.length === 0) return;
+        const moved = runStructural(() => {
+          capture(buildTreeIndex(nodesCollection.toArray), targets[0]!);
+          return moveManyNodes(todayId, targets);
+        });
+        if (!moved) {
+          drop();
+          return;
+        }
+        toast.success(`Moved ${moved} to Today`, {
           action: { label: "Go", onClick: () => ctx.nav.zoom(todayId) },
         });
       },

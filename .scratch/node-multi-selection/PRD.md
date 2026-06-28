@@ -1,6 +1,6 @@
 # PRD: Node multi-selection
 
-Status: proposed (designed, not started)
+Status: Ship 2 shipped (Ship 3 deferred). ADR 0018 accepted.
 Decision record: [ADR 0018](../../docs/adr/0018-node-multi-selection.md). Serializer shared with
 [ADR 0017](../../docs/adr/0017-markdown-export.md) (Ship 1).
 
@@ -43,20 +43,42 @@ node-clipboard format + insertion logic; drag needs `use-drag-reorder.ts` surger
 
 ## Build checklist (Ship 2)
 
-- [ ] `selection-state.ts` — module singleton mirrored on `view-state.ts`; `getSelection()`,
-      anchor/focus, subscribe; derive selected-root set + an `isSelected(id)` that accounts for
-      subtree-implied descendants.
-- [ ] `useIsSelected(id)` per-node subscription (shape of `useIsProtected`); wire the accent tint +
-      rounded-block corners into `OutlineNode` row classes. Don't thread as props (ADR 0014).
-- [ ] Keyboard: intercept `Shift+↑/↓`, `Cmd+A`, and the while-selected `↑/↓`/`Escape`/printable
-      handling. Respect the existing reserved keymap (`Cmd+↑/↓` = expand/collapse,
-      `Cmd+Shift+↑/↓` = move) — selection uses `Shift+arrow`, which is free.
-- [ ] `CommandSpec.runMany?(rootIds, ctx)` in `plugins/types.ts`; registry surfaces the
-      selection-command list; implement `runMany` for Move, todos To-do, daily Send to Today.
-- [ ] Selection actions menu component (reuse `SlashMenuList`), anchored to the selection top.
-- [ ] Copy as Markdown over roots (reuse `outlineToMarkdown`); Delete = loop `removeNode` over
-      roots in one `runStructural`.
-- [ ] e2e: shift-extend/shrink, Cmd+A ladder, delete, copy, menu `runMany`, escape/click clearing.
+- [x] `selection-state.ts` — module singleton mirrored on `view-state.ts`; anchor/focus,
+      subscribe; derives the selected-root run + per-root slab `SelectionEdge`. (Selection is
+      sibling-scoped and the root's `<li>` background tints its subtree, so `useSelectionEdge`
+      marks only roots — descendants come along visually, no per-descendant set needed.)
+- [x] `useSelectionEdge(id)` per-node subscription (shape of `useIsProtected`); wires the
+      slab tint + rounded outer corners onto the `OutlineNode` `<li>` via `data-selected`. Not
+      threaded as props (ADR 0014).
+- [x] Keyboard: `Shift+↑/↓` enter (`use-bullet-keymap`), `Cmd+A` ladder rung 1→2 there + rung 3
+      in the while-selected window handler (`selection-mode.tsx`), and the while-selected
+      `↑/↓`/`Escape`/printable/`Cmd+C`/`Backspace`. Reserved keys respected (`Cmd+↑/↓` = expand,
+      `Cmd+Shift+↑/↓` = move); selection uses the free `Shift+arrow` + `Mod+A`.
+- [x] `CommandSpec.runMany?(rootIds, ctx)` in `plugins/types.ts`; registry surfaces
+      `selectionCommandSpecs`; `runMany` implemented for Move (core, multi-target move dialog),
+      todos To-do (batch `setIsTask`), daily Send to Today (one batch + one nav).
+- [x] Selection actions menu (`SelectionActionsMenu`, reuses `SlashMenuList`), anchored to the
+      selection's top row via live DOM (`data-node-id`), re-anchors on extend.
+- [x] Copy as Markdown over roots (reuses `outlineToMarkdown`); Delete = `removeManyNodes` over
+      roots in one `runStructural` (rebuild-per-delete keeps the sibling chain intact).
+- [x] e2e (`e2e/node-multi-select.spec.ts`): shift-extend/shrink, boundary no-op, Cmd+A ladder,
+      copy (clipboard round-trip), delete + undo, printable no-op, escape/click clearing, menu
+      To-do `runMany`.
+
+## Ship 2 notes (as built)
+
+- The slab is painted on the selected ROOT's `<li>` (its background sits behind the whole
+  subtree), so only roots carry a `data-selected` edge; contiguous roots merge because sibling
+  `<li>`s have `margin:0`. Tint is `oklch(from var(--primary) l c h / 0.1)` (adapts to both themes).
+- Caret↔selection exclusivity is enforced by clearing the selection on any bullet/title `onFocus`
+  and on a window `mousedown` outside the actions menu; the while-selected keys live on a
+  capture-phase `window` listener (no caret is focused in selection mode).
+- The actions menu anchors via `document.querySelector` on `data-node-id`, NOT the refs Map: the
+  bullet span's ref is an inline arrow (re-attaches each commit), so a layout-effect read of the
+  Map can race the re-attach. (Caught in e2e.)
+- Multi-node Move/Send-to-Today/Delete rebuild the index from the live collection between each
+  `moveNode`/`removeNode` (`moveManyNodes`/`removeManyNodes`), because looping over a stale
+  snapshot tears the sibling chain when the operated nodes are siblings of each other.
 
 ## Open implementation questions (resolve at build)
 
