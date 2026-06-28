@@ -1,11 +1,19 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { nodesCollection } from './collection'
-import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from './tree'
+import {
+  buildTreeIndex,
+  buildTrail,
+  childrenOf,
+  type Node,
+  type TreeIndex,
+} from './tree'
 
 /**
  * A single, app-wide subscription to the nodes collection that derives one
  * shared {@link TreeIndex} and lets components subscribe to *narrow slices* of
- * it via {@link useNode} and {@link useVisibleChildIds}.
+ * it via {@link useNode}, {@link useVisibleChildIds}, {@link useTrail}, and
+ * {@link useHasNodes} -- each re-rendering only when its own slice changes
+ * identity, so the editor shell no longer re-renders on every keystroke.
  *
  * Why this exists: `useLiveQuery(nodesCollection)` rebuilds a brand-new `index`
  * object on every edit. Threading that object as a prop into every `OutlineNode`
@@ -24,6 +32,7 @@ import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from './tree'
 
 const EMPTY_INDEX: TreeIndex = buildTreeIndex([])
 const EMPTY_IDS: string[] = []
+const EMPTY_TRAIL: Node[] = []
 
 let index: TreeIndex = EMPTY_INDEX
 const listeners = new Set<() => void>()
@@ -46,7 +55,14 @@ function ensureStarted() {
   nodesCollection.subscribeChanges(() => rebuild(), { includeInitialState: true })
 }
 
-function subscribe(cb: () => void): () => void {
+/**
+ * Subscribe to any change in the shared tree index. Exported so the editor
+ * shell's own narrow slice hooks ({@link useTrail}, {@link useHasNodes}, and the
+ * registry's `useViewFilter`) fold the same single collection subscription --
+ * each re-renders only when its cached snapshot's identity changes, never on an
+ * unrelated keystroke. See ADR 0014.
+ */
+export function subscribeTree(cb: () => void): () => void {
   ensureStarted()
   listeners.add(cb)
   return () => {
@@ -67,7 +83,7 @@ export function getTreeIndex(): TreeIndex {
 
 /** Whole-index subscription. Re-renders on every change -- use sparingly. */
 export function useTreeIndex(): TreeIndex {
-  return useSyncExternalStore(subscribe, getTreeIndex, () => EMPTY_INDEX)
+  return useSyncExternalStore(subscribeTree, getTreeIndex, () => EMPTY_INDEX)
 }
 
 /**
@@ -77,7 +93,7 @@ export function useTreeIndex(): TreeIndex {
  */
 export function useNode(id: string): Node | undefined {
   const getSnapshot = useCallback(() => getTreeIndex().byId.get(id), [id])
-  return useSyncExternalStore(subscribe, getSnapshot, () => undefined)
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined)
 }
 
 /**
@@ -107,5 +123,39 @@ export function useVisibleChildIds(
     if (!cache.current || cache.current.key !== key) cache.current = { key, ids }
     return cache.current.ids
   }, [parentId, isHidden])
-  return useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_IDS)
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_IDS)
+}
+
+/**
+ * Subscribe to the breadcrumb trail of `rootId` -- its ancestors top-down,
+ * including the node itself (see {@link buildTrail}). The cached array keeps its
+ * identity until a *displayed* crumb changes: its id (the path structure) OR its
+ * text (the label the breadcrumb renders). So typing in a bullet that is NOT on
+ * the trail leaves the shell untouched, while renaming an ancestor's title does
+ * update the crumb. Same stable-snapshot trick as {@link useVisibleChildIds}.
+ */
+export function useTrail(rootId: string | null): Node[] {
+  const cache = useRef<{ key: string; trail: Node[] } | null>(null)
+  const getSnapshot = useCallback(() => {
+    const trail = buildTrail(getTreeIndex(), rootId)
+    let key = ''
+    for (const n of trail) key += `${n.id}\0${n.text}\n`
+    if (!cache.current || cache.current.key !== key) cache.current = { key, trail }
+    return cache.current.trail
+  }, [rootId])
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_TRAIL)
+}
+
+/**
+ * Whether the store has loaded any nodes. A primitive boolean snapshot, so it
+ * only re-renders when emptiness flips (once, on initial load) -- never on a
+ * keystroke. Lets the shell tell "deep link to a deleted node" (show the
+ * not-found notice) apart from "store still loading" (render nothing yet).
+ */
+export function useHasNodes(): boolean {
+  return useSyncExternalStore(
+    subscribeTree,
+    () => getTreeIndex().byId.size > 0,
+    () => false,
+  )
 }

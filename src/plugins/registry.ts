@@ -4,9 +4,16 @@
 // combined regex + dispatch from here, staying generic over which plugins
 // exist; this file is the only place that knows the plugin set for tokens.
 
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { plugins } from "./index";
 import { registerWidget } from "../components/plugin-widget";
+import { getTreeIndex, subscribeTree } from "../data/tree-store";
 import type { Node, TreeIndex } from "../data/tree";
 import type {
   AutoformatInput,
@@ -210,6 +217,37 @@ export function buildViewFilter(
     if (f) return f;
   }
   return null;
+}
+
+/**
+ * Subscribe to the active view filter, re-rendering ONLY while a filter is live.
+ * When no plugin wants to filter (no `?q=` query) {@link buildViewFilter}
+ * returns null, so the cached snapshot stays a stable `null` and a no-filter
+ * keystroke never re-renders the editor shell. While a filter IS active it
+ * recomputes against the live tree on every change so the pruned view tracks
+ * edits -- the one render-time read that legitimately depends on node text,
+ * scoped so it only costs when filtering. The cache (keyed on the shared index's
+ * identity, which is stable between edits) keeps getSnapshot referentially
+ * stable, as `useSyncExternalStore` requires. See ADR 0014 and ADR 0018 (Seam G).
+ */
+export function useViewFilter(
+  ctx: ViewContext,
+  isHidden: (node: Node) => boolean,
+): ViewFilter | null {
+  const cache = useRef<{
+    index: TreeIndex;
+    ctx: ViewContext;
+    filter: ViewFilter | null;
+  } | null>(null);
+  const getSnapshot = useCallback(() => {
+    const index = getTreeIndex();
+    const prev = cache.current;
+    if (prev && prev.index === index && prev.ctx === ctx) return prev.filter;
+    const filter = buildViewFilter(index, ctx, isHidden);
+    cache.current = { index, ctx, filter };
+    return filter;
+  }, [ctx, isHidden]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => null);
 }
 
 // --- Seam H: caret autocomplete menus --------------------------------------

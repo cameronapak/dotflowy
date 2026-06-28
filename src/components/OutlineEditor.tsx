@@ -21,19 +21,20 @@ import {
   type UseHotkeyDefinition,
 } from "@tanstack/react-hotkeys";
 import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
-import { useTree } from "../data/useTree";
-import { getTreeIndex } from "../data/tree-store";
+import {
+  getTreeIndex,
+  useHasNodes,
+  useNode,
+  useTrail,
+  useTreeIndex,
+  useVisibleChildIds,
+} from "../data/tree-store";
 import {
   getViewIsHidden,
   getViewRootId,
   useSyncViewState,
 } from "../data/view-state";
-import {
-  buildTrail,
-  childrenOf,
-  type Node,
-  type TreeIndex,
-} from "../data/tree";
+import { childrenOf, type Node, type TreeIndex } from "../data/tree";
 import {
   indent,
   insertChildAtStart,
@@ -63,12 +64,12 @@ import { hasLink } from "../data/links";
 import { pasteIntoBullet } from "./paste";
 import {
   blocksCaret,
-  buildViewFilter,
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
   keymapSpecs,
   useIsProtected,
+  useViewFilter,
 } from "../plugins/registry";
 import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
@@ -118,15 +119,16 @@ function onContentMouseDown(e: ReactMouseEvent) {
  *  - the zoom view (breadcrumb + editable title) when rootId is set
  */
 export function OutlineEditor({ rootId }: OutlineEditorProps) {
-  const { index } = useTree();
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
 
-  // Event-time reads of the live tree go through tree-store's getTreeIndex()
-  // (same value as `index`, read at call time), so the stable command/drag
-  // closures don't depend on this render's `index` and `commands` keeps its
-  // identity across renders -- a prop on every memoized OutlineNode (ADR 0014).
-  // Render reads below use `index` from useTree() so they stay reactive.
+  // The shell reads the tree through NARROW slices, never the whole index, so a
+  // keystroke in a bullet doesn't re-render the editor itself (ADR 0014): the
+  // visible top-level ids (useVisibleChildIds), the zoomed node (useNode), the
+  // breadcrumb trail (useTrail), the loaded flag (useHasNodes), and the filter
+  // (useViewFilter, live only while filtering). Each re-renders only when its
+  // own slice changes identity. Event-time reads (commands, drag, zoom) still go
+  // through getTreeIndex() at call time, so those closures stay stable too.
 
   // First-run import-or-seed bootstrap; safe to run on mount. See seed.ts.
   useBootstrapOutline();
@@ -166,7 +168,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation
   // focus landing. See useZoomNavigation.
   const { navigateZoom, pivotId } = useZoomNavigation({
-    index,
     rootId,
     isHidden,
     refs,
@@ -261,28 +262,29 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   );
 
   // The pruned visible-set for the active filter (matches + ancestor context),
-  // or null when no filter. Now a plugin-contributed Seam-G transform (the tags
-  // plugin's tag-filter), composed in registry.buildViewFilter -- the core no
-  // longer imports buildTagFilter directly. Render-time only, never mutates a
-  // node (ADR 0015). The composed isHidden is passed so it prunes hidden nodes.
-  const filter = useMemo(
-    () => buildViewFilter(index, viewCtx, isHidden),
-    [index, viewCtx, isHidden],
-  );
+  // or null when no filter. A plugin-contributed Seam-G transform (the tags
+  // plugin's tag-filter), composed in registry.buildViewFilter. Subscribed via
+  // useViewFilter so the shell re-renders on a keystroke ONLY while a filter is
+  // live; with no filter its snapshot stays a stable null. Render-time only,
+  // never mutates a node (ADR 0015).
+  const filter = useViewFilter(viewCtx, isHidden);
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
-  // Top-level roots start the fade cascade fresh: a completed ancestor above
-  // the current view (when zoomed) contributes nothing. Apply the composed
-  // visibility prune (hide-completed when the toggle is off), and -- while
-  // filtering -- keep only the ones on a path to a match.
-  const topLevel = childrenOf(index, rootId).filter(
-    (n) => !isHidden(n) && (!filter || filter.visibleIds.has(n.id)),
-  );
-  const zoomedNode = rootId ? (index.byId.get(rootId) ?? null) : null;
-  const trail = buildTrail(index, rootId);
+  // Top-level visible child ids, read as a stable slice (useVisibleChildIds
+  // already applies the composed prune, so it changes identity only on a
+  // structural edit -- never on typing). While filtering, keep only the ones on
+  // a path to a match. The fade cascade starts fresh here: a completed ancestor
+  // above the current view contributes nothing.
+  const topLevelIds = useVisibleChildIds(rootId, isHidden);
+  const topLevel = filter
+    ? topLevelIds.filter((id) => filter.visibleIds.has(id))
+    : topLevelIds;
+  const zoomedNode = useNode(rootId ?? "") ?? null;
+  const trail = useTrail(rootId);
+  const hasNodes = useHasNodes();
 
   // Deep-linked to a node that no longer exists (and the store has loaded).
-  if (rootId !== null && zoomedNode === null && index.byId.size > 0) {
+  if (rootId !== null && zoomedNode === null && hasNodes) {
     return (
       <div className="mx-auto max-w-[720px] p-6">
         <div className="outline-empty">
@@ -294,6 +296,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   return (
     <>
+      <FocusPass
+        refs={refs}
+        pendingFocus={pendingFocus}
+        pendingFocusAtStart={pendingFocusAtStart}
+        pendingFlash={pendingFlash}
+      />
       <div className="sticky top-0 z-10 relative">
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
@@ -340,10 +348,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         ) : (
           <>
             <ul className="outline-list" ref={listRef}>
-              {topLevel.map((node) => (
+              {topLevel.map((id) => (
                 <OutlineNode
-                  key={node.id}
-                  nodeId={node.id}
+                  key={id}
+                  nodeId={id}
                   commands={commands}
                   pluginCtx={pluginCtx}
                   registerRef={registerRef}
@@ -453,26 +461,13 @@ function useOutlineFocus(): OutlineFocus {
   const pendingFocusAtStart = useRef(false);
   const pendingFlash = useRef<string | null>(null);
 
-  // After every render, if a focus is pending and the target exists, focus it;
-  // likewise flash a just-moved row. Both run post-render because the target row
-  // only exists after the structural mutation's render.
-  useEffect(() => {
-    if (pendingFocus.current) {
-      const el = refs.get(pendingFocus.current);
-      if (el) {
-        el.focus();
-        if (pendingFocusAtStart.current) placeCaretAtStart(el);
-        else placeCaretAtEnd(el);
-      }
-      pendingFocus.current = null;
-      pendingFocusAtStart.current = false;
-    }
-    if (pendingFlash.current) {
-      const el = refs.get(pendingFlash.current);
-      flashRow(el?.closest(".outline-row") ?? null);
-      pendingFlash.current = null;
-    }
-  });
+  // The post-mutation focus/flash pass lives in <FocusPass> (rendered by the
+  // editor), not here. It must run after EVERY tree change -- including a nested
+  // reparent that leaves the shell's own slices unchanged, and a text undo (no
+  // structural change, but pendingFocus is set) -- and the shell no longer
+  // re-renders on every change now that it reads narrow slices (ADR 0014). So
+  // the pass subscribes to the whole tree itself, in a null component that's
+  // cheap to re-render per change.
 
   // The currently-focused bullet id, by reverse-looking-up the registry (covers
   // list items and the zoomed title). Null when focus is outside the outline.
@@ -513,8 +508,53 @@ function useOutlineFocus(): OutlineFocus {
   return { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash };
 }
 
+/**
+ * Runs the post-mutation focus + flash pass. Subscribes to the WHOLE tree
+ * (useTreeIndex) so its effect runs after every tree change -- that is what
+ * consumes pendingFocus once the just-mutated row has committed to the DOM
+ * (refs register during commit, before this passive effect). It renders null,
+ * so re-rendering it on every change is nearly free: no DOM, no children, and a
+ * no-op effect whenever nothing is pending (the common keystroke case).
+ *
+ * Why a dedicated component: the editor shell reads narrow slices and no longer
+ * re-renders on every change (ADR 0014), so a focus pass hung on the shell's
+ * render would miss a nested reparent (top level unchanged) or a text undo
+ * (no structural change, but pendingFocus is set). Owning its own whole-tree
+ * subscription keeps the pass correct without re-rendering the expensive shell.
+ */
+function FocusPass({
+  refs,
+  pendingFocus,
+  pendingFocusAtStart,
+  pendingFlash,
+}: {
+  refs: Map<string, HTMLSpanElement | null>;
+  pendingFocus: RefObject<string | null>;
+  pendingFocusAtStart: RefObject<boolean>;
+  pendingFlash: RefObject<string | null>;
+}) {
+  useTreeIndex();
+  useEffect(() => {
+    if (pendingFocus.current) {
+      const el = refs.get(pendingFocus.current);
+      if (el) {
+        el.focus();
+        if (pendingFocusAtStart.current) placeCaretAtStart(el);
+        else placeCaretAtEnd(el);
+      }
+      pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
+    }
+    if (pendingFlash.current) {
+      const el = refs.get(pendingFlash.current);
+      flashRow(el?.closest(".outline-row") ?? null);
+      pendingFlash.current = null;
+    }
+  });
+  return null;
+}
+
 interface ZoomNavigationArgs {
-  index: TreeIndex;
   rootId: string | null;
   isHidden: (node: Node) => boolean;
   refs: Map<string, HTMLSpanElement | null>;
@@ -528,7 +568,6 @@ interface ZoomNavigationArgs {
  * the editor remounting per zoom view (ADR 0003's `key={nodeId}`).
  */
 function useZoomNavigation({
-  index,
   rootId,
   isHidden,
   refs,
@@ -622,7 +661,9 @@ function useZoomNavigation({
     if (!pivotId) return;
     let targetId = pivotId;
     if (pivotId === rootId) {
-      const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
+      const firstChild = childrenOf(getTreeIndex(), rootId).find(
+        (n) => !isHidden(n),
+      );
       if (firstChild) targetId = firstChild.id;
     }
     const el = refs.get(targetId);
