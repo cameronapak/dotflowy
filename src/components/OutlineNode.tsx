@@ -39,7 +39,7 @@ interface OutlineNodeProps {
   // object avoids each node importing mutations + focus logic directly.
   // Must be referentially stable, or every node re-renders on every keystroke.
   commands: NodeCommands;
-  // The PluginContext factory (ADR 0018 D8), for the caret menu engine (Seam H)
+  // The PluginContext factory (ADR 0001 D8), for the caret menu engine (Seam H)
   // and any other plugin surface a bullet drives. Stable (a useCallback in the
   // editor), so it doesn't break OutlineNode's memo. Read live at event time.
   pluginCtx: () => PluginContext;
@@ -52,7 +52,7 @@ interface OutlineNodeProps {
   // renders faded even if it isn't itself completed. Visual-only inheritance;
   // never written to data. Resets to false at each zoom root. See ADR 0002.
   ancestorCompleted: boolean;
-  // The composed Seam-G visibility predicate (ADR 0018): a node is pruned from
+  // The composed Seam-G visibility predicate (ADR 0001): a node is pruned from
   // the render iff it returns true (hide-completed when show-completed is off).
   // Replaces the old `showCompleted` boolean -- this node no longer knows the
   // hide rule, it just applies the predicate. Stable across keystrokes.
@@ -138,7 +138,7 @@ function OutlineNodeBody({
   // ends, then decorate once with the committed text.
   const composingRef = useRef(false);
   // Cleanup for the per-link reveal watcher, live only while this bullet is
-  // focused (added in onFocus, called in onBlur). See ADR 0017.
+  // focused (added in onFocus, called in onBlur). See ADR 0005.
   const caretWatchRef = useRef<(() => void) | null>(null);
   // Visible child ids, read reactively from the store. The array keeps its
   // identity until the child set/order changes, so typing in a child doesn't
@@ -183,7 +183,7 @@ function OutlineNodeBody({
   // appear late, only after a zoom).
   const protectedNode = useIsProtected(node.id);
 
-  // Plugin caret menus (ADR 0018 Seam H): typing a trigger char ("#") opens an
+  // Plugin caret menus (ADR 0001 Seam H): typing a trigger char ("#") opens an
   // autocomplete driven by the plugin that registered it (the tags plugin's tag
   // menu). The engine is generic; it coexists with the slash menu -- different
   // trigger chars, at most one open at a time.
@@ -245,7 +245,7 @@ function OutlineNodeBody({
     // one folds every link. The focus/blur handlers own the swap when only
     // focus changes; this effect handles store-driven text changes (mount,
     // undo, programmatic setText). Preserve the caret only when focused (e.g.
-    // undo while editing). See ADR 0017.
+    // undo while editing). See ADR 0005.
     const focused = document.activeElement === el;
     const revealOffset = focused ? getCaretOffset(el) : null;
     decorate(el, node.text, revealOffset, focused);
@@ -364,7 +364,7 @@ function OutlineNodeBody({
           }}
           onFocus={(e) => {
             // Per-link reveal: watch the caret so exactly the link it's on shows
-            // raw markdown (ADR 0017). The watcher lives only while focused.
+            // raw markdown (ADR 0005). The watcher lives only while focused.
             const el = e.currentTarget;
             caretWatchRef.current?.();
             caretWatchRef.current = watchCaretReveal(

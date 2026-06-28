@@ -13,7 +13,7 @@ import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { MenuList } from "./menu-list";
 
 /**
- * The generic caret-menu engine (ADR 0018 Seam H). One per focused bullet --
+ * The generic caret-menu engine (ADR 0001 Seam H). One per focused bullet --
  * only the focused bullet has a caret, so at most one menu is open across the
  * whole outline. It owns the machinery every menu shares: detect a live trigger
  * before the caret, portal the option list at the caret, drive arrow/enter/tab/

@@ -12,7 +12,7 @@ import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from './kv-api'
  * it. The choice is keyed by the *normalized* tag name, so it applies to every
  * instance of that tag everywhere. See docs/adr/0007-custom-tag-colors.md.
  *
- * Backed by D1 through the generic /api/kv side-collection store (ADR 0024),
+ * Backed by D1 through the generic /api/kv side-collection store (ADR 0008),
  * sibling to nodesCollection -- a custom color is shared meaning, not
  * view-state, so it syncs across devices. Empty by default; absence of a row
  * means "no color" (the neutral default).

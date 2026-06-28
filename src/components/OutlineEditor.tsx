@@ -137,7 +137,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   const routeSearch = useSearch({ strict: false }) as { q?: string };
 
-  // Seam G (ADR 0018): the composed per-node visibility predicate. The core no
+  // Seam G (ADR 0001): the composed per-node visibility predicate. The core no
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
   // hide (hide-completed today). Memoized so it stays referentially stable
   // across keystrokes, which keeps useVisibleChildIds' cache warm and every
@@ -184,7 +184,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // so the core runs ONE set of handlers on the content container and dispatches
   // to whichever plugin owns the surface under the pointer (registry.ts). The
   // core has zero feature knowledge -- a folded link opens, a tag chip filters,
-  // a right-click picks a color, all decided by the plugins. See ADR 0018.
+  // a right-click picks a color, all decided by the plugins. See ADR 0001.
   // (onContentMouseDown is pure and lives at module scope above.)
   const onContentClick = (e: ReactMouseEvent) => {
     dispatchClick(e.target as HTMLElement, pluginCtx(), e);
@@ -200,7 +200,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     });
   };
   // A plugin-owned overlay (the tag color picker), mounted once below. The core
-  // is a thin host -- the overlay portals + dismisses itself (ADR 0018 Seam B).
+  // is a thin host -- the overlay portals + dismisses itself (ADR 0001 Seam B).
   const [overlayNode, setOverlayNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
@@ -248,7 +248,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     consumeClick,
   });
 
-  // PluginContext factory (ADR 0018 D8): the promoted command set + tree reads +
+  // PluginContext factory (ADR 0001 D8): the promoted command set + tree reads +
   // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
   // the live tree via getTreeIndex() at call time; stable identity.
   const pluginCtx = useCallback(
@@ -1034,7 +1034,7 @@ function ZoomedTitle({
           if (next !== null) syncedRef.current = next;
         }}
         onFocus={(e) => {
-          // Per-link reveal in the title (ADR 0017): watch the caret, and
+          // Per-link reveal in the title (ADR 0005): watch the caret, and
           // reveal the link it's currently on. Link-free is a no-op so the
           // native caret stands.
           const el = e.currentTarget;

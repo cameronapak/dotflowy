@@ -34,7 +34,7 @@ import { childrenOf } from "../data/tree";
 /**
  * Copy the current view's subtree to the clipboard as a markdown bullet list.
  * Scope is the zoom root (read live at click time), or every top-level node at
- * home -- the header is contextual to the current zoom view. See ADR 0029.
+ * home -- the header is contextual to the current zoom view. See ADR 0017.
  */
 async function copyOutlineAsMarkdown() {
   const index = getTreeIndex();

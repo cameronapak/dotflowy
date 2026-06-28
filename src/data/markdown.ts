@@ -16,7 +16,7 @@ function emit(index: TreeIndex, id: string, depth: number, lines: string[]): voi
   if (!node) return
   // `node.text` is already the markdown source (links `[label](url)`, `#tags`,
   // inline `code`) -- emit it verbatim, no transform. Empty text yields a bare
-  // `- ` bullet, preserving structure. See ADR 0029.
+  // `- ` bullet, preserving structure. See ADR 0017.
   lines.push(INDENT.repeat(depth) + prefixFor(node) + node.text)
   // Full subtree, regardless of collapsed/completed/filter: childrenOf returns
   // the raw ordered children (view state never reaches here).
@@ -30,7 +30,7 @@ function emit(index: TreeIndex, id: string, depth: number, lines: string[]): voi
  * `rootIds` becomes a top-level bullet; its full subtree is emitted beneath it,
  * indented two spaces per level. Uniform bullets (never headings) so every node
  * serializes identically and task roots survive as `- [ ]`. Pure and
- * view-agnostic -- its only inputs are the index and the roots. See ADR 0029.
+ * view-agnostic -- its only inputs are the index and the roots. See ADR 0017.
  */
 export function outlineToMarkdown(index: TreeIndex, rootIds: string[]): string {
   const lines: string[] = []

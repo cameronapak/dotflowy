@@ -1,4 +1,4 @@
-// The plugin surface (ADR 0018). A plugin is a bundle of registrations against
+// The plugin surface (ADR 0001). A plugin is a bundle of registrations against
 // the core's finite set of *seams*, compiled into the app (an internal
 // registry, D1 -- not runtime-loaded). This file is the typed contract; the
 // core composes every plugin's registrations in `registry.ts`.
@@ -56,7 +56,7 @@ export type Json =
   | { [key: string]: Json };
 
 /**
- * Seam A (React mode -- ADR 0028): an ATOMIC widget. Unlike an `El` (serialized
+ * Seam A (React mode -- ADR 0006): an ATOMIC widget. Unlike an `El` (serialized
  * to an innerHTML string), a widget renders REAL TSX -- a component, lucide
  * icons, Tailwind classes, no plugin CSS. The core serializes it to one custom
  * element that is an opaque atom (`contenteditable="false"` + `data-src`, so the
@@ -125,12 +125,12 @@ export interface TokenSpec {
   /**
    * Build the descriptor for one matched token. `tok` is the matched source.
    * Return an `El` (the string fast path) or a `WidgetEl` (a real-TSX atomic
-   * widget -- ADR 0028); a token that ever returns a `WidgetEl` must set
+   * widget -- ADR 0006); a token that ever returns a `WidgetEl` must set
    * `component`.
    */
   render(tok: string, view: TokenView): El | WidgetEl;
   /**
-   * Seam A (React mode -- ADR 0028): the component the core mounts for a
+   * Seam A (React mode -- ADR 0006): the component the core mounts for a
    * `WidgetEl` this token returns, keyed by the token's `id`. Receives
    * `WidgetProps` (the atom's `source` + the widget's `props`). Required iff
    * `render` can return a `WidgetEl`.
@@ -389,7 +389,7 @@ export interface SlotSpec {
 // app header -- which has NO focused node -- so it is its own spec whose render
 // takes only the PluginContext factory. The core renders every header slot into
 // the header's action cluster (plugin/array order). First consumer: the Daily
-// Notes plugin's "go to today" button (ADR 0019/0020).
+// Notes plugin's "go to today" button (ADR 0001/0002).
 
 export interface HeaderSlotSpec {
   id: string;
@@ -553,14 +553,14 @@ export interface SearchAction {
 export interface PluginDef {
   id: string;
   /**
-   * Plugin-owned static CSS (ADR 0027). The core mounts every plugin's `styles`
+   * Plugin-owned static CSS (ADR 0001). The core mounts every plugin's `styles`
    * once via `<PluginStyles>` (a React 19 hoisted `<style>`), so a plugin ships
    * its styling IN ITS FOLDER instead of bleeding into core `styles.css`.
    * Namespace every selector by the plugin's own prefix -- this is colocation +
    * no-bleed-by-convention, NOT Shadow-DOM isolation (impossible for an inline
    * chip living inside the editor's contentEditable). Currently no plugin uses
    * this: route-bible, its first mover, moved to the widget seam (`component` +
-   * `WidgetEl`), which renders real TSX + Tailwind with no CSS (ADR 0028). Kept
+   * `WidgetEl`), which renders real TSX + Tailwind with no CSS (ADR 0006). Kept
    * as the home for a plugin's static CSS when one needs it.
    *
    * RAW CSS only: this string is not run through the Tailwind build, so no

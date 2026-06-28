@@ -1,4 +1,4 @@
-// Todos plugin (ADR 0018). Completion is the todo plugin's concept (D9): a plain
+// Todos plugin (ADR 0001). Completion is the todo plugin's concept (D9): a plain
 // outline is just nestable text; installing this plugin is what makes nodes
 // completable -- it grants the checkbox, hide-completed, the toggle keys, the
 // `/todo` command, and the `[]` autoformat. The `completed`/`isTask` FIELDS stay

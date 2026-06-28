@@ -1,6 +1,6 @@
-// Pure link layer for rich links (ADR 0017). A link is `[label](url)` living
+// Pure link layer for rich links (ADR 0005). A link is `[label](url)` living
 // literally in `node.text` -- never a stored field, exactly like a `code` run
-// or a `#tag`. The links plugin (src/plugins/links, ADR 0018) reuses
+// or a `#tag`. The links plugin (src/plugins/links, ADR 0001) reuses
 // LINK_PATTERN to decorate the same runs as a token; while a bullet is focused
 // they show as raw markdown, while blurred they fold to a clean <a>.
 //
@@ -12,7 +12,7 @@
 // "anything but `)`". Kept deliberately simple -- URLs that would break it (a
 // literal `)`, `(`, or space) are percent-encoded by encodeUrlForMarkdown when
 // WE insert a link, so every machine-made link parses. A hand-typed URL with a
-// raw `)` is the accepted rough edge (ADR 0017).
+// raw `)` is the accepted rough edge (ADR 0005).
 export const LINK_PATTERN = "\\[[^\\]]*\\]\\([^)]*\\)";
 
 const LINK_RE = () => new RegExp(`\\[([^\\]]*)\\]\\(([^)]*)\\)`, "g");
@@ -23,12 +23,12 @@ export function hasLink(text: string): boolean {
 }
 
 /** Flatten links to their label text -- the projection used for fuzzy search
- *  and for clean display in result rows (ADR 0017). */
+ *  and for clean display in result rows (ADR 0005). */
 export function stripLinks(text: string): string {
   return text.replace(LINK_RE(), (_full, label: string) => label);
 }
 
-/** http(s) only -- the single URL shape v1 auto-detects (ADR 0017). */
+/** http(s) only -- the single URL shape v1 auto-detects (ADR 0005). */
 export function isHttpUrl(s: string): boolean {
   return /^https?:\/\//i.test(s.trim());
 }

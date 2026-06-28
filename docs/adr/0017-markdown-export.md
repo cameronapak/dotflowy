@@ -6,7 +6,7 @@ writes it to the clipboard (`text/plain`), with a success toast. At the top leve
 `rootId === null`) it exports the whole outline. The serializer is a **pure function**
 (`outlineToMarkdown(index, rootIds)`, `src/data/markdown.ts`), unit-tested per the repo's
 pure-logic rule, and is the shared core a future selection-copy (Cmd+C on a node selection,
-[ADR 0030](./0030-node-multi-selection.md)) reuses unchanged.
+[ADR 0018](./0018-node-multi-selection.md)) reuses unchanged.
 
 **The lucky break: `node.text` is already markdown.** Links are stored `[label](url)`, tags as
 `#tag`, inline code keeps its backticks — the folded/chip *display* is derived at render time, but

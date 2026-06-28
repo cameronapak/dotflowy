@@ -1,8 +1,8 @@
 # PRD: Node multi-selection
 
 Status: proposed (designed, not started)
-Decision record: [ADR 0030](../../docs/adr/0030-node-multi-selection.md). Serializer shared with
-[ADR 0029](../../docs/adr/0029-markdown-export.md) (Ship 1).
+Decision record: [ADR 0018](../../docs/adr/0018-node-multi-selection.md). Serializer shared with
+[ADR 0017](../../docs/adr/0017-markdown-export.md) (Ship 1).
 
 ## Why
 

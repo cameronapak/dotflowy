@@ -1,8 +1,8 @@
-// Daily Notes plugin (ADR 0019). Each calendar day gets a node; a header button
+// Daily Notes plugin (ADR 0001). Each calendar day gets a node; a header button
 // jumps to today, creating it on first use. Built entirely on public seams plus
 // two new ones this feature introduced:
 //
-//   - Seam F (header): the "Today" button (ADR 0020) -- node-less chrome.
+//   - Seam F (header): the "Today" button (ADR 0002) -- node-less chrome.
 //   - Protected nodes: the "Daily" container can't be deleted (ADR 0015).
 //   - Seam F (row): the date badge on each day note.
 //
@@ -151,7 +151,7 @@ async function ensureDay(
 /** Ensure the container + the day exist and return the day's node id (no nav).
  *  Takes just the tree index (not a `PluginContext`) so the Today button, the
  *  `/` command, AND the Cmd+K virtual action (Seam J -- which has no
- *  `PluginContext`) all reuse the exact same get-or-create (ADR 0019/0022).
+ *  `PluginContext`) all reuse the exact same get-or-create (ADR 0001).
  *  Async: it may round-trip the atomic claim before the node id is settled. */
 async function getOrCreateDay(
   key: string,
@@ -340,7 +340,7 @@ export default definePlugin({
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
   // exist yet (when it does, the alias above surfaces the real node -- no dup).
   // Picking it creates the note + container, then navigates. This is the "search
-  // today even if it isn't there" half (ADR 0022).
+  // today even if it isn't there" half (ADR 0001).
   searchActions: (query, ctx) => {
     const q = query.trim().toLowerCase();
     if (q.length < 2 || !"today".startsWith(q)) return [];

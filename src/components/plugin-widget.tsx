@@ -1,4 +1,4 @@
-// The plugin WIDGET host (ADR 0028 -- Seam A's React mode). A token can render a
+// The plugin WIDGET host (ADR 0006 -- Seam A's React mode). A token can render a
 // real React component instead of a serialized `El`. The catch: inline tokens
 // live in a contentEditable whose innerHTML the core rebuilds imperatively each
 // keystroke (ADR 0014), so React can't own those nodes directly. The bridge is

@@ -8,7 +8,7 @@ status: proposed
 inside one bullet), so an action can act on several subtrees at once — copy-as-markdown today,
 delete today, and indent/move/cut/paste later. Designed in full here; build plan in
 `.scratch/node-multi-selection/PRD.md`. The first consumer is selection-copy, which reuses the
-[ADR 0029](./0029-markdown-export.md) serializer verbatim.
+[ADR 0017](./0017-markdown-export.md) serializer verbatim.
 
 **Model — sibling-scoped, subtree-implied.** A selection is a **contiguous run of siblings under
 one parent**, and selecting a node **implies its whole subtree** (you select roots; descendants come
@@ -40,7 +40,7 @@ while you have a caret you're editing one bullet. The transitions are the whole 
   persists** — it must **never** replace-on-type the way a text editor does, or a stray keypress
   would delete whole subtrees. `Escape` clears → caret returns; a click clears → normal edit.
 
-**Operations (this ADR's v1):** **Copy as Markdown** (`Cmd+C`, reuses the ADR 0029 serializer over
+**Operations (this ADR's v1):** **Copy as Markdown** (`Cmd+C`, reuses the ADR 0017 serializer over
 the selected roots) and **Delete** (`Backspace`/`Delete`, loops `removeNode` over the selected roots
 inside one `runStructural` batch). **Deferred:** Tab indent/outdent, drag, cut, paste — paste needs
 a node-clipboard format and insertion logic that doesn't exist, and drag is a single-node imperative

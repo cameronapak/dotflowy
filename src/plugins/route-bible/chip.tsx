@@ -1,4 +1,4 @@
-// The route-bible chip, as REAL TSX (ADR 0028 -- Seam A's React mode). It mounts
+// The route-bible chip, as REAL TSX (ADR 0006 -- Seam A's React mode). It mounts
 // inside the `<dotflowy-widget>` atom, so all of its look is plain Tailwind
 // utility classes + lucide icons -- NO plugin CSS string (the old styles.ts is
 // gone), and the icons are components, not SVG-mask pseudo-elements. The atom is

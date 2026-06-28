@@ -770,7 +770,7 @@ body.dragging-active * {
   }
 }
 
-/* Rich links (ADR 0017, per-link reveal). A link FOLDS to a clean <a> with a
+/* Rich links (ADR 0005, per-link reveal). A link FOLDS to a clean <a> with a
    leading site favicon and a trailing external-link icon when the caret isn't
    on it; it REVEALS to raw `[label](url)` -- decorated, not plain -- when the
    caret is within/adjacent. At most one link reveals at a time (under caret). */

@@ -1,4 +1,4 @@
-// Core paste handling for bullets and the zoomed title (Seam I, ADR 0018). The
+// Core paste handling for bullets and the zoomed title (Seam I, ADR 0001). The
 // browser's default contentEditable paste injects arbitrary rich HTML, which
 // breaks the "the DOM is always rebuilt from plain-text source" model. So we
 // ALWAYS preventDefault and insert plain text ourselves -- then let plugins
@@ -75,7 +75,7 @@ export function pasteIntoBullet(
   const caret = start + inserted.length;
   onText(next);
   // Caret lands right after the insert; revealing whatever link it's now on
-  // (a just-pasted link shows raw until the user clicks away). See ADR 0017.
+  // (a just-pasted link shows raw until the user clicks away). See ADR 0005.
   decorate(el, next, caret, false);
   setCaretOffset(el, caret);
   // Post-paste side effects, now that the DOM reflects the insert (so a plugin

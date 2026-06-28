@@ -46,7 +46,7 @@ import {
 const FUSE_OPTIONS: IFuseOptions<Node> = {
   // Plus plugin-contributed aliases (Seam J) so `/move` -> "today" finds the
   // daily note despite its full-date text. Matched, never highlighted
-  // (textMatchIndices keeps only the "text" key). See ADR 0022.
+  // (textMatchIndices keeps only the "text" key). See ADR 0001.
   keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
   includeMatches: true,
   // Match late in the string too, so "notes" finds "Weekly team notes" (ADR 0012).

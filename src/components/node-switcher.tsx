@@ -41,14 +41,14 @@ import {
 
 // We search a link-stripped projection of each node (a `[label](url)` flattens
 // to `label`), so URL noise stays out of the corpus and match indices line up
-// with the clean text the result row displays. See ADR 0017.
+// with the clean text the result row displays. See ADR 0005.
 interface Searchable {
   node: Node;
   text: string;
   // Extra match terms a plugin contributes for this node (Seam J) -- the daily
   // plugin's relative label ("Today"), absent from the full-date text. Searched
   // but NOT highlighted (highlight only looks at the "text" key), so the row
-  // still displays node.text with no misaligned ranges. See ADR 0022.
+  // still displays node.text with no misaligned ranges. See ADR 0001.
   aliases: string[];
 }
 

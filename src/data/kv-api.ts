@@ -1,5 +1,5 @@
 /**
- * Throw-based client for the generic /api/kv side-collection store (ADR 0024).
+ * Throw-based client for the generic /api/kv side-collection store (ADR 0008).
  * Each plugin side-collection (tag colors, the daily index) is one `collection`
  * namespace; `value` is the full item object, `key` is the collection's getKey.
  *

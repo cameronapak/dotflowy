@@ -1,5 +1,5 @@
 // Shared inline decoration for contentEditable bullet/title text. The tokens
-// themselves (`code` runs, #tags, rich links) are PLUGIN-CONTRIBUTED (ADR 0018):
+// themselves (`code` runs, #tags, rich links) are PLUGIN-CONTRIBUTED (ADR 0001):
 // each registers a regex fragment + a declarative `render` in src/plugins/, and
 // the registry composes them into one combined regex + dispatch (registry.ts).
 // This file owns only the generic machinery -- the one decorate pass, escaping
@@ -18,13 +18,13 @@
 // is on it. An atom carries its full source in `data-src` (+ `data-src-len`)
 // and `contenteditable="false"`; the caret helpers below count it off `data-src`
 // generically, so every consumer keeps speaking source offsets -- with no
-// per-token special-casing (the unlock in ADR 0018 D6).
+// per-token special-casing (the unlock in ADR 0001 D6).
 
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
 import type { El, WidgetEl } from "../plugins/types";
 
-/** True for a widget descriptor (Seam A's React mode -- ADR 0028) vs an `El`. */
+/** True for a widget descriptor (Seam A's React mode -- ADR 0006) vs an `El`. */
 function isWidgetEl(el: El | WidgetEl): el is WidgetEl {
   return typeof el === "object" && (el as WidgetEl).kind === "widget";
 }
@@ -46,7 +46,7 @@ const renderCache = new WeakMap<HTMLElement, string>();
 // within or adjacent to it (offset in `[start, end]`, boundaries inclusive so
 // you can arrow/click in from either edge); otherwise it FOLDS to a clean <a>.
 // At most one link reveals -- the one under the caret. Code and tags keep their
-// source visible in both states. See ADR 0017 (per-link reveal).
+// source visible in both states. See ADR 0005 (per-link reveal).
 function inlineMarkupHtml(
   text: string,
   revealOffset: number | null,
@@ -89,7 +89,7 @@ function serializeEl(el: El | WidgetEl): string {
   return out;
 }
 
-// Serialize a widget descriptor to the `<dotflowy-widget>` atom (ADR 0028). The
+// Serialize a widget descriptor to the `<dotflowy-widget>` atom (ADR 0006). The
 // core owns the atom contract -- `data-src` (+ `data-src-len`) and
 // `contenteditable="false"` make `readSource`/the caret math treat it as one
 // opaque unit (isAtom keys on `data-src`), exactly like a folded link. The
@@ -129,7 +129,7 @@ function escapeHtml(s: string): string {
 
 // True for an ATOMIC folding-token widget -- any element carrying its full
 // source in `data-src` (a folded link today). Keyed on `data-src` alone, not on
-// "link", so the caret math is generic over folding tokens (ADR 0018 D6).
+// "link", so the caret math is generic over folding tokens (ADR 0001 D6).
 // Non-folding tokens (code, tags) and revealed links carry no data-src, so they
 // read back 1:1 as plain text.
 function isAtom(node: Node): node is HTMLElement {
@@ -327,7 +327,7 @@ function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
 // caret is revealed (and others fold). Cheap by design -- it bails on a
 // link-free line, and decorate()'s render cache makes a move within the same
 // active link a no-op. `paused` suspends it during IME composition. Returns a
-// cleanup to call on blur. See ADR 0017 (per-link reveal).
+// cleanup to call on blur. See ADR 0005 (per-link reveal).
 export function watchCaretReveal(
   el: HTMLElement,
   paused: () => boolean,
@@ -353,7 +353,7 @@ export function watchCaretReveal(
 // layout (caret at the true end); we then re-read the source offset, reveal, and
 // restore the caret. No-op if focus left before the frame. The selectionchange
 // watcher already covers a click; this is the belt for a focus that emits no
-// selectionchange (e.g. a programmatic el.focus()). See ADR 0017.
+// selectionchange (e.g. a programmatic el.focus()). See ADR 0005.
 export function revealLinkAtCaret(
   el: HTMLElement,
   text: string,

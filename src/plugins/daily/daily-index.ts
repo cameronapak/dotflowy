@@ -14,7 +14,7 @@ import { Effect } from 'effect'
 import { kvGetOrCreateE } from '../../data/kv-client-effect'
 
 /**
- * The daily index -- the *identity* of a daily note (ADR 0019). A row maps a
+ * The daily index -- the *identity* of a daily note (ADR 0001). A row maps a
  * key to a node id:
  *  - key `YYYY-MM-DD` (local date)  -> that day's note node
  *  - key `"container"` (sentinel)   -> the single "Daily" container node
@@ -23,7 +23,7 @@ import { kvGetOrCreateE } from '../../data/kv-client-effect'
  * machine-addressable ("the node for 2026-06-23"), and that identity can't live
  * in mutable text (Seam A's tags/links derive from text precisely because their
  * identity *is* the text). Seam E keeps it off the `Node` schema. A sibling of
- * `nodesCollection`, backed by D1 through the generic /api/kv store (ADR 0024),
+ * `nodesCollection`, backed by D1 through the generic /api/kv store (ADR 0008),
  * so daily-note identity syncs across devices.
  *
  * Mirrors `tag-colors.ts`: a D1-backed kv collection plus a
@@ -130,7 +130,7 @@ export function formatDayRelative(
 /** The compact *relative* label for the badge: Today / Yesterday / Tomorrow,
  *  else a short date ("Jun 23"). Complementary to the seeded full-date text, not
  *  a duplicate of it -- it's the "this is a daily note" signifier + quick
- *  orientation. Computed from the key vs today (ADR 0019). */
+ *  orientation. Computed from the key vs today (ADR 0001). */
 export function formatDayBadge(key: string, today = localDateKey()): string {
   const rel = formatDayRelative(key, today)
   if (rel) return rel

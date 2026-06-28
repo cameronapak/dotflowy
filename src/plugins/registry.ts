@@ -1,4 +1,4 @@
-// Seam aggregation (ADR 0018). Derives the combined token machinery from the
+// Seam aggregation (ADR 0001). Derives the combined token machinery from the
 // explicit plugins array once, at module load (plugins are compiled in -- D1 --
 // so nothing changes at runtime). The core (inline-code.ts) consumes the
 // combined regex + dispatch from here, staying generic over which plugins
@@ -70,7 +70,7 @@ const tokenSpecs: TokenSpec[] = withOrder
   .sort((a, b) => a.spec.precedence - b.spec.precedence || a.order - b.order)
   .map(({ spec }) => spec);
 
-// Seam A (React mode -- ADR 0028): register each widget token's component with
+// Seam A (React mode -- ADR 0006): register each widget token's component with
 // the custom-element host, keyed by the token id (the `data-widget` value the
 // serializer stamps). Importing plugin-widget here also runs its client-only
 // `customElements.define` side effect (no-op in the prerender). Done once at
@@ -103,7 +103,7 @@ function specForMatch(m: RegExpMatchArray): TokenSpec | null {
 
 /** Render one matched token to its descriptor, dispatching to its plugin. A
  *  widget result is stamped with the token id (its component key) so the
- *  serializer can address the right `<dotflowy-widget>` component (ADR 0028). */
+ *  serializer can address the right `<dotflowy-widget>` component (ADR 0006). */
 export function renderToken(
   m: RegExpMatchArray,
   view: TokenView,
@@ -229,7 +229,7 @@ export function buildViewFilter(
  * edits -- the one render-time read that legitimately depends on node text,
  * scoped so it only costs when filtering. The cache (keyed on the shared index's
  * identity, which is stable between edits) keeps getSnapshot referentially
- * stable, as `useSyncExternalStore` requires. See ADR 0014 and ADR 0018 (Seam G).
+ * stable, as `useSyncExternalStore` requires. See ADR 0014 and ADR 0001 (Seam G).
  */
 export function useViewFilter(
   ctx: ViewContext,

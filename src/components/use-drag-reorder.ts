@@ -41,7 +41,7 @@ interface DragDeps {
   getIndex: () => TreeIndex;
   getRootId: () => string | null;
   /** The composed Seam-G visibility prune (hide-completed today). Drag mirrors
-   *  the render: a hidden node is not a droppable row. See ADR 0018. */
+   *  the render: a hidden node is not a droppable row. See ADR 0001. */
   getIsHidden: () => (node: Node) => boolean;
   /** The `.outline-row` element for a node id (via the editor's refs registry). */
   getRowEl: (id: string) => HTMLElement | null;

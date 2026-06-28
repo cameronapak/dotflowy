@@ -1,4 +1,4 @@
-// The route-bible plugin's pure Scripture-reference layer (ADR 0026). A Bible
+// The route-bible plugin's pure Scripture-reference layer (ADR 0001). A Bible
 // reference lives literally in `node.text` -- never a stored field, exactly like
 // a `#tag` or a link. `index.tsx` reuses BIBLE_REF_PATTERN to decorate the same
 // runs as a clickable chip.
@@ -23,7 +23,7 @@ import { toResolverUrl, tryParsePassage } from "grab-bcv";
 //   (?:(?::|\s)\d+(?:-\d+)?)?  an optional `:verse` (or space-verse) with range
 //
 // Deliberately liberal (case-insensitive, space-or-colon verse separator) per
-// ADR 0026 -- it over-matches, and `resolveBibleRef` rejects anything grab-bcv
+// ADR 0001 -- it over-matches, and `resolveBibleRef` rejects anything grab-bcv
 // won't parse ("Hello 3", "Revelation 99:99"). Tighten the regex later if the
 // false positives ("Matthew 5 minutes") are felt in real use.
 export const BIBLE_REF_PATTERN =
@@ -36,7 +36,7 @@ const ROUTE_BIBLE_BASE = "https://route.bible";
  * Validate a detected candidate and build its route.bible URL, or null if it
  * isn't a real reference (the caller then renders the raw text -- no chip).
  * `src=dotflowy` is sent for attribution; the translation is left to
- * route.bible's default (a per-user choice is deferred, ADR 0026).
+ * route.bible's default (a per-user choice is deferred, ADR 0001).
  */
 export function resolveBibleRef(token: string): { url: string } | null {
   const parsed = tryParsePassage(token);

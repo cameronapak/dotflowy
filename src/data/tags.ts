@@ -98,7 +98,7 @@ function matchesAllTags(text: string, activeTags: string[]): boolean {
  * (normal styling) iff it is in `matchIds`, otherwise as dimmed context. Nodes
  * the view otherwise hides (e.g. completed subtrees when show-completed is off)
  * are skipped via the `isHidden` predicate -- this layer no longer knows about
- * `completed`; the composed Seam-G predicate carries that (ADR 0018 D9).
+ * `completed`; the composed Seam-G predicate carries that (ADR 0001 D9).
  */
 export interface TagFilter {
   visibleIds: Set<string>

@@ -1,4 +1,4 @@
-// Code plugin (ADR 0018). The inline `code` run -- `` `like this` `` -- as a
+// Code plugin (ADR 0001). The inline `code` run -- `` `like this` `` -- as a
 // token plugin. Source == display (backticks stay visible), so it never folds.
 // This is the simplest dogfood of Seam A: pattern + render, no interaction.
 

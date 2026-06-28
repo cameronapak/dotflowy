@@ -98,7 +98,7 @@ export function useNode(id: string): Node | undefined {
 
 /**
  * Subscribe to a node's ordered, visibility-filtered child ids. `isHidden` is
- * the composed Seam-G prune predicate (ADR 0018): the store no longer hardcodes
+ * the composed Seam-G prune predicate (ADR 0001): the store no longer hardcodes
  * `completed` -- it hides whatever the predicate hides (hide-completed today).
  * It must be referentially stable across keystrokes (the caller memoizes it on
  * its inputs), or this cache resets every render and parents re-render on typing.

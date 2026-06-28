@@ -1,6 +1,6 @@
-// Links plugin (ADR 0018). Rich links -- `[label](url)` -- as a token plugin.
+// Links plugin (ADR 0001). Rich links -- `[label](url)` -- as a token plugin.
 // The one token that FOLDS: it shows raw markdown only when the caret is on it
-// (per-link reveal, ADR 0017), otherwise a clean <a>. Slice 1 ports the token
+// (per-link reveal, ADR 0005), otherwise a clean <a>. Slice 1 ports the token
 // render (Seam A); the delegated open (Seam B) and paste (Seam I) follow.
 //
 // The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
@@ -57,7 +57,7 @@ function faviconImgEl(host: string): El {
 // A folded link: a clean, ATOMIC <a> showing the site favicon + label. The whole
 // `(url)` is hidden; `contenteditable="false"` makes it one indivisible caret
 // unit. `data-src`/`data-src-len` carry the full markdown so the core's
-// readSource can reconstruct it and the caret helpers can count it (ADR 0017) --
+// readSource can reconstruct it and the caret helpers can count it (ADR 0005) --
 // readSource stops at the <a> and reads `data-src`, so the inner <img> never
 // perturbs source/caret math. Attr order is preserved verbatim so the generated
 // HTML stays byte-identical.
@@ -136,7 +136,7 @@ function findFoldedAnchor(el: HTMLElement, token: string): HTMLElement | null {
 // If the clipboard HTML is "essentially a single anchor" -- exactly one
 // `<a href>` whose text is the whole payload -- return its text + http(s) href.
 // Anything richer (a paragraph, multiple links, a table) returns null and falls
-// back to plain text. Narrow on purpose (ADR 0017).
+// back to plain text. Narrow on purpose (ADR 0005).
 function singleAnchor(html: string): { text: string; href: string } | null {
   if (!html) return null;
   const doc = new DOMParser().parseFromString(html, "text/html");

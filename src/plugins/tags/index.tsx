@@ -1,4 +1,4 @@
-// Tags plugin (ADR 0018). `#tag` as a plugin. Seam A: the chip render. Seam B:
+// Tags plugin (ADR 0001). `#tag` as a plugin. Seam A: the chip render. Seam B:
 // the delegated chip click -> filter and right-click -> color picker. Seam F
 // (subheader): the active-tag filter bar. Seam G: the `?q=` view transform.
 // Seam H: `#` autocomplete. The pure tag layer (parse/normalize/collect/filter)
@@ -117,7 +117,7 @@ export default definePlugin({
   // context (the pure walk stays in src/data/tags.ts). It's handed the composed
   // `isHidden` so completed subtrees drop out without this layer knowing about
   // completion. The core wires the result in as the `filter` prop (still
-  // core-rendered for now -- see ADR 0018's "still core-wired" note).
+  // core-rendered for now -- see ADR 0001's "still core-wired" note).
   viewTransforms: [
     {
       id: "tag-filter",

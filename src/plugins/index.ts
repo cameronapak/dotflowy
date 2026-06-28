@@ -1,4 +1,4 @@
-// The plugin registry (ADR 0018 D5). ONE explicit, ordered, greppable array --
+// The plugin registry (ADR 0001 D5). ONE explicit, ordered, greppable array --
 // not import.meta.glob auto-discovery. Adding a plugin = add a folder under
 // src/plugins/<name>/ and one line here. Array order is the tiebreak when two
 // tokens share a precedence, and the order slash commands / keymaps concatenate

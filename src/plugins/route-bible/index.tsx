@@ -1,10 +1,10 @@
-// Route Bible plugin (ADR 0026). A Scripture reference in `node.text` -> a
+// Route Bible plugin (ADR 0001). A Scripture reference in `node.text` -> a
 // clickable chip that opens route.bible. Seam A (the chip render) + Seam B (the
 // delegated open) -- the same two seams the `links` plugin uses, minus the fold.
 //
 // Detection is liberal-regex-PROPOSES (BIBLE_REF_PATTERN) /
 // grab-bcv-parser-DISPOSES (resolveBibleRef returns null -> the core renders raw
-// text). The chip is an ATOMIC WIDGET (ADR 0028): Seam A's React mode, so the
+// text). The chip is an ATOMIC WIDGET (ADR 0006): Seam A's React mode, so the
 // chip is REAL TSX (BibleChip -- lucide icons + Tailwind classes) mounted inside
 // a `<dotflowy-widget>` atom, with NO plugin CSS. The atom carries its source in
 // `data-src`, so `readSource`/the caret math treat it as one opaque unit (the
@@ -14,7 +14,7 @@ import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
 import { BibleChip } from "./chip";
 import { definePlugin, type WidgetEl } from "../types";
 
-// The chip is a `<dotflowy-widget>` atom mounting BibleChip (ADR 0028). `source`
+// The chip is a `<dotflowy-widget>` atom mounting BibleChip (ADR 0006). `source`
 // is the verbatim reference ("Jn 3:16") -- the atom's source text AND the
 // component's label. `data-bible-ref` + `data-href` are the Seam-B interaction
 // hooks (the click handler reads them off the element); the core adds
