@@ -1,5 +1,6 @@
 import {
   CircleCheckIcon,
+  ClipboardCopyIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
@@ -7,6 +8,7 @@ import {
   SunIcon,
   SunMoonIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -24,6 +26,34 @@ import {
 import { signOut } from "../lib/auth-client";
 import { useShowCompleted } from "./show-completed-provider";
 import { useTheme } from "./theme-provider";
+import { outlineToMarkdown } from "../data/markdown";
+import { getTreeIndex } from "../data/tree-store";
+import { getViewRootId } from "../data/view-state";
+import { childrenOf } from "../data/tree";
+
+/**
+ * Copy the current view's subtree to the clipboard as a markdown bullet list.
+ * Scope is the zoom root (read live at click time), or every top-level node at
+ * home -- the header is contextual to the current zoom view. See ADR 0029.
+ */
+async function copyOutlineAsMarkdown() {
+  const index = getTreeIndex();
+  const rootId = getViewRootId();
+  const rootIds = rootId
+    ? [rootId]
+    : childrenOf(index, null).map((n) => n.id);
+  const markdown = outlineToMarkdown(index, rootIds);
+  if (!markdown) {
+    toast("Nothing to copy");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(markdown);
+    toast.success("Copied as Markdown");
+  } catch {
+    toast.error("Couldn't copy to clipboard");
+  }
+}
 
 /**
  * Header overflow ("More") menu. Holds the secondary, set-once controls --
@@ -54,6 +84,13 @@ export function HeaderMoreMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem onClick={copyOutlineAsMarkdown}>
+          <ClipboardCopyIcon />
+          Copy as Markdown
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <SunMoonIcon />
