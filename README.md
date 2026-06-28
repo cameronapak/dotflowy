@@ -1,6 +1,21 @@
-# Dotflowy
+<p align="center">
+  <img src="/public/favicon-light.svg" alt="Dotflowy" width="120" height="120" />
+</p>
 
-An outline editor in the spirit of [Workflowy](https://workflowy.com). Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
+<h1 align="center">Dotflowy (beta)</h1>
+
+<p align="center">
+  <strong>An infinite outliner for your thoughts and tasks</strong><br/>
+	<span>If Workflowy was open source and had the extensibility of Obsidian plugins</span>
+</p>
+
+<p align="center">
+  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a>
+</p>
+
+---
+
+Built with [TanStack Start](https://tanstack.com/start) and [TanStack DB](https://tanstack.com/db).
 
 Local-first at heart, with an optional Cloudflare deployment that syncs your outline across devices via a per-user [Durable Object](https://developers.cloudflare.com/durable-objects/), behind email + password accounts ([Better Auth](https://www.better-auth.com)).
 
