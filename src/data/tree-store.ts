@@ -10,6 +10,8 @@ import {
   type Node,
   type TreeIndex,
 } from './tree'
+import { buildVisibleRows, type VisibleRow } from './visible-order'
+import type { TagFilter } from './tags'
 
 /**
  * A single, app-wide subscription to the nodes collection that derives one
@@ -43,6 +45,15 @@ const EMPTY_TRAIL: Node[] = []
 let index: TreeIndex = { byId: new Map(), childrenByParent: new Map() }
 const listeners = new Set<() => void>()
 let started = false
+
+// Monotonic counter bumped only when the VISIBLE STRUCTURE changes -- an
+// insert/delete/reparent/reorder (dirty parents) OR a collapse/completed flip
+// (field edits that nonetheless add/remove rows or change fade inheritance). A
+// plain text/isTask edit never bumps it, so {@link useVisibleRows}' getSnapshot
+// is an O(1) rev compare on the typing hot path and rebuilds the flat list only
+// on a real structural change -- the Phase B counterpart to the field-edit Map
+// identity discipline below (ADR 0019).
+let structureRev = 0
 
 function notify() {
   for (const l of listeners) l()
@@ -81,6 +92,10 @@ function notify() {
  */
 function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   const dirty = new Set<string>() // parents whose child order may have changed
+  // A collapse or completed flip is a field edit (no parent dirties) but it DOES
+  // change the visible row set / fade inheritance, so it must bump structureRev
+  // for useVisibleRows even though it keeps the Map refs (it's not a re-sort).
+  let visibilityChanged = false
   for (const change of changes) {
     if (change.type === 'delete') {
       const prev = index.byId.get(change.key as string)
@@ -94,6 +109,9 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     const next = change.value
     const prev = index.byId.get(next.id)
     index.byId.set(next.id, next)
+    if (prev && (prev.collapsed !== next.collapsed || prev.completed !== next.completed)) {
+      visibilityChanged = true
+    }
     if (!prev) {
       // Insert (also the safe fallback for an update to a row we haven't seen).
       const key = parentKeyOf(next)
@@ -142,6 +160,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
           childrenByParent: new Map(index.childrenByParent),
         }
       : { byId: index.byId, childrenByParent: index.childrenByParent }
+  // Bump the flat-list signal on a structural change OR a visibility flip; a
+  // pure text/isTask edit leaves it untouched (the typing hot path). See
+  // useVisibleRows.
+  if (dirty.size > 0 || visibilityChanged) structureRev++
   notify()
 }
 
@@ -285,4 +307,62 @@ export function useHasNodes(): boolean {
     () => getTreeIndex().byId.size > 0,
     () => false,
   )
+}
+
+/** The current visible-structure revision (see {@link structureRev}). O(1). */
+export function getStructureRev(): number {
+  ensureStarted()
+  return structureRev
+}
+
+const EMPTY_ROWS: VisibleRow[] = []
+
+/**
+ * The flat, depth-tagged list of visible rows under `rootId` -- the Phase B
+ * render driver (ADR 0019). One subscription feeds the whole windowed list,
+ * replacing the per-parent {@link useVisibleChildIds} fan-out of the recursive
+ * path.
+ *
+ * Identity discipline (the reason this is cheap at 100k): getSnapshot rebuilds
+ * the array ONLY when {@link structureRev} changes -- a structural edit or a
+ * collapse/completed flip. A plain keystroke bumps nothing, so getSnapshot is an
+ * O(1) rev compare and returns the SAME array reference, so the virtualizer host
+ * doesn't re-render on typing. `isHidden` and `filter` are deps of the memoized
+ * callback (a new filter object on a matching keystroke while filtering forces a
+ * rebuild -- correct, and not the 100k hot path). They must be referentially
+ * stable across unrelated keystrokes (the caller memoizes them), or the cache
+ * resets every render.
+ */
+export function useVisibleRows(
+  rootId: string | null,
+  isHidden: (node: Node) => boolean,
+  filter: TagFilter | null,
+): VisibleRow[] {
+  const cache = useRef<{
+    rev: number
+    rootId: string | null
+    isHidden: (n: Node) => boolean
+    filter: TagFilter | null
+    rows: VisibleRow[]
+  } | null>(null)
+  const getSnapshot = useCallback(() => {
+    const rev = getStructureRev()
+    const c = cache.current
+    // Reuse only when NOTHING that shapes the list changed: rev (structure) AND
+    // the deps (the cache outlives a getSnapshot swap, so a dep change with an
+    // unchanged rev would otherwise return rows built for the old deps).
+    if (
+      c &&
+      c.rev === rev &&
+      c.rootId === rootId &&
+      c.isHidden === isHidden &&
+      c.filter === filter
+    ) {
+      return c.rows
+    }
+    const rows = buildVisibleRows(getTreeIndex(), rootId, isHidden, filter)
+    cache.current = { rev, rootId, isHidden, filter, rows }
+    return rows
+  }, [rootId, isHidden, filter])
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_ROWS)
 }

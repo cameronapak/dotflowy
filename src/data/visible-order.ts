@@ -1,32 +1,62 @@
 import { childrenOf, type Node, type TreeIndex } from './tree'
+import type { TagFilter } from './tags'
 
 /**
- * The visible (non-collapsed, non-hidden) outline in display order within the
- * current zoom root. `isHidden` is the composed Seam-G prune (hide-completed
- * today), so this MIRRORS what the editor actually renders -- a node absent from
- * the DOM is absent here too. The zoom root (the title) is the first entry, so
- * ArrowUp from the first child lands on the title.
- *
- * Shared by the caret-neighbor walk ({@link findVisibleNeighbor}, used by
- * onMoveFocus/delete-focus) and node multi-selection (which mirrors the same
- * visible order to pick the row above/below a selection). Extracted from
- * OutlineEditor so both read one definition. Pure; no DOM, no React.
+ * One visible row of the outline, in display order, as the windowed renderer and
+ * the caret-neighbor walk both consume it (ADR 0019). `depth` is relative to the
+ * zoom root (a direct child of the root is depth 0), driving the row's visual
+ * indentation now that nesting is no longer DOM structure. `ancestorCompleted`
+ * is the fade-inheritance bit carried DOWN the walk -- true when any ancestor
+ * *within the current view* is completed -- so a flat row knows to render faded
+ * without a parent passing it a prop (ADR 0002).
  */
-function flattenVisible(
+export interface VisibleRow {
+  id: string
+  depth: number
+  ancestorCompleted: boolean
+}
+
+/**
+ * The visible (non-collapsed, non-hidden) descendants of `rootId` in display
+ * order, flattened to a depth-tagged list. EXCLUDES the root itself: when zoomed
+ * the root renders as the page title (not a list row), and at the top level
+ * (`rootId === null`) there is no root. The caret walk re-adds the root at the
+ * front (see {@link findVisibleNeighbor}).
+ *
+ * `isHidden` is the composed Seam-G prune (hide-completed today), so this MIRRORS
+ * what the editor renders -- a node absent from the DOM is absent here too.
+ *
+ * `filter` (the tags plugin's pruned set, ADR 0015) switches the walk to
+ * filter-mode: collapse state is IGNORED (matches inside a closed subtree are
+ * revealed) and only nodes in `filter.visibleIds` survive -- exactly the
+ * recursive render's per-node filter. Omitted by the caret walk (nav doesn't
+ * prune to the filter), so render and nav share one builder, parameterized.
+ *
+ * Pure; no DOM, no React.
+ */
+export function buildVisibleRows(
   index: TreeIndex,
   rootId: string | null,
   isHidden: (n: Node) => boolean,
-): Array<{ id: string }> {
-  const out: Array<{ id: string }> = []
-  if (rootId) out.push({ id: rootId })
-  const walk = (parentId: string | null) => {
+  filter?: TagFilter | null,
+): VisibleRow[] {
+  const out: VisibleRow[] = []
+  const walk = (
+    parentId: string | null,
+    depth: number,
+    ancestorCompleted: boolean,
+  ) => {
     for (const child of childrenOf(index, parentId)) {
       if (isHidden(child)) continue
-      out.push({ id: child.id })
-      if (!child.collapsed) walk(child.id)
+      if (filter && !filter.visibleIds.has(child.id)) continue
+      out.push({ id: child.id, depth, ancestorCompleted })
+      // Faded children inherit the fade; filter-mode descends regardless of
+      // collapse so a deep match is still reached.
+      const childFade = ancestorCompleted || child.completed
+      if (filter || !child.collapsed) walk(child.id, depth + 1, childFade)
     }
   }
-  walk(rootId)
+  walk(rootId, 0, false)
   return out
 }
 
@@ -34,6 +64,10 @@ function flattenVisible(
  * The id immediately before/after `id` in visible display order within the zoom
  * root, or null if none. Used for caret motion across bullets and for landing
  * the caret above/below a node multi-selection.
+ *
+ * The root is prepended so ArrowUp from the first child lands on the title (the
+ * root registers a contentEditable span under its own id). Filter is not applied
+ * here -- caret nav walks the unfiltered visible tree, unchanged from before.
  */
 export function findVisibleNeighbor(
   index: TreeIndex,
@@ -42,11 +76,12 @@ export function findVisibleNeighbor(
   direction: 'up' | 'down',
   isHidden: (n: Node) => boolean,
 ): string | null {
-  const flat = flattenVisible(index, rootId, isHidden)
-  const i = flat.findIndex((n) => n.id === id)
+  const rows = buildVisibleRows(index, rootId, isHidden)
+  const seq = rootId ? [rootId, ...rows.map((r) => r.id)] : rows.map((r) => r.id)
+  const i = seq.indexOf(id)
   if (i === -1) return null
-  const neighbor = direction === 'up' ? flat[i - 1] : flat[i + 1]
-  return neighbor ? neighbor.id : null
+  const neighbor = direction === 'up' ? seq[i - 1] : seq[i + 1]
+  return neighbor ?? null
 }
 
 /**

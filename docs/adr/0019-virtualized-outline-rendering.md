@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Virtualized outline rendering
@@ -57,3 +57,32 @@ attempt it.
 - One flatten definition (`visible-order.ts`) drives both render and caret nav — don't fork a
   render-only copy that can drift from the neighbor walk.
 - Delete the recursive path once the flag flips; don't leave two render models alive.
+
+**Shipped (default on, recursive path retained as the rollback fallback).** What
+landed and the non-obvious calls:
+
+- **The flat row is `OutlineRow` (`OutlineRow.tsx`), windowed by `useWindowVirtualizer`** over
+  `useVisibleRows` (`tree-store.ts`). The outline scrolls the **window**, not a container, so it's
+  the *window* virtualizer with `scrollMargin` = the list's document-top offset (measured per zoom
+  view) and `initialRect` seeded from the viewport (else the first paint renders 0 rows until the
+  window is observed — a blank flash, and an under-load test flake).
+- **`OutlineRow` IS the positioned + measured `<li>`** (not a wrapper div): it carries the
+  `transform: translateY(start - scrollMargin)`, `data-index`, and `virtualizer.measureElement` ref
+  directly, so the row stays an `<li[data-node-id]>` directly under the list `<ul>` (CSS + e2e
+  selectors depend on that). It re-renders on scroll to reposition — fine; the memo's job is
+  isolating *typing*, and row props stay referentially stable.
+- **`OutlineEditor` opts OUT of React Compiler (`"use no memo"`).** The compiler memoizes
+  `virtualizer.getVirtualItems()` on the stable virtualizer instance and never recomputes it on
+  scroll, freezing the window at its initial range. The shell's hand-tuned `useMemo`/`useCallback`
+  already keep row props stable, so opting out costs nothing on the hot path.
+- **`structureRev` (`tree-store.ts`)** bumps only on structural OR collapse/completed changes, so
+  `useVisibleRows`' getSnapshot is an O(1) rev compare on the typing hot path (no re-flatten).
+- **Off-screen focus** rides `virtual-nav.ts`: a focus/flash target not in the window is reached via
+  `scrollRowIntoView` (scroll → the row claims `pendingFocus`/`pendingFlash` in its own mount effect,
+  since a scroll isn't a tree change `FocusPass` can see). **Drag** hit-tests against the virtualizer
+  measurements (`virtualRowRect`), not mounted DOM.
+- **`data-parent-id` / `data-depth`** on each row expose the real parent + depth (top-level = no
+  `data-parent-id`); nesting is asserted via these, since the flat list has no nested `<li>`.
+- **Collapse/expand is instant** (no height-slide): the flat list drops collapsed descendants
+  entirely, so the grid-rows animation can't survive — matches Workflowy/Roam (decided with Cam).
+  Node multi-selection now tints **full-width** rows rather than indented ones (same reason).

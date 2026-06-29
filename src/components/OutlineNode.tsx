@@ -277,6 +277,7 @@ function OutlineNodeBody({
     <li
       className="outline-node"
       data-node-id={node.id}
+      data-parent-id={node.parentId ?? undefined}
       data-selected={selectionEdge ?? undefined}
     >
       <div className="outline-row" data-faded={faded} data-context={isContext}>

@@ -74,9 +74,9 @@ test.describe("move dialog: bookmark empty state", () => {
     // Confirming toast names the destination.
     await expect(page.getByText("Moved to Inbox")).toBeVisible();
 
-    // And the node is now a child of Inbox in the DOM (not a top-level sibling).
+    // And the node is now a child of Inbox (its data-parent-id), not top-level.
     await expect(
-      page.locator('li[data-node-id="inbox"] li[data-node-id="loose"]'),
+      page.locator('li[data-node-id="loose"][data-parent-id="inbox"]'),
     ).toBeVisible();
   });
 

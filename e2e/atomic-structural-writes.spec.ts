@@ -114,9 +114,12 @@ test.describe("atomic structural writes", () => {
     writes.length = 0;
     await page.keyboard.press("Enter");
 
-    // A new child appeared under alpha (the op landed).
+    // A new child appeared under alpha (the op landed) -- a focused bullet whose
+    // data-parent-id is alpha (the flat render has no nested <ul>; ADR 0019).
     await expect(
-      page.locator('li[data-node-id="alpha"] ul .node-text:focus'),
+      page.locator(
+        'li[data-parent-id="alpha"] > .outline-row > .node-text:focus',
+      ),
     ).toBeVisible();
 
     // Exactly one request, and it is the atomic batch (POST {ops}), never a
