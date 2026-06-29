@@ -1,13 +1,11 @@
-import { useCallback, useSyncExternalStore } from 'react'
+import { useSelector } from '@xstate/react'
 import { createActor } from 'xstate'
 import { nodesCollection } from './collection'
 import { getTreeIndex } from './tree-store'
 import { getViewIsHidden, getViewRootId } from './view-state'
 import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from './tree'
-import { isSelectionMachine } from './flags'
 import {
   buildEdgeMap,
-  rangeFrom,
   selectionMachine,
   type SelectionEdge,
 } from './selection-machine'
@@ -17,26 +15,26 @@ import {
  * *nodes* are selected (distinct from selecting text inside one bullet), so an
  * action can act on several subtrees at once.
  *
- * Shape: a module singleton mirrored like {@link view-state} and the tree store
- * -- the stable command/keyboard closures read it live at EVENT time, and each
- * row subscribes to its OWN slice via {@link useSelectionEdge}, so a selection
- * change re-renders only the rows entering or leaving it (preserving the
- * per-node-render guarantee of ADR 0014). Selection is NEVER threaded as a prop.
+ * Storage is a single module-singleton **XState v6 actor** whose context +
+ * events are typed with **Effect Schema** (`selection-machine.ts`). The
+ * stable command/keyboard closures read it live at EVENT time, and each row
+ * subscribes to its OWN slice via {@link useSelectionEdge} (`useSelector`), so a
+ * selection change re-renders only the rows entering or leaving it (preserving
+ * the per-node-render guarantee of ADR 0014). Selection is NEVER threaded as a
+ * prop.
  *
  * Model: a selection is a **contiguous run of siblings under one parent**
  * (`rootIds`), and selecting a node implies its whole subtree. The fixed end is
  * the `anchorId`; Shift+arrow moves the `focusId` end. See ADR 0018.
  *
- * **Storage is pluggable behind the `isSelectionMachine()` flag** (the XState v6
- * PoC -- see `.scratch/xstate-effect-schema/`). Both backends share the SAME
- * tree-reading code below and the SAME `rangeFrom`/`buildEdgeMap` math, so they
- * compute identical runs -- the flag only swaps WHERE the result is held (a
- * module var vs. an Effect-Schema-typed XState actor) and how React subscribes.
- * The singleton is the default; flip localStorage to dogfood the machine.
+ * The tree-reading functions below stay machine-agnostic: they read the live
+ * tree, hand the visible sibling ids to the actor, and the machine normalizes
+ * the run via `rangeFrom` and classifies `idle/single/multi`. The machine is
+ * pure (tree facts arrive as event data), so the adapter owns every tree read.
  */
 
 /** Where a selected ROOT sits in the slab (ADR 0018). Re-exported from the
- *  machine module, which owns the edge math shared by both backends. */
+ *  machine module, which owns the edge math. */
 export type { SelectionEdge }
 
 interface SelectionState {
@@ -60,137 +58,52 @@ function visibleSiblings(index: TreeIndex, parentId: string | null): Node[] {
 
 const EMPTY_ROOTS: string[] = []
 
-// --- pluggable backend -------------------------------------------------------
+// --- the selection actor (module singleton) ---------------------------------
 
-/** What a storage backend must provide. The tree-reading public functions below
- *  are backend-agnostic: they compute `{ parentId, anchor, focus, siblings }`
- *  from the live tree and hand it to `setRange`; the backend runs the (shared)
- *  range math and holds the result. */
-interface SelectionBackend {
-  getState(): SelectionState | null
-  /** Stable identity per selection (safe as a `useSyncExternalStore` snapshot). */
-  rootIds(): string[]
-  edgeOf(id: string): SelectionEdge | null
-  isActive(): boolean
-  subscribe(cb: () => void): () => void
-  setRange(input: {
-    parentId: string | null
-    anchorId: string
-    focusId: string
-    siblings: string[]
-  }): void
-  clear(): void
-}
+/** The selection lives in one XState actor for the app's lifetime. Creation is
+ *  pure (no DOM/tree reads until an event arrives), so it is SSR-safe: the
+ *  prerender sees an idle selection and `useSelector` reads that same snapshot
+ *  as its server value. */
+const selectionActor = createActor(selectionMachine).start()
 
-// --- backend 1: the module singleton (default, shipping) ---------------------
-
-function makeSingletonBackend(): SelectionBackend {
-  let state: SelectionState | null = null
-  let edgeByRoot = new Map<string, SelectionEdge>()
-  const listeners = new Set<() => void>()
-  const notify = () => {
-    for (const l of listeners) l()
+/** The live selection as a {@link SelectionState}, or null when idle. Built
+ *  fresh per call; read imperatively at event time, never as a store snapshot. */
+function selectionState(): SelectionState | null {
+  const c = selectionActor.getSnapshot().context
+  if (c.anchorId === null || c.focusId === null || c.rootIds.length === 0) {
+    return null
   }
+  // The machine context's rootIds is `readonly string[]`; callers treat the
+  // selection as immutable, so widening the cast is sound and keeps identity
+  // stable across reads.
   return {
-    getState: () => state,
-    rootIds: () => (state ? state.rootIds : EMPTY_ROOTS),
-    edgeOf: (id) => edgeByRoot.get(id) ?? null,
-    isActive: () => state !== null,
-    subscribe: (cb) => {
-      listeners.add(cb)
-      return () => {
-        listeners.delete(cb)
-      }
-    },
-    setRange: ({ parentId, anchorId, focusId, siblings }) => {
-      const r = rangeFrom(siblings, anchorId, focusId)
-      if (!r) {
-        if (state) {
-          state = null
-          edgeByRoot = new Map()
-          notify()
-        }
-        return
-      }
-      state = { parentId, anchorId, focusId: r.focusId, rootIds: r.rootIds }
-      edgeByRoot = buildEdgeMap(state.rootIds)
-      notify()
-    },
-    clear: () => {
-      if (!state) return
-      state = null
-      edgeByRoot = new Map()
-      notify()
-    },
+    parentId: c.parentId,
+    anchorId: c.anchorId,
+    focusId: c.focusId,
+    rootIds: c.rootIds as string[],
   }
 }
 
-// --- backend 2: the XState v6 actor (opt-in via isSelectionMachine()) ---------
-
-function makeMachineBackend(): SelectionBackend {
-  const actor = createActor(selectionMachine).start()
-  // Edge lookups are cached per selection (rebuilt only when rootIds identity
-  // changes), matching the singleton's O(1)-per-row reads instead of an indexOf
-  // scan on every visible row.
-  let cachedRoots: readonly string[] | null = null
-  let cachedEdges = new Map<string, SelectionEdge>()
-  const liveRoots = (): readonly string[] => actor.getSnapshot().context.rootIds
-  return {
-    getState: () => {
-      const c = actor.getSnapshot().context
-      if (c.anchorId === null || c.focusId === null || c.rootIds.length === 0) {
-        return null
-      }
-      // The machine context's rootIds is `readonly string[]`; callers treat the
-      // selection as immutable, so the cast is sound and keeps identity stable.
-      return {
-        parentId: c.parentId,
-        anchorId: c.anchorId,
-        focusId: c.focusId,
-        rootIds: c.rootIds as string[],
-      }
-    },
-    rootIds: () => {
-      const r = liveRoots()
-      return r.length ? (r as string[]) : EMPTY_ROOTS
-    },
-    edgeOf: (id) => {
-      const roots = liveRoots()
-      if (roots !== cachedRoots) {
-        cachedRoots = roots
-        cachedEdges = buildEdgeMap(roots)
-      }
-      return cachedEdges.get(id) ?? null
-    },
-    isActive: () => !actor.getSnapshot().matches('idle'),
-    subscribe: (cb) => {
-      const sub = actor.subscribe(() => cb())
-      return () => sub.unsubscribe()
-    },
-    setRange: (input) => {
-      actor.send({ type: 'SELECT_RANGE', ...input })
-    },
-    clear: () => {
-      if (actor.getSnapshot().matches('idle')) return
-      actor.send({ type: 'CLEAR' })
-    },
+/** Per-selection edge map, rebuilt only when the run's identity changes, so a
+ *  per-row {@link useSelectionEdge} read stays O(1) instead of an indexOf scan
+ *  on every visible row. The machine hands out a fresh `rootIds` array per
+ *  transition, so identity equality is a safe cache key. */
+let edgeCacheRoots: readonly string[] | null = null
+let edgeCache = new Map<string, SelectionEdge>()
+function edgeOf(rootIds: readonly string[], id: string): SelectionEdge | null {
+  if (rootIds !== edgeCacheRoots) {
+    edgeCacheRoots = rootIds
+    edgeCache = buildEdgeMap(rootIds)
   }
+  return edgeCache.get(id) ?? null
 }
 
-/** The active backend is chosen ONCE at module load: the flag is a build/reload
- *  switch (like `isVirtualized`), and the two backends must not diverge mid
- *  session. SSR reads false (no window), so the actor is never created on the
- *  server. */
-const backend: SelectionBackend = isSelectionMachine()
-  ? makeMachineBackend()
-  : makeSingletonBackend()
-
-// --- backend-agnostic tree logic (unchanged behavior; ADR 0018) --------------
+// --- tree logic (ADR 0018) --------------------------------------------------
 
 /**
  * Set the selection to the visible sibling run between `anchorId` and `focusId`
  * (inclusive), under the anchor's parent. Reads the tree, then hands the visible
- * sibling ids to the backend, which derives the run via `rangeFrom`. Clears if
+ * sibling ids to the actor, which derives the run via `rangeFrom`. Clears if
  * the anchor is gone or not a visible sibling.
  */
 function selectRange(
@@ -200,11 +113,17 @@ function selectRange(
 ) {
   const anchor = index.byId.get(anchorId)
   if (!anchor) {
-    backend.clear()
+    clearSelection()
     return
   }
   const siblings = visibleSiblings(index, anchor.parentId).map((n) => n.id)
-  backend.setRange({ parentId: anchor.parentId, anchorId, focusId, siblings })
+  selectionActor.send({
+    type: 'SELECT_RANGE',
+    parentId: anchor.parentId,
+    anchorId,
+    focusId,
+    siblings,
+  })
 }
 
 // --- public API -------------------------------------------------------------
@@ -212,23 +131,25 @@ function selectRange(
 /** Subscribe to any selection change. Referentially stable, safe as a
  *  `useSyncExternalStore` subscribe. */
 export function subscribeSelection(cb: () => void): () => void {
-  return backend.subscribe(cb)
+  const sub = selectionActor.subscribe(cb)
+  return () => sub.unsubscribe()
 }
 
 /** Whether any node selection is active. */
 export function isSelectionActive(): boolean {
-  return backend.isActive()
+  return !selectionActor.getSnapshot().matches('idle')
 }
 
 /** The selected ROOT ids (subtrees implied), in visible order. Empty when no
  *  selection. Stable identity per selection -- safe as a store snapshot. */
 export function getSelectionRootIds(): string[] {
-  return backend.rootIds()
+  const r = selectionActor.getSnapshot().context.rootIds
+  return r.length ? (r as string[]) : EMPTY_ROOTS
 }
 
 /** The full selection state, read live at event time. Null when inactive. */
 export function getSelectionState(): SelectionState | null {
-  return backend.getState()
+  return selectionState()
 }
 
 /** Select exactly `nodeId` and its subtree -- the fresh single-root selection
@@ -248,7 +169,7 @@ export function selectSingle(nodeId: string) {
  * root; diving needs an expanded node with a visible child). See ADR 0018.
  */
 export function extendSelection(direction: 'up' | 'down') {
-  const s = backend.getState()
+  const s = selectionState()
   if (!s) return
   const index = getTreeIndex()
   const sibs = visibleSiblings(index, s.parentId)
@@ -289,7 +210,7 @@ export function selectAllInView() {
 /** Whether the current selection already covers the whole current view -- the
  *  top rung of the Cmd+A ladder, so a further Cmd+A is bounded (a no-op). */
 export function isWholeViewSelected(): boolean {
-  const s = backend.getState()
+  const s = selectionState()
   if (!s) return false
   const rootId = getViewRootId()
   if (s.parentId !== rootId) return false
@@ -310,25 +231,25 @@ export function isWholeViewSelected(): boolean {
  * `runStructural` batch -- before the store's subscription has rebuilt.
  */
 export function refreshSelection() {
-  const s = backend.getState()
+  const s = selectionState()
   if (!s) return
   selectRange(s.anchorId, s.focusId, buildTreeIndex(nodesCollection.toArray))
 }
 
 /** Clear the selection (Escape, a click, a focus, after an op). */
 export function clearSelection() {
-  backend.clear()
+  if (selectionActor.getSnapshot().matches('idle')) return
+  selectionActor.send({ type: 'CLEAR' })
 }
 
 /**
  * Per-node subscription to this node's slab edge: a row re-renders only when ITS
  * edge changes, never on an unrelated selection change. This is what keeps
- * multi-selection inside ADR 0014's per-node-render budget. With the machine
- * backend this is the `useSelector(actor, …)` equivalent -- a
- * `useSyncExternalStore` over the actor, selecting a single per-id edge value.
- * Returns null when the node isn't a selected root.
+ * multi-selection inside ADR 0014's per-node-render budget. `useSelector` is a
+ * `useSyncExternalStore`-with-selector over the actor, returning a single per-id
+ * edge value compared with `Object.is`. Returns null when the node isn't a
+ * selected root.
  */
 export function useSelectionEdge(id: string): SelectionEdge | null {
-  const getSnapshot = useCallback(() => backend.edgeOf(id), [id])
-  return useSyncExternalStore(backend.subscribe, getSnapshot, () => null)
+  return useSelector(selectionActor, (snap) => edgeOf(snap.context.rootIds, id))
 }

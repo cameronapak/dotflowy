@@ -3,9 +3,10 @@ import { setup } from 'xstate'
 
 /**
  * Node multi-selection (ADR 0018) as an XState v6 machine whose context + events
- * are typed with **Effect Schema**. Driven behind the `isSelectionMachine()` flag
- * by `selection-state.ts` (the singleton stays the default). See
- * `.scratch/xstate-effect-schema/` for the design + draft ADR.
+ * are typed with **Effect Schema**. This machine IS the selection store: a single
+ * module-singleton actor in `selection-state.ts` drives it, and rows read per-id
+ * edge slices via `useSelector`. See `.scratch/xstate-effect-schema/` for the
+ * design history and draft ADR.
  *
  * Integration showcase:
  *
@@ -23,11 +24,10 @@ import { setup } from 'xstate'
  *    selection transition depends on the live tree (which siblings are visible,
  *    the depth-walk at a boundary). So the adapter (`selection-state.ts`) reads
  *    the tree and hands the machine the visible sibling ids; the machine
- *    normalizes the run via `rangeFrom` and classifies `idle/single/multi`. The
- *    same `rangeFrom`/`buildEdgeMap` power the singleton backend, so both paths
- *    compute identically (parity by construction). This is the honest finding:
- *    for tree-dominated features the machine's value is state classification + a
- *    single Effect-Schema-typed source of truth, not owning pure transition logic.
+ *    normalizes the run via `rangeFrom` and classifies `idle/single/multi`. This
+ *    is the honest finding: for tree-dominated features the machine's value is
+ *    state classification + a single Effect-Schema-typed source of truth, not
+ *    owning pure transition logic.
  */
 
 /** Where a selected ROOT sits in the slab (mirrors ADR 0018). */
