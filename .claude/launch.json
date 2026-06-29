@@ -4,8 +4,8 @@
     {
       "name": "dev",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "runtimeArgs": ["run", "cf:dev"],
+      "port": 8787
     }
   ]
 }
