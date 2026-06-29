@@ -172,19 +172,23 @@ test.describe("Node multi-selection", () => {
 
     // Tab: c and d become children of b, in order, and STAY selected.
     await page.keyboard.press("Tab");
-    await expect(li(page, "b").locator('li[data-node-id="c"]')).toBeVisible();
-    await expect(li(page, "b").locator('li[data-node-id="d"]')).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="c"][data-parent-id="b"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="d"][data-parent-id="b"]'),
+    ).toBeVisible();
     await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
     await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
     // Only alpha + bravo remain at the top level now.
     await expect(
-      page.locator(".outline-list > li[data-node-id]"),
+      page.locator("li[data-node-id]:not([data-parent-id])"),
     ).toHaveCount(2);
 
     // Shift+Tab: outdent back to the top level, right after b, still selected.
     await page.keyboard.press("Shift+Tab");
     await expect(
-      page.locator(".outline-list > li[data-node-id]"),
+      page.locator("li[data-node-id]:not([data-parent-id])"),
     ).toHaveCount(4);
     await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
     await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
@@ -209,7 +213,7 @@ test.describe("Node multi-selection", () => {
     await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
     await expect(li(page, "b")).toHaveAttribute("data-selected", "bottom");
     await expect(
-      page.locator(".outline-list > li[data-node-id]"),
+      page.locator("li[data-node-id]:not([data-parent-id])"),
     ).toHaveCount(4);
   });
 
@@ -336,12 +340,16 @@ test.describe("Node multi-selection", () => {
     await dialog.getByRole("option", { name: "delta" }).click();
 
     await expect(page.getByText("Moved 2 nodes to delta")).toBeVisible();
-    // Both moved roots are now children of delta, in order.
-    await expect(li(page, "d").locator('li[data-node-id="a"]')).toBeVisible();
-    await expect(li(page, "d").locator('li[data-node-id="b"]')).toBeVisible();
+    // Both moved roots are now children of delta (their data-parent-id).
+    await expect(
+      page.locator('li[data-node-id="a"][data-parent-id="d"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="b"][data-parent-id="d"]'),
+    ).toBeVisible();
     // They are no longer top-level (only charlie + delta remain at the top).
     await expect(
-      page.locator(".outline-list > li[data-node-id]"),
+      page.locator("li[data-node-id]:not([data-parent-id])"),
     ).toHaveCount(2);
   });
 

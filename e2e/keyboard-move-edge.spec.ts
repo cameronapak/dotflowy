@@ -8,8 +8,14 @@ function modifier() {
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
+// "nodeId is a child of ancestorId", asserted via the row's data-parent-id (the
+// node's real parent) rather than DOM nesting -- the flat windowed render has no
+// nested <li>s (ADR 0019). nestedUnder(parent, x).toHaveCount(0) still reads as
+// "x is no longer a direct child of parent".
 const nestedUnder = (page: Page, ancestorId: string, nodeId: string) =>
-  page.locator(`li[data-node-id="${ancestorId}"] li[data-node-id="${nodeId}"]`);
+  page.locator(
+    `li[data-node-id="${nodeId}"][data-parent-id="${ancestorId}"]`,
+  );
 
 /**
  *   - Uncle

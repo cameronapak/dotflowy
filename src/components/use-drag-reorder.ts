@@ -1,5 +1,7 @@
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
+import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
+import { INDENT_PX } from "./OutlineRow";
 
 /**
  * Pointer-driven drag to reorder and reparent a bullet, for mouse and touch.
@@ -16,9 +18,11 @@ import { childrenOf, type Node, type TreeIndex } from "../data/tree";
 
 // Movement (px) before a press becomes a drag. Below this, it's a click → zoom.
 const THRESHOLD = 5;
-// Indent per depth level. Matches `.outline-children { padding-left }` in
-// styles.css; measured from the live rows when possible, this is the fallback.
-const INDENT_FALLBACK = 24;
+// Indent per depth level. The render's single source (OutlineRow.INDENT_PX, also
+// the recursive path's `.outline-children` padding); measured from the live rows
+// when possible, this is the fallback so the windowed drop-depth projection can't
+// drift from the rendered indent.
+const INDENT_FALLBACK = INDENT_PX;
 // How much of an indent the pointer must travel rightward before a drop nests
 // one level deeper. 0 = snap to the nearest level (flips at the halfway point);
 // higher = stickier toward the shallower level, so a near-vertical drag stays
@@ -35,6 +39,16 @@ interface Row {
   parentId: string | null;
   depth: number; // relative to the zoom root: its direct children are depth 0
   el: HTMLElement | null;
+}
+
+// A row's viewport box for hit-testing. Sourced from a DOMRect (recursive path)
+// or synthesized from the virtualizer's measurements (windowed path).
+interface RowRect {
+  top: number;
+  bottom: number;
+  height: number;
+  left: number;
+  right: number;
 }
 
 interface DragDeps {
@@ -180,8 +194,49 @@ export function useDragReorder(deps: DragDeps) {
   const project = useCallback((px: number, py: number) => {
     const s = state.current;
     if (!s) return;
-    const rows = s.rows.filter((r) => r.el);
-    const rects = rows.map((r) => r.el!.getBoundingClientRect());
+    // Geometry source: the virtualizer's measurements when windowed (so an
+    // off-screen drop target still has a position, estimated until it renders),
+    // else the rendered rows' DOM rects (recursive path). The depth math after
+    // is identical -- only where top/left come from differs.
+    const virtualized = isVirtualNavActive();
+    const listEl = depsRef.current.getListEl();
+    const listRect = listEl?.getBoundingClientRect();
+    const scrollY = window.scrollY;
+    const pairs: { row: Row; rect: RowRect }[] = [];
+    for (const r of s.rows) {
+      if (virtualized) {
+        const vr = virtualRowRect(r.id, scrollY);
+        if (!vr) continue;
+        // Uniform indent: depth-0 left is the container left; deeper rows add
+        // depth * indent (OutlineRow's paddingInlineStart). project() backs
+        // baseLeft out of this exactly, so the synthesized left is self-consistent.
+        const left = (listRect?.left ?? 0) + r.depth * s.indent;
+        pairs.push({
+          row: r,
+          rect: {
+            top: vr.top,
+            bottom: vr.top + vr.height,
+            height: vr.height,
+            left,
+            right: listRect?.right ?? left + 240,
+          },
+        });
+      } else if (r.el) {
+        const b = r.el.getBoundingClientRect();
+        pairs.push({
+          row: r,
+          rect: {
+            top: b.top,
+            bottom: b.bottom,
+            height: b.height,
+            left: b.left,
+            right: b.right,
+          },
+        });
+      }
+    }
+    const rows = pairs.map((p) => p.row);
+    const rects = pairs.map((p) => p.rect);
 
     // Gap: index of the first row whose vertical midpoint is below the pointer.
     let gap = rows.length;
@@ -245,9 +300,8 @@ export function useDragReorder(deps: DragDeps) {
 
     s.pending = { parentId, afterSiblingId };
 
-    // Indicator: a line at the gap, indented to the target depth.
-    const listEl = depsRef.current.getListEl();
-    const listRect = listEl?.getBoundingClientRect();
+    // Indicator: a line at the gap, indented to the target depth. listEl/listRect
+    // were resolved above (shared with the geometry source).
     const y = aboveRect
       ? aboveRect.bottom
       : belowRect

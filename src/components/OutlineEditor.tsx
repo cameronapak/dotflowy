@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +11,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Link,
   useLocation,
@@ -29,7 +31,11 @@ import {
   useTrail,
   useTreeIndex,
   useVisibleChildIds,
+  useVisibleRows,
 } from "../data/tree-store";
+import { isVirtualized } from "../data/flags";
+import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
+import { OutlineRow } from "./OutlineRow";
 import {
   getViewIsHidden,
   getViewRootId,
@@ -116,6 +122,11 @@ function onContentMouseDown(e: ReactMouseEvent) {
   if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
 }
 
+// Estimated row height (px) before measureElement corrects it. A one-line bullet
+// is ~32px (node-text min-height 24 + row padding); 36 errs slightly tall so the
+// initial window over-renders rather than leaving a gap. See ADR 0019.
+const ROW_ESTIMATE = 36;
+
 /**
  * Top-level outline editor. Owns:
  *  - reading the live tree
@@ -125,6 +136,16 @@ function onContentMouseDown(e: ReactMouseEvent) {
  *  - the zoom view (breadcrumb + editable title) when rootId is set
  */
 export function OutlineEditor({ rootId }: OutlineEditorProps) {
+  // React Compiler is OFF for this component (ADR 0019). The windowed list reads
+  // `virtualizer.getVirtualItems()` -- data derived from the virtualizer's
+  // MUTABLE internal state behind a referentially STABLE instance. The compiler
+  // memoizes that read on the stable instance and never recomputes it on scroll,
+  // so the rendered window freezes at its initial range. Opting out lets the
+  // shell re-render on scroll (as any virtual list must). This is not a hot-path
+  // regression: the shell already kept its referential stability by hand
+  // (`commands`/`pluginCtx` via useMemo/useCallback, narrow store slices), so
+  // rows stay memoized and a keystroke still re-renders only its own bullet.
+  "use no memo";
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
 
@@ -167,8 +188,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash } =
     useOutlineFocus();
 
-  // The top-level <ul>, so the drag indicator knows how wide to draw.
-  const listRef = useRef<HTMLUListElement | null>(null);
+  // The list container (recursive <ul> or virtualized <div>), so the drag
+  // indicator knows how wide to draw and the window virtualizer can measure its
+  // document-top offset (scrollMargin).
+  const listRef = useRef<HTMLElement | null>(null);
+  // The sticky header block above the list. Observed so scrollMargin re-measures
+  // when its height changes (tag-filter subheader opening, breadcrumb wrap, the
+  // daily-progress bar) without a route remount -- else windowed rows drift by
+  // that delta. See the scrollMargin effect below.
+  const headerRef = useRef<HTMLDivElement | null>(null);
 
   // Zoom navigation: the shared-element morph between a node's title and list-
   // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation
@@ -178,6 +206,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     isHidden,
     refs,
     navigate,
+    pendingFocus,
+    pendingFlash,
   });
 
   // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
@@ -294,6 +324,81 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const trail = useTrail(rootId);
   const hasNodes = useHasNodes();
 
+  // --- Phase B: windowed rendering (ADR 0019) -------------------------------
+  // The flat visible list, the window virtualizer over it, and the event-time
+  // bridge that lets the stable focus/drag closures scroll an off-screen row in.
+  // Hooks run unconditionally (rules of hooks); when the flag is off, count is 0
+  // and the recursive <ul> renders instead. Default on (flags.ts) -- the
+  // recursive path is the rollback/parity fallback.
+  const virtualized = isVirtualized();
+  const rows = useVisibleRows(rootId, isHidden, filter);
+  // scrollMargin = the list container's distance from the document top (header +
+  // title above it). Measured per zoom view; the editor remounts on zoom (route
+  // key), so a one-shot mount measure is current. listRef is set in the branch
+  // below, so this runs after the list paints once.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = listRef.current;
+      if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
+    };
+    measure();
+    // Re-measure when the sticky header resizes (the tag-filter subheader is a
+    // query-param change, not a remount, so the deps below never fire for it).
+    const header = headerRef.current;
+    if (!header || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, [rootId, zoomedNode?.id]);
+  const virtualizer = useWindowVirtualizer<HTMLLIElement>({
+    count: virtualized ? rows.length : 0,
+    estimateSize: () => ROW_ESTIMATE,
+    overscan: 8,
+    scrollMargin,
+    getItemKey: (i) => rows[i]?.id ?? i,
+    // Seed the viewport size so the FIRST paint already has a non-empty window.
+    // Without it the window virtualizer starts at a 0-height rect and renders no
+    // rows until it observes the window a frame later -- a gap that, under heavy
+    // load, can outlast a "row is visible" assertion (and shows a blank flash).
+    initialRect:
+      typeof window !== "undefined"
+        ? { width: window.innerWidth, height: window.innerHeight }
+        : undefined,
+  });
+  // id -> flat index, for virtual-nav's off-screen scroll. Rebuilt only when the
+  // flat list changes identity (structure), not on keystrokes.
+  const rowIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.forEach((r, i) => m.set(r.id, i));
+    return m;
+  }, [rows]);
+  const rowIndexRef = useRef(rowIndex);
+  useEffect(() => {
+    rowIndexRef.current = rowIndex;
+  }, [rowIndex]);
+  // useLayoutEffect (not useEffect): the post-navigation focus/flash effects in
+  // useZoomNavigation and FocusPass are passive and read this bridge via
+  // scrollRowIntoView. The editor remounts per zoom view, so on a cross-zoom
+  // "/move Go" (or zoom-out) the prior editor's cleanup already nulled `nav`;
+  // wiring it in the layout phase guarantees it's set before those passive
+  // effects run, so an off-screen target is actually scrolled in rather than
+  // silently dropped. rowIndexRef is seeded by useRef on mount, so indexOf works
+  // here even before its own (passive) sync effect runs.
+  useLayoutEffect(() => {
+    if (!virtualized) {
+      setVirtualNav(null);
+      return;
+    }
+    setVirtualNav({
+      scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
+      indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
+      scrollMargin: () => virtualizer.options.scrollMargin,
+      measurementAt: (i) => virtualizer.measurementsCache[i],
+    });
+    return () => setVirtualNav(null);
+  }, [virtualized, virtualizer]);
+
   // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && hasNodes) {
     return (
@@ -314,7 +419,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFlash={pendingFlash}
       />
       <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
-      <div className="sticky top-0 z-10 relative">
+      <div className="sticky top-0 z-10 relative" ref={headerRef}>
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}
@@ -359,21 +464,65 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           <div className="outline-empty">{filter.emptyMessage}</div>
         ) : (
           <>
-            <ul className="outline-list" ref={listRef}>
-              {topLevel.map((id) => (
-                <OutlineNode
-                  key={id}
-                  nodeId={id}
-                  commands={commands}
-                  pluginCtx={pluginCtx}
-                  registerRef={registerRef}
-                  pivotId={pivotId}
-                  ancestorCompleted={false}
-                  isHidden={isHidden}
-                  filter={filter}
-                />
-              ))}
-            </ul>
+            {virtualized ? (
+              <ul
+                className="outline-list"
+                ref={(el) => {
+                  listRef.current = el;
+                }}
+                style={{
+                  position: "relative",
+                  height: virtualizer.getTotalSize(),
+                }}
+              >
+                {virtualizer.getVirtualItems().map((vi) => {
+                  const row = rows[vi.index];
+                  if (!row) return null;
+                  return (
+                    <OutlineRow
+                      key={vi.key}
+                      nodeId={row.id}
+                      depth={row.depth}
+                      ancestorCompleted={row.ancestorCompleted}
+                      commands={commands}
+                      pluginCtx={pluginCtx}
+                      registerRef={registerRef}
+                      pivotId={pivotId}
+                      isHidden={isHidden}
+                      filter={filter}
+                      pendingFocus={pendingFocus}
+                      pendingFocusAtStart={pendingFocusAtStart}
+                      pendingFlash={pendingFlash}
+                      index={vi.index}
+                      start={vi.start}
+                      scrollMargin={virtualizer.options.scrollMargin}
+                      measureRef={virtualizer.measureElement}
+                    />
+                  );
+                })}
+              </ul>
+            ) : (
+              <ul
+                className="outline-list"
+                ref={(el) => {
+                  listRef.current = el;
+                }}
+              >
+                {topLevel.map((id) => (
+                  <OutlineNode
+                    key={id}
+                    nodeId={id}
+                    commands={commands}
+                    pluginCtx={pluginCtx}
+                    registerRef={registerRef}
+                    pivotId={pivotId}
+                    ancestorCompleted={false}
+                    isHidden={isHidden}
+                    filter={filter}
+                  />
+                ))}
+              </ul>
+            )}
             {/* Click in the whitespace below the list adds a new top-level
                 bullet. Hidden while filtering -- there's no "add here" then. */}
             {!filter && (
@@ -547,20 +696,32 @@ function FocusPass({
 }) {
   useTreeIndex();
   useEffect(() => {
-    if (pendingFocus.current) {
-      const el = refs.get(pendingFocus.current);
+    const fid = pendingFocus.current;
+    if (fid) {
+      const el = refs.get(fid);
       if (el) {
         el.focus();
         if (pendingFocusAtStart.current) placeCaretAtStart(el);
         else placeCaretAtEnd(el);
+        pendingFocus.current = null;
+        pendingFocusAtStart.current = false;
+      } else if (!scrollRowIntoView(fid)) {
+        // Not windowed (or the id isn't a visible row): nothing to mount later,
+        // so clear to avoid a stuck pending. When windowed and off-screen, leave
+        // it set -- OutlineRow claims it in its mount effect once scrolled in.
+        pendingFocus.current = null;
+        pendingFocusAtStart.current = false;
       }
-      pendingFocus.current = null;
-      pendingFocusAtStart.current = false;
     }
-    if (pendingFlash.current) {
-      const el = refs.get(pendingFlash.current);
-      flashRow(el?.closest(".outline-row") ?? null);
-      pendingFlash.current = null;
+    const flid = pendingFlash.current;
+    if (flid) {
+      const el = refs.get(flid);
+      if (el) {
+        flashRow(el.closest(".outline-row"));
+        pendingFlash.current = null;
+      } else if (!scrollRowIntoView(flid)) {
+        pendingFlash.current = null;
+      }
     }
   });
   return null;
@@ -571,6 +732,10 @@ interface ZoomNavigationArgs {
   isHidden: (node: Node) => boolean;
   refs: Map<string, HTMLSpanElement | null>;
   navigate: ReturnType<typeof useNavigate>;
+  // Focus plumbing, for landing focus on a post-nav row that's off-screen in the
+  // windowed list (the row claims pendingFocus/pendingFlash on its mount).
+  pendingFocus: RefObject<string | null>;
+  pendingFlash: RefObject<string | null>;
 }
 
 /**
@@ -584,6 +749,8 @@ function useZoomNavigation({
   isHidden,
   refs,
   navigate,
+  pendingFocus,
+  pendingFlash,
 }: ZoomNavigationArgs): {
   navigateZoom: (toRootId: string | null, pivot: string) => void;
   pivotId: string | null;
@@ -679,7 +846,12 @@ function useZoomNavigation({
       if (firstChild) targetId = firstChild.id;
     }
     const el = refs.get(targetId);
-    if (!el) return;
+    if (!el) {
+      // Windowed + off-screen (zoom-out can land on a deep node): scroll it in
+      // and let OutlineRow claim focus on mount.
+      if (scrollRowIntoView(targetId)) pendingFocus.current = targetId;
+      return;
+    }
     el.focus({ preventScroll: true });
     placeCaretAtEnd(el);
     el.scrollIntoView({ block: "nearest" });
@@ -695,7 +867,14 @@ function useZoomNavigation({
     const flashId = consumeFlashAfterNav();
     if (!flashId) return;
     const el = refs.get(flashId);
-    if (!el) return;
+    if (!el) {
+      // Windowed + off-screen: scroll in, claim focus + flash on mount.
+      if (scrollRowIntoView(flashId)) {
+        pendingFocus.current = flashId;
+        pendingFlash.current = flashId;
+      }
+      return;
+    }
     el.focus({ preventScroll: true });
     placeCaretAtEnd(el);
     el.scrollIntoView({ block: "nearest" });
@@ -896,13 +1075,18 @@ function useNodeCommands({
           direction,
           getViewIsHidden(),
         );
-        if (target) {
-          const el = refs.get(target);
-          if (el) {
-            el.focus();
-            if (x != null) placeCaretAtColumn(el, direction, x);
-            else placeCaretAtStart(el);
-          }
+        if (!target) return;
+        const el = refs.get(target);
+        if (el) {
+          el.focus();
+          if (x != null) placeCaretAtColumn(el, direction, x);
+          else placeCaretAtStart(el);
+        } else if (scrollRowIntoView(target)) {
+          // Crossed the window edge: the neighbor row isn't mounted. Scroll it
+          // in and let its mount effect claim focus (column intent is lost on
+          // this rare edge case -- land at the leading edge of the entry side).
+          pendingFocus.current = target;
+          pendingFocusAtStart.current = direction === "down";
         }
       },
 

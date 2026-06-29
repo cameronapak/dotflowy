@@ -369,11 +369,19 @@ test.describe("daily notes", () => {
     // Confirming toast, and the node -- a top-level sibling before -- now nests
     // under the Daily container's today note (creating both on first use).
     await expect(page.getByText("Moved to Today")).toBeVisible();
-    const dailyContainer = page.locator("li[data-node-id]", {
-      hasText: "Daily",
-    });
+    // charlie now nests under TODAY's note (itself a child of the Daily
+    // container). The flat render has no nested <li> (ADR 0019), so assert
+    // charlie's real parent is the today note -- located by its "today" badge.
+    const todayId = await page
+      .locator("li[data-node-id] [data-daily-today]")
+      .first()
+      .evaluate(
+        (el) =>
+          el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+      );
+    expect(todayId).not.toBe("");
     await expect(
-      dailyContainer.locator('li[data-node-id="charlie"]'),
+      page.locator(`li[data-node-id="charlie"][data-parent-id="${todayId}"]`),
     ).toBeVisible();
   });
 

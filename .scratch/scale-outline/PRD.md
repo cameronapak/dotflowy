@@ -1,7 +1,9 @@
 # PRD: Scale the outline to 100k nodes
 
-Status: Phase A built + green (serial e2e 83/83, unit 117/117, typecheck/lint clean). Phase B next.
-ADR 0019 (virtualization) proposed. Decision record:
+Status: Phase A + B built + green (serial e2e 86/86 incl. windowing proof, unit 117/117,
+typecheck/lint clean). Phase B ships default-on behind the `isVirtualized()` flag (`flags.ts`); the
+recursive path is retained as the rollback fallback, to be deleted after dogfooding. ADR 0019
+(virtualization) accepted. Decision record:
 [ADR 0019](../../docs/adr/0019-virtualized-outline-rendering.md).
 
 ## Why
@@ -47,13 +49,20 @@ Target ceiling: **100k nodes**, smooth scroll + typing.
 - Load-bearing code comment (the dirty-set + why an agent shouldn't "simplify" it to a full rebuild).
 - No behavior change → existing e2e covers it; add a large-outline typing-latency check.
 
-**Phase B — virtualized rendering** (ADR 0019):
-- Promote `flattenVisible` → exported `{id, depth}[]`, identity-stable subscribed slice.
-- `OutlineEditor`: `useVirtualizer` over the flat list + `measureElement`.
-- `OutlineNode`: split a flat row (body only, indent by depth, drop `OutlineNodeChildren`).
-- Focus-into-window (`scrollToIndex` + `pendingFocus`); drag auto-scroll; flash-on-mount.
-- Flag + new windowing/perf e2e (seed 10k, assert DOM row count ∝ viewport); flip + delete recursive
-  path.
+**Phase B — virtualized rendering** (ADR 0019) — BUILT:
+- [x] `flattenVisible` → exported `buildVisibleRows` `{id, depth, ancestorCompleted}[]`; identity-
+      stable `useVisibleRows` slice gated by `structureRev` (O(1) on the typing hot path).
+- [x] `OutlineEditor`: `useWindowVirtualizer` over the flat list + `measureElement` + `scrollMargin`
+      + `initialRect`; `"use no memo"` (React Compiler froze the window — see ADR 0019).
+- [x] `OutlineRow.tsx`: flat row (indent by depth, claims focus/flash on mount, IS the measured
+      `<li>`); recursive `OutlineNode` kept behind the flag.
+- [x] Focus-into-window (`virtual-nav.ts` `scrollRowIntoView` + `pendingFocus`); drag hit-tests the
+      virtualizer measurements (`virtualRowRect`); flash-on-mount.
+- [x] `flags.ts` (`isVirtualized()`, default on); `data-parent-id`/`data-depth` for flat-list
+      nesting assertions; windowing e2e (`virtualized-windowing.spec.ts` — seed 2040, assert DOM rows
+      ∝ viewport + scroll-follows + depth). **Serial parity: 86/86.**
+- [ ] **Remaining:** flip e2e default + DELETE the recursive path (`OutlineNode` recursion, the
+      grid-collapse CSS) once dogfooded — the one explicit follow-up.
 
 **Phase C — lazy subtree sync** (deferred, own ADR):
 - TanStack DB on-demand `syncMode`/`loadSubset`; DO serves subtree snapshots + per-subtree change
