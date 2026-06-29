@@ -17,6 +17,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { definePlugin, type PluginContext } from "../types";
 import { type Node } from "../../data/tree";
+import { setIsTask } from "../../data/mutations";
+import { runStructural } from "../../data/structural";
+import { capture } from "../../data/history";
+import { isProtected } from "../registry";
 
 // Toggle completion on a node, shared by Mod+Enter and Mod+D. Reads the live
 // node off the tree so it flips relative to the current state.
@@ -117,6 +121,22 @@ export default definePlugin({
       keywords: ["todo", "task", "checkbox", "check", "done", "into"],
       available: (node) => !node.isTask,
       run: (id, ctx) => ctx.mutations.onSetTask(id, true),
+      // Node multi-selection (ADR 0018): turn every selected root into a task in
+      // ONE batch -- a single undo step, one DO frame (runStructural). Skips
+      // nodes already a task (a redundant write) and protected ones (the daily
+      // container can't become a to-do, mirroring the single-node guard); if
+      // nothing qualifies it's a clean no-op.
+      runMany: (ids, ctx) => {
+        const targets = ids.filter((id) => {
+          const n = ctx.tree.byId.get(id);
+          return !!n && !n.isTask && !isProtected(id);
+        });
+        if (targets.length === 0) return;
+        runStructural(() => {
+          capture(ctx.tree, targets[0]!);
+          for (const id of targets) setIsTask(id, true);
+        });
+      },
     },
     {
       id: "bullet",

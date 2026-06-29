@@ -342,6 +342,18 @@ export interface CommandSpec {
   available(node: Node): boolean;
   /** Run the command against the focused node. */
   run(nodeId: string, ctx: PluginContext): void;
+  /**
+   * Set-aware variant for node multi-selection (ADR 0018): run against the
+   * SELECTED ROOT ids (subtrees implied) in ONE shot. A single-node `run` can't
+   * simply be looped over a set -- `Move` would open N destination pickers,
+   * daily's "Send to Today" would navigate N times -- so a command must OPT IN
+   * by declaring how it batches (`Move` -> one dialog, N moves; todos' To-do ->
+   * one batch `setIsTask`; daily's Send to Today -> one batch + one nav). The
+   * selection actions menu shows ONLY commands that define this. Multi-node
+   * mutations must land as one `runStructural` batch, not a loop of writes
+   * (ADR 0009). Omit when the command has no meaningful set semantics.
+   */
+  runMany?(rootIds: string[], ctx: PluginContext): void;
 }
 
 // --- Seam D: per-bullet keymap ----------------------------------------------

@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import type { Node } from "../data/schema";
 import { keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
+import { selectSingle } from "../data/selection-state";
 import { getCaretOffset } from "./inline-code";
 import type { NodeCommands } from "./OutlineNode";
 
@@ -129,6 +130,63 @@ export function useBulletKeymap({
         callback: () => commands.onDeleteNode(node.id),
       },
       {
+        // Shift+ArrowUp from the top visual line: ENTER node multi-selection
+        // (ADR 0018) on THIS node only -- the first press selects the focused
+        // node; a subsequent Shift+arrow extends the run (handled while-selected
+        // in selection-mode.tsx). From a wrapped bullet's interior it falls
+        // through to native shift text-selection (preventDefault opted out),
+        // mirroring ArrowUp's edge-line rule. Selection mode has no caret, so we
+        // blur the bullet.
+        hotkey: "Shift+ArrowUp",
+        callback: (e) => {
+          const el = textRef.current;
+          if (!el || !atLineStart(el)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          selectSingle(node.id);
+          el.blur();
+          window.getSelection()?.removeAllRanges();
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
+      {
+        // Shift+ArrowDown from the last visual line: same single-node entry as
+        // Shift+ArrowUp (entry is direction-agnostic -- it selects the focused
+        // node; the next press extends). Mirror of Shift+ArrowUp's edge gate.
+        hotkey: "Shift+ArrowDown",
+        callback: (e) => {
+          const el = textRef.current;
+          if (!el || !atLineEnd(el)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          selectSingle(node.id);
+          el.blur();
+          window.getSelection()?.removeAllRanges();
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
+      {
+        // Cmd/Ctrl+A -- the bounded selection ladder (ADR 0018), rung 1 -> 2.
+        // Rung 1 (native): a non-empty bullet whose text isn't already fully
+        // selected selects all its TEXT. Rung 2: once the text is fully selected
+        // (or the bullet is empty -- rung 1 is skipped), select this NODE and its
+        // subtree, entering node selection. Rung 3 (the whole view) is escalated
+        // by the while-selected handler once a selection exists.
+        hotkey: "Mod+A",
+        callback: (e) => {
+          const el = textRef.current;
+          if (!el) return;
+          const empty = el.textContent === "";
+          if (!empty && !isAllTextSelected(el)) return; // rung 1: native select-all
+          e.preventDefault();
+          e.stopPropagation();
+          selectSingle(node.id);
+          el.blur();
+          window.getSelection()?.removeAllRanges();
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
+      {
         // ArrowUp on the first visual line: move to the previous node,
         // preserving the caret's column (its x). Within a wrapped bullet the
         // browser default handles line-1 <- line-2 itself.
@@ -184,6 +242,21 @@ export function useBulletKeymap({
     ],
     { target: textRef, enabled },
   );
+}
+
+// Whether the current selection spans exactly the whole bullet's text (the Cmd+A
+// ladder uses this to tell rung 1 "select the text" from rung 2 "select the
+// node"). A collapsed caret, a partial selection, or a selection that overflows
+// this bullet is not "all selected". Compared by string rather than range
+// boundary points: a native contentEditable Cmd+A selects at the editing-host
+// level, so the range's commonAncestorContainer can be an ANCESTOR of the span
+// (range-containment checks then wrongly fail). The selected text equalling the
+// bullet's text is the reliable signal.
+function isAllTextSelected(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return false;
+  const text = el.textContent ?? "";
+  return text.length > 0 && sel.toString() === text;
 }
 
 // Caret at the very start of the bullet, measured by absolute offset so the

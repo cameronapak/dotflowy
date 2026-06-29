@@ -36,6 +36,10 @@ import {
   useSyncViewState,
 } from "../data/view-state";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
+import { findVisibleNeighbor } from "../data/visible-order";
+import { clearSelection } from "../data/selection-state";
+import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
+import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
   indent,
   insertChildAtStart,
@@ -263,6 +267,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [commands, navigateZoom],
   );
 
+  // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
+  // actions menu's ops. Installs window key/mouse listeners only while a
+  // selection is active, and clears any stale selection on this view's mount.
+  const selection = useSelectionMode({ refs, pendingFocus });
+
   // The pruned visible-set for the active filter (matches + ancestor context),
   // or null when no filter. A plugin-contributed Seam-G transform (the tags
   // plugin's tag-filter), composed in registry.buildViewFilter. Subscribed via
@@ -304,6 +313,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFocusAtStart={pendingFocusAtStart}
         pendingFlash={pendingFlash}
       />
+      <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
       <div className="sticky top-0 z-10 relative">
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
@@ -1034,6 +1044,9 @@ function ZoomedTitle({
           if (next !== null) syncedRef.current = next;
         }}
         onFocus={(e) => {
+          // Caret and node selection are mutually exclusive (ADR 0018): focusing
+          // the title leaves selection mode.
+          clearSelection();
           // Per-link reveal in the title (ADR 0005): watch the caret, and
           // reveal the link it's currently on. Link-free is a no-op so the
           // native caret stands.
@@ -1234,74 +1247,12 @@ function revealAncestorsToRoot(
   for (const id of collapsedOnPath) toggleCollapsed(id, false);
 }
 
-/**
- * Walk the visible (non-collapsed) outline in display order within the
- * current zoom root and return the id of the node immediately before/after
- * `id`, or null if none. The zoom root (the title) is the first entry, so
- * ArrowUp from the first child lands on the title.
- */
-function findVisibleNeighbor(
-  index: TreeIndex,
-  rootId: string | null,
-  id: string,
-  direction: "up" | "down",
-  isHidden: (n: Node) => boolean,
-): string | null {
-  const flat = flattenVisible(index, rootId, isHidden);
-  const i = flat.findIndex((n) => n.id === id);
-  if (i === -1) return null;
-  const neighbor = direction === "up" ? flat[i - 1] : flat[i + 1];
-  return neighbor ? neighbor.id : null;
-}
-
-function flattenVisible(
-  index: TreeIndex,
-  rootId: string | null,
-  isHidden: (n: Node) => boolean,
-): Array<{ id: string }> {
-  const out: Array<{ id: string }> = [];
-  // The zoomed title participates in up/down navigation.
-  if (rootId) out.push({ id: rootId });
-  const walk = (parentId: string | null) => {
-    for (const child of childrenOf(index, parentId)) {
-      // Mirror the render's visibility (the composed Seam-G prune): a hidden
-      // node (e.g. completed while show-completed is off) and its subtree are
-      // absent from the DOM. Keeping them here would make findVisibleNeighbor
-      // return an id with no mounted element, so onMoveFocus silently no-ops
-      // and focus gets stuck.
-      if (isHidden(child)) continue;
-      out.push({ id: child.id });
-      if (!child.collapsed) walk(child.id);
-    }
-  };
-  walk(rootId);
-  return out;
-}
-
 function prefersReducedMotion(): boolean {
   return (
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
-}
-
-function placeCaretAtEnd(el: HTMLElement) {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  range.collapse(false);
-  const sel = window.getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
-}
-
-function placeCaretAtStart(el: HTMLElement) {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  range.collapse(true);
-  const sel = window.getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(range);
 }
 
 // Cross-node caret nav preserves the column: drop the caret at the same

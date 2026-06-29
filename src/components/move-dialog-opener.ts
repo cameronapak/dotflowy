@@ -1,10 +1,12 @@
-let opener: ((nodeId: string) => void) | null = null;
+let opener: ((nodeIds: string[]) => void) | null = null;
 
 export function setMoveDialogOpener(fn: typeof opener) {
   opener = fn;
 }
 
-/** Open the move picker for `nodeId` from anywhere (e.g. the `/move` command). */
-export function openMoveDialog(nodeId: string) {
-  opener?.(nodeId);
+/** Open the move picker for one node (the `/move` command) or several (node
+ *  multi-selection's Move action -- ADR 0018). A single id is normalized to a
+ *  one-element run. */
+export function openMoveDialog(nodeIds: string | string[]) {
+  opener?.(typeof nodeIds === "string" ? [nodeIds] : nodeIds);
 }

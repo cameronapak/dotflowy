@@ -159,8 +159,7 @@ export function useSlashMenu({
         <SlashMenuList
           items={items}
           activeIndex={state.activeIndex}
-          x={state.x}
-          y={state.y}
+          style={{ position: "fixed", left: state.x, top: state.y + 6 }}
           onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
           onSelect={select}
         />,

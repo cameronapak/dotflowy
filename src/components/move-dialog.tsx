@@ -11,7 +11,7 @@ import { BookmarkIcon, HomeIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useTree } from "../data/useTree";
 import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { moveNode } from "../data/mutations";
+import { moveManyNodes } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
@@ -29,10 +29,14 @@ import {
 
 /**
  * `/move` destination picker: a focused fuzzy search over every node, plus a
- * "Home" entry, that reparents the chosen node as the **last child** of the
+ * "Home" entry, that reparents the chosen node(s) as the **last child** of the
  * picked target (or a top-level node for Home). Mirrors `node-switcher.tsx`
  * (self-contained, single mount, module-level opener), but it *acts* -- it runs
- * the `moveNode` mutation -- rather than only navigating.
+ * the move mutation -- rather than only navigating.
+ *
+ * Drives ONE node (`/move`) or several at once -- node multi-selection's Move
+ * action passes the selected root run (ADR 0018), moved together as one atomic
+ * batch. The candidate list excludes the union of every moved node's subtree.
  *
  * The empty-query state lists **bookmarks** (same as the quick-switcher), since
  * the usual move target is a saved view -- so the common case is a single pick,
@@ -78,7 +82,7 @@ const BOOKMARKS_HEADING = (
  * prerender (SPA mode, ADR 0004). Same guard as the quick-switcher.
  */
 export function MoveDialog() {
-  const [target, setTarget] = useState<string | null>(null);
+  const [targets, setTargets] = useState<string[] | null>(null);
   const [query, setQuery] = useState("");
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -87,8 +91,8 @@ export function MoveDialog() {
   );
 
   useEffect(() => {
-    setMoveDialogOpener((nodeId) => {
-      setTarget(nodeId);
+    setMoveDialogOpener((nodeIds) => {
+      setTargets(nodeIds);
       setQuery("");
     });
     return () => {
@@ -100,10 +104,10 @@ export function MoveDialog() {
 
   return (
     <MoveDialogInner
-      nodeId={target}
+      nodeIds={targets}
       onOpenChange={(next) => {
         if (!next) {
-          setTarget(null);
+          setTargets(null);
           setQuery("");
         }
       }}
@@ -114,36 +118,39 @@ export function MoveDialog() {
 }
 
 function MoveDialogInner({
-  nodeId,
+  nodeIds,
   onOpenChange,
   query,
   setQuery,
 }: {
-  nodeId: string | null;
+  nodeIds: string[] | null;
   onOpenChange: (next: boolean) => void;
   query: string;
   setQuery: (q: string) => void;
 }) {
   const { index } = useTree();
   const navigate = useNavigate();
-  const open = nodeId !== null;
+  const open = nodeIds !== null && nodeIds.length > 0;
 
-  // Candidate destinations: every node except the one being moved and its own
-  // subtree (you can't move a branch into itself -- `moveNode` guards this too,
+  // Candidate destinations: every node except the ones being moved and their own
+  // subtrees (you can't move a branch into itself -- `moveNode` guards this too,
   // but listing those rows would be a dead press). Built only while open.
   //
   // Manually memoized despite React Compiler: the compiler folds this into one
   // reactive scope keyed on `query` too, so without the memo the subtree walk,
   // candidate filter, and Fuse INDEX all rebuild on every keystroke (verified
-  // in the compiled output). Keyed on [index, nodeId] so typing only re-runs
+  // in the compiled output). Keyed on [index, nodeIds] so typing only re-runs
   // `results` (the cheap search) below.
   const candidates = useMemo(() => {
-    if (!nodeId) return [];
-    const excluded = subtreeIds(index, nodeId);
+    if (!nodeIds || nodeIds.length === 0) return [];
+    const excluded = new Set<string>();
+    for (const id of nodeIds) {
+      for (const sub of subtreeIds(index, id)) excluded.add(sub);
+    }
     return Array.from(index.byId.values()).filter(
       (n) => !excluded.has(n.id) && n.text.trim() !== "",
     );
-  }, [index, nodeId]);
+  }, [index, nodeIds]);
 
   const fuse = useMemo(
     () => (open ? new Fuse(candidates, FUSE_OPTIONS) : null),
@@ -177,15 +184,15 @@ function MoveDialogInner({
   const showHome = q === "" || "home".includes(q.toLowerCase());
 
   function move(targetId: string | null) {
-    if (!nodeId) return;
-    const movedId = nodeId;
+    if (!nodeIds || nodeIds.length === 0) return;
+    const ids = nodeIds;
     onOpenChange(false);
+    // Append the whole run as the destination's last children (or last top-level
+    // for Home), in ONE atomic batch (moveManyNodes keeps their relative order
+    // and rebuilds the index per move so the sibling chain stays intact).
     const moved = runStructural(() => {
-      capture(index, movedId);
-      // Append as the last child of the destination (or last top-level for Home).
-      const siblings = childrenOf(index, targetId);
-      const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
-      return moveNode(index, movedId, targetId, after);
+      capture(index, ids[0]!);
+      return moveManyNodes(targetId, ids);
     });
     // A no-op move (already at the exact destination) still captured an undo
     // point; discard it so Cmd+Z doesn't look dead and redo history survives.
@@ -200,13 +207,14 @@ function MoveDialogInner({
       targetId === null
         ? "Home"
         : index.byId.get(targetId)?.text.trim() || "Untitled";
-    toast.success(`Moved to ${dest}`, {
+    const count = ids.length === 1 ? "" : `${moved} nodes `;
+    toast.success(`Moved ${count}to ${dest}`, {
       action: {
         label: "Go",
         onClick: () => {
-          // Flash + focus the moved node once the destination view mounts, so
-          // it's easy to spot where it landed. See flash-node.ts.
-          requestFlashAfterNav(movedId);
+          // Flash + focus the first moved node once the destination view mounts,
+          // so it's easy to spot where the run landed. See flash-node.ts.
+          requestFlashAfterNav(ids[0]!);
           if (targetId === null) {
             navigate({ to: "/" });
           } else {
