@@ -27,6 +27,8 @@ const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 const li = (page: Page, id: string) => page.locator(`li[data-node-id="${id}"]`);
 const focused = (page: Page) => page.locator(".node-text:focus");
+const orderedTexts = (page: Page) =>
+  page.locator(".outline-row > .node-text").allTextContents();
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 async function load(page: Page, tree: SeedNode[] = FLAT) {
@@ -141,5 +143,51 @@ test.describe("Node multi-selection (XState backend)", () => {
     await expect(li(page, "c")).toHaveCount(0);
     await expect(li(page, "a")).toBeVisible();
     await expect(li(page, "d")).toBeVisible();
+  });
+
+  // The relocate-run path (`refreshSelection`) is the one place `parentId`
+  // mutates: an indent/outdent moves the selected run under a new parent and the
+  // selection must follow. It's the only public op the other scenarios don't
+  // touch, so cover it explicitly under the actor backend -- a machine-specific
+  // regression here would otherwise ship green (the singleton spec runs flag-off).
+  test("Tab indents the selected run under the previous sibling; Shift+Tab outdents it back", async ({
+    page,
+  }) => {
+    await load(page); // FLAT: alpha, bravo, charlie, delta
+    await focus(page, "d");
+    await page.keyboard.press("Shift+ArrowUp"); // enter -> [d]
+    await page.keyboard.press("Shift+ArrowUp"); // extend -> [c, d] -- anchor d, focus c
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+
+    // Tab: c and d become children of b, in order, and STAY selected -- the actor
+    // re-derives the run under the new parent (`refreshSelection`).
+    await page.keyboard.press("Tab");
+    await expect(
+      page.locator('li[data-node-id="c"][data-parent-id="b"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="d"][data-parent-id="b"]'),
+    ).toBeVisible();
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+    // Only alpha + bravo remain at the top level now.
+    await expect(
+      page.locator("li[data-node-id]:not([data-parent-id])"),
+    ).toHaveCount(2);
+
+    // Shift+Tab: outdent back to the top level, right after b, still selected.
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+      page.locator("li[data-node-id]:not([data-parent-id])"),
+    ).toHaveCount(4);
+    await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+    expect(await orderedTexts(page)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+      "delta",
+    ]);
   });
 });
