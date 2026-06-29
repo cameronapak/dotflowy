@@ -45,6 +45,12 @@ multi-selection) so the decision can be judged against real code before it's ado
    infers exactly what you expect. Transforms (e.g. `Schema.Date`) make XState see the decoded
    `Type` side — fine, just know which side you get.
 
+### Alpha sharp edges found while wiring
+- **Root-level `on` transitions don't apply** in `xstate@6.0.0-alpha.11`. A machine-level
+  `on: { EVT: … }` silently no-ops; the handler must live inside each `states.<x>.on`. Caught by a
+  unit test (4 transitions no-op'd), fixed by moving handlers into the states. Recorded in
+  `selection-machine.ts`.
+
 ## The other big v6 win for us: `createAsyncLogic` ↔ Effect
 
 Our async work is *already* Effect (`kv-client-effect.ts`, the unfurl fetch). `createAsyncLogic`
@@ -101,14 +107,33 @@ the live singleton as the shipping path:
 Deliberately **not** in the PoC: replacing the live `selection-state.ts` wiring, the boundary
 depth-walk (parent/child at a sibling edge — stays in the adapter), and any DOM/menu work.
 
-## Swap-in plan (after the PoC is judged)
+## Wiring (done — this step)
 
-1. Behind `isSelectionMachine()`, have `selection-mode.tsx` drive the machine instead of calling
-   the singleton mutators; the editor still computes `siblings` from the live tree and sends them.
-2. Replace `useSelectionEdge(id)` reads with a `useSelector(actor, …)` per-row selector (same
-   `useSyncExternalStore` primitive — preserves the ADR 0014 per-node-render budget).
-3. Port the boundary depth-walk into a machine event (`EXTEND` carrying parent/child candidates).
-4. Once parity holds in `e2e/node-multi-select.spec.ts`, delete the singleton + the flag together.
+Wired in behind `isSelectionMachine()` via a **backend swap inside `selection-state.ts`**, which
+turned out cleaner than the original "rewire `selection-mode.tsx`" plan:
+
+- `selection-state.ts`'s public API is **byte-identical**, so none of its 5 consumers
+  (`selection-mode.tsx`, `OutlineNode`, `OutlineRow`, `OutlineEditor`, `use-bullet-keymap`) changed.
+- Internally it now picks a **backend** at module load: the module singleton (default) or a
+  module-singleton **XState actor**. Both share the SAME tree-reading code and the SAME
+  `rangeFrom`/`buildEdgeMap` math (now exported from `selection-machine.ts`), so they compute
+  identical runs — **parity by construction**.
+- `useSelectionEdge(id)` is one `useSyncExternalStore` over the active backend; with the machine
+  backend that IS the `useSelector(actor, …)` equivalent (per-id edge value → ADR 0014 budget kept).
+- The machine is tree-dominated, so it **classifies** (`idle/single/multi`) and **normalizes**
+  (`rangeFrom`) while the adapter does the tree work — the honest shape for this feature.
+
+**e2e parity:** `e2e/node-multi-select-machine.spec.ts` runs 6 representative scenarios with the
+flag ON (entry+edges, extend/shrink, depth-walk climb/dive, Cmd+A ladder, Escape+caret, one-batch
+delete) — all green against the live actor-backed path. (First test cold-start-flakes on Vite's
+initial dep-optimize, passes on retry — not machine-specific.)
+
+## Remaining (after the PoC is judged)
+
+1. Decide adopt / hold.
+2. If adopt: `/grill-with-docs` → numbered ADR (the draft is in this folder).
+3. Parametrize the full `node-multi-select.spec.ts` over both flag states, then delete the
+   singleton backend + the flag together (the ADR 0019 dogfood-then-delete discipline).
 
 ## Risks
 
@@ -127,6 +152,8 @@ depth-walk (parent/child at a sibling edge — stays in the adapter), and any DO
 ## Status / next
 
 - [x] Deps installed (`xstate@6.0.0-alpha.11`, `@xstate/react@7.0.0-alpha.1`).
-- [x] PoC machine + Effect-Schema bridge + flag + unit test (this branch).
+- [x] PoC machine + Effect-Schema bridge + flag + unit test.
+- [x] Wired into the live editor behind the flag (backend swap in `selection-state.ts`).
+- [x] e2e parity spec passing with the flag ON (`node-multi-select-machine.spec.ts`).
 - [ ] Judge the PoC; decide adopt / hold.
-- [ ] If adopt: `/grill-with-docs` → numbered ADR → swap-in plan above.
+- [ ] If adopt: `/grill-with-docs` → numbered ADR → delete singleton + flag.

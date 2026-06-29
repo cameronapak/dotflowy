@@ -2,33 +2,36 @@ import { Schema } from 'effect'
 import { setup } from 'xstate'
 
 /**
- * PROOF-OF-CONCEPT: node multi-selection (ADR 0018) modelled as an XState v6
- * machine whose context + events are typed with **Effect Schema**. This runs
- * PARALLEL to the live `selection-state.ts` singleton, behind the
- * `isSelectionMachine()` flag — it is not yet wired into the editor. See
+ * Node multi-selection (ADR 0018) as an XState v6 machine whose context + events
+ * are typed with **Effect Schema**. Driven behind the `isSelectionMachine()` flag
+ * by `selection-state.ts` (the singleton stays the default). See
  * `.scratch/xstate-effect-schema/` for the design + draft ADR.
  *
- * Why this file is the integration showcase:
+ * Integration showcase:
  *
  * 1. **Effect Schema -> XState `schemas`.** `Schema.toStandardSchemaV1(s)` turns
- *    an Effect schema into a Standard-Schema-v1 object (XState v6's `schemas`
- *    accept any Standard Schema). XState infers context/event types from the
- *    type-level `~standard.types` phantom that Effect's return type carries.
- *    GOTCHA: in Effect **v4** the API is `toStandardSchemaV1` — the published
- *    v3 docs' `standardSchemaV1` does not exist here.
+ *    an Effect schema into a Standard-Schema-v1 object; XState v6 `schemas` accept
+ *    any Standard Schema and infer context/event types from the type-level
+ *    `~standard.types` phantom Effect's return type carries. GOTCHA: Effect **v4**
+ *    spells it `toStandardSchemaV1` (the v3 docs' `standardSchemaV1` is gone).
  *
  * 2. **Type-only today.** v6 `schemas` mostly drive *type inference*, not runtime
- *    validation (that's "where supported" / opt-in later). So this is the single
- *    source of truth for the selection *types*; it does NOT replace the real
- *    boundary validation in `worker/wire.ts`.
+ *    validation. So this is the single source of truth for the selection *types*;
+ *    it does NOT replace the boundary validation in `worker/wire.ts`.
  *
- * 3. **Pure machine.** The tree-dependent input — which siblings are visible — is
- *    passed INTO events as a `siblings` snapshot, so the machine has no live-tree
- *    dependency and is unit-testable with `createActor` alone (the editor adapter
- *    is what reads the tree and feeds it in). The boundary depth-walk
- *    (climb-to-parent / dive-to-child at a sibling edge) is intentionally left to
- *    the adapter for the PoC.
+ * 3. **Tree-dominated -> the machine classifies, the adapter computes.** Every
+ *    selection transition depends on the live tree (which siblings are visible,
+ *    the depth-walk at a boundary). So the adapter (`selection-state.ts`) reads
+ *    the tree and hands the machine the visible sibling ids; the machine
+ *    normalizes the run via `rangeFrom` and classifies `idle/single/multi`. The
+ *    same `rangeFrom`/`buildEdgeMap` power the singleton backend, so both paths
+ *    compute identically (parity by construction). This is the honest finding:
+ *    for tree-dominated features the machine's value is state classification + a
+ *    single Effect-Schema-typed source of truth, not owning pure transition logic.
  */
+
+/** Where a selected ROOT sits in the slab (mirrors ADR 0018). */
+export type SelectionEdge = 'top' | 'bottom' | 'middle' | 'single'
 
 // --- Effect Schema: the single source of truth for the machine's types --------
 
@@ -39,7 +42,7 @@ const SelectionContextSchema = Schema.Struct({
   parentId: Schema.NullOr(Schema.String),
   /** The fixed end of the run; null only when idle. */
   anchorId: Schema.NullOr(Schema.String),
-  /** The moving end (EXTEND walks this); null only when idle. */
+  /** The moving end; null only when idle. */
   focusId: Schema.NullOr(Schema.String),
   /** Selected sibling roots in visible order, anchor..focus inclusive. */
   rootIds: Schema.Array(Schema.String),
@@ -48,36 +51,25 @@ const SelectionContextSchema = Schema.Struct({
 /** The decoded context type, derived from the schema (never hand-written). */
 export type SelectionContext = Schema.Schema.Type<typeof SelectionContextSchema>
 
-/** Enter selection on exactly `nodeId` (Cmd+A rung 2 / first Shift+arrow). */
-const SelectSingleEvent = Schema.Struct({
-  nodeId: Schema.String,
+/** Set the run from tree facts: the visible sibling ids under `parentId` plus the
+ *  desired anchor/focus. The machine derives `rootIds` via `rangeFrom`. */
+const SelectRangeEvent = Schema.Struct({
   parentId: Schema.NullOr(Schema.String),
+  anchorId: Schema.String,
+  focusId: Schema.String,
   /** Visible sibling ids under `parentId`, in display order (tree snapshot). */
-  siblings: Schema.Array(Schema.String),
-})
-
-/** Move the focus end one visible sibling (Shift+arrow), once active. */
-const ExtendEvent = Schema.Struct({
-  dir: Schema.Literals(['up', 'down']),
-  siblings: Schema.Array(Schema.String),
-})
-
-/** Select the whole visible run under `parentId` (Cmd+A rung 3). */
-const SelectAllEvent = Schema.Struct({
-  parentId: Schema.NullOr(Schema.String),
   siblings: Schema.Array(Schema.String),
 })
 
 /** Local alias for the v4 bridge — see the GOTCHA in the file header. */
 const std = Schema.toStandardSchemaV1
 
-// --- pure range math (no tree, no XState) ------------------------------------
+// --- pure helpers, shared by BOTH backends (one source of truth) -------------
 
 /** The inclusive sibling run between `anchorId` and `focusId` within `siblings`,
- *  collapsing to the anchor if focus isn't a visible sibling. Null if the anchor
- *  itself is gone. Mirrors `selectRange` in `selection-state.ts`, minus the tree
- *  read (siblings are passed in). */
-function rangeFrom(
+ *  collapsing to the anchor if focus isn't visible. Null if the anchor itself is
+ *  gone. Mirrors `selectRange` in `selection-state.ts`, minus the tree read. */
+export function rangeFrom(
   siblings: readonly string[],
   anchorId: string,
   focusId: string,
@@ -91,9 +83,51 @@ function rangeFrom(
   return { focusId: siblings[fi]!, rootIds: siblings.slice(lo, hi + 1) }
 }
 
+/** Map each selected root id to its slab edge. The first/last get rounded outer
+ *  corners, a lone root rounds all four, middles round nothing (ADR 0018). */
+export function buildEdgeMap(rootIds: readonly string[]): Map<string, SelectionEdge> {
+  const m = new Map<string, SelectionEdge>()
+  if (rootIds.length === 0) return m
+  if (rootIds.length === 1) {
+    m.set(rootIds[0]!, 'single')
+    return m
+  }
+  m.set(rootIds[0]!, 'top')
+  m.set(rootIds[rootIds.length - 1]!, 'bottom')
+  for (let i = 1; i < rootIds.length - 1; i++) m.set(rootIds[i]!, 'middle')
+  return m
+}
+
 /** A fresh idle context (never share the reference across transitions). */
 function idleContext(): SelectionContext {
   return { parentId: null, anchorId: null, focusId: null, rootIds: [] }
+}
+
+/** The SELECT_RANGE transition body, shared by every state's handler (one typed
+ *  function so there's no per-state duplication and inference still flows). The
+ *  event carries `type` too, but structural typing lets it satisfy this input. */
+function applyRange(event: {
+  parentId: string | null
+  anchorId: string
+  focusId: string
+  siblings: readonly string[]
+}): { target: 'idle' | 'single' | 'multi'; context: SelectionContext } {
+  const r = rangeFrom(event.siblings, event.anchorId, event.focusId)
+  if (!r) return { target: 'idle', context: idleContext() }
+  return {
+    target: r.rootIds.length === 1 ? 'single' : 'multi',
+    context: {
+      parentId: event.parentId,
+      anchorId: event.anchorId,
+      focusId: r.focusId,
+      rootIds: r.rootIds,
+    },
+  }
+}
+
+/** CLEAR transition body. */
+function clearToIdle(): { target: 'idle'; context: SelectionContext } {
+  return { target: 'idle', context: idleContext() }
 }
 
 // --- the machine -------------------------------------------------------------
@@ -102,9 +136,7 @@ const { createMachine } = setup({
   schemas: {
     context: std(SelectionContextSchema),
     events: {
-      SELECT_SINGLE: std(SelectSingleEvent),
-      EXTEND: std(ExtendEvent),
-      SELECT_ALL: std(SelectAllEvent),
+      SELECT_RANGE: std(SelectRangeEvent),
       CLEAR: std(Schema.Struct({})),
     },
   },
@@ -112,112 +144,25 @@ const { createMachine } = setup({
 
 /**
  * `idle → single → multi`. Caret and selection are mutually exclusive (ADR 0018);
- * `idle` is the caret world. `SELECT_SINGLE` / `SELECT_ALL` enter from anywhere;
- * `EXTEND` only matters while active; `CLEAR` returns to caret.
+ * `idle` is the caret world. The transitions are machine-level (`on`), so they
+ * apply from any state: `SELECT_RANGE` re-normalizes the run from the supplied
+ * siblings and re-classifies; `CLEAR` returns to the caret world.
  */
 export const selectionMachine = createMachine({
   context: idleContext(),
   initial: 'idle',
   states: {
+    // `SELECT_RANGE` is handled in every state (enter from idle, re-select while
+    // active); `CLEAR` only matters once active. Handlers live IN the states:
+    // root-level `on` transitions don't apply in this v6 alpha.
     idle: {
-      on: {
-        SELECT_SINGLE: ({ event }) => ({
-          target: 'single',
-          context: {
-            parentId: event.parentId,
-            anchorId: event.nodeId,
-            focusId: event.nodeId,
-            rootIds: [event.nodeId],
-          },
-        }),
-        SELECT_ALL: ({ event }) => {
-          if (event.siblings.length === 0) return undefined
-          return {
-            target: event.siblings.length === 1 ? 'single' : 'multi',
-            context: {
-              parentId: event.parentId,
-              anchorId: event.siblings[0]!,
-              focusId: event.siblings[event.siblings.length - 1]!,
-              rootIds: [...event.siblings],
-            },
-          }
-        },
-      },
+      on: { SELECT_RANGE: ({ event }) => applyRange(event) },
     },
     single: {
-      on: {
-        SELECT_SINGLE: ({ event }) => ({
-          target: 'single',
-          context: {
-            parentId: event.parentId,
-            anchorId: event.nodeId,
-            focusId: event.nodeId,
-            rootIds: [event.nodeId],
-          },
-        }),
-        EXTEND: ({ context, event }) => extend(context, event.dir, event.siblings),
-        SELECT_ALL: ({ event }) => {
-          if (event.siblings.length === 0) return undefined
-          return {
-            target: event.siblings.length === 1 ? 'single' : 'multi',
-            context: {
-              parentId: event.parentId,
-              anchorId: event.siblings[0]!,
-              focusId: event.siblings[event.siblings.length - 1]!,
-              rootIds: [...event.siblings],
-            },
-          }
-        },
-        CLEAR: () => ({ target: 'idle', context: idleContext() }),
-      },
+      on: { SELECT_RANGE: ({ event }) => applyRange(event), CLEAR: clearToIdle },
     },
     multi: {
-      on: {
-        SELECT_SINGLE: ({ event }) => ({
-          target: 'single',
-          context: {
-            parentId: event.parentId,
-            anchorId: event.nodeId,
-            focusId: event.nodeId,
-            rootIds: [event.nodeId],
-          },
-        }),
-        EXTEND: ({ context, event }) => extend(context, event.dir, event.siblings),
-        SELECT_ALL: ({ event }) => {
-          if (event.siblings.length === 0) return undefined
-          return {
-            target: event.siblings.length === 1 ? 'single' : 'multi',
-            context: {
-              parentId: event.parentId,
-              anchorId: event.siblings[0]!,
-              focusId: event.siblings[event.siblings.length - 1]!,
-              rootIds: [...event.siblings],
-            },
-          }
-        },
-        CLEAR: () => ({ target: 'idle', context: idleContext() }),
-      },
+      on: { SELECT_RANGE: ({ event }) => applyRange(event), CLEAR: clearToIdle },
     },
   },
 })
-
-/** Shared EXTEND transition body: walk the focus end one visible sibling, picking
- *  `single`/`multi` from the resulting run length. A sibling-boundary step is a
- *  no-op here (the parent/child depth-walk lives in the adapter for the PoC). */
-function extend(
-  context: SelectionContext,
-  dir: 'up' | 'down',
-  siblings: readonly string[],
-): { target: 'single' | 'multi'; context: SelectionContext } | undefined {
-  if (context.anchorId === null || context.focusId === null) return undefined
-  const fi = siblings.indexOf(context.focusId)
-  if (fi === -1) return undefined
-  const ni = dir === 'down' ? fi + 1 : fi - 1
-  if (ni < 0 || ni >= siblings.length) return undefined
-  const r = rangeFrom(siblings, context.anchorId, siblings[ni]!)
-  if (!r) return undefined
-  return {
-    target: r.rootIds.length === 1 ? 'single' : 'multi',
-    context: { ...context, focusId: r.focusId, rootIds: r.rootIds },
-  }
-}
