@@ -193,8 +193,13 @@ export function siblingChainRepairs(
 ): Array<{ id: string; prevSiblingId: string | null }> {
   const index = buildTreeIndex(nodes)
   const fixes: Array<{ id: string; prevSiblingId: string | null }> = []
-  for (const children of index.childrenByParent.values()) {
-    for (const d of chainDisagreements(children)) {
+  // childrenByParent holds ordered child *ids* now; map them back to the rows
+  // chainDisagreements compares (the ids are canonical-order by construction).
+  for (const ids of index.childrenByParent.values()) {
+    const ordered = ids
+      .map((id) => index.byId.get(id))
+      .filter((n): n is Node => n != null)
+    for (const d of chainDisagreements(ordered)) {
       fixes.push({ id: d.id, prevSiblingId: d.expectedPrev })
     }
   }

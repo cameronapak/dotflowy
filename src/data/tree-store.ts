@@ -1,9 +1,12 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import type { ChangeMessage } from '@tanstack/react-db'
 import { nodesCollection } from './collection'
 import {
   buildTreeIndex,
   buildTrail,
   childrenOf,
+  orderChildIds,
+  parentKeyOf,
   type Node,
   type TreeIndex,
 } from './tree'
@@ -34,25 +37,149 @@ const EMPTY_INDEX: TreeIndex = buildTreeIndex([])
 const EMPTY_IDS: string[] = []
 const EMPTY_TRAIL: Node[] = []
 
-let index: TreeIndex = EMPTY_INDEX
+// The store owns ONE mutable index, maintained in place by applyChanges. It must
+// be its own instance -- never the shared EMPTY_INDEX, which has to stay pristine
+// as the server/initial snapshot for the hooks below.
+let index: TreeIndex = { byId: new Map(), childrenByParent: new Map() }
 const listeners = new Set<() => void>()
 let started = false
 
-function rebuild() {
-  index = buildTreeIndex(nodesCollection.toArray)
+function notify() {
   for (const l of listeners) l()
 }
 
 /**
+ * Apply a batch of collection changes to the shared index IN PLACE, rather than
+ * rebuilding it from scratch. This is the Phase A scaling win (ADR 0019 / PRD
+ * scale-outline): a text/field keystroke (the hot path) touches neither
+ * `parentId` nor `prevSiblingId`, so it dirties NO parent -- the work is a single
+ * `byId.set`, O(1), versus the old `buildTreeIndex(toArray)` that ran O(total
+ * nodes) on EVERY change. Only inserts, deletes, reparents, and reorders touch
+ * `childrenByParent`, and only the affected parents are re-sorted.
+ *
+ * INVARIANT -- do NOT "simplify" this back to `index = buildTreeIndex(toArray)`:
+ * that reintroduces the O(n)-per-keystroke rebuild this exists to kill.
+ *
+ * Why id arrays + byId (see tree.ts): every node read goes through `byId`, so a
+ * text edit never has to find-and-replace a stale node object inside a sibling
+ * array. `change.value` is the FULL row (TanStack DB `ChangeMessage`), so the
+ * parentId/prevSiblingId comparisons below are reliable.
+ *
+ * Re-sort EVERY parent whose membership or sibling order changed -- insert,
+ * delete, reparent-from, reparent-to, reorder -- re-derived from the batch's
+ * FINAL `byId`. A removal does not "keep the rest ordered" in general: a
+ * multi-write structural op is transiently inconsistent mid-batch (a delete
+ * repoints the follower's prevSiblingId *and* deletes the node, so two siblings
+ * briefly share one prev -- a "fan"), and only a re-sort from the settled state
+ * fixes it. This is exactly what the old `buildTreeIndex(toArray)` did by
+ * re-deriving on every change; we just scope the re-sort to touched parents.
+ * Field-only edits touch no parent, so they re-sort nothing and stay O(1).
+ *
+ * NOTE: this kills the index-rebuild O(n). The remaining O(visible) per-keystroke
+ * cost is the `useVisibleChildIds` getSnapshot fan-out across *mounted* parents
+ * -- that's what Phase B's windowing cuts, not this.
+ */
+function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
+  const dirty = new Set<string>() // parents whose child order may have changed
+  for (const change of changes) {
+    if (change.type === 'delete') {
+      const prev = index.byId.get(change.key as string)
+      if (!prev) continue
+      index.byId.delete(prev.id)
+      const key = parentKeyOf(prev)
+      removeChildId(key, prev.id)
+      dirty.add(key)
+      continue
+    }
+    const next = change.value
+    const prev = index.byId.get(next.id)
+    index.byId.set(next.id, next)
+    if (!prev) {
+      // Insert (also the safe fallback for an update to a row we haven't seen).
+      const key = parentKeyOf(next)
+      addChildId(key, next.id)
+      dirty.add(key)
+    } else if (prev.parentId !== next.parentId) {
+      // Reparent: leaves the old parent, joins the new -- both need a re-sort.
+      const from = parentKeyOf(prev)
+      const to = parentKeyOf(next)
+      removeChildId(from, next.id)
+      addChildId(to, next.id)
+      dirty.add(from)
+      dirty.add(to)
+    } else if (prev.prevSiblingId !== next.prevSiblingId) {
+      // Reorder within the same parent.
+      dirty.add(parentKeyOf(next))
+    }
+    // else: a field-only edit (text / completed / ...) -- byId.set above is all.
+  }
+  for (const key of dirty) {
+    const ids = index.childrenByParent.get(key)
+    if (ids) index.childrenByParent.set(key, orderChildIds(index.byId, ids))
+  }
+  // Identity discipline. Always bump the WRAPPER so `useTreeIndex` re-renders
+  // (the focus/flash effect in OutlineEditor subscribes to it purely to re-run
+  // after every tree change -- in-place-only would freeze its identity and focus
+  // would stop landing).
+  //
+  // On a STRUCTURAL change (dirty.size > 0 -- insert/delete/reparent/reorder) also
+  // hand out FRESH Maps: whole-collection readers, and the React Compiler's
+  // inferred deps, memoize on the byId / childrenByParent *reference* (e.g. the
+  // Cmd+K switcher's `Array.from(index.byId.values())`), so mutating in place
+  // would leave them stale -- a just-created node would never appear in search.
+  // The Map copy is O(n), but it only rides discrete structural actions (Enter,
+  // Delete, move), never the per-keystroke path, and it's still cheaper than the
+  // old buildTreeIndex (no re-bucketing/re-sort of the whole outline). Node refs
+  // are shared by the copy, so per-node `useNode` stays stable.
+  //
+  // Field-only edits (the hot path) keep the SAME Map refs -- O(1). Per-node
+  // reactivity flows through `useNode` (node-object identity), not Map identity,
+  // and whole-collection readers are inert while a bullet is being edited.
+  index =
+    dirty.size > 0
+      ? {
+          byId: new Map(index.byId),
+          childrenByParent: new Map(index.childrenByParent),
+        }
+      : { byId: index.byId, childrenByParent: index.childrenByParent }
+  notify()
+}
+
+/** Append an id to a parent's child list (the dirty re-sort fixes its position).
+ *  Guards against a duplicate from a redelivered change. */
+function addChildId(key: string, id: string) {
+  const ids = index.childrenByParent.get(key)
+  if (ids) {
+    if (!ids.includes(id)) ids.push(id)
+  } else {
+    index.childrenByParent.set(key, [id])
+  }
+}
+
+/** Drop an id from a parent's child list; prune the entry when it empties. The
+ *  caller marks the parent dirty so it's re-sorted from the settled byId (a
+ *  mid-batch removal can leave a transient fan -- see applyChanges). */
+function removeChildId(key: string, id: string) {
+  const ids = index.childrenByParent.get(key)
+  if (!ids) return
+  const i = ids.indexOf(id)
+  if (i !== -1) ids.splice(i, 1)
+  if (ids.length === 0) index.childrenByParent.delete(key)
+}
+
+/**
  * Begin the one collection subscription, lazily. `includeInitialState` makes the
- * callback fire immediately with the current rows, so the first read is already
- * populated; every later change rebuilds the shared index and notifies. Skipped
- * on the server (SPA + prerender, no localStorage) -- see ADR 0004.
+ * callback fire immediately with the current rows (delivered as inserts), so the
+ * first read is already populated; every later change is folded into the shared
+ * index incrementally and notifies. Skipped on the server (SPA + prerender, no
+ * socket) -- see ADR 0004.
  */
 function ensureStarted() {
   if (started || typeof window === 'undefined') return
   started = true
-  nodesCollection.subscribeChanges(() => rebuild(), { includeInitialState: true })
+  nodesCollection.subscribeChanges((changes) => applyChanges(changes), {
+    includeInitialState: true,
+  })
 }
 
 /**
