@@ -33,18 +33,22 @@ rest. This is the honest scope of the "XState + Effect Schema" combo *for this f
 runtime-validation half of that combo, the real home is the sync frame decode (ADR 0013's open
 `decodeFrame` pass), not here.
 
-**The two-state-with-nullable-context call (deliberate, not the maximal version).** v6 supports
-*per-state context narrowing* (a field that exists only in one state's type), which would make
-`parentId`/`anchorId`/`rootIds` literally unreadable at the type level while `idle`. We did **not**
-use it. The context is a single `{ data: SelectionData | null }`; `idle` carries `data: null`,
-`selecting` carries the run. Reasons: (1) per-state context typing is the most alpha, least-documented
-surface in v6-alpha, and the project bar is "tests pass before shipping" — a robust green beats a
-fragile maximal; (2) the **behavioral** guarantee is already there at runtime (`idle` genuinely holds
-`data: null`, and `isSelectionActive()` keys off the state value, not the field); (3) the
-**event-level** narrowing — which *is* robust — already lands the safety that matters: `extend` and
-`refresh` exist **only** in the `selecting` state, so a stray `Shift+arrow` can't no-op into a bug,
-and entering selection is the only path that can produce a run. Tightening `{ data: ... | null }`
-into true per-state context is a type-only follow-up that changes no behavior.
+**Single nullable context, because per-state context narrowing is theater in v6-alpha (proven).** v6
+advertises *per-state context narrowing* — a field that exists only in one state's type — which would
+make `parentId`/`anchorId`/`rootIds` literally unreadable while `idle`. **It does not deliver that
+guarantee in 6.0.0-alpha.12.** `MachineContext = Record<string, any>` (xstate `types.d.ts`), and both
+`SetupContext` and `StateContext` intersect their schema with it, so every field is readable as `any`
+in *every* state regardless of the per-state schema. A typed probe confirmed it: a `@ts-expect-error`
+on `context.parentId` inside an `idle` transition — and on `snapshot.context.parentId` with no
+`matches` guard — is reported **unused** (i.e. those reads compile). The index signature swallows the
+narrowing. So the context is a single `{ data: SelectionData | null }`; `idle` carries `data: null`,
+`selecting` carries the run. This isn't a fallback — it's the *correct* shape here: `SelectionData |
+null` is a real discriminated type a consumer narrows with a null-check (which works, no index leak),
+whereas the state-scoped version would add a `matches()` read-dance and a base-empty context for **no**
+compile-time guarantee. The safety that *is* robust comes from **event-level** narrowing: `extend` and
+`refresh` exist **only** in the `selecting` state, so a stray `Shift+arrow` can't no-op into a bug, and
+entering selection is the only path that produces a run. (Events ARE precisely typed — `InferEvents`
+doesn't intersect `MachineContext`.) Re-evaluate if a later xstate tightens `MachineContext`.
 
 **Why a module-singleton actor + `useSelector`, never `useMachine`.** An XState actor is a
 subscribable external store — exactly the hand-rolled `Set<listener>` + `useSyncExternalStore` the old
