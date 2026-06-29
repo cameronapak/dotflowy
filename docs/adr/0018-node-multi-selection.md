@@ -61,8 +61,19 @@ insertion logic that doesn't exist, and drag is a single-node imperative system
 (`use-drag-reorder.ts`) that needs real surgery to carry a selection.
 
 **The actions menu, and `runMany`.** When a selection exists, a menu **auto-appears anchored to the
-selection's top row**, reusing `SlashMenuList`'s rendering (no second menu look); `Escape` dismisses
-and clears. It lists core **Copy** + **Delete** plus every plugin command that opts in. A single-node
+active (focus) edge — the newest node a `Shift+arrow` just added — and re-anchors to it on every
+extension**, so it tracks the node you're selecting instead of parking over the run's text.
+**Positioning is delegated to floating-ui** (`@floating-ui/react-dom` — the same engine Base UI uses):
+its preferred side is the **outer edge** of the run (below the focus row when the run grows down,
+above when it grows up; below for a lone single node) so it stays off the selected text, while
+`flip()` + `shift()` keep it **fully on screen at any viewport edge** — flipping below the top node
+rather than clipping off-screen — and `autoUpdate` re-solves on scroll/resize. The focus row itself
+is kept on screen with a stock `el.scrollIntoView({ block: "nearest" })`, since selection extension
+never focuses a row (caret and selection are mutually exclusive, so nothing else scrolls it). It
+reuses `SlashMenuList`, which is now **presentational only** — the caller owns positioning (the slash
+menu fixes itself at the caret; this menu hands floating-ui the focus row as the reference), so
+neither reinvents collision geometry. `Escape` dismisses and clears. It lists core **Copy** +
+**Move** + **Delete** plus every plugin command that opts in. A single-node
 `CommandSpec.run(nodeId, ctx)` **cannot** simply be looped over a set — `Move` opens a destination
 picker (looping fires N dialogs) and daily's "Send to Today" navigates (looping navigates N times).
 So `CommandSpec` gains an **optional `runMany(rootIds, ctx)`**, mirroring how `available(node)`

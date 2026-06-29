@@ -19,6 +19,26 @@ const CHAIN: SeedNode[] = [
   { id: "aaa", parentId: "aa", prevSiblingId: null, text: "alphaalphaalpha" },
 ];
 
+// A long flat list -- enough rows to overflow a short viewport, so the actions
+// menu's on-screen guarantee can be tested past the fold.
+const TALL: SeedNode[] = Array.from({ length: 14 }, (_, i) => ({
+  id: `n${i}`,
+  parentId: null,
+  prevSiblingId: i === 0 ? null : `n${i - 1}`,
+  text: `node${i}`,
+}));
+
+// Assert a bounding box sits fully within the viewport (1px slack for rounding).
+function expectInViewport(
+  box: { x: number; y: number; width: number; height: number },
+  vp: { width: number; height: number },
+) {
+  expect(box.y).toBeGreaterThanOrEqual(-1);
+  expect(box.x).toBeGreaterThanOrEqual(-1);
+  expect(box.y + box.height).toBeLessThanOrEqual(vp.height + 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(vp.width + 1);
+}
+
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
@@ -333,7 +353,7 @@ test.describe("Node multi-selection", () => {
     await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
     await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
-    // The actions menu auto-appears anchored to the selection's top row.
+    // The actions menu auto-appears anchored to the active (focus) edge.
     const menu = page.getByRole("listbox");
     await expect(menu).toBeVisible();
     await menu.getByRole("option", { name: "To-do" }).click();
@@ -343,5 +363,76 @@ test.describe("Node multi-selection", () => {
     await expect(li(page, "b").locator(".checkbox")).toBeVisible();
     // The untouched siblings stay plain bullets.
     await expect(li(page, "c").locator(".checkbox")).toHaveCount(0);
+  });
+
+  test("actions menu follows the active edge DOWN, anchored below the newest node", async ({
+    page,
+  }) => {
+    await load(page);
+    await focus(page, "a");
+
+    const menu = page.getByRole("listbox");
+    const rowBox = async (id: string) =>
+      (await page
+        .locator(`li[data-node-id="${id}"] > .outline-row`)
+        .boundingBox())!;
+    const menuBox = async () => (await menu.boundingBox())!;
+
+    // Enter on a single node: the menu sits just below the focused row (there's
+    // plenty of room below in the default tall viewport, so no flip).
+    await page.keyboard.press("Shift+ArrowDown"); // -> [a], focus a
+    await expect(menu).toBeVisible();
+    let row = await rowBox("a");
+    let m = await menuBox();
+    expect(m.y).toBeGreaterThanOrEqual(row.y + row.height - 1);
+    expect(m.y).toBeLessThanOrEqual(row.y + row.height + 16);
+    const yBelowA = m.y;
+
+    // Extend down twice: the menu drops to the NEW bottom node each time, never
+    // parking over the run's text up top.
+    await page.keyboard.press("Shift+ArrowDown"); // -> [a, b], focus b
+    await page.keyboard.press("Shift+ArrowDown"); // -> [a, b, c], focus c
+    row = await rowBox("c");
+    m = await menuBox();
+    expect(m.y).toBeGreaterThan(yBelowA + 10); // it moved down with the selection
+    expect(m.y).toBeGreaterThanOrEqual(row.y + row.height - 1); // below c
+    expect(m.y).toBeLessThanOrEqual(row.y + row.height + 16);
+  });
+
+  test("actions menu stays fully on screen when the run grows to the TOP edge", async ({
+    page,
+  }) => {
+    await load(page);
+    await focus(page, "d");
+
+    // Grow the run all the way up so the focus lands on the top-most row, where
+    // the old top-anchored menu clipped off the top of the viewport.
+    await page.keyboard.press("Shift+ArrowUp"); // -> [d]
+    await page.keyboard.press("Shift+ArrowUp"); // -> [c, d]
+    await page.keyboard.press("Shift+ArrowUp"); // -> [b, c, d]
+    await page.keyboard.press("Shift+ArrowUp"); // -> [a, b, c, d], focus a (top)
+
+    const menu = page.getByRole("listbox");
+    await expect(menu).toBeVisible();
+    // floating-ui flips the menu below the top node rather than letting it clip:
+    // the whole box is within the viewport (the bug in the report).
+    expectInViewport((await menu.boundingBox())!, page.viewportSize()!);
+  });
+
+  test("actions menu stays on screen extending DOWN past the fold", async ({
+    page,
+  }) => {
+    // A short viewport so the lower rows sit past the fold.
+    await page.setViewportSize({ width: 1000, height: 420 });
+    await load(page, TALL);
+    await focus(page, "n0");
+
+    await page.keyboard.press("Shift+ArrowDown"); // enter -> [n0]
+    for (let i = 0; i < 12; i++) await page.keyboard.press("Shift+ArrowDown");
+
+    const menu = page.getByRole("listbox");
+    await expect(menu).toBeVisible();
+    // shift()/flip() keep the menu in view even though the run runs past the fold.
+    expectInViewport((await menu.boundingBox())!, page.viewportSize()!);
   });
 });

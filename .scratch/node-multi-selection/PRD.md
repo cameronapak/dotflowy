@@ -1,6 +1,6 @@
 # PRD: Node multi-selection
 
-Status: Ship 2 shipped (Ship 3 deferred). ADR 0018 accepted.
+Status: Ship 2 shipped + Ship 2.1 (menu follows the active edge); Ship 3 deferred. ADR 0018 accepted.
 Decision record: [ADR 0018](../../docs/adr/0018-node-multi-selection.md). Serializer shared with
 [ADR 0017](../../docs/adr/0017-markdown-export.md) (Ship 1).
 
@@ -24,8 +24,11 @@ the larger sibling of the markdown-export feature — export is its first consum
   no-op, selection persists (NEVER replace-on-type); `Escape` → clear + caret; click → clear + edit.
 - **Visual:** subtle theme-aware accent tint across every row of the selected subtrees, full row
   width, rounded outer corners (one slab); no focus-edge marker; composes with faded/filter states.
-- **Actions menu:** auto-appears anchored to the selection's top row, reuses `SlashMenuList`;
-  `Escape` dismisses + clears.
+- **Actions menu:** auto-appears anchored to the **active (focus) edge** (the newest node a
+  `Shift+arrow` just added), re-anchoring on every extension; positioned by **floating-ui**
+  (preferred outer side, `flip()`/`shift()` keep it fully on screen at any edge); the focus row is
+  kept visible with a stock `scrollIntoView`. Reuses `SlashMenuList` (presentational only); `Escape`
+  dismisses + clears.
 - **`runMany(rootIds, ctx)` opt-in** on `CommandSpec`; selection menu shows core Copy + Delete plus
   every command that defines `runMany`. Operates on selected ROOT ids.
 
@@ -58,7 +61,9 @@ node-clipboard format + insertion logic; drag needs `use-drag-reorder.ts` surger
       `selectionCommandSpecs`; `runMany` implemented for Move (core, multi-target move dialog),
       todos To-do (batch `setIsTask`), daily Send to Today (one batch + one nav).
 - [x] Selection actions menu (`SelectionActionsMenu`, reuses `SlashMenuList`), anchored to the
-      selection's top row via live DOM (`data-node-id`), re-anchors on extend.
+      **active (focus) edge** via live DOM (`data-node-id`), positioned by floating-ui
+      (`flip`/`shift`/`autoUpdate`) so it stays on screen; `scrollIntoView` keeps the focus row
+      visible. `SlashMenuList` is now presentational only. [Ship 2.1]
 - [x] Copy as Markdown over roots (reuses `outlineToMarkdown`); Delete = `removeManyNodes` over
       roots in one `runStructural` (rebuild-per-delete keeps the sibling chain intact).
 - [x] e2e (`e2e/node-multi-select.spec.ts`): shift-extend/shrink, boundary no-op, Cmd+A ladder,
@@ -80,9 +85,32 @@ node-clipboard format + insertion logic; drag needs `use-drag-reorder.ts` surger
   `moveNode`/`removeNode` (`moveManyNodes`/`removeManyNodes`), because looping over a stale
   snapshot tears the sibling chain when the operated nodes are siblings of each other.
 
-## Open implementation questions (resolve at build)
+## Ship 2.1 notes (menu follows the selection, stays on screen)
 
-- Exact selection-tint token (eyeball both themes).
-- Where the keyboard interception lives cleanly (bullet keymap vs a selection-mode handler) given
-  caret/selection exclusivity.
-- Menu re-anchor behavior while extending the selection upward.
+- The actions menu anchors to the **focus** edge, not the top row, so it tracks the node you're
+  adding. Side is derived stateless from focus-vs-anchor order (`focusId === rootIds[last]` →
+  `bottom-start`, else `top-start`; single node → `bottom-start`) and handed to **floating-ui** as
+  the preferred placement.
+- **floating-ui owns the geometry** (`@floating-ui/react-dom`, already in the tree via Base UI):
+  `offset(6)` + `flip({padding:8})` + `shift({padding:8})` + `autoUpdate`. `flip`/`shift` keep the
+  menu fully on screen at any edge (it flips below the top node instead of clipping off the top —
+  the reported bug); `autoUpdate` re-solves on scroll/resize. This **replaced** a hand-rolled
+  `window.scrollBy` reserve, manual above/below math, an `itemCount*44` height estimate, and a
+  `[data-editor-chrome]` header measurement — all of which floating-ui does better, and the
+  `scrollBy` reserve couldn't fix the document-top boundary at all.
+- The focus row is kept visible with a stock `el.scrollIntoView({ block: "nearest" })` (selection
+  extension never focuses a row — caret/selection exclusivity — so nothing else scrolls it).
+- `SlashMenuList` is now **presentational only**: the caller passes `style`/`ref`, owning
+  positioning. The slash menu fixes itself at the caret; the selection menu hands the floating
+  element to floating-ui. Neither reinvents collision geometry.
+- **Trade-off:** at the top boundary the menu flips *below* the focus node to stay on screen, so it
+  can overlap the selected rows there. "Always visible" wins over "never covers text" only at that
+  edge (rare); elsewhere the outer-side rule keeps it off the text.
+
+## Resolved open questions
+
+- Exact selection-tint token: `oklch(from var(--primary) l c h / 0.1)` (Ship 2).
+- Keyboard interception location: enter in `use-bullet-keymap`, while-selected in `selection-mode`
+  (Ship 2).
+- Menu re-anchor while extending upward: anchors to the focus edge, preferring **above** it when the
+  run grows up, and floating-ui flips it **below** at the top boundary to stay on screen (Ship 2.1).

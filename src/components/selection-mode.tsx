@@ -8,6 +8,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useFloating,
+} from "@floating-ui/react-dom";
+import {
   ClipboardCopyIcon,
   CornerUpRightIcon,
   Trash2Icon,
@@ -346,13 +353,23 @@ function useSyncSelectionActive(): boolean {
 }
 
 /**
- * The selection actions menu: auto-appears anchored to the selection's TOP row
- * while a selection is active, reusing `SlashMenuList`'s look (no second menu
- * style). Lists the core Copy + Move + Delete, plus every plugin command that
- * opted into `runMany` and applies to at least one selected node. Mouse-driven
- * (the while-selected arrows are taken for caret motion); the two most-reached
- * ops, Copy and Delete, also have direct keys. Re-anchors as the top row
- * changes (e.g. extending the selection upward).
+ * The selection actions menu: auto-appears anchored to the **active (focus) edge**
+ * of the selection -- the newest node a `Shift+arrow` just added -- and re-anchors
+ * to it on every extension, so it tracks the node you're selecting instead of
+ * sitting over the run's text (ADR 0018). Positioning is delegated to floating-ui
+ * (the same engine Base UI uses): its preferred side is the OUTER edge of the run
+ * (below when the run grows down, above when it grows up, below for a lone single
+ * node) so it stays off the selected text, while `flip()` + `shift()` keep it
+ * fully on screen at any viewport edge -- flipping below at the top boundary
+ * rather than clipping off-screen. `autoUpdate` re-solves on scroll/resize too.
+ * The focus row itself is kept on screen with a stock `scrollIntoView` (selection
+ * extension never focuses a row, so nothing else scrolls it).
+ *
+ * Reuses `SlashMenuList`'s look (no second menu style). Lists the core
+ * Copy + Move + Delete, plus every plugin command that opted into `runMany` and
+ * applies to at least one selected node. Mouse-driven (the while-selected arrows
+ * are taken for caret motion); the two most-reached ops, Copy and Delete, also
+ * have direct keys.
  */
 export function SelectionActionsMenu({
   ops,
@@ -364,34 +381,54 @@ export function SelectionActionsMenu({
   const active = useSyncSelectionActive();
   const rootIds = useSelectionRootIds();
   const [hover, setHover] = useState(0);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const topId = rootIds[0];
 
+  // The focus edge (newest selected node) and its outer side. The run is
+  // anchor..focus in visible order, so focus is always an end: the LAST root when
+  // the run grew down (menu below), otherwise the top (menu above). A lone
+  // single-node run reads as "below". Read live -- the rootIds subscription
+  // re-renders on every selection change, so this stays in sync.
+  const state = active ? getSelectionState() : null;
+  const focusId = state?.focusId;
+  const side =
+    focusId && focusId === rootIds[rootIds.length - 1] ? "bottom-start" : "top-start";
+
+  const { refs, floatingStyles, update } = useFloating({
+    placement: side,
+    strategy: "fixed",
+    // offset: gap from the row. flip: swap to the other side when this one would
+    // clip (the on-screen guarantee at the top/bottom edge). shift: slide along
+    // the edge to stay within an 8px viewport inset.
+    middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  // Point floating-ui at the focus row's LIVE element on every extension. Query
+  // the DOM (not the refs registry): the bullet span's ref is an inline arrow
+  // (fresh identity each commit), so the Map can lag a commit; the `data-node-id`
+  // row is in the DOM by the layout phase.
   useLayoutEffect(() => {
-    if (!active || !topId) {
-      setPos(null);
+    if (!active || !focusId) {
+      refs.setReference(null);
       return;
     }
-    // Anchor to the top row via the LIVE DOM, not the refs registry: the bullet
-    // span's ref is an inline arrow (fresh identity each render), so React
-    // detaches+reattaches it every commit -- this layout effect can run before
-    // the row's ref reattaches, leaving the Map momentarily missing it. The
-    // `data-node-id` row is already in the DOM by the layout phase, so query it.
     const row = document.querySelector(
-      `li[data-node-id="${topId}"] > .outline-row`,
+      `li[data-node-id="${focusId}"] > .outline-row`,
     );
-    if (!(row instanceof HTMLElement)) {
-      setPos(null);
-      return;
+    if (row instanceof HTMLElement) {
+      // Keep the node you're selecting on screen -- selection extension never
+      // focuses a row, so nothing else scrolls it. floating-ui then keeps the
+      // MENU on screen relative to the row.
+      row.scrollIntoView({ block: "nearest" });
+      refs.setReference(row);
+    } else {
+      refs.setReference(null);
     }
-    const r = row.getBoundingClientRect();
-    setPos({ x: r.left, y: r.bottom });
+    update();
     setHover(0);
-  }, [active, topId, rootIds]);
+  }, [active, focusId, rootIds, refs, update]);
 
-  if (!active || !pos || rootIds.length === 0) return null;
-
-  const items = buildItems(rootIds, ops, getCtx);
+  const items = active && rootIds.length ? buildItems(rootIds, ops, getCtx) : null;
+  if (!active || !focusId || !items) return null;
 
   const onSelect = (i: number) => {
     const item = items[i];
@@ -404,10 +441,10 @@ export function SelectionActionsMenu({
 
   return createPortal(
     <SlashMenuList
+      ref={refs.setFloating}
+      style={floatingStyles}
       items={items}
       activeIndex={hover}
-      x={pos.x}
-      y={pos.y}
       onHover={setHover}
       onSelect={onSelect}
     />,

@@ -6,6 +6,7 @@
       "name": "dotflowy",
       "dependencies": {
         "@base-ui/react": "^1.6.0",
+        "@floating-ui/react-dom": "^2.1.8",
         "@fontsource-variable/geist": "^5.2.9",
         "@tanstack/query-core": "^5.101.1",
         "@tanstack/query-db-collection": "^1.0.42",
