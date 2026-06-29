@@ -117,8 +117,9 @@ function selectRange(
     return
   }
   const siblings = visibleSiblings(index, anchor.parentId).map((n) => n.id)
-  selectionActor.send({
-    type: 'SELECT_RANGE',
+  // v6 `trigger` proxy: typed, terminal-`type`-free equivalent of
+  // `send({ type: 'SELECT_RANGE', ... })`.
+  selectionActor.trigger.SELECT_RANGE({
     parentId: anchor.parentId,
     anchorId,
     focusId,
@@ -239,7 +240,7 @@ export function refreshSelection() {
 /** Clear the selection (Escape, a click, a focus, after an op). */
 export function clearSelection() {
   if (selectionActor.getSnapshot().matches('idle')) return
-  selectionActor.send({ type: 'CLEAR' })
+  selectionActor.trigger.CLEAR()
 }
 
 /**
