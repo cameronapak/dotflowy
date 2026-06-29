@@ -95,6 +95,9 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // A collapse or completed flip is a field edit (no parent dirties) but it DOES
   // change the visible row set / fade inheritance, so it must bump structureRev
   // for useVisibleRows even though it keeps the Map refs (it's not a re-sort).
+  // `completed`/`collapsed` are the only fields that affect visibility today
+  // (hide-completed Seam-G + collapse). If a future Seam-G transform hides a node
+  // by another field, add it here or useVisibleRows will show stale rows.
   let visibilityChanged = false
   for (const change of changes) {
     if (change.type === 'delete') {

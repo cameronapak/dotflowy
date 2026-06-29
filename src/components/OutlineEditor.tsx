@@ -192,6 +192,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // indicator knows how wide to draw and the window virtualizer can measure its
   // document-top offset (scrollMargin).
   const listRef = useRef<HTMLElement | null>(null);
+  // The sticky header block above the list. Observed so scrollMargin re-measures
+  // when its height changes (tag-filter subheader opening, breadcrumb wrap, the
+  // daily-progress bar) without a route remount -- else windowed rows drift by
+  // that delta. See the scrollMargin effect below.
+  const headerRef = useRef<HTMLDivElement | null>(null);
 
   // Zoom navigation: the shared-element morph between a node's title and list-
   // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation
@@ -333,8 +338,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // below, so this runs after the list paints once.
   const [scrollMargin, setScrollMargin] = useState(0);
   useLayoutEffect(() => {
-    const el = listRef.current;
-    if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
+    const measure = () => {
+      const el = listRef.current;
+      if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
+    };
+    measure();
+    // Re-measure when the sticky header resizes (the tag-filter subheader is a
+    // query-param change, not a remount, so the deps below never fire for it).
+    const header = headerRef.current;
+    if (!header || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(header);
+    return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
     count: virtualized ? rows.length : 0,
@@ -362,7 +377,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   useEffect(() => {
     rowIndexRef.current = rowIndex;
   }, [rowIndex]);
-  useEffect(() => {
+  // useLayoutEffect (not useEffect): the post-navigation focus/flash effects in
+  // useZoomNavigation and FocusPass are passive and read this bridge via
+  // scrollRowIntoView. The editor remounts per zoom view, so on a cross-zoom
+  // "/move Go" (or zoom-out) the prior editor's cleanup already nulled `nav`;
+  // wiring it in the layout phase guarantees it's set before those passive
+  // effects run, so an off-screen target is actually scrolled in rather than
+  // silently dropped. rowIndexRef is seeded by useRef on mount, so indexOf works
+  // here even before its own (passive) sync effect runs.
+  useLayoutEffect(() => {
     if (!virtualized) {
       setVirtualNav(null);
       return;
@@ -396,7 +419,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFlash={pendingFlash}
       />
       <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
-      <div className="sticky top-0 z-10 relative">
+      <div className="sticky top-0 z-10 relative" ref={headerRef}>
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}

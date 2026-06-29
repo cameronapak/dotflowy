@@ -1,6 +1,7 @@
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
 import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
+import { INDENT_PX } from "./OutlineRow";
 
 /**
  * Pointer-driven drag to reorder and reparent a bullet, for mouse and touch.
@@ -17,9 +18,11 @@ import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
 
 // Movement (px) before a press becomes a drag. Below this, it's a click → zoom.
 const THRESHOLD = 5;
-// Indent per depth level. Matches `.outline-children { padding-left }` in
-// styles.css; measured from the live rows when possible, this is the fallback.
-const INDENT_FALLBACK = 24;
+// Indent per depth level. The render's single source (OutlineRow.INDENT_PX, also
+// the recursive path's `.outline-children` padding); measured from the live rows
+// when possible, this is the fallback so the windowed drop-depth projection can't
+// drift from the rendered indent.
+const INDENT_FALLBACK = INDENT_PX;
 // How much of an indent the pointer must travel rightward before a drop nests
 // one level deeper. 0 = snap to the nearest level (flips at the halfway point);
 // higher = stickier toward the shallower level, so a near-vertical drag stays

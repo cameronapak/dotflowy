@@ -117,10 +117,11 @@ function OutlineRowBody({
   // With windowing only ~viewport rows call this, so the per-parent fan-out the
   // recursive path paid is gone.
   const childIds = useVisibleChildIds(node.id, isHidden);
-  const visibleChildIds = filter
-    ? childIds.filter((id) => filter.visibleIds.has(id))
-    : childIds;
-  const hasChildren = visibleChildIds.length > 0;
+  // Only the boolean is needed here (a leaf row has no children list to pass
+  // down), so test emptiness without materializing the filtered array.
+  const hasChildren = filter
+    ? childIds.some((id) => filter.visibleIds.has(id))
+    : childIds.length > 0;
   const effectiveCollapsed = filter ? false : node.collapsed;
   const isContext = filter ? !filter.matchIds.has(node.id) : false;
   const isPivot = node.id === pivotId;
@@ -191,6 +192,17 @@ function OutlineRowBody({
     decorate(el, node.text, revealOffset, focused);
     syncedRef.current = node.text;
   });
+
+  // Unmount: tear down the caret-reveal watcher if it's still live. onBlur clears
+  // it in the recursive path, but a windowed row can unmount while still focused
+  // (its bullet scrolls out of the window), and a blur isn't guaranteed on DOM
+  // disconnect -- so the document `selectionchange` listener would otherwise leak.
+  useEffect(() => {
+    return () => {
+      caretWatchRef.current?.();
+      caretWatchRef.current = null;
+    };
+  }, []);
 
   useBulletKeymap({
     node,
