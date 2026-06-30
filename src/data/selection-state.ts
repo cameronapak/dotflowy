@@ -328,8 +328,13 @@ export function refreshSelection() {
   selectionActor.send({ type: "refresh" });
 }
 
-/** Clear the selection (Escape, a click, a focus, after an op). */
+/** Clear the selection (Escape, a click, a focus, after an op). No-op while idle
+ *  -- guarding here keeps the hot focus/mousedown path (which calls this on every
+ *  click to enforce caret/selection exclusivity) from notifying every selection
+ *  subscriber when there's nothing to clear (an unhandled `clear` in `idle` still
+ *  emits a snapshot in xstate v6), matching the pre-XState `if (!state) return`. */
 export function clearSelection() {
+  if (snapshot().value !== "selecting") return;
   selectionActor.send({ type: "clear" });
 }
 
