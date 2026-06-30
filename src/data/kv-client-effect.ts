@@ -97,11 +97,16 @@ function request({ collection, method, body, suffix }: FetchArgs): Effect.Effect
       }),
     catch: (cause) => new KvTransportError({ collection, cause }),
   }).pipe(
+    // Retry transport failures (with backoff), THEN bound the whole sequence by
+    // one 8s budget. Timeout OUTSIDE retry on purpose: wrapping each attempt
+    // would give a wedged endpoint 8s PER attempt (~40s across 5); outside, the
+    // entire request — every retry included — can't exceed 8s, and the timeout
+    // itself isn't retried. (Kept in lockstep with nodes-client-effect.ts.)
+    Effect.retry(retryPolicy),
     Effect.timeoutOrElse({
       duration: Duration.seconds(8),
       orElse: () => Effect.fail(new KvTimeoutError({ collection })),
     }),
-    Effect.retry(retryPolicy),
     Effect.flatMap((res) =>
       res.ok
         ? Effect.succeed(res)
