@@ -290,6 +290,36 @@ export function useNode(id: string): Node | undefined {
   return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined)
 }
 
+/** A no-op store subscription, for hooks switched off by a session-fixed flag:
+ *  no listener is registered and it never notifies, so the snapshot stays at its
+ *  disabled value for the session. */
+const NOOP_SUBSCRIBE = () => () => {}
+
+/**
+ * Subscribe to how many mirror INSTANCES point at `id` as their source (ADR
+ * 0022) -- the number behind the "appears in N places" chrome. A primitive
+ * snapshot, so a row re-renders only when its source's mirror count actually
+ * changes (create / promote / delete), never on a keystroke -- the same per-node
+ * budget as {@link useNode} / `useIsProtected`.
+ *
+ * `enabled` is the session-fixed mirrors flag, read once by the caller. When off
+ * the hook subscribes to nothing and reports 0, so a mirror-free outline adds
+ * zero reactive work to the hot path -- the "don't regress" rule (ADR 0019/0022).
+ * Always called (rules of hooks); only the subscribe target varies by the stable
+ * flag.
+ */
+export function useMirrorCount(id: string, enabled = true): number {
+  const getSnapshot = useCallback(
+    () => (enabled ? (getTreeIndex().mirrorsBySource.get(id)?.length ?? 0) : 0),
+    [id, enabled],
+  )
+  return useSyncExternalStore(
+    enabled ? subscribeTree : NOOP_SUBSCRIBE,
+    getSnapshot,
+    () => 0,
+  )
+}
+
 /**
  * Subscribe to a node's ordered, visibility-filtered child ids. `isHidden` is
  * the composed Seam-G prune predicate (ADR 0001): the store no longer hardcodes

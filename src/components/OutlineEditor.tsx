@@ -27,13 +27,15 @@ import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import {
   getTreeIndex,
   useHasNodes,
+  useMirrorCount,
   useNode,
   useTrail,
   useTreeIndex,
   useVisibleChildIds,
   useVisibleRows,
 } from "../data/tree-store";
-import { isVirtualized } from "../data/flags";
+import { isMirrorsEnabled, isVirtualized } from "../data/flags";
+import { MirrorBadge } from "./mirror-chrome";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { OutlineRow } from "./OutlineRow";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
@@ -1176,6 +1178,12 @@ function ZoomedTitle({
   // registry). Mirrors OutlineNode's order: slots, then the lock, then the text.
   const beforeTextSlots = slotsAt("title:before-text");
 
+  // Mirror "appears in N places" badge on the zoomed title too (ADR 0022, slice
+  // 1d), so a mirrored node shows the chrome whether it's a list bullet or the
+  // page title. Session-fixed flag -> no reactive work when mirrors are off.
+  const mirrorsOn = isMirrorsEnabled();
+  const mirrorCount = useMirrorCount(node.id, mirrorsOn);
+
   useEffect(() => {
     const el = ref.current;
     if (!el || composingRef.current) return;
@@ -1208,6 +1216,9 @@ function ZoomedTitle({
         <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
       ))}
       {protectedNode && <ProtectedLock size={16} />}
+      {mirrorsOn && mirrorCount > 0 && (
+        <MirrorBadge sourceId={node.id} count={mirrorCount} />
+      )}
       <span
         ref={(el) => {
           ref.current = el;

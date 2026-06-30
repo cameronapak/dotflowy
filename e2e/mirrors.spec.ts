@@ -244,3 +244,71 @@ test.describe("node mirrors -- create via the picker (ADR 0022)", () => {
     ).toHaveCount(0);
   });
 });
+
+// Slice 1d: mirror chrome -- the "appears in N places" badge, the source/instance
+// border attribute, the places jump list, and the Cmd+K dedup. Seeded directly
+// (the MIRROR_TREE from above: source A with one mirror M under P).
+test.describe("node mirrors -- chrome (ADR 0022)", () => {
+  test("the source and the instance both show the 'appears in N places' badge", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+
+    // A is the source of exactly one mirror, so the content appears in 2 places.
+    // The badge shows the total (2) on BOTH the source row and the mirror row.
+    const sourceBadge = page.locator(
+      'li[data-node-id="A"] > .outline-row .mirror-badge',
+    );
+    const mirrorBadge = page.locator(
+      'li[data-node-id="M"] > .outline-row .mirror-badge',
+    );
+    await expect(sourceBadge).toHaveText("2");
+    await expect(mirrorBadge).toHaveText("2");
+
+    // The source row carries data-mirror="source" (its colored edge); the mirror
+    // row stays "instance".
+    await expect(page.locator('li[data-node-id="A"]')).toHaveAttribute(
+      "data-mirror",
+      "source",
+    );
+    await expect(page.locator('li[data-node-id="M"]')).toHaveAttribute(
+      "data-mirror",
+      "instance",
+    );
+  });
+
+  test("clicking the badge opens the places list and jumps to the source", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+
+    await page
+      .locator('li[data-node-id="A"] > .outline-row .mirror-badge')
+      .click();
+
+    // The jump list opens, titled with the place count, listing a Source row and
+    // a Mirror row.
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Appears in 2 places")).toBeVisible();
+    await expect(dialog.getByText("Source", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Mirror", { exact: true })).toBeVisible();
+
+    // Picking "Source" zooms into A -- it becomes the page title.
+    await dialog.getByText("Source", { exact: true }).click();
+    await expect(page).toHaveURL(/\/A$/);
+    await expect(page.locator("h2.zoomed-title")).toContainText("alpha source");
+  });
+
+  test("flag OFF: no badge, no data-mirror attribute (parity)", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, false);
+
+    await expect(page.locator(".mirror-badge")).toHaveCount(0);
+    await expect(page.locator('li[data-node-id="A"]')).not.toHaveAttribute(
+      "data-mirror",
+      /.*/,
+    );
+  });
+});

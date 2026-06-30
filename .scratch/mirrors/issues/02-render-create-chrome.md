@@ -1,6 +1,8 @@
 # 02 — Render + create + chrome (delivers the use case)
 
-Status: in-progress (branch `feat/mirror-of-plumbing`)
+Status: Stage 1 complete — 1a/1b/1c/1d all DONE (branch `feat/mirror-of-plumbing`).
+The motivating use case works behind the flag. Editing parity inside a mirror is
+Stage 2 (issue 03); promote-on-delete is Stage 3 (issue 04).
 
 Sliced for safe landing (each slice its own verified commit):
 
@@ -39,8 +41,33 @@ Sliced for safe landing (each slice its own verified commit):
   suite green. Daily "Mirror to Today" has no dedicated e2e (the flaky daily
   infra; it's the well-tested "Send to Today" shape calling `mirrorNode`).
   Chrome (badge, borders, jump list) is 1d.
-- **1d — chrome.** "mirrored xN" badge, hover/`:focus-within` borders (pure CSS on
-  `data-mirror`), "appears in N places" jump list, Cmd+K dedup.
+- **1d — chrome. DONE** (branch `feat/mirror-of-plumbing`). Four pieces, all
+  flag-gated, both render paths (list row + zoomed title):
+  - **"appears in N places" badge** (`mirror-chrome.tsx`'s `MirrorBadge`) driven
+    by a new per-node `useMirrorCount(id, enabled)` (`tree-store.ts`) off the
+    `mirrorsBySource` reverse index. Shows on the source AND every instance/capped
+    row (shared content id → same count); shows `count + 1` (total places). The
+    hook short-circuits to a no-op subscription when the flag is off, so a
+    mirror-free outline adds zero reactive work (the ADR 0014 budget). Rendered in
+    `OutlineRow`'s `RowChrome` and `OutlineEditor`'s `ZoomedTitle`.
+  - **Source/instance edge** via `data-mirror`: `RowChrome` now also sets
+    `data-mirror="source"` on a non-mirror row whose content has mirrors. Pure-CSS
+    colored left edge revealed on `:hover`/`:focus-within` (`styles.css`), source
+    hue vs instance hue (two new theme vars, the only chroma in a grayscale
+    theme); capped reuses the instance hue. Zero JS (tag-color ethos, ADR 0007).
+  - **"Appears in N places" jump list** (`mirror-places.tsx`, opener
+    `mirror-places-opener.ts`, mounted once in `__root.tsx`). A plain `Dialog`
+    listing the source + each instance with breadcrumbs; the source zooms to
+    itself, a mirror zooms to its parent and flashes the instance
+    (`requestFlashAfterNav`, reusing `/move`'s "Go" path — a mirror can't be a sane
+    zoom root). The badge opens it.
+  - **Cmd+K dedup**: `node-switcher.tsx`'s `buildFuse` skips `mirrorOf` instances
+    when the flag is on, so a mirrored node appears once (its source). Flag off, a
+    `mirrorOf` node is indexed as normal.
+  e2e: badge count + `data-mirror="source"` on both rows; badge opens the list and
+  "Source" zooms to A; flag-off parity (no badge, no attribute). 11 mirror specs
+  serial; full suite green (one pre-existing rich-links caret flake, passes in
+  isolation). Closes Stage 1 (issue 02).
 
 Stage 1 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The meat of the feature
 that isn't the caret surgery. After this, a task mirrored into Today is **visible, expandable, text-synced,
@@ -75,14 +102,15 @@ and checkable in both places** — the motivating use case. Behind a flag.
 
 ## Acceptance
 
-- [ ] Mirror a project task into Today; both show the same text; editing text in one updates the other.
-- [ ] Toggle `completed` from either instance → both reflect it.
-- [ ] Expand the mirror → its source's children render under it (read/scroll fine; full *editing* parity is
-      Stage 3 — note any rough caret edges).
-- [ ] Cycle: mirror-into-own-subtree blocked at create; a cycle formed by a later move renders a capped row,
-      never hangs.
-- [ ] Badge count correct; jump list navigates to each instance; hover borders show source vs instance.
-- [ ] Flag off → outline byte-identical to today (no path keys, no perf change). e2e parity green.
+- [x] Mirror a project task into Today; both show the same text; editing text in one updates the other. (1b/1c)
+- [x] Toggle `completed` from either instance → both reflect it. (1b)
+- [x] Expand the mirror → its source's children render under it (read/scroll fine; full *editing* parity is
+      Stage 2 — caret/focus/drag inside a mirror is knowingly rough). (1b)
+- [x] Cycle: mirror-into-own-subtree blocked at create; a cycle formed by a later move renders a capped row,
+      never hangs. (1a create-guard + render cap; 1c picker exclusion)
+- [x] Badge count correct; jump list navigates (source zooms to itself, a mirror zooms to its parent + flash);
+      hover borders show source vs instance. (1d)
+- [x] Flag off → outline byte-identical to today (no path keys, no perf change). e2e parity green. (every slice)
 
 ## Out of scope (later stages)
 

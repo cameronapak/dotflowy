@@ -9,8 +9,10 @@ import {
 import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
-import { useNode, useVisibleChildIds } from "../data/tree-store";
+import { useMirrorCount, useNode, useVisibleChildIds } from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
+import { isMirrorsEnabled } from "../data/flags";
+import { MirrorBadge } from "./mirror-chrome";
 import type { PluginContext } from "../plugins/types";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
 import { clearSelection, useSelectionEdge } from "../data/selection-state";
@@ -214,6 +216,13 @@ function RowChrome({
   const beforeTextSlots = slotsAt("row:before-text");
   const protectedNode = useIsProtected(content.id);
   const selectionEdge = useSelectionEdge(instance.id);
+  // Mirror chrome (ADR 0022, slice 1d). The count is the same for the source row
+  // and every instance (they share the content id), so the "appears in N places"
+  // badge shows on all of them. `mirrorsOn` is session-fixed, so the hook adds no
+  // reactive work when the flag is off (useMirrorCount short-circuits).
+  const mirrorsOn = isMirrorsEnabled();
+  const mirrorCount = useMirrorCount(content.id, mirrorsOn);
+  const isSource = !isMirror && mirrorCount > 0;
 
   const menus = useMenus({
     node: content,
@@ -301,7 +310,9 @@ function RowChrome({
       data-node-id={instance.id}
       data-parent-id={instance.parentId ?? undefined}
       data-depth={depth}
-      data-mirror={isMirror ? (capped ? "capped" : "instance") : undefined}
+      data-mirror={
+        isMirror ? (capped ? "capped" : "instance") : isSource ? "source" : undefined
+      }
       data-selected={selectionEdge ?? undefined}
       data-index={index}
       ref={measureRef}
@@ -351,6 +362,9 @@ function RowChrome({
           <Fragment key={slot.id}>{slot.render(content, pluginCtx)}</Fragment>
         ))}
         {protectedNode && <ProtectedLock size={12} />}
+        {mirrorsOn && mirrorCount > 0 && (
+          <MirrorBadge sourceId={content.id} count={mirrorCount} />
+        )}
         <span
           ref={(el) => {
             textRef.current = el;

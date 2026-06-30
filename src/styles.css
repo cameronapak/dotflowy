@@ -81,6 +81,11 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* Node mirrors (ADR 0022): a source hue and a distinct instance hue, the only
+   * chromatic accents in an otherwise grayscale theme, so a colored edge reads at
+   * a glance. Tuned for light surfaces. */
+  --mirror-source: oklch(0.58 0.13 250);
+  --mirror-instance: oklch(0.6 0.16 300);
 }
 
 .dark {
@@ -115,6 +120,9 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  /* Brighter on dark surfaces (see :root). */
+  --mirror-source: oklch(0.72 0.13 250);
+  --mirror-instance: oklch(0.74 0.16 300);
 }
 
 @layer base {
@@ -352,6 +360,30 @@ h2 > span.protected-lock {
 .outline-node[data-selected="single"] {
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
+}
+
+/*
+ * Node mirrors (ADR 0022, slice 1d). A mirror INSTANCE and its SOURCE each wear a
+ * thin colored left edge, revealed only on row hover or while the caret is within
+ * (:focus-within) -- so a mirror-free outline, and an idle mirror, look exactly as
+ * before. Source hue vs instance hue tells the original apart from its live
+ * copies; a capped row (a cycle) reuses the instance hue. Pure CSS keyed off the
+ * row's `data-mirror`, zero JS -- the tag-color ethos (ADR 0007). The edge sits on
+ * `.outline-row` (the flex line), so depth indentation already offsets it.
+ */
+.outline-node[data-mirror] > .outline-row {
+  box-shadow: inset 3px 0 0 0 transparent;
+  transition: box-shadow 0.12s ease;
+}
+.outline-node[data-mirror="source"]:hover > .outline-row,
+.outline-node[data-mirror="source"]:focus-within > .outline-row {
+  box-shadow: inset 3px 0 0 0 var(--mirror-source);
+}
+.outline-node[data-mirror="instance"]:hover > .outline-row,
+.outline-node[data-mirror="instance"]:focus-within > .outline-row,
+.outline-node[data-mirror="capped"]:hover > .outline-row,
+.outline-node[data-mirror="capped"]:focus-within > .outline-row {
+  box-shadow: inset 3px 0 0 0 var(--mirror-instance);
 }
 
 /*
