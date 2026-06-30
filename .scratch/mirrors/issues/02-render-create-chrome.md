@@ -1,6 +1,27 @@
 # 02 — Render + create + chrome (delivers the use case)
 
-Status: ready-for-human
+Status: in-progress (branch `feat/mirror-of-plumbing`)
+
+Sliced for safe landing (each slice its own verified commit):
+
+- **1a — render-walk keystone. DONE** (commit `e944285`). `buildVisibleRows`
+  resolves `contentId`, windows the source's children, emits path keys + isMirror/
+  capped/broken; behind `isMirrorsEnabled()` (default off) + a `mirrorsEnabled`
+  param. Pure, 11 unit tests, **not yet wired into the UI** — `useVisibleRows`
+  still calls it mirror-free, so the live app is byte-identical.
+- **1b — UI wiring + field split. NEXT (the regression-prone refactor).** Thread
+  the flag into `useVisibleRows`; split `OutlineRow` so content (text/isTask/
+  completed/children) reads + routes to `contentId` while collapse/position/zoom
+  stay on the instance (a thin `MirrorRow` wrapper over a shared body, so the
+  mirror-free row keeps its single `useNode` — no double-subscribe); zoom on a
+  mirror bullet navigates to the source; virtualizer keys by `row.key`; capped +
+  broken row components. Seeded-mirror e2e (text+completed sync, expand) + flag-off
+  parity. Caret/focus/drag rough edges acceptable here (Stage 2 owns parity).
+- **1c — creation.** `/mirror` "Mirror to…" (Seam C) + daily "Mirror to Today" +
+  selection `runMany`; create-time cycle block; flatten mirror-of-mirror; one
+  `runStructural` batch.
+- **1d — chrome.** "mirrored xN" badge, hover/`:focus-within` borders (pure CSS on
+  `data-mirror`), "appears in N places" jump list, Cmd+K dedup.
 
 Stage 1 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The meat of the feature
 that isn't the caret surgery. After this, a task mirrored into Today is **visible, expandable, text-synced,
