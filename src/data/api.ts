@@ -1,4 +1,4 @@
-import { Semaphore } from 'effect'
+import { Effect, Semaphore } from 'effect'
 import type { Node } from './schema'
 import type { ChangeOp } from './realtime'
 import {
@@ -32,11 +32,10 @@ import {
  * helpers below stay for FIELD edits (text, completed, …) and the first-run
  * seed. See structural.ts and PLAN.md.
  *
- * NOTE: structural-batch serialization is an Effect `Semaphore` (below). The
- * FIELD coalescer is still a Promise-singleton on purpose — see its own comment
- * and .scratch/effect-tightening issue 02 for why a faithful Effect port is
- * net-neutral there (it must preserve shared-fate failure across coalesced
- * callers, which the singleton already does minimally).
+ * NOTE: both write-path coordinators are now Effect `Semaphore`s — structural
+ * batches (`writeSem`) and the field coalescer (`fieldSem`: generations with a
+ * shared per-caller promise that preserves shared-fate failure). See
+ * .scratch/effect-tightening issue 02 for the design + timing proof.
  */
 
 // Serializes structural batches so the DO receives them in client-call order.
@@ -79,57 +78,86 @@ export const createNodes = (nodes: Node[]): Promise<void> =>
 //      Worker dispatch), so PATCH("ab") can reach the DO AFTER PATCH("abc").
 //      Last-writer-wins then persists the stale "ab" and broadcasts it as the
 //      newest seq -- the echo overwrites the live row with older text and the
-//      "c" is lost (and survives refresh). This is the field-edit twin of the
-//      P3 fan that `persistBatch` serializes away for structural writes.
+//      "c" is lost (and survives refresh). The field-edit twin of the structural
+//      fan that `persistBatch` serializes away.
 //   2) Cost. One Worker + Durable Object invocation (a SQL write + a broadcast)
 //      PER CHARACTER. A 40-character bullet billed 40 round trips.
 //
-// The fix is the same `batchTail` discipline, plus coalescing: while a PATCH is
-// in flight, every later field change MERGES into a pending map (field-wise
-// last-write-wins -- correct because a PATCH carries only changed columns), and
-// when the in-flight request returns we flush the merged latest as ONE ordered
-// PATCH. Order is guaranteed (one request at a time) and a burst of N keystrokes
-// costs ~1 request per round trip instead of N -- the bulk of the savings, with
-// no artificial debounce latency (the optimistic overlay is already on screen).
+// The fix is one `Semaphore(1)` (`fieldSem`) plus coalescing into GENERATIONS. A
+// generation is a pending field-merge map (field-wise last-write-wins -- correct
+// because a PATCH carries only changed columns) plus ONE shared promise. While a
+// PATCH is in flight the permit is held, so every later edit MERGES into the open
+// generation; when the in-flight PATCH returns the permit releases and the next
+// generation drains everything that accumulated as ONE ordered PATCH. The
+// semaphore's FIFO queue gives client-call order for free, and it releases on
+// failure/interruption too, so a rejected PATCH can't wedge the queue.
+//
+// Shared-fate (the ADR 0010 invariant): every caller that merges into a
+// generation returns that generation's SINGLE `runPromise(flush)` promise, so if
+// the flush fails they ALL reject together -> all roll back. The naive
+// one-fiber-per-call port breaks this (only the draining fiber would learn of the
+// failure); the shared promise is what preserves it.
 //
 // This deliberately does NOT await the echo (the text path must stay snappy,
 // per docs/adr/0010-field-edits-serialize-coalesce-ignore-echoes.md); the overlay still drops on the PATCH ack. The
 // companion client guard (the focused bullet ignores echo-driven repaints, see
 // collection.ts `echoedText` + OutlineNode) keeps that ack/echo gap from ever
 // touching the DOM you're typing into.
-let fieldInFlight: Promise<unknown> = Promise.resolve()
-let fieldPending: Map<string, Partial<Node>> | null = null
-let fieldFlush: Promise<void> | null = null
+//
+// See .scratch/effect-tightening issue 02 for the timing proof (why the merge
+// must precede arming the flush, and why `yieldNow` buys exact same-tick parity).
 
-function scheduleFieldFlush(): Promise<void> {
-  if (fieldFlush) return fieldFlush
-  fieldFlush = fieldInFlight
-    // A failed prior batch must not wedge the queue; its own caller already
-    // rejected (rolling back that transaction). Swallow here so the next flush
-    // still runs.
-    .catch(() => {})
-    .then(() => {
-      const batch = fieldPending
-      fieldPending = null
-      fieldFlush = null
-      if (!batch || batch.size === 0) return
-      const updates = [...batch].map(([id, changes]) => ({ id, changes }))
-      const run = runPromise(updateNodesE(updates))
-      fieldInFlight = run
-      return run
-    })
-  return fieldFlush
+interface FieldGen {
+  /** Field-wise last-write-wins merge accumulated for this generation. */
+  pending: Map<string, Partial<Node>>
+  /** The one promise every caller of this generation shares (shared-fate). */
+  promise: Promise<void>
+}
+
+const fieldSem = Semaphore.makeUnsafe(1)
+let currentGen: FieldGen | null = null
+
+/**
+ * Arm a generation's flush: wait our turn on the permit, then drain everything
+ * that coalesced and PATCH it as one request. `yieldNow` defers the drain past
+ * the current synchronous tick so same-tick callers all merge into this
+ * generation first; the merge in `updateNodes` runs before this is called, so
+ * even a free-permit (synchronous) acquire drains a populated map.
+ */
+function startFieldFlush(gen: FieldGen): Promise<void> {
+  const flush = fieldSem.withPermits(1)(
+    Effect.flatMap(Effect.yieldNow, () =>
+      Effect.suspend(() => {
+        // Holding the permit => the prior generation's PATCH has settled. Detach
+        // so new callers open a fresh generation, and snapshot the merge.
+        if (currentGen === gen) currentGen = null
+        if (gen.pending.size === 0) return Effect.void
+        const updates = [...gen.pending].map(([id, changes]) => ({ id, changes }))
+        return updateNodesE(updates)
+      }),
+    ),
+  )
+  return runPromise(flush)
 }
 
 export function updateNodes(
   updates: { id: string; changes: Partial<Node> }[],
 ): Promise<void> {
-  if (!fieldPending) fieldPending = new Map()
-  for (const u of updates) {
-    const prev = fieldPending.get(u.id)
-    fieldPending.set(u.id, prev ? { ...prev, ...u.changes } : { ...u.changes })
+  // Join the open generation, or open one. Assign `currentGen` and merge BEFORE
+  // arming the flush -- a free-permit flush can drain synchronously, so the merge
+  // must already be in the map (else this caller's edit sends as an empty batch).
+  let gen = currentGen
+  const fresh = !gen
+  if (!gen) {
+    gen = { pending: new Map(), promise: Promise.resolve() }
+    currentGen = gen
   }
-  return scheduleFieldFlush()
+  for (const u of updates) {
+    const prev = gen.pending.get(u.id)
+    gen.pending.set(u.id, prev ? { ...prev, ...u.changes } : { ...u.changes })
+  }
+  if (fresh) gen.promise = startFieldFlush(gen)
+  return gen.promise
 }
 
 export const deleteNodes = (ids: string[]): Promise<void> =>

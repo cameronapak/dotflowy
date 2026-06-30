@@ -25,7 +25,8 @@ Concrete gaps in `src/data/api.ts`:
 
 The coordination around it is hand-rolled concurrency that Effect models natively: `batchTail`
 (serialize structural batches, `api.ts:51`) is a `Semaphore(1)`; the field coalescer
-(`fieldInFlight`/`fieldPending`/`fieldFlush`, `:97`) is a `Ref` + `Deferred`; `waitForSeq`/`waitForNode`
+(`fieldInFlight`/`fieldPending`/`fieldFlush`, `:97`) is a `Semaphore(1)` + one shared per-generation
+promise (NOT `Ref`/`Deferred` — see issue 02); `waitForSeq`/`waitForNode`
 (`collection.ts:130,:147`) are `Deferred` + `Effect.timeout`. Plus the scattered edge async the audit
 found: `seed.ts` bootstrap, the `fetchLinkTitle` fire-and-forget (no cancellation → can write a deleted
 bullet's DOM), and the daily `ensure*` chains.
@@ -59,8 +60,9 @@ already speaks.
    foundation: `nodes-client-effect.ts` (retry + timeout + typed errors + `{seq}` validation), `api.ts`
    re-shelled over it. Closes the robustness gap and the unchecked-`seq` latent bug on its own.
 2. **[02 — write-path coordination](./issues/02-write-path-coordination.md)** — HIGH risk, depends on
-   01. `batchTail` → `Semaphore(1)`; field coalescer → `Ref` + `Deferred`. The typing hot path; ADRs
-   0009/0010 behaviors are the acceptance bar. Fake-transport unit tests first.
+   01. `batchTail` → `Semaphore(1)` (DONE); field coalescer → `Semaphore(1)` + shared per-generation
+   promise (no `Ref`/`Deferred`). The typing hot path; ADRs 0009/0010 behaviors are the acceptance bar.
+   Fake-transport unit tests first.
 3. **[03 — echo waiters](./issues/03-echo-waiters.md)** — MED risk, depends on 01 (composes the write
    program end-to-end). `waitForSeq`/`waitForNode` → `Deferred` + `Effect.timeout`. Preserve the
    resolve-on-timeout (seq) vs reject-on-timeout (node) semantics exactly.
