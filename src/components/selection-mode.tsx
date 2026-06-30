@@ -3,7 +3,6 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -36,11 +35,11 @@ import {
   extendSelection,
   getSelectionRootIds,
   getSelectionState,
-  isSelectionActive,
   isWholeViewSelected,
   refreshSelection,
   selectAllInView,
-  subscribeSelection,
+  useIsSelectionActive,
+  useSelectionRootIds,
 } from "../data/selection-state";
 import { isProtected, selectionCommandSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
@@ -248,7 +247,7 @@ export function useSelectionMode({
     () => makeSelectionOps({ refs, pendingFocus }),
     [refs, pendingFocus],
   );
-  const active = useSyncSelectionActive();
+  const active = useIsSelectionActive();
 
   // Clear any stale selection carried across an editor (re)mount -- the
   // singleton outlives the per-zoom remount, but a new view starts caret-first.
@@ -342,16 +341,6 @@ export function useSelectionMode({
 
 type SelItem = MenuListItem & { run: () => void };
 
-const SSR_EMPTY: string[] = [];
-
-function useSelectionRootIds(): string[] {
-  return useSyncExternalStoreShim(getSelectionRootIds, SSR_EMPTY);
-}
-
-function useSyncSelectionActive(): boolean {
-  return useSyncExternalStoreShim(isSelectionActive, false);
-}
-
 /**
  * The selection actions menu: auto-appears anchored to the **active (focus) edge**
  * of the selection -- the newest node a `Shift+arrow` just added -- and re-anchors
@@ -378,7 +367,7 @@ export function SelectionActionsMenu({
   ops: SelectionOps;
   getCtx: () => PluginContext;
 }) {
-  const active = useSyncSelectionActive();
+  const active = useIsSelectionActive();
   const rootIds = useSelectionRootIds();
   const [hover, setHover] = useState(0);
 
@@ -498,10 +487,4 @@ function buildItems(
     run: ops.remove,
   };
   return [...core, ...pluginItems, del];
-}
-
-// `useSyncExternalStore` against the selection store with a stable server
-// snapshot. Tiny shim so the two subscriptions above read identically.
-function useSyncExternalStoreShim<T>(getSnapshot: () => T, server: T): T {
-  return useSyncExternalStore(subscribeSelection, getSnapshot, () => server);
 }
