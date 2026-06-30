@@ -114,8 +114,8 @@ const UNFURLING_CLASS = "link-unfurling";
 // an Effect. Same-origin, so the session cookie rides along by default. Any
 // failure -- a non-200, a malformed body, a network error -- collapses to null,
 // and the caller keeps the url placeholder (the graceful fallback). The runtime
-// `signal` makes the fetch interruptible: forked on `appRuntime` (afterPaste),
-// it's a managed fiber, not a floating promise.
+// `signal` wires the fetch up to be interruptible; nothing interrupts it per
+// node today (see the runFork site), so it runs to completion either way.
 function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
   return Effect.tryPromise({
     try: async (signal) => {
@@ -229,9 +229,11 @@ export default definePlugin({
       const anchor = findFoldedAnchor(el, token);
       anchor?.classList.add(UNFURLING_CLASS);
 
-      // Fork the unfurl as a managed fiber on the app runtime (not a floating
-      // promise). The continuation applies the title; its guards keep it safe if
-      // the bullet changed or was deleted while the fetch was in flight.
+      // Fork the unfurl on the app runtime (a tracked fiber, not a floating
+      // `void promise.then`). NOTE: it's app-scoped, not node-scoped -- nothing
+      // interrupts it when the bullet is deleted, so the continuation's own
+      // guards (current == null, verbatim swapLinkLabel match) are what keep a
+      // late title from writing into a deleted or since-edited bullet.
       appRuntime.runFork(
         fetchLinkTitleE(label).pipe(
           Effect.flatMap((title) =>

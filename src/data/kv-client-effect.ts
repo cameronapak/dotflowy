@@ -201,18 +201,7 @@ export function kvGetOrCreateE<T>(
 
 // --- Unsafe escape hatch ----------------------------------------------------
 
-/**
- * Run an Effect kv program and convert its typed error into a thrown Error, so a
- * caller that still speaks the throw-based contract (TanStack DB mutation
- * handlers, which signal failure by throwing to trigger optimistic rollback)
- * can adopt the Effect pipeline without a wider rewrite.
- */
-export function runPromise<T, E>(
-  effect: Effect.Effect<T, E>,
-): Promise<T> {
-  return Effect.runPromise(
-    effect.pipe(
-      Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))),
-    ),
-  )
-}
+// The throw bridge for the TanStack rollback contract lives in one place
+// (shared with nodes-client-effect.ts); re-exported here so kv-api.ts and
+// daily-index.ts keep importing it from the kv core.
+export { runPromise } from './effect-bridge'

@@ -154,16 +154,7 @@ export const sendBatchE = (
 
 // --- Unsafe escape hatch ----------------------------------------------------
 
-/**
- * Run a nodes Effect program and convert its typed error into a thrown Error,
- * so the throw-based TanStack DB mutation handlers (which signal failure by
- * throwing to trigger optimistic rollback) consume it unchanged. Mirrors
- * kv-client-effect.ts `runPromise`. (A shared bridge is a later cleanup.)
- */
-export function runPromise<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
-  return Effect.runPromise(
-    effect.pipe(
-      Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))),
-    ),
-  )
-}
+// The throw bridge for the TanStack rollback contract lives in one place
+// (shared with kv-client-effect.ts); re-exported here so api.ts/structural.ts/
+// collection.ts keep importing it from the nodes core.
+export { runPromise } from './effect-bridge'
