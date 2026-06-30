@@ -508,6 +508,18 @@ h2 > span.protected-lock {
   margin-top: 6px;
 }
 
+/* The mirror badge is a bordered pill in the same flex-start row; left at the
+   top it reads as jammed into the row's top edge, and a fixed margin would need
+   per-height tuning (cf. the checkbox's 6px and the daily badge's `mt-1`, each
+   tuned to its own height). `align-self: center` drops its middle onto the row's
+   cross-axis center -- which is the text line's center (the `.node-text` line
+   box fills the row's 28px content area) -- and self-adjusts if the badge height
+   changes. Scoped to the row for the same reason as the checkbox: the zoomed
+   title is already flex-centered, so the badge needs no nudge there. */
+.outline-row .mirror-badge {
+  align-self: center;
+}
+
 .node-text {
   flex: 1 1 auto;
   min-height: 24px;
