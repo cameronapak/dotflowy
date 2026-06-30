@@ -1,9 +1,22 @@
 # 04 — plugin + bootstrap async (Effect)
 
-Status: Planned. Risk: LOW–MED. Depends on: nothing (parallel with 01–03).
+Status: PARTIAL — bootstrap (part 1) + links unfurl (part 2) BUILT + green. Daily `ensure*` (part 3)
+RECOMMENDED-DEFER (evidence below). Risk: LOW–MED. Depends on: nothing (parallel with 01–03).
 
-See [PRD](../PRD.md). The scattered edge async the audit found. Independent of the write path, so it can
-land anytime.
+Built:
+- **`seed.ts` bootstrap → Effect.** `bootstrapOutline` is one `Effect` program: `tryPromise` over the
+  readiness wait, a typed `BootstrapError` gate on `nodesLoadError`, `seedIfEmpty` in the success leg;
+  `Effect.match` folds the typed failure back to a VALUE (`BootstrapError | void`) at the mount-time
+  boundary the caller checks (not a throw — not a TanStack handler). Behavior identical.
+- **`fetchLinkTitle` → `fetchLinkTitleE` + `appRuntime.runFork`** (`links/index.ts`). The unfurl is now
+  an Effect (`tryPromise` with the runtime `signal` → interruptible; `orElseSucceed(null)` keeps the
+  graceful fallback), and the afterPaste fire-and-forget is a managed fiber, not a floating promise. The
+  existing guards (`current == null`, verbatim `swapLinkLabel`) are kept.
+
+Gates: typecheck + typecheck:test + lint clean, unit 134/134, e2e rich-links 11/11 serial (incl. the
+title-swap + failed-fetch-fallback). The "write-after-delete" the plan billed was ALREADY guarded by
+`current == null` + verbatim-match, so part 2 is ADR-0021 alignment + a managed/interruptible fiber, NOT
+a critical bug fix (honest correction of the plan's framing).
 
 ## Scope
 
@@ -25,6 +38,22 @@ land anytime.
   becomes `Effect.ensuring`. **Keep using the low-level `mutations.ts` primitives directly**, not
   `ctx.mutations` (CLAUDE.md: navigate-away creates need different capture/focus semantics). Bridge at
   the click-handler seam with `runPromise`/`runFork`.
+
+## Part 3 (daily `ensure*` + `pending.ts`) — recommended defer, with evidence
+
+`ensureNodeExists`/`ensureContainer`/`ensureDay`/`getOrCreateDay` (`daily/index.tsx`) +
+`withDailyNavigation` (`pending.ts`) are `async/await` glue around `claimMapping` (already Effect-backed),
+`runStructural` (sync), and `setMapping` (sync). Converting them is a CASCADE through ~5 functions + 3
+bridge sites (`goToDate`, the `/` command, the Cmd+K Seam-J action), in the **subtlest async in the
+codebase** (atomic claim, idempotency, self-heal, the deliberate `mutations.ts`-not-`ctx.mutations`
+capture/focus semantics), behind a **known-flaky e2e** (`daily-notes.spec.ts`).
+
+The genuine effects there are small: `withDailyNavigation`'s `try/finally` → `Effect.ensuring`, and
+`ensureNodeExists`'s `await waitForNode(...).catch(() => {})` → compose the issue-03 `waitForNodeE`. The
+rest is correct, readable async orchestration with no retry/timeout/concurrency/resource benefit — and
+ADR 0021's own test ("if the code already makes the call obvious, the code is the doc; don't churn it").
+So: net LOW value, MED risk in fragile code. Recommend leaving it unless the daily flow is being touched
+for another reason — at which point the `waitForNodeE` compose + `ensuring` ride along cheaply.
 
 ## Acceptance
 

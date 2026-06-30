@@ -1,3 +1,4 @@
+import { Effect } from 'effect'
 import { appendChild } from './mutations'
 import { createId, makeNode, now } from './tree'
 import { nodesCollection, nodesLoadError } from './collection'
@@ -29,17 +30,36 @@ let bootstrapped = false
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return
   bootstrapped = true
-  // Wait for the first load to settle. The .catch covers the rare paths where
-  // preload() actually rejects (a synchronous sync-init throw); the common
-  // 500/offline case resolves here and is caught by the nodesLoadError gate.
-  const ready = await nodesCollection
-    .toArrayWhenReady()
-    .catch((e) => new BootstrapError({ cause: e }))
-  if (ready instanceof Error) return ready
-  const loadError = nodesLoadError()
-  if (loadError) return new BootstrapError({ cause: loadError })
-
-  await seedIfEmpty()
+  // One Effect program. Wait for the first load (tryPromise covers the rare
+  // synchronous sync-init throw); then the typed-failure gate — if the sync
+  // failed (the common 500/offline case settles ready-but-empty with the error
+  // recorded in nodesLoadError), fail with BootstrapError rather than seed over
+  // an unreachable outline; otherwise seed-if-empty.
+  const program = Effect.tryPromise({
+    try: () => nodesCollection.toArrayWhenReady(),
+    catch: (cause) => new BootstrapError({ cause }),
+  }).pipe(
+    Effect.flatMap(() => {
+      const loadError = nodesLoadError()
+      return loadError
+        ? Effect.fail(new BootstrapError({ cause: loadError }))
+        : Effect.tryPromise({
+            try: () => seedIfEmpty(),
+            catch: (cause) => new BootstrapError({ cause }),
+          })
+    }),
+    Effect.asVoid,
+  )
+  // Fold the typed failure back to a VALUE at this mount-time boundary
+  // (BootstrapError | void, which the caller checks) — not a throw, since this
+  // isn't a TanStack handler. The Effect runs underneath; only the seam differs.
+  // See docs/adr/0021-effect-first-one-schema-language.md.
+  return Effect.runPromise(
+    Effect.match(program, {
+      onFailure: (error) => error,
+      onSuccess: () => undefined,
+    }),
+  )
 }
 
 // One-shot guard, set synchronously before the first await. The old

@@ -6,6 +6,7 @@
 // The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
 // just the decoration half expressed as El descriptors.
 
+import { Effect } from "effect";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
@@ -14,6 +15,7 @@ import {
   sanitizeLinkLabel,
   swapLinkLabel,
 } from "../../data/links";
+import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
 import { definePlugin, type El } from "../types";
 
@@ -108,19 +110,24 @@ function revealedLinkEl(label: string, url: string): El {
 // removed on resolve; the success re-decorate replaces the <a> outright.
 const UNFURLING_CLASS = "link-unfurling";
 
-// Fetch a pasted URL's title from the auth-gated Worker endpoint (ADR 0016).
-// Same-origin, so the session cookie rides along by default. Any failure -- a
-// non-200, a malformed body, a network error -- collapses to null, and the
-// caller keeps the url placeholder (the graceful fallback).
-async function fetchLinkTitle(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(`/api/unfurl?url=${encodeURIComponent(url)}`);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { title?: string | null };
-    return typeof data.title === "string" && data.title ? data.title : null;
-  } catch {
-    return null;
-  }
+// Fetch a pasted URL's title from the auth-gated Worker endpoint (ADR 0016), as
+// an Effect. Same-origin, so the session cookie rides along by default. Any
+// failure -- a non-200, a malformed body, a network error -- collapses to null,
+// and the caller keeps the url placeholder (the graceful fallback). The runtime
+// `signal` makes the fetch interruptible: forked on `appRuntime` (afterPaste),
+// it's a managed fiber, not a floating promise.
+function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
+  return Effect.tryPromise({
+    try: async (signal) => {
+      const res = await fetch(`/api/unfurl?url=${encodeURIComponent(url)}`, {
+        signal,
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { title?: string | null };
+      return typeof data.title === "string" && data.title ? data.title : null;
+    },
+    catch: (cause) => cause,
+  }).pipe(Effect.orElseSucceed(() => null));
 }
 
 // The just-folded <a> for `token` inside `el` (matched on its `data-src`, which
@@ -222,21 +229,31 @@ export default definePlugin({
       const anchor = findFoldedAnchor(el, token);
       anchor?.classList.add(UNFURLING_CLASS);
 
-      void fetchLinkTitle(label).then((title) => {
-        // Drop the spinner. On success the swap re-decorates a fresh <a> anyway;
-        // on failure this is what clears it (the text is unchanged).
-        anchor?.classList.remove(UNFURLING_CLASS);
-        if (!title) return; // keep the url placeholder
-        const safe = sanitizeLinkLabel(title);
-        if (!safe) return;
-        // Read the LIVE text at swap time (not a paste-time snapshot): the user
-        // may have typed since. Verbatim-match-or-drop (swapLinkLabel) does the
-        // rest -- only an untouched placeholder is rewritten.
-        const current = getTreeIndex().byId.get(nodeId)?.text;
-        if (current == null) return;
-        const next = swapLinkLabel(current, encodedUrl, label, safe);
-        if (next != null) ctx.mutations.onTextChange(nodeId, next);
-      });
+      // Fork the unfurl as a managed fiber on the app runtime (not a floating
+      // promise). The continuation applies the title; its guards keep it safe if
+      // the bullet changed or was deleted while the fetch was in flight.
+      appRuntime.runFork(
+        fetchLinkTitleE(label).pipe(
+          Effect.flatMap((title) =>
+            Effect.sync(() => {
+              // Drop the spinner. On success the swap re-decorates a fresh <a>
+              // anyway; on failure this is what clears it (text unchanged).
+              anchor?.classList.remove(UNFURLING_CLASS);
+              if (!title) return; // keep the url placeholder
+              const safe = sanitizeLinkLabel(title);
+              if (!safe) return;
+              // Read the LIVE text at swap time (not a paste-time snapshot): the
+              // user may have typed since. Verbatim-match-or-drop (swapLinkLabel)
+              // does the rest -- only an untouched placeholder is rewritten, and
+              // a deleted node (current == null) is skipped.
+              const current = getTreeIndex().byId.get(nodeId)?.text;
+              if (current == null) return;
+              const next = swapLinkLabel(current, encodedUrl, label, safe);
+              if (next != null) ctx.mutations.onTextChange(nodeId, next);
+            }),
+          ),
+        ),
+      );
     },
   },
 });
