@@ -8,11 +8,16 @@ status: accepted
 state machine** whose **context + events are typed by Effect Schema** (`Schema.toStandardSchemaV1` →
 XState's Standard Schema slots), backing the existing `src/data/selection-state.ts`. The machine is a
 **module-singleton actor** (`createActor(...).start()`, mirrored like `view-state.ts`), not a
-`useMachine` — its public API (`selectSingle`/`extendSelection`/`selectAllInView`/`refreshSelection`/
-`clearSelection`/`getSelectionState`/`getSelectionRootIds`/`isSelectionActive`/`isWholeViewSelected`/
-`subscribeSelection`/`useSelectionEdge`) is **byte-for-byte unchanged**, so every consumer
-(`selection-mode.tsx`, the rows, `use-bullet-keymap.ts`) is untouched and a rollback is "restore the
-old file + `bun remove xstate @xstate/react`."
+`useMachine`. Its **imperative read/command API**
+(`selectSingle`/`extendSelection`/`selectAllInView`/`refreshSelection`/`clearSelection`/
+`getSelectionState`/`getSelectionRootIds`/`isWholeViewSelected`) is unchanged;
+its **React reads** are now uniformly `@xstate/react` hooks — `useSelectionEdge` per row, plus
+`useSelectionRootIds`/`useIsSelectionActive` for the actions menu. The hand-rolled
+`subscribeSelection` + `useSyncExternalStore` bridge was **removed in favour of `useSelector`** (a
+consolidation follow-up: `useSelector` re-renders on selector-value change, so no-op snapshot
+emissions can't churn a subscriber — what the old `subscribeSelection` path needed a guard for).
+Consumers outside the menu (the rows, `use-bullet-keymap.ts`) are untouched; a rollback is "restore
+the old file + `bun remove xstate @xstate/react`."
 
 **Why here, and not the sync socket.** The genuinely good XState target is a place where state is
 **currently implicit and the cost of getting it wrong is real**, *and* where converting doesn't
@@ -67,15 +72,16 @@ idiom. The machine isn't a self-contained pure statechart — the tree is ambien
 up the *mode + keyboard-routing*; it did not dissolve the derivation, and was never going to.
 
 **Don't regress:**
-- Keep the public API of `selection-state.ts` frozen — the swap's whole safety story is that
-  consumers never changed. Add a method only if a consumer needs it.
+- Keep the **imperative** API of `selection-state.ts` stable, and expose **React reads only as
+  `useSelector` hooks** — never re-introduce a raw `subscribe` + `useSyncExternalStore` bridge (that's
+  the churn-prone path the consolidation removed). Add a method only if a consumer needs it.
 - Module-singleton actor + `useSelector` for per-node reads. Never `useMachine`, never thread
   selection as a prop ([ADR 0014](./0004-localized-rendering-via-the-tree-store.md)).
 - `useSelectionEdge` must return the **edge primitive** through `useSelector`'s compare, so a
   selection change re-renders only the rows whose edge actually changed.
 - Transitions read the live tree at event time (getters), not render-time values; a no-op transition
-  returns nothing so the context reference is preserved (which is what keeps `getSelectionRootIds`'s
-  snapshot stable for `useSyncExternalStore`).
+  preserves the `data` reference (returns nothing, or the same `data`), which is what keeps
+  `getSelectionRootIds` / `useSelectionRootIds` stable under `useSelector`'s `Object.is` compare.
 - `xstate@6` / `@xstate/react@7` are **alpha**, accepted because dotflowy has one user and e2e gates
   every ship. Treat a version bump as a real change: re-run `node-multi-select.spec.ts`.
 

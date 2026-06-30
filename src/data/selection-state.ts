@@ -254,19 +254,7 @@ const selectionActor = createActor(selectionMachine).start();
 
 const snapshot = () => selectionActor.getSnapshot();
 
-// --- public API (unchanged surface, now backed by the actor) ----------------
-
-/** Subscribe to any selection change. Module-level + referentially stable, safe
- *  as a `useSyncExternalStore` subscribe. */
-export function subscribeSelection(cb: () => void): () => void {
-  const sub = selectionActor.subscribe(() => cb());
-  return () => sub.unsubscribe();
-}
-
-/** Whether any node selection is active. */
-export function isSelectionActive(): boolean {
-  return snapshot().value === "selecting";
-}
+// --- public API (now backed by the actor) -----------------------------------
 
 /** The selected ROOT ids (subtrees implied), in visible order. Empty when no
  *  selection. Stable identity per selection -- safe as a store snapshot (the
@@ -352,4 +340,21 @@ export function useSelectionEdge(id: string): SelectionEdge | null {
     (snap) => edgeOf(id, snap.context.data),
     Object.is,
   );
+}
+
+/** Reactive `rootIds` for the actions menu. `useSelector` re-renders only when the
+ *  array value changes (`Object.is`); the context `rootIds` reference is stable
+ *  across no-op transitions, so this never churns on an unrelated event. */
+export function useSelectionRootIds(): string[] {
+  return useSelector(
+    selectionActor,
+    (snap) => (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
+    Object.is,
+  );
+}
+
+/** Reactive "is a node selection active". Re-renders only on the idle<->selecting
+ *  flip, not on every selection change within `selecting`. */
+export function useIsSelectionActive(): boolean {
+  return useSelector(selectionActor, (snap) => snap.value === "selecting");
 }
