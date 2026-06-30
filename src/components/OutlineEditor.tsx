@@ -268,19 +268,33 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     getIndex: getTreeIndex,
     getRootId: getViewRootId,
     getIsHidden: getViewIsHidden,
-    getRowEl: (id) =>
-      (refs.get(id)?.closest(".outline-row") as HTMLElement | null) ??
+    getRowEl: (key) =>
+      (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ??
       null,
     getListEl: () => listRef.current,
-    onMove: (id, newParentId, afterSiblingId) =>
+    onMove: (grabbedKey, newParentInstanceId, afterSiblingId) =>
       runStructural(() => {
         const index = getTreeIndex();
-        capture(index, id);
-        const moved = moveNode(index, id, newParentId, afterSiblingId);
+        const instanceId = instanceIdForKey(grabbedKey);
+        // Field split (ADR 0022): dropping under a mirror reparents to its
+        // SOURCE, so the moved node windows into every instance. The position
+        // (the node itself + its predecessor) stays the instance. Off the flag
+        // newParentInstanceId is already a real node, so this is a no-op.
+        const newParentId =
+          isMirrorsEnabled() && newParentInstanceId
+            ? (index.byId.get(newParentInstanceId)?.mirrorOf ??
+              newParentInstanceId)
+            : newParentInstanceId;
+        capture(index, instanceId);
+        const moved = moveNode(index, instanceId, newParentId, afterSiblingId);
         if (moved) {
-          pendingFocus.current = id;
+          // Land focus + flash in the instance that was dragged (re-derived from
+          // the post-move render walk), not the source's far copy. Bare id off
+          // the flag.
+          const key = focusKeyFor(instanceId, grabbedKey);
+          pendingFocus.current = key;
           // Tint the row it landed on so the eye can find what just moved.
-          pendingFlash.current = id;
+          pendingFlash.current = key;
         } else drop();
       }),
   });

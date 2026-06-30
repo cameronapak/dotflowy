@@ -36,6 +36,17 @@ function modifier() {
   return process.platform === "darwin" ? "Meta" : "Control";
 }
 
+// The flat-list order of node ids as rendered (document order === visible order).
+// A windowed source child appears twice, so the same id repeats -- exactly what
+// lets us prove a reorder lands in BOTH the source and the mirror.
+const nodeOrder = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll("li[data-node-id]")).map((li) =>
+      li.getAttribute("data-node-id"),
+    ),
+  );
+
+
 async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
   await page.addInitScript(() => {
     localStorage.setItem("dotflowy:flag:virtualized", "on");
@@ -293,6 +304,83 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     expect(named).toBe(1);
     await expect(spans(page, "M")).not.toHaveAttribute("style", /zoom-target/);
     expect(morphErrors).toEqual([]);
+  });
+
+  test("dragging a windowed child inside a mirror reorders the SOURCE in every instance (2d)", async ({
+    page,
+  }) => {
+    // The structural-write tripwire only console.errors; assert it stayed silent
+    // (a reorder that read a stale post-update index would tear the chain).
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+    // Three children so the drop lands UNAMBIGUOUSLY off the top: dropping the
+    // grabbed a1 past every row puts it after a2/a3 -- no longer first -- which
+    // survives the virtualizer's estimate-vs-measured geometry offset (the reason
+    // a precise gap can't be aimed from a synthetic-pointer test).
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+      { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
+      { id: "a2", parentId: "A", prevSiblingId: "a1", text: "childtwo" },
+      { id: "a3", parentId: "A", prevSiblingId: "a2", text: "childthree" },
+      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+    ];
+    await load(page, tree, true);
+    await expect(spans(page, "a1")).toHaveCount(2);
+    expect(await nodeOrder(page)).toEqual([
+      "A",
+      "a1",
+      "a2",
+      "a3",
+      "P",
+      "M",
+      "a1",
+      "a2",
+      "a3",
+    ]);
+
+    // Drag the WINDOWED a1 (under M, nth(1)) DOWN past every row so it lands after
+    // the last windowed child. a1 is a REAL node, so reordering it restructures
+    // the source -> the move shows under BOTH the source and the mirror. Pre-2d
+    // the windowed rows had no virtualizer geometry (hit-test keyed by bare id,
+    // not row.key) so the drop projected off only the non-mirror rows ("way off").
+    // Drop near the viewport bottom (above the 72px auto-scroll edge band): that's
+    // below every row's virtualizer position regardless of the estimate offset,
+    // so the gap is unambiguously the end of the list.
+    {
+      const grab = page.locator('li[data-node-id="a1"] .bullet').nth(1);
+      const g = await grab.boundingBox();
+      if (!g) throw new Error("grab handle not laid out");
+      const gx = g.x + g.width / 2;
+      const dropY = (page.viewportSize()?.height ?? 720) - 100;
+      await page.mouse.move(gx, g.y + g.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(gx, g.y + g.height / 2 + 12, { steps: 5 });
+      await page.mouse.move(gx, dropY, { steps: 12 });
+      await page.mouse.up();
+    }
+
+    // a1 left the top in BOTH instances, and the two blocks stay in lockstep (one
+    // real reorder, windowed everywhere). The exact landing slot (after a2 or a3)
+    // is left loose -- either proves the source was restructured.
+    const childBlocks = async () => {
+      const order = await nodeOrder(page);
+      const p = order.indexOf("P");
+      const m = order.indexOf("M");
+      return { source: order.slice(1, p), mirror: order.slice(m + 1) };
+    };
+    await expect.poll(async () => (await childBlocks()).source[0]).toBe("a2");
+    const { source, mirror } = await childBlocks();
+    expect(source).not.toEqual(["a1", "a2", "a3"]); // a1 moved off the top
+    expect(mirror).toEqual(source); // reflected in the mirror
+    expect(source).toContain("a1"); // still present, just relocated
+    expect(chainErrors).toEqual([]);
   });
 
   test("flag OFF: a mirrorOf node Enter-splits as an ordinary leaf (parity)", async ({

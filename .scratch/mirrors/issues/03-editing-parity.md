@@ -1,6 +1,6 @@
 # 03 — Full editing parity inside mirrors (the hard part)
 
-Status: in progress — 2a, 2b, 2c DONE; 2d–2e remain (branch `feat/mirror-of-plumbing`).
+Status: in progress — 2a, 2b, 2c, 2d DONE; 2e remains (branch `feat/mirror-of-plumbing`).
 Each slice is its own verified commit, mirroring Stage 1's 1a–1d discipline.
 
 Stage 2 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The A1 gold-plate and the
@@ -88,9 +88,26 @@ All in `src/components/`. Each is correct today only because no id repeats; each
   typecheck:test / lint / 170 unit green; e2e mirrors + keyboard-nav + node-multi-select + the new
   `mirror-editing.spec.ts` green; full e2e green except the pre-existing daily-notes `goHome` nav flake (16/16
   isolated); flag-off parity unchanged.
-- **2d — drag-reorder by path.** `use-drag-reorder.ts` + `virtual-nav.ts`: hit-test / projection by `row.key`
-  (`virtualRowRect` keyed by key); dropping inside a mirror reorders the **real** source children (and thus
-  every instance). Document the surprise.
+- **2d — drag-reorder by path. DONE.** `buildRows` (`use-drag-reorder.ts`) now reuses `buildVisibleRows`
+  (the same flat render walk the editor + virtualizer use) instead of its own ad-hoc `childrenOf` walk, which
+  never resolved windowed source descendants — so inside a mirror their geometry was missing and the drop line
+  projected off only the non-mirror rows (dogfood finding 4, "way off"). Each drag `Row` now carries `key`
+  (geometry/hit-test address via `virtualRowRect(r.key)`), `id` (instance), `contentId`, and a **render-parent**
+  instance (`instanceIdForKey(parentKeyOf(key))`, not the tree parent, so the sibling/ancestor projection stays
+  inside the window). The grabbed subtree is the contiguous deeper-depth run after the grabbed row (the flat
+  list's subtree property, uniform across paths). The bullet arms the drag with `rowKey` (`OutlineRow`), so a
+  windowed copy is the exact instance grabbed. On drop, `onMove` (`OutlineEditor`) resolves `grabbedKey →
+  instanceId`, **field-splits the drop parent** (a drop under a mirror reparents to its SOURCE via `mirrorOf`,
+  so the moved node windows into every instance), runs `moveNode` on real nodes in one `runStructural`, and
+  lands focus + flash via `focusKeyFor(instanceId, grabbedKey)` (the dragged instance, not the source's far
+  copy). `moveNode` was audited for the in-place-sync gotcha — clean (it reads all sibling state BEFORE any
+  `update()`). Mirror-free path byte-identical (`key === id`, render parent === tree parent, field split a
+  no-op). **The surprise** (PRD gotcha): a drag inside one instance reorders the real source, so it moves in
+  every instance; dragging a windowed child OUT of the mirror moves the real node out everywhere (same as the
+  2c outdent-out). e2e in `mirror-editing.spec.ts` (drag a windowed child reorders the source, reflected in
+  both blocks; chain tripwire silent) — the FIRST drag e2e in the repo (drag was previously dogfood-only;
+  precise gap aiming is impractical because the projection reads the virtualizer's estimate-vs-measured
+  geometry, so the test drops past the last row and asserts the loose "a1 left the top, both blocks agree").
 - **2e — multi-select by path.** `selection-state` `rootIds` + `useSelectionEdge` keyed by `row.key`;
   `runMany` resolves keys to the real nodes. A run inside a mirror operates on the source nodes.
 
@@ -128,7 +145,9 @@ All in `src/components/`. Each is correct today only because no id repeats; each
       same edit appears in every instance. *(2c: Enter-split + indent/outdent + delete in `mirror-editing.spec.ts`;
       type via 1b; backspace-merge rides the same key-addressed `onDeleteNode` + `findVisibleNeighbor` path.)*
 - [x] Add a child directly under a mirror → it shows under the source and all other instances. *(2c)*
-- [ ] Drag a sub-item inside a mirror → reorders under the source (verified in another instance). *(2d)*
+- [x] Drag a sub-item inside a mirror → reorders under the source (verified in another instance). *(2d:
+      `mirror-editing.spec.ts` drags a windowed child and asserts both the source and mirror blocks reorder
+      in lockstep.)*
 - [ ] Multi-select + move/indent inside a mirror behaves as on real nodes; no cross-instance focus bleed. *(2e)*
 - [x] The **same node visible at two paths simultaneously** (both homes on screen, e.g. top-level unzoomed):
       focusing one doesn't steal/echo into the other; both spans independent. *(2c: Enter-split focuses the

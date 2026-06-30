@@ -9,7 +9,11 @@ import {
 import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
-import { useMirrorCount, useNode, useVisibleChildIds } from "../data/tree-store";
+import {
+  useMirrorCount,
+  useNode,
+  useVisibleChildIds,
+} from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
 import { MirrorBadge } from "./mirror-chrome";
@@ -331,7 +335,13 @@ function RowChrome({
       data-parent-id={instance.parentId ?? undefined}
       data-depth={depth}
       data-mirror={
-        isMirror ? (capped ? "capped" : "instance") : isSource ? "source" : undefined
+        isMirror
+          ? capped
+            ? "capped"
+            : "instance"
+          : isSource
+            ? "source"
+            : undefined
       }
       data-selected={selectionEdge ?? undefined}
       data-index={index}
@@ -364,7 +374,10 @@ function RowChrome({
           type="button"
           className="bullet touch-hitbox"
           aria-label="Zoom in"
-          onPointerDown={(e) => commands.onBulletPointerDown(instance.id, e)}
+          // Drag arms with the row KEY so a windowed copy inside a mirror is the
+          // exact instance grabbed, never its source copy (ADR 0022). key === id
+          // off the flag / outside a mirror.
+          onPointerDown={(e) => commands.onBulletPointerDown(rowKey, e)}
           // A mirror's bullet zooms to the SOURCE (content.id) -- you land on the
           // real node to work its subtree. For a normal row content.id ===
           // instance.id, so this is today's behavior.

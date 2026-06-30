@@ -1,5 +1,11 @@
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { childrenOf, type Node, type TreeIndex } from "../data/tree";
+import { type Node, type TreeIndex } from "../data/tree";
+import {
+  buildVisibleRows,
+  instanceIdForKey,
+  parentKeyOf,
+} from "../data/visible-order";
+import { isMirrorsEnabled } from "../data/flags";
 import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
 import { INDENT_PX } from "./OutlineRow";
 
@@ -35,7 +41,23 @@ const EDGE = 72;
 const SCROLL_MAX = 18;
 
 interface Row {
+  // The render ADDRESS (row.key) -- the drag's identity, so a windowed source
+  // descendant inside a mirror is the exact on-screen row, not its source copy
+  // (ADR 0022). Equals `id` for every mirror-free row, so the 99% path is
+  // unchanged. Geometry (virtualRowRect) and the refs lookup both key off this.
+  key: string;
+  // The INSTANCE (position) node id -- what `moveNode` repositions. Inside a
+  // mirror's window this is the real node (instance === content), so reordering
+  // it restructures the source and shows in every instance.
   id: string;
+  // The CONTENT node id (`mirrorOf ?? id`). Used when this row is the drop
+  // PARENT: dropping under a mirror targets its SOURCE, so the new child windows
+  // into every instance (the ADR 0022 field split, applied in onMove).
+  contentId: string;
+  // The RENDER parent's instance id (`instanceIdForKey(parentKeyOf(key))`), not
+  // the tree parent: inside a mirror a windowed child's render parent is the
+  // mirror instance, so the sibling/ancestor projection stays within the window.
+  // Field-split back to a content id in onMove. Equals the tree parent off-flag.
   parentId: string | null;
   depth: number; // relative to the zoom root: its direct children are depth 0
   el: HTMLElement | null;
@@ -57,18 +79,28 @@ interface DragDeps {
   /** The composed Seam-G visibility prune (hide-completed today). Drag mirrors
    *  the render: a hidden node is not a droppable row. See ADR 0001. */
   getIsHidden: () => (node: Node) => boolean;
-  /** The `.outline-row` element for a node id (via the editor's refs registry). */
-  getRowEl: (id: string) => HTMLElement | null;
+  /** The `.outline-row` element for a row KEY (via the editor's refs registry,
+   *  keyed by row.key since ADR 0022; key === id off the flag). */
+  getRowEl: (key: string) => HTMLElement | null;
   /** The `ul.outline-list` element, for the indicator's right edge. */
   getListEl: () => HTMLElement | null;
+  /**
+   * Commit the drop. `grabbedKey` is the dragged row's render address; the parent
+   * + predecessor are INSTANCE ids from the render hierarchy. The editor resolves
+   * the field split (a drop under a mirror targets its source) and re-derives the
+   * landing focus key from the post-move render walk. Off the flag these are bare
+   * ids and the resolution is a no-op.
+   */
   onMove: (
-    id: string,
-    newParentId: string | null,
-    afterSiblingId: string | null,
+    grabbedKey: string,
+    newParentInstanceId: string | null,
+    afterSiblingInstanceId: string | null,
   ) => void;
 }
 
 interface DragState {
+  /** The grabbed row's KEY (render address) -- buildRows/getRowEl/onMove all key
+   *  off it. Equals the node id for every mirror-free drag. */
   id: string;
   startX: number;
   startY: number;
@@ -112,41 +144,59 @@ export function useDragReorder(deps: DragDeps) {
   }, []);
 
   // Build the visible, ordered rows (matching what's rendered), with depth,
-  // excluding the grabbed node and everything under it (can't drop into self).
-  const buildRows = useCallback((grabbedId: string): Row[] => {
+  // excluding the grabbed row and everything under it (can't drop into self).
+  //
+  // Reuses `buildVisibleRows` -- the SAME flat walk the editor renders and the
+  // virtualizer indexes -- so the drag's rows can't drift from what's on screen
+  // (inside a mirror the ad-hoc tree walk produced the wrong rows: it never
+  // resolved the windowed source descendants, so their geometry was missing and
+  // the drop line projected off only the non-mirror rows). The grabbed subtree
+  // is the CONTIGUOUS run of deeper rows right after the grabbed one -- the flat
+  // list's standard subtree property, uniform across mirror-free and crossed
+  // paths. Filter is null to match today's drag (it ignores the tag filter).
+  const buildRows = useCallback((grabbedKey: string): Row[] => {
     const { getIndex, getRootId, getIsHidden, getRowEl } = depsRef.current;
     const index = getIndex();
     const rootId = getRootId();
     const isHidden = getIsHidden();
+    const visible = buildVisibleRows(
+      index,
+      rootId,
+      isHidden,
+      null,
+      isMirrorsEnabled(),
+    );
 
-    const skip = new Set<string>([grabbedId]);
-    const stack = [grabbedId];
-    while (stack.length) {
-      const id = stack.pop()!;
-      for (const c of childrenOf(index, id)) {
-        skip.add(c.id);
-        stack.push(c.id);
+    // The grabbed row, then skip it + its rendered subtree (rows deeper than it,
+    // up to the next row at or above its depth).
+    const gi = visible.findIndex((r) => r.key === grabbedKey);
+    let skipEnd = gi;
+    if (gi !== -1) {
+      const grabbedDepth = visible[gi]!.depth;
+      skipEnd = gi + 1;
+      while (skipEnd < visible.length && visible[skipEnd]!.depth > grabbedDepth) {
+        skipEnd++;
       }
     }
 
     const rows: Row[] = [];
-    const walk = (parentId: string | null, depth: number) => {
-      for (const child of childrenOf(index, parentId)) {
-        if (isHidden(child)) continue;
-        if (!skip.has(child.id)) {
-          rows.push({
-            id: child.id,
-            parentId: child.parentId,
-            depth,
-            el: getRowEl(child.id),
-          });
-        }
-        // Descend regardless of skip: a non-skipped node can't live under a
-        // skipped (grabbed) one, so this only walks real visible structure.
-        if (!child.collapsed && !skip.has(child.id)) walk(child.id, depth + 1);
-      }
-    };
-    walk(rootId, 0);
+    for (let i = 0; i < visible.length; i++) {
+      if (gi !== -1 && i >= gi && i < skipEnd) continue;
+      const vr = visible[i]!;
+      const parentKey = parentKeyOf(vr.key);
+      rows.push({
+        key: vr.key,
+        id: vr.id,
+        contentId: vr.contentId,
+        // Render parent: the mirror/ancestor instance the row sits under, or the
+        // node's tree parent at the top level (key === id, parentKey === null).
+        parentId: parentKey
+          ? instanceIdForKey(parentKey)
+          : (index.byId.get(vr.id)?.parentId ?? null),
+        depth: vr.depth,
+        el: getRowEl(vr.key),
+      });
+    }
     return rows;
   }, []);
 
@@ -173,7 +223,8 @@ export function useDragReorder(deps: DragDeps) {
     sourceRow?.closest(".outline-node")?.classList.add("drag-collapsed");
 
     const index = depsRef.current.getIndex();
-    const text = index.byId.get(s.id)?.text?.trim() || "Untitled";
+    const text =
+      index.byId.get(instanceIdForKey(s.id))?.text?.trim() || "Untitled";
 
     const pill = document.createElement("div");
     pill.className = "drag-pill";
@@ -205,7 +256,7 @@ export function useDragReorder(deps: DragDeps) {
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
       if (virtualized) {
-        const vr = virtualRowRect(r.id, scrollY);
+        const vr = virtualRowRect(r.key, scrollY);
         if (!vr) continue;
         // Uniform indent: depth-0 left is the container left; deeper rows add
         // depth * indent (OutlineRow's paddingInlineStart). project() backs
@@ -358,10 +409,14 @@ export function useDragReorder(deps: DragDeps) {
     if (s.dragging) {
       consumed.current = true;
       const pending = s.pending;
-      const id = s.id;
+      const grabbedKey = s.id;
       cleanup();
       if (pending) {
-        depsRef.current.onMove(id, pending.parentId, pending.afterSiblingId);
+        depsRef.current.onMove(
+          grabbedKey,
+          pending.parentId,
+          pending.afterSiblingId,
+        );
       }
       return;
     }
@@ -369,13 +424,13 @@ export function useDragReorder(deps: DragDeps) {
   }
 
   const startDrag = useCallback(
-    (id: string, e: ReactPointerEvent) => {
+    (grabbedKey: string, e: ReactPointerEvent) => {
       // A fresh press: clear any stale click-suppression.
       consumed.current = false;
       // Ignore secondary buttons.
       if (e.button !== 0 && e.pointerType === "mouse") return;
       state.current = {
-        id,
+        id: grabbedKey,
         startX: e.clientX,
         startY: e.clientY,
         dragging: false,
