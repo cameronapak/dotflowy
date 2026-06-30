@@ -157,18 +157,35 @@ function computeAllInView(): SelectionData | null {
   return computeRange(sibs[0]!.id, sibs[sibs.length - 1]!.id, index);
 }
 
+/** id -> edge map for one selection, built once and reused for every row. Keyed
+ *  on the `SelectionData` reference (stable per selection -- a no-op transition
+ *  preserves it), so it rebuilds only when the selection actually changes, and a
+ *  replaced `SelectionData` is GC'd with its map. This keeps `edgeOf` O(1) per
+ *  row instead of an O(rootIds) `indexOf` on every subscribed row per snapshot
+ *  (the pre-XState `recomputeEdges` behavior). */
+const edgeMaps = new WeakMap<SelectionData, Map<string, SelectionEdge>>();
+function edgeMapFor(data: SelectionData): Map<string, SelectionEdge> {
+  let m = edgeMaps.get(data);
+  if (m) return m;
+  m = new Map();
+  const ids = data.rootIds;
+  if (ids.length === 1) {
+    m.set(ids[0]!, "single");
+  } else {
+    m.set(ids[0]!, "top");
+    m.set(ids[ids.length - 1]!, "bottom");
+    for (let i = 1; i < ids.length - 1; i++) m.set(ids[i]!, "middle");
+  }
+  edgeMaps.set(data, m);
+  return m;
+}
+
 /** The slab edge for a node id given the current selection, or null when it
- *  isn't a selected root. A pure function of `rootIds`, computed in the
- *  `useSelector` selector so each row reduces to its own primitive edge. */
+ *  isn't a selected root. O(1): consults the memoized {@link edgeMapFor} map, so
+ *  the `useSelector` selector stays cheap across every subscribed row. */
 function edgeOf(id: string, data: SelectionData | null): SelectionEdge | null {
   if (!data) return null;
-  const ids = data.rootIds;
-  const i = ids.indexOf(id);
-  if (i === -1) return null;
-  if (ids.length === 1) return "single";
-  if (i === 0) return "top";
-  if (i === ids.length - 1) return "bottom";
-  return "middle";
+  return edgeMapFor(data).get(id) ?? null;
 }
 
 // --- the machine ------------------------------------------------------------
