@@ -155,3 +155,92 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
     await expect(page.locator('li[data-node-id="a2"]')).toHaveCount(1);
   });
 });
+
+// Slice 1c: creating a mirror via the `/mirror` destination picker (reuses the
+// `/move` dialog in mirror mode). Source A (children a1/a2) + a bookmarked
+// destination box D.
+const CREATE_TREE: SeedNode[] = [
+  { id: "A", parentId: null, prevSiblingId: null, text: "alpha source" },
+  {
+    id: "D",
+    parentId: null,
+    prevSiblingId: "A",
+    text: "dest box",
+    bookmarkedAt: 100,
+  },
+  { id: "a1", parentId: "A", prevSiblingId: null, text: "alpha child one" },
+  { id: "a2", parentId: "A", prevSiblingId: "a1", text: "alpha child two" },
+];
+
+// Open the CORE `/mirror` picker for a node the way a user does: focus the
+// bullet, type the slash command (a leading space so `detectSlash` fires), then
+// click the core option -- disambiguated from daily's "Mirror to Today" by its
+// unique description ("...another node"). Mirrors openMove in move-dialog.spec.
+async function openMirror(page: Page, id: string) {
+  await text(page, id).click();
+  await expect(text(page, id)).toBeFocused();
+  await page.keyboard.type(" /mirror");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.getByRole("option", { name: /another node/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+
+test.describe("node mirrors -- create via the picker (ADR 0022)", () => {
+  test("/mirror creates a live copy under the chosen destination", async ({
+    page,
+  }) => {
+    await load(page, CREATE_TREE, true);
+    await openMirror(page, "A");
+
+    // Pick the bookmarked destination from the empty-query state.
+    await page
+      .getByRole("dialog")
+      .getByRole("option", { name: "dest box" })
+      .click();
+    await expect(page.getByText("Mirrored to dest box")).toBeVisible();
+
+    // A new mirror instance now lives under D, windowing A's text + children.
+    const mirror = page.locator('li[data-mirror="instance"]');
+    await expect(mirror).toHaveCount(1);
+    await expect(mirror).toHaveAttribute("data-parent-id", "D");
+    await expect(mirror.locator("> .outline-row > .node-text")).toContainText(
+      "alpha source",
+    );
+    // a1/a2 now each render twice: under real A, and under the new mirror.
+    await expect(page.locator('li[data-node-id="a1"]')).toHaveCount(2);
+    await expect(page.locator('li[data-node-id="a2"]')).toHaveCount(2);
+  });
+
+  test("the picker excludes the source's own subtree (cycle guard)", async ({
+    page,
+  }) => {
+    // Bookmark a1 (a child of A) so it WOULD surface in the empty-query picker --
+    // but mirroring A into its own child would cycle, so it must be excluded.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alpha source" },
+      {
+        id: "D",
+        parentId: null,
+        prevSiblingId: "A",
+        text: "dest box",
+        bookmarkedAt: 100,
+      },
+      {
+        id: "a1",
+        parentId: "A",
+        prevSiblingId: null,
+        text: "alpha child one",
+        bookmarkedAt: 200,
+      },
+    ];
+    await load(page, tree, true);
+    await openMirror(page, "A");
+
+    const dialog = page.getByRole("dialog");
+    // D is offered; the source's own child a1 is not (it would cycle).
+    await expect(dialog.getByRole("option", { name: "dest box" })).toBeVisible();
+    await expect(
+      dialog.getByRole("option", { name: "alpha child one" }),
+    ).toHaveCount(0);
+  });
+});

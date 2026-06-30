@@ -83,6 +83,9 @@ export interface NodeCommands {
   onSetTask: (id: string, isTask: boolean) => void;
   // Open the `/move` destination picker for this bullet.
   onRequestMove: (id: string) => void;
+  // Open the `/mirror` destination picker for this bullet (ADR 0022): same
+  // picker, but a pick creates a live mirror under the destination.
+  onRequestMirror: (id: string) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
   // `x` is the caret's viewport x at the moment of the keypress, so the
   // landing node can drop the caret at the same column. Omitted when there's

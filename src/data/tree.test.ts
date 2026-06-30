@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { buildTrail, buildTreeIndex, childrenOf, makeNode } from './tree'
+import {
+  buildTrail,
+  buildTreeIndex,
+  childrenOf,
+  makeNode,
+  trueSourceOf,
+  wouldMirrorCycle,
+} from './tree'
 
 describe('buildTreeIndex + childrenOf', () => {
   test('orders siblings by the prevSiblingId chain, not input order', () => {
@@ -61,6 +68,60 @@ describe('buildTreeIndex mirrorsBySource (ADR 0022)', () => {
     const m = makeNode({ id: 'm', mirrorOf: 'ghost' })
     const index = buildTreeIndex([m])
     expect(index.mirrorsBySource.get('ghost')).toEqual(['m'])
+  })
+})
+
+describe('trueSourceOf (mirror flatten, ADR 0022)', () => {
+  const src = makeNode({ id: 'src' })
+  const m = makeNode({ id: 'm', mirrorOf: 'src' })
+  const plain = makeNode({ id: 'plain' })
+  const index = buildTreeIndex([src, m, plain])
+
+  test('a non-mirror node is its own source', () => {
+    expect(trueSourceOf(index, 'plain')).toBe('plain')
+    expect(trueSourceOf(index, 'src')).toBe('src')
+  })
+
+  test('a mirror resolves to its source (one hop -- the create invariant)', () => {
+    // mirrorOf always points at a TRUE source, so mirroring a mirror flattens to
+    // that same source rather than chaining through the mirror.
+    expect(trueSourceOf(index, 'm')).toBe('src')
+  })
+
+  test('an unknown id resolves to itself (tolerant)', () => {
+    expect(trueSourceOf(index, 'ghost')).toBe('ghost')
+  })
+})
+
+describe('wouldMirrorCycle (ADR 0022)', () => {
+  // src > c > gc ; `other` is an unrelated top-level node.
+  const src = makeNode({ id: 'src', parentId: null })
+  const c = makeNode({ id: 'c', parentId: 'src' })
+  const gc = makeNode({ id: 'gc', parentId: 'c' })
+  const other = makeNode({ id: 'other', parentId: null, prevSiblingId: 'src' })
+  const index = buildTreeIndex([src, c, gc, other])
+
+  test('mirroring into an unrelated branch is fine', () => {
+    expect(wouldMirrorCycle(index, 'src', 'other')).toBe(false)
+  })
+
+  test('mirroring into the source itself cycles', () => {
+    expect(wouldMirrorCycle(index, 'src', 'src')).toBe(true)
+  })
+
+  test('mirroring into a descendant of the source cycles (direct + deep)', () => {
+    expect(wouldMirrorCycle(index, 'src', 'c')).toBe(true)
+    expect(wouldMirrorCycle(index, 'src', 'gc')).toBe(true)
+  })
+
+  test('mirroring a descendant under the source does NOT cycle', () => {
+    // A mirror of `c` placed under `src` windows c's subtree, which never
+    // contains the mirror -- only `src` being an ancestor would close a loop.
+    expect(wouldMirrorCycle(index, 'c', 'src')).toBe(false)
+  })
+
+  test('Home (null parent) never cycles', () => {
+    expect(wouldMirrorCycle(index, 'src', null)).toBe(false)
   })
 })
 

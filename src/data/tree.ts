@@ -120,6 +120,37 @@ export function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
   return trail
 }
 
+/**
+ * The canonical content node for a mirror source: a mirror's own source, or the
+ * node itself when it isn't a mirror. Flattens mirror-of-mirror so every created
+ * mirror points at ONE true source -- there's never a chain to resolve (ADR
+ * 0022). Pure -- reads `index` only.
+ */
+export function trueSourceOf(index: TreeIndex, sourceId: string): string {
+  return index.byId.get(sourceId)?.mirrorOf ?? sourceId
+}
+
+/**
+ * Whether mirroring the content node `trueSourceId` under `destParentId` would
+ * form a cycle: the source is the destination itself, or an ancestor of it, so
+ * the mirror would window a subtree that contains the mirror (ADR 0022). Home
+ * (a null parent) never cycles. The render walk caps such a cycle if one forms
+ * later (a move), but creation refuses it outright. Pure -- reads `index` only.
+ */
+export function wouldMirrorCycle(
+  index: TreeIndex,
+  trueSourceId: string,
+  destParentId: string | null,
+): boolean {
+  let cursor: string | null = destParentId
+  let guard = index.byId.size + 1
+  while (cursor && guard-- > 0) {
+    if (cursor === trueSourceId) return true
+    cursor = index.byId.get(cursor)?.parentId ?? null
+  }
+  return false
+}
+
 /** Stable-ish id. crypto.randomUUID is ubiquitous in modern browsers. */
 export function createId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {

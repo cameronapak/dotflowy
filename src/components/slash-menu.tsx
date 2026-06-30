@@ -1,9 +1,10 @@
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { CornerUpRightIcon } from "lucide-react";
+import { CopyPlusIcon, CornerUpRightIcon } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { CommandSpec, PluginContext } from "../plugins/types";
 import { commandSpecs } from "../plugins/registry";
+import { isMirrorsEnabled } from "../data/flags";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import {
   decorate,
@@ -28,6 +29,18 @@ const CORE_COMMANDS: CommandSpec[] = [
     keywords: ["move", "reparent", "under", "into", "relocate", "home"],
     available: () => true,
     run: (id, ctx) => ctx.mutations.onRequestMove(id),
+  },
+  // Mirror is structural like Move (it relinks the tree), so it stays core too.
+  // Hidden until the mirrors feature flag is on (ADR 0022) -- a mirror-free
+  // build never offers it. Opens the SAME destination picker, in mirror mode.
+  {
+    id: "mirror",
+    label: "Mirror to",
+    description: "Show a live copy under another node",
+    icon: CopyPlusIcon,
+    keywords: ["mirror", "synced", "instance", "alias", "reference", "clone"],
+    available: () => isMirrorsEnabled(),
+    run: (id, ctx) => ctx.mutations.onRequestMirror(id),
   },
 ];
 

@@ -7,6 +7,8 @@ import {
   createId,
   makeNode,
   now,
+  trueSourceOf,
+  wouldMirrorCycle,
 } from './tree'
 
 /**
@@ -117,6 +119,66 @@ export function appendChild(
     makeNode({ id, parentId, prevSiblingId, text }),
   )
   return id
+}
+
+/**
+ * Create a MIRROR of `sourceId` as the last child of `targetId` (or the last
+ * top-level node when targetId is null/Home) -- a node carrying `mirrorOf` ->
+ * the TRUE source (ADR 0022). Two invariants:
+ *
+ *  - **Flatten:** if `sourceId` is itself a mirror, the new node points at its
+ *    source (`trueSourceOf`), never at another mirror, so every instance shares
+ *    ONE canonical content node and there's no chain to resolve.
+ *  - **No cycle:** refuses (returns null) when the true source is the
+ *    destination or one of its ancestors -- expanding such a mirror would window
+ *    content that contains the mirror itself.
+ *
+ * The stored `text` snapshots the source so a mirror still reads sensibly with
+ * the feature flag OFF; with mirrors ON the field split reads the live source,
+ * so the snapshot is never shown. Returns the new node's id, or null when
+ * blocked / the source is gone. Wrap in `runStructural` (ADR 0009).
+ */
+export function mirrorNode(
+  index: TreeIndex,
+  sourceId: string,
+  targetId: string | null,
+): string | null {
+  if (!index.byId.has(sourceId)) return null
+  const trueSourceId = trueSourceOf(index, sourceId)
+  if (wouldMirrorCycle(index, trueSourceId, targetId)) return null
+
+  const siblings = childrenOf(index, targetId)
+  const after = siblings.length ? siblings[siblings.length - 1]!.id : null
+  const id = createId()
+  nodesCollection.insert(
+    makeNode({
+      id,
+      parentId: targetId,
+      prevSiblingId: after,
+      text: index.byId.get(trueSourceId)?.text ?? '',
+      mirrorOf: trueSourceId,
+    }),
+  )
+  return id
+}
+
+/**
+ * Mirror several sources under `targetId`, appended in order (node multi-
+ * selection's Mirror action + daily "Mirror to Today" -- ADR 0018). Rebuilds the
+ * index between inserts so each append reads the freshly grown sibling list;
+ * sources that would cycle (or are gone) are skipped. Returns the count actually
+ * mirrored. Wrap in `runStructural` (ADR 0009).
+ */
+export function mirrorManyNodes(
+  targetId: string | null,
+  ids: string[],
+): number {
+  let made = 0
+  for (const id of ids) {
+    const index = buildTreeIndex(nodesCollection.toArray)
+    if (mirrorNode(index, id, targetId)) made++
+  }
+  return made
 }
 
 /**

@@ -15,6 +15,7 @@ import {
 } from "@floating-ui/react-dom";
 import {
   ClipboardCopyIcon,
+  CopyPlusIcon,
   CornerUpRightIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -42,6 +43,7 @@ import {
   useSelectionRootIds,
 } from "../data/selection-state";
 import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { isMirrorsEnabled } from "../data/flags";
 import type { PluginContext } from "../plugins/types";
 import { rejectRow } from "./flash-node";
 import { placeCaretAtEnd } from "./caret-place";
@@ -73,6 +75,7 @@ export interface SelectionOps {
   copy: () => void;
   remove: () => void;
   move: () => void;
+  mirror: () => void;
   indent: () => void;
   outdent: () => void;
   caretAbove: () => void;
@@ -154,6 +157,16 @@ function makeSelectionOps({
     clearSelection();
   };
 
+  // Mirror the whole run: the same picker in mirror mode creates a live mirror
+  // of each selected root under the destination (ADR 0022), as one batch. The
+  // dialog owns the ids now, so leave selection mode (mirrors the Move action).
+  const mirror = () => {
+    const ids = getSelectionRootIds();
+    if (ids.length === 0) return;
+    openMoveDialog([...ids], "mirror");
+    clearSelection();
+  };
+
   // Tab: indent the whole run under the first root's previous sibling, as ONE
   // atomic batch (ADR 0009). The selection PERSISTS (the moved run stays
   // selected) -- refreshSelection re-derives its new parent so the next Tab /
@@ -224,7 +237,7 @@ function makeSelectionOps({
     focusNode(id);
   };
 
-  return { copy, remove, move, indent, outdent, caretAbove, caretBelow, exitToCaret };
+  return { copy, remove, move, mirror, indent, outdent, caretAbove, caretBelow, exitToCaret };
 }
 
 /**
@@ -463,6 +476,17 @@ function buildItems(
       run: ops.move,
     },
   ];
+  // Mirror sits next to Move, but only when the feature flag is on (ADR 0022) --
+  // a mirror-free build never offers it (matches the core `/mirror` slash gate).
+  if (isMirrorsEnabled()) {
+    core.push({
+      id: "sel-mirror",
+      label: "Mirror",
+      description: "Show live copies under another node",
+      icon: CopyPlusIcon,
+      run: ops.mirror,
+    });
+  }
   // Plugin commands that opted in (To-do, Send to Today), kept only when they
   // apply to at least one selected node (To-do hides when all are already tasks).
   const pluginItems: SelItem[] = selectionCommandSpecs

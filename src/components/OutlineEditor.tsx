@@ -1079,6 +1079,10 @@ function useNodeCommands({
       // Open the move picker; the dialog runs the mutation + navigation itself.
       onRequestMove: (id) => openMoveDialog(id),
 
+      // Same picker in mirror mode; a pick creates a live mirror under the
+      // chosen destination instead of reparenting (ADR 0022).
+      onRequestMirror: (id) => openMoveDialog(id, "mirror"),
+
       onToggleCollapsed: (id, collapsed) => {
         capture(getTreeIndex(), id);
         toggleCollapsed(id, collapsed);
