@@ -380,11 +380,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         ? { width: window.innerWidth, height: window.innerHeight }
         : undefined,
   });
-  // id -> flat index, for virtual-nav's off-screen scroll. Rebuilt only when the
-  // flat list changes identity (structure), not on keystrokes.
+  // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
+  // render ADDRESS (row.key), not the bare id: a source descendant appears under
+  // every instance, so scrollRowIntoView/virtualRowRect must resolve the exact
+  // row (ADR 0022). key === id for every mirror-free row, so the lookup is
+  // unchanged for the 99% outline. Rebuilt only when the flat list changes
+  // identity (structure), not on keystrokes.
   const rowIndex = useMemo(() => {
     const m = new Map<string, number>();
-    rows.forEach((r, i) => m.set(r.id, i));
+    rows.forEach((r, i) => m.set(r.key, i));
     return m;
   }, [rows]);
   const rowIndexRef = useRef(rowIndex);
@@ -496,6 +500,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     <OutlineRow
                       key={vi.key}
                       nodeId={row.id}
+                      rowKey={row.key}
                       contentId={row.contentId}
                       isMirror={row.isMirror}
                       capped={row.capped}
@@ -599,11 +604,14 @@ function useBootstrapOutline() {
 }
 
 interface OutlineFocus {
-  /** id -> contentEditable span. The zoomed title registers under rootId too,
-   *  so focus logic treats titles and list items uniformly. */
+  /** row key -> contentEditable span. Keyed by the render ADDRESS (row.key), not
+   *  the bare id, so a source descendant windowed under two mirrors keeps two
+   *  distinct spans (ADR 0022); key === id for every mirror-free row and for the
+   *  recursive path, so titles and list items still register uniformly (the
+   *  zoomed title registers under rootId, which is its own key). */
   refs: Map<string, HTMLSpanElement | null>;
-  registerRef: (id: string, el: HTMLSpanElement | null) => void;
-  /** The node to focus after the next render (most-recently inserted/moved). */
+  registerRef: (key: string, el: HTMLSpanElement | null) => void;
+  /** The row key to focus after the next render (most-recently inserted/moved). */
   pendingFocus: RefObject<string | null>;
   /** When an Enter-split moved text into the new bullet, land the caret at its
    *  START, not its end (every other pending-focus wants the end). */
@@ -648,12 +656,15 @@ function useOutlineFocus(): OutlineFocus {
   // the pass subscribes to the whole tree itself, in a null component that's
   // cheap to re-render per change.
 
-  // The currently-focused bullet id, by reverse-looking-up the registry (covers
-  // list items and the zoomed title). Null when focus is outside the outline.
+  // The currently-focused bullet's row KEY, by reverse-looking-up the registry
+  // (covers list items and the zoomed title). The registry is keyed by row.key,
+  // so this returns the focused row's address -- equal to the node id for every
+  // mirror-free row, and the path address for a row inside a mirror (ADR 0022).
+  // Null when focus is outside the outline.
   const findFocusedId = useCallback((): string | null => {
     const active = document.activeElement;
-    for (const [id, el] of refs) {
-      if (el === active) return id;
+    for (const [key, el] of refs) {
+      if (el === active) return key;
     }
     return null;
   }, [refs]);

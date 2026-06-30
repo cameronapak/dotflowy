@@ -51,6 +51,49 @@ export interface VisibleRow {
 const PATH_SEP = String.fromCharCode(1)
 
 /**
+ * Split a {@link VisibleRow.key} back into its segment node ids. A mirror-free
+ * key is a single bare id, so this returns `[id]`; a key inside a mirrored
+ * subtree is the `PATH_SEP`-joined instance-id chain, so this returns each hop
+ * in display order. The LAST segment is always the row's own instance id
+ * (ADR 0022).
+ */
+export function parseRowKey(key: string): string[] {
+  return key.split(PATH_SEP)
+}
+
+/**
+ * The row's own instance (position) node id — the last path segment. For a
+ * mirror-free key this is the key itself, so `instanceIdForKey(id) === id`.
+ */
+export function instanceIdForKey(key: string): string {
+  const i = key.lastIndexOf(PATH_SEP)
+  return i === -1 ? key : key.slice(i + 1)
+}
+
+/**
+ * The CONTENT node id a row key reads from: its instance id resolved through
+ * `mirrorOf` (a mirror windows its source). Equals {@link VisibleRow.contentId},
+ * but recomputed from a bare key for the callers that hold a key without the row
+ * object (focus restore, caret nav). Falls back to the raw instance id when the
+ * node is unknown. For a mirror-free row, content === instance === the key.
+ */
+export function contentIdForKey(index: TreeIndex, key: string): string {
+  const instanceId = instanceIdForKey(key)
+  return index.byId.get(instanceId)?.mirrorOf ?? instanceId
+}
+
+/**
+ * Compose a child row key from its parent's path prefix and the child's instance
+ * id — the inverse of {@link parseRowKey}. `prefix` is the parent row's key when
+ * the child sits inside a crossed mirror; `null`/empty at the top level (the
+ * child key is then its bare id, matching today's identity). Used by the
+ * structural-redirect and caret-nav slices to land focus on the right instance.
+ */
+export function rowKeyFor(prefix: string | null, instanceId: string): string {
+  return prefix ? prefix + PATH_SEP + instanceId : instanceId
+}
+
+/**
  * The visible (non-collapsed, non-hidden) descendants of `rootId` in display
  * order, flattened to a depth-tagged list. EXCLUDES the root itself: when zoomed
  * the root renders as the page title (not a list row), and at the top level
@@ -89,9 +132,12 @@ export function buildVisibleRows(
     contentParentId: string | null,
     depth: number,
     ancestorCompleted: boolean,
-    // The instance-id chain of ancestors below the root. Only consulted (and only
-    // grown) once a mirror has been crossed, so it stays `[]` in the mirror-free
-    // path.
+    // The instance-id chain ANCHORED AT THE CROSSING MIRROR: empty until a mirror
+    // is crossed, then the mirror's own id followed by each instance id down to
+    // (not including) the current child. So a crossed row's key is
+    // `mirrorId[·childId]*` and composes cleanly — `childKey === rowKeyFor(
+    // parentKey, childId)` (see {@link rowKeyFor}), which the Stage 2 caret/
+    // structural slices rely on. Stays `[]` in the mirror-free path.
     path: string[],
     // Has the walk descended through a mirror to reach here? Once true, rows take
     // a compound path key (their bare id is duplicated across instances).
@@ -167,7 +213,11 @@ export function buildVisibleRows(
           contentId,
           depth + 1,
           childFade,
-          mirrorsEnabled ? path.concat(child.id) : path,
+          // Grow the path only from the crossing mirror down (mirror-free /
+          // pre-crossing levels keep it `[]`, so the key stays the bare id and
+          // the 99% outline is unchanged). `crossed || mirrored` is exactly the
+          // next level's `crossed`, so the path and the key grow in lockstep.
+          crossed || mirrored ? path.concat(child.id) : path,
           crossed || mirrored,
           mirrorsEnabled ? new Set(expandedContent).add(contentId) : expandedContent,
         )

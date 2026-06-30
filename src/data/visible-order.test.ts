@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { buildTreeIndex, makeNode } from './tree'
-import { buildVisibleRows } from './visible-order'
+import {
+  buildVisibleRows,
+  contentIdForKey,
+  instanceIdForKey,
+  parseRowKey,
+  rowKeyFor,
+} from './visible-order'
 
 const show = () => false // nothing hidden
 const hideCompleted = (n: { completed: boolean }) => n.completed
@@ -170,5 +176,80 @@ describe('buildVisibleRows — cycle + broken guards', () => {
     expect(m.broken).toBe(true)
     expect(m.contentId).toBe('ghost')
     expect(rows).toHaveLength(1) // no children expanded
+  })
+})
+
+describe('row-key helpers (the Stage 2 identity keystone, ADR 0022)', () => {
+  // A          (source)
+  //   a1
+  // P
+  //   M -> A   (windows a1)
+  const tree = [
+    makeNode({ id: 'A', prevSiblingId: null }),
+    makeNode({ id: 'P', prevSiblingId: 'A' }),
+    makeNode({ id: 'a1', parentId: 'A', prevSiblingId: null }),
+    makeNode({ id: 'M', parentId: 'P', prevSiblingId: null, mirrorOf: 'A' }),
+  ]
+  const index = buildTreeIndex(tree)
+
+  test('parseRowKey / instanceIdForKey: a bare id is a single segment', () => {
+    expect(parseRowKey('a1')).toEqual(['a1'])
+    expect(instanceIdForKey('a1')).toBe('a1')
+  })
+
+  test('rowKeyFor composes, and parseRowKey is its inverse', () => {
+    const childKey = rowKeyFor('M', 'a1')
+    expect(parseRowKey(childKey)).toEqual(['M', 'a1'])
+    expect(instanceIdForKey(childKey)).toBe('a1')
+    // Top level (no prefix) is the bare id — today's identity.
+    expect(rowKeyFor(null, 'x')).toBe('x')
+    // Nesting composes left-to-right.
+    expect(parseRowKey(rowKeyFor(rowKeyFor('M', 'a1'), 'leaf'))).toEqual([
+      'M',
+      'a1',
+      'leaf',
+    ])
+  })
+
+  test('rowKeyFor matches the address buildVisibleRows actually emits', () => {
+    const rows = buildVisibleRows(index, null, show, null, true)
+    // a1 appears under the real source (bare id) and under the mirror (path key).
+    const windowed = rows.find((r) => r.id === 'a1' && r.key !== 'a1')!
+    expect(windowed.key).toBe(rowKeyFor('M', 'a1'))
+  })
+
+  test('contentIdForKey resolves a mirror to its source, a real node to itself', () => {
+    // The mirror row's key resolves to the SOURCE's content id.
+    expect(contentIdForKey(index, 'M')).toBe('A')
+    // A windowed real descendant reads its own content (it is not itself a mirror).
+    expect(contentIdForKey(index, rowKeyFor('M', 'a1'))).toBe('a1')
+    // A bare real node is its own content.
+    expect(contentIdForKey(index, 'a1')).toBe('a1')
+    // Unknown node falls back to the raw instance id, never throws.
+    expect(contentIdForKey(index, 'ghost')).toBe('ghost')
+  })
+
+  test('INVARIANT: helpers agree with every row buildVisibleRows emits', () => {
+    const rows = buildVisibleRows(index, null, show, null, true)
+    for (const r of rows) {
+      // The key always points back at the row's own instance id...
+      expect(instanceIdForKey(r.key)).toBe(r.id)
+      // ...and resolves to the same content id the walk computed.
+      expect(contentIdForKey(index, r.key)).toBe(r.contentId)
+    }
+  })
+
+  test('INVARIANT: key === id for a mirror-free tree (flag-off parity budget)', () => {
+    const plain = buildTreeIndex([
+      makeNode({ id: 'A', prevSiblingId: null }),
+      makeNode({ id: 'a1', parentId: 'A', prevSiblingId: null }),
+      makeNode({ id: 'a2', parentId: 'A', prevSiblingId: 'a1' }),
+    ])
+    const rows = buildVisibleRows(plain, null, show, null, true)
+    for (const r of rows) {
+      expect(r.key).toBe(r.id)
+      expect(instanceIdForKey(r.key)).toBe(r.id)
+      expect(contentIdForKey(plain, r.key)).toBe(r.id)
+    }
   })
 })

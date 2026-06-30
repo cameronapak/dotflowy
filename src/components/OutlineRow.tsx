@@ -63,8 +63,13 @@ export const INDENT_PX = 24;
  */
 export interface OutlineRowProps {
   // The INSTANCE node id (row.id) -- where this row physically sits. Drives
-  // position, collapse, drag, selection, focus/flash claiming.
+  // position, collapse, drag, selection.
   nodeId: string;
+  // The render ADDRESS (row.key): the refs/focus/flash key. A bare id until the
+  // walk crosses a mirror, then a path key, so a source descendant rendered under
+  // two instances registers two distinct spans (ADR 0022). Equals nodeId for
+  // every mirror-free row, so the 99% outline keeps today's identity.
+  rowKey: string;
   // The CONTENT node id (row.contentId): `mirrorOf ?? id`. Equal to nodeId for
   // every normal row; the source's id for a mirror. Drives text/task/completed
   // and the windowed children.
@@ -162,6 +167,7 @@ type RowChromeProps = Omit<
 function RowChrome({
   instance,
   content,
+  rowKey,
   isMirror,
   capped,
   depth,
@@ -245,19 +251,20 @@ function RowChrome({
   // FocusPass handles rows already mounted at tree-change time; this handles a
   // row that mounts because we scrolled it into view (scrollRowIntoView), which
   // FocusPass never sees (a scroll isn't a tree change). Runs after the seed
-  // effect above, so the caret lands on populated text. Keyed by the INSTANCE id
-  // (pendingFocus carries position ids, set by the commands).
+  // effect above, so the caret lands on populated text. Keyed by the row KEY
+  // (the render address) so the right instance claims it when a source descendant
+  // is windowed under two mirrors; key === id for a mirror-free row (ADR 0022).
   useLayoutEffect(() => {
     const el = textRef.current;
     if (!el) return;
-    if (pendingFocus.current === instance.id) {
+    if (pendingFocus.current === rowKey) {
       el.focus();
       if (pendingFocusAtStart.current) placeCaretAtStart(el);
       else placeCaretAtEnd(el);
       pendingFocus.current = null;
       pendingFocusAtStart.current = false;
     }
-    if (pendingFlash.current === instance.id) {
+    if (pendingFlash.current === rowKey) {
       flashRow(el.closest(".outline-row"));
       pendingFlash.current = null;
     }
@@ -368,7 +375,7 @@ function RowChrome({
         <span
           ref={(el) => {
             textRef.current = el;
-            registerRef(instance.id, el);
+            registerRef(rowKey, el);
           }}
           className={`node-text${isPivot ? " vt-morph" : ""}`}
           style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}

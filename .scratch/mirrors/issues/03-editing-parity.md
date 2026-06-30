@@ -1,10 +1,77 @@
 # 03 — Full editing parity inside mirrors (the hard part)
 
-Status: ready-for-human
+Status: in progress — 2a DONE; 2b–2e remain (branch `feat/mirror-of-plumbing`).
+Each slice is its own verified commit, mirroring Stage 1's 1a–1d discipline.
 
 Stage 2 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The A1 gold-plate and the
 **most regression-prone work in the app** — path-based identity for the caret-sensitive subsystems inside
 mirrored subtrees. Gate on heavy e2e. Behind the flag.
+
+## The keystone insight (read first)
+
+Stage 1 already shipped the address: every `VisibleRow` carries a `key` (`visible-order.ts`). It is the bare
+node id until the walk crosses a mirror, then a `PATH_SEP`-joined chain of instance ids. The defining property:
+
+> **`row.key === row.id` for every mirror-free row.**
+
+So Stage 2 is "switch the caret-sensitive subsystems to key off `row.key` instead of bare `id`." Because
+key===id off the flag (and on the flag, outside any crossed mirror), the swap is a **no-op for the 99%
+outline** — the new behavior engages *only* inside a windowed mirror, where one node id legitimately has two
+spans. That invariant is the regression budget: flag-off parity must stay byte-identical, and the e2e proves it.
+
+## Bare-id assumptions to convert (the inventory)
+
+All in `src/components/`. Each is correct today only because no id repeats; each must take/return a `row.key`:
+
+- **`refs: Map<string, span>`** keyed by `instance.id` — `registerRef(instance.id, el)` (`OutlineRow.tsx:371`),
+  title registers under `rootId` (`OutlineEditor`). Two rows sharing an id collide; the later registration wins.
+- **`pendingFocus` / `pendingFocusAtStart` / `pendingFlash`** (`useOutlineFocus`, `OutlineEditor.tsx:639-641`)
+  carry a bare id. Consumed by `FocusPass` via `refs.get(fid)` (`OutlineEditor.tsx:719,736`) and by
+  `OutlineRow`'s mount-claim `pendingFocus.current === instance.id` (`OutlineRow.tsx:253,260`).
+- **`findFocusedId`** (`OutlineEditor.tsx:653`) reverse-scans `refs` for the active span and returns its id —
+  must return the focused **key** (used by undo/redo to restore focus).
+- **`findVisibleNeighbor`** (`visible-order.ts:194`) builds `seq = rows.map(r => r.id)` and `indexOf(id)` —
+  `indexOf` finds the *first* occurrence, so caret nav inside a mirror lands on the wrong instance.
+- **Commands** set `pendingFocus.current = <newId>`. Off the flag the new id IS the key (correct unchanged).
+  Inside a mirror the new node appears under every instance; focus must land in the **editing** instance →
+  the command composes `activePathPrefix + newInstanceId`. The active prefix comes from `findFocusedId()`.
+
+## Slices
+
+- **2a — identity keystone (focus / refs / flash by `row.key`). DONE.** `refs`/`registerRef`/`pendingFocus`/
+  `pendingFlash`/`findFocusedId`/`FocusPass`/the `OutlineRow` mount-claim/`nav.indexOf` (the `rowIndex` map)
+  all key off `row.key` now; `OutlineRow` carries a `rowKey` prop. `history.restore` gates focus existence on
+  the key's last segment (`instanceIdForKey`) but returns the full key, so undo lands focus back in the same
+  instance (design Q1). Pure helpers `parseRowKey` / `instanceIdForKey` / `contentIdForKey` / `rowKeyFor` added
+  to `visible-order.ts`, unit-tested. **Plus a keystone fix:** `buildVisibleRows` now anchors the path at the
+  crossing mirror (was accumulating *all* root-side ancestors, contradicting its own comment and breaking
+  `childKey === rowKeyFor(parentKey, childId)`), so keys inside a mirror are `mirrorId[·childId]*` and compose
+  cleanly for 2b/2c — a unit test ties the helper to the address the walk emits. Commands still pass bare ids
+  (key===id off-flag / outside a mirror); composing the focus key from the active prefix inside a mirror is
+  2c. **Gate met:** 163 unit pass; full e2e green (only the pre-existing daily-notes nav flake, passes
+  isolated); every focus-sensitive spec (enter-split, move-flash, mirrors) green; flag-off parity unchanged.
+- **2b — caret nav across boundaries.** `findVisibleNeighbor` walks `row.key` addresses (accepts + returns
+  keys, `indexOf` on keys). Arrow Up/Down (`placeCaretAtColumn` neighbor walk, `OutlineEditor`) and
+  selection-mode's neighbor use keys. Mirror-free: keys===ids, unchanged.
+- **2c — structural redirect at the mirror edge.** Inserting a child *directly under* a mirror row
+  (`insertChildAtStart`, Enter-split's `insertSibling`, `indent`/`outdent` at the mirror's edge) targets the
+  **source** (`contentId`), so the new node appears in every instance. Inside the subtree (real nodes) it
+  already targets real nodes — confirm + test. New node's focus key = active prefix + new id (needs 2a). One
+  `runStructural` batch ([ADR 0009](../../../docs/adr/0009-atomic-structural-writes.md)).
+- **2d — drag-reorder by path.** `use-drag-reorder.ts` + `virtual-nav.ts`: hit-test / projection by `row.key`
+  (`virtualRowRect` keyed by key); dropping inside a mirror reorders the **real** source children (and thus
+  every instance). Document the surprise.
+- **2e — multi-select by path.** `selection-state` `rootIds` + `useSelectionEdge` keyed by `row.key`;
+  `runMany` resolves keys to the real nodes. A run inside a mirror operates on the source nodes.
+
+## Open design questions (decide before 2a code)
+
+- **Undo/redo focus under duplicate ids.** `undo()`/`redo()` return a node id to refocus; if that id has two
+  rendered keys, which gets focus? Proposed v1: preserve the focused key's **prefix** (restore into the same
+  instance the user was in); if the node no longer exists at that path, fall back to the first key matching the
+  bare id. Confirm before wiring `findFocusedId` → undo.
+- **Focus-key composition source.** The active path prefix is derived from `findFocusedId()` at command time.
+  Confirm that's available everywhere a command sets `pendingFocus` (history restore, daily loser-path).
 
 ## Scope
 
@@ -34,5 +101,7 @@ mirrored subtrees. Gate on heavy e2e. Behind the flag.
 
 ## Risk notes
 
-This is where caret bugs hide. Budget for it. Consider landing Stage 1 to dogfood (text + completed sync +
-view) and only starting this once the reference-grade behavior is proven in real use.
+This is where caret bugs hide. Budget for it. Stage 1 is landed and dogfooded (text + completed sync + view),
+so the reference-grade behavior is proven in real use — this slice only adds editing *inside* the window.
+The keystone (2a) is the regression risk; land it on its own commit behind the flag-off parity gate before
+touching nav / structural / drag / select.

@@ -1,6 +1,7 @@
 import { nodesCollection } from './collection'
 import type { Node } from './schema'
 import type { TreeIndex } from './tree'
+import { instanceIdForKey } from './visible-order'
 
 /**
  * Undo/redo history for the outline.
@@ -105,8 +106,14 @@ function restore(index: TreeIndex, entry: Entry): string | null {
     }
   }
 
-  // Only focus if the node still exists in the restored state.
-  return entry.focusId && target.has(entry.focusId) ? entry.focusId : null
+  // Only focus if the focused node still exists in the restored state. The focus
+  // identity may be a row KEY (a path address inside a mirror, ADR 0022); gate on
+  // the node it points at (the key's last segment) but return the full key, so
+  // focus lands back in the same instance the user was editing. For a mirror-free
+  // row key === id, so this is identical to a bare-id check.
+  return entry.focusId && target.has(instanceIdForKey(entry.focusId))
+    ? entry.focusId
+    : null
 }
 
 /**
