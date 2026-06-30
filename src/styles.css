@@ -372,8 +372,8 @@ h2 > span.protected-lock {
  * `.outline-row` (the flex line), so depth indentation already offsets it.
  */
 .outline-node[data-mirror] > .outline-row {
-  box-shadow: inset 3px 0 0 0 transparent;
-  transition: box-shadow 0.12s ease;
+  outline: 2px solid transparent;
+  transition: outline-color 0.12s ease;
 }
 /*.outline-node[data-mirror="source"]:hover > .outline-row,*/
 .outline-node[data-mirror="source"]:focus-within > .outline-row {
