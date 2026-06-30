@@ -17,9 +17,10 @@ import {
 import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
 import { MirrorBadge } from "./mirror-chrome";
-import type { PluginContext } from "../plugins/types";
+import type { PluginContext, SlotSpec } from "../plugins/types";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
-import { clearSelection, useSelectionEdge } from "../data/selection-state";
+import { clearSelection } from "../data/selection-state";
+import { useSelectionFill } from "../data/selection-fill";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
 import { useBulletKeymap } from "./use-bullet-keymap";
@@ -232,9 +233,13 @@ function RowChrome({
     onTextChange: (text) => commands.onTextChange(content.id, text),
   });
 
-  const beforeTextSlots = slotsAt("row:before-text");
   const protectedNode = useIsProtected(content.id);
-  const selectionEdge = useSelectionEdge(instance.id);
+  // Covers this row AND its visible descendants (2e-2) -- unlike the recursive
+  // path's useSelectionEdge, the flat list has no DOM nesting for a root's tint
+  // to paint behind its children, so every covered row reads its own value.
+  // Keyed by rowKey (the render address), not instance.id, so a windowed mirror
+  // descendant and its source's canonical row are independent reads.
+  const selectionFill = useSelectionFill(rowKey);
   // Mirror chrome (ADR 0022, slice 1d). The count is the same for the source row
   // and every instance (they share the content id), so the "appears in N places"
   // badge shows on all of them. `mirrorsOn` is session-fixed, so the hook adds no
@@ -242,6 +247,27 @@ function RowChrome({
   const mirrorsOn = isMirrorsEnabled();
   const mirrorCount = useMirrorCount(content.id, mirrorsOn);
   const isSource = !isMirror && mirrorCount > 0;
+  // The plugin row slots (Seam F) plus the two core decorations (protected lock,
+  // mirror badge) in ONE list, so the row renders them uniformly instead of a
+  // standalone conditional per decoration -- core decorations aren't plugins
+  // (registering them in plugins/index.ts would misrepresent them), but they
+  // share the same {id, render} shape, so a slot-list `.map()` covers all of it.
+  const beforeTextSlots: SlotSpec[] = [
+    ...slotsAt("row:before-text"),
+    {
+      id: "core:protected-lock",
+      position: "row:before-text",
+      render: () => (protectedNode ? <ProtectedLock size={12} /> : null),
+    },
+    {
+      id: "core:mirror-badge",
+      position: "row:before-text",
+      render: () =>
+        mirrorsOn && mirrorCount > 0 ? (
+          <MirrorBadge sourceId={content.id} count={mirrorCount} />
+        ) : null,
+    },
+  ];
 
   const menus = useMenus({
     node: content,
@@ -343,7 +369,7 @@ function RowChrome({
             ? "source"
             : undefined
       }
-      data-selected={selectionEdge ?? undefined}
+      data-selected={selectionFill ?? undefined}
       data-index={index}
       ref={measureRef}
       style={{
@@ -394,10 +420,6 @@ function RowChrome({
         {beforeTextSlots.map((slot) => (
           <Fragment key={slot.id}>{slot.render(content, pluginCtx)}</Fragment>
         ))}
-        {protectedNode && <ProtectedLock size={12} />}
-        {mirrorsOn && mirrorCount > 0 && (
-          <MirrorBadge sourceId={content.id} count={mirrorCount} />
-        )}
         <span
           ref={(el) => {
             textRef.current = el;

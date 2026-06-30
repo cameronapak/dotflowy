@@ -63,7 +63,9 @@ const SelectionDataSchema = Schema.Struct({
   /** The selected sibling roots, in visible display order. */
   rootIds: Schema.Array(Schema.String),
 });
-type SelectionData = Schema.Schema.Type<typeof SelectionDataSchema>;
+/** Exported for {@link "./selection-fill"}'s coverage walk -- a type-only need,
+ *  not a widening of the frozen function API (ADR 0020). */
+export type SelectionData = Schema.Schema.Type<typeof SelectionDataSchema>;
 
 /** Machine context: the current selection, or null while idle. One field, so a
  *  transition just replaces it; a no-op transition returns nothing and the
@@ -374,4 +376,16 @@ export function useSelectionRootIds(): string[] {
  *  flip, not on every selection change within `selecting`. */
 export function useIsSelectionActive(): boolean {
   return useSelector(selectionActor, (snap) => snap.value === "selecting");
+}
+
+/** Raw subscribe to any selection change, outside React. The one consumer is
+ *  {@link "./selection-fill"}'s module-singleton mirror (ADR 0019's windowed
+ *  list has no DOM nesting for a root's tint to paint behind its descendants,
+ *  so the fill map needs its own walk -- this is how it learns a selection
+ *  changed without itself being a React subscriber). Not part of the frozen
+ *  consumer-facing API (selectSingle/extendSelection/useSelectionEdge/...) --
+ *  an internal seam for the one other module in this slice. */
+export function subscribeSelection(cb: () => void): () => void {
+  const sub = selectionActor.subscribe(cb);
+  return () => sub.unsubscribe();
 }

@@ -218,14 +218,32 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     // INSTANCE: the mirror row carries the edge, the source row does not.
     await caretIn(spans(page, "M"), 99);
     await page.keyboard.press("Shift+ArrowDown");
+    // M windows a1/a2, so the windowed-subtree-tint fix (2e-2) covers all three
+    // rows -- the slab rounds at M (top) and a2's windowed copy, its last visible
+    // descendant (bottom), not just at M alone.
     await expect(page.locator('li[data-node-id="M"]')).toHaveAttribute(
       "data-selected",
-      "single",
+      "top",
     );
+    await expect(spans(page, "a1").nth(1)).toBeVisible(); // sanity: nth(1) is the windowed copy
+    await expect(
+      page.locator('li[data-node-id="a1"]').nth(1),
+    ).toHaveAttribute("data-selected", "middle");
+    await expect(
+      page.locator('li[data-node-id="a2"]').nth(1),
+    ).toHaveAttribute("data-selected", "bottom");
+    // No cross-instance bleed: the real source A and its OWN (canonical) a1/a2
+    // rows are a totally different branch of the walk, never covered.
     await expect(page.locator('li[data-node-id="A"]')).not.toHaveAttribute(
       "data-selected",
       /.*/,
     );
+    await expect(
+      page.locator('li[data-node-id="a1"]').nth(0),
+    ).not.toHaveAttribute("data-selected", /.*/);
+    await expect(
+      page.locator('li[data-node-id="a2"]').nth(0),
+    ).not.toHaveAttribute("data-selected", /.*/);
 
     // Delete the selection (selection-mode Backspace). Only the mirror goes; the
     // source and its children survive, now rendering once.

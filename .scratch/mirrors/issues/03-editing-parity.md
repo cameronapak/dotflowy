@@ -1,7 +1,7 @@
 # 03 — Full editing parity inside mirrors (the hard part)
 
-Status: in progress — 2a, 2b, 2c, 2d DONE; 2e remains (branch `feat/mirror-of-plumbing`).
-Each slice is its own verified commit, mirroring Stage 1's 1a–1d discipline.
+Status: in progress — 2a, 2b, 2c, 2d, 2e-1, 2e-2, 2e-3 DONE; cross-instance bleed (below) remains
+(branch `feat/mirror-of-plumbing`). Each slice is its own verified commit, mirroring Stage 1's 1a–1d discipline.
 
 Stage 2 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The A1 gold-plate and the
 **most regression-prone work in the app** — path-based identity for the caret-sensitive subsystems inside
@@ -108,8 +108,35 @@ All in `src/components/`. Each is correct today only because no id repeats; each
   both blocks; chain tripwire silent) — the FIRST drag e2e in the repo (drag was previously dogfood-only;
   precise gap aiming is impractical because the projection reads the virtualizer's estimate-vs-measured
   geometry, so the test drops past the last row and asserts the loose "a1 left the top, both blocks agree").
-- **2e — multi-select by path.** `selection-state` `rootIds` + `useSelectionEdge` keyed by `row.key`;
-  `runMany` resolves keys to the real nodes. A run inside a mirror operates on the source nodes.
+- **2e — multi-select by path.**
+  - **2e-1 — selection identity by instance. DONE.** Entering selection from a mirror's own row selects
+    the INSTANCE, not the source's content id (pre-fix, a select+delete on a mirror deleted the source and
+    orphaned every instance). `e2e/mirror-editing.spec.ts` "selecting a mirror selects the INSTANCE".
+  - **2e-2 — virtualized subtree tint. DONE.** The flat list has no DOM nesting for a selected root's tint
+    to paint behind its children (ADR 0019), so only the root ever got `data-selected` -- for ANY node, not
+    just mirrors. Fixed via a render-walk coverage map: `src/data/selection-fill.ts` walks the current
+    `buildVisibleRows` output on each selection/structure change (mirrored into a module singleton the same
+    way `view-state.ts` mirrors view state, via `useSyncSelectionFillRows` in `OutlineEditor`), marking the
+    ONE contiguous span `[firstRoot … lastVisibleDescendant(lastRoot)]` with the same top/bottom/middle/single
+    vocabulary `useSelectionEdge` already used (reused as `SelectionFill = SelectionEdge`, so the CSS needed
+    no changes). `useSelectionFill(rowKey)` replaces `useSelectionEdge` in `OutlineRow` ONLY -- the recursive
+    `OutlineNode` path keeps `useSelectionEdge` (its DOM nesting already paints descendants correctly, no
+    walk needed there). Per-row budget preserved (ADR 0014): a row only re-renders when ITS OWN key's fill
+    value changes. `e2e/node-multi-select.spec.ts` (CHAIN sibling-boundary test, now asserting descendant
+    tint) and `e2e/mirror-editing.spec.ts` (selecting a mirror tints its windowed children too) updated --
+    both PINNED the old missing-descendant-tint behavior and needed rewriting, not just extending.
+  - **2e-3 — block deleting a mirrored source. DONE.** `guardMirrorSourceDelete` (`protection.tsx`),
+    flag-gated. Covered in 2c's commit.
+  - **Cross-instance bleed -- still OPEN, not blocking.** Coverage in 2e-2 matches by row id against
+    `rootIds` (the same identity `edgeMapFor` always used), so a node rendered at TWO row keys at once (a
+    windowed mirror descendant whose source is ALSO visible elsewhere in the same view) covers both
+    occurrences when EITHER is selected directly. `e2e/mirror-editing.spec.ts`'s updated test proves the
+    common case is clean (selecting the mirror ROOT `M` does not bleed into source `A`'s canonical rows --
+    the walk only descends INTO the branch it's already in), but selecting a windowed DESCENDANT by itself
+    (not yet exercised in any spec) still bleeds. Fully killing it needs `rootIds`/`anchorId`/`focusId` to
+    carry a row key, not just a node id -- a `SelectionData` schema change touching the sibling-walk helpers
+    (`computeRange`/`computeExtend`), out of scope for this slice. Not blocking per Cam (hasn't hit it in
+    dogfooding); pick up as its own slice if it surfaces.
 
 ## Open design questions (decide before 2a code)
 
@@ -148,7 +175,11 @@ All in `src/components/`. Each is correct today only because no id repeats; each
 - [x] Drag a sub-item inside a mirror → reorders under the source (verified in another instance). *(2d:
       `mirror-editing.spec.ts` drags a windowed child and asserts both the source and mirror blocks reorder
       in lockstep.)*
-- [ ] Multi-select + move/indent inside a mirror behaves as on real nodes; no cross-instance focus bleed. *(2e)*
+- [x] Multi-select + move/indent inside a mirror behaves as on real nodes. *(2e-1/2e-3, + runMany's
+      live-collection rebuild between ops)*
+- [ ] No cross-instance focus bleed: selecting a windowed descendant doesn't visually tint its source's
+      canonical row elsewhere in the same view. *(2e-2 proved the mirror-ROOT case is clean; the
+      descendant case needs key-aware `SelectionData` -- see the bleed note above. Not blocking.)*
 - [x] The **same node visible at two paths simultaneously** (both homes on screen, e.g. top-level unzoomed):
       focusing one doesn't steal/echo into the other; both spans independent. *(2c: Enter-split focuses the
       windowed copy, asserts the source copy is NOT focused; content sync is by design, span identity is 2a.)*

@@ -53,6 +53,7 @@ import {
 } from "../data/visible-order";
 import { nodesCollection } from "../data/collection";
 import { clearSelection } from "../data/selection-state";
+import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
@@ -92,7 +93,7 @@ import {
   useIsProtected,
   useViewFilter,
 } from "../plugins/registry";
-import type { PluginContext, ViewContext } from "../plugins/types";
+import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { healProtectedText } from "./protected-text";
@@ -368,6 +369,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // recursive path is the rollback/parity fallback.
   const virtualized = isVirtualized();
   const rows = useVisibleRows(rootId, isHidden, filter);
+  // Mirror `rows` into the selection-fill module (2e-2) so each row's own
+  // `useSelectionFill` read covers its visible descendants, not just a selected
+  // root -- the flat list has no DOM nesting for a root's tint to paint behind
+  // its children. See selection-fill.ts.
+  useSyncSelectionFillRows(rows);
   // scrollMargin = the list container's distance from the document top (header +
   // title above it). Measured per zoom view; the editor remounts on zoom (route
   // key), so a one-shot mount measure is current. listRef is set in the branch
@@ -1336,17 +1342,33 @@ function ZoomedTitle({
   // ADR 0015.
   const protectedNode = useIsProtected(node.id);
 
-  // Plugin slots for the zoomed title (Seam F): the same decorations a list
-  // bullet gets at `row:before-text` -- the daily date badge, the todos checkbox
-  // -- rendered before the text here too. Stable array (precomputed in the
-  // registry). Mirrors OutlineNode's order: slots, then the lock, then the text.
-  const beforeTextSlots = slotsAt("title:before-text");
-
   // Mirror "appears in N places" badge on the zoomed title too (ADR 0022, slice
   // 1d), so a mirrored node shows the chrome whether it's a list bullet or the
   // page title. Session-fixed flag -> no reactive work when mirrors are off.
   const mirrorsOn = isMirrorsEnabled();
   const mirrorCount = useMirrorCount(node.id, mirrorsOn);
+
+  // Plugin slots for the zoomed title (Seam F) plus the two core decorations
+  // (protected lock, mirror badge), in ONE list -- the same composition as
+  // OutlineRow's `row:before-text`, so the two render paths can't drift (see
+  // AGENTS.md "a node renders in TWO paths"). Mirrors OutlineRow's order: slots,
+  // then the lock, then the badge.
+  const beforeTextSlots: SlotSpec[] = [
+    ...slotsAt("title:before-text"),
+    {
+      id: "core:protected-lock",
+      position: "title:before-text",
+      render: () => (protectedNode ? <ProtectedLock size={16} /> : null),
+    },
+    {
+      id: "core:mirror-badge",
+      position: "title:before-text",
+      render: () =>
+        mirrorsOn && mirrorCount > 0 ? (
+          <MirrorBadge sourceId={node.id} count={mirrorCount} />
+        ) : null,
+    },
+  ];
 
   useEffect(() => {
     const el = ref.current;
@@ -1379,10 +1401,6 @@ function ZoomedTitle({
       {beforeTextSlots.map((slot) => (
         <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
       ))}
-      {protectedNode && <ProtectedLock size={16} />}
-      {mirrorsOn && mirrorCount > 0 && (
-        <MirrorBadge sourceId={node.id} count={mirrorCount} />
-      )}
       <span
         ref={(el) => {
           ref.current = el;
