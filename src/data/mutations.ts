@@ -205,22 +205,28 @@ export function indent(index: TreeIndex, nodeId: string): boolean {
     ? oldSiblings[i + 1]!
     : null
 
+  // The node becomes the LAST child of newParent, so read newParent's current
+  // last child BEFORE moving it. The shared tree index is maintained IN PLACE
+  // (tree-store applyChanges), and an update can notify synchronously, so a read
+  // AFTER the move can already include the node itself -- it would then point its
+  // own prevSiblingId at itself (a self-referencing chain). node is a sibling of
+  // newParent here, never already its child, so the pre-move read excludes it.
+  const newSiblings = childrenOf(index, newParent.id)
+  const lastExisting = newSiblings.length > 0
+    ? newSiblings[newSiblings.length - 1]!
+    : null
+
   // Node becomes last child of newParent. If that parent was collapsed, the
   // node would be indented out of sight, so expand it to keep the node visible.
-  update(nodeId, { parentId: newParent.id, prevSiblingId: null })
+  update(nodeId, {
+    parentId: newParent.id,
+    prevSiblingId: lastExisting ? lastExisting.id : null,
+  })
   if (newParent.collapsed) update(newParent.id, { collapsed: false })
 
   // Old next sibling links back to node's old prev.
   if (oldNext) {
     update(oldNext.id, { prevSiblingId: node.prevSiblingId })
-  }
-
-  // Node is now the last child of newParent; repoint whatever was last.
-  const newSiblings = childrenOf(index, newParent.id)
-  // newSiblings is from the pre-mutation index, so it doesn't include node yet.
-  if (newSiblings.length > 0) {
-    const lastExisting = newSiblings[newSiblings.length - 1]!
-    update(nodeId, { prevSiblingId: lastExisting.id })
   }
 
   return true

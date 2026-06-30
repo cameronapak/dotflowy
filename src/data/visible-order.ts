@@ -94,6 +94,17 @@ export function rowKeyFor(prefix: string | null, instanceId: string): string {
 }
 
 /**
+ * The parent row's key — drop the last path segment. `null` for a bare key (top
+ * level / pre-mirror), matching {@link rowKeyFor}'s null prefix, so the round trip
+ * holds: `rowKeyFor(parentKeyOf(childKey), instanceIdForKey(childKey)) === childKey`.
+ * Used by the structural slice to compose a new sibling's key from the active row.
+ */
+export function parentKeyOf(key: string): string | null {
+  const i = key.lastIndexOf(PATH_SEP)
+  return i === -1 ? null : key.slice(0, i)
+}
+
+/**
  * The visible (non-collapsed, non-hidden) descendants of `rootId` in display
  * order, flattened to a depth-tagged list. EXCLUDES the root itself: when zoomed
  * the root renders as the page title (not a list row), and at the top level
@@ -262,6 +273,48 @@ export function findVisibleNeighbor(
   if (i === -1) return null
   const neighbor = direction === 'up' ? seq[i - 1] : seq[i + 1]
   return neighbor ?? null
+}
+
+/**
+ * The render key to focus after a structural edit (insert / move) inside a mirror
+ * (ADR 0022, Stage 2c). A source descendant windows into EVERY instance, so a node
+ * id can address several rows; focus must land in the instance the user was
+ * editing. Rather than compose the key by hand (fragile across reparent moves),
+ * re-derive it from the freshly-built visible rows — the SAME render walk the UI
+ * uses, so the focus key can never drift from what's on screen.
+ *
+ * Picks the row with `id === instanceId` whose key shares the longest leading-
+ * segment prefix with `activeKey` (the pre-edit focused row): that's the copy
+ * under the same crossed-mirror anchor. Ties resolve to the SHALLOWEST key (fewest
+ * segments) — the copy nearest the source. Returns `null` when no visible row has
+ * that id (e.g. an outdent pushed the node out of the current view). For a
+ * mirror-free outline a node id is unique, so the single match is its bare key.
+ * Pure.
+ */
+export function focusKeyAfterEdit(
+  rows: readonly VisibleRow[],
+  instanceId: string,
+  activeKey: string,
+): string | null {
+  const active = parseRowKey(activeKey)
+  let best: VisibleRow | null = null
+  let bestShared = -1
+  for (const r of rows) {
+    if (r.id !== instanceId) continue
+    const segs = parseRowKey(r.key)
+    let shared = 0
+    while (shared < segs.length && shared < active.length && segs[shared] === active[shared]) {
+      shared++
+    }
+    if (
+      shared > bestShared ||
+      (shared === bestShared && best !== null && segs.length < parseRowKey(best.key).length)
+    ) {
+      bestShared = shared
+      best = r
+    }
+  }
+  return best?.key ?? null
 }
 
 /**

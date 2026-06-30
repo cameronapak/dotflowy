@@ -3,7 +3,9 @@ import { buildTreeIndex, makeNode } from './tree'
 import {
   buildVisibleRows,
   contentIdForKey,
+  focusKeyAfterEdit,
   instanceIdForKey,
+  parentKeyOf,
   parseRowKey,
   rowKeyFor,
 } from './visible-order'
@@ -251,5 +253,77 @@ describe('row-key helpers (the Stage 2 identity keystone, ADR 0022)', () => {
       expect(instanceIdForKey(r.key)).toBe(r.id)
       expect(contentIdForKey(plain, r.key)).toBe(r.id)
     }
+  })
+})
+
+describe('parentKeyOf (Stage 2c focus composition)', () => {
+  test('a bare key has no parent (top level / pre-mirror)', () => {
+    expect(parentKeyOf('a1')).toBeNull()
+  })
+
+  test('drops the last segment of a compound key', () => {
+    expect(parentKeyOf(rowKeyFor('M', 'a1'))).toBe('M')
+    expect(parentKeyOf(rowKeyFor(rowKeyFor('M', 'a1'), 'leaf'))).toBe(
+      rowKeyFor('M', 'a1'),
+    )
+  })
+
+  test('inverse of rowKeyFor: recompose a sibling under the same parent', () => {
+    const child = rowKeyFor('M', 'a1')
+    // A sibling of `child` shares its parent prefix.
+    expect(rowKeyFor(parentKeyOf(child), 'a2')).toBe(rowKeyFor('M', 'a2'))
+    // For a bare key the sibling stays bare (today's identity).
+    expect(rowKeyFor(parentKeyOf('a1'), 'a2')).toBe('a2')
+  })
+})
+
+describe('focusKeyAfterEdit (land focus in the editing instance, ADR 0022 2c)', () => {
+  // A          (source)
+  //   a1
+  //   a2
+  // P
+  //   M -> A   (windows a1, a2)
+  const tree = [
+    makeNode({ id: 'A', prevSiblingId: null }),
+    makeNode({ id: 'P', prevSiblingId: 'A' }),
+    makeNode({ id: 'a1', parentId: 'A', prevSiblingId: null }),
+    makeNode({ id: 'a2', parentId: 'A', prevSiblingId: 'a1' }),
+    makeNode({ id: 'M', parentId: 'P', prevSiblingId: null, mirrorOf: 'A' }),
+  ]
+  const rows = buildVisibleRows(buildTreeIndex(tree), null, show, null, true)
+
+  test('a unique (mirror-free) id resolves to its own bare key', () => {
+    // P appears once; the active key is irrelevant.
+    expect(focusKeyAfterEdit(rows, 'P', 'anything')).toBe('P')
+  })
+
+  test('a duplicated id resolves to the copy under the active mirror anchor', () => {
+    // a1 appears under the real source (key 'a1') AND under the mirror M
+    // (key M·a1). Editing under M must keep focus under M, not teleport to A.
+    expect(focusKeyAfterEdit(rows, 'a1', rowKeyFor('M', 'a2'))).toBe(
+      rowKeyFor('M', 'a1'),
+    )
+    // Conversely, editing under the real source (bare active key) keeps the bare
+    // copy.
+    expect(focusKeyAfterEdit(rows, 'a1', 'a2')).toBe('a1')
+  })
+
+  test('a newly inserted source child lands under the editing mirror', () => {
+    // Simulate inserting a child `n` under source A: it windows under M too.
+    const withChild = buildVisibleRows(
+      buildTreeIndex([...tree, makeNode({ id: 'n', parentId: 'A', prevSiblingId: 'a2' })]),
+      null,
+      show,
+      null,
+      true,
+    )
+    // Editing on the mirror row M (active key 'M'): focus the windowed copy.
+    expect(focusKeyAfterEdit(withChild, 'n', 'M')).toBe(rowKeyFor('M', 'n'))
+    // Editing on the real source A (active key 'A'): focus the bare copy.
+    expect(focusKeyAfterEdit(withChild, 'n', 'A')).toBe('n')
+  })
+
+  test('returns null when the id is no longer visible (moved out of the view)', () => {
+    expect(focusKeyAfterEdit(rows, 'ghost', 'M')).toBeNull()
   })
 })

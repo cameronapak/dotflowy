@@ -1,6 +1,6 @@
 # 03 — Full editing parity inside mirrors (the hard part)
 
-Status: in progress — 2a, 2b DONE; 2c–2e remain (branch `feat/mirror-of-plumbing`).
+Status: in progress — 2a, 2b, 2c DONE; 2d–2e remain (branch `feat/mirror-of-plumbing`).
 Each slice is its own verified commit, mirroring Stage 1's 1a–1d discipline.
 
 Stage 2 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The A1 gold-plate and the
@@ -61,11 +61,33 @@ All in `src/components/`. Each is correct today only because no id repeats; each
   enters its OWN windowed child (positioned below it), never the source's row; arrow nav walks between
   windowed instances and back up to the mirror; bottom-of-view holds focus (no teleport). Full e2e green
   (only the pre-existing daily-notes nav flake, passes isolated).
-- **2c — structural redirect at the mirror edge.** Inserting a child *directly under* a mirror row
-  (`insertChildAtStart`, Enter-split's `insertSibling`, `indent`/`outdent` at the mirror's edge) targets the
-  **source** (`contentId`), so the new node appears in every instance. Inside the subtree (real nodes) it
-  already targets real nodes — confirm + test. New node's focus key = active prefix + new id (needs 2a). One
-  `runStructural` batch ([ADR 0009](../../../docs/adr/0009-atomic-structural-writes.md)).
+- **2c — structural edits by the field split + path focus. DONE.** The keymap feeds a mirror row the
+  CONTENT id (slice 1b: `useBulletKeymap({ node: content })`), so 2c reframed around the ADR 0022 **field
+  split** rather than a blanket "redirect to source": each structural command now derives `instanceId` /
+  `contentId` from the focused row's **key** (`findFocusedId()` → `instanceIdForKey`; content = `mirrorOf ??
+  instance`, flag-gated). **Position ops target the INSTANCE** (`insertSibling`, `indent`, `outdent`,
+  `moveUp/Down`, `removeNode` — Tab/move/delete on a mirror's own row move/remove that mirror in its own
+  tree, never the source); **content + child inserts target the SOURCE** (Enter-at-end-of-open →
+  `insertChildAtStart(contentId)`, text split → `setText(contentId)`), so they window into every instance.
+  Inside the windowed subtree the rows are real nodes (instance === content), so those edits were already
+  correct — confirmed by e2e. **Enter on a mirror's OWN row never moves source text** (Option A, Cam's
+  "best/robust" call): a mid-text split would desync every instance or strand the tail on a local node, so it
+  degrades to the empty-tail case (add a node, source text whole). Delete targets the instance so backspacing
+  a mirror removes only that mirror (promote-on-source-delete is Stage 3). **Focus** is re-derived from the
+  live post-edit render walk (`focusKeyAfterEdit` over `buildVisibleRows`, built from a fresh
+  `nodesCollection.toArray` — settled after `runStructural`), never composed by hand, so it can't drift from
+  what's on screen and lands in the editing instance under the same mirror anchor; flag-off / mirror-free it
+  returns the bare id (zero rebuild). New helpers `parentKeyOf` / `focusKeyAfterEdit` in `visible-order.ts`
+  (unit-tested). Each edit stays ONE `runStructural` batch ([ADR 0009](../../../docs/adr/0009-atomic-structural-writes.md)).
+  **Plus a pre-existing core bug fix:** `indent` (`mutations.ts`) read the destination parent's last child
+  AFTER its `update()`; the tree-store maintains that index IN PLACE and notifies synchronously, so the read
+  already included the just-moved node and pointed its own `prevSiblingId` at itself (a self-referencing
+  chain). Latent because no e2e single-Tab-indented under the DEV invariant tripwire and a leaf destination
+  renders the self-ref identically. Fixed by reading the last child BEFORE the move; gated by an assertion in
+  `mirror-editing.spec.ts` that the structural-write tripwire stays silent. **Gate met:** typecheck /
+  typecheck:test / lint / 170 unit green; e2e mirrors + keyboard-nav + node-multi-select + the new
+  `mirror-editing.spec.ts` green; full e2e green except the pre-existing daily-notes `goHome` nav flake (16/16
+  isolated); flag-off parity unchanged.
 - **2d — drag-reorder by path.** `use-drag-reorder.ts` + `virtual-nav.ts`: hit-test / projection by `row.key`
   (`virtualRowRect` keyed by key); dropping inside a mirror reorders the **real** source children (and thus
   every instance). Document the surprise.
@@ -80,6 +102,10 @@ All in `src/components/`. Each is correct today only because no id repeats; each
   bare id. Confirm before wiring `findFocusedId` → undo.
 - **Focus-key composition source.** The active path prefix is derived from `findFocusedId()` at command time.
   Confirm that's available everywhere a command sets `pendingFocus` (history restore, daily loser-path).
+  **Resolved in 2c:** rather than *compose* `activePrefix + newId` by hand (fragile across reparent moves),
+  the focus key is *re-derived* from the live post-edit render walk (`focusKeyAfterEdit` over
+  `buildVisibleRows`), picking the matching instance under the same mirror anchor as the active key. Single
+  source of truth (the render walk), so it can't drift; flag-off / mirror-free it's the bare id.
 
 ## Scope
 
@@ -98,14 +124,16 @@ All in `src/components/`. Each is correct today only because no id repeats; each
 
 ## Acceptance
 
-- [ ] Type, Enter-split, indent/outdent, Backspace-merge inside a mirror — caret lands correctly, and the
-      same edit appears in every instance.
-- [ ] Add a child directly under a mirror → it shows under the source and all other instances.
-- [ ] Drag a sub-item inside a mirror → reorders under the source (verified in another instance).
-- [ ] Multi-select + move/indent inside a mirror behaves as on real nodes; no cross-instance focus bleed.
-- [ ] The **same node visible at two paths simultaneously** (both homes on screen, e.g. top-level unzoomed):
-      focusing one doesn't steal/echo into the other; both spans independent.
-- [ ] Flag off → unchanged. New e2e spec `mirror-editing.spec.ts` green serial.
+- [x] Type, Enter-split, indent/outdent, Backspace-merge inside a mirror — caret lands correctly, and the
+      same edit appears in every instance. *(2c: Enter-split + indent/outdent + delete in `mirror-editing.spec.ts`;
+      type via 1b; backspace-merge rides the same key-addressed `onDeleteNode` + `findVisibleNeighbor` path.)*
+- [x] Add a child directly under a mirror → it shows under the source and all other instances. *(2c)*
+- [ ] Drag a sub-item inside a mirror → reorders under the source (verified in another instance). *(2d)*
+- [ ] Multi-select + move/indent inside a mirror behaves as on real nodes; no cross-instance focus bleed. *(2e)*
+- [x] The **same node visible at two paths simultaneously** (both homes on screen, e.g. top-level unzoomed):
+      focusing one doesn't steal/echo into the other; both spans independent. *(2c: Enter-split focuses the
+      windowed copy, asserts the source copy is NOT focused; content sync is by design, span identity is 2a.)*
+- [x] Flag off → unchanged. New e2e spec `mirror-editing.spec.ts` green serial.
 
 ## Risk notes
 

@@ -1,0 +1,214 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { seedOutline, type SeedNode } from "./fixtures";
+
+// Node mirrors (ADR 0022), slice 2c: full editing parity INSIDE a mirror. Stage 1
+// shipped render + the field split; 2a/2b made focus + caret nav path-addressed.
+// 2c makes STRUCTURAL edits behave per the field split -- position ops target the
+// INSTANCE, content + child inserts target the SOURCE -- and lands focus in the
+// instance the user was editing (never teleporting to the source's far copy).
+//
+// Tree (display order, flag on, nothing collapsed):
+//   A  "alphasource"
+//     a1 "childone"
+//     a2 "childtwo"
+//   P  "project"
+//     M  (mirrorOf=A)  -> windows a1, a2
+//
+// So a1/a2 each render TWICE: once under the real source A (document order first =
+// nth(0)) and once windowed under the mirror M (nth(1)). Text is space-free so
+// `toHaveText` (which normalizes whitespace) compares exactly.
+const MIRROR_TREE: SeedNode[] = [
+  { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+  { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+  { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
+  { id: "a2", parentId: "A", prevSiblingId: "a1", text: "childtwo" },
+  { id: "M", parentId: "P", prevSiblingId: null, text: "placeholder", mirrorOf: "A" },
+];
+
+// All copies of a node's editable span (a windowed source child has two).
+const spans = (page: Page, id: string) =>
+  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+const focused = (page: Page) => page.locator(".node-text:focus");
+
+// Platform Cmd/Ctrl, matching the app's `Mod+...` hotkeys (Playwright has no
+// "Mod" alias). Mirrors the helper in the other specs.
+function modifier() {
+  return process.platform === "darwin" ? "Meta" : "Control";
+}
+
+async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
+  await page.addInitScript(() => {
+    localStorage.setItem("dotflowy:flag:virtualized", "on");
+  });
+  if (mirrors) {
+    await page.addInitScript(() => {
+      localStorage.setItem("dotflowy:flag:mirrors", "on");
+    });
+  }
+  await seedOutline(page, tree);
+  await page.goto("/");
+  await expect(spans(page, "A")).toBeVisible();
+}
+
+// Focus a SPECIFIC span (a Locator, so we can target one of two duplicate copies)
+// and drop the caret at absolute offset `col`. Sets the Selection range directly:
+// Home/Arrow keys are unreliable in macOS Chromium contentEditable, and a plain
+// click lands past the text. Mirrors the caretAt helper in enter-split.spec.ts.
+async function caretIn(locator: Locator, col: number) {
+  await locator.click();
+  await locator.evaluate((el, target) => {
+    const sel = window.getSelection();
+    if (!sel) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let remaining = target as number;
+    let node = walker.nextNode();
+    const range = document.createRange();
+    while (node) {
+      const len = node.textContent?.length ?? 0;
+      if (remaining <= len) {
+        range.setStart(node, remaining);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      remaining -= len;
+      node = walker.nextNode();
+    }
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, col);
+}
+
+test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", () => {
+  test("Enter-split inside a mirror splits the source and lands focus under the mirror", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+    await expect(spans(page, "a1")).toHaveCount(2);
+
+    // Split the WINDOWED copy of a1 (under M) at "child|one". The split edits the
+    // real node a1, so it shows in BOTH instances; the tail seeds a new sibling.
+    await caretIn(spans(page, "a1").nth(1), 5);
+    await page.keyboard.press("Enter");
+
+    // a1 truncated to "child" in every instance.
+    await expect(spans(page, "a1").nth(0)).toHaveText("child");
+    await expect(spans(page, "a1").nth(1)).toHaveText("child");
+    // The new "one" node windows into both instances (real under A + under M).
+    const ones = page.locator(".node-text").filter({ hasText: /^one$/ });
+    await expect(ones).toHaveCount(2);
+    // Focus landed on the WINDOWED copy (doc order: nth(0)=under source, nth(1)=
+    // under the mirror), NOT the source's row -- no cross-instance focus bleed.
+    await expect(ones.nth(1)).toBeFocused();
+  });
+
+  test("Enter at the end of a mirror's own row adds a child to the source", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+
+    // The mirror row shows the SOURCE's text; pressing Enter at its end dives in,
+    // adding a child to the source (windows into every instance), not a local
+    // sibling next to the mirror.
+    await expect(spans(page, "M")).toHaveText("alphasource");
+    await caretIn(spans(page, "M"), 99);
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("newkid");
+
+    // "newkid" now exists under the real source A AND windowed under M.
+    const kids = page.locator(".node-text").filter({ hasText: /^newkid$/ });
+    await expect(kids).toHaveCount(2);
+    await expect(kids.nth(1)).toBeFocused(); // editing instance keeps focus
+  });
+
+  test("indent + outdent inside a mirror restructures the source in every instance", async ({
+    page,
+  }) => {
+    // Gate the structural-write invariant: indent/outdent must never produce a
+    // self-referencing sibling chain (the DEV tripwire in structural.ts). This is
+    // the regression guard for the indent fix -- the tripwire only logs, so we
+    // assert it stayed silent.
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      ) {
+        chainErrors.push(msg.text());
+      }
+    });
+    await load(page, MIRROR_TREE, true);
+
+    // Tab on the windowed a2 indents it under a1. a2 is a real node, so its parent
+    // changes everywhere -- both copies now hang under a1.
+    await spans(page, "a2").nth(1).click();
+    await expect(spans(page, "a2").nth(1)).toBeFocused();
+    await page.keyboard.press("Tab");
+
+    await expect(page.locator('li[data-node-id="a2"]').nth(0)).toHaveAttribute(
+      "data-parent-id",
+      "a1",
+    );
+    await expect(page.locator('li[data-node-id="a2"]').nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "a1",
+    );
+    // Focus stayed on the windowed a2 (the editing instance), not the source copy.
+    await expect(spans(page, "a2").nth(1)).toBeFocused();
+
+    // Shift+Tab outdents it back to a child of A, again in both instances.
+    await page.keyboard.press("Shift+Tab");
+    await expect(page.locator('li[data-node-id="a2"]').nth(0)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(page.locator('li[data-node-id="a2"]').nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(spans(page, "a2").nth(1)).toBeFocused();
+
+    expect(chainErrors).toEqual([]);
+  });
+
+  test("deleting a mirror instance removes only that instance, not the source", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+    await expect(spans(page, "a1")).toHaveCount(2);
+
+    // Delete the mirror's own row. The keymap hands the command the SOURCE's id,
+    // but the delete targets the focused INSTANCE -- so the mirror goes and the
+    // source survives (promote-on-source-delete is Stage 3, not this).
+    await spans(page, "M").click();
+    await expect(spans(page, "M")).toBeFocused();
+    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+
+    await expect(page.locator('li[data-mirror="instance"]')).toHaveCount(0);
+    await expect(spans(page, "A")).toBeVisible();
+    // a1/a2 now render once -- only under the surviving source.
+    await expect(spans(page, "a1")).toHaveCount(1);
+    await expect(spans(page, "a2")).toHaveCount(1);
+  });
+
+  test("flag OFF: a mirrorOf node Enter-splits as an ordinary leaf (parity)", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, false);
+
+    // Mirrors disabled: M is a plain node showing its own text, no windowing.
+    await expect(spans(page, "M")).toHaveText("placeholder");
+    await expect(spans(page, "a1")).toHaveCount(1);
+
+    await caretIn(spans(page, "M"), 4);
+    await page.keyboard.press("Enter");
+
+    await expect(spans(page, "M")).toHaveText("plac");
+    await expect(focused(page)).toHaveText("eholder");
+    // Still no windowing -- a1 stays single.
+    await expect(spans(page, "a1")).toHaveCount(1);
+  });
+});
