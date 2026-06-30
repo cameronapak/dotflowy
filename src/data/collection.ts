@@ -1,8 +1,9 @@
 import { createCollection } from '@tanstack/react-db'
-import { Effect, Fiber, Schema, Stream } from 'effect'
+import { type Cause, Duration, Effect, Fiber, Schema, Stream } from 'effect'
 import { nodeSchema } from './schema'
 import type { Node } from './schema'
 import { createNodes, deleteNodes, updateNodes } from './api'
+import { runPromise } from './nodes-client-effect'
 import { makeSyncStream } from './realtime'
 import type { ChangeOp, ServerMessage, SyncEvent } from './realtime'
 import { appRuntime } from './runtime'
@@ -117,53 +118,69 @@ function resetAppliedSeq(seq: number): void {
 }
 
 /**
- * Resolve once this client has applied change-frame `seq` (the originator's own
+ * Complete once this client has applied change-frame `seq` (the originator's own
  * echo, a resume gap, or a superseding snapshot all advance the cursor past it).
- * `runStructural` awaits this so a structural transaction stays optimistic until
- * its write echoes back — never reverting to a pre-op state a fast follow-up
- * edit could read (PLAN.md, P2).
+ * `runStructural` composes this onto its batch send (structural.ts) so a
+ * structural transaction stays optimistic until its write echoes back — never
+ * reverting to a pre-op state a fast follow-up edit could read (PLAN.md, P2).
  *
- * On timeout it RESOLVES (never rejects): a snapshot/resync may have superseded
- * the seq, or the socket is wedged; either way we fall back to trusting the
- * synced snapshot rather than hanging the transaction forever.
+ * An Effect: the `seqWaiters` registration is lifted with `Effect.callback` (the
+ * sync-fiber cursor advance still releases it through `w.resolve`), and the
+ * fallback is `Effect.timeoutOrElse` resolving to `void`. On timeout it COMPLETES
+ * (never fails): a snapshot/resync may have superseded the seq, or the socket is
+ * wedged; either way trust the synced snapshot rather than hang the transaction.
+ * The interrupt finalizer drops the waiter, so a timed-out wait can't leak.
  */
-export function waitForSeq(seq: number, timeoutMs = 8000): Promise<void> {
-  if (appliedSeq >= seq) return Promise.resolve()
-  return new Promise((resolve) => {
-    const waiter: SeqWaiter = { seq, resolve }
+export function waitForSeqE(seq: number, timeoutMs = 8000): Effect.Effect<void> {
+  return Effect.callback<void>((resume) => {
+    if (appliedSeq >= seq) {
+      resume(Effect.void)
+      return
+    }
+    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) }
     seqWaiters.add(waiter)
-    setTimeout(() => {
-      if (seqWaiters.delete(waiter)) resolve()
-    }, timeoutMs)
-  })
+    return Effect.sync(() => {
+      seqWaiters.delete(waiter)
+    })
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.millis(timeoutMs),
+      orElse: () => Effect.void,
+    }),
+  )
 }
 
-/** Resolve once `id` is present in the collection (live delta or snapshot).
- *  Used by the daily claim loser-path so navigation doesn't zoom to a node
- *  that hasn't replicated locally yet. */
-export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
-  if (nodesCollection.toArray.some((n) => n.id === id)) return Promise.resolve()
-
-  return new Promise((resolve, reject) => {
-    let sub: ReturnType<typeof nodesCollection.subscribeChanges>
-    const timer = setTimeout(() => {
-      sub.unsubscribe()
-      reject(new Error(`node ${id} not synced within ${timeoutMs}ms`))
-    }, timeoutMs)
-
-    sub = nodesCollection.subscribeChanges(() => {
-      if (!nodesCollection.toArray.some((n) => n.id === id)) return
-      clearTimeout(timer)
-      sub.unsubscribe()
-      resolve()
-    })
-
-    if (nodesCollection.toArray.some((n) => n.id === id)) {
-      clearTimeout(timer)
-      sub.unsubscribe()
-      resolve()
+/**
+ * Complete once `id` is present in the collection (live delta or snapshot); on
+ * timeout it FAILS (the opposite of `waitForSeqE` — the daily claim loser-path
+ * wants to know the node never replicated, then materializes locally instead).
+ * `Effect.callback` over `subscribeChanges`, time-bounded by `Effect.timeout`.
+ */
+export function waitForNodeE(
+  id: string,
+  timeoutMs = 8000,
+): Effect.Effect<void, Cause.TimeoutError> {
+  return Effect.callback<void>((resume) => {
+    const present = () => nodesCollection.toArray.some((n) => n.id === id)
+    if (present()) {
+      resume(Effect.void)
+      return
     }
-  })
+    const sub = nodesCollection.subscribeChanges(() => {
+      if (present()) resume(Effect.void) // resume is idempotent; finalizer unsubs
+    })
+    // Guard the registration gap (a delta applied between the check and subscribe).
+    if (present()) resume(Effect.void)
+    return Effect.sync(() => {
+      sub.unsubscribe()
+    })
+  }).pipe(Effect.timeout(Duration.millis(timeoutMs)))
+}
+
+/** Promise form of {@link waitForNodeE} for the daily claim loser-path (rejects
+ *  on timeout; the caller `.catch`es it and materializes locally). */
+export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
+  return runPromise(waitForNodeE(id, timeoutMs))
 }
 
 /**

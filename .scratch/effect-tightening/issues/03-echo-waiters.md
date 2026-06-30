@@ -1,9 +1,25 @@
-# 03 — echo waiters (Deferred + Effect.timeout)
+# 03 — echo waiters (Effect.callback + Effect.timeout)
 
-Status: Planned. Risk: MED (callers are React handlers; timeout semantics differ per waiter).
+Status: BUILT + green. Risk: MED (callers are React handlers; timeout semantics differ per waiter).
 Depends on: 01 (so the structural write composes as one end-to-end Effect program).
 
-See [PRD](../PRD.md). Replace the manual `Promise`-resolver sets in `collection.ts` with `Deferred`.
+Built: `waitForSeq`→`waitForSeqE` and `waitForNode`→`waitForNodeE` (`collection.ts`); `runStructural`
+composes `persistBatchE(ops).pipe(Effect.flatMap(({seq}) => waitForSeqE(seq)))` as ONE program through
+`runPromise` (`structural.ts`); `persistBatchE` exposed from `api.ts` (writeSem + sendBatchE, permit held
+across the SEND only). Tests: `src/data/echo-waiters.test.ts` (the opposite-timeout-semantics watch-out).
+Gates: unit 134/134, typecheck + typecheck:test + lint clean, e2e atomic-structural 3/3 + daily-notes
+19/19 serial (incl. the claim loser-path + orphaned-mapping materialize). Docs: ADR 0013 scope-boundary
+note + AGENTS.md updated (the waiters are no longer "deliberately not Effect-ified").
+
+Design note: used **`Effect.callback`**, not `Deferred` (the issue's original wording). The completion
+site (`advanceAppliedSeq`/`resetAppliedSeq`) is synchronous external plumbing that still calls
+`w.resolve`, so `callback` lifts the registration without the `doneUnsafe` ceremony a `Deferred` would
+need, and keeps the `seqWaiters` set + cursor logic byte-identical. The opposite timeout semantics fall
+out of `timeoutOrElse` (resolve) vs `timeout` (fail). Testing: per the repo convention (don't unit-test
+the collection/DO data flow — CLAUDE.md), the cursor-advance path stays e2e-covered; the new unit test
+pins only the two pure timeout outcomes, which need no mocking.
+
+See [PRD](../PRD.md). Replaces the manual `Promise`-resolver sets in `collection.ts` with `Effect.callback`.
 
 ## Scope
 

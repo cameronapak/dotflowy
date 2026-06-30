@@ -29,10 +29,15 @@ interface (`onMessage`/`onInitialError`) would have been deleted on the next mig
 apply logic in `collection.ts` (snapshot/resume/change → `begin/write/commit` + the seq plumbing) is
 *unchanged* — it moved from `onMessage`'s body into `Stream.runForEach`, re-hosted under a fiber.
 
-**Scope boundary (deliberate).** `waitForSeq`'s Promise/`setTimeout` waiters in `collection.ts` were
-**not** converted to Effect. Their consumer is `runStructural`, called from React click/keystroke
-handlers that `await` a Promise — not Effect contexts yet. The echo-hold contract (ADR 0009) stays
-byte-identical; `appliedSeq → SubscriptionRef` is a later slice, when the editor-command path migrates.
+**Scope boundary (since narrowed).** This ADR shipped with `waitForSeq`'s Promise/`setTimeout` waiters
+left unconverted. Under the Effect-first posture ([ADR 0021](./0021-effect-first-one-schema-language.md))
+they since became `waitForSeqE`/`waitForNodeE` in `collection.ts` — the registration lifted with
+`Effect.callback`, time-bounded by `Effect.timeoutOrElse` (resolve-on-timeout, the P2 fallback) and
+`Effect.timeout` (fail-on-timeout, the daily loser-path) respectively — and `runStructural` now composes
+the batch send + echo-hold as ONE Effect, bridged once at its async `mutationFn`. The cursor itself
+(`appliedSeq`, advanced by `advanceAppliedSeq`/`resetAppliedSeq`) stays a plain module value with
+callback resolves; `appliedSeq → SubscriptionRef` remains a later slice. The echo-hold contract
+(ADR 0009) is byte-identical.
 
 ## Considered and rejected
 

@@ -4,6 +4,7 @@ import type { ChangeOp } from './realtime'
 import {
   createNodesE,
   deleteNodesE,
+  type NodesError,
   runPromise,
   sendBatchE,
   updateNodesE,
@@ -55,14 +56,26 @@ import {
 const writeSem = Semaphore.makeUnsafe(1)
 
 /**
- * Persist a structural mutation as one atomic batch. The DO applies every op and
- * commits a SINGLE change frame, returning its sequence number; the caller
- * (`runStructural`) waits for that seq to echo back before dropping its
- * optimistic overlay. All-or-nothing: a failed request rolls the whole op back.
- * Calls are serialized (see `writeSem`) so concurrent edits persist in order.
+ * Persist a structural mutation as one atomic batch — the Effect core. The DO
+ * applies every op and commits a SINGLE change frame, returning its sequence
+ * number. `writeSem` serializes batches so concurrent edits persist in order;
+ * the permit is held across the SEND only (it releases on the HTTP response, not
+ * the echo), so the next batch can send as soon as this one commits. Exposed in
+ * Effect shape so `runStructural` can compose the P2 echo-wait (`waitForSeqE`)
+ * onto it as ONE program (structural.ts), bridged once at the mutationFn seam.
+ */
+export const persistBatchE = (
+  ops: ChangeOp[],
+): Effect.Effect<{ seq: number }, NodesError> =>
+  writeSem.withPermits(1)(sendBatchE(ops))
+
+/**
+ * Throw-shell over `persistBatchE` for the non-composing callers (and the unit
+ * tests). The caller (`runStructural`) waits for the returned seq to echo back
+ * before dropping its optimistic overlay; all-or-nothing on failure.
  */
 export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
-  return runPromise(writeSem.withPermits(1)(sendBatchE(ops)))
+  return runPromise(persistBatchE(ops))
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>
