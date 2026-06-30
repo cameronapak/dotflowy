@@ -1,5 +1,5 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
-import { useEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useState, type RefObject } from "react";
 import type { Node } from "../data/schema";
 import { keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
@@ -49,8 +49,18 @@ export function useBulletKeymap({
   // gating registration on focus cuts that to one bullet's worth. The no-caret
   // selection keys live on a window-level listener (selection-mode.tsx), so
   // multi-select is unaffected when the bullet blurs.
+  //
+  // LAYOUT effect, not passive: a freshly-inserted bullet is focused in
+  // OutlineRow's mount `useLayoutEffect` (the central FocusPass for already-
+  // mounted rows). `useHotkeys` registers in a passive effect, so if this flip
+  // ran passively too, `setFocused(true)` would land AFTER the first paint and
+  // force a SECOND passive pass before the full keymap registered -- a paint
+  // cycle where the just-focused bullet has no keymap (a rapid second Enter
+  // could no-op). Flipping in the layout phase re-renders synchronously before
+  // paint, so the keymap registers in the first passive pass -- matching the
+  // pre-gating (always-on) timing.
   const [focused, setFocused] = useState(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textRef.current;
     if (!el) return;
     // Sync now: a freshly inserted bullet is focused imperatively right after
