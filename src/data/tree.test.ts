@@ -4,6 +4,7 @@ import {
   buildTreeIndex,
   childrenOf,
   makeNode,
+  orphanedMirrorsBy,
   trueSourceOf,
   wouldMirrorCycle,
 } from './tree'
@@ -68,6 +69,58 @@ describe('buildTreeIndex mirrorsBySource (ADR 0022)', () => {
     const m = makeNode({ id: 'm', mirrorOf: 'ghost' })
     const index = buildTreeIndex([m])
     expect(index.mirrorsBySource.get('ghost')).toEqual(['m'])
+  })
+})
+
+describe('orphanedMirrorsBy (delete-source guard, ADR 0022)', () => {
+  // src has two children; M (under p) mirrors src.
+  const tree = () => [
+    makeNode({ id: 'src' }),
+    makeNode({ id: 'k1', parentId: 'src', prevSiblingId: null }),
+    makeNode({ id: 'k2', parentId: 'src', prevSiblingId: 'k1' }),
+    makeNode({ id: 'p', prevSiblingId: 'src' }),
+    makeNode({ id: 'M', parentId: 'p', prevSiblingId: null, mirrorOf: 'src' }),
+  ]
+
+  test('deleting a source with a live mirror reports the orphan', () => {
+    const index = buildTreeIndex(tree())
+    expect(orphanedMirrorsBy(index, ['src'])).toEqual(['M'])
+  })
+
+  test('deleting a plain mirror is always safe', () => {
+    const index = buildTreeIndex(tree())
+    expect(orphanedMirrorsBy(index, ['M'])).toEqual([])
+  })
+
+  test('a source is found even when it sits inside the deleted subtree', () => {
+    // Delete p's parent; src is a deep descendant whose mirror lives elsewhere.
+    const nested = [
+      makeNode({ id: 'top' }),
+      makeNode({ id: 'src', parentId: 'top', prevSiblingId: null }),
+      makeNode({ id: 'p', prevSiblingId: 'top' }),
+      makeNode({ id: 'M', parentId: 'p', prevSiblingId: null, mirrorOf: 'src' }),
+    ]
+    const index = buildTreeIndex(nested)
+    expect(orphanedMirrorsBy(index, ['top'])).toEqual(['M'])
+  })
+
+  test('deleting a source together with all its mirrors is safe', () => {
+    // Both src and its only mirror M sit under `top`, so deleting top takes both.
+    const together = [
+      makeNode({ id: 'top' }),
+      makeNode({ id: 'src', parentId: 'top', prevSiblingId: null }),
+      makeNode({ id: 'M', parentId: 'top', prevSiblingId: 'src', mirrorOf: 'src' }),
+    ]
+    const index = buildTreeIndex(together)
+    expect(orphanedMirrorsBy(index, ['top'])).toEqual([])
+  })
+
+  test('a mirror-free deletion is always safe', () => {
+    const index = buildTreeIndex([
+      makeNode({ id: 'a' }),
+      makeNode({ id: 'b', parentId: 'a', prevSiblingId: null }),
+    ])
+    expect(orphanedMirrorsBy(index, ['a'])).toEqual([])
   })
 })
 

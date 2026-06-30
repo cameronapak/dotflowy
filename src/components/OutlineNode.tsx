@@ -269,6 +269,9 @@ function OutlineNodeBody({
   // menu is open so the menu owns Arrow/Enter/Tab/Esc. See use-bullet-keymap.ts.
   useBulletKeymap({
     node,
+    // Flag-off recursive path: no mirrors, so instance === content === node.
+    instanceId: node.id,
+    instanceCollapsed: node.collapsed,
     textRef,
     commands,
     pluginCtx,

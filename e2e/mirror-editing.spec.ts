@@ -194,6 +194,107 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     await expect(spans(page, "a2")).toHaveCount(1);
   });
 
+  test("selecting a mirror selects the INSTANCE, so delete removes only the mirror", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+    await expect(spans(page, "a1")).toHaveCount(2);
+
+    // Enter node selection on the mirror's own row (Shift+Down from line end is
+    // the direction-agnostic single-node entry). Pre-2e the keymap selected the
+    // SOURCE's id (content), so the SOURCE row lit up and a select+delete removed
+    // the source, orphaning every instance ("deletes both"). It must select the
+    // INSTANCE: the mirror row carries the edge, the source row does not.
+    await caretIn(spans(page, "M"), 99);
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(page.locator('li[data-node-id="M"]')).toHaveAttribute(
+      "data-selected",
+      "single",
+    );
+    await expect(page.locator('li[data-node-id="A"]')).not.toHaveAttribute(
+      "data-selected",
+      /.*/,
+    );
+
+    // Delete the selection (selection-mode Backspace). Only the mirror goes; the
+    // source and its children survive, now rendering once.
+    await page.keyboard.press("Backspace");
+    await expect(page.locator('li[data-mirror="instance"]')).toHaveCount(0);
+    await expect(spans(page, "A")).toBeVisible();
+    await expect(spans(page, "a1")).toHaveCount(1);
+    await expect(spans(page, "a2")).toHaveCount(1);
+  });
+
+  test("deleting a SOURCE that has a live mirror is blocked (no orphaned instances)", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+    await expect(spans(page, "a1")).toHaveCount(2); // source + windowed under M
+
+    // Try to delete the real source A. Removing it would strand the mirror M
+    // (promote-on-delete is Stage 3), so the core blocks it: A and the mirror
+    // both survive, and a1/a2 still render twice.
+    await caretIn(spans(page, "A"), 0);
+    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+
+    await expect(spans(page, "A")).toBeVisible();
+    await expect(page.locator('li[data-mirror="instance"]')).toHaveCount(1);
+    await expect(spans(page, "a1")).toHaveCount(2);
+    await expect(spans(page, "a2")).toHaveCount(2);
+  });
+
+  test("zoom morph names ONE element when a source and its mirror are both visible (no duplicate view-transition-name)", async ({
+    page,
+  }) => {
+    // Dogfood crash repro. pivotId is a node id; the old `content.id === pivotId`
+    // tagged the source's OWN row AND every visible mirror row with
+    // `view-transition-name: zoom-target`. That name must be unique per document,
+    // so the duplicate logged a console error and the next zoom threw "Transition
+    // was aborted". Pivot is now keyed by the per-instance rowKey, so only the
+    // source's canonical row morphs (key === id); mirror rows never collide.
+    const morphErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        /duplicate view-transition-name|Transition was aborted/.test(msg.text())
+      )
+        morphErrors.push(msg.text());
+    });
+    page.on("pageerror", (err) => {
+      if (/Transition was aborted|duplicate view-transition-name/.test(err.message))
+        morphErrors.push(err.message);
+    });
+
+    await load(page, MIRROR_TREE, true);
+    await expect(spans(page, "a1")).toHaveCount(2); // source + windowed under M
+
+    // Zoom INTO the source A (bullet click -> A becomes the title), then back OUT
+    // one level (Mod+,). Zooming out sets the morph pivot to A while rooting at the
+    // top, so A's own row AND the mirror M (which windows A) are both visible with
+    // pivotId === A -- the exact collision the user hit.
+    await page.locator('li[data-node-id="A"] .bullet').first().click();
+    await expect(page.locator(".zoomed-title-text")).toHaveText("alphasource");
+    await page.keyboard.press(`${modifier()}+Comma`);
+
+    // Back at the top level with both rows visible. The source's row carrying the
+    // morph name proves pivotId === A took effect (precondition -- fails loudly if
+    // the zoom-out didn't land, so the assertions below can't false-green).
+    await expect(spans(page, "A")).toBeVisible();
+    await expect(page.locator('li[data-mirror="instance"]')).toHaveCount(1);
+    await expect(spans(page, "A")).toHaveAttribute("style", /zoom-target/);
+
+    // Exactly ONE element carries the morph name, and it is NOT the mirror row.
+    const named = await page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll<HTMLElement>(".node-text")).filter(
+          (el) => el.style.viewTransitionName === "zoom-target",
+        ).length,
+    );
+    expect(named).toBe(1);
+    await expect(spans(page, "M")).not.toHaveAttribute("style", /zoom-target/);
+    expect(morphErrors).toEqual([]);
+  });
+
   test("flag OFF: a mirrorOf node Enter-splits as an ordinary leaf (parity)", async ({
     page,
   }) => {

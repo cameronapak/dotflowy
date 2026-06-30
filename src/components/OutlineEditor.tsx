@@ -96,7 +96,7 @@ import type { PluginContext, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { healProtectedText } from "./protected-text";
-import { guardProtected, ProtectedLock } from "./protection";
+import { guardMirrorSourceDelete, guardProtected, ProtectedLock } from "./protection";
 import { Header } from "./Header";
 import { Subheader } from "./Subheader";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
@@ -1177,6 +1177,12 @@ function useNodeCommands({
           // the user acted on (the active key). The node isn't removed, so its
           // row still exists.
           if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
+          // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
+          // v1 blocks). A mirror's own row is never a source, so this no-ops
+          // there -- backspacing a mirror still works. Flag-gated: off-flag a
+          // mirrorOf node is just a normal node, so the guard never runs.
+          if (mirrorsOn && guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey)))
+            return;
           capture(idx, activeKey);
           // Focus the row directly ABOVE the deleted one (Workflowy backspace
           // behavior), computed before the mutation so the neighbor still

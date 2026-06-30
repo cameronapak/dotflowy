@@ -206,10 +206,19 @@ function RowChrome({
       ? childIds.some((id) => filter.visibleIds.has(id))
       : childIds.length > 0;
   // Collapse is LOCAL to the instance (a mirror collapsed here leaves the source
-  // open elsewhere); fade/match/pivot follow the CONTENT.
+  // open elsewhere); fade/match follow the CONTENT.
   const effectiveCollapsed = filter ? false : instance.collapsed;
   const isContext = filter ? !filter.matchIds.has(content.id) : false;
-  const isPivot = content.id === pivotId;
+  // The zoom morph (`view-transition-name: zoom-target`) must name exactly ONE
+  // element -- the browser aborts the transition on a duplicate name. pivotId is
+  // a node id, but it addresses the row by KEY, not content: a source and every
+  // mirror of it share a content id, so `content.id === pivotId` would tag the
+  // source's own row AND each visible mirror row at once (a persistent duplicate
+  // that crashes the next zoom). rowKey is per-instance, so only the source's own
+  // canonical row (key === id) morphs; mirror rows carry path/instance keys and
+  // never collide. For a mirror-free row key === id === content.id, so the 99%
+  // path is byte-identical (ADR 0022).
+  const isPivot = rowKey === pivotId;
   const faded = content.completed || ancestorCompleted;
 
   const slash = useSlashMenu({
@@ -304,6 +313,10 @@ function RowChrome({
 
   useBulletKeymap({
     node: content,
+    // Collapse is local to the instance (mirrors the chevron, ADR 0022); the
+    // rest of the keymap re-resolves the instance from the focused key.
+    instanceId: instance.id,
+    instanceCollapsed: instance.collapsed,
     textRef,
     commands,
     pluginCtx,

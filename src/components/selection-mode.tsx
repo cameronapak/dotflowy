@@ -43,6 +43,7 @@ import {
   useSelectionRootIds,
 } from "../data/selection-state";
 import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { orphanedMirrorsBy } from "../data/tree";
 import { isMirrorsEnabled } from "../data/flags";
 import type { PluginContext } from "../plugins/types";
 import { rejectRow } from "./flash-node";
@@ -129,6 +130,19 @@ function makeSelectionOps({
       );
     }
     if (deletable.length === 0) return; // nothing removed; keep the selection
+    // Deleting a SOURCE orphans its live mirrors (Stage 3 promotes; v1 blocks).
+    // Check the whole deletable set at once, so selecting a source AND its
+    // mirror together still deletes cleanly (both leave, nothing is orphaned). If
+    // anything would be stranded, keep the selection and explain. Flag-gated:
+    // off-flag a mirrorOf node is just a normal node, so this never fires.
+    if (isMirrorsEnabled() && orphanedMirrorsBy(index, deletable).length > 0) {
+      for (const id of deletable) rejectRow(rowOf(id));
+      toast.error(
+        "A selected node is mirrored elsewhere -- delete its mirrors first.",
+        { id: "mirror-source-delete" },
+      );
+      return;
+    }
     const isHidden = getViewIsHidden();
     const rootId = getViewRootId();
     // Focus relative to the rows actually being DELETED, not the full selection:

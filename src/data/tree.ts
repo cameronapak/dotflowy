@@ -84,6 +84,36 @@ export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
 }
 
 /**
+ * The mirror instances that deleting `ids` (and their subtrees) would ORPHAN: a
+ * source in the deletion set whose mirror lives OUTSIDE it. Empty = safe.
+ *
+ * `removeNode` cascades, so the whole subtree of each id is collected, then any
+ * mirror whose source is being deleted but which itself survives is an orphan.
+ * Deleting a source-and-all-its-mirrors together (both in the set) is safe;
+ * deleting a plain mirror is always safe (a mirror is never a source). The
+ * caller blocks the delete when this is non-empty (ADR 0022: promote-on-delete
+ * is Stage 3, so v1 protects rather than orphans). Mirror-free outline -> the
+ * `mirrorsBySource` lookups all miss, so this is O(subtree) and returns [].
+ */
+export function orphanedMirrorsBy(index: TreeIndex, ids: string[]): string[] {
+  const deleting = new Set<string>()
+  const stack = [...ids]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (deleting.has(id)) continue
+    deleting.add(id)
+    for (const k of childrenOf(index, id)) stack.push(k.id)
+  }
+  const orphans: string[] = []
+  for (const sourceId of deleting) {
+    const mirrors = index.mirrorsBySource.get(sourceId)
+    if (!mirrors) continue
+    for (const m of mirrors) if (!deleting.has(m)) orphans.push(m)
+  }
+  return orphans
+}
+
+/**
  * Re-derive one parent's ordered child ids from the live `byId`: map ids ->
  * nodes, run the canonical sibling-chain order, map back to ids. Used by the
  * incremental tree-store to re-sort a parent whose membership or sibling order
