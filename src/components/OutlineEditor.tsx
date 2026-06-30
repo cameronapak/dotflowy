@@ -36,6 +36,7 @@ import {
 import { isVirtualized } from "../data/flags";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { OutlineRow } from "./OutlineRow";
+import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
 import {
   getViewIsHidden,
   getViewRootId,
@@ -159,6 +160,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // First-run import-or-seed bootstrap; safe to run on mount. See seed.ts.
   useBootstrapOutline();
+
+  // DEV-only: expose the hotkey manager so the zoom perf guard can read the live
+  // registration count. No-op (and stripped) in production. See hotkey-devtools.ts.
+  useEffect(() => {
+    exposeHotkeyManagerForDev();
+  }, []);
 
   const routeSearch = useSearch({ strict: false }) as { q?: string };
 
