@@ -1,7 +1,8 @@
 # 04 — plugin + bootstrap async (Effect)
 
-Status: PARTIAL — bootstrap (part 1) + links unfurl (part 2) BUILT + green. Daily `ensure*` (part 3)
-RECOMMENDED-DEFER (evidence below). Risk: LOW–MED. Depends on: nothing (parallel with 01–03).
+Status: CLOSED — bootstrap (part 1) + links unfurl (part 2) BUILT + green. Daily `ensure*` (part 3)
+DEFERRED, accepted by Cam 2026-06-30 (keep as-is; revisit only if the daily flow is touched for another
+reason). Evidence in "Part 3" below. Risk: LOW–MED. Depends on: nothing (parallel with 01–03).
 
 Built:
 - **`seed.ts` bootstrap → Effect.** `bootstrapOutline` is one `Effect` program: `tryPromise` over the

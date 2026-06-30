@@ -1,6 +1,10 @@
 # PRD: Tighten the client async layer onto Effect
 
-Status: In progress — issue 01 (transport core) BUILT + green; 02–04 planned. Posture recorded in
+Status: DONE — issues 01–03 BUILT + green; 04 parts 1–2 BUILT + green, part 3 (daily `ensure*`)
+DEFERRED (accepted 2026-06-30, see issue 04). The primary `/api/nodes` path now has transport parity
+with kv (retry + 8s timeout + typed errors + response-shape validation), and the hand-rolled Promise
+coordination (batchTail, field coalescer, echo waiters) is Effect; the structural P1→P2 write composes
+as one program bridged once at the TanStack `mutationFn`. Posture recorded in
 [ADR 0021](../../docs/adr/0021-effect-first-one-schema-language.md) (sharpened: "any effect is Effect;
 pure stays pure; the three runtime seams bridge, not exempt"). This PRD is the conversion backlog ADR
 0021's consequences point at.
