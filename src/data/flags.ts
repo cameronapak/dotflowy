@@ -17,10 +17,9 @@ const VIRTUALIZED_DEFAULT = true;
 
 const MIRRORS_KEY = "dotflowy:flag:mirrors";
 
-// Compiled default OFF. Mirrors (ADR 0022) are mid-build: the render walk reads
-// the flag, but the mirror-free outline must run today's exact code, so the
-// feature is opt-in (localStorage "on") until it's complete and dogfooded.
-const MIRRORS_DEFAULT = false;
+// Compiled default ON. Mirrors (ADR 0022) shipped to all users; localStorage
+// "off" is the escape hatch if a regression turns up.
+const MIRRORS_DEFAULT = true;
 
 /**
  * Whether the editor renders the flat, windowed outline (Phase B) instead of the
@@ -43,9 +42,8 @@ export function isVirtualized(): boolean {
 /**
  * Whether node mirrors (ADR 0022) are active. Read at render time by the visible-
  * order walk (mirror resolution + path keys) and the mirror create/chrome paths.
- * OFF by default: a mirror-free outline must behave byte-identically to today, so
- * the whole feature is opt-in until complete. Same localStorage escape-hatch shape
- * as {@link isVirtualized}.
+ * ON by default for all users; localStorage "off" is the rollback escape hatch.
+ * Same localStorage escape-hatch shape as {@link isVirtualized}.
  */
 export function isMirrorsEnabled(): boolean {
   if (typeof window === "undefined") return MIRRORS_DEFAULT;
