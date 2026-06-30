@@ -1,6 +1,8 @@
 import { createTransaction, getActiveTransaction } from '@tanstack/react-db'
-import { nodesCollection, waitForSeq } from './collection'
-import { persistBatch } from './api'
+import { Effect } from 'effect'
+import { nodesCollection, waitForSeqE } from './collection'
+import { persistBatchE } from './api'
+import { runPromise } from './nodes-client-effect'
 import type { ChangeOp } from './realtime'
 import type { Node } from './schema'
 import { buildTreeIndex, childrenOf } from './tree'
@@ -45,8 +47,13 @@ export function runStructural<T>(body: () => T): T {
       // A captured-but-no-op command (e.g. indent at the top of a list) makes no
       // mutations; skip the network round-trip entirely.
       if (ops.length === 0) return
-      const { seq } = await persistBatch(ops) // P1
-      await waitForSeq(seq) // P2
+      // P1 (atomic, writeSem-serialized send) → P2 (hold optimistic until the
+      // echo) as ONE Effect program, bridged once here at the async mutationFn
+      // seam (ADR 0021). waitForSeqE never fails, so the only rejection — which
+      // rolls the transaction back — comes from the batch send.
+      await runPromise(
+        persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
+      )
     },
   })
   tx.mutate(() => {
