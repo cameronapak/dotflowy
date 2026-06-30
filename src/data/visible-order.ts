@@ -11,10 +11,44 @@ import type { TagFilter } from './tags'
  * without a parent passing it a prop (ADR 0002).
  */
 export interface VisibleRow {
+  /**
+   * The instance/position node id — where this row physically sits. Its
+   * `parentId`/`prevSiblingId`, `collapsed`, and drag target are read from here.
+   * Equals {@link contentId} for every normal (non-mirror) row.
+   */
   id: string
+  /**
+   * The node to read CONTENT from — `text`, `isTask`, `completed`, and children:
+   * `mirrorOf ?? id` (ADR 0022). Differs from {@link id} only on a mirror's own
+   * row; everything inside a mirrored subtree is real nodes (content === id).
+   */
+  contentId: string
+  /**
+   * Unique render address: the React key, and (Stage 2) the refs/focus/flash/drag
+   * key. A bare `id` until the walk crosses a mirror, then a compound path key —
+   * because a source's descendant appears under every instance, so its bare id is
+   * no longer unique. Equal to `id` for every mirror-free row, so the 99% outline
+   * keeps today's exact identity (ADR 0022 "don't regress").
+   */
+  key: string
   depth: number
   ancestorCompleted: boolean
+  /** This row IS a mirror (its own `mirrorOf` is set). */
+  isMirror: boolean
+  /**
+   * A mirror whose source is already an expanded ancestor on this path: rendered
+   * as a non-expandable capped row so the walk can't recurse forever (the cycle
+   * net for a loop formed after creation — ADR 0022).
+   */
+  capped: boolean
+  /** A mirror whose `mirrorOf` resolves to no node (sync race / bug): rendered as
+   *  a "source not found" leaf, never expanded. */
+  broken: boolean
 }
+
+/** Path-key separator: a control char that can't appear in a node id, so a joined
+ *  path can't collide with another path or a bare id. */
+const PATH_SEP = String.fromCharCode(1)
 
 /**
  * The visible (non-collapsed, non-hidden) descendants of `rootId` in display
@@ -32,6 +66,13 @@ export interface VisibleRow {
  * recursive render's per-node filter. Omitted by the caret walk (nav doesn't
  * prune to the filter), so render and nav share one builder, parameterized.
  *
+ * `mirrorsEnabled` (ADR 0022) turns on mirror resolution: a node with `mirrorOf`
+ * windows its source's content + children, rows gain a content id + a path-based
+ * key, and cycles cap / broken sources render a leaf. Default OFF, and when off
+ * every branch collapses back to the original mirror-free walk (no resolution, no
+ * path keys, no per-level allocation) -- the "don't regress" rule. The caret walk
+ * omits it for now (mirror caret nav is Stage 2).
+ *
  * Pure; no DOM, no React.
  */
 export function buildVisibleRows(
@@ -39,26 +80,107 @@ export function buildVisibleRows(
   rootId: string | null,
   isHidden: (n: Node) => boolean,
   filter?: TagFilter | null,
+  mirrorsEnabled = false,
 ): VisibleRow[] {
   const out: VisibleRow[] = []
   const walk = (
-    parentId: string | null,
+    // The node whose children we iterate. For a normal parent this is its own id;
+    // for a mirror it is the SOURCE id (so a mirror windows the source's subtree).
+    contentParentId: string | null,
     depth: number,
     ancestorCompleted: boolean,
+    // The instance-id chain of ancestors below the root. Only consulted (and only
+    // grown) once a mirror has been crossed, so it stays `[]` in the mirror-free
+    // path.
+    path: string[],
+    // Has the walk descended through a mirror to reach here? Once true, rows take
+    // a compound path key (their bare id is duplicated across instances).
+    crossed: boolean,
+    // Content ids already expanded on this path (ancestor sources). A mirror whose
+    // source is in here would loop, so it caps. Only tracked under the flag.
+    expandedContent: ReadonlySet<string>,
   ) => {
-    for (const child of childrenOf(index, parentId)) {
-      if (isHidden(child)) continue
-      if (filter && !filter.visibleIds.has(child.id)) continue
-      out.push({ id: child.id, depth, ancestorCompleted })
-      // Faded children inherit the fade; filter-mode descends regardless of
-      // collapse so a deep match is still reached.
-      const childFade = ancestorCompleted || child.completed
-      if (filter || !child.collapsed) walk(child.id, depth + 1, childFade)
+    for (const child of childrenOf(index, contentParentId)) {
+      const mirrored = mirrorsEnabled && child.mirrorOf != null
+      const contentId = mirrored ? (child.mirrorOf as string) : child.id
+      const key = crossed ? path.concat(child.id).join(PATH_SEP) : child.id
+      // Content node: the mirror's source, or the node itself. A non-mirror reads
+      // its own row exactly as before (content === child).
+      const content = mirrored ? index.byId.get(contentId) : child
+
+      // Broken mirror: the source id resolves to nothing (sync race / bug). Render
+      // a "source not found" leaf, never recurse, never throw.
+      if (mirrored && !content) {
+        out.push({
+          id: child.id,
+          contentId,
+          key,
+          depth,
+          ancestorCompleted,
+          isMirror: true,
+          capped: false,
+          broken: true,
+        })
+        continue
+      }
+      // content is defined here (non-mirror → child; mirror → resolved source).
+      const c = content as Node
+      // Visibility prunes read CONTENT (a mirror of a completed task hides under
+      // hide-completed; a tag filter matches the source's text). Identical to the
+      // old `isHidden(child)` / `filter.has(child.id)` when content === child.
+      if (isHidden(c)) continue
+      if (filter && !filter.visibleIds.has(contentId)) continue
+
+      // Cycle net: this mirror's source is already an expanded ancestor. Cap it
+      // (non-expandable; the UI shows a badge + jump-to-source) instead of looping.
+      if (mirrored && expandedContent.has(contentId)) {
+        out.push({
+          id: child.id,
+          contentId,
+          key,
+          depth,
+          ancestorCompleted,
+          isMirror: true,
+          capped: true,
+          broken: false,
+        })
+        continue
+      }
+
+      out.push({
+        id: child.id,
+        contentId,
+        key,
+        depth,
+        ancestorCompleted,
+        isMirror: mirrored,
+        capped: false,
+        broken: false,
+      })
+
+      // Faded children inherit the fade (from CONTENT's completed); filter-mode
+      // descends regardless of collapse so a deep match is still reached. Collapse
+      // is LOCAL -- read from the instance node (`child`), not the content.
+      const childFade = ancestorCompleted || c.completed
+      if (filter || !child.collapsed) {
+        walk(
+          contentId,
+          depth + 1,
+          childFade,
+          mirrorsEnabled ? path.concat(child.id) : path,
+          crossed || mirrored,
+          mirrorsEnabled ? new Set(expandedContent).add(contentId) : expandedContent,
+        )
+      }
     }
   }
-  walk(rootId, 0, false)
+  walk(rootId, 0, false, [], false, mirrorsEnabled && rootId ? new Set([rootId]) : EMPTY_EXPANDED)
   return out
 }
+
+/** Shared empty set for the mirror-free recursion (never mutated — the walk only
+ *  ever copies it via `new Set(...)` under the flag). */
+const EMPTY_EXPANDED: ReadonlySet<string> = new Set<string>()
 
 /**
  * The id immediately before/after `id` in visible display order within the zoom
