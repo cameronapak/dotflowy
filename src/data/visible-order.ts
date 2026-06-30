@@ -233,24 +233,32 @@ export function buildVisibleRows(
 const EMPTY_EXPANDED: ReadonlySet<string> = new Set<string>()
 
 /**
- * The id immediately before/after `id` in visible display order within the zoom
- * root, or null if none. Used for caret motion across bullets and for landing
- * the caret above/below a node multi-selection.
+ * The row KEY immediately before/after `key` in visible display order within the
+ * zoom root, or null if none. Used for caret motion across bullets and for
+ * landing the caret above/below a node multi-selection. Takes and returns row
+ * keys (the render address), so it crosses mirror boundaries correctly — a
+ * windowed source descendant has a path key, not a bare id (ADR 0022). For a
+ * mirror-free row key === id, so this is unchanged from before.
+ *
+ * `mirrorsEnabled` MUST match how the editor renders (callers pass
+ * `isMirrorsEnabled()`): the neighbor sequence has to be the rendered sequence,
+ * or a mirror elsewhere in the view shifts the rows and the neighbor is wrong.
  *
  * The root is prepended so ArrowUp from the first child lands on the title (the
- * root registers a contentEditable span under its own id). Filter is not applied
- * here -- caret nav walks the unfiltered visible tree, unchanged from before.
+ * root registers a contentEditable span under its own id, which is its key).
+ * Filter is not applied here -- caret nav walks the unfiltered visible tree.
  */
 export function findVisibleNeighbor(
   index: TreeIndex,
   rootId: string | null,
-  id: string,
+  key: string,
   direction: 'up' | 'down',
   isHidden: (n: Node) => boolean,
+  mirrorsEnabled = false,
 ): string | null {
-  const rows = buildVisibleRows(index, rootId, isHidden)
-  const seq = rootId ? [rootId, ...rows.map((r) => r.id)] : rows.map((r) => r.id)
-  const i = seq.indexOf(id)
+  const rows = buildVisibleRows(index, rootId, isHidden, null, mirrorsEnabled)
+  const seq = rootId ? [rootId, ...rows.map((r) => r.key)] : rows.map((r) => r.key)
+  const i = seq.indexOf(key)
   if (i === -1) return null
   const neighbor = direction === 'up' ? seq[i - 1] : seq[i + 1]
   return neighbor ?? null

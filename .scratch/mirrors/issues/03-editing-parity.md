@@ -1,6 +1,6 @@
 # 03 — Full editing parity inside mirrors (the hard part)
 
-Status: in progress — 2a DONE; 2b–2e remain (branch `feat/mirror-of-plumbing`).
+Status: in progress — 2a, 2b DONE; 2c–2e remain (branch `feat/mirror-of-plumbing`).
 Each slice is its own verified commit, mirroring Stage 1's 1a–1d discipline.
 
 Stage 2 of [PRD](../PRD.md) / [ADR 0022](../../../docs/adr/0022-node-mirrors.md). The A1 gold-plate and the
@@ -50,9 +50,17 @@ All in `src/components/`. Each is correct today only because no id repeats; each
   (key===id off-flag / outside a mirror); composing the focus key from the active prefix inside a mirror is
   2c. **Gate met:** 163 unit pass; full e2e green (only the pre-existing daily-notes nav flake, passes
   isolated); every focus-sensitive spec (enter-split, move-flash, mirrors) green; flag-off parity unchanged.
-- **2b — caret nav across boundaries.** `findVisibleNeighbor` walks `row.key` addresses (accepts + returns
-  keys, `indexOf` on keys). Arrow Up/Down (`placeCaretAtColumn` neighbor walk, `OutlineEditor`) and
-  selection-mode's neighbor use keys. Mirror-free: keys===ids, unchanged.
+- **2b — caret nav across boundaries. DONE.** `findVisibleNeighbor` takes + returns row keys (`indexOf` on
+  keys) and gained a `mirrorsEnabled` param; every caller passes `isMirrorsEnabled()` so the neighbor sequence
+  is the rendered sequence (a mirror elsewhere in the view shifts the rows). `onMoveFocus` (Arrow Up/Down) now
+  starts the walk from `findFocusedId()` (the focused row's KEY) instead of the bare id the keymap passes —
+  load-bearing, because a mirror row's keymap hands over the *content* id, so only the focused span's key
+  addresses the right instance. `findFocusedId` is threaded from `useOutlineFocus` through `useNodeCommands`
+  (a stable callback, like `refs`). `onDeleteNode` (backspace focus-above) and selection-mode's 4 neighbor
+  walks pass the flag too. Mirror-free: keys===ids, unchanged. e2e (mirrors.spec.ts): ArrowDown from a mirror
+  enters its OWN windowed child (positioned below it), never the source's row; arrow nav walks between
+  windowed instances and back up to the mirror; bottom-of-view holds focus (no teleport). Full e2e green
+  (only the pre-existing daily-notes nav flake, passes isolated).
 - **2c — structural redirect at the mirror edge.** Inserting a child *directly under* a mirror row
   (`insertChildAtStart`, Enter-split's `insertSibling`, `indent`/`outdent` at the mirror's edge) targets the
   **source** (`contentId`), so the new node appears in every instance. Inside the subtree (real nodes) it

@@ -194,8 +194,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // flash pass, and undo/redo (which restore focus where the action left it).
   // The refs are returned so the command closures + drag can write them. See
   // useOutlineFocus.
-  const { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash } =
-    useOutlineFocus();
+  const {
+    refs,
+    registerRef,
+    pendingFocus,
+    pendingFocusAtStart,
+    pendingFlash,
+    findFocusedId,
+  } = useOutlineFocus();
 
   // The list container (recursive <ul> or virtualized <div>), so the drag
   // indicator knows how wide to draw and the window virtualizer can measure its
@@ -286,6 +292,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFocus,
     pendingFocusAtStart,
     pendingFlash,
+    findFocusedId,
     navigateZoom,
     startDrag,
     consumeClick,
@@ -619,6 +626,8 @@ interface OutlineFocus {
   /** Like pendingFocus, but pulses the row's background to mark a just-moved
    *  node (set after a drag/keyboard move). */
   pendingFlash: RefObject<string | null>;
+  /** The focused row's key, reverse-looked-up from the registry (stable). */
+  findFocusedId: () => string | null;
 }
 
 /**
@@ -695,7 +704,14 @@ function useOutlineFocus(): OutlineFocus {
     { preventDefault: true },
   );
 
-  return { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash };
+  return {
+    refs,
+    registerRef,
+    pendingFocus,
+    pendingFocusAtStart,
+    pendingFlash,
+    findFocusedId,
+  };
 }
 
 /**
@@ -922,6 +938,9 @@ interface NodeCommandsArgs {
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
   pendingFlash: RefObject<string | null>;
+  /** Reverse-lookup of the focused row's key (stable). Caret nav walks from this
+   *  so it addresses the right instance inside a mirror (ADR 0022). */
+  findFocusedId: () => string | null;
   navigateZoom: (toRootId: string | null, pivot: string) => void;
   startDrag: ReturnType<typeof useDragReorder>["startDrag"];
   consumeClick: ReturnType<typeof useDragReorder>["consumeClick"];
@@ -937,6 +956,7 @@ function useNodeCommands({
   pendingFocus,
   pendingFocusAtStart,
   pendingFlash,
+  findFocusedId,
   navigateZoom,
   startDrag,
   consumeClick,
@@ -1060,9 +1080,10 @@ function useNodeCommands({
           const above = findVisibleNeighbor(
             getTreeIndex(),
             getViewRootId(),
-            id,
+            findFocusedId() ?? id,
             "up",
             getViewIsHidden(),
+            isMirrorsEnabled(),
           );
           const focusId = removeNode(getTreeIndex(), id);
           const target = above ?? focusId;
@@ -1102,12 +1123,19 @@ function useNodeCommands({
       },
 
       onMoveFocus: (id, direction, x) => {
+        // Walk from the FOCUSED row's key, not the bare id the keymap passes:
+        // inside a mirror a node id is ambiguous (it renders under every
+        // instance), so only the focused span's key addresses the right row. For
+        // a mirror-free row findFocusedId() === id, so this is unchanged. Fall
+        // back to the passed id when focus is somehow outside the registry.
+        const from = findFocusedId() ?? id;
         const target = findVisibleNeighbor(
           getTreeIndex(),
           getViewRootId(),
-          id,
+          from,
           direction,
           getViewIsHidden(),
+          isMirrorsEnabled(),
         );
         if (!target) return;
         const el = refs.get(target);

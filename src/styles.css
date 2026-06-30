@@ -375,15 +375,16 @@ h2 > span.protected-lock {
   box-shadow: inset 3px 0 0 0 transparent;
   transition: box-shadow 0.12s ease;
 }
-.outline-node[data-mirror="source"]:hover > .outline-row,
+/*.outline-node[data-mirror="source"]:hover > .outline-row,*/
 .outline-node[data-mirror="source"]:focus-within > .outline-row {
-  box-shadow: inset 3px 0 0 0 var(--mirror-source);
+  /*box-shadow: inset 3px 0 0 0 var(--mirror-source);*/
+  outline: 2px solid var(--mirror-source);
 }
-.outline-node[data-mirror="instance"]:hover > .outline-row,
+/*.outline-node[data-mirror="instance"]:hover > .outline-row,*/
 .outline-node[data-mirror="instance"]:focus-within > .outline-row,
-.outline-node[data-mirror="capped"]:hover > .outline-row,
+/*.outline-node[data-mirror="capped"]:hover > .outline-row,*/
 .outline-node[data-mirror="capped"]:focus-within > .outline-row {
-  box-shadow: inset 3px 0 0 0 var(--mirror-instance);
+  outline: 2px solid var(--mirror-instance);
 }
 
 /*

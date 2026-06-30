@@ -137,9 +137,24 @@ function makeSelectionOps({
     // protected one); `below` = the row after the last deleted node's subtree.
     const firstDel = deletable[0]!;
     const lastDel = deletable[deletable.length - 1]!;
-    const above = findVisibleNeighbor(index, rootId, firstDel, "up", isHidden);
+    const mirrorsOn = isMirrorsEnabled();
+    const above = findVisibleNeighbor(
+      index,
+      rootId,
+      firstDel,
+      "up",
+      isHidden,
+      mirrorsOn,
+    );
     const bottom = lastVisibleDescendant(index, lastDel, isHidden);
-    const below = findVisibleNeighbor(index, rootId, bottom, "down", isHidden);
+    const below = findVisibleNeighbor(
+      index,
+      rootId,
+      bottom,
+      "down",
+      isHidden,
+      mirrorsOn,
+    );
     runStructural(() => {
       capture(getTreeIndex(), deletable[0]!);
       removeManyNodes(deletable);
@@ -206,8 +221,14 @@ function makeSelectionOps({
     const index = getTreeIndex();
     const top = state.rootIds[0]!;
     const target =
-      findVisibleNeighbor(index, getViewRootId(), top, "up", getViewIsHidden()) ??
-      top;
+      findVisibleNeighbor(
+        index,
+        getViewRootId(),
+        top,
+        "up",
+        getViewIsHidden(),
+        isMirrorsEnabled(),
+      ) ?? top;
     clearSelection();
     focusNode(target);
   };
@@ -222,8 +243,14 @@ function makeSelectionOps({
     const lastRoot = state.rootIds[state.rootIds.length - 1]!;
     const bottom = lastVisibleDescendant(index, lastRoot, isHidden);
     const target =
-      findVisibleNeighbor(index, getViewRootId(), bottom, "down", isHidden) ??
-      bottom;
+      findVisibleNeighbor(
+        index,
+        getViewRootId(),
+        bottom,
+        "down",
+        isHidden,
+        isMirrorsEnabled(),
+      ) ?? bottom;
     clearSelection();
     focusNode(target);
   };

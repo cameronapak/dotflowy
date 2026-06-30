@@ -312,3 +312,62 @@ test.describe("node mirrors -- chrome (ADR 0022)", () => {
     );
   });
 });
+
+// Slice 2b: caret nav across the mirror boundary. Arrow Up/Down walks ROW KEYS
+// (visible-order's path address), so pressing Down from a mirror enters the
+// mirror's OWN windowed copy of the source's children -- never the source's real
+// row elsewhere in the view. Same MIRROR_TREE (A + a1/a2; P > M -> A); visible
+// order is A, a1, a2, P, M, then M's windowed a1, a2.
+test.describe("node mirrors -- caret nav (ADR 0022)", () => {
+  // Both copies of a source child share data-node-id AND data-parent-id (they are
+  // the same instance node, rendered at two paths), so they're indistinguishable
+  // by attribute. Document order IS the flat visible order, so nth(0) is the real
+  // row under the source and nth(1) is the windowed copy under the mirror.
+  const a1Copies = (page: Page) =>
+    page.locator('li[data-node-id="a1"] > .outline-row > .node-text');
+  const a2Copies = (page: Page) =>
+    page.locator('li[data-node-id="a2"] > .outline-row > .node-text');
+
+  test("ArrowDown from a mirror enters its windowed child, not the source's row", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+    await expect(a1Copies(page)).toHaveCount(2);
+
+    await text(page, "M").click();
+    await expect(text(page, "M")).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+
+    // Focus crossed into the mirror's OWN a1 (the row just below M), not the
+    // source's real a1 (which sits far above, under A).
+    await expect(a1Copies(page).nth(1)).toBeFocused();
+    await expect(a1Copies(page).nth(0)).not.toBeFocused();
+    // Decisive anti-teleport check: the focused row sits BELOW M (the windowed
+    // child), not above it where the source's real a1 lives.
+    const mBox = await text(page, "M").boundingBox();
+    const focusedBox = await page.locator(":focus").boundingBox();
+    expect(focusedBox!.y).toBeGreaterThan(mBox!.y);
+  });
+
+  test("arrow nav walks between windowed instances and back to the mirror", async ({
+    page,
+  }) => {
+    await load(page, MIRROR_TREE, true);
+
+    await text(page, "M").click();
+    await page.keyboard.press("ArrowDown"); // M -> windowed a1
+    await expect(a1Copies(page).nth(1)).toBeFocused();
+    await page.keyboard.press("ArrowDown"); // -> windowed a2
+    await expect(a2Copies(page).nth(1)).toBeFocused();
+
+    // a2 is the last visible row: Down holds focus, never teleports to the source.
+    await page.keyboard.press("ArrowDown");
+    await expect(a2Copies(page).nth(1)).toBeFocused();
+
+    // Back up: windowed a2 -> windowed a1 -> M.
+    await page.keyboard.press("ArrowUp");
+    await expect(a1Copies(page).nth(1)).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(text(page, "M")).toBeFocused();
+  });
+});
