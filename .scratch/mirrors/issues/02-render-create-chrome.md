@@ -9,14 +9,19 @@ Sliced for safe landing (each slice its own verified commit):
   capped/broken; behind `isMirrorsEnabled()` (default off) + a `mirrorsEnabled`
   param. Pure, 11 unit tests, **not yet wired into the UI** — `useVisibleRows`
   still calls it mirror-free, so the live app is byte-identical.
-- **1b — UI wiring + field split. NEXT (the regression-prone refactor).** Thread
-  the flag into `useVisibleRows`; split `OutlineRow` so content (text/isTask/
-  completed/children) reads + routes to `contentId` while collapse/position/zoom
-  stay on the instance (a thin `MirrorRow` wrapper over a shared body, so the
-  mirror-free row keeps its single `useNode` — no double-subscribe); zoom on a
-  mirror bullet navigates to the source; virtualizer keys by `row.key`; capped +
-  broken row components. Seeded-mirror e2e (text+completed sync, expand) + flag-off
-  parity. Caret/focus/drag rough edges acceptable here (Stage 2 owns parity).
+- **1b — UI wiring + field split. DONE** (branch `feat/mirror-of-plumbing`).
+  `useVisibleRows` threads `isMirrorsEnabled()`; `OutlineRow` dispatches
+  `isMirror ? MirrorRow : NormalRow` — the normal path keeps its single `useNode`
+  (no double-subscribe), `MirrorRow` subscribes to instance + content and feeds a
+  shared `RowChrome`. Content (text/isTask/completed/children + edits routed to
+  `content.id`) reads from the source; position/collapse/drag/selection/focus stay
+  on the instance; a mirror bullet zooms to the source. Virtualizer keys by
+  `row.key`. `MirrorMissingRow` renders a broken source as a leaf; a capped mirror
+  is non-expandable (`data-mirror="capped"`). e2e `e2e/mirrors.spec.ts` (6):
+  source/children windowing, live text sync both ways, completed pass-through,
+  local collapse, broken leaf, flag-off parity. Full suite 94/94 serial. Caret/
+  focus/drag inside a mirror are knowingly rough (refs/`data-node-id` collide on a
+  windowed source descendant) — Stage 2 owns path-based parity.
 - **1c — creation.** `/mirror` "Mirror to…" (Seam C) + daily "Mirror to Today" +
   selection `runMany`; create-time cycle block; flatten mirror-of-mirror; one
   `runStructural` batch.

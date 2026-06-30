@@ -363,7 +363,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
     scrollMargin,
-    getItemKey: (i) => rows[i]?.id ?? i,
+    // Key by the row's render ADDRESS, not its node id: inside a mirror a
+    // source's descendant appears under every instance, so its bare id is no
+    // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
+    // the 99% outline keeps today's identity and the virtualizer's measurement
+    // cache is unaffected.
+    getItemKey: (i) => rows[i]?.key ?? i,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
     // Without it the window virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
@@ -489,6 +494,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     <OutlineRow
                       key={vi.key}
                       nodeId={row.id}
+                      contentId={row.contentId}
+                      isMirror={row.isMirror}
+                      capped={row.capped}
+                      broken={row.broken}
                       depth={row.depth}
                       ancestorCompleted={row.ancestorCompleted}
                       commands={commands}

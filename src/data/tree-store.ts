@@ -11,6 +11,7 @@ import {
   type TreeIndex,
 } from './tree'
 import { buildVisibleRows, type VisibleRow } from './visible-order'
+import { isMirrorsEnabled } from './flags'
 import type { TagFilter } from './tags'
 
 /**
@@ -376,6 +377,11 @@ const EMPTY_ROWS: VisibleRow[] = []
  * rebuild -- correct, and not the 100k hot path). They must be referentially
  * stable across unrelated keystrokes (the caller memoizes them), or the cache
  * resets every render.
+ *
+ * Mirror resolution (ADR 0022) is gated on {@link isMirrorsEnabled}, read here
+ * rather than threaded as a dep: the flag is fixed for a session (set before the
+ * first render, like {@link isVirtualized}), so a flip is picked up on the next
+ * structural rebuild -- it never needs to invalidate the keystroke-hot cache.
  */
 export function useVisibleRows(
   rootId: string | null,
@@ -404,7 +410,7 @@ export function useVisibleRows(
     ) {
       return c.rows
     }
-    const rows = buildVisibleRows(getTreeIndex(), rootId, isHidden, filter)
+    const rows = buildVisibleRows(getTreeIndex(), rootId, isHidden, filter, isMirrorsEnabled())
     cache.current = { rev, rootId, isHidden, filter, rows }
     return rows
   }, [rootId, isHidden, filter])
