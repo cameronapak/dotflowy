@@ -27,13 +27,15 @@ import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
 import {
   getTreeIndex,
   useHasNodes,
+  useMirrorCount,
   useNode,
   useTrail,
   useTreeIndex,
   useVisibleChildIds,
   useVisibleRows,
 } from "../data/tree-store";
-import { isVirtualized } from "../data/flags";
+import { isMirrorsEnabled, isVirtualized } from "../data/flags";
+import { MirrorBadge } from "./mirror-chrome";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { OutlineRow } from "./OutlineRow";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
@@ -42,9 +44,16 @@ import {
   getViewRootId,
   useSyncViewState,
 } from "../data/view-state";
-import { childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { findVisibleNeighbor } from "../data/visible-order";
+import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "../data/tree";
+import {
+  buildVisibleRows,
+  findVisibleNeighbor,
+  focusKeyAfterEdit,
+  instanceIdForKey,
+} from "../data/visible-order";
+import { nodesCollection } from "../data/collection";
 import { clearSelection } from "../data/selection-state";
+import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
@@ -84,11 +93,11 @@ import {
   useIsProtected,
   useViewFilter,
 } from "../plugins/registry";
-import type { PluginContext, ViewContext } from "../plugins/types";
+import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { healProtectedText } from "./protected-text";
-import { guardProtected, ProtectedLock } from "./protection";
+import { guardMirrorSourceDelete, guardProtected, ProtectedLock } from "./protection";
 import { Header } from "./Header";
 import { Subheader } from "./Subheader";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
@@ -192,8 +201,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // flash pass, and undo/redo (which restore focus where the action left it).
   // The refs are returned so the command closures + drag can write them. See
   // useOutlineFocus.
-  const { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash } =
-    useOutlineFocus();
+  const {
+    refs,
+    registerRef,
+    pendingFocus,
+    pendingFocusAtStart,
+    pendingFlash,
+    findFocusedId,
+  } = useOutlineFocus();
 
   // The list container (recursive <ul> or virtualized <div>), so the drag
   // indicator knows how wide to draw and the window virtualizer can measure its
@@ -254,19 +269,33 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     getIndex: getTreeIndex,
     getRootId: getViewRootId,
     getIsHidden: getViewIsHidden,
-    getRowEl: (id) =>
-      (refs.get(id)?.closest(".outline-row") as HTMLElement | null) ??
+    getRowEl: (key) =>
+      (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ??
       null,
     getListEl: () => listRef.current,
-    onMove: (id, newParentId, afterSiblingId) =>
+    onMove: (grabbedKey, newParentInstanceId, afterSiblingId) =>
       runStructural(() => {
         const index = getTreeIndex();
-        capture(index, id);
-        const moved = moveNode(index, id, newParentId, afterSiblingId);
+        const instanceId = instanceIdForKey(grabbedKey);
+        // Field split (ADR 0022): dropping under a mirror reparents to its
+        // SOURCE, so the moved node windows into every instance. The position
+        // (the node itself + its predecessor) stays the instance. Off the flag
+        // newParentInstanceId is already a real node, so this is a no-op.
+        const newParentId =
+          isMirrorsEnabled() && newParentInstanceId
+            ? (index.byId.get(newParentInstanceId)?.mirrorOf ??
+              newParentInstanceId)
+            : newParentInstanceId;
+        capture(index, instanceId);
+        const moved = moveNode(index, instanceId, newParentId, afterSiblingId);
         if (moved) {
-          pendingFocus.current = id;
+          // Land focus + flash in the instance that was dragged (re-derived from
+          // the post-move render walk), not the source's far copy. Bare id off
+          // the flag.
+          const key = focusKeyFor(instanceId, grabbedKey);
+          pendingFocus.current = key;
           // Tint the row it landed on so the eye can find what just moved.
-          pendingFlash.current = id;
+          pendingFlash.current = key;
         } else drop();
       }),
   });
@@ -284,6 +313,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFocus,
     pendingFocusAtStart,
     pendingFlash,
+    findFocusedId,
     navigateZoom,
     startDrag,
     consumeClick,
@@ -339,6 +369,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // recursive path is the rollback/parity fallback.
   const virtualized = isVirtualized();
   const rows = useVisibleRows(rootId, isHidden, filter);
+  // Mirror `rows` into the selection-fill module (2e-2) so each row's own
+  // `useSelectionFill` read covers its visible descendants, not just a selected
+  // root -- the flat list has no DOM nesting for a root's tint to paint behind
+  // its children. See selection-fill.ts.
+  useSyncSelectionFillRows(rows);
   // scrollMargin = the list container's distance from the document top (header +
   // title above it). Measured per zoom view; the editor remounts on zoom (route
   // key), so a one-shot mount measure is current. listRef is set in the branch
@@ -363,7 +398,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
     scrollMargin,
-    getItemKey: (i) => rows[i]?.id ?? i,
+    // Key by the row's render ADDRESS, not its node id: inside a mirror a
+    // source's descendant appears under every instance, so its bare id is no
+    // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
+    // the 99% outline keeps today's identity and the virtualizer's measurement
+    // cache is unaffected.
+    getItemKey: (i) => rows[i]?.key ?? i,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
     // Without it the window virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
@@ -373,11 +413,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         ? { width: window.innerWidth, height: window.innerHeight }
         : undefined,
   });
-  // id -> flat index, for virtual-nav's off-screen scroll. Rebuilt only when the
-  // flat list changes identity (structure), not on keystrokes.
+  // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
+  // render ADDRESS (row.key), not the bare id: a source descendant appears under
+  // every instance, so scrollRowIntoView/virtualRowRect must resolve the exact
+  // row (ADR 0022). key === id for every mirror-free row, so the lookup is
+  // unchanged for the 99% outline. Rebuilt only when the flat list changes
+  // identity (structure), not on keystrokes.
   const rowIndex = useMemo(() => {
     const m = new Map<string, number>();
-    rows.forEach((r, i) => m.set(r.id, i));
+    rows.forEach((r, i) => m.set(r.key, i));
     return m;
   }, [rows]);
   const rowIndexRef = useRef(rowIndex);
@@ -489,6 +533,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     <OutlineRow
                       key={vi.key}
                       nodeId={row.id}
+                      rowKey={row.key}
+                      contentId={row.contentId}
+                      isMirror={row.isMirror}
+                      capped={row.capped}
+                      broken={row.broken}
                       depth={row.depth}
                       ancestorCompleted={row.ancestorCompleted}
                       commands={commands}
@@ -588,11 +637,14 @@ function useBootstrapOutline() {
 }
 
 interface OutlineFocus {
-  /** id -> contentEditable span. The zoomed title registers under rootId too,
-   *  so focus logic treats titles and list items uniformly. */
+  /** row key -> contentEditable span. Keyed by the render ADDRESS (row.key), not
+   *  the bare id, so a source descendant windowed under two mirrors keeps two
+   *  distinct spans (ADR 0022); key === id for every mirror-free row and for the
+   *  recursive path, so titles and list items still register uniformly (the
+   *  zoomed title registers under rootId, which is its own key). */
   refs: Map<string, HTMLSpanElement | null>;
-  registerRef: (id: string, el: HTMLSpanElement | null) => void;
-  /** The node to focus after the next render (most-recently inserted/moved). */
+  registerRef: (key: string, el: HTMLSpanElement | null) => void;
+  /** The row key to focus after the next render (most-recently inserted/moved). */
   pendingFocus: RefObject<string | null>;
   /** When an Enter-split moved text into the new bullet, land the caret at its
    *  START, not its end (every other pending-focus wants the end). */
@@ -600,6 +652,8 @@ interface OutlineFocus {
   /** Like pendingFocus, but pulses the row's background to mark a just-moved
    *  node (set after a drag/keyboard move). */
   pendingFlash: RefObject<string | null>;
+  /** The focused row's key, reverse-looked-up from the registry (stable). */
+  findFocusedId: () => string | null;
 }
 
 /**
@@ -637,12 +691,15 @@ function useOutlineFocus(): OutlineFocus {
   // the pass subscribes to the whole tree itself, in a null component that's
   // cheap to re-render per change.
 
-  // The currently-focused bullet id, by reverse-looking-up the registry (covers
-  // list items and the zoomed title). Null when focus is outside the outline.
+  // The currently-focused bullet's row KEY, by reverse-looking-up the registry
+  // (covers list items and the zoomed title). The registry is keyed by row.key,
+  // so this returns the focused row's address -- equal to the node id for every
+  // mirror-free row, and the path address for a row inside a mirror (ADR 0022).
+  // Null when focus is outside the outline.
   const findFocusedId = useCallback((): string | null => {
     const active = document.activeElement;
-    for (const [id, el] of refs) {
-      if (el === active) return id;
+    for (const [key, el] of refs) {
+      if (el === active) return key;
     }
     return null;
   }, [refs]);
@@ -673,7 +730,14 @@ function useOutlineFocus(): OutlineFocus {
     { preventDefault: true },
   );
 
-  return { refs, registerRef, pendingFocus, pendingFocusAtStart, pendingFlash };
+  return {
+    refs,
+    registerRef,
+    pendingFocus,
+    pendingFocusAtStart,
+    pendingFlash,
+    findFocusedId,
+  };
 }
 
 /**
@@ -895,11 +959,35 @@ function useZoomNavigation({
   return { navigateZoom, pivotId };
 }
 
+/**
+ * The render key to focus after a structural edit, re-derived from the LIVE post-
+ * edit render walk so the focus key can never drift from what's on screen (ADR
+ * 0022, Stage 2c). `instanceId` is the new/moved node; `activeKey` is the row the
+ * user was editing — we return the matching instance's key under the same mirror
+ * anchor, so a child added to a source lands under the mirror you were in (not the
+ * source's far-away copy).
+ *
+ * Off the flag (the 99% path) a node id is unique, so we return it directly and
+ * skip the rebuild entirely. With the flag on we build a fresh index from
+ * `nodesCollection.toArray` — synchronously current after `runStructural`, the
+ * same technique the structural invariant check uses — rather than
+ * `getTreeIndex()`, whose change-notify can lag the optimistic apply.
+ */
+function focusKeyFor(instanceId: string, activeKey: string): string {
+  if (!isMirrorsEnabled()) return instanceId;
+  const index = buildTreeIndex(nodesCollection.toArray as Node[]);
+  const rows = buildVisibleRows(index, getViewRootId(), getViewIsHidden(), null, true);
+  return focusKeyAfterEdit(rows, instanceId, activeKey) ?? instanceId;
+}
+
 interface NodeCommandsArgs {
   refs: Map<string, HTMLSpanElement | null>;
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
   pendingFlash: RefObject<string | null>;
+  /** Reverse-lookup of the focused row's key (stable). Caret nav walks from this
+   *  so it addresses the right instance inside a mirror (ADR 0022). */
+  findFocusedId: () => string | null;
   navigateZoom: (toRootId: string | null, pivot: string) => void;
   startDrag: ReturnType<typeof useDragReorder>["startDrag"];
   consumeClick: ReturnType<typeof useDragReorder>["consumeClick"];
@@ -915,6 +1003,7 @@ function useNodeCommands({
   pendingFocus,
   pendingFocusAtStart,
   pendingFlash,
+  findFocusedId,
   navigateZoom,
   startDrag,
   consumeClick,
@@ -931,118 +1020,203 @@ function useNodeCommands({
         setText(id, text);
       },
 
-      onEnter: (id, caretOffset) =>
-        runStructural(() => {
-          const node = getTreeIndex().byId.get(id);
-          if (!node) return;
-          capture(getTreeIndex(), id);
-          const offset = Math.max(0, Math.min(caretOffset, node.text.length));
-          const before = node.text.slice(0, offset);
-          const after = node.text.slice(offset);
-          const caretAtEnd = after.length === 0;
+      onEnter: (id, caretOffset) => {
+        // The new node's id + the row the user was editing, returned from the
+        // batch so the focus key can be re-derived from the post-edit render walk
+        // AFTER it commits (focusKeyFor reads the settled collection).
+        const plan = runStructural(():
+          | { instanceId: string; activeKey: string; atStart: boolean }
+          | null => {
+          // Address the row by its render KEY, not the bare id the keymap passes:
+          // inside a mirror the keymap hands over the CONTENT id, so only the
+          // focused span's key resolves the right instance (ADR 0022, 2b/2c). The
+          // field split (ADR 0022): position (sibling/parent) is LOCAL to the
+          // instance; text + children are the SOURCE's content.
+          const mirrorsOn = isMirrorsEnabled();
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
+          const idx = getTreeIndex();
+          const instance = idx.byId.get(instanceId);
+          if (!instance) return null;
+          const contentId = mirrorsOn
+            ? (instance.mirrorOf ?? instanceId)
+            : instanceId;
+          const content = idx.byId.get(contentId);
+          if (!content) return null;
+          const isMirrorRow = contentId !== instanceId;
+          capture(idx, activeKey);
+          const offset = Math.max(0, Math.min(caretOffset, content.text.length));
+          const before = content.text.slice(0, offset);
+          const after = content.text.slice(offset);
+          // On a mirror's OWN row, Enter never moves text off the source -- the
+          // text is the source's content, so a split would either desync every
+          // instance or strand the tail on a local node. Treat it as the empty-
+          // tail case: add a node, leave the source text whole (ADR 0022, 2c).
+          const caretAtEnd = isMirrorRow || after.length === 0;
           // Pressing Enter at the end of an open (expanded, has-children) bullet
           // adds a child at the top of its list rather than a sibling -- you're
-          // diving into the thing you just finished naming. Anywhere else keeps
-          // the plain new-sibling.
+          // diving into the thing you just finished naming. "Open" reads the
+          // CONTENT's children but the INSTANCE's collapse (collapse is local).
           const isOpen =
-            !node.collapsed && childrenOf(getTreeIndex(), id).length > 0;
+            !instance.collapsed && childrenOf(idx, contentId).length > 0;
+          let newId: string;
+          let atStart = false;
           if (caretAtEnd && isOpen) {
-            pendingFocus.current = insertChildAtStart(
-              getTreeIndex(),
-              id,
-              node.isTask,
+            // Dive in: a child of the CONTENT (source), so the new node windows
+            // into every instance, not just the one being edited.
+            newId = insertChildAtStart(idx, contentId, content.isTask);
+          } else {
+            // New sibling beside the INSTANCE (position is local to where the row
+            // sits). Off-flag / mirror-free, instance === content === id, so this
+            // is byte-identical to the old new-sibling path.
+            newId = insertSibling(
+              idx,
+              instance.parentId,
+              instanceId,
+              content.isTask,
+              isMirrorRow ? "" : after,
             );
-            return;
+            if (!caretAtEnd) {
+              setText(contentId, before);
+              // Caret sits before the moved text, where the split happened.
+              atStart = true;
+            }
           }
-          // Split at the caret: text left of it stays on this node, text to its
-          // right seeds the new sibling. (Caret at the end is just `after === ""`.)
-          const newId = insertSibling(
-            getTreeIndex(),
-            node.parentId,
-            id,
-            node.isTask,
-            after,
-          );
-          if (!caretAtEnd) {
-            setText(id, before);
-            // Caret sits before the moved text, where the split happened.
-            pendingFocusAtStart.current = true;
-          }
-          pendingFocus.current = newId;
-        }),
+          return { instanceId: newId, activeKey, atStart };
+        });
+        if (plan) {
+          pendingFocus.current = focusKeyFor(plan.instanceId, plan.activeKey);
+          pendingFocusAtStart.current = plan.atStart;
+        }
+      },
 
-      onIndent: (id) =>
-        runStructural(() => {
-          // Moving the node reparents it into a different <ul>, which remounts
-          // its contentEditable and drops focus. Re-focus it after the render.
-          capture(getTreeIndex(), id);
-          if (indent(getTreeIndex(), id)) {
-            pendingFocus.current = id;
-            pendingFlash.current = id;
-          } else drop(); // no move happened; discard the redundant undo point
-        }),
+      onIndent: (id) => {
+        const plan = runStructural((): { instanceId: string; activeKey: string } | null => {
+          // Indent reorders the INSTANCE (position is local, ADR 0022). Inside a
+          // mirror the windowed children are real source nodes, so this restructures
+          // the source and shows in every instance; on a mirror's own row it moves
+          // that mirror, not the source. Address by the focused row's key (the
+          // keymap passes the content id inside a mirror).
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
+          // Moving the node reparents it, which drops focus. Re-focus after render.
+          capture(getTreeIndex(), activeKey);
+          if (indent(getTreeIndex(), instanceId)) return { instanceId, activeKey };
+          drop(); // no move happened; discard the redundant undo point
+          return null;
+        });
+        if (plan) {
+          const key = focusKeyFor(plan.instanceId, plan.activeKey);
+          pendingFocus.current = key;
+          pendingFlash.current = key;
+        }
+      },
 
-      onOutdent: (id) =>
-        runStructural(() => {
+      onOutdent: (id) => {
+        const plan = runStructural((): { instanceId: string; activeKey: string } | null => {
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
           // Don't let a direct child of the zoom root outdent past it; that
           // would move it out of the visible subtree and look like it vanished.
-          const node = getTreeIndex().byId.get(id);
-          if (node && node.parentId === getViewRootId()) return;
+          const node = getTreeIndex().byId.get(instanceId);
+          if (node && node.parentId === getViewRootId()) return null;
           // Same remount-drops-focus issue as indent; re-focus on a real move.
-          capture(getTreeIndex(), id);
-          if (outdent(getTreeIndex(), id)) {
-            pendingFocus.current = id;
-            pendingFlash.current = id;
-          } else drop();
-        }),
+          capture(getTreeIndex(), activeKey);
+          if (outdent(getTreeIndex(), instanceId)) return { instanceId, activeKey };
+          drop();
+          return null;
+        });
+        if (plan) {
+          const key = focusKeyFor(plan.instanceId, plan.activeKey);
+          pendingFocus.current = key;
+          pendingFlash.current = key;
+        }
+      },
 
-      onMoveUp: (id) =>
-        runStructural(() => {
+      onMoveUp: (id) => {
+        const plan = runStructural((): { instanceId: string; activeKey: string } | null => {
+          // Move reorders the INSTANCE (position is local, ADR 0022); address by
+          // the focused key so a mirror moves itself, not its source.
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
           // Reorder/outdent remounts the contentEditable; re-focus on a real move.
-          capture(getTreeIndex(), id);
-          const moved = moveUp(getTreeIndex(), id, {
+          capture(getTreeIndex(), activeKey);
+          const moved = moveUp(getTreeIndex(), instanceId, {
             isVisible: (n) => !getViewIsHidden()(n),
             rootId: getViewRootId(),
           });
-          if (moved) {
-            pendingFocus.current = id;
-            pendingFlash.current = id;
-          } else drop();
-        }),
+          if (moved) return { instanceId, activeKey };
+          drop();
+          return null;
+        });
+        if (plan) {
+          const key = focusKeyFor(plan.instanceId, plan.activeKey);
+          pendingFocus.current = key;
+          pendingFlash.current = key;
+        }
+      },
 
-      onMoveDown: (id) =>
-        runStructural(() => {
-          capture(getTreeIndex(), id);
-          const moved = moveDown(getTreeIndex(), id, {
+      onMoveDown: (id) => {
+        const plan = runStructural((): { instanceId: string; activeKey: string } | null => {
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
+          capture(getTreeIndex(), activeKey);
+          const moved = moveDown(getTreeIndex(), instanceId, {
             isVisible: (n) => !getViewIsHidden()(n),
             rootId: getViewRootId(),
           });
-          if (moved) {
-            pendingFocus.current = id;
-            pendingFlash.current = id;
-          } else drop();
-        }),
+          if (moved) return { instanceId, activeKey };
+          drop();
+          return null;
+        });
+        if (plan) {
+          const key = focusKeyFor(plan.instanceId, plan.activeKey);
+          pendingFocus.current = key;
+          pendingFlash.current = key;
+        }
+      },
 
       onDeleteNode: (id) =>
         runStructural(() => {
+          // Delete the INSTANCE (position is local, ADR 0022): backspacing a
+          // mirror's own row removes that mirror, never its source (which would
+          // strand the other instances -- promote-on-source-delete is Stage 3).
+          // Address by the focused key; the keymap passes the content id in a
+          // mirror.
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
+          const idx = getTreeIndex();
+          const mirrorsOn = isMirrorsEnabled();
+          const contentId = mirrorsOn
+            ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
+            : instanceId;
           // A protected node can't be deleted. This is the single funnel every
           // delete path flows through, so the core enforces it here: shake the
           // row + toast why (guardProtected), and bail before removing anything.
-          // The node isn't removed, so its row still exists.
-          if (guardProtected(id, "delete", rowOf(id))) return;
-          capture(getTreeIndex(), id);
+          // Protection follows CONTENT (the source); the shake lands on the row
+          // the user acted on (the active key). The node isn't removed, so its
+          // row still exists.
+          if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
+          // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
+          // v1 blocks). A mirror's own row is never a source, so this no-ops
+          // there -- backspacing a mirror still works. Flag-gated: off-flag a
+          // mirrorOf node is just a normal node, so the guard never runs.
+          if (mirrorsOn && guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey)))
+            return;
+          capture(idx, activeKey);
           // Focus the row directly ABOVE the deleted one (Workflowy backspace
           // behavior), computed before the mutation so the neighbor still
           // exists. Fall back to removeNode's structural pick (next sibling /
           // parent) only when nothing is above -- the first visible row.
           const above = findVisibleNeighbor(
-            getTreeIndex(),
+            idx,
             getViewRootId(),
-            id,
+            activeKey,
             "up",
             getViewIsHidden(),
+            mirrorsOn,
           );
-          const focusId = removeNode(getTreeIndex(), id);
+          const focusId = removeNode(idx, instanceId);
           const target = above ?? focusId;
           if (target) pendingFocus.current = target;
           else drop(); // node didn't exist; nothing was deleted
@@ -1070,18 +1244,29 @@ function useNodeCommands({
       // Open the move picker; the dialog runs the mutation + navigation itself.
       onRequestMove: (id) => openMoveDialog(id),
 
+      // Same picker in mirror mode; a pick creates a live mirror under the
+      // chosen destination instead of reparenting (ADR 0022).
+      onRequestMirror: (id) => openMoveDialog(id, "mirror"),
+
       onToggleCollapsed: (id, collapsed) => {
         capture(getTreeIndex(), id);
         toggleCollapsed(id, collapsed);
       },
 
       onMoveFocus: (id, direction, x) => {
+        // Walk from the FOCUSED row's key, not the bare id the keymap passes:
+        // inside a mirror a node id is ambiguous (it renders under every
+        // instance), so only the focused span's key addresses the right row. For
+        // a mirror-free row findFocusedId() === id, so this is unchanged. Fall
+        // back to the passed id when focus is somehow outside the registry.
+        const from = findFocusedId() ?? id;
         const target = findVisibleNeighbor(
           getTreeIndex(),
           getViewRootId(),
-          id,
+          from,
           direction,
           getViewIsHidden(),
+          isMirrorsEnabled(),
         );
         if (!target) return;
         const el = refs.get(target);
@@ -1157,11 +1342,33 @@ function ZoomedTitle({
   // ADR 0015.
   const protectedNode = useIsProtected(node.id);
 
-  // Plugin slots for the zoomed title (Seam F): the same decorations a list
-  // bullet gets at `row:before-text` -- the daily date badge, the todos checkbox
-  // -- rendered before the text here too. Stable array (precomputed in the
-  // registry). Mirrors OutlineNode's order: slots, then the lock, then the text.
-  const beforeTextSlots = slotsAt("title:before-text");
+  // Mirror "appears in N places" badge on the zoomed title too (ADR 0022, slice
+  // 1d), so a mirrored node shows the chrome whether it's a list bullet or the
+  // page title. Session-fixed flag -> no reactive work when mirrors are off.
+  const mirrorsOn = isMirrorsEnabled();
+  const mirrorCount = useMirrorCount(node.id, mirrorsOn);
+
+  // Plugin slots for the zoomed title (Seam F) plus the two core decorations
+  // (protected lock, mirror badge), in ONE list -- the same composition as
+  // OutlineRow's `row:before-text`, so the two render paths can't drift (see
+  // AGENTS.md "a node renders in TWO paths"). Mirrors OutlineRow's order: slots,
+  // then the lock, then the badge.
+  const beforeTextSlots: SlotSpec[] = [
+    ...slotsAt("title:before-text"),
+    {
+      id: "core:protected-lock",
+      position: "title:before-text",
+      render: () => (protectedNode ? <ProtectedLock size={16} /> : null),
+    },
+    {
+      id: "core:mirror-badge",
+      position: "title:before-text",
+      render: () =>
+        mirrorsOn && mirrorCount > 0 ? (
+          <MirrorBadge sourceId={node.id} count={mirrorCount} />
+        ) : null,
+    },
+  ];
 
   useEffect(() => {
     const el = ref.current;
@@ -1194,7 +1401,6 @@ function ZoomedTitle({
       {beforeTextSlots.map((slot) => (
         <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
       ))}
-      {protectedNode && <ProtectedLock size={16} />}
       <span
         ref={(el) => {
           ref.current = el;

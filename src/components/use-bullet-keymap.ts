@@ -9,6 +9,14 @@ import type { NodeCommands } from "./OutlineNode";
 
 interface BulletKeymapArgs {
   node: Node;
+  // The INSTANCE id + its collapse state. Collapse is LOCAL to where the row
+  // sits (ADR 0022 field split), so Cmd+Up/Down toggle the INSTANCE, not the
+  // source. `node` is the CONTENT (slice 1b feeds a mirror row its source), so
+  // keying collapse off `node.id`/`node.collapsed` would expand/collapse the
+  // source instead -- exactly what the chevron (which uses `instance`) avoids.
+  // For a mirror-free row instanceId === node.id, so this is byte-identical.
+  instanceId: string;
+  instanceCollapsed: boolean;
   textRef: RefObject<HTMLSpanElement | null>;
   commands: NodeCommands;
   pluginCtx: () => PluginContext;
@@ -36,6 +44,8 @@ const EMPTY_KEYMAP: never[] = [];
 
 export function useBulletKeymap({
   node,
+  instanceId,
+  instanceCollapsed,
   textRef,
   commands,
   pluginCtx,
@@ -188,7 +198,11 @@ export function useBulletKeymap({
               if (!el || !atLineStart(el)) return;
               e.preventDefault();
               e.stopPropagation();
-              selectSingle(node.id);
+              // Select the INSTANCE, not the content (ADR 0022): selecting a
+              // mirror by its source id would make select+delete remove the
+              // source and orphan every instance. instanceId === node.id for a
+              // mirror-free row.
+              selectSingle(instanceId);
               el.blur();
               window.getSelection()?.removeAllRanges();
             },
@@ -204,7 +218,7 @@ export function useBulletKeymap({
               if (!el || !atLineEnd(el)) return;
               e.preventDefault();
               e.stopPropagation();
-              selectSingle(node.id);
+              selectSingle(instanceId); // the instance, not its source (see above)
               el.blur();
               window.getSelection()?.removeAllRanges();
             },
@@ -225,7 +239,7 @@ export function useBulletKeymap({
               if (!empty && !isAllTextSelected(el)) return; // rung 1: native select-all
               e.preventDefault();
               e.stopPropagation();
-              selectSingle(node.id);
+              selectSingle(instanceId); // the instance, not its source (see above)
               el.blur();
               window.getSelection()?.removeAllRanges();
             },
@@ -266,8 +280,10 @@ export function useBulletKeymap({
             // no-op on an already-open or childless bullet. See ADR 0007.
             hotkey: "Mod+ArrowDown",
             callback: () => {
-              if (hasChildren && node.collapsed)
-                commands.onToggleCollapsed(node.id, false);
+              // Toggle the INSTANCE (collapse is local, ADR 0022): on a mirror's
+              // own row this opens that mirror, leaving the source untouched.
+              if (hasChildren && instanceCollapsed)
+                commands.onToggleCollapsed(instanceId, false);
             },
           },
           {
@@ -275,8 +291,8 @@ export function useBulletKeymap({
             // Mirror of Mod+ArrowDown -- Up only ever closes; otherwise a no-op.
             hotkey: "Mod+ArrowUp",
             callback: () => {
-              if (hasChildren && !node.collapsed)
-                commands.onToggleCollapsed(node.id, true);
+              if (hasChildren && !instanceCollapsed)
+                commands.onToggleCollapsed(instanceId, true);
             },
           },
           {

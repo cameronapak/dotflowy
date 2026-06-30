@@ -20,6 +20,7 @@ interface NodeRow {
   completed: number
   collapsed: number
   bookmarkedAt: number | null
+  mirrorOf: string | null
   createdAt: number
   updatedAt: number
 }
@@ -45,6 +46,7 @@ const WRITABLE_COLUMNS = new Set([
   'completed',
   'collapsed',
   'bookmarkedAt',
+  'mirrorOf',
   'createdAt',
   'updatedAt',
 ])
@@ -91,6 +93,7 @@ function rowToNode(r: NodeRow): Node {
     completed: !!r.completed,
     collapsed: !!r.collapsed,
     bookmarkedAt: r.bookmarkedAt,
+    mirrorOf: r.mirrorOf,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }
@@ -135,6 +138,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           completed     INTEGER NOT NULL DEFAULT 0,
           collapsed     INTEGER NOT NULL DEFAULT 0,
           bookmarkedAt  INTEGER,
+          mirrorOf      TEXT,
           createdAt     INTEGER NOT NULL,
           updatedAt     INTEGER NOT NULL
         );
@@ -155,6 +159,16 @@ export class UserOutlineDO extends DurableObject<Env> {
           ops TEXT NOT NULL
         );
       `)
+      // Migrate already-deployed DOs (ADR 0022): a pre-mirror `nodes` table was
+      // created without `mirrorOf`, and `CREATE TABLE IF NOT EXISTS` above no-ops
+      // for it. Add the column once (NULL default), guarded by a column-existence
+      // check since SQLite has no `ADD COLUMN IF NOT EXISTS`. Fresh DOs already
+      // have it from the CREATE above, so this skips. Runs before any request is
+      // served (blockConcurrencyWhile), so getNodes never reads a missing column.
+      const hasMirrorOf = (this.sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{
+        name: string
+      }>).some((c) => c.name === 'mirrorOf')
+      if (!hasMirrorOf) this.sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`)
     })
   }
 
@@ -163,7 +177,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   getNodes(): Node[] {
     const rows = this.sql
       .exec(
-        'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes',
+        'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes',
       )
       .toArray() as unknown as NodeRow[]
     return rows.map(rowToNode)
@@ -178,12 +192,12 @@ export class UserOutlineDO extends DurableObject<Env> {
     const existed =
       this.sql.exec('SELECT 1 FROM nodes WHERE id = ?', n.id).toArray().length > 0
     this.sql.exec(
-      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
          isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
-         bookmarkedAt=excluded.bookmarkedAt, updatedAt=excluded.updatedAt`,
+         bookmarkedAt=excluded.bookmarkedAt, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt`,
       n.id,
       n.parentId,
       n.prevSiblingId,
@@ -192,6 +206,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       n.completed ? 1 : 0,
       n.collapsed ? 1 : 0,
       n.bookmarkedAt,
+      n.mirrorOf,
       n.createdAt,
       n.updatedAt,
     )
@@ -261,7 +276,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           // a remote client applies an unambiguous update regardless of rowUpdateMode.
           const row = this.sql
             .exec(
-              'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE id = ?',
+              'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes WHERE id = ?',
               u.id,
             )
             .toArray()[0] as unknown as NodeRow | undefined

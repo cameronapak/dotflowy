@@ -15,6 +15,7 @@ import {
 } from "@floating-ui/react-dom";
 import {
   ClipboardCopyIcon,
+  CopyPlusIcon,
   CornerUpRightIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -42,6 +43,8 @@ import {
   useSelectionRootIds,
 } from "../data/selection-state";
 import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { orphanedMirrorsBy } from "../data/tree";
+import { isMirrorsEnabled } from "../data/flags";
 import type { PluginContext } from "../plugins/types";
 import { rejectRow } from "./flash-node";
 import { placeCaretAtEnd } from "./caret-place";
@@ -73,6 +76,7 @@ export interface SelectionOps {
   copy: () => void;
   remove: () => void;
   move: () => void;
+  mirror: () => void;
   indent: () => void;
   outdent: () => void;
   caretAbove: () => void;
@@ -126,6 +130,19 @@ function makeSelectionOps({
       );
     }
     if (deletable.length === 0) return; // nothing removed; keep the selection
+    // Deleting a SOURCE orphans its live mirrors (Stage 3 promotes; v1 blocks).
+    // Check the whole deletable set at once, so selecting a source AND its
+    // mirror together still deletes cleanly (both leave, nothing is orphaned). If
+    // anything would be stranded, keep the selection and explain. Flag-gated:
+    // off-flag a mirrorOf node is just a normal node, so this never fires.
+    if (isMirrorsEnabled() && orphanedMirrorsBy(index, deletable).length > 0) {
+      for (const id of deletable) rejectRow(rowOf(id));
+      toast.error(
+        "A selected node is mirrored elsewhere -- delete its mirrors first.",
+        { id: "mirror-source-delete" },
+      );
+      return;
+    }
     const isHidden = getViewIsHidden();
     const rootId = getViewRootId();
     // Focus relative to the rows actually being DELETED, not the full selection:
@@ -134,9 +151,24 @@ function makeSelectionOps({
     // protected one); `below` = the row after the last deleted node's subtree.
     const firstDel = deletable[0]!;
     const lastDel = deletable[deletable.length - 1]!;
-    const above = findVisibleNeighbor(index, rootId, firstDel, "up", isHidden);
+    const mirrorsOn = isMirrorsEnabled();
+    const above = findVisibleNeighbor(
+      index,
+      rootId,
+      firstDel,
+      "up",
+      isHidden,
+      mirrorsOn,
+    );
     const bottom = lastVisibleDescendant(index, lastDel, isHidden);
-    const below = findVisibleNeighbor(index, rootId, bottom, "down", isHidden);
+    const below = findVisibleNeighbor(
+      index,
+      rootId,
+      bottom,
+      "down",
+      isHidden,
+      mirrorsOn,
+    );
     runStructural(() => {
       capture(getTreeIndex(), deletable[0]!);
       removeManyNodes(deletable);
@@ -151,6 +183,16 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     openMoveDialog([...ids]);
+    clearSelection();
+  };
+
+  // Mirror the whole run: the same picker in mirror mode creates a live mirror
+  // of each selected root under the destination (ADR 0022), as one batch. The
+  // dialog owns the ids now, so leave selection mode (mirrors the Move action).
+  const mirror = () => {
+    const ids = getSelectionRootIds();
+    if (ids.length === 0) return;
+    openMoveDialog([...ids], "mirror");
     clearSelection();
   };
 
@@ -193,8 +235,14 @@ function makeSelectionOps({
     const index = getTreeIndex();
     const top = state.rootIds[0]!;
     const target =
-      findVisibleNeighbor(index, getViewRootId(), top, "up", getViewIsHidden()) ??
-      top;
+      findVisibleNeighbor(
+        index,
+        getViewRootId(),
+        top,
+        "up",
+        getViewIsHidden(),
+        isMirrorsEnabled(),
+      ) ?? top;
     clearSelection();
     focusNode(target);
   };
@@ -209,8 +257,14 @@ function makeSelectionOps({
     const lastRoot = state.rootIds[state.rootIds.length - 1]!;
     const bottom = lastVisibleDescendant(index, lastRoot, isHidden);
     const target =
-      findVisibleNeighbor(index, getViewRootId(), bottom, "down", isHidden) ??
-      bottom;
+      findVisibleNeighbor(
+        index,
+        getViewRootId(),
+        bottom,
+        "down",
+        isHidden,
+        isMirrorsEnabled(),
+      ) ?? bottom;
     clearSelection();
     focusNode(target);
   };
@@ -224,7 +278,7 @@ function makeSelectionOps({
     focusNode(id);
   };
 
-  return { copy, remove, move, indent, outdent, caretAbove, caretBelow, exitToCaret };
+  return { copy, remove, move, mirror, indent, outdent, caretAbove, caretBelow, exitToCaret };
 }
 
 /**
@@ -463,6 +517,17 @@ function buildItems(
       run: ops.move,
     },
   ];
+  // Mirror sits next to Move, but only when the feature flag is on (ADR 0022) --
+  // a mirror-free build never offers it (matches the core `/mirror` slash gate).
+  if (isMirrorsEnabled()) {
+    core.push({
+      id: "sel-mirror",
+      label: "Mirror",
+      description: "Show live copies under another node",
+      icon: CopyPlusIcon,
+      run: ops.mirror,
+    });
+  }
   // Plugin commands that opted in (To-do, Send to Today), kept only when they
   // apply to at least one selected node (To-do hides when all are already tasks).
   const pluginItems: SelItem[] = selectionCommandSpecs

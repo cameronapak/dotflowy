@@ -11,6 +11,7 @@ import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { stripLinks } from "../data/links";
+import { isMirrorsEnabled } from "../data/flags";
 import {
   searchAliases,
   searchActions,
@@ -74,15 +75,19 @@ const BOOKMARKS_HEADING = (
 // One pass over the nodes (skip empties, project to the searchable shape), then
 // index. Module scope: pure, and a single iteration over potentially many nodes.
 function buildFuse(nodes: Node[]): Fuse<Searchable> {
+  // With mirrors on (ADR 0022) a mirror INSTANCE shares its source's content, so
+  // indexing it too would surface the same node twice -- dedup the search corpus
+  // to the source. Flag off, a `mirrorOf` node is an ordinary node and is kept.
+  const mirrorsOn = isMirrorsEnabled();
   const searchable: Searchable[] = [];
   for (const n of nodes) {
-    if (n.text.trim() !== "") {
-      searchable.push({
-        node: n,
-        text: stripLinks(n.text),
-        aliases: searchAliases(n),
-      });
-    }
+    if (n.text.trim() === "") continue;
+    if (mirrorsOn && n.mirrorOf != null) continue;
+    searchable.push({
+      node: n,
+      text: stripLinks(n.text),
+      aliases: searchAliases(n),
+    });
   }
   return new Fuse(searchable, FUSE_OPTIONS);
 }

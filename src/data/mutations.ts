@@ -7,6 +7,8 @@ import {
   createId,
   makeNode,
   now,
+  trueSourceOf,
+  wouldMirrorCycle,
 } from './tree'
 
 /**
@@ -120,6 +122,66 @@ export function appendChild(
 }
 
 /**
+ * Create a MIRROR of `sourceId` as the last child of `targetId` (or the last
+ * top-level node when targetId is null/Home) -- a node carrying `mirrorOf` ->
+ * the TRUE source (ADR 0022). Two invariants:
+ *
+ *  - **Flatten:** if `sourceId` is itself a mirror, the new node points at its
+ *    source (`trueSourceOf`), never at another mirror, so every instance shares
+ *    ONE canonical content node and there's no chain to resolve.
+ *  - **No cycle:** refuses (returns null) when the true source is the
+ *    destination or one of its ancestors -- expanding such a mirror would window
+ *    content that contains the mirror itself.
+ *
+ * The stored `text` snapshots the source so a mirror still reads sensibly with
+ * the feature flag OFF; with mirrors ON the field split reads the live source,
+ * so the snapshot is never shown. Returns the new node's id, or null when
+ * blocked / the source is gone. Wrap in `runStructural` (ADR 0009).
+ */
+export function mirrorNode(
+  index: TreeIndex,
+  sourceId: string,
+  targetId: string | null,
+): string | null {
+  if (!index.byId.has(sourceId)) return null
+  const trueSourceId = trueSourceOf(index, sourceId)
+  if (wouldMirrorCycle(index, trueSourceId, targetId)) return null
+
+  const siblings = childrenOf(index, targetId)
+  const after = siblings.length ? siblings[siblings.length - 1]!.id : null
+  const id = createId()
+  nodesCollection.insert(
+    makeNode({
+      id,
+      parentId: targetId,
+      prevSiblingId: after,
+      text: index.byId.get(trueSourceId)?.text ?? '',
+      mirrorOf: trueSourceId,
+    }),
+  )
+  return id
+}
+
+/**
+ * Mirror several sources under `targetId`, appended in order (node multi-
+ * selection's Mirror action + daily "Mirror to Today" -- ADR 0018). Rebuilds the
+ * index between inserts so each append reads the freshly grown sibling list;
+ * sources that would cycle (or are gone) are skipped. Returns the count actually
+ * mirrored. Wrap in `runStructural` (ADR 0009).
+ */
+export function mirrorManyNodes(
+  targetId: string | null,
+  ids: string[],
+): number {
+  let made = 0
+  for (const id of ids) {
+    const index = buildTreeIndex(nodesCollection.toArray)
+    if (mirrorNode(index, id, targetId)) made++
+  }
+  return made
+}
+
+/**
  * Indent: move `nodeId` to become the last child of its previous sibling.
  * No-op if it's already the first child of its parent.
  *
@@ -143,22 +205,28 @@ export function indent(index: TreeIndex, nodeId: string): boolean {
     ? oldSiblings[i + 1]!
     : null
 
+  // The node becomes the LAST child of newParent, so read newParent's current
+  // last child BEFORE moving it. The shared tree index is maintained IN PLACE
+  // (tree-store applyChanges), and an update can notify synchronously, so a read
+  // AFTER the move can already include the node itself -- it would then point its
+  // own prevSiblingId at itself (a self-referencing chain). node is a sibling of
+  // newParent here, never already its child, so the pre-move read excludes it.
+  const newSiblings = childrenOf(index, newParent.id)
+  const lastExisting = newSiblings.length > 0
+    ? newSiblings[newSiblings.length - 1]!
+    : null
+
   // Node becomes last child of newParent. If that parent was collapsed, the
   // node would be indented out of sight, so expand it to keep the node visible.
-  update(nodeId, { parentId: newParent.id, prevSiblingId: null })
+  update(nodeId, {
+    parentId: newParent.id,
+    prevSiblingId: lastExisting ? lastExisting.id : null,
+  })
   if (newParent.collapsed) update(newParent.id, { collapsed: false })
 
   // Old next sibling links back to node's old prev.
   if (oldNext) {
     update(oldNext.id, { prevSiblingId: node.prevSiblingId })
-  }
-
-  // Node is now the last child of newParent; repoint whatever was last.
-  const newSiblings = childrenOf(index, newParent.id)
-  // newSiblings is from the pre-mutation index, so it doesn't include node yet.
-  if (newSiblings.length > 0) {
-    const lastExisting = newSiblings[newSiblings.length - 1]!
-    update(nodeId, { prevSiblingId: lastExisting.id })
   }
 
   return true

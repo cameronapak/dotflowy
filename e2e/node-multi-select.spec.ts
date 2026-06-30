@@ -133,31 +133,38 @@ test.describe("Node multi-selection", () => {
     await load(page, CHAIN);
     await focus(page, "aaa");
 
-    // First press selects the focused node itself -- entering never climbs.
+    // First press selects the focused node itself -- entering never climbs. aaa
+    // is a leaf, so it's the only covered row.
     await page.keyboard.press("Shift+ArrowUp");
     await expect(li(page, "aaa")).toHaveAttribute("data-selected", "single");
 
-    // No upper sibling -> the selection moves UP to the parent (the child stays
-    // tinted as the parent's implied subtree, but only the root carries an edge).
+    // No upper sibling -> the selection moves UP to the parent. aa has a visible
+    // child (aaa), so the windowed list tints BOTH rows now (2e-2) -- the slab
+    // rounds at aa (top) and at aaa, its last visible descendant (bottom), not
+    // just at the selected root.
     await page.keyboard.press("Shift+ArrowUp");
-    await expect(li(page, "aa")).toHaveAttribute("data-selected", "single");
-    await expect(li(page, "aaa")).not.toHaveAttribute("data-selected", /.*/);
+    await expect(li(page, "aa")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "aaa")).toHaveAttribute("data-selected", "bottom");
 
-    // Climb again to the top-level grandparent.
+    // Climb again to the top-level grandparent: the whole chain is covered.
     await page.keyboard.press("Shift+ArrowUp");
-    await expect(li(page, "a")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "aa")).toHaveAttribute("data-selected", "middle");
+    await expect(li(page, "aaa")).toHaveAttribute("data-selected", "bottom");
 
     // At the top level there is no parent to climb to -> no-op.
     await page.keyboard.press("Shift+ArrowUp");
-    await expect(li(page, "a")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
 
     // Shift+Down dives back into the first visible child, one level per press.
     await page.keyboard.press("Shift+ArrowDown");
-    await expect(li(page, "aa")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "aa")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "aaa")).toHaveAttribute("data-selected", "bottom");
     await expect(li(page, "a")).not.toHaveAttribute("data-selected", /.*/);
 
     await page.keyboard.press("Shift+ArrowDown");
     await expect(li(page, "aaa")).toHaveAttribute("data-selected", "single");
+    await expect(li(page, "aa")).not.toHaveAttribute("data-selected", /.*/);
   });
 
   test("Tab indents the selected run under the previous sibling; Shift+Tab outdents it back", async ({

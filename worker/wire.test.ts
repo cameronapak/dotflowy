@@ -31,6 +31,7 @@ const node = (id: string): Node => ({
   completed: false,
   collapsed: false,
   bookmarkedAt: null,
+  mirrorOf: null,
   createdAt: 1,
   updatedAt: 1,
 })
@@ -81,6 +82,11 @@ describe('NodesPostBody (POST /api/nodes)', () => {
   it('rejects a node missing a required field', () => {
     const { text: _omit, ...missingText } = node('a')
     rejects(NodesPostBody, { ops: [{ op: 'insert', value: missingText }] })
+  })
+
+  it('rejects a node missing mirrorOf (required + nullable at the boundary — ADR 0022)', () => {
+    const { mirrorOf: _omit, ...missingMirrorOf } = node('a')
+    rejects(NodesPostBody, { ops: [{ op: 'insert', value: missingMirrorOf }] })
   })
 })
 

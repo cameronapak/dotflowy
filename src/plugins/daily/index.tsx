@@ -16,6 +16,7 @@
 import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
+  CalendarPlusIcon,
   Loader2Icon,
   SunIcon,
 } from "lucide-react";
@@ -24,9 +25,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { definePlugin, type PluginContext } from "../types";
 import { capture, drop } from "../../data/history";
+import { isMirrorsEnabled } from "../../data/flags";
 import {
   appendChild,
   insertChildAtStart,
+  mirrorManyNodes,
+  mirrorNode,
   moveManyNodes,
   moveNode,
   setText,
@@ -325,6 +329,64 @@ export default definePlugin({
           return;
         }
         toast.success(`Moved ${moved} to Today`, {
+          action: { label: "Go", onClick: () => ctx.nav.zoom(todayId) },
+        });
+      },
+    },
+
+    // Seam C: the mirror sibling of "Send to Today" -- create a LIVE copy of the
+    // node under today's note (ADR 0022) instead of moving it, so the same node
+    // stays where it is AND appears in Today, editable from both. Hidden until
+    // the mirrors flag is on. No picker: the destination is always today.
+    {
+      id: "mirror-to-today",
+      label: "Mirror to Today",
+      description: "Show a live copy under today's daily note",
+      icon: CalendarPlusIcon,
+      keywords: ["today", "daily", "mirror", "synced"],
+      available: () => isMirrorsEnabled(),
+      run: async (nodeId, ctx) => {
+        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
+        if (!todayId) {
+          toast.error("Couldn't open today's daily note");
+          return;
+        }
+        // Rebuild fresh: today may have just been created, so ctx.tree is stale
+        // (no `after`, no cycle context). Capture AFTER, so undo removes the
+        // mirror but keeps the new day note (mirrors the runMany path below).
+        const index = buildTreeIndex(nodesCollection.toArray);
+        const newId = runStructural(() => {
+          capture(index, nodeId);
+          return mirrorNode(index, nodeId, todayId);
+        });
+        if (!newId) {
+          drop();
+          toast.error("Can't mirror that into Today.");
+          return;
+        }
+        toast.success("Mirrored to Today", {
+          action: { label: "Go", onClick: () => ctx.nav.zoom(todayId) },
+        });
+      },
+      // Node multi-selection (ADR 0018): mirror every selected root under today
+      // in ONE batch. Captured against the LIVE tree AFTER the day exists, so
+      // undo removes the mirrors without deleting the freshly created day note.
+      runMany: async (ids, ctx) => {
+        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
+        if (!todayId) {
+          toast.error("Couldn't open today's daily note");
+          return;
+        }
+        const made = runStructural(() => {
+          capture(buildTreeIndex(nodesCollection.toArray), ids[0]!);
+          return mirrorManyNodes(todayId, ids);
+        });
+        if (!made) {
+          drop();
+          toast.error("Couldn't mirror those into Today.");
+          return;
+        }
+        toast.success(`Mirrored ${made} to Today`, {
           action: { label: "Go", onClick: () => ctx.nav.zoom(todayId) },
         });
       },

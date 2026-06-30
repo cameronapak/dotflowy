@@ -10,14 +10,20 @@ import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { BookmarkIcon, HomeIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useTree } from "../data/useTree";
-import { buildTrail, childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { moveManyNodes } from "../data/mutations";
+import {
+  buildTrail,
+  childrenOf,
+  trueSourceOf,
+  type Node,
+  type TreeIndex,
+} from "../data/tree";
+import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { capture, drop } from "../data/history";
 import { cn } from "@/lib/utils";
-import { setMoveDialogOpener } from "./move-dialog-opener";
+import { setMoveDialogOpener, type MoveMode } from "./move-dialog-opener";
 import {
   Command,
   CommandDialog,
@@ -83,6 +89,7 @@ const BOOKMARKS_HEADING = (
  */
 export function MoveDialog() {
   const [targets, setTargets] = useState<string[] | null>(null);
+  const [mode, setMode] = useState<MoveMode>("move");
   const [query, setQuery] = useState("");
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -91,8 +98,9 @@ export function MoveDialog() {
   );
 
   useEffect(() => {
-    setMoveDialogOpener((nodeIds) => {
+    setMoveDialogOpener((nodeIds, nextMode) => {
       setTargets(nodeIds);
+      setMode(nextMode);
       setQuery("");
     });
     return () => {
@@ -105,6 +113,7 @@ export function MoveDialog() {
   return (
     <MoveDialogInner
       nodeIds={targets}
+      mode={mode}
       onOpenChange={(next) => {
         if (!next) {
           setTargets(null);
@@ -119,11 +128,13 @@ export function MoveDialog() {
 
 function MoveDialogInner({
   nodeIds,
+  mode,
   onOpenChange,
   query,
   setQuery,
 }: {
   nodeIds: string[] | null;
+  mode: MoveMode;
   onOpenChange: (next: boolean) => void;
   query: string;
   setQuery: (q: string) => void;
@@ -145,12 +156,18 @@ function MoveDialogInner({
     if (!nodeIds || nodeIds.length === 0) return [];
     const excluded = new Set<string>();
     for (const id of nodeIds) {
-      for (const sub of subtreeIds(index, id)) excluded.add(sub);
+      // Move can't drop a branch into itself, so exclude the node's own subtree.
+      // Mirror can't window content that contains the mirror, so exclude the
+      // SOURCE's subtree (a mirror's source, not the mirror) -- listing either
+      // would be a dead press the mutation guards anyway (ADR 0022). For a plain
+      // node the two roots coincide.
+      const rootId = mode === "mirror" ? trueSourceOf(index, id) : id;
+      for (const sub of subtreeIds(index, rootId)) excluded.add(sub);
     }
     return Array.from(index.byId.values()).filter(
       (n) => !excluded.has(n.id) && n.text.trim() !== "",
     );
-  }, [index, nodeIds]);
+  }, [index, nodeIds, mode]);
 
   const fuse = useMemo(
     () => (open ? new Fuse(candidates, FUSE_OPTIONS) : null),
@@ -183,6 +200,41 @@ function MoveDialogInner({
   // "Home" shows on an empty query or when the text looks like the word.
   const showHome = q === "" || "home".includes(q.toLowerCase());
 
+  const destName = (targetId: string | null) =>
+    targetId === null
+      ? "Home"
+      : index.byId.get(targetId)?.text.trim() || "Untitled";
+
+  const goTo = (targetId: string | null) => {
+    if (targetId === null) navigate({ to: "/" });
+    else navigate({ to: "/$nodeId", params: { nodeId: targetId } });
+  };
+
+  // Mirror each selected source under the destination as ONE atomic batch
+  // (mirrorManyNodes appends them in order, rebuilding the index per insert).
+  // Stays put with a toast (a "Go" jumps to where the mirrors landed); no flash
+  // -- the source didn't move, and the new mirrors have fresh ids we don't hold.
+  function mirror(targetId: string | null) {
+    if (!nodeIds || nodeIds.length === 0) return;
+    const ids = nodeIds;
+    onOpenChange(false);
+    const made = runStructural(() => {
+      capture(index, ids[0]!);
+      return mirrorManyNodes(targetId, ids);
+    });
+    // Nothing created => every source would have cycled (or vanished); the
+    // captured undo point is dead, so discard it.
+    if (!made) {
+      drop();
+      toast.error("Can't mirror there.");
+      return;
+    }
+    const count = ids.length === 1 ? "" : `${made} nodes `;
+    toast.success(`Mirrored ${count}to ${destName(targetId)}`, {
+      action: { label: "Go", onClick: () => goTo(targetId) },
+    });
+  }
+
   function move(targetId: string | null) {
     if (!nodeIds || nodeIds.length === 0) return;
     const ids = nodeIds;
@@ -203,45 +255,54 @@ function MoveDialogInner({
     // Stay put -- moving shouldn't navigate you away. Confirm with a toast, and
     // offer a "Go" action to jump to the destination's zoom view on demand
     // (plain nav, no morph, since no pivot dot is involved).
-    const dest =
-      targetId === null
-        ? "Home"
-        : index.byId.get(targetId)?.text.trim() || "Untitled";
     const count = ids.length === 1 ? "" : `${moved} nodes `;
-    toast.success(`Moved ${count}to ${dest}`, {
+    toast.success(`Moved ${count}to ${destName(targetId)}`, {
       action: {
         label: "Go",
         onClick: () => {
           // Flash + focus the first moved node once the destination view mounts,
           // so it's easy to spot where the run landed. See flash-node.ts.
           requestFlashAfterNav(ids[0]!);
-          if (targetId === null) {
-            navigate({ to: "/" });
-          } else {
-            navigate({ to: "/$nodeId", params: { nodeId: targetId } });
-          }
+          goTo(targetId);
         },
       },
     });
   }
 
+  // The picker UI is identical; only the completion differs by mode.
+  const commit = mode === "mirror" ? mirror : move;
+  const copy =
+    mode === "mirror"
+      ? {
+          title: "Mirror node",
+          description: "Choose where to show a live copy of this node",
+          placeholder: "Mirror under...",
+          heading: "Mirror under",
+        }
+      : {
+          title: "Move node",
+          description: "Choose a destination to move this node under",
+          placeholder: "Move under...",
+          heading: "Move under",
+        };
+
   return (
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Move node"
-      description="Choose a destination to move this node under"
+      title={copy.title}
+      description={copy.description}
     >
       <Command shouldFilter={false}>
         <CommandInput
           value={query}
           onValueChange={setQuery}
-          placeholder="Move under..."
+          placeholder={copy.placeholder}
         />
         <CommandList>
           {showHome && (
             <CommandGroup heading="Top level">
-              <CommandItem value="__home__" onSelect={() => move(null)}>
+              <CommandItem value="__home__" onSelect={() => commit(null)}>
                 <HomeIcon className="size-4 shrink-0 opacity-70" />
                 <span>Home</span>
               </CommandItem>
@@ -257,7 +318,7 @@ function MoveDialogInner({
                     key={node.id}
                     index={index}
                     node={node}
-                    onSelect={move}
+                    onSelect={commit}
                   />
                 ))}
               </CommandGroup>
@@ -265,14 +326,14 @@ function MoveDialogInner({
           ) : results.length === 0 ? (
             !showHome && <Hint>No matches.</Hint>
           ) : (
-            <CommandGroup heading="Move under">
+            <CommandGroup heading={copy.heading}>
               {results.map(({ node, matches }) => (
                 <DestinationRow
                   key={node.id}
                   index={index}
                   node={node}
                   matches={matches}
-                  onSelect={move}
+                  onSelect={commit}
                 />
               ))}
             </CommandGroup>

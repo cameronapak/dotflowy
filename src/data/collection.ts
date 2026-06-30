@@ -261,6 +261,23 @@ function healSiblingChains(nodes: Node[]): void {
   })
 }
 
+/**
+ * Backfill `mirrorOf` for rows persisted before the field existed (ADR 0022,
+ * mirrors Stage 0). The per-user DO adds the column with a NULL default in its
+ * constructor, so a healthy DO always sends it; this guards the brief
+ * pre-migration window and any mock/snapshot that predates the field (e.g. the
+ * e2e Worker mock). Done inline rather than via the post-commit sibling-chain
+ * heal because the value must be present BEFORE the schema-typed collection
+ * write (`mirrorOf` is required, no default — ADR 0003), and it allocates a new
+ * object only when the field is actually absent (the never-taken branch once
+ * every DO has migrated). */
+function withMirrorDefault(n: Node): Node {
+  // The wire/DO type says mirrorOf is always present, so read it through a cast:
+  // a row persisted before the field existed (or the e2e mock) may omit it at
+  // runtime even though the type can't express that.
+  return (n as { mirrorOf?: unknown }).mirrorOf === undefined ? { ...n, mirrorOf: null } : n
+}
+
 export const nodesCollection = createCollection({
   id: 'nodes',
   getKey: (node: Node) => node.id,
@@ -293,7 +310,7 @@ export const nodesCollection = createCollection({
             write({ type: 'delete', key: op.key })
             echoedText.delete(op.key)
           } else {
-            write({ type: op.op, value: op.value })
+            write({ type: op.op, value: withMirrorDefault(op.value) })
             echoedText.set(op.value.id, op.value.text)
           }
         }
@@ -312,7 +329,7 @@ export const nodesCollection = createCollection({
           // changelog window. The cursor survives truncate (separate store).
           begin()
           truncate()
-          for (const n of msg.nodes) write({ type: 'insert', value: n })
+          for (const n of msg.nodes) write({ type: 'insert', value: withMirrorDefault(n) })
           metadata?.collection.set('cursor', msg.seq)
           commit()
           // A fresh snapshot supersedes every earlier seq (and may be the

@@ -20,6 +20,7 @@ import { Lock } from "lucide-react";
 import { toast } from "sonner";
 import { getProtection } from "../plugins/registry";
 import type { NodeProtection } from "../plugins/types";
+import { orphanedMirrorsBy, type TreeIndex } from "../data/tree";
 import { rejectRow } from "./flash-node";
 
 /** The actions a protected node forbids. The string also keys the toast id (so
@@ -81,6 +82,31 @@ export function guardProtected(
   const protection = getProtection(id);
   if (!protection) return false;
   signalRejection(rowEl, protection, kind);
+  return true;
+}
+
+/**
+ * Guard a delete of `ids` (and their subtrees): if any is a mirror SOURCE whose
+ * instances would be orphaned, shake `rowEl`, toast why, and return `true` (the
+ * caller bails). Returns `false` when nothing is orphaned (proceed). Deleting a
+ * source would strand its live mirrors -- promote-on-delete is Stage 3 (ADR
+ * 0022), so v1 blocks rather than orphans. FLAG-GATED at the call site: off the
+ * mirrors flag a `mirrorOf` node is just a normal node, so this is never called.
+ */
+export function guardMirrorSourceDelete(
+  index: TreeIndex,
+  ids: string[],
+  rowEl: Element | null,
+): boolean {
+  const n = orphanedMirrorsBy(index, ids).length;
+  if (n === 0) return false;
+  rejectRow(rowEl);
+  toast.error(
+    `Can't delete: ${n} mirror${n === 1 ? "" : "s"} point here. Delete ${
+      n === 1 ? "it" : "them"
+    } first.`,
+    { id: "mirror-source-delete" },
+  );
   return true;
 }
 
