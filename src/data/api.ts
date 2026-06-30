@@ -1,3 +1,4 @@
+import { Semaphore } from 'effect'
 import type { Node } from './schema'
 import type { ChangeOp } from './realtime'
 import {
@@ -31,9 +32,11 @@ import {
  * helpers below stay for FIELD edits (text, completed, …) and the first-run
  * seed. See structural.ts and PLAN.md.
  *
- * NOTE: the serialize/coalesce coordination below (`batchTail`, the field
- * coalescer) is still hand-rolled Promise machinery; converting it to Effect
- * primitives (Semaphore + Ref/Deferred) is .scratch/effect-tightening issue 02.
+ * NOTE: structural-batch serialization is an Effect `Semaphore` (below). The
+ * FIELD coalescer is still a Promise-singleton on purpose — see its own comment
+ * and .scratch/effect-tightening issue 02 for why a faithful Effect port is
+ * net-neutral there (it must preserve shared-fate failure across coalesced
+ * callers, which the singleton already does minimally).
  */
 
 // Serializes structural batches so the DO receives them in client-call order.
@@ -42,24 +45,25 @@ import {
 // nothing pins separate fetches to send order (HTTP/2 multiplexing, the Worker
 // dispatch). If batch B reached the DO before batch A, B's repoint of a shared
 // follower would be overwritten by A's stale one, re-creating the very fan this
-// whole change exists to kill. Each batch waits for the previous one's HTTP
-// response (sent only after the DO has committed it) before leaving the client,
-// so logical order == persisted order. The overlay is already on screen, so the
-// added latency is invisible. `.catch` keeps one failed batch from wedging the
-// queue while still rejecting the caller's promise (its transaction rolls back).
-let batchTail: Promise<unknown> = Promise.resolve()
+// whole change exists to kill. A 1-permit semaphore admits one batch at a time;
+// its FIFO queue makes acquire order == client-call order, and `withPermits`
+// holds the permit across the whole request — so the next batch can't leave the
+// client until the previous one's HTTP response (sent only after the DO commits)
+// lands. Logical order == persisted order. The overlay is already on screen, so
+// the added latency is invisible. `withPermits` releases on success, failure,
+// AND interruption, so one rejected batch can't wedge the queue (its caller's
+// promise still rejects → that transaction rolls back).
+const writeSem = Semaphore.makeUnsafe(1)
 
 /**
  * Persist a structural mutation as one atomic batch. The DO applies every op and
  * commits a SINGLE change frame, returning its sequence number; the caller
  * (`runStructural`) waits for that seq to echo back before dropping its
  * optimistic overlay. All-or-nothing: a failed request rolls the whole op back.
- * Calls are serialized (see `batchTail`) so concurrent edits persist in order.
+ * Calls are serialized (see `writeSem`) so concurrent edits persist in order.
  */
 export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
-  const run = batchTail.then(() => runPromise(sendBatchE(ops)))
-  batchTail = run.catch(() => {})
-  return run
+  return runPromise(writeSem.withPermits(1)(sendBatchE(ops)))
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>

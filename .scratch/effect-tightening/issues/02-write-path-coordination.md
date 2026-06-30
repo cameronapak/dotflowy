@@ -1,9 +1,34 @@
 # 02 — write-path coordination (Semaphore + Ref/Deferred)
 
-Status: Planned. Risk: HIGH (typing hot path; ADRs 0009/0010 behaviors are the bar). Depends on: 01.
+Status: PARTIAL — `batchTail` → `Semaphore` BUILT + green. Field coalescer DEFERRED (evidence below).
+Risk: HIGH (typing hot path; ADRs 0009/0010 behaviors are the bar). Depends on: 01.
 
-See [PRD](../PRD.md). Replace the hand-rolled `Promise` coordination in `api.ts` with Effect primitives,
-preserving every tuned behavior.
+Shipped: `batchTail` (structural serialization) is now `Semaphore.makeUnsafe(1)` + `withPermits(1)` in
+`api.ts`; FIFO == client-call order, `withPermits` releases on success/failure/interrupt (no manual
+`.catch` tail). Tests: `src/data/api.test.ts` (off-the-wire ordering + failure-doesn't-wedge), unit
+126/126, typecheck/lint clean, `atomic-structural-writes.spec.ts` 3/3 (incl. the wire-ordering proof).
+
+## Field coalescer — DEFERRED, with reason (not skipped)
+
+The field PATCH coalescer (`fieldInFlight`/`fieldPending`/`fieldFlush`) stays a Promise-singleton. A
+faithful Effect port is **net-neutral at best on a scramble-prone path**, on this evidence:
+
+- The singleton's correctness rests on **shared-fate**: every caller that merges into a pending
+  generation gets the *same* `fieldFlush` promise, so if that generation's PATCH fails, **all** its
+  participants reject together → all roll back (ADR 0010).
+- The obvious Effect port — one flush fiber per `updateNodes`, each draining all-pending on
+  semaphore-acquire — **breaks shared-fate**: only the fiber that happened to drain rejects on a failed
+  send; peers whose data rode that same batch get their own later no-op fibers and resolve *success*,
+  so they DON'T roll back though their edit never persisted. A silent divergence on the typing path.
+- A *correct* Effect port must reintroduce a per-generation shared `Deferred` + the same
+  schedule-at-most-one-flush logic — i.e. re-implement the singleton's state machine with
+  Semaphore+Deferred+suspend, gaining no simplification and adding new failure-mode edges.
+
+Per the sharpened [ADR 0021](../../docs/adr/0021-effect-first-one-schema-language.md): the serialization
+*is* an effect (→ converted), but the coalescer's shared-fate bookkeeping is a minimal correct state
+machine whose Effect re-expression buys nothing and risks the exact bug ADR 0010 fixed. Filed alongside
+`waitForSeq` as a deliberately-deferred seam. Revisit only with a concrete simplification + dedicated
+shared-fate-failure tests.
 
 ## Scope
 
