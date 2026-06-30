@@ -51,5 +51,5 @@ separate Postgres backend (off the all-Cloudflare goal); try to query D1 or a DO
 (impossible — both are Worker bindings); use legacy `ws.accept()` on the DO (bills duration for the
 whole connection lifetime — the budget trap); have a snapshot return a *partial* node set (the
 collection truncates on snapshot); or extract a generic `createKvCollection<T>` factory for
-side-collections — each must pass its **concrete** zod schema inline, or schema inference falls
-through to `Record<string, unknown>`.
+side-collections — each must pass its **concrete** Effect `Schema` inline (wrapped with
+`Schema.toStandardSchemaV1`), or schema inference falls through to `Record<string, unknown>`.

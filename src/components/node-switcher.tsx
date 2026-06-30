@@ -191,7 +191,7 @@ function SwitcherDialog({
 
   function go(nodeId: string) {
     onPicked();
-    // Plain nav -- no zoom morph (ADR 0003): a result row isn't the pivot dot.
+    // Plain nav -- no zoom morph: a result row isn't the pivot dot.
     navigate({ to: "/$nodeId", params: { nodeId } });
   }
 

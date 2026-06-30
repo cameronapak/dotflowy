@@ -14,7 +14,7 @@ it's a **side-collection keyed by node id**, never a `Node` field (clean uninsta
 rides the sync path).
 
 **Don't:**
-- Add plugin-owned fields to the `Node` schema (migrations, the no-zod-defaults problem, sync
+- Add plugin-owned fields to the `Node` schema (migrations, the no-schema-defaults problem, sync
   churn, orphan fields on uninstall). Plugin data is a side-collection — this is also why
   "protected node" is a *composed predicate*, not a `protected:` column.
 - Give each token its own regex/scan — N plugins must not mean N passes. The core composes one

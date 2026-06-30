@@ -749,7 +749,8 @@ interface ZoomNavigationArgs {
  * Zoom navigation: the shared-element morph between a node's title and list-item
  * roles, Cmd+, zoom-out, and the focus landing after a navigation. Returns the
  * stable `navigateZoom` and the current pivot id. The mount-only effects rely on
- * the editor remounting per zoom view (ADR 0003's `key={nodeId}`).
+ * the editor remounting per zoom view (its `key={nodeId}`; see the "Zoom + view
+ * transitions" section of AGENTS.md).
  */
 function useZoomNavigation({
   rootId,
