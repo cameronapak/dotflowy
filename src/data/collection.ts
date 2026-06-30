@@ -166,11 +166,22 @@ export function waitForNodeE(
       resume(Effect.void)
       return
     }
+    // `Effect.callback`'s returned finalizer runs ONLY on interruption (the
+    // timeout path), NOT on a successful `resume` — so the success paths must
+    // unsubscribe themselves or the listener leaks (it would keep running
+    // `present()` on every future collection change). `unsubscribe` is
+    // idempotent, so a later finalizer call after success is harmless.
     const sub = nodesCollection.subscribeChanges(() => {
-      if (present()) resume(Effect.void) // resume is idempotent; finalizer unsubs
+      if (present()) {
+        sub.unsubscribe()
+        resume(Effect.void)
+      }
     })
     // Guard the registration gap (a delta applied between the check and subscribe).
-    if (present()) resume(Effect.void)
+    if (present()) {
+      sub.unsubscribe()
+      resume(Effect.void)
+    }
     return Effect.sync(() => {
       sub.unsubscribe()
     })

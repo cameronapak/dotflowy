@@ -136,20 +136,25 @@ export const sendBatchE = (
         catch: (cause) => new NodesTransportError({ cause }),
       }),
     ),
-    Effect.flatMap((data) =>
-      typeof data === 'object' &&
-      data !== null &&
-      'seq' in data &&
-      typeof (data as { seq: unknown }).seq === 'number'
-        ? Effect.succeed({ seq: (data as { seq: number }).seq })
+    Effect.flatMap((data) => {
+      // A DO frame seq is a monotonic non-negative integer counter, so reject
+      // anything that isn't one — `typeof === 'number'` alone would also admit
+      // NaN/Infinity/negatives/floats, and waitForSeqE does a numeric `>=`
+      // compare on this (a NaN would hang to its timeout, a bogus value resolve
+      // it instantly). JSON can't even carry NaN/Infinity, so this only bites a
+      // server bug, but the guard is free.
+      const seq =
+        typeof data === 'object' && data !== null && 'seq' in data
+          ? (data as { seq: unknown }).seq
+          : undefined
+      return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0
+        ? Effect.succeed({ seq })
         : Effect.fail(
             new NodesTransportError({
-              cause: new Error(
-                `expected { seq: number }, got ${typeof data}`,
-              ),
+              cause: new Error(`expected { seq: non-negative int }, got ${typeof data}`),
             }),
-          ),
-    ),
+          )
+    }),
   )
 
 // --- Unsafe escape hatch ----------------------------------------------------
