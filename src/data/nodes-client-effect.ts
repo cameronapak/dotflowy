@@ -1,0 +1,169 @@
+import { Data, Duration, Effect, Schedule } from 'effect'
+import type { Node } from './schema'
+import type { ChangeOp } from './realtime'
+
+/**
+ * The Effect transport core for the /api/nodes Worker (which routes to the
+ * user's Durable Object) — a typed-error, retrying, time-bounded REST client,
+ * the outline twin of kv-client-effect.ts. `api.ts` is the throwing shell over
+ * it (so the TanStack DB mutation path keeps its throw-on-failure rollback
+ * contract); see docs/adr/0021-effect-first-one-schema-language.md and the
+ * conversion plan in .scratch/effect-tightening/.
+ *
+ * Why this exists: the primary data path (the outline itself) used to be raw
+ * `fetch` with none of the resilience the kv side-collections already had. This
+ * brings parity — retry (exponential backoff), 8s timeout, typed errors, and
+ * response-shape validation on the `{ seq }` batch envelope.
+ *
+ * Design notes (Effect v4) — mirrors kv-client-effect.ts deliberately:
+ *  - Domain errors are tagged classes via `Data.TaggedError`.
+ *  - `Effect.tryPromise` lifts `fetch`; its `catch` maps the rejection to
+ *    `NodesTransportError`.
+ *  - Retry wraps the fetch (+ timeout), so only TRANSPORT failures (the fetch
+ *    promise rejects: network drop, abort) retry. A received response — even a
+ *    5xx — resolves the fetch, so the `res.ok` check sits AFTER `retry` and is
+ *    NOT retried (a 500 is deterministic; retrying amplifies a broken write).
+ *    Retrying the committed-but-lost-ack case is safe: every DO op is an
+ *    absolute upsert/delete keyed by id (worker/outline-do.ts putNode/
+ *    deleteNodeRow), so re-applying a batch is idempotent on state.
+ *  - Timeout: `Effect.timeoutOrElse` turns a stall into a typed `NodesTimeoutError`.
+ */
+
+const ENDPOINT = '/api/nodes'
+
+// --- Domain errors ----------------------------------------------------------
+
+export class NodesTransportError extends Data.TaggedError('NodesTransportError')<{
+  cause: unknown
+}> {
+  get message() {
+    return 'nodes request failed'
+  }
+}
+
+export class NodesResponseError extends Data.TaggedError('NodesResponseError')<{
+  status: number
+}> {
+  get message() {
+    return `nodes -> HTTP ${this.status}`
+  }
+}
+
+export class NodesTimeoutError extends Data.TaggedError('NodesTimeoutError')<{}> {
+  get message() {
+    return 'nodes request timed out'
+  }
+}
+
+export type NodesError =
+  | NodesTransportError
+  | NodesResponseError
+  | NodesTimeoutError
+
+// --- Core request effect ----------------------------------------------------
+
+/** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
+const retryPolicy = Schedule.both(
+  Schedule.exponential('100 millis'),
+  Schedule.recurs(4),
+)
+
+/**
+ * One HTTP request to /api/nodes as an Effect. Retries transport failures only
+ * (see the module note); a non-2xx response lands as `NodesResponseError`, a
+ * stall as `NodesTimeoutError`.
+ */
+function request(
+  method: string,
+  body: unknown,
+): Effect.Effect<Response, NodesError> {
+  return Effect.tryPromise({
+    // The signal comes from Effect's runtime: `timeoutOrElse` aborts it on
+    // timeout and `retry` aborts the current attempt before the next, so a
+    // superseded request is cancelled instead of left running.
+    try: (signal) =>
+      fetch(ENDPOINT, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal,
+      }),
+    catch: (cause) => new NodesTransportError({ cause }),
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(8),
+      orElse: () => Effect.fail(new NodesTimeoutError()),
+    }),
+    Effect.retry(retryPolicy),
+    Effect.flatMap((res) =>
+      res.ok
+        ? Effect.succeed(res)
+        : Effect.fail(new NodesResponseError({ status: res.status })),
+    ),
+  )
+}
+
+// --- Public API (Effect-shaped) ---------------------------------------------
+
+/** Seed/create nodes (first-run + non-structural creates). */
+export const createNodesE = (nodes: Node[]): Effect.Effect<void, NodesError> =>
+  request('POST', { nodes }).pipe(Effect.asVoid)
+
+/** Field-edit PATCH (text, completed, …) — one or more `{ id, changes }`. */
+export const updateNodesE = (
+  updates: { id: string; changes: Partial<Node> }[],
+): Effect.Effect<void, NodesError> =>
+  request('PATCH', { updates }).pipe(Effect.asVoid)
+
+/** Delete nodes by id. */
+export const deleteNodesE = (ids: string[]): Effect.Effect<void, NodesError> =>
+  request('DELETE', { ids }).pipe(Effect.asVoid)
+
+/**
+ * Persist a structural batch and return the committed frame's seq. Validates
+ * the `{ seq: number }` envelope before returning: a non-object / missing /
+ * non-numeric `seq` (a proxy 200 with an HTML body, a server bug) is a contract
+ * violation, coerced to a transport error — NOT an `undefined` success that
+ * would later make `waitForSeq(undefined)` hang to its timeout.
+ */
+export const sendBatchE = (
+  ops: ChangeOp[],
+): Effect.Effect<{ seq: number }, NodesError> =>
+  request('POST', { ops }).pipe(
+    Effect.flatMap((res) =>
+      Effect.tryPromise({
+        try: () => res.json() as Promise<unknown>,
+        catch: (cause) => new NodesTransportError({ cause }),
+      }),
+    ),
+    Effect.flatMap((data) =>
+      typeof data === 'object' &&
+      data !== null &&
+      'seq' in data &&
+      typeof (data as { seq: unknown }).seq === 'number'
+        ? Effect.succeed({ seq: (data as { seq: number }).seq })
+        : Effect.fail(
+            new NodesTransportError({
+              cause: new Error(
+                `expected { seq: number }, got ${typeof data}`,
+              ),
+            }),
+          ),
+    ),
+  )
+
+// --- Unsafe escape hatch ----------------------------------------------------
+
+/**
+ * Run a nodes Effect program and convert its typed error into a thrown Error,
+ * so the throw-based TanStack DB mutation handlers (which signal failure by
+ * throwing to trigger optimistic rollback) consume it unchanged. Mirrors
+ * kv-client-effect.ts `runPromise`. (A shared bridge is a later cleanup.)
+ */
+export function runPromise<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
+  return Effect.runPromise(
+    effect.pipe(
+      Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))),
+    ),
+  )
+}

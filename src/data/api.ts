@@ -1,41 +1,40 @@
 import type { Node } from './schema'
 import type { ChangeOp } from './realtime'
+import {
+  createNodesE,
+  deleteNodesE,
+  runPromise,
+  sendBatchE,
+  updateNodesE,
+} from './nodes-client-effect'
 
 /**
- * Thin REST client for the /api/nodes Worker (which routes to the user's
+ * Throw-based client for the /api/nodes Worker (which routes to the user's
  * Durable Object). Same-origin, so the Better Auth session cookie rides along
  * automatically. The collection's mutation handlers (collection.ts) call
  * create/update/delete on the write path; the initial snapshot + live reads now
  * arrive over the sync socket (realtime.ts), not a GET here. See
  * docs/adr/0008-sync-via-a-per-user-durable-object.md.
  *
+ * These are thin SHELLS over the Effect transport core in nodes-client-effect.ts
+ * (the outline twin of kv-api.ts over kv-client-effect.ts): each runs the
+ * matching Effect program through `runPromise`, so every outline write inherits
+ * the core's retry, 8s timeout, typed errors, and `{ seq }` envelope validation.
+ * They keep THROWING on failure on purpose — TanStack DB mutation handlers
+ * signal failure by throwing (a throw triggers optimistic rollback), so the
+ * throw is now Effect-backed, not a hand-rolled bare fetch.
+ * See docs/adr/0021-effect-first-one-schema-language.md.
+ *
  * STRUCTURAL writes (insert/delete a bullet — anything that relinks the sibling
  * chain) go through `persistBatch` instead: one request carrying every op, so
  * the DO commits them as one atomic frame. The per-type create/update/delete
  * helpers below stay for FIELD edits (text, completed, …) and the first-run
  * seed. See structural.ts and PLAN.md.
+ *
+ * NOTE: the serialize/coalesce coordination below (`batchTail`, the field
+ * coalescer) is still hand-rolled Promise machinery; converting it to Effect
+ * primitives (Semaphore + Ref/Deferred) is .scratch/effect-tightening issue 02.
  */
-
-const ENDPOINT = '/api/nodes'
-
-async function send(method: string, body: unknown): Promise<void> {
-  const res = await fetch(ENDPOINT, {
-    method,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${method} ${ENDPOINT} -> ${res.status}`)
-}
-
-async function sendBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ops }),
-  })
-  if (!res.ok) throw new Error(`POST ${ENDPOINT} (batch) -> ${res.status}`)
-  return (await res.json()) as { seq: number }
-}
 
 // Serializes structural batches so the DO receives them in client-call order.
 // The DO assigns each frame's `seq` in arrival order, but two rapid structural
@@ -58,13 +57,13 @@ let batchTail: Promise<unknown> = Promise.resolve()
  * Calls are serialized (see `batchTail`) so concurrent edits persist in order.
  */
 export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
-  const run = batchTail.then(() => sendBatch(ops))
+  const run = batchTail.then(() => runPromise(sendBatchE(ops)))
   batchTail = run.catch(() => {})
   return run
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>
-  send('POST', { nodes })
+  runPromise(createNodesE(nodes))
 
 // --- Field-edit PATCH: serialize + coalesce ---------------------------------
 //
@@ -111,7 +110,7 @@ function scheduleFieldFlush(): Promise<void> {
       fieldFlush = null
       if (!batch || batch.size === 0) return
       const updates = [...batch].map(([id, changes]) => ({ id, changes }))
-      const run = send('PATCH', { updates })
+      const run = runPromise(updateNodesE(updates))
       fieldInFlight = run
       return run
     })
@@ -130,4 +129,4 @@ export function updateNodes(
 }
 
 export const deleteNodes = (ids: string[]): Promise<void> =>
-  send('DELETE', { ids })
+  runPromise(deleteNodesE(ids))
