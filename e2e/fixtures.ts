@@ -13,6 +13,8 @@ export interface SeedNode {
   isTask?: boolean;
   /** Epoch ms when bookmarked; omit/null for an un-bookmarked node. */
   bookmarkedAt?: number | null;
+  /** Source node id this is a mirror of (ADR 0022); omit/null for a normal node. */
+  mirrorOf?: string | null;
 }
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
@@ -26,6 +28,7 @@ interface ApiNode {
   completed: boolean;
   collapsed: boolean;
   bookmarkedAt: number | null;
+  mirrorOf: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -47,6 +50,7 @@ function toNode(n: SeedNode): ApiNode {
     completed: n.completed ?? false,
     collapsed: n.collapsed ?? false,
     bookmarkedAt: n.bookmarkedAt ?? null,
+    mirrorOf: n.mirrorOf ?? null,
     createdAt: 0,
     updatedAt: 0,
   };

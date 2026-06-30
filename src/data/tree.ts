@@ -19,6 +19,15 @@ export interface TreeIndex {
   /** parentId -> ordered child *ids*, plus the synthetic ROOT_PARENT for top-level */
   childrenByParent: Map<string, string[]>
   byId: Map<string, Node>
+  /**
+   * Reverse mirror index (ADR 0022): a source node's id -> ids of the *mirror*
+   * nodes pointing at it (`mirrorOf === sourceId`). Built here and maintained
+   * incrementally in tree-store.ts alongside `childrenByParent`. Stage 0 fills
+   * it but nothing reads it yet; Stage 1 uses it for the "mirrored xN" badge,
+   * Stage 3 for promote-on-delete. Empty for any mirror-free outline (every
+   * `mirrorOf` is null), so it costs nothing today.
+   */
+  mirrorsBySource: Map<string, string[]>
 }
 
 /** Synthetic parent id for top-level nodes (those with parentId === null). */
@@ -50,7 +59,17 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     childrenByParent.set(parentKey, orderSiblings(list).map((n) => n.id))
   }
 
-  return { childrenByParent, byId }
+  // Reverse mirror index (ADR 0022): bucket each mirror's id under its source.
+  // Source order within a bucket is arbitrary (callers sort if they care).
+  const mirrorsBySource = new Map<string, string[]>()
+  for (const node of nodes) {
+    if (!node.mirrorOf) continue
+    const list = mirrorsBySource.get(node.mirrorOf)
+    if (list) list.push(node.id)
+    else mirrorsBySource.set(node.mirrorOf, [node.id])
+  }
+
+  return { childrenByParent, byId, mirrorsBySource }
 }
 
 export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
@@ -126,6 +145,7 @@ export function makeNode(partial: Partial<Node> & Pick<Node, 'id'>): Node {
     completed: false,
     collapsed: false,
     bookmarkedAt: null,
+    mirrorOf: null,
     createdAt: now(),
     updatedAt: now(),
     ...partial,

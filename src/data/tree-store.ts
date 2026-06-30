@@ -42,7 +42,11 @@ const EMPTY_TRAIL: Node[] = []
 // The store owns ONE mutable index, maintained in place by applyChanges. It must
 // be its own instance -- never the shared EMPTY_INDEX, which has to stay pristine
 // as the server/initial snapshot for the hooks below.
-let index: TreeIndex = { byId: new Map(), childrenByParent: new Map() }
+let index: TreeIndex = {
+  byId: new Map(),
+  childrenByParent: new Map(),
+  mirrorsBySource: new Map(),
+}
 const listeners = new Set<() => void>()
 let started = false
 
@@ -99,6 +103,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // (hide-completed Seam-G + collapse). If a future Seam-G transform hides a node
   // by another field, add it here or useVisibleRows will show stale rows.
   let visibilityChanged = false
+  // mirrorOf transitions (create/promote — ADR 0022) are rare and ride structural
+  // batches today, but tracked independently so the reverse index stays correct
+  // (and its Map identity is refreshed) even on a bare field edit that flips it.
+  let mirrorsChanged = false
   for (const change of changes) {
     if (change.type === 'delete') {
       const prev = index.byId.get(change.key as string)
@@ -107,6 +115,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       const key = parentKeyOf(prev)
       removeChildId(key, prev.id)
       dirty.add(key)
+      if (prev.mirrorOf) {
+        removeMirror(prev.mirrorOf, prev.id)
+        mirrorsChanged = true
+      }
       continue
     }
     const next = change.value
@@ -114,6 +126,12 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     index.byId.set(next.id, next)
     if (prev && (prev.collapsed !== next.collapsed || prev.completed !== next.completed)) {
       visibilityChanged = true
+    }
+    if ((prev?.mirrorOf ?? null) !== (next.mirrorOf ?? null)) {
+      // null<->id or id<->id: leave the old source's bucket, join the new one.
+      if (prev?.mirrorOf) removeMirror(prev.mirrorOf, next.id)
+      if (next.mirrorOf) addMirror(next.mirrorOf, next.id)
+      mirrorsChanged = true
     }
     if (!prev) {
       // Insert (also the safe fallback for an update to a row we haven't seen).
@@ -156,13 +174,16 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // Field-only edits (the hot path) keep the SAME Map refs -- O(1). Per-node
   // reactivity flows through `useNode` (node-object identity), not Map identity,
   // and whole-collection readers are inert while a bullet is being edited.
-  index =
-    dirty.size > 0
-      ? {
-          byId: new Map(index.byId),
-          childrenByParent: new Map(index.childrenByParent),
-        }
-      : { byId: index.byId, childrenByParent: index.childrenByParent }
+  const structural = dirty.size > 0
+  index = {
+    byId: structural ? new Map(index.byId) : index.byId,
+    childrenByParent: structural ? new Map(index.childrenByParent) : index.childrenByParent,
+    // Copy the reverse-index Map on a structural change (it rides the same fresh-
+    // Maps discipline as the others) OR whenever a mirrorOf flipped, so readers
+    // memoized on its reference can't go stale. Untouched on the keystroke path.
+    mirrorsBySource:
+      structural || mirrorsChanged ? new Map(index.mirrorsBySource) : index.mirrorsBySource,
+  }
   // Bump the flat-list signal on a structural change OR a visibility flip; a
   // pure text/isTask edit leaves it untouched (the typing hot path). See
   // useVisibleRows.
@@ -190,6 +211,26 @@ function removeChildId(key: string, id: string) {
   const i = ids.indexOf(id)
   if (i !== -1) ids.splice(i, 1)
   if (ids.length === 0) index.childrenByParent.delete(key)
+}
+
+/** Register a mirror id under its source in the reverse index (ADR 0022).
+ *  Guards against a duplicate from a redelivered change. */
+function addMirror(sourceId: string, id: string) {
+  const ids = index.mirrorsBySource.get(sourceId)
+  if (ids) {
+    if (!ids.includes(id)) ids.push(id)
+  } else {
+    index.mirrorsBySource.set(sourceId, [id])
+  }
+}
+
+/** Drop a mirror id from its source's bucket; prune the entry when it empties. */
+function removeMirror(sourceId: string, id: string) {
+  const ids = index.mirrorsBySource.get(sourceId)
+  if (!ids) return
+  const i = ids.indexOf(id)
+  if (i !== -1) ids.splice(i, 1)
+  if (ids.length === 0) index.mirrorsBySource.delete(sourceId)
 }
 
 /**

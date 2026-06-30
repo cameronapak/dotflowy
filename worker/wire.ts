@@ -36,6 +36,10 @@ export const NodeSchema = Schema.Struct({
   completed: Schema.Boolean,
   collapsed: Schema.Boolean,
   bookmarkedAt: Schema.NullOr(Schema.Number),
+  // Mirror pointer (ADR 0022): null = own source, an id = a mirror of that node.
+  // Required + nullable at the boundary, same as every other field — the client
+  // always sends it (makeNode), so a body without it is malformed (→ 400).
+  mirrorOf: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
 })

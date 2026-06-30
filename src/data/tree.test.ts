@@ -36,6 +36,34 @@ describe('buildTreeIndex + childrenOf', () => {
   })
 })
 
+describe('buildTreeIndex mirrorsBySource (ADR 0022)', () => {
+  test('is empty for a mirror-free outline', () => {
+    const a = makeNode({ id: 'a' })
+    const b = makeNode({ id: 'b', prevSiblingId: 'a' })
+    const index = buildTreeIndex([a, b])
+    expect(index.mirrorsBySource.size).toBe(0)
+  })
+
+  test('buckets every mirror under its source id', () => {
+    const src = makeNode({ id: 'src' })
+    const m1 = makeNode({ id: 'm1', mirrorOf: 'src' })
+    const m2 = makeNode({ id: 'm2', mirrorOf: 'src' })
+    const other = makeNode({ id: 'other' })
+    const index = buildTreeIndex([src, m1, m2, other])
+
+    expect(index.mirrorsBySource.get('src')).toEqual(['m1', 'm2'])
+    // A source is not its own mirror; an un-mirrored node has no bucket.
+    expect(index.mirrorsBySource.has('other')).toBe(false)
+    expect(index.mirrorsBySource.has('m1')).toBe(false)
+  })
+
+  test('a mirror whose source is absent still indexes (broken-mirror tolerant)', () => {
+    const m = makeNode({ id: 'm', mirrorOf: 'ghost' })
+    const index = buildTreeIndex([m])
+    expect(index.mirrorsBySource.get('ghost')).toEqual(['m'])
+  })
+})
+
 describe('buildTrail', () => {
   // a -> b -> c (parent chain)
   const a = makeNode({ id: 'a', parentId: null })

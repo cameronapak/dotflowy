@@ -107,6 +107,9 @@ function rowToNode(r: NodeRow): Node {
     completed: !!r.completed,
     collapsed: !!r.collapsed,
     bookmarkedAt: r.bookmarkedAt,
+    // Legacy D1 data predates mirrors (ADR 0022); the import source has no such
+    // column, so every imported node is its own source.
+    mirrorOf: null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }
