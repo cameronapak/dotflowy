@@ -55,9 +55,12 @@ behavior the docs don't promise.
   schema makes drift impossible — the validator is the type. (The client's copy in
   `src/data/realtime.ts` stays hand-written on purpose: a different tsconfig, no Effect at the type
   layer, kept in lockstep as before. The client is the originator; the Worker is the gate.)
-- **Zod (already an app dependency) instead of Effect Schema.** Rejected: zod is a *client* dependency,
-  not in the Worker bundle, and its failures wouldn't compose with the Worker's Effect error channel —
-  Effect Schema decodes straight into it.
+- **Zod (then the client's schema library) instead of Effect Schema.** Rejected: zod wasn't in the
+  Worker bundle, and its failures wouldn't compose with the Worker's Effect error channel — Effect
+  Schema decodes straight into it. (Moot since: the client's data-layer schemas also moved to Effect
+  Schema and zod was removed from the project entirely — see [ADR 0003](./0003-no-schema-defaults.md)
+  and [ADR 0021](./0021-effect-first-one-schema-language.md). Effect Schema is now the one schema
+  language across client and Worker.)
 - **Effect runtime / STM transaction in the DO for atomicity.** Rejected as over-engineering: see the
   split rationale above. `transactionSync` is the native, synchronous fit for a synchronous loop.
 

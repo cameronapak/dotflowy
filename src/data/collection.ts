@@ -1,5 +1,5 @@
 import { createCollection } from '@tanstack/react-db'
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Schema, Stream } from 'effect'
 import { nodeSchema } from './schema'
 import type { Node } from './schema'
 import { createNodes, deleteNodes, updateNodes } from './api'
@@ -236,7 +236,7 @@ function healSiblingChains(nodes: Node[]): void {
 export const nodesCollection = createCollection({
   id: 'nodes',
   getKey: (node: Node) => node.id,
-  schema: nodeSchema,
+  schema: Schema.toStandardSchemaV1(nodeSchema),
   sync: {
     // Updates carry only changed fields (a PATCH) OR a full row (an upsert);
     // partial merges both correctly.

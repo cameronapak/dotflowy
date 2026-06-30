@@ -202,7 +202,7 @@ function MoveDialogInner({
     }
     // Stay put -- moving shouldn't navigate you away. Confirm with a toast, and
     // offer a "Go" action to jump to the destination's zoom view on demand
-    // (plain nav, no morph -- ADR 0003 -- since no pivot dot is involved).
+    // (plain nav, no morph, since no pivot dot is involved).
     const dest =
       targetId === null
         ? "Home"

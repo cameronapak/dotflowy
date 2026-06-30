@@ -1,7 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { z } from 'zod'
 import { queryClient } from '../../data/query-client'
 import {
   kvDelete,
@@ -10,7 +9,7 @@ import {
   toKvKeys,
   toKvRows,
 } from '../../data/kv-api'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { kvGetOrCreateE } from '../../data/kv-client-effect'
 
 /**
@@ -39,14 +38,14 @@ export const CONTAINER_KEY = 'container'
  *  left nameless). Cosmetic -- identity is the side-collection, never the text. */
 export const DAILY_CONTAINER_TEXT = 'Daily'
 
-const dailyRowSchema = z.object({
+const dailyRowSchema = Schema.Struct({
   /** `YYYY-MM-DD` (local) for a day, or {@link CONTAINER_KEY}. */
-  key: z.string(),
+  key: Schema.String,
   /** The node this key points at. */
-  nodeId: z.string(),
+  nodeId: Schema.String,
 })
 
-export type DailyRow = z.infer<typeof dailyRowSchema>
+export type DailyRow = Schema.Schema.Type<typeof dailyRowSchema>
 
 const KV = 'daily-index'
 
@@ -57,7 +56,7 @@ export const dailyIndexCollection = createCollection(
     queryClient,
     queryFn: () => kvFetch<DailyRow>(KV),
     getKey: (row: DailyRow) => row.key,
-    schema: dailyRowSchema,
+    schema: Schema.toStandardSchemaV1(dailyRowSchema),
     // Insert and update both upsert the whole row (tiny key->value items).
     onInsert: async ({ transaction }) => {
       await kvPut(KV, toKvRows(transaction))

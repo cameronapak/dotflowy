@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { Schema } from 'effect'
 
 /**
  * Node: a single bullet in the outline.
@@ -15,29 +15,31 @@ import { z } from 'zod'
  * This is the Workflowy/Notion approach: inserting between two
  * siblings is O(1), no renumbering. Reordering is relinking pointers.
  *
- * Note: no zod .default() values. Defaults make zod's inferred *input*
- * type optional, which collides with TanStack DB's WritableObjectDeep
- * handling in the schema-typed collection overload. We always
- * construct complete nodes via makeNode(), so defaults buy us nothing.
+ * Schema language: Effect `Schema` (ADR 0012 made Effect the error/validation
+ * model; the Worker trust boundary in worker/wire.ts already speaks it). No
+ * transforms and no optional fields, so the schema's Encoded and Type are the
+ * same all-required shape -- which is what keeps TanStack DB's schema-typed
+ * collection overload (WritableObjectDeep) happy. We always construct complete
+ * nodes via makeNode(), so there's nothing to default.
  */
-export const nodeSchema = z.object({
-  id: z.string(),
-  parentId: z.string().nullable(),
-  prevSiblingId: z.string().nullable(),
-  text: z.string(),
+export const nodeSchema = Schema.Struct({
+  id: Schema.String,
+  parentId: Schema.NullOr(Schema.String),
+  prevSiblingId: Schema.NullOr(Schema.String),
+  text: Schema.String,
   // Whether this bullet renders a checkbox (a "task") vs a plain bullet.
   // Purely a display choice, independent of `completed`. See ADR 0001.
-  isTask: z.boolean(),
+  isTask: Schema.Boolean,
   // Done-status. Applies to any bullet, task or not. Toggled by Cmd+Enter.
-  completed: z.boolean(),
-  collapsed: z.boolean(),
+  completed: Schema.Boolean,
+  collapsed: Schema.Boolean,
   // Bookmark pointer. `null` = not bookmarked; a timestamp = bookmarked, and
   // also the sort key for the bookmarks list (newest pinned first). A nullable
   // timestamp beats a boolean: it carries both "is it pinned?" and "in what
   // order?" in one field. See ADR 0011.
-  bookmarkedAt: z.number().nullable(),
-  createdAt: z.number(),
-  updatedAt: z.number(),
+  bookmarkedAt: Schema.NullOr(Schema.Number),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
 })
 
-export type Node = z.infer<typeof nodeSchema>
+export type Node = Schema.Schema.Type<typeof nodeSchema>

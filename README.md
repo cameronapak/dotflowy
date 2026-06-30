@@ -28,7 +28,7 @@ Local-first at heart, with an optional Cloudflare deployment that syncs your out
 ![TanStack Query](https://www.shieldcn.dev/badge/Stack-TanStack_Query-FF4154.svg?logo=reactquery&variant=branded&size=sm)
 ![Better Auth](https://www.shieldcn.dev/badge/Stack-Better_Auth-000000.svg?logo=ri%3ARiShieldKeyholeFill&variant=branded&size=sm)
 ![React](https://www.shieldcn.dev/badge/Stack-React-61DAFB.svg?logo=react&variant=branded&size=sm)
-![Zod](https://www.shieldcn.dev/badge/Stack-Zod-3E67B1.svg?logo=zod&variant=branded&size=sm)
+![Effect](https://www.shieldcn.dev/badge/Stack-Effect-5B5BD6.svg?variant=secondary&size=sm)
 ![Tailwind CSS](https://www.shieldcn.dev/badge/Stack-Tailwind_CSS-06B6D4.svg?logo=tailwindcss&variant=branded&size=sm)
 ![Agent-friendly AGENTS.md](https://www.shieldcn.dev/badge/Agent--friendly-AGENTS.md-D97757.svg?variant=secondary&size=sm)
 
@@ -73,7 +73,7 @@ Not built yet: sharing, email verification.
 | Data | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
 | Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md)) |
 | Auth | Better Auth (email + password) | Self-serve signup; its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1 |
-| Validation | Zod 4 | Standard-schema compatible, drives the collection's item type |
+| Validation | Effect Schema | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker |
 | Build | Vite 8 | What Start uses |
 | Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
 
@@ -187,7 +187,7 @@ src/
     use-drag-reorder.ts # bullet-dot drag (reorder + reparent)
     Header.tsx, paste.ts, flash-node.ts, *-provider.tsx, *-toggle.tsx, ui/
   data/
-    schema.ts         # zod schema, Node type
+    schema.ts         # Effect Schema, Node type
     collection.ts     # TanStack DB query collection over the Worker (/api/nodes)
     api.ts            # REST client for the /api/nodes Worker
     kv-api.ts         # REST client for the generic /api/kv side-collection store

@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { z } from 'zod'
+import { Schema } from 'effect'
 import { normalizeTag } from './tags'
 import { queryClient } from './query-client'
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from './kv-api'
@@ -82,14 +82,14 @@ export type TagColor = (typeof TAG_COLORS)[number]
 
 const TAG_COLOR_SET = new Set<string>(TAG_COLORS)
 
-const tagColorSchema = z.object({
+const tagColorSchema = Schema.Struct({
   /** Normalized tag name (no `#`, lowercased) -- the row key. */
-  tag: z.string(),
+  tag: Schema.String,
   /** One of {@link TAG_COLORS}. */
-  color: z.string(),
+  color: Schema.String,
 })
 
-export type TagColorRow = z.infer<typeof tagColorSchema>
+export type TagColorRow = Schema.Schema.Type<typeof tagColorSchema>
 
 const KV = 'tag-colors'
 
@@ -100,7 +100,7 @@ export const tagColorsCollection = createCollection(
     queryClient,
     queryFn: () => kvFetch<TagColorRow>(KV),
     getKey: (row: TagColorRow) => row.tag,
-    schema: tagColorSchema,
+    schema: Schema.toStandardSchemaV1(tagColorSchema),
     // Insert and update both upsert the whole row (tiny key->value items).
     onInsert: async ({ transaction }) => {
       await kvPut(KV, toKvRows(transaction))
