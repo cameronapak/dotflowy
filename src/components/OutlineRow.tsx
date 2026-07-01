@@ -33,7 +33,11 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
-import { pasteIntoBullet } from "./paste";
+import {
+  copySourceSelection,
+  cutSourceSelection,
+  pasteIntoBullet,
+} from "./paste";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
 import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
@@ -473,6 +477,16 @@ function RowChrome({
             );
             if (next !== null) syncedRef.current = next;
           }}
+          // Copy/cut hand back the markdown SOURCE (a folded link's rendered
+          // text drops the url half). See copySourceSelection (ADR 0005).
+          onCopy={(e) => copySourceSelection(e, e.currentTarget)}
+          onCut={(e) => {
+            const el = e.currentTarget;
+            const next = cutSourceSelection(e, el, (t) =>
+              commands.onTextChange(content.id, t),
+            );
+            if (next !== null) syncedRef.current = next;
+          }}
           onFocus={(e) => {
             clearSelection();
             const el = e.currentTarget;
@@ -482,8 +496,8 @@ function RowChrome({
               () => composingRef.current,
             );
             if (!hasLink(content.text)) return;
-            revealLinkAtCaret(el, content.text, () => {
-              syncedRef.current = content.text;
+            revealLinkAtCaret(el, (t) => {
+              syncedRef.current = t;
             });
           }}
           onBlur={(e) => {

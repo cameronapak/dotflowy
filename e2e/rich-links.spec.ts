@@ -1,10 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { seedOutline, type SeedNode } from "./fixtures";
 
-// Rich links (ADR 0017): markdown `[label](url)` in node.text that folds to a
-// clean <a> while the bullet is blurred and reveals to raw markdown while it's
-// focused. These specs cover the fold/reveal swap, click-to-open, and the four
-// paste paths.
+// Rich links (ADR 0005): markdown `[label](url)` in node.text that folds to a
+// clean <a> while the bullet is blurred and BRACKET-reveals while the caret is
+// on it -- `[label]` editable, the url folded behind a `(✎)` chip; the raw url
+// never expands into the line. These specs cover the fold/reveal swap,
+// click-to-open, the Edit Link popover, copy/cut-as-source, and the paste paths.
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
@@ -60,7 +61,7 @@ const opened = (page: Page) =>
 const LINK = "[Anthropic](https://anthropic.com)";
 
 test.describe("Rich links fold and reveal", () => {
-  test("a blurred bullet folds the link to a clean <a>; focusing reveals raw markdown", async ({
+  test("a blurred bullet folds the link to a clean <a>; focusing bracket-reveals it", async ({
     page,
   }) => {
     await load(page, [
@@ -73,17 +74,27 @@ test.describe("Rich links fold and reveal", () => {
     await expect(anchor).toHaveAttribute("href", "https://anthropic.com");
 
     // It leads with the host's favicon (Google s2/favicons), inside the anchor
-    // so a click on it still opens the link. The img carries no text, so the
-    // anchor's text stays the label.
+    // so a click on it still opens the link, and trails the edit pencil. Both
+    // carry no text, so the anchor's text stays the label.
     const favicon = anchor.locator("img.link-favicon");
     await expect(favicon).toHaveAttribute(
       "src",
       "https://www.google.com/s2/favicons?domain=anthropic.com&sz=64",
     );
+    await expect(anchor.locator(".link-edit-icon")).toHaveCount(1);
 
-    // Focus reveals the literal markdown for editing, and the <a> is gone.
+    // Focus reveals the BRACKETS around the editable label, but the url stays
+    // folded behind the `(✎)` chip (its data-src) -- it never expands into the
+    // line (ADR 0005, bracket reveal). The <a> is gone.
     await focusBullet(page, "n");
-    await expect(text(page, "n")).toHaveText(LINK);
+    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
+      "Anthropic",
+    );
+    await expect(text(page, "n")).toHaveText("[Anthropic]");
+    await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
+      "data-src",
+      "(https://anthropic.com)",
+    );
     await expect(text(page, "n").locator("a[data-link]")).toHaveCount(0);
 
     // Blur folds it back.
@@ -127,8 +138,15 @@ test.describe("Per-link reveal", () => {
 
     // Focus with no prior caret lands at offset 0, on the first link only.
     await focusBullet(page, "n");
-    // First link revealed (raw, decorated), second still folded.
-    await expect(text(page, "n").locator(".link-reveal")).toHaveText(A);
+    // First link bracket-revealed (label editable, url chip folded), second
+    // still a folded <a>.
+    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
+      "A",
+    );
+    await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
+      "data-src",
+      "(https://a.com)",
+    );
     const folded = text(page, "n").locator("a[data-link]");
     await expect(folded).toHaveCount(1);
     await expect(folded).toHaveText("B");
@@ -142,7 +160,9 @@ test.describe("Per-link reveal", () => {
     ]);
 
     await focusBullet(page, "n");
-    await expect(text(page, "n").locator(".link-reveal")).toHaveText(A);
+    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
+      "A",
+    );
 
     // Move the caret to just before the still-folded second link. Setting the
     // selection fires selectionchange, which drives the per-link reflow (the
@@ -157,8 +177,10 @@ test.describe("Per-link reveal", () => {
       sel?.addRange(range);
     });
 
-    // Now the SECOND link is raw and the FIRST has folded back.
-    await expect(text(page, "n").locator(".link-reveal")).toHaveText(B);
+    // Now the SECOND link is bracket-revealed and the FIRST has folded back.
+    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
+      "B",
+    );
     const folded = text(page, "n").locator("a[data-link]");
     await expect(folded).toHaveCount(1);
     await expect(folded).toHaveText("A");
@@ -179,7 +201,7 @@ test.describe("Click caret near a folded link", () => {
           return;
         }
         const e = n as HTMLElement;
-        if (e.hasAttribute?.("data-link") && e.hasAttribute("data-src")) {
+        if (e.hasAttribute?.("data-src")) {
           out += e.getAttribute("data-src") ?? "";
           return;
         }
@@ -241,7 +263,7 @@ test.describe("Creating links by paste", () => {
           return;
         }
         const e = n as HTMLElement;
-        if (e.hasAttribute?.("data-link") && e.hasAttribute("data-src")) {
+        if (e.hasAttribute?.("data-src")) {
           out += e.getAttribute("data-src") ?? "";
           return;
         }
@@ -289,7 +311,14 @@ test.describe("Creating links by paste", () => {
     });
     await pasteInto(text(page, "n"), { plain: "https://anthropic.com" });
 
-    await expect(text(page, "n")).toHaveText(LINK);
+    // The caret keeps the end-of-link position, so the new link is bracket-
+    // revealed: `[Anthropic]` visible, the url folded into the `(✎)` chip.
+    await expect(text(page, "n")).toHaveText("[Anthropic]");
+    await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
+      "data-src",
+      "(https://anthropic.com)",
+    );
+    expect(await readSrc(page, "n")).toBe(LINK);
   });
 
   test("pasting a rich link (single anchor) inserts [title](url) and folds it", async ({
@@ -404,5 +433,143 @@ test.describe("Creating links by paste", () => {
     expect(await readSrc(page, "n")).toBe(
       "[https://anthropic.com](https://anthropic.com) ",
     );
+  });
+});
+
+test.describe("Edit Link popover", () => {
+  // Same data-src mirror as above.
+  const readSrc = (page: Page, id: string) =>
+    text(page, id).evaluate((el: HTMLElement) => {
+      let out = "";
+      const visit = (n: Node) => {
+        if (n.nodeType === 3) {
+          out += n.textContent ?? "";
+          return;
+        }
+        const e = n as HTMLElement;
+        if (e.hasAttribute?.("data-src")) {
+          out += e.getAttribute("data-src") ?? "";
+          return;
+        }
+        n.childNodes.forEach(visit);
+      };
+      el.childNodes.forEach(visit);
+      return out;
+    });
+
+  const popover = (page: Page) => page.locator("[data-link-edit-popover]");
+
+  test("the pencil on a folded link opens the editor; Done rewrites label and url", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: `before ${LINK} after` },
+    ]);
+
+    await text(page, "n").locator("a[data-link] .link-edit-icon").click();
+
+    // The popover opens prefilled -- and the pencil click did NOT open the url.
+    await expect(popover(page)).toBeVisible();
+    await expect(popover(page).getByLabel("Link text")).toHaveValue("Anthropic");
+    await expect(popover(page).getByLabel("Link URL")).toHaveValue(
+      "https://anthropic.com",
+    );
+    expect(await opened(page)).toEqual([]);
+
+    await popover(page).getByLabel("Link text").fill("Claude");
+    await popover(page).getByLabel("Link URL").fill("https://claude.ai");
+    await popover(page).getByRole("button", { name: "Done" }).click();
+
+    // Closed, and the token was rewritten in place (a field edit).
+    await expect(popover(page)).toHaveCount(0);
+    const anchor = text(page, "n").locator("a[data-link]");
+    await expect(anchor).toHaveText("Claude");
+    await expect(anchor).toHaveAttribute("href", "https://claude.ai");
+    expect(await readSrc(page, "n")).toBe(
+      "before [Claude](https://claude.ai) after",
+    );
+  });
+
+  test("Cancel leaves the link untouched", async ({ page }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await text(page, "n").locator("a[data-link] .link-edit-icon").click();
+    await popover(page).getByLabel("Link text").fill("changed");
+    await popover(page).getByRole("button", { name: "Cancel" }).click();
+
+    await expect(popover(page)).toHaveCount(0);
+    expect(await readSrc(page, "n")).toBe(LINK);
+  });
+
+  test("the revealed link's (✎) chip opens the editor too", async ({ page }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await focusBullet(page, "n");
+    await expect(text(page, "n").locator(".link-url-chip")).toBeVisible();
+    await text(page, "n").locator(".link-url-chip").click();
+
+    await expect(popover(page)).toBeVisible();
+    await expect(popover(page).getByLabel("Link URL")).toHaveValue(
+      "https://anthropic.com",
+    );
+
+    await popover(page).getByLabel("Link URL").fill("https://claude.ai");
+    await popover(page).getByRole("button", { name: "Done" }).click();
+
+    expect(await readSrc(page, "n")).toBe("[Anthropic](https://claude.ai)");
+  });
+});
+
+test.describe("Copy and cut return markdown source", () => {
+  const SRC = `before ${LINK} after`;
+
+  // Select the whole line and dispatch a synthetic copy/cut carrying a
+  // DataTransfer, then read back what the handler wrote to it. The folded <a>
+  // renders only "Anthropic", so a native copy would lose the url half.
+  const clip = (page: Page, id: string, type: "copy" | "cut") =>
+    text(page, id).evaluate((el: HTMLElement, t) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const dt = new DataTransfer();
+      el.dispatchEvent(
+        new ClipboardEvent(t, {
+          clipboardData: dt,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      return dt.getData("text/plain");
+    }, type);
+
+  test("copying a selection spanning a folded link yields the markdown", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: SRC },
+    ]);
+
+    expect(await clip(page, "n", "copy")).toBe(SRC);
+    // Copy doesn't disturb the line.
+    await expect(text(page, "n").locator("a[data-link]")).toHaveText(
+      "Anthropic",
+    );
+  });
+
+  test("cut yields the markdown and removes the selection in source space", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: SRC },
+    ]);
+
+    expect(await clip(page, "n", "cut")).toBe(SRC);
+    await expect(text(page, "n")).toHaveText("");
   });
 });

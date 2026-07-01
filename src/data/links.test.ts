@@ -4,6 +4,7 @@ import {
   encodeUrlForMarkdown,
   hasLink,
   isHttpUrl,
+  replaceLinkToken,
   sanitizeLinkLabel,
   stripLinks,
   swapLinkLabel,
@@ -97,6 +98,30 @@ describe('sanitizeLinkLabel', () => {
   test('an all-junk title collapses to empty (caller keeps the placeholder)', () => {
     expect(sanitizeLinkLabel('   \n\t ')).toBe('')
     expect(sanitizeLinkLabel(']]]')).toBe('')
+  })
+})
+
+describe('replaceLinkToken', () => {
+  test('replaces the verbatim token, first occurrence only', () => {
+    const text = 'a [x](http://x) b [x](http://x) c'
+    expect(replaceLinkToken(text, '[x](http://x)', '[y](http://y)')).toBe(
+      'a [y](http://y) b [x](http://x) c',
+    )
+  })
+
+  test('returns null when the token is gone (the line was edited)', () => {
+    expect(replaceLinkToken('now different', '[x](http://x)', '[y](http://y)'))
+      .toBeNull()
+  })
+
+  test('can change label and url together (the Edit Link popover write)', () => {
+    expect(
+      replaceLinkToken(
+        'see [old label](https://old.example) now',
+        '[old label](https://old.example)',
+        '[New](https://new.example/path)',
+      ),
+    ).toBe('see [New](https://new.example/path) now')
   })
 })
 

@@ -843,25 +843,18 @@ body.dragging-active * {
   }
 }
 
-/* Rich links (ADR 0005, per-link reveal). A link FOLDS to a clean <a> with a
-   leading site favicon and a trailing external-link icon when the caret isn't
-   on it; it REVEALS to raw `[label](url)` -- decorated, not plain -- when the
-   caret is within/adjacent. At most one link reveals at a time (under caret). */
-.node-link,
-.link-url {
-  color: oklch(0.5 0.18 255);
-}
-
+/* Rich links (ADR 0005, bracket reveal). A link FOLDS to a clean <a> with a
+   leading site favicon and a trailing edit pencil when the caret isn't on it;
+   when the caret is within/adjacent, the BRACKETS appear around the editable
+   label but the URL stays folded behind a `(✎)` chip -- the raw url never
+   expands into the line. At most one link reveals at a time (under caret). */
 .node-link {
+  color: oklch(0.5 0.18 255);
   text-decoration-color: oklch(0.5 0.18 255 / 0.5);
 }
 
-.dark .node-link,
-.dark .link-url {
-  color: oklch(0.78 0.13 245);
-}
-
 .dark .node-link {
+  color: oklch(0.78 0.13 245);
   text-decoration-color: oklch(0.78 0.13 245 / 0.5);
 }
 
@@ -869,16 +862,17 @@ body.dragging-active * {
   text-decoration-color: currentColor;
 }
 
-/* Revealed-link decoration: faint `[]()` punctuation (most-dimmed), normal
-   label, link-color url -- mimicking Obsidian Live Preview. The label/url carry
-   no underline (raw editing mode); only the folded <a> underlines. */
+/* Revealed-link decoration: faint `[]` punctuation (most-dimmed) around a
+   normal-color label -- mimicking Obsidian Live Preview, minus the raw url.
+   The label carries no underline (raw editing mode); only the folded <a>
+   underlines. */
 .md-punct {
   color: var(--muted-foreground);
   opacity: 0.6;
 }
 
 .link-label {
-  color: var(--foreground);
+  color: oklch(0.5 0.18 255);
 }
 
 /* The site favicon, leading a folded link (Google s2/favicons). It sits inside the <a>
@@ -932,31 +926,59 @@ body.dragging-active * {
   }
 }
 
-/* The external-link affordance: a small icon after a folded link and after a
-   revealed link's source, painted with the current text color via an SVG mask
-   (lucide `external-link`). Not part of textContent, so caret math is unaffected. */
-.node-link[data-link]::after,
-.link-reveal[data-link-reveal]::after {
-  content: "";
+/* The edit affordance (ADR 0005, bracket reveal): a small pencil painted with
+   the current text color via an SVG mask (lucide `pencil`). It trails the label
+   inside a folded <a> and fills the revealed link's `(✎)` chip -- a text-free
+   span, so source/caret math is unaffected. Clicking it opens the Edit Link
+   popover (Seam B). */
+.link-edit-icon {
   display: inline-block;
   width: 0.7em;
   height: 0.7em;
   margin-left: 0.12em;
   vertical-align: -0.02em;
   background-color: currentColor;
-  opacity: 0.75;
-  -webkit-mask: var(--external-link-icon) no-repeat center / contain;
-  mask: var(--external-link-icon) no-repeat center / contain;
+  opacity: 0.55;
+  cursor: pointer;
+  user-select: none;
+  -webkit-mask: var(--link-edit-icon) no-repeat center / contain;
+  mask: var(--link-edit-icon) no-repeat center / contain;
 }
 
-.link-reveal[data-link-reveal]::after {
+.node-link:hover .link-edit-icon,
+.link-url-chip:hover .link-edit-icon {
+  opacity: 1;
+}
+
+/* The revealed link's folded URL: faint parens around the pencil, standing in
+   for the whole `(url)` source (carried in its data-src). Link-colored like the
+   folded <a>, so it reads as "the link half". */
+.link-url-chip {
+  cursor: pointer;
+  user-select: none;
   color: oklch(0.5 0.18 255);
 }
 
-.dark .link-reveal[data-link-reveal]::after {
+.dark .link-url-chip {
   color: oklch(0.78 0.13 245);
 }
 
+.link-url-chip::before {
+  content: "(";
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.link-url-chip::after {
+  content: ")";
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.link-url-chip .link-edit-icon {
+  margin-left: 0;
+}
+
 :root {
-  --external-link-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/></svg>');
+  --link-edit-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>');
 }

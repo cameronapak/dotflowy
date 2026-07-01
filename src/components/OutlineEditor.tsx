@@ -82,7 +82,11 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
-import { pasteIntoBullet } from "./paste";
+import {
+  copySourceSelection,
+  cutSourceSelection,
+  pasteIntoBullet,
+} from "./paste";
 import {
   blocksCaret,
   composeHidden,
@@ -1441,6 +1445,14 @@ function ZoomedTitle({
           const next = pasteIntoBullet(e, el, node.id, getCtx, onTextChange);
           if (next !== null) syncedRef.current = next;
         }}
+        // Copy/cut hand back the markdown SOURCE (a folded link's rendered
+        // text drops the url half). See copySourceSelection (ADR 0005).
+        onCopy={(e) => copySourceSelection(e, e.currentTarget)}
+        onCut={(e) => {
+          const el = e.currentTarget;
+          const next = cutSourceSelection(e, el, onTextChange);
+          if (next !== null) syncedRef.current = next;
+        }}
         onFocus={(e) => {
           // Caret and node selection are mutually exclusive (ADR 0018): focusing
           // the title leaves selection mode.
@@ -1457,8 +1469,8 @@ function ZoomedTitle({
           // Deferred to the next frame so a CLICK at the title's end settles on
           // the folded layout before the link expands; see revealLinkAtCaret.
           if (!hasLink(node.text)) return;
-          revealLinkAtCaret(el, node.text, () => {
-            syncedRef.current = node.text;
+          revealLinkAtCaret(el, (t) => {
+            syncedRef.current = t;
           });
         }}
         onBlur={(e) => {

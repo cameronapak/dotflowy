@@ -83,3 +83,50 @@ export function pasteIntoBullet(
   afterPaste({ inserted, nodeId, el }, getCtx());
   return next;
 }
+
+/**
+ * Copy the selected SOURCE (not the rendered text) to the clipboard. A folded
+ * link renders only its label, so the browser's native copy would drop the
+ * `(url)` half; this writes the source slice instead -- "whatever you copy
+ * comes back as markdown" (ADR 0005). Returns the source + selection range on
+ * success, or null when there's no selection inside `el` (native copy
+ * proceeds; on a link-free line source == rendered text anyway).
+ */
+export function copySourceSelection(
+  e: ClipboardEvent<HTMLElement>,
+  el: HTMLElement,
+): { source: string; start: number; end: number } | null {
+  const cd = e.clipboardData;
+  if (!cd) return null;
+  const range = getSelectionRange(el);
+  if (!range || range.end <= range.start) return null;
+  const source = readSource(el);
+  e.preventDefault();
+  cd.setData("text/plain", source.slice(range.start, range.end));
+  return { source, ...range };
+}
+
+/**
+ * Cut = the same source copy plus the source-space delete (the native cut
+ * would both copy the rendered text AND leave the DOM for the browser to
+ * mangle). Splices in source space like a paste, re-decorates, and drops the
+ * caret at the cut point. Returns the new source text (so the caller can
+ * update its synced-text ref), or null when nothing was cut.
+ */
+export function cutSourceSelection(
+  e: ClipboardEvent<HTMLElement>,
+  el: HTMLElement,
+  onText: (text: string) => void,
+): string | null {
+  const cut = copySourceSelection(e, el);
+  if (!cut) return null;
+  const next = cut.source.slice(0, cut.start) + cut.source.slice(cut.end);
+  onText(next);
+  decorate(el, next, cut.start, false);
+  // Restore the caret only when the bullet already owns focus. Placing a
+  // selection into an UNFOCUSED contentEditable focuses it (Chromium), and the
+  // resulting onFocus reveal would repaint this bullet from its pre-cut render
+  // scope -- resurrecting the text we just cut.
+  if (document.activeElement === el) setCaretOffset(el, cut.start);
+  return next;
+}

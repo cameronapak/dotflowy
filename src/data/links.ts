@@ -66,21 +66,35 @@ export function sanitizeLinkLabel(title: string): string {
   return title.replace(/]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Verbatim-match-or-drop label swap (ADR 0016). Find the FIRST occurrence of
- *  the exact placeholder token `[oldLabel](encodedUrl)` in `text` and replace
- *  its label with `newLabel`, returning the new text. Returns null when the
- *  placeholder is gone (the user edited the label, or the bullet changed) -- the
- *  signal to keep whatever is there now. No parsing, no fuzzy match: we only
- *  ever touch a label we know we inserted and that is still byte-for-byte present. */
+/** Verbatim-match-or-drop token replacement. Find the FIRST occurrence of the
+ *  exact `oldToken` in `text` and replace it with `newToken`, returning the new
+ *  text. Returns null when the token is gone (the user edited the line, or the
+ *  bullet changed) -- the signal to keep whatever is there now. No parsing, no
+ *  fuzzy match: we only ever touch a token that is still byte-for-byte present.
+ *  Shared by the unfurl label swap (ADR 0016) and the Edit Link popover's
+ *  write-back (ADR 0005). */
+export function replaceLinkToken(
+  text: string,
+  oldToken: string,
+  newToken: string,
+): string | null {
+  const at = text.indexOf(oldToken);
+  if (at < 0) return null;
+  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
+}
+
+/** Verbatim-match-or-drop label swap (ADR 0016): replace the FIRST occurrence
+ *  of the placeholder `[oldLabel](encodedUrl)` with `[newLabel](encodedUrl)`,
+ *  or null when the placeholder is gone. */
 export function swapLinkLabel(
   text: string,
   encodedUrl: string,
   oldLabel: string,
   newLabel: string,
 ): string | null {
-  const oldToken = `[${oldLabel}](${encodedUrl})`;
-  const at = text.indexOf(oldToken);
-  if (at < 0) return null;
-  const newToken = `[${newLabel}](${encodedUrl})`;
-  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
+  return replaceLinkToken(
+    text,
+    `[${oldLabel}](${encodedUrl})`,
+    `[${newLabel}](${encodedUrl})`,
+  );
 }

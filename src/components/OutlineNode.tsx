@@ -26,7 +26,11 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
-import { pasteIntoBullet } from "./paste";
+import {
+  copySourceSelection,
+  cutSourceSelection,
+  pasteIntoBullet,
+} from "./paste";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
 
@@ -382,6 +386,16 @@ function OutlineNodeBody({
             );
             if (next !== null) syncedRef.current = next;
           }}
+          // Copy/cut hand back the markdown SOURCE (a folded link's rendered
+          // text drops the url half). See copySourceSelection (ADR 0005).
+          onCopy={(e) => copySourceSelection(e, e.currentTarget)}
+          onCut={(e) => {
+            const el = e.currentTarget;
+            const next = cutSourceSelection(e, el, (t) =>
+              commands.onTextChange(node.id, t),
+            );
+            if (next !== null) syncedRef.current = next;
+          }}
           onFocus={(e) => {
             // A caret and a node selection are mutually exclusive (ADR 0018):
             // focusing any bullet leaves selection mode. Covers "click clears ->
@@ -401,8 +415,8 @@ function OutlineNodeBody({
             // next frame so a CLICK at the line's end settles on the folded
             // layout before the link expands; see revealLinkAtCaret.
             if (!hasLink(node.text)) return;
-            revealLinkAtCaret(el, node.text, () => {
-              syncedRef.current = node.text;
+            revealLinkAtCaret(el, (t) => {
+              syncedRef.current = t;
             });
           }}
           onBlur={(e) => {

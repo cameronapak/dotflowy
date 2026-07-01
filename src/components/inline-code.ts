@@ -15,10 +15,12 @@
 // Most tokens keep their FULL source visible (backticks, the leading `#`), so
 // source string and rendered text have identical length. A FOLDING token (a
 // link) is the exception: it folds to a shorter atomic widget unless the caret
-// is on it. An atom carries its full source in `data-src` (+ `data-src-len`)
-// and `contenteditable="false"`; the caret helpers below count it off `data-src`
-// generically, so every consumer keeps speaking source offsets -- with no
-// per-token special-casing (the unlock in ADR 0001 D6).
+// is on it -- and even revealed, only its `[label]` half is text (the `(url)`
+// half stays a smaller atom; ADR 0005's bracket reveal). An atom carries its
+// full source in `data-src` (+ `data-src-len`) and `contenteditable="false"`;
+// the caret helpers below count it off `data-src` generically, so every
+// consumer keeps speaking source offsets -- with no per-token special-casing
+// (the unlock in ADR 0001 D6).
 
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
@@ -146,9 +148,9 @@ function foldedSrcLen(el: HTMLElement): number {
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
 // the source once a focused bullet can hold folded links (they show only their
 // label), so onInput/onCompositionEnd/paste read through this instead: walk the
-// tree emitting `data-src` for folded links and textContent for everything else
-// (revealed-link spans, code, and tags are all 1:1 with their source). See ADR
-// 0017 (per-link reveal).
+// tree emitting `data-src` for atoms (folded links, a revealed link's `(url)`
+// chip) and textContent for everything else (a revealed link's `[label]`, code,
+// and tags are all 1:1 with their source). See ADR 0005 (bracket reveal).
 export function readSource(el: HTMLElement): string {
   let out = "";
   const visit = (node: Node) => {
@@ -349,21 +351,26 @@ export function watchCaretReveal(
 // On a mouse click, focus fires before the browser finalizes the click caret; a
 // synchronous reveal would expand the folded link under the pointer first, so a
 // click at the visual END of the line then lands geometrically in the MIDDLE of
-// the now-long raw markdown. Deferring lets the click settle against the folded
+// the now-longer markdown. Deferring lets the click settle against the folded
 // layout (caret at the true end); we then re-read the source offset, reveal, and
 // restore the caret. No-op if focus left before the frame. The selectionchange
 // watcher already covers a click; this is the belt for a focus that emits no
 // selectionchange (e.g. a programmatic el.focus()). See ADR 0005.
+//
+// The text is re-read from the DOM AT FRAME TIME (readSource), never captured
+// at focus time: a synchronous edit landing between the focus and the frame
+// (a cut, a paste) would otherwise be repainted over with the stale snapshot.
+// `onRevealed` receives the text that was actually rendered.
 export function revealLinkAtCaret(
   el: HTMLElement,
-  text: string,
-  onRevealed?: () => void,
+  onRevealed?: (text: string) => void,
 ): void {
   requestAnimationFrame(() => {
     if (document.activeElement !== el) return;
+    const text = readSource(el);
     const caret = getCaretOffset(el);
     decorate(el, text, caret, false);
-    onRevealed?.();
+    onRevealed?.(text);
     setCaretOffset(el, caret);
   });
 }

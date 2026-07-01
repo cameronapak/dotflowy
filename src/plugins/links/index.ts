@@ -17,13 +17,15 @@ import {
 } from "../../data/links";
 import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
-import { definePlugin, type El } from "../types";
+import { getViewRootId } from "../../data/view-state";
+import { definePlugin, type El, type PluginContext } from "../types";
+import { openLinkEditPopover } from "./link-edit-popover";
 
 // Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so
 // it always matches what the tokenizer fed us.
 const LINK_PARTS = /^\[([^\]]*)\]\(([^)]*)\)$/;
 
-const LINK_CLASS = "node-link cursor-pointer underline underline-offset-2";
+const LINK_CLASS = "node-link cursor-pointer";
 
 // The host of a folded link's url, for the favicon lookup -- or null if the url
 // won't parse (a hand-typed rough edge). The token's url is percent-encoded for
@@ -56,13 +58,24 @@ function faviconImgEl(host: string): El {
   };
 }
 
-// A folded link: a clean, ATOMIC <a> showing the site favicon + label. The whole
-// `(url)` is hidden; `contenteditable="false"` makes it one indivisible caret
-// unit. `data-src`/`data-src-len` carry the full markdown so the core's
-// readSource can reconstruct it and the caret helpers can count it (ADR 0005) --
-// readSource stops at the <a> and reads `data-src`, so the inner <img> never
-// perturbs source/caret math. Attr order is preserved verbatim so the generated
-// HTML stays byte-identical.
+// The trailing pencil affordance -- a text-free span (icon painted by CSS mask)
+// that opens the Edit Link popover. Inside a folded <a> it's invisible to
+// source/caret math (readSource stops at the atom's `data-src`); inside the
+// revealed `(url)` chip it's interior to that atom, same story.
+function editIconEl(): El {
+  return {
+    tag: "span",
+    attrs: { class: "link-edit-icon", "aria-hidden": "true" },
+  };
+}
+
+// A folded link: a clean, ATOMIC <a> showing the site favicon + label + the
+// edit pencil. The whole `(url)` is hidden; `contenteditable="false"` makes it
+// one indivisible caret unit. `data-src`/`data-src-len` carry the full markdown
+// so the core's readSource can reconstruct it and the caret helpers can count
+// it (ADR 0005) -- readSource stops at the <a> and reads `data-src`, so the
+// inner <img>/pencil never perturb source/caret math. Attr order is preserved
+// verbatim so the generated HTML stays byte-identical.
 function foldedLinkEl(label: string, url: string, tok: string): El {
   const host = linkHost(url);
   return {
@@ -77,19 +90,26 @@ function foldedLinkEl(label: string, url: string, tok: string): El {
       target: "_blank",
       rel: "noopener noreferrer",
     },
-    children: host ? [faviconImgEl(host), label] : [label],
+    children: host
+      ? [faviconImgEl(host), label, editIconEl()]
+      : [label, editIconEl()],
   };
 }
 
-// A revealed link: the raw `[label](url)` as decorated spans whose combined
-// textContent EQUALS the source (so it stays 1:1 with source offsets, like
-// code/tag chips). The `[]()` punctuation is faint, the url is link-color.
+// A revealed link (bracket reveal, ADR 0005): `[label]` as editable text -- the
+// brackets appear so the label edits as raw markdown -- but the URL half NEVER
+// expands into the line. `(url)` folds to one atomic chip (`data-src` carries
+// it, so readSource still reconstructs the full token and the caret jumps over
+// it) rendered as a pencil between faint parens; clicking it opens the Edit
+// Link popover. The visible text (`[` + label + `]`) stays 1:1 with its slice
+// of the source.
 function revealedLinkEl(label: string, url: string): El {
   const punct = (s: string): El => ({
     tag: "span",
     attrs: { class: "md-punct" },
     children: [s],
   });
+  const urlSrc = `(${url})`;
   return {
     tag: "span",
     attrs: { class: "link-reveal", "data-link-reveal": true },
@@ -97,11 +117,60 @@ function revealedLinkEl(label: string, url: string): El {
       punct("["),
       { tag: "span", attrs: { class: "link-label" }, children: [label] },
       punct("]"),
-      punct("("),
-      { tag: "span", attrs: { class: "link-url" }, children: [url] },
-      punct(")"),
+      {
+        tag: "span",
+        attrs: {
+          class: "link-url-chip",
+          "data-src": urlSrc,
+          "data-src-len": urlSrc.length,
+          contenteditable: "false",
+          title: "Edit link",
+        },
+        children: [editIconEl()],
+      },
     ],
   };
+}
+
+// Resolve a click on an edit affordance to (nodeId, token, anchor rect) and
+// open the popover. The pencil inside a folded <a> reads the full token off
+// the anchor's data-src; the revealed `(url)` chip reads its own data-src plus
+// the label from the sibling span (fresh -- every keystroke re-decorates). The
+// node id comes from the enclosing row's `data-node-id`; the zoomed title has
+// no row, so it falls back to the zoom root (which IS the title's node).
+function openEditFor(el: HTMLElement, ctx: PluginContext): void {
+  const anchor = el.closest<HTMLElement>("a[data-link]");
+  let token: string;
+  let rectEl: HTMLElement;
+  if (anchor) {
+    token = anchor.getAttribute("data-src") ?? "";
+    rectEl = anchor;
+  } else {
+    const chip = el.closest<HTMLElement>(".link-url-chip");
+    if (!chip) return;
+    const reveal = chip.closest<HTMLElement>(".link-reveal");
+    const label = reveal?.querySelector(".link-label")?.textContent ?? "";
+    token = `[${label}]${chip.getAttribute("data-src") ?? ""}`;
+    rectEl = reveal ?? chip;
+  }
+  const parts = LINK_PARTS.exec(token);
+  if (!parts) return;
+  const nodeId =
+    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
+    getViewRootId();
+  if (!nodeId) return;
+  const rect = rectEl.getBoundingClientRect();
+  openLinkEditPopover(
+    {
+      nodeId,
+      token,
+      label: parts[1] ?? "",
+      url: parts[2] ?? "",
+      x: rect.left,
+      y: rect.bottom + 6,
+    },
+    ctx,
+  );
 }
 
 // While its title is being fetched, a just-pasted bare-url link wears this
@@ -173,14 +242,29 @@ export default definePlugin({
         const url = parts?.[2] ?? "";
         const reveal =
           revealOffset != null && revealOffset >= start && revealOffset <= end;
-        return reveal ? revealedLinkEl(label, url) : foldedLinkEl(label, url, tok);
+        return reveal
+          ? revealedLinkEl(label, url)
+          : foldedLinkEl(label, url, tok);
       },
     },
   ],
 
-  // Seam B: a folded link opens in a new tab; its mousedown blocks the editing
-  // caret (editing a link is done from its edges -- click beside it reveals raw).
+  // Seam B: the edit pencil (in a folded <a> AND the revealed `(url)` chip)
+  // opens the Edit Link popover -- listed FIRST so a click on the pencil inside
+  // the anchor dispatches here, not to the open-in-new-tab handler below. A
+  // folded link itself opens in a new tab; its mousedown blocks the editing
+  // caret (editing the label is done from its edges -- click beside it reveals
+  // the brackets; editing the url is the popover's job).
   interactions: [
+    {
+      selector: ".link-edit-icon, .link-url-chip",
+      blockCaretOnMouseDown: true,
+      onClick: (el, ctx, e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openEditFor(el, ctx);
+      },
+    },
     {
       selector: "a[data-link]",
       blockCaretOnMouseDown: true,
@@ -223,7 +307,8 @@ export default definePlugin({
       if (!parts) return;
       const label = parts[1] ?? "";
       const encodedUrl = parts[2] ?? "";
-      if (!isHttpUrl(label) || encodeUrlForMarkdown(label) !== encodedUrl) return;
+      if (!isHttpUrl(label) || encodeUrlForMarkdown(label) !== encodedUrl)
+        return;
 
       const token = `[${label}](${encodedUrl})`;
       const anchor = findFoldedAnchor(el, token);
