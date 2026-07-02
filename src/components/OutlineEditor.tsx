@@ -448,7 +448,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     setVirtualNav({
       scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
       indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
-      scrollMargin: () => virtualizer.options.scrollMargin,
       measurementAt: (i) => virtualizer.measurementsCache[i],
     });
     return () => setVirtualNav(null);

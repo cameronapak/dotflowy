@@ -15,9 +15,13 @@
 interface VirtualNav {
   scrollToIndex: (index: number, opts?: { align?: "start" | "center" | "end" | "auto" }) => void
   indexOf: (id: string) => number
-  /** The windowed list's document-top offset (virtualizer scrollMargin). */
-  scrollMargin: () => number
-  /** Measured (or estimated) start/size for a flat-list index, in list space. */
+  /**
+   * Measured (or estimated) start/size for a flat-list index. `start` is in
+   * DOCUMENT space: the window virtualizer folds `scrollMargin` into every
+   * measurement (the first item starts at paddingStart + scrollMargin), which
+   * is why the render subtracts it (`translateY(start - scrollMargin)`,
+   * OutlineRow). Consumers must NOT add scrollMargin again.
+   */
   measurementAt: (index: number) => { start: number; size: number } | undefined
 }
 
@@ -48,7 +52,7 @@ export function virtualRowRect(
   if (i < 0) return null
   const m = nav.measurementAt(i)
   if (!m) return null
-  return { top: nav.scrollMargin() + m.start - scrollY, height: m.size }
+  return { top: m.start - scrollY, height: m.size }
 }
 
 /**
