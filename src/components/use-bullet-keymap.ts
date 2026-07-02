@@ -4,7 +4,8 @@ import type { Node } from "../data/schema";
 import { keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 import { selectSingle } from "../data/selection-state";
-import { getCaretOffset } from "./inline-code";
+import { getCaretOffset, readSource } from "./inline-code";
+import { openLinkAtCaret } from "./link-keymap";
 import type { NodeCommands } from "./OutlineNode";
 
 interface BulletKeymapArgs {
@@ -98,7 +99,11 @@ export function useBulletKeymap({
             // KeymapSpec.hotkey is a plain string (plugin contract stays library-
             // agnostic); the manager wants its RegisterableHotkey union here.
             hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
-            callback: () => k.run(node.id, pluginCtx()),
+            callback: () => {
+              const el = textRef.current;
+              if (k.hotkey === "Mod+Enter" && el && openLinkAtCaret(el)) return;
+              k.run(node.id, pluginCtx());
+            },
           })),
           {
             // Enter: split the bullet at the caret -- text left of the caret stays,
@@ -273,6 +278,31 @@ export function useBulletKeymap({
             options: { preventDefault: false, stopPropagation: false },
           },
           {
+            // Left at the start snakes to the previous visible node's end,
+            // matching the existing visible-order walk used by Up/Down.
+            hotkey: "ArrowLeft",
+            callback: (e) => {
+              const el = textRef.current;
+              if (!el || !isCollapsedCaretAtStart(el)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              commands.onMoveFocus(node.id, "up");
+            },
+            options: { preventDefault: false, stopPropagation: false },
+          },
+          {
+            // Right at the end snakes to the next visible node's start.
+            hotkey: "ArrowRight",
+            callback: (e) => {
+              const el = textRef.current;
+              if (!el || !isCaretAtEnd(el)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              commands.onMoveFocus(node.id, "down");
+            },
+            options: { preventDefault: false, stopPropagation: false },
+          },
+          {
             // Cmd/Ctrl+Down: open (reveal the children of) a closed bullet that
             // has children. Direction encodes intent -- Down only ever opens.
             // Default options preventDefault, so the caret never jumps to the end
@@ -327,6 +357,17 @@ function isCaretAtStart(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return true;
   return getCaretOffset(el) === 0;
+}
+
+function isCaretAtEnd(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return false;
+  return getCaretOffset(el) === readSource(el).length;
+}
+
+function isCollapsedCaretAtStart(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  return !!sel && sel.isCollapsed && isCaretAtStart(el);
 }
 
 // Caret-to-neighbor navigation is about VISUAL lines, not text offset: on a

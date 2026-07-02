@@ -92,8 +92,8 @@ export interface NodeCommands {
   onRequestMirror: (id: string) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
   // `x` is the caret's viewport x at the moment of the keypress, so the
-  // landing node can drop the caret at the same column. Omitted when there's
-  // no caret to preserve (e.g. the zoom title), which lands at the start.
+  // landing node can drop the caret at the same column. Omitted for horizontal
+  // snaking: up lands at the previous row's end, down at the next row's start.
   onMoveFocus: (id: string, direction: "up" | "down", x?: number) => void;
   // Zoom the outline so this node becomes the temporary root.
   onZoom: (id: string) => void;

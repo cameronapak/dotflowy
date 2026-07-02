@@ -7,6 +7,18 @@ import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 
+async function caretAtEdge(page: Page, id: string, edge: "start" | "end") {
+  await text(page, id).evaluate((el: HTMLElement, atEnd) => {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(!atEnd);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }, edge === "end");
+}
+
 async function load(
   page: Page,
   tree: SeedNode[] = STANDARD_TREE,
@@ -156,6 +168,24 @@ test.describe("keyboard arrow navigation", () => {
 
     await page.keyboard.press("ArrowUp");
     await expect(text(page, "alpha")).toBeFocused();
+  });
+
+  test("ArrowLeft/ArrowRight snake between adjacent visible bullets", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await caretAtEdge(page, "alpha", "end");
+    await page.keyboard.press("ArrowRight");
+    await expect(text(page, "alpha-1")).toBeFocused();
+    await page.keyboard.type("!");
+    await expect(text(page, "alpha-1")).toHaveText("!Alpha one");
+
+    await caretAtEdge(page, "bravo", "start");
+    await page.keyboard.press("ArrowLeft");
+    await expect(text(page, "alpha-2")).toBeFocused();
+    await page.keyboard.type("!");
+    await expect(text(page, "alpha-2")).toHaveText("Alpha two!");
   });
 
   test("backspacing an empty bullet away focuses the row ABOVE, not below", async ({

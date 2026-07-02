@@ -4,6 +4,7 @@ import {
   encodeUrlForMarkdown,
   hasLink,
   isHttpUrl,
+  linkUrlAtOffset,
   replaceLinkToken,
   sanitizeLinkLabel,
   stripLinks,
@@ -35,6 +36,30 @@ describe('stripLinks', () => {
 
   test('leaves link-free text untouched', () => {
     expect(stripLinks('no links here')).toBe('no links here')
+  })
+})
+
+describe('linkUrlAtOffset', () => {
+  const text = 'see [Example](https://example.com) now'
+
+  test('returns the url when the caret is in the link label', () => {
+    expect(linkUrlAtOffset(text, text.indexOf('Example'))).toBe(
+      'https://example.com',
+    )
+    expect(linkUrlAtOffset(text, text.indexOf(']'))).toBe(
+      'https://example.com',
+    )
+  })
+
+  test('returns the url when the caret is in the url segment', () => {
+    expect(linkUrlAtOffset(text, text.indexOf('example.com'))).toBe(
+      'https://example.com',
+    )
+  })
+
+  test('returns null outside a complete link token', () => {
+    expect(linkUrlAtOffset(text, 0)).toBeNull()
+    expect(linkUrlAtOffset('[partial]', 3)).toBeNull()
   })
 })
 
