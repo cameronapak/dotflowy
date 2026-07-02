@@ -47,6 +47,38 @@ test.describe("tag autocomplete (plugin Seam H)", () => {
     await expect(text(page, "b").locator('.tag[data-tag="urgent"]')).toBeVisible();
   });
 
+  test("adding a second tag to a node that already has one still lists it", async ({
+    page,
+  }) => {
+    // Regression: the corpus used to exclude the whole node being edited, so a
+    // node's OWN existing tags never autocompleted when you added another tag
+    // to that same node. Here "#urgent" lives only on node "a"; typing a second
+    // tag into "a" must still surface it.
+    await seedOutline(page, [
+      { id: "a", parentId: null, prevSiblingId: null, text: "#urgent" },
+    ]);
+    await page.goto("/");
+    await expect(text(page, "a")).toBeVisible();
+
+    // Focus + caret at the very end via evaluate -- a plain click would land on
+    // the "#urgent" chip and fire its filter interaction (Seam B), not the caret.
+    await text(page, "a").evaluate((el) => {
+      (el as HTMLElement).focus();
+      const sel = window.getSelection();
+      if (!sel) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    await page.keyboard.type(" #urg");
+
+    await expect(
+      page.locator('[role="listbox"] .tag-option[data-tag="urgent"]'),
+    ).toBeVisible();
+  });
+
   test("a query with no existing match does not open the menu", async ({
     page,
   }) => {

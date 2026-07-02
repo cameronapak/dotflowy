@@ -40,7 +40,10 @@ function tagMenuMatch(before: string): MenuTrigger | null {
   const triggerIndex = before.lastIndexOf("#");
   if (triggerIndex === -1) return null;
   const prev = before[triggerIndex - 1];
-  if (triggerIndex > 0 && prev !== " " && prev !== " ") return null;
+  // `\s` (not a space literal) so this also accepts the non-breaking space
+  // (U+00A0) contentEditable inserts after existing content -- otherwise adding
+  // a second `#tag` to an already-tagged bullet would never open the menu.
+  if (triggerIndex > 0 && !/\s/.test(prev ?? "")) return null;
   const query = before.slice(triggerIndex + 1);
   if (query.length > 0 && !TAG_CHARS.test(query)) return null;
   return { query, triggerIndex };
@@ -151,13 +154,18 @@ export default definePlugin({
       match: tagMenuMatch,
       entries: (trigger, node, ctx) => {
         const q = trigger.query.toLowerCase();
-        // Exclude the node being edited: its text already holds the in-progress
-        // tag (live tree), so the corpus must be OTHER nodes' tags or the menu
-        // would offer the brand-new tag you're typing as a match for itself.
-        const all = collectAllTags(ctx.tree, node.id);
-        const matches = q
+        // Exclude only the tag being typed at the caret -- NOT the whole node.
+        // Its text (live tree) already holds the in-progress tag, so offering
+        // `#<query>` as a match for itself is noise; but excluding the entire
+        // node drops its OTHER, already-completed tags too, so a node that
+        // already has a tag would never autocomplete a second one. Keep the
+        // full corpus and filter out just the self-match token.
+        const inProgress = ("#" + trigger.query).toLowerCase();
+        const all = collectAllTags(ctx.tree);
+        const matches = (q
           ? all.filter((t) => t.slice(1).toLowerCase().includes(q))
-          : all;
+          : all
+        ).filter((t) => t.toLowerCase() !== inProgress);
         return matches.slice(0, 8).map((tag) => ({
           key: tag,
           render: () => tagOption(tag),

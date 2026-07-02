@@ -35,14 +35,14 @@ interface MenuOpen {
 
 // The default trigger detector: the trigger sits at start-or-after-whitespace
 // and the query after it is whitespace-free. A spec can override `match` for a
-// stricter query (tags require tag-chars). ` ` is a non-breaking space,
-// which contentEditable can insert.
+// stricter query (tags require tag-chars). The preceding-char test uses `\s`
+// so it also accepts the non-breaking space (U+00A0) contentEditable inserts.
 function defaultMatch(trigger: string) {
   return (before: string): MenuTrigger | null => {
     const triggerIndex = before.lastIndexOf(trigger);
     if (triggerIndex === -1) return null;
     const prev = before[triggerIndex - 1];
-    if (triggerIndex > 0 && prev !== " " && prev !== " ") return null;
+    if (triggerIndex > 0 && !/\s/.test(prev ?? "")) return null;
     const query = before.slice(triggerIndex + 1);
     if (/\s/.test(query)) return null;
     return { query, triggerIndex };

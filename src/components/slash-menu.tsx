@@ -197,7 +197,7 @@ function detectSlash(
   const slashIndex = before.lastIndexOf("/");
   if (slashIndex === -1) return null;
   const prev = before[slashIndex - 1];
-  if (slashIndex > 0 && prev !== " " && prev !== " ") return null;
+  if (slashIndex > 0 && !/\s/.test(prev ?? "")) return null;
   const query = before.slice(slashIndex + 1);
   if (/\s/.test(query)) return null;
   return { query, slashIndex };
