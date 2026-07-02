@@ -303,7 +303,7 @@ export const nodesCollection = createCollection({
       const getCursor = (): number | null =>
         (metadata?.collection.get('cursor') as number | undefined) ?? null
 
-      const applyOps = (ops: ChangeOp[], seq: number): void => {
+      const applyOps = (ops: readonly ChangeOp[], seq: number): void => {
         begin()
         for (const op of ops) {
           if (op.op === 'delete') {
@@ -341,7 +341,8 @@ export const nodesCollection = createCollection({
           ensureReady()
           // Self-heal any persisted sibling-chain corruption now that the full
           // outline is in hand (deferred so it writes outside this commit).
-          healSiblingChains(msg.nodes)
+          // Copy: msg.nodes is a readonly wire array; the heal path wants Node[].
+          healSiblingChains(msg.nodes.slice())
         } else if (msg.type === 'resume') {
           // The gap since our cursor. Empty = already current; the cursor is
           // unchanged so there's nothing to write.

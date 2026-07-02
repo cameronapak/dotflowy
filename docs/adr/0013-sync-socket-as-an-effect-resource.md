@@ -62,3 +62,9 @@ callback resolves; `appliedSeq → SubscriptionRef` remains a later slice. The e
   the vendored `repos/effect-smol` source; if it churns, the blast radius is one module.
 - **One shared `ManagedRuntime` (`appRuntime`) now exists** as the home for long-lived Effect fibers.
   It's the backbone every subsequent Effect slice forks onto, provisioned by one growing service layer.
+- **Frame decoding is now Schema-validated (later pass, done).** `decodeFrame` originally did
+  `JSON.parse(...) as ServerMessage` — the last unchecked cast on inbound data, left as a deliberate
+  "higher-value pass." The DO→client frames are now decoded against the shared `src/data/wire-schema.ts`
+  (see [ADR 0014](./0014-validate-the-worker-do-trust-boundary.md)), closing the outbound half of the
+  trust boundary. The discard policy is unchanged — a malformed frame warns and is dropped, not escalated
+  to a reconnect (a bad frame from our own DO is a bug to log, not a connection to kill).

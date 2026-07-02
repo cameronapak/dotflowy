@@ -1,10 +1,9 @@
 /**
- * The wire contract for /api/nodes and /api/kv, as Effect Schemas — the single
+ * The Worker's request-body schemas for /api/nodes and /api/kv — the single
  * source of truth for the Worker's request-body types AND their runtime
  * validation at the trust boundary.
  *
- * Why this file exists (and why the schemas, not hand-written types, are
- * canonical worker-side): the Worker receives untrusted JSON from the client and
+ * Why this file exists: the Worker receives untrusted JSON from the client and
  * forwards it into the per-user Durable Object's SQLite. A malformed body (e.g.
  * an op with no `value`) used to sail through an unchecked `as` cast and
  * dereference `undefined` deep inside the SQLite write loop — a 500 from inside
@@ -12,47 +11,19 @@
  * into a clean typed `BadRequest` (→ 400) before it ever reaches the DO. See
  * docs/adr/0014-validate-the-worker-do-trust-boundary.md.
  *
- * `Node` and `ChangeOp` are DERIVED from their schemas (`Schema.Schema.Type`),
- * so the validator and the type the DO trusts can never drift. The client keeps
- * its own hand-written copy of these types in src/data/realtime.ts (a different
- * tsconfig, no Effect at the type layer) — kept in lockstep on purpose, same as
- * before; the client is the originator, the Worker is the gate.
- *
- * Deliberately imports ONLY `effect/Schema` — no `cloudflare:workers`, no DOM
- * lib — so a pure `bun test` can import and exercise the decode path without the
- * Workers runtime (mirrors the realtime socket's pure-logic test tier).
+ * `Node` / `ChangeOp` (and their schemas) come from the shared wire module
+ * `../src/data/wire-schema.ts` — the one leaf both the client and the Worker
+ * derive from, so the type the DO trusts can never drift from the type the
+ * client sends. The request-body wrappers below stay worker-local (the client
+ * never decodes a request body). Re-exported so existing importers
+ * (worker/index.ts, worker/wire.test.ts) keep resolving `Node`/`ChangeOp` here.
  */
 
 import { Schema } from 'effect'
+import { ChangeOpSchema, NodeSchema } from '../src/data/wire-schema'
 
-/** A node as the client speaks it — booleans are real booleans. The decoded
- *  type mirrors the `Node` interface in src/data/schema.ts. */
-export const NodeSchema = Schema.Struct({
-  id: Schema.String,
-  parentId: Schema.NullOr(Schema.String),
-  prevSiblingId: Schema.NullOr(Schema.String),
-  text: Schema.String,
-  isTask: Schema.Boolean,
-  completed: Schema.Boolean,
-  collapsed: Schema.Boolean,
-  bookmarkedAt: Schema.NullOr(Schema.Number),
-  // Mirror pointer (ADR 0022): null = own source, an id = a mirror of that node.
-  // Required + nullable at the boundary, same as every other field — the client
-  // always sends it (makeNode), so a body without it is malformed (→ 400).
-  mirrorOf: Schema.NullOr(Schema.String),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
-})
-export type Node = Schema.Schema.Type<typeof NodeSchema>
-
-/** One node mutation in a change frame, discriminated on `op`. Upserts carry the
- *  full node; deletes carry just the key. The union reproduces the hand-written
- *  wire type exactly, so the DO and the client stay byte-compatible. */
-const InsertOp = Schema.Struct({ op: Schema.Literal('insert'), value: NodeSchema })
-const UpdateOp = Schema.Struct({ op: Schema.Literal('update'), value: NodeSchema })
-const DeleteOp = Schema.Struct({ op: Schema.Literal('delete'), key: Schema.String })
-const ChangeOpSchema = Schema.Union([InsertOp, UpdateOp, DeleteOp])
-export type ChangeOp = Schema.Schema.Type<typeof ChangeOpSchema>
+export { NodeSchema } from '../src/data/wire-schema'
+export type { ChangeOp, Node } from '../src/data/wire-schema'
 
 // --- Request-body schemas (the /api/nodes + /api/kv trust boundary) ----------
 

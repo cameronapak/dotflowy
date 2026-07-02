@@ -8,10 +8,16 @@ import {
   Queue,
   Random,
   Ref,
+  Schema,
   Stream,
 } from 'effect'
 import { Socket } from 'effect/unstable/socket'
-import type { Node } from './schema'
+import { ServerMessageSchema } from './wire-schema'
+import type { ServerMessage } from './wire-schema'
+
+// Re-export the wire types so this module stays the client's import surface for
+// them (collection.ts, api.ts, structural.ts, ... all import from './realtime').
+export type { ChangeOp, ServerMessage } from './wire-schema'
 
 /**
  * The realtime sync transport: one WebSocket per tab to the per-user Durable
@@ -36,27 +42,10 @@ import type { Node } from './schema'
  */
 
 // --- Wire protocol ----------------------------------------------------------
-// MUST stay in lockstep with worker/outline-do.ts (duplicated, not shared — the
-// two live behind different tsconfigs, same as the Node type).
-
-/** One node mutation in a change frame. */
-export type ChangeOp =
-  | { op: 'insert'; value: Node }
-  | { op: 'update'; value: Node }
-  | { op: 'delete'; key: string }
-
-/** A committed batch of ops at a monotonic sequence number. */
-export interface ChangeFrame {
-  seq: number
-  ops: ChangeOp[]
-}
-
-/** DO -> client frames. `snapshot` = full state; `resume` = the gap since the
- *  client's cursor; `change` = a live mutation. */
-export type ServerMessage =
-  | { type: 'snapshot'; seq: number; nodes: Node[] }
-  | { type: 'resume'; seq: number; changes: ChangeFrame[] }
-  | { type: 'change'; seq: number; ops: ChangeOp[] }
+// `ChangeOp` / `ServerMessage` (and the `ServerMessageSchema` decoder below) are
+// imported from the shared wire module ./wire-schema — one leaf the client and
+// the Worker both derive from, so the socket decoder and the DO broadcaster
+// can't drift. See docs/adr/0013.
 
 /**
  * What the sync stream emits. `Message` is a decoded server frame. `InitialError`
@@ -100,16 +89,35 @@ function syncUrl(): string {
   return `${proto}//${window.location.host}/api/sync`
 }
 
-/** A malformed frame is dropped with a warn — same discard policy as before; a
- *  single bad frame isn't worth a typed error. (Full Effect Schema validation of
- *  the frame shape is a separate, higher-value pass — see ADR 0013.) */
+/** Decode inbound `ServerMessage`s (schema-derived exit, no throw). */
+const decodeServerMessage = Schema.decodeUnknownExit(ServerMessageSchema)
+
+/** Decode one inbound frame against the shared `ServerMessageSchema` (ADR 0013):
+ *  the last unchecked cast on inbound data is now a real validation. Two failure
+ *  modes — malformed JSON or a shape the schema rejects — both drop the frame
+ *  with a warn and return null.
+ *
+ *  Escalation: a bad frame mid-stream (after the hello handshake) is simply not
+ *  applied — the connection stays open, unchanged from before. A bad *first*
+ *  frame (before the handshake completes) leaves the hello `Deferred` unresolved,
+ *  so the watchdog eventually treats the socket as un-replied and reconnects —
+ *  the same FAIL-SAFE path as a dropped connection (InitialError → the bootstrap
+ *  gate declines to seed over the real-but-unsyncable outline). In practice the
+ *  DO and this decoder share one schema (wire-schema.ts) and the `nodes` columns
+ *  are NOT NULL, so a real DO frame can't fail decode; this is the guard's edge,
+ *  not a live path. */
 function decodeFrame(data: string): ServerMessage | null {
+  let raw: unknown
   try {
-    return JSON.parse(data) as ServerMessage
+    raw = JSON.parse(data)
   } catch (e) {
-    console.warn('realtime: malformed sync frame', e)
+    console.warn('realtime: malformed sync frame (bad JSON)', e)
     return null
   }
+  const exit = decodeServerMessage(raw)
+  if (Exit.isSuccess(exit)) return exit.value
+  console.warn('realtime: sync frame failed schema validation', exit.cause)
+  return null
 }
 
 /**

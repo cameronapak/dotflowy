@@ -52,9 +52,14 @@ behavior the docs don't promise.
   over already-valid input; the trust boundary is where untrusted JSON enters (the Worker), and
   rejecting there means a bad body never costs a DO round-trip.
 - **Hand-written `Node`/`ChangeOp` types with a parallel schema.** Rejected: deriving the type *from* the
-  schema makes drift impossible — the validator is the type. (The client's copy in
-  `src/data/realtime.ts` stays hand-written on purpose: a different tsconfig, no Effect at the type
-  layer, kept in lockstep as before. The client is the originator; the Worker is the gate.)
+  schema makes drift impossible — the validator is the type. (This ADR originally kept the client's copy
+  in `src/data/realtime.ts` hand-written, reasoning "a different tsconfig, no Effect at the type layer."
+  **That reason was later proven false and this is reversed:** `realtime.ts` already imports Effect
+  heavily, and a shared `effect/Schema` module was demonstrated to typecheck under *both* the app tsconfig
+  (DOM lib) and the Worker tsconfig (workers-types, no DOM). The wire types now derive from one shared
+  `src/data/wire-schema.ts` imported by both sides, which also lets the client Schema-validate inbound
+  DO→client frames — the "higher-value pass" [ADR 0013](./0013-sync-socket-as-an-effect-resource.md)
+  anticipated. The client is still the originator; the Worker is still the gate.)
 - **Zod (then the client's schema library) instead of Effect Schema.** Rejected: zod wasn't in the
   Worker bundle, and its failures wouldn't compose with the Worker's Effect error channel — Effect
   Schema decodes straight into it. (Moot since: the client's data-layer schemas also moved to Effect
@@ -63,6 +68,9 @@ behavior the docs don't promise.
   language across client and Worker.)
 - **Effect runtime / STM transaction in the DO for atomicity.** Rejected as over-engineering: see the
   split rationale above. `transactionSync` is the native, synchronous fit for a synchronous loop.
+  ([ADR 0023](./0023-do-storage-stays-native.md) revisits this specifically for the first-party
+  `@effect/sql-sqlite-do` adapter and rejects it for the same reason — its `withTransaction` wraps the
+  **async** `storage.transaction`, a regression from this synchronous critical section.)
 
 ## Consequences
 

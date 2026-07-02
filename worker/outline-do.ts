@@ -2,11 +2,12 @@
 
 import { DurableObject } from 'cloudflare:workers'
 
-import type { ChangeOp, Node } from './wire'
+import type { ChangeFrame, ChangeOp, Node, ServerMessage } from '../src/data/wire-schema'
 
-// The wire types (`Node`, `ChangeOp`) are schema-derived in ./wire — the Worker's
-// single source of truth for both the type and its boundary validation. Re-export
-// them so existing importers (worker/index.ts) keep resolving them from here.
+// The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
+// the shared wire module — the one leaf the client and the Worker both derive
+// from, so the DO can't drift from what the client sends. Re-export the two the
+// existing importers (worker/index.ts) resolve from here.
 export type { ChangeOp, Node }
 
 /** A row as stored in the DO's SQLite — booleans are 0/1 integers, and there is
@@ -52,25 +53,11 @@ const WRITABLE_COLUMNS = new Set([
 ])
 
 // --- Realtime sync protocol -------------------------------------------------
-// The wire contract for /api/sync. MUST stay in lockstep with the client's copy
-// in src/data/realtime.ts (the two live behind different tsconfigs, so the types
-// are duplicated, not shared — same as Node/NodeRow above).
-
-/** A committed batch of ops at a monotonic sequence number. Also the unit
- *  `recordChange` returns to `broadcastChange` — the SQL commit and the WS
- *  broadcast are now two steps so the broadcast only fires post-commit. */
-interface ChangeFrame {
-  seq: number
-  ops: ChangeOp[]
-}
-
-/** DO -> client frames. `snapshot` = full state (initial connect or resync past
- *  the changelog window); `resume` = the gap since the client's cursor; `change`
- *  = a live mutation broadcast. */
-type ServerMessage =
-  | { type: 'snapshot'; seq: number; nodes: Node[] }
-  | { type: 'resume'; seq: number; changes: ChangeFrame[] }
-  | { type: 'change'; seq: number; ops: ChangeOp[] }
+// `ChangeFrame` (the unit recordChange returns to broadcastChange — the SQL
+// commit and the WS broadcast are two steps so the broadcast only fires
+// post-commit) and `ServerMessage` (the DO→client frames) are imported from the
+// shared wire module above, so the DO can't drift from the client's decoder.
+// `HelloMessage` is worker-inbound-only, so it stays local.
 
 /** client -> DO. The only inbound message: the handshake, carrying the client's
  *  last-applied seq (null on a fresh/forced-resync connect). */
@@ -127,60 +114,122 @@ export class UserOutlineDO extends DurableObject<Env> {
     super(ctx, env)
     this.sql = ctx.storage.sql
     // Schema setup only — never hold blockConcurrencyWhile across external I/O.
-    ctx.blockConcurrencyWhile(async () => {
-      this.sql.exec(`
-        CREATE TABLE IF NOT EXISTS nodes (
-          id            TEXT PRIMARY KEY,
-          parentId      TEXT,
-          prevSiblingId TEXT,
-          text          TEXT NOT NULL,
-          isTask        INTEGER NOT NULL DEFAULT 0,
-          completed     INTEGER NOT NULL DEFAULT 0,
-          collapsed     INTEGER NOT NULL DEFAULT 0,
-          bookmarkedAt  INTEGER,
-          mirrorOf      TEXT,
-          createdAt     INTEGER NOT NULL,
-          updatedAt     INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parentId);
-        CREATE TABLE IF NOT EXISTS kv (
-          collection TEXT NOT NULL,
-          key        TEXT NOT NULL,
-          value      TEXT NOT NULL,
-          updatedAt  INTEGER NOT NULL,
-          PRIMARY KEY (collection, key)
-        );
-        CREATE TABLE IF NOT EXISTS meta (
-          key   TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS changelog (
-          seq INTEGER PRIMARY KEY,
-          ops TEXT NOT NULL
-        );
-      `)
-      // Migrate already-deployed DOs (ADR 0022): a pre-mirror `nodes` table was
-      // created without `mirrorOf`, and `CREATE TABLE IF NOT EXISTS` above no-ops
-      // for it. Add the column once (NULL default), guarded by a column-existence
-      // check since SQLite has no `ADD COLUMN IF NOT EXISTS`. Fresh DOs already
-      // have it from the CREATE above, so this skips. Runs before any request is
-      // served (blockConcurrencyWhile), so getNodes never reads a missing column.
-      const hasMirrorOf = (this.sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{
-        name: string
-      }>).some((c) => c.name === 'mirrorOf')
-      if (!hasMirrorOf) this.sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`)
-    })
+    // Runs before any request is served, so no reader ever sees a half-built
+    // schema (e.g. getNodes reading a missing `mirrorOf` column).
+    ctx.blockConcurrencyWhile(async () => this.migrate())
+  }
+
+  // --- schema migration ------------------------------------------------------
+  // Ordered, versioned migrator (ADR 0023). `meta.schema_version` records the
+  // last-applied step; on construct we run every step `> current`, each inside a
+  // `transactionSync`, and bump the version. This replaces the constructor's
+  // ad-hoc `CREATE TABLE IF NOT EXISTS` block AND the hand-rolled
+  // `PRAGMA table_info` / `ALTER TABLE mirrorOf` dance (ADR 0022) — schema
+  // evolution is now append-only: a change is a new MIGRATIONS entry.
+
+  /** Ordered schema steps. v1 is the IDEMPOTENT BASELINE: a fresh DO and a
+   *  pre-versioning deployed DO both read version 0 (absent `schema_version`),
+   *  so v1 must be safe on both — it is today's `CREATE TABLE IF NOT EXISTS` set
+   *  plus the guarded `mirrorOf` add. From v2 onward every step is guaranteed to
+   *  run exactly once, so no future step needs a `PRAGMA`/`IF NOT EXISTS` guard.
+   *  (This idempotent-baseline / exactly-once-tail split is the load-bearing
+   *  invariant — see ADR 0023.) */
+  private static readonly MIGRATIONS: ReadonlyArray<{
+    version: number
+    up: (sql: SqlStorage) => void
+  }> = [
+    {
+      version: 1,
+      up: (sql) => {
+        sql.exec(`
+          CREATE TABLE IF NOT EXISTS nodes (
+            id            TEXT PRIMARY KEY,
+            parentId      TEXT,
+            prevSiblingId TEXT,
+            text          TEXT NOT NULL,
+            isTask        INTEGER NOT NULL DEFAULT 0,
+            completed     INTEGER NOT NULL DEFAULT 0,
+            collapsed     INTEGER NOT NULL DEFAULT 0,
+            bookmarkedAt  INTEGER,
+            mirrorOf      TEXT,
+            createdAt     INTEGER NOT NULL,
+            updatedAt     INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parentId);
+          CREATE TABLE IF NOT EXISTS kv (
+            collection TEXT NOT NULL,
+            key        TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            updatedAt  INTEGER NOT NULL,
+            PRIMARY KEY (collection, key)
+          );
+          CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS changelog (
+            seq INTEGER PRIMARY KEY,
+            ops TEXT NOT NULL
+          );
+        `)
+        // Pre-mirror `nodes` tables (a deployed DO) were created without
+        // `mirrorOf`, and `CREATE TABLE IF NOT EXISTS` above no-ops for them.
+        // Add the column once, guarded by a column-existence check since SQLite
+        // has no `ADD COLUMN IF NOT EXISTS`. A fresh DO already has it from the
+        // CREATE, so this skips. The guard lives here (not in a later step)
+        // because v1 is the one migration that can meet an already-populated DB.
+        const hasMirrorOf = (
+          sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{ name: string }>
+        ).some((c) => c.name === 'mirrorOf')
+        if (!hasMirrorOf) sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`)
+      },
+    },
+  ]
+
+  /** Run every migration newer than the recorded schema version, each atomically
+   *  (its DDL + the version bump commit together or roll back together). */
+  private migrate(): void {
+    // Bootstrap: `meta` must exist before we can read the version. Idempotent —
+    // a fresh DO has no tables; a deployed DO already has `meta` populated.
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+    const current = this.schemaVersion()
+    for (const step of UserOutlineDO.MIGRATIONS) {
+      if (step.version <= current) continue
+      this.ctx.storage.transactionSync(() => {
+        step.up(this.sql)
+        this.sql.exec(
+          "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+          String(step.version),
+        )
+      })
+    }
+  }
+
+  /** The last-applied schema version (0 if never migrated / pre-versioning).
+   *  Same meta single-column read shape as `currentSeq`. */
+  private schemaVersion(): number {
+    const row = this.sql
+      .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'")
+      .toArray()[0]
+    return row ? Number(row.value) : 0
+  }
+
+  /** Run a read query and return its rows as `T[]`. The one seam for the
+   *  wide-row reads that need the runtime-shape cast — it replaces the inline
+   *  `as unknown as NodeRow[]` at the `nodes` SELECT sites (`getNodes`,
+   *  `patchNodes`); ADR 0023. The narrow single-column reads elsewhere
+   *  (`currentSeq`, `getKv`, `initialFrame`, …) keep using the type-checked
+   *  `exec<{…}>()` overload, which needs no cast. */
+  private readRows<T>(query: string, ...params: SqlVal[]): T[] {
+    return this.sql.exec(query, ...params).toArray() as unknown as T[]
   }
 
   // --- nodes -----------------------------------------------------------------
 
   getNodes(): Node[] {
-    const rows = this.sql
-      .exec(
-        'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes',
-      )
-      .toArray() as unknown as NodeRow[]
-    return rows.map(rowToNode)
+    return this.readRows<NodeRow>(
+      'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes',
+    ).map(rowToNode)
   }
 
   /** Upsert one node into SQLite and return the change op describing it (insert
@@ -274,12 +323,10 @@ export class UserOutlineDO extends DurableObject<Env> {
           this.sql.exec(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`, ...vals)
           // Broadcast the full post-patch row (canonical booleans, every field) so
           // a remote client applies an unambiguous update regardless of rowUpdateMode.
-          const row = this.sql
-            .exec(
-              'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes WHERE id = ?',
-              u.id,
-            )
-            .toArray()[0] as unknown as NodeRow | undefined
+          const row = this.readRows<NodeRow>(
+            'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes WHERE id = ?',
+            u.id,
+          )[0] as NodeRow | undefined
           if (row) ops.push({ op: 'update', value: rowToNode(row) })
         }
         return this.recordChange(ops)
