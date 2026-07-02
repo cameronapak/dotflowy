@@ -484,7 +484,7 @@ h2 > span.protected-lock {
  */
 .bullet:hover,
 .bullet:has(span[data-has-children="true"][data-collapsed="true"]) {
-  @apply bg-primary/10;
+  @apply bg-accent-foreground/10;
 }
 
 .bullet:hover .bullet-dot {
@@ -492,7 +492,7 @@ h2 > span.protected-lock {
 }
 
 .bullet-dot {
-  @apply block size-2 rounded-full bg-primary;
+  @apply block size-2 rounded-full bg-accent-foreground/80;
 }
 
 .checkbox {
