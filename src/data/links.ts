@@ -17,6 +17,13 @@ export const LINK_PATTERN = "\\[[^\\]]*\\]\\([^)]*\\)";
 
 const LINK_RE = () => new RegExp(`\\[([^\\]]*)\\]\\(([^)]*)\\)`, "g");
 
+export interface LinkAtOffset {
+  label: string;
+  url: string;
+  start: number;
+  end: number;
+}
+
 /** True iff the text contains at least one complete link token. */
 export function hasLink(text: string): boolean {
   return new RegExp(LINK_PATTERN).test(text);
@@ -26,6 +33,31 @@ export function hasLink(text: string): boolean {
  *  and for clean display in result rows (ADR 0005). */
 export function stripLinks(text: string): string {
   return text.replace(LINK_RE(), (_full, label: string) => label);
+}
+
+/** Return the markdown link whose editable label/url contains `offset`.
+ *  The offset is in SOURCE space, matching contentEditable caret helpers. */
+export function linkAtOffset(text: string, offset: number): LinkAtOffset | null {
+  for (const m of text.matchAll(LINK_RE())) {
+    const start = m.index ?? 0;
+    const token = m[0] ?? "";
+    const label = m[1] ?? "";
+    const url = m[2] ?? "";
+    const labelStart = start + 1;
+    const labelEnd = labelStart + label.length;
+    const urlStart = labelEnd + 2; // `](`
+    const urlEnd = urlStart + url.length;
+    const inLabel = offset >= labelStart && offset <= labelEnd;
+    const inUrl = offset >= urlStart && offset <= urlEnd;
+    if (inLabel || inUrl) {
+      return { label, url, start, end: start + token.length };
+    }
+  }
+  return null;
+}
+
+export function linkUrlAtOffset(text: string, offset: number): string | null {
+  return linkAtOffset(text, offset)?.url ?? null;
 }
 
 /** http(s) only -- the single URL shape v1 auto-detects (ADR 0005). */

@@ -108,6 +108,7 @@ import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import { useShowCompleted } from "./show-completed-provider";
 import { openMoveDialog } from "./move-dialog-opener";
 import { Button } from "./ui/button";
+import { openLinkAtCaret } from "./link-keymap";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
 // history state, so the incoming view knows which element to name -- and so it
@@ -1280,7 +1281,8 @@ function useNodeCommands({
         if (el) {
           el.focus();
           if (x != null) placeCaretAtColumn(el, direction, x);
-          else placeCaretAtStart(el);
+          else if (direction === "down") placeCaretAtStart(el);
+          else placeCaretAtEnd(el);
         } else if (scrollRowIntoView(target)) {
           // Crossed the window edge: the neighbor row isn't mounted. Scroll it
           // in and let its mount effect claim focus (column intent is lost on
@@ -1397,7 +1399,11 @@ function ZoomedTitle({
       { hotkey: "ArrowDown", callback: () => onArrowDown() },
       ...keymapSpecs.map((k) => ({
         hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
-        callback: () => k.run(node.id, getCtx()),
+        callback: () => {
+          const el = ref.current;
+          if (k.hotkey === "Mod+Enter" && el && openLinkAtCaret(el)) return;
+          k.run(node.id, getCtx());
+        },
       })),
     ],
     { target: ref },

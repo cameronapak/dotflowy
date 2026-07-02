@@ -59,6 +59,7 @@ const opened = (page: Page) =>
   page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
 
 const LINK = "[Anthropic](https://anthropic.com)";
+const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 test.describe("Rich links fold and reveal", () => {
   test("a blurred bullet folds the link to a clean <a>; focusing bracket-reveals it", async ({
@@ -119,6 +120,31 @@ test.describe("Rich links fold and reveal", () => {
     expect(await opened(page)).toEqual(["https://anthropic.com/"]);
     // Still folded -- the click opened, it didn't focus into edit mode.
     await expect(text(page, "n").locator("a[data-link]")).toBeVisible();
+  });
+
+  test("Mod+Enter inside a markdown link opens it instead of completing the node", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await focusBullet(page, "n");
+    await text(page, "n").evaluate((el: HTMLElement) => {
+      const label = el.querySelector(".link-label")?.firstChild;
+      if (!label) throw new Error("missing revealed link label");
+      const range = document.createRange();
+      range.setStart(label, 1);
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+
+    await page.keyboard.press(`${MOD}+Enter`);
+
+    expect(await opened(page)).toEqual(["https://anthropic.com"]);
+    await expect(text(page, "n")).toHaveAttribute("data-completed", "false");
   });
 });
 
