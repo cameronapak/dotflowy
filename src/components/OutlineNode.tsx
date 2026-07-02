@@ -25,7 +25,7 @@ import {
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
-import { hasLink } from "../data/links";
+import { hasFoldingToken } from "../plugins/registry";
 import {
   copySourceSelection,
   cutSourceSelection,
@@ -414,7 +414,7 @@ function OutlineNodeBody({
             // -- so the native click caret stands untouched. Deferred to the
             // next frame so a CLICK at the line's end settles on the folded
             // layout before the link expands; see revealLinkAtCaret.
-            if (!hasLink(node.text)) return;
+            if (!hasFoldingToken(node.text)) return;
             revealLinkAtCaret(el, (t) => {
               syncedRef.current = t;
             });
@@ -430,8 +430,8 @@ function OutlineNodeBody({
             const restored = healProtectedText(node.id, text, el);
             if (restored !== null) {
               syncedRef.current = restored;
-            } else if (hasLink(text)) {
-              // Fold: re-render every link in this bullet as a clean <a>.
+            } else if (hasFoldingToken(text)) {
+              // Fold: re-render every folding run (link, emphasis) as clean HTML.
               decorate(el, text, null, false);
               syncedRef.current = text;
             }

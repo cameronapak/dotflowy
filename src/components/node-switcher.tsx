@@ -10,7 +10,7 @@ import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
-import { stripLinks } from "../data/links";
+import { flattenInline } from "../data/inline-text";
 import { isMirrorsEnabled } from "../data/flags";
 import {
   searchAliases,
@@ -85,7 +85,7 @@ function buildFuse(nodes: Node[]): Fuse<Searchable> {
     if (mirrorsOn && n.mirrorOf != null) continue;
     searchable.push({
       node: n,
-      text: stripLinks(n.text),
+      text: flattenInline(n.text),
       aliases: searchAliases(n),
     });
   }
@@ -327,10 +327,10 @@ function ResultRow({
   // Links flatten to their label so a crumb never shows raw `[..](..)`.
   const crumbs = buildTrail(index, node.id)
     .slice(0, -1)
-    .map((n) => stripLinks(n.text).trim() || "Untitled")
+    .map((n) => flattenInline(n.text).trim() || "Untitled")
     .join(" › ");
 
-  const title = stripLinks(node.text).trim() || "Untitled";
+  const title = flattenInline(node.text).trim() || "Untitled";
   // A plugin's display-only suffix (Seam J) -- the daily plugin's "Today" -- so a
   // day note reads "Tuesday, June 23, 2026 (Today)". Not part of node.text, so
   // it's rendered as a separate, un-highlighted span after the title.

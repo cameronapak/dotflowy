@@ -252,17 +252,17 @@ A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on 
 The editor is a clean core extended by **plugins** — modules compiled into the bundle (an internal registry, *not* runtime-loaded), one per `src/plugins/<name>/`. `code`, `links`, `tags`, `todos`, `daily`, and `route-bible` are themselves plugins (dogfooded), so the core carries no feature-specific branches. Design rationale: [Plugin architecture](./docs/adr/0001-plugin-architecture.md); React-widget token mode: [React token widgets](./docs/adr/0006-react-token-widgets.md).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `NodeProtection`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
-- **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
+- **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, emphasis, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
 - **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
 
 | Seam | What it is | Owners |
 | ---- | ---------- | ------ |
-| **A** inline token | regex fragment + `render → El \| WidgetEl`, composed into one `gu` regex; core owns escaping. Folding token emits a `data-src` atom (`contenteditable="false"`); React mode mounts a `<dotflowy-widget>` TSX atom. Precedence: links 0 < code 10 < route-bible 15 < tags 20. | code, links, tags, route-bible |
+| **A** inline token | regex fragment + `render → El \| WidgetEl`, composed into one `gu` regex; core owns escaping. Folding token emits a `data-src` atom (`contenteditable="false"`); React mode mounts a `<dotflowy-widget>` TSX atom. Precedence: links 0 < code 10 < route-bible 15 < tags 20 < emphasis 30-33. | code, links, tags, route-bible, emphasis |
 | **B** delegated interaction | one set of content-container handlers, dispatched by `target.closest(selector)`; core has zero feature knowledge. | links, tags, route-bible |
-| **C** `/` command | `CommandSpec`; the `/` list is `[...commandSpecs, ...CORE]`. `/move` stays core. | todos (`/todo`,`/bullet`), daily ("Send to Today") |
-| **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`) |
+| **C** `/` command | `CommandSpec`; the `/` list is `[...commandSpecs, ...CORE]`. `/move` stays core. | todos (`/todo`,`/bullet`), daily ("Send to Today"), emphasis (`/bold` etc.) |
+| **D** keymap | `{hotkey, run}`; reserved-key denylist guarded at load. | todos (`Mod+Enter`/`Mod+D`), emphasis (`Mod+B`/`Mod+I`/`Mod+U`/`Mod+Shift+X`) |
 | **E** side-collection | plugin-owned data, no `Node` field (see Tag colors, below). | tags |
 | **F** node slot | `{position:"row:before-text" \| "title:before-text", render(node,getCtx)}`, real JSX — decorates a node before its text in BOTH render paths: the list bullet (`row:`, `OutlineNode`) and the zoomed page title (`title:`, `OutlineEditor`'s `ZoomedTitle`). A plugin opts into either/both with one spec per position; `slotsAt(position)` returns the precomputed-stable array. | todos (checkbox), daily (date badge) |
 | **F** header slot | `{id, render(getCtx)}`, real JSX, no node — persistent actions in the header's right cluster. | daily ("Today") |
@@ -273,7 +273,7 @@ Seams wired today (each row: the contract, who owns it):
 | **J** search providers | `searchAliases`/`searchActions`/`searchAnnotation`; ctx is the minimal `{index, goTo}`, not a `PluginContext`. | daily |
 | — | **overlay host** `ctx.openOverlay(node\|null)`; **protected nodes** `protects(id) → boolean \| NodeProtection` — the plugin only *declares which* nodes; the **core enforces all four rules** (no delete / blank / to-do / complete) in `components/protection.tsx` (`guardProtected` on the command funnels, `signalRejection` on the blur heal) with a shake (`rejectRow`) + toast. A bare `true` is enough (core supplies default copy); the descriptor is **all overrides** (`reason`, `blankReason`/`taskReason`/`completeReason`, `canonicalText`). Reactive lock `<ProtectedLock>` via `useIsProtected` (tracks async protection like the daily index). [ADR 0015](./docs/adr/0015-protected-nodes.md). | tags (picker), daily (container) |
 
-Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **todos** C+D+F(row+title)+G+I · **daily** C+F(header)+F(row+title)+J+protected.
+Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B · **tags** A+B+E+F(subheader)+G+H · **emphasis** A(folding)+C+D · **todos** C+D+F(row+title)+G+I · **daily** C+F(header)+F(row+title)+J+protected.
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineNode`; the `/` palette still runs `useSlashMenu` (only its command *list* is registry-driven).
 
@@ -307,6 +307,16 @@ A Bible ref in `node.text` renders as a chip opening [route.bible](https://route
 - **Liberal regex PROPOSES, `grab-bcv` DISPOSES.** `BIBLE_REF_PATTERN` (`bible.ts`) requires a chapter, verse optional, and over-matches on purpose; `resolveBibleRef(tok)` runs the candidate through grab-bcv's `tryParsePassage` and returns null for non-references (the core then renders raw text). Dependency is **`grab-bcv`** (parse + `toResolverUrl`), not `@route-bible/core`.
 - **A real-TSX atomic widget** ([React token widgets](./docs/adr/0006-react-token-widgets.md)): `render` returns a `WidgetEl` + `component: BibleChip`; the core serializes it to a `<dotflowy-widget>` atom and mounts `BibleChip` (`chip.tsx`) — lucide icons + Tailwind, **no plugin CSS**. `readSource` reads `data-src`; the caret jumps over it.
 - v1 is liberal by explicit call (accepts `Matthew 5 minutes` → `Matthew 5`); tightening is a one-line regex change. Covered by `e2e/route-bible.spec.ts`.
+
+## Inline emphasis (`src/plugins/emphasis/`)
+
+Bold / italic / strikethrough / underline — `**b**`, `*i*`, `~~s~~`, `~u~` (Bear-style, all four are Bear's markup) — **parsed from `node.text`** (no `Node` field, no migration) as **folding tokens modelled on the rich link** ([ADR 0025](./docs/adr/0025-inline-emphasis.md)). Do NOT model them as a new "edged"/CSS-pseudo token shape (a prior attempt did; it can't put the caret *between* the interior and a marker, which is the whole point).
+
+- **Fold = the link atom, reused verbatim.** A run folds to `<em data-src="*i*" contenteditable="false">i</em>` — the exact `data-src` atom shape a folded link uses, so `readSource` + the source-offset caret math handle it with **zero new machinery** (keyed on `data-src`, ADR 0001 D6). No `inline-code.ts` changes. This is why emphasis is a `folds: true` `TokenSpec`, not a bespoke shape.
+- **Reveal = real, walk-through markers.** When the caret is within/adjacent (`revealOffset ∈ [start, end]`) the run swaps to `*<em>i</em>*` where the `*` are **real, dimmed `.md-punct` text** OUTSIDE the styled tag — so the caret steps through the fence one char at a time and can land at `*i|*`. Same reveal watcher as links; the fold/reveal focus+blur guard in **both** render paths (`OutlineRow`/`OutlineNode`) is now the generic **`hasFoldingToken`**, not `hasLink`.
+- **Precedence coupling.** `**`/`*` and `~~`/`~` share a leading char, so bold (30) + strike (31) sit before italic (32) + underline (33) in the combined regex (double-char wins on overlap). v1 is FLAT — no nesting, no `***triple***`. The single-tilde `~underline~` collides with the "approximately" tilde by design (Bear parity; creation is Cmd+U/`/underline`, so it's rarely hand-typed).
+- **Creation:** Seam C (`/bold` etc.) + Seam D (`Mod+B`/`Mod+I`/`Mod+U`/`Mod+Shift+X`, all browser-native contentEditable commands the keymap's preventDefault overrides) via `wrap.ts` (source-space wrap-or-insert). First plugin to use the `styles` seam. Search/display flatten via `flattenInline` (`src/data/inline-text.ts` = `stripEmphasis ∘ stripLinks`). Covered by `e2e/emphasis.spec.ts`.
+- **Inline code shares this model.** The `code` plugin (`` `code` ``) is now a `folds: true` token too — backticks hide, reveal as dimmed `.md-punct` text INSIDE the `<code>` box on proximity (was: always-visible backticks). Same atom-when-folded shape, no extra core machinery. `e2e/inline-code.spec.ts`.
 
 ## Environment gotcha: adding a React-importing dependency
 

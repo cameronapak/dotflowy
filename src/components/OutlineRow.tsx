@@ -32,7 +32,7 @@ import {
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
-import { hasLink } from "../data/links";
+import { hasFoldingToken } from "../plugins/registry";
 import {
   copySourceSelection,
   cutSourceSelection,
@@ -495,7 +495,7 @@ function RowChrome({
               el,
               () => composingRef.current,
             );
-            if (!hasLink(content.text)) return;
+            if (!hasFoldingToken(content.text)) return;
             revealLinkAtCaret(el, (t) => {
               syncedRef.current = t;
             });
@@ -510,7 +510,7 @@ function RowChrome({
             const restored = healProtectedText(content.id, text, el);
             if (restored !== null) {
               syncedRef.current = restored;
-            } else if (hasLink(text)) {
+            } else if (hasFoldingToken(text)) {
               decorate(el, text, null, false);
               syncedRef.current = text;
             }

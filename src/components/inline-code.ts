@@ -12,15 +12,16 @@
 // The caret is saved as an absolute SOURCE-character offset before the rebuild
 // and restored after.
 //
-// Most tokens keep their FULL source visible (backticks, the leading `#`), so
-// source string and rendered text have identical length. A FOLDING token (a
-// link) is the exception: it folds to a shorter atomic widget unless the caret
-// is on it -- and even revealed, only the bare url stays an atom; `[label]`,
-// `(`, and `)` are real text (ADR 0005's bracket reveal). An atom carries its
-// full source in `data-src` (+ `data-src-len`) and `contenteditable="false"`;
-// the caret helpers below count it off `data-src` generically, so every
-// consumer keeps speaking source offsets -- with no per-token special-casing
-// (the unlock in ADR 0001 D6).
+// A #tag keeps its FULL source visible (the leading `#`), so its source string
+// and rendered text have identical length. FOLDING tokens (links, inline code,
+// emphasis) are the exception: each folds to a shorter atomic widget unless the
+// caret is within/adjacent, when it reveals its markers as real, walk-through
+// text -- a link's `[label](✎)` (ADR 0005's bracket reveal, only the bare url
+// stays an atom), or code/emphasis's dimmed `` ` ``/`*` markers flanking the
+// styled run (ADR 0025). An atom carries its full source in `data-src` (+
+// `data-src-len`) and `contenteditable="false"`; the caret helpers below count
+// it off `data-src` generically, so every consumer keeps speaking source
+// offsets -- with no per-token special-casing (the unlock in ADR 0001 D6).
 
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
@@ -130,10 +131,10 @@ function escapeHtml(s: string): string {
 }
 
 // True for an ATOMIC folding-token widget -- any element carrying its full
-// source in `data-src` (a folded link today). Keyed on `data-src` alone, not on
-// "link", so the caret math is generic over folding tokens (ADR 0001 D6).
-// Non-folding tokens (code, tags) and revealed links carry no data-src, so they
-// read back 1:1 as plain text.
+// source in `data-src` (a folded link, code, or emphasis run). Keyed on
+// `data-src` alone, not on "link", so the caret math is generic over folding
+// tokens (ADR 0001 D6). Non-folding tokens (#tags), a revealed run's markers,
+// and revealed links carry no data-src, so they read back 1:1 as plain text.
 function isAtom(node: Node): node is HTMLElement {
   return node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src");
 }
@@ -146,11 +147,12 @@ function foldedSrcLen(el: HTMLElement): number {
 }
 
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
-// the source once a focused bullet can hold folded links (they show only their
-// label), so onInput/onCompositionEnd/paste read through this instead: walk the
-// tree emitting `data-src` for atoms (folded links, a revealed link's url chip)
-// and textContent for everything else (a revealed link's `[label]()` frame,
-// code, and tags are all 1:1 with their source). See ADR 0005 (bracket reveal).
+// the source once a folding token hides part of its source (a folded link shows
+// only its label; folded code/emphasis hide their markers), so
+// onInput/onCompositionEnd/paste read through this instead: walk the tree
+// emitting `data-src` for atoms (folded links/code/emphasis, a revealed link's
+// url chip) and textContent for everything else (a revealed run's markers +
+// interior, and #tags, are all 1:1 with their source). See ADR 0005 / ADR 0025.
 export function readSource(el: HTMLElement): string {
   let out = "";
   const visit = (node: Node) => {

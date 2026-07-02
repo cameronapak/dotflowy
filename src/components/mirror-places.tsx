@@ -14,7 +14,7 @@ import {
   type Node,
   type TreeIndex,
 } from "../data/tree";
-import { stripLinks } from "../data/links";
+import { flattenInline } from "../data/inline-text";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMirrorPlacesOpener } from "./mirror-places-opener";
 import { Badge } from "./ui/badge";
@@ -99,7 +99,7 @@ function MirrorPlacesInner({
   }, [index, source]);
 
   const open = source !== null;
-  const title = source ? stripLinks(source.text).trim() || "Untitled" : "";
+  const title = source ? flattenInline(source.text).trim() || "Untitled" : "";
 
   function goToPlace(place: Place) {
     onClose();
@@ -153,7 +153,7 @@ function MirrorPlacesInner({
 function crumbsFor(index: TreeIndex, id: string): string[] {
   return buildTrail(index, id)
     .slice(0, -1)
-    .map((n) => stripLinks(n.text).trim() || "Untitled");
+    .map((n) => flattenInline(n.text).trim() || "Untitled");
 }
 
 function PlaceRow({
