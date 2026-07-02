@@ -231,6 +231,7 @@ function DailyBadge({
       className={cn([
         "shrink-0 border!",
         placement === "row" && "mt-1",
+        placement === "title" && "mt-2",
         isToday ? "border-transparent" : "border-border",
       ])}
       data-daily-date={key}
