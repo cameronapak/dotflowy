@@ -29,20 +29,20 @@
     // circuits non-/api requests to env.ASSETS (SPA fallback intact) without
     // touching auth; only /api/* is session-gated. Worker-first keeps a single
     // routing path and lets the asset/SPA fallback flow through env.ASSETS.
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "dotflowy-db",
-      "database_id": "da326dc6-b043-4df9-a277-08e9fad1d749"
-    }
+      "database_id": "da326dc6-b043-4df9-a277-08e9fad1d749",
+    },
   ],
   // One Durable Object per user: USER_OUTLINE holds the user's whole outline +
   // side-collections in colocated SQLite. The Worker routes each /api request to
   // the caller's DO. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
   "durable_objects": {
-    "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }]
+    "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }],
   },
   // SQLite-backed DO storage requires `new_sqlite_classes` (not new_classes).
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }],
@@ -54,7 +54,16 @@
     {
       "name": "UNFURL_LIMIT",
       "namespace_id": "1001",
-      "simple": { "limit": 30, "period": 60 }
-    }
-  ]
+      "simple": { "limit": 30, "period": 60 },
+    },
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+    },
+    "traces": {
+      "enabled": false,
+    },
+  },
 }
