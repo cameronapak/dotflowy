@@ -168,7 +168,7 @@ See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md) for t
 src/
   routes/
     __root.tsx        # HTML shell, global CSS, app-wide providers
-    index.tsx         # the outline at the top level
+    index.tsx         # the outline at the top level (Home)
     $nodeId.tsx       # the same outline zoomed into one bullet
   lib/
     auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOut)

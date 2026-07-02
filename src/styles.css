@@ -875,6 +875,10 @@ body.dragging-active * {
   color: oklch(0.5 0.18 255);
 }
 
+.dark .link-label {
+  color: oklch(0.78 0.13 245);
+}
+
 /* The site favicon, leading a folded link (Google s2/favicons). It sits inside the <a>
    but contributes no textContent, so caret math is unaffected. A fixed em box
    keeps it aligned with the text regardless of the source icon's size. */

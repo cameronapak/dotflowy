@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { CopyPlus } from "lucide-react";
+import { ChevronRight, CopyPlus } from "lucide-react";
 import { useTree } from "../data/useTree";
-import { buildTrail, trueSourceOf, type Node, type TreeIndex } from "../data/tree";
+import {
+  buildTrail,
+  trueSourceOf,
+  type Node,
+  type TreeIndex,
+} from "../data/tree";
 import { stripLinks } from "../data/links";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMirrorPlacesOpener } from "./mirror-places-opener";
+import { Badge } from "./ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -56,10 +68,7 @@ export function MirrorPlaces() {
   if (!mounted) return null;
 
   return (
-    <MirrorPlacesInner
-      sourceId={sourceId}
-      onClose={() => setSourceId(null)}
-    />
+    <MirrorPlacesInner sourceId={sourceId} onClose={() => setSourceId(null)} />
   );
 }
 
@@ -75,7 +84,9 @@ function MirrorPlacesInner({
 
   // Normalize whatever id we were handed (a content id is already the source,
   // but a raw mirror id flattens to it) and read the live source node.
-  const source = sourceId ? index.byId.get(trueSourceOf(index, sourceId)) : null;
+  const source = sourceId
+    ? index.byId.get(trueSourceOf(index, sourceId))
+    : null;
 
   const places = useMemo<Place[]>(() => {
     if (!source) return [];
@@ -88,9 +99,7 @@ function MirrorPlacesInner({
   }, [index, source]);
 
   const open = source !== null;
-  const title = source
-    ? stripLinks(source.text).trim() || "Untitled"
-    : "";
+  const title = source ? stripLinks(source.text).trim() || "Untitled" : "";
 
   function goToPlace(place: Place) {
     onClose();
@@ -110,17 +119,21 @@ function MirrorPlacesInner({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-w-md gap-0 p-0">
-        <DialogHeader className="px-4 pt-4 pb-2">
+      {/* DialogContent is a grid; its items need min-w-0 or their nowrap
+          (truncate) text sets the track's min width and blows the dialog open
+          past its max-w. sm:max-w-md (not max-w-md) keeps the base
+          max-w-[calc(100%-2rem)] mobile guard out of tailwind-merge's way. */}
+      <DialogContent className="gap-0 p-0 sm:max-w-md">
+        <DialogHeader className="min-w-0 px-4 pt-4 pb-2">
           <DialogTitle className="flex items-center gap-1.5 text-base">
             <CopyPlus className="size-4 shrink-0 text-muted-foreground" />
             Appears in {places.length} places
           </DialogTitle>
-          <DialogDescription className="truncate text-left">
+          <DialogDescription className="line-clamp-4 text-left">
             {title}
           </DialogDescription>
         </DialogHeader>
-        <ul className="max-h-[60vh] overflow-y-auto px-2 pb-2">
+        <ul className="max-h-[60vh] min-w-0 overflow-y-auto overscroll-contain px-2 pb-2">
           {places.map((place) => (
             <PlaceRow
               key={place.node.id}
@@ -135,14 +148,12 @@ function MirrorPlacesInner({
   );
 }
 
-/** Ancestors top-down, excluding the node itself -- the disambiguating
- *  breadcrumb. "Top level" when the occurrence sits at the root. */
-function crumbsFor(index: TreeIndex, id: string): string {
-  const crumbs = buildTrail(index, id)
+/** Ancestor texts top-down, excluding the node itself -- the disambiguating
+ *  breadcrumb. Empty = the occurrence sits at the top level. */
+function crumbsFor(index: TreeIndex, id: string): string[] {
+  return buildTrail(index, id)
     .slice(0, -1)
-    .map((n) => stripLinks(n.text).trim() || "Untitled")
-    .join(" › ");
-  return crumbs || "Top level";
+    .map((n) => stripLinks(n.text).trim() || "Untitled");
 }
 
 function PlaceRow({
@@ -151,7 +162,7 @@ function PlaceRow({
   onSelect,
 }: {
   place: Place;
-  crumbs: string;
+  crumbs: string[];
   onSelect: () => void;
 }) {
   return (
@@ -159,21 +170,67 @@ function PlaceRow({
       <button
         type="button"
         onClick={onSelect}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent"
+        className="grid grid-cols-[auto_1fr_auto] w-full items-center gap-2.5 rounded-md px-2 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
       >
-        <span
-          className={
-            place.isSource
-              ? "shrink-0 rounded-full bg-primary/15 px-2 text-[10px] font-medium leading-5 text-foreground"
-              : "shrink-0 rounded-full bg-muted px-2 text-[10px] font-medium leading-5 text-muted-foreground"
-          }
+        <Badge
+          variant={place.isSource ? "outline" : "secondary"}
+          className="w-16 justify-center"
         >
           {place.isSource ? "Source" : "Mirror"}
-        </span>
-        <span className="min-w-0 truncate text-sm text-muted-foreground">
-          {crumbs}
-        </span>
+        </Badge>
+        <Crumbs crumbs={crumbs} />
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
       </button>
     </li>
+  );
+}
+
+/**
+ * One-line breadcrumb that truncates from the HEAD, not the tail. Deep trails
+ * collapse to "first › … › parent" (the immediate parent disambiguates best,
+ * so the tail is what must survive; the full trail rides the title tooltip).
+ * The parent crumb is rigid (shrink-0, capped at 60% so a giant name can't
+ * evict the trail entirely); ancestors shrink first, down to a min-w-6 sliver.
+ * End-truncating the joined string would hide exactly the crumb that tells
+ * the places apart.
+ */
+function Crumbs({ crumbs }: { crumbs: string[] }) {
+  if (crumbs.length === 0) {
+    return <span className="truncate text-sm text-muted-foreground">Home</span>;
+  }
+  const shown =
+    crumbs.length <= 2
+      ? crumbs
+      : [...crumbs.slice(0, 1), "…", ...crumbs.slice(-1)];
+  const last = shown.length - 1;
+  return (
+    <span
+      title={crumbs.join(" › ")}
+      className="flex min-w-0 items-center text-sm text-muted-foreground"
+    >
+      {shown.map((crumb, i) => (
+        <Fragment key={i}>
+          {i > 0 && (
+            <span
+              aria-hidden="true"
+              className="shrink-0 px-1 text-muted-foreground/50"
+            >
+              ›
+            </span>
+          )}
+          <span
+            className={
+              i < last
+                ? "min-w-6 shrink-[999] truncate"
+                : shown.length === 1
+                  ? "min-w-0 truncate"
+                  : "min-w-0 max-w-[60%] shrink-0 truncate"
+            }
+          >
+            {crumb}
+          </span>
+        </Fragment>
+      ))}
+    </span>
   );
 }
