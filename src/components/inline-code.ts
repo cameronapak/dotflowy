@@ -15,8 +15,8 @@
 // Most tokens keep their FULL source visible (backticks, the leading `#`), so
 // source string and rendered text have identical length. A FOLDING token (a
 // link) is the exception: it folds to a shorter atomic widget unless the caret
-// is on it -- and even revealed, only its `[label]` half is text (the `(url)`
-// half stays a smaller atom; ADR 0005's bracket reveal). An atom carries its
+// is on it -- and even revealed, only the bare url stays an atom; `[label]`,
+// `(`, and `)` are real text (ADR 0005's bracket reveal). An atom carries its
 // full source in `data-src` (+ `data-src-len`) and `contenteditable="false"`;
 // the caret helpers below count it off `data-src` generically, so every
 // consumer keeps speaking source offsets -- with no per-token special-casing
@@ -148,9 +148,9 @@ function foldedSrcLen(el: HTMLElement): number {
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
 // the source once a focused bullet can hold folded links (they show only their
 // label), so onInput/onCompositionEnd/paste read through this instead: walk the
-// tree emitting `data-src` for atoms (folded links, a revealed link's `(url)`
-// chip) and textContent for everything else (a revealed link's `[label]`, code,
-// and tags are all 1:1 with their source). See ADR 0005 (bracket reveal).
+// tree emitting `data-src` for atoms (folded links, a revealed link's url chip)
+// and textContent for everything else (a revealed link's `[label]()` frame,
+// code, and tags are all 1:1 with their source). See ADR 0005 (bracket reveal).
 export function readSource(el: HTMLElement): string {
   let out = "";
   const visit = (node: Node) => {

@@ -84,16 +84,17 @@ test.describe("Rich links fold and reveal", () => {
     await expect(anchor.locator(".link-edit-icon")).toHaveCount(1);
 
     // Focus reveals the BRACKETS around the editable label, but the url stays
-    // folded behind the `(✎)` chip (its data-src) -- it never expands into the
-    // line (ADR 0005, bracket reveal). The <a> is gone.
+    // folded behind the `(✎)` chip (its data-src is the bare url) -- it never
+    // expands into the line (ADR 0005, bracket reveal). The parens around the
+    // chip are REAL text (the caret walks through them). The <a> is gone.
     await focusBullet(page, "n");
     await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
       "Anthropic",
     );
-    await expect(text(page, "n")).toHaveText("[Anthropic]");
+    await expect(text(page, "n")).toHaveText("[Anthropic]()");
     await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
       "data-src",
-      "(https://anthropic.com)",
+      "https://anthropic.com",
     );
     await expect(text(page, "n").locator("a[data-link]")).toHaveCount(0);
 
@@ -145,7 +146,7 @@ test.describe("Per-link reveal", () => {
     );
     await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
       "data-src",
-      "(https://a.com)",
+      "https://a.com",
     );
     const folded = text(page, "n").locator("a[data-link]");
     await expect(folded).toHaveCount(1);
@@ -184,6 +185,41 @@ test.describe("Per-link reveal", () => {
     const folded = text(page, "n").locator("a[data-link]");
     await expect(folded).toHaveCount(1);
     await expect(folded).toHaveText("A");
+  });
+
+  test("typing between ] and ( splits the link open into raw text", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await focusBullet(page, "n");
+    await expect(text(page, "n").locator(".link-url-chip")).toBeVisible();
+
+    // The revealed frame's parens are REAL text, so the caret can sit between
+    // `]` and `(` (arrow keys walk through; set the position directly here --
+    // arrows are unreliable in headless contentEditable). Typing there breaks
+    // the `](` adjacency the token regex needs, so the whole construct falls
+    // back to plain text: `[Anthropic] (https://anthropic.com)`.
+    await text(page, "n").evaluate((el: HTMLElement) => {
+      const chip = el.querySelector(".link-url-chip")!;
+      const openParen = chip.previousSibling!; // the `(` punct span
+      const range = document.createRange();
+      range.setStartBefore(openParen);
+      range.collapse(true);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    await page.keyboard.type(" ");
+
+    // Split open: no link construct left, the raw url is in the line.
+    await expect(text(page, "n").locator(".link-reveal")).toHaveCount(0);
+    await expect(text(page, "n").locator("a[data-link]")).toHaveCount(0);
+    await expect(text(page, "n")).toHaveText(
+      "[Anthropic] (https://anthropic.com)",
+    );
   });
 });
 
@@ -312,11 +348,11 @@ test.describe("Creating links by paste", () => {
     await pasteInto(text(page, "n"), { plain: "https://anthropic.com" });
 
     // The caret keeps the end-of-link position, so the new link is bracket-
-    // revealed: `[Anthropic]` visible, the url folded into the `(✎)` chip.
-    await expect(text(page, "n")).toHaveText("[Anthropic]");
+    // revealed: `[Anthropic]()` visible, the url folded into the `(✎)` chip.
+    await expect(text(page, "n")).toHaveText("[Anthropic]()");
     await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
       "data-src",
-      "(https://anthropic.com)",
+      "https://anthropic.com",
     );
     expect(await readSrc(page, "n")).toBe(LINK);
   });

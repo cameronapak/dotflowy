@@ -61,7 +61,7 @@ function faviconImgEl(host: string): El {
 // The trailing pencil affordance -- a text-free span (icon painted by CSS mask)
 // that opens the Edit Link popover. Inside a folded <a> it's invisible to
 // source/caret math (readSource stops at the atom's `data-src`); inside the
-// revealed `(url)` chip it's interior to that atom, same story.
+// revealed url chip it's interior to that atom, same story.
 function editIconEl(): El {
   return {
     tag: "span",
@@ -97,19 +97,20 @@ function foldedLinkEl(label: string, url: string, tok: string): El {
 }
 
 // A revealed link (bracket reveal, ADR 0005): `[label]` as editable text -- the
-// brackets appear so the label edits as raw markdown -- but the URL half NEVER
-// expands into the line. `(url)` folds to one atomic chip (`data-src` carries
-// it, so readSource still reconstructs the full token and the caret jumps over
-// it) rendered as a pencil between faint parens; clicking it opens the Edit
-// Link popover. The visible text (`[` + label + `]`) stays 1:1 with its slice
-// of the source.
+// brackets appear so the label edits as raw markdown -- but the URL itself
+// NEVER expands into the line. Only the bare `url` folds to one atomic chip
+// (`data-src` carries it, so readSource still reconstructs the full token and
+// the caret jumps over it) rendered as a pencil; the parens around it are REAL
+// text, so the caret walks through `](` and `)` one step at a time, and typing
+// between `]` and `(` breaks the token match -- the link splits open to raw
+// text. Clicking the chip opens the Edit Link popover. Everything except the
+// chip stays 1:1 with its slice of the source.
 function revealedLinkEl(label: string, url: string): El {
   const punct = (s: string): El => ({
     tag: "span",
     attrs: { class: "md-punct" },
     children: [s],
   });
-  const urlSrc = `(${url})`;
   return {
     tag: "span",
     attrs: { class: "link-reveal", "data-link-reveal": true },
@@ -117,27 +118,30 @@ function revealedLinkEl(label: string, url: string): El {
       punct("["),
       { tag: "span", attrs: { class: "link-label" }, children: [label] },
       punct("]"),
+      punct("("),
       {
         tag: "span",
         attrs: {
           class: "link-url-chip",
-          "data-src": urlSrc,
-          "data-src-len": urlSrc.length,
+          "data-src": url,
+          "data-src-len": url.length,
           contenteditable: "false",
           title: "Edit link",
         },
         children: [editIconEl()],
       },
+      punct(")"),
     ],
   };
 }
 
 // Resolve a click on an edit affordance to (nodeId, token, anchor rect) and
 // open the popover. The pencil inside a folded <a> reads the full token off
-// the anchor's data-src; the revealed `(url)` chip reads its own data-src plus
-// the label from the sibling span (fresh -- every keystroke re-decorates). The
-// node id comes from the enclosing row's `data-node-id`; the zoomed title has
-// no row, so it falls back to the zoom root (which IS the title's node).
+// the anchor's data-src; the revealed url chip reads its own data-src (the
+// bare url) plus the label from the sibling span (fresh -- every keystroke
+// re-decorates). The node id comes from the enclosing row's `data-node-id`;
+// the zoomed title has no row, so it falls back to the zoom root (which IS
+// the title's node).
 function openEditFor(el: HTMLElement, ctx: PluginContext): void {
   const anchor = el.closest<HTMLElement>("a[data-link]");
   let token: string;
@@ -150,7 +154,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
     if (!chip) return;
     const reveal = chip.closest<HTMLElement>(".link-reveal");
     const label = reveal?.querySelector(".link-label")?.textContent ?? "";
-    token = `[${label}]${chip.getAttribute("data-src") ?? ""}`;
+    token = `[${label}](${chip.getAttribute("data-src") ?? ""})`;
     rectEl = reveal ?? chip;
   }
   const parts = LINK_PARTS.exec(token);

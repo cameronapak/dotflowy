@@ -950,9 +950,10 @@ body.dragging-active * {
   opacity: 1;
 }
 
-/* The revealed link's folded URL: faint parens around the pencil, standing in
-   for the whole `(url)` source (carried in its data-src). Link-colored like the
-   folded <a>, so it reads as "the link half". */
+/* The revealed link's folded URL: the pencil stands in for the bare url
+   (carried in its data-src); the parens around it are real `.md-punct` text,
+   so the caret walks through them. Link-colored like the folded <a>, so it
+   reads as "the link half". */
 .link-url-chip {
   cursor: pointer;
   user-select: none;
@@ -961,18 +962,6 @@ body.dragging-active * {
 
 .dark .link-url-chip {
   color: oklch(0.78 0.13 245);
-}
-
-.link-url-chip::before {
-  content: "(";
-  color: var(--muted-foreground);
-  opacity: 0.6;
-}
-
-.link-url-chip::after {
-  content: ")";
-  color: var(--muted-foreground);
-  opacity: 0.6;
 }
 
 .link-url-chip .link-edit-icon {
