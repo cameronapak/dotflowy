@@ -516,8 +516,14 @@ h2 > span.protected-lock {
   @apply mt-1.25;
 }
 
-h2.zoomed-title > button.mirror-badge {
-  @apply mt-2.5;
+h2.zoomed-title {
+  & > button.mirror-badge {
+    @apply mt-2.5;
+  }
+
+  & > .checkbox {
+    @apply mt-2;
+  }
 }
 
 .node-text {
