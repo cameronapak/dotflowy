@@ -1255,6 +1255,10 @@ function useNodeCommands({
       onToggleCollapsed: (id, collapsed) => {
         capture(getTreeIndex(), id);
         toggleCollapsed(id, collapsed);
+        // The windowed list toggles instantly (ADR 0019 dropped the reveal
+        // animation), so flash the toggled row to signal something happened --
+        // the same "acted-upon" pulse a move gives. See flash-node.ts.
+        flashRow(rowOf(id));
       },
 
       onMoveFocus: (id, direction, x) => {
