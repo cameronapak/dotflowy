@@ -516,6 +516,10 @@ h2 > span.protected-lock {
   @apply mt-1.25;
 }
 
+h2.zoomed-title > button.mirror-badge {
+  @apply mt-2.5;
+}
+
 .node-text {
   flex: 1 1 auto;
   min-height: 24px;
@@ -756,7 +760,7 @@ body.dragging-active * {
      in the list row, so the zoom morph's two endpoints stay geometrically
      consistent (see .vt-morph below). */
   display: flex;
-  align-items: center;
+  align-items: start;
   gap: 4px;
 }
 
