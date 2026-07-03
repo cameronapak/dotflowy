@@ -32,6 +32,10 @@ export interface VisibleRow {
    */
   key: string
   depth: number
+  /** Instance ids for the ancestor guide rails painted beside this row, ordered
+   *  outermost-to-innermost. `railOwnerIds[i]` owns the rail drawn at
+   *  `14px + i * INDENT_PX`; clicking that rail collapses that ancestor. */
+  railOwnerIds: string[]
   ancestorCompleted: boolean
   /** This row IS a mirror (its own `mirrorOf` is set). */
   isMirror: boolean
@@ -156,6 +160,9 @@ export function buildVisibleRows(
     // Content ids already expanded on this path (ancestor sources). A mirror whose
     // source is in here would loop, so it caps. Only tracked under the flag.
     expandedContent: ReadonlySet<string>,
+    // Instance ids for the rendered ancestors of the next child. These own the
+    // guide rails painted beside the child row.
+    railOwnerIds: string[],
   ) => {
     for (const child of childrenOf(index, contentParentId)) {
       const mirrored = mirrorsEnabled && child.mirrorOf != null
@@ -173,6 +180,7 @@ export function buildVisibleRows(
           contentId,
           key,
           depth,
+          railOwnerIds,
           ancestorCompleted,
           isMirror: true,
           capped: false,
@@ -196,6 +204,7 @@ export function buildVisibleRows(
           contentId,
           key,
           depth,
+          railOwnerIds,
           ancestorCompleted,
           isMirror: true,
           capped: true,
@@ -209,6 +218,7 @@ export function buildVisibleRows(
         contentId,
         key,
         depth,
+        railOwnerIds,
         ancestorCompleted,
         isMirror: mirrored,
         capped: false,
@@ -231,11 +241,20 @@ export function buildVisibleRows(
           crossed || mirrored ? path.concat(child.id) : path,
           crossed || mirrored,
           mirrorsEnabled ? new Set(expandedContent).add(contentId) : expandedContent,
+          railOwnerIds.concat(child.id),
         )
       }
     }
   }
-  walk(rootId, 0, false, [], false, mirrorsEnabled && rootId ? new Set([rootId]) : EMPTY_EXPANDED)
+  walk(
+    rootId,
+    0,
+    false,
+    [],
+    false,
+    mirrorsEnabled && rootId ? new Set([rootId]) : EMPTY_EXPANDED,
+    [],
+  )
   return out
 }
 

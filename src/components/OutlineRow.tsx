@@ -6,7 +6,6 @@ import {
   useRef,
   type RefObject,
 } from "react";
-import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import {
@@ -49,6 +48,8 @@ import type { NodeCommands } from "./OutlineNode";
 // agree on (use-drag-reorder.ts INDENT_FALLBACK). Once the recursive path is
 // deleted (ADR 0019), this is the single source for outline indentation.
 export const INDENT_PX = 24;
+const RAIL_CENTER_X_PX = 14;
+const RAIL_HIT_WIDTH_PX = 20;
 
 /**
  * One flat, windowed outline row (Phase B, ADR 0019). The virtualized
@@ -94,6 +95,10 @@ export interface OutlineRowProps {
   // Depth relative to the zoom root (direct child of the root = 0). Drives the
   // left indent. Comes from the flat list, stable per id until structure shifts.
   depth: number;
+  // Instance ids for the visible ancestor guide rails beside this row. Clicking
+  // a rail collapses its owner (outer rail => outer ancestor, inner rail =>
+  // immediate parent).
+  railOwnerIds: string[];
   // True when an ancestor within the view is completed (fade inheritance, ADR
   // 0002). Carried by the flat list, not threaded through a parent row.
   ancestorCompleted: boolean;
@@ -144,6 +149,8 @@ function MirrorRow({ nodeId, contentId, broken, ...rest }: OutlineRowProps) {
       <MirrorMissingRow
         instance={instance}
         depth={rest.depth}
+        railOwnerIds={rest.railOwnerIds}
+        commands={rest.commands}
         index={rest.index}
         start={rest.start}
         scrollMargin={rest.scrollMargin}
@@ -180,6 +187,7 @@ function RowChrome({
   isMirror,
   capped,
   depth,
+  railOwnerIds,
   ancestorCompleted,
   commands,
   pluginCtx,
@@ -201,14 +209,14 @@ function RowChrome({
   const caretWatchRef = useRef<(() => void) | null>(null);
 
   // Direct visible children of the CONTENT -- a mirror windows its source's
-  // subtree, so the chevron + collapsed dot follow the source's children. No
+  // subtree, so the collapse affordance + collapsed dot follow the source's children. No
   // recursion: the flat list already holds the descendants as their own rows.
   // With windowing only ~viewport rows call this, so the per-parent fan-out the
   // recursive path paid is gone.
   const childIds = useVisibleChildIds(content.id, isHidden);
   // Only the boolean is needed here (a leaf row has no children list to pass
   // down), so test emptiness without materializing the filtered array. A capped
-  // mirror is never expandable (it would loop), so it shows no chevron.
+  // mirror is never expandable (it would loop), so it shows no collapse affordance.
   const hasChildren = capped
     ? false
     : filter
@@ -347,7 +355,7 @@ function RowChrome({
 
   useBulletKeymap({
     node: content,
-    // Collapse is local to the instance (mirrors the chevron, ADR 0022); the
+    // Collapse is local to the instance (mirrors the hidden collapse target, ADR 0022); the
     // rest of the keymap re-resolves the instance from the focused key.
     instanceId: instance.id,
     instanceCollapsed: instance.collapsed,
@@ -364,6 +372,7 @@ function RowChrome({
       data-node-id={instance.id}
       data-parent-id={instance.parentId ?? undefined}
       data-depth={depth}
+      data-rail-owners={railOwnerIds.join(",")}
       data-mirror={
         isMirror
           ? capped
@@ -385,7 +394,26 @@ function RowChrome({
         paddingInlineStart: depth * INDENT_PX,
       }}
     >
-      <div className="outline-row" data-faded={faded} data-context={isContext}>
+      <div
+        className="outline-row"
+        data-faded={faded}
+        data-context={isContext}
+        data-collapsed-branch={
+          hasChildren && effectiveCollapsed ? true : undefined
+        }
+      >
+        <RailToggles
+          depth={depth}
+          ownerIds={railOwnerIds}
+          onCollapse={(ownerId) => commands.onToggleCollapsed(ownerId, true)}
+        />
+        {hasChildren && effectiveCollapsed && (
+          <CollapsedRailToggle
+            depth={depth}
+            ownerId={instance.id}
+            onExpand={() => commands.onToggleCollapsed(instance.id, false)}
+          />
+        )}
         <button
           type="button"
           className="collapse-toggle touch-hitbox"
@@ -397,9 +425,7 @@ function RowChrome({
             commands.onToggleCollapsed(instance.id, !instance.collapsed)
           }
           tabIndex={-1}
-        >
-          {hasChildren && <ChevronRight size={14} strokeWidth={2.5} />}
-        </button>
+        />
         <button
           type="button"
           className="bullet touch-hitbox"
@@ -536,6 +562,8 @@ function RowChrome({
 function MirrorMissingRow({
   instance,
   depth,
+  railOwnerIds,
+  commands,
   index,
   start,
   scrollMargin,
@@ -543,6 +571,8 @@ function MirrorMissingRow({
 }: {
   instance: Node;
   depth: number;
+  railOwnerIds: string[];
+  commands: NodeCommands;
   index: number;
   start: number;
   scrollMargin: number;
@@ -554,6 +584,7 @@ function MirrorMissingRow({
       data-node-id={instance.id}
       data-parent-id={instance.parentId ?? undefined}
       data-depth={depth}
+      data-rail-owners={railOwnerIds.join(",")}
       data-mirror="broken"
       data-index={index}
       ref={measureRef}
@@ -567,6 +598,11 @@ function MirrorMissingRow({
       }}
     >
       <div className="outline-row" data-faded={true}>
+        <RailToggles
+          depth={depth}
+          ownerIds={railOwnerIds}
+          onCollapse={(ownerId) => commands.onToggleCollapsed(ownerId, true)}
+        />
         <span className="collapse-toggle touch-hitbox" aria-hidden="true" />
         <span className="bullet touch-hitbox" aria-hidden="true">
           <span className="bullet-dot" data-broken="true" />
@@ -576,5 +612,151 @@ function MirrorMissingRow({
         </span>
       </div>
     </li>
+  );
+}
+
+function RailToggles({
+  depth,
+  ownerIds,
+  onCollapse,
+}: {
+  depth: number;
+  ownerIds: string[];
+  onCollapse: (ownerId: string) => void;
+}) {
+  if (ownerIds.length === 0) return null;
+
+  const setRailHover = (e: React.MouseEvent, ownerId: string, globalX: number) => {
+    const list = (e.currentTarget as HTMLElement).closest<HTMLElement>(".outline-list");
+    if (!list) return;
+
+    const clearAll = () => {
+      list.style.removeProperty("--hovered-rail-x");
+      list.querySelectorAll<HTMLElement>(".outline-node").forEach((li) =>
+        li.classList.remove("rail-hovered")
+      );
+      delete list.dataset.railHoverListener;
+    };
+
+    // Attach a one-time clearer when the pointer leaves the whole list area.
+    // This keeps the highlight stable while the mouse travels between
+    // vertically adjacent segments of the same rail.
+    if (!list.dataset.railHoverListener) {
+      list.addEventListener("mouseleave", clearAll, { once: true });
+      list.dataset.railHoverListener = "1";
+    }
+
+    list.style.setProperty("--hovered-rail-x", `${globalX}px`);
+
+    // Scope the highlight to only the "collapsable part": rows whose ancestry
+    // includes this specific ownerId (i.e. descendants under that ancestor).
+    // This avoids lighting the entire depth column across sibling branches.
+    list.querySelectorAll<HTMLElement>(".outline-node").forEach((li) => {
+      const rowOwners = (li.dataset.railOwners || "").split(",").filter(Boolean);
+      if (rowOwners.includes(ownerId)) {
+        li.classList.add("rail-hovered");
+      } else {
+        li.classList.remove("rail-hovered");
+      }
+    });
+  };
+
+  return (
+    <>
+      {ownerIds.map((ownerId, railIndex) => (
+        <button
+          key={`${railIndex}:${ownerId}`}
+          type="button"
+          className="rail-toggle"
+          data-rail-owner-id={ownerId}
+          aria-label="Collapse branch"
+          tabIndex={-1}
+          style={{
+            left:
+              RAIL_CENTER_X_PX +
+              railIndex * INDENT_PX -
+              depth * INDENT_PX -
+              RAIL_HIT_WIDTH_PX / 2,
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCollapse(ownerId);
+          }}
+          onMouseEnter={(e) => {
+            const globalX = RAIL_CENTER_X_PX + railIndex * INDENT_PX;
+            setRailHover(e, ownerId, globalX);
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+function CollapsedRailToggle({
+  depth,
+  ownerId,
+  onExpand,
+}: {
+  depth: number;
+  ownerId: string;
+  onExpand: () => void;
+}) {
+  const setRailHover = (e: React.MouseEvent, ownerId: string, globalX: number) => {
+    const list = (e.currentTarget as HTMLElement).closest<HTMLElement>(".outline-list");
+    if (!list) return;
+
+    const clearAll = () => {
+      list.style.removeProperty("--hovered-rail-x");
+      list.querySelectorAll<HTMLElement>(".outline-node").forEach((li) =>
+        li.classList.remove("rail-hovered")
+      );
+      delete list.dataset.railHoverListener;
+    };
+
+    if (!list.dataset.railHoverListener) {
+      list.addEventListener("mouseleave", clearAll, { once: true });
+      list.dataset.railHoverListener = "1";
+    }
+
+    list.style.setProperty("--hovered-rail-x", `${globalX}px`);
+
+    // For collapsed, descendants aren't rendered yet, so owner scoping won't
+    // tag any rows (correct -- no visible collapsable segments below). The
+    // stub itself provides the visual.
+    list.querySelectorAll<HTMLElement>(".outline-node").forEach((li) => {
+      const owners = (li.dataset.railOwners || "").split(",").filter(Boolean);
+      if (owners.includes(ownerId)) {
+        li.classList.add("rail-hovered");
+      } else {
+        li.classList.remove("rail-hovered");
+      }
+    });
+  };
+
+  return (
+    <button
+      type="button"
+      className="rail-toggle collapsed-rail-toggle"
+      data-rail-owner-id={ownerId}
+      aria-label="Expand branch"
+      tabIndex={-1}
+      style={{ left: RAIL_CENTER_X_PX - RAIL_HIT_WIDTH_PX / 2 }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onExpand();
+      }}
+      onMouseEnter={(e) => {
+        const globalX = depth * INDENT_PX + RAIL_CENTER_X_PX;
+        setRailHover(e, ownerId, globalX);
+      }}
+    />
   );
 }

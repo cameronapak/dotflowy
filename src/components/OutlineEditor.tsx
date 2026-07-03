@@ -543,6 +543,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                       capped={row.capped}
                       broken={row.broken}
                       depth={row.depth}
+                      railOwnerIds={row.railOwnerIds}
                       ancestorCompleted={row.ancestorCompleted}
                       commands={commands}
                       pluginCtx={pluginCtx}

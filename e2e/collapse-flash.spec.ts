@@ -6,13 +6,13 @@ function modifier() {
   return process.platform === "darwin" ? "Meta" : "Control";
 }
 
-// A node's OWN editable text span, its row, and its collapse chevron.
+// A node's OWN editable text span, its row, and a guide rail owned by that node.
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row`);
-const chevron = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .collapse-toggle`);
+const rail = (page: Page, ownerId: string) =>
+  page.locator(`.rail-toggle[data-rail-owner-id="${ownerId}"]`).first();
 
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
@@ -23,18 +23,17 @@ async function load(page: Page) {
 // The windowed list drops the reveal animation (ADR 0019), so a deliberate
 // expand/collapse flashes the toggled row instead -- the same `.node-acted`
 // pulse a move gives. Fired in the single `onToggleCollapsed` funnel, so it
-// covers the chevron AND the Cmd+Up/Down hotkeys. See flash-node.ts.
+// covers rail clicks AND the Cmd+Up/Down hotkeys. See flash-node.ts.
 test.describe("collapse flash: the toggled node pulses", () => {
-  test("clicking the chevron collapses alpha and flashes its row", async ({
+  test("clicking alpha's guide rail collapses and expands it", async ({
     page,
   }) => {
     await load(page);
     // alpha starts expanded (children visible).
     await expect(text(page, "alpha-1")).toBeVisible();
 
-    // Hover so the gutter chevron is interactive, then collapse.
-    await row(page, "alpha").hover();
-    await chevron(page, "alpha").click();
+    // The rail beside alpha's descendants is the pointer collapse target.
+    await rail(page, "alpha").click();
 
     // The subtree is gone (instant, no slide) and the toggled row flashes...
     await expect(text(page, "alpha-1")).toBeHidden();
@@ -49,6 +48,12 @@ test.describe("collapse flash: the toggled node pulses", () => {
 
     // The class clears itself on animationend so it can re-trigger.
     await expect(acted).not.toHaveClass(/node-acted/, { timeout: 4000 });
+
+    // Once collapsed, descendants (and their rails) are gone; the parent row's
+    // short collapsed-rail stub is the visible expand target.
+    await rail(page, "alpha").click();
+    await expect(text(page, "alpha-1")).toBeVisible();
+    await expect(acted).toHaveClass(/node-acted/);
   });
 
   test("Cmd+Up (close) then Cmd+Down (open) each flash the toggled row", async ({
