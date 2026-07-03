@@ -82,7 +82,8 @@ delegated.
 - **MCP server inside the Durable Object** — pins session state but bloats the DO with an RPC runtime
   and still loses it on hibernation; the DO stays storage-only.
 - **A `move_node` / full structural tool set in v1** — the asked-for surface is capture + mirror +
-  edit; move/indent/reorder can follow once real agent usage shows the need.
+  edit; move/indent/reorder can follow once real agent usage shows the need. (Move landed as
+  `move_nodes` in [ADR 0027](./0027-mcp-move-nodes.md).)
 - **Deriving "today" server-side from a stored user timezone** — new schema + settings surface for
   something the calling agent already knows better.
 

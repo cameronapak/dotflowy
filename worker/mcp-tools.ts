@@ -30,6 +30,7 @@ import {
   planDeleteNode,
   planMirrorNode,
   planMirrorToDaily,
+  planReparent,
   planUpdateNode,
   searchNodes,
   trueSourceOf,
@@ -244,6 +245,22 @@ const DeleteNodeInput = Schema.Struct({
   }),
 })
 
+const MoveNodesInput = Schema.Struct({
+  nodeIds: Schema.Array(Schema.String).annotate({
+    description: 'The nodes to move. Each moves with its whole subtree; the order you pass is kept.',
+  }),
+  newParentId: optional(
+    Schema.String.annotate({
+      description: 'Where to move them. Omit or null for the top level.',
+    }),
+  ),
+  position: optional(
+    Schema.Literals(['first', 'last']).annotate({
+      description: 'Land as the first or last children of the parent (default: last).',
+    }),
+  ),
+})
+
 const dateField = optional(
   Schema.String.annotate({
     description:
@@ -393,6 +410,41 @@ export const tools: ReadonlyArray<ToolDef> = [
         yield* guardContainerDelete(containerId, plan.deletedIds)
         yield* commit(store, plan.ops)
         return `Deleted ${plan.deletedIds.length} node(s) (node ${input.nodeId} and its subtree).`
+      }),
+  },
+  {
+    name: 'move_nodes',
+    description:
+      'Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.',
+    input: MoveNodesInput,
+    readOnly: false,
+    handle: (input: typeof MoveNodesInput.Type, store) =>
+      Effect.gen(function* () {
+        const index = yield* loadIndex(store)
+        const timestamp = yield* clock
+        const position = input.position ?? 'last'
+        const plan = yield* unwrap(
+          planReparent(index, {
+            nodeIds: input.nodeIds,
+            newParentId: input.newParentId ?? null,
+            position,
+            timestamp,
+          }),
+        )
+        yield* commit(store, plan.ops)
+        // An empty plan committed nothing (no nodes given, or every node was
+        // already exactly where asked) — say so rather than claim a phantom move.
+        if (plan.ops.length === 0) {
+          return input.nodeIds.length === 0
+            ? 'No nodes to move.'
+            : 'No change — the node(s) are already in that position.'
+        }
+        const where = plan.parentId
+          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}" (id: ${plan.parentId})`
+          : 'to the top level'
+        const noun = plan.parentId ? 'children' : 'items'
+        const pos = position === 'first' ? `as the first ${noun}` : `as the last ${noun}`
+        return `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`
       }),
   },
   {

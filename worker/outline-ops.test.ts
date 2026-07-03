@@ -14,6 +14,8 @@ import {
   DAILY_CONTAINER_TEXT,
   MirrorCycle,
   NodeNotFound,
+  RedundantDescendant,
+  WouldCycle,
   WouldOrphanMirrors,
   buildTreeIndex,
   flattenSubtree,
@@ -25,6 +27,7 @@ import {
   planEnsureDaily,
   planMirrorNode,
   planMirrorToDaily,
+  planReparent,
   planUpdateNode,
   searchNodes,
 } from './outline-ops'
@@ -251,6 +254,142 @@ describe('planMirrorNode', () => {
       timestamp: T,
     })
     expect(plan).toBeInstanceOf(MirrorCycle)
+  })
+})
+
+describe('planReparent', () => {
+  const move = (nodes: Node[], args: Parameters<typeof planReparent>[1]) =>
+    planReparent(index(nodes), args)
+
+  /** The emitted update ops, keyed by node id. */
+  const movedById = (ops: ChangeOp[]) => new Map(updated(ops).map((n) => [n.id, n]))
+
+  test('moves a single node to the last child of a parent', () => {
+    const plan = move(fixture(), { nodeIds: ['b'], newParentId: 'a', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const b = movedById(plan.ops).get('b')!
+    expect(b.parentId).toBe('a')
+    expect(b.prevSiblingId).toBe('a2')
+    expect(b.updatedAt).toBe(T)
+    expect(plan.parentId).toBe('a')
+    expect(plan.movedIds).toEqual(['b'])
+  })
+
+  test('position "first" pushes the old head down', () => {
+    const plan = move(fixture(), { nodeIds: ['b'], newParentId: 'a', position: 'first', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const byId = movedById(plan.ops)
+    expect(byId.get('b')!.prevSiblingId).toBeNull()
+    expect(byId.get('b')!.parentId).toBe('a')
+    // the former first child now follows the moved node
+    expect(byId.get('a1')!.prevSiblingId).toBe('b')
+  })
+
+  test('a batch keeps the passed order (last)', () => {
+    const nodes = [
+      makeNode({ id: 'p', text: 'parent' }),
+      makeNode({ id: 'x', text: 'x', prevSiblingId: 'p' }),
+      makeNode({ id: 'y', text: 'y', prevSiblingId: 'x' }),
+    ]
+    const plan = move(nodes, { nodeIds: ['x', 'y'], newParentId: 'p', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const byId = movedById(plan.ops)
+    expect(byId.get('x')!.parentId).toBe('p')
+    expect(byId.get('x')!.prevSiblingId).toBeNull()
+    expect(byId.get('y')!.parentId).toBe('p')
+    expect(byId.get('y')!.prevSiblingId).toBe('x')
+  })
+
+  test('a batch keeps the passed order at the front (first)', () => {
+    const nodes = [
+      makeNode({ id: 'p', text: 'parent' }),
+      makeNode({ id: 'z', text: 'z', parentId: 'p' }),
+      makeNode({ id: 'x', text: 'x', prevSiblingId: 'p' }),
+      makeNode({ id: 'y', text: 'y', prevSiblingId: 'x' }),
+    ]
+    const plan = move(nodes, { nodeIds: ['x', 'y'], newParentId: 'p', position: 'first', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const byId = movedById(plan.ops)
+    expect(byId.get('x')!.prevSiblingId).toBeNull()
+    expect(byId.get('y')!.prevSiblingId).toBe('x')
+    // the pre-existing child is pushed below the moved run
+    expect(byId.get('z')!.prevSiblingId).toBe('y')
+  })
+
+  test('a run of mutual siblings keeps its chain (no tearing)', () => {
+    // Both a1 and a2 are children of a; moving both under b must not self-ref or
+    // reorder — the bug the rebuild-between-moves guard exists to prevent.
+    const plan = move(fixture(), { nodeIds: ['a1', 'a2'], newParentId: 'b', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const byId = movedById(plan.ops)
+    expect(byId.get('a1')!.parentId).toBe('b')
+    expect(byId.get('a1')!.prevSiblingId).toBeNull()
+    expect(byId.get('a2')!.parentId).toBe('b')
+    expect(byId.get('a2')!.prevSiblingId).toBe('a1')
+  })
+
+  test('moves across different parents in one call', () => {
+    // a1 (under a) and b (top level) both land under a2.
+    const plan = move(fixture(), { nodeIds: ['a1', 'b'], newParentId: 'a2', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const byId = movedById(plan.ops)
+    expect(byId.get('a1')!.parentId).toBe('a2')
+    expect(byId.get('a1')!.prevSiblingId).toBeNull()
+    expect(byId.get('b')!.parentId).toBe('a2')
+    expect(byId.get('b')!.prevSiblingId).toBe('a1')
+  })
+
+  test('null parent moves to the top level after the last root', () => {
+    const plan = move(fixture(), { nodeIds: ['a1'], newParentId: null, position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    const byId = movedById(plan.ops)
+    expect(byId.get('a1')!.parentId).toBeNull()
+    expect(byId.get('a1')!.prevSiblingId).toBe('b')
+    // the follower under the old parent inherits the moved node's old predecessor
+    expect(byId.get('a2')!.prevSiblingId).toBeNull()
+  })
+
+  test('a mirror parent redirects to its true source', () => {
+    const nodes = [...fixture(), makeNode({ id: 'm', text: 'alpha', mirrorOf: 'a', prevSiblingId: 'b' })]
+    const plan = move(nodes, { nodeIds: ['b'], newParentId: 'm', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    expect(plan.parentId).toBe('a')
+    expect(movedById(plan.ops).get('b')!.parentId).toBe('a')
+  })
+
+  test('emits ONLY update ops — never recreates a node (ADR 0027)', () => {
+    const plan = move(fixture(), { nodeIds: ['a1', 'b'], newParentId: 'a2', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    expect(inserted(plan.ops)).toHaveLength(0)
+    expect(deletedKeys(plan.ops)).toHaveLength(0)
+    expect(plan.ops.every((op) => op.op === 'update')).toBe(true)
+  })
+
+  test('deduplicates repeated ids, preserving first-seen order', () => {
+    const plan = move(fixture(), { nodeIds: ['b', 'b'], newParentId: 'a', position: 'last', timestamp: T })
+    if (plan instanceof Error) throw plan
+    expect(plan.movedIds).toEqual(['b'])
+    expect(movedById(plan.ops).get('b')!.parentId).toBe('a')
+  })
+
+  test('a missing node is NodeNotFound', () => {
+    expect(move(fixture(), { nodeIds: ['ghost'], newParentId: 'a', position: 'last', timestamp: T })).toBeInstanceOf(NodeNotFound)
+  })
+
+  test('a missing parent is NodeNotFound', () => {
+    expect(move(fixture(), { nodeIds: ['a1'], newParentId: 'ghost', position: 'last', timestamp: T })).toBeInstanceOf(NodeNotFound)
+  })
+
+  test('moving a node under itself is WouldCycle', () => {
+    expect(move(fixture(), { nodeIds: ['a'], newParentId: 'a', position: 'last', timestamp: T })).toBeInstanceOf(WouldCycle)
+  })
+
+  test('moving a node under its own descendant is WouldCycle', () => {
+    expect(move(fixture(), { nodeIds: ['a'], newParentId: 'a1', position: 'last', timestamp: T })).toBeInstanceOf(WouldCycle)
+  })
+
+  test('listing a node alongside its own moved ancestor is RedundantDescendant', () => {
+    expect(move(fixture(), { nodeIds: ['a', 'a1'], newParentId: 'b', position: 'last', timestamp: T })).toBeInstanceOf(RedundantDescendant)
   })
 })
 

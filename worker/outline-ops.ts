@@ -58,6 +58,29 @@ export class WouldOrphanMirrors extends Data.TaggedError('WouldOrphanMirrors')<{
   }
 }
 
+/** A move whose destination sits inside one of the moved subtrees (or is a
+ *  moved node itself) — it would detach the branch into its own descendants
+ *  (ADR 0027 / ADR 0010). */
+export class WouldCycle extends Data.TaggedError('WouldCycle')<{
+  nodeId: string
+  parentId: string
+}> {
+  get message() {
+    return `moving node ${this.nodeId} under ${this.parentId} would put it inside its own subtree`
+  }
+}
+
+/** Two nodes in one move where one is already inside the other: the descendant
+ *  travels with its ancestor, so listing both is ambiguous (ADR 0027). */
+export class RedundantDescendant extends Data.TaggedError('RedundantDescendant')<{
+  nodeId: string
+  ancestorId: string
+}> {
+  get message() {
+    return `node ${this.nodeId} is already inside node ${this.ancestorId}, which you're also moving — move one, not both`
+  }
+}
+
 // --- Node construction --------------------------------------------------------
 
 /** A complete wire node with caller-supplied identity + clock. `makeNode` owns
@@ -276,6 +299,169 @@ export function planMirrorNode(
     },
   ]
   return { ops, nodeId: args.id, sourceId: trueSourceId }
+}
+
+// --- Move planning ------------------------------------------------------------
+
+/** Whether `maybeAncestorId` is `nodeId` itself or one of its ancestors. Pure
+ *  upward walk, guarded against a corrupted parent chain. */
+function isSelfOrAncestor(index: TreeIndex, nodeId: string, maybeAncestorId: string): boolean {
+  let cursor: string | null = nodeId
+  let guard = index.byId.size + 1
+  while (cursor && guard-- > 0) {
+    if (cursor === maybeAncestorId) return true
+    cursor = index.byId.get(cursor)?.parentId ?? null
+  }
+  return false
+}
+
+/** A node whose readonly wire fields can be reassigned while we replay a move. */
+type MutNode = { -readonly [K in keyof Node]: Node[K] }
+
+/**
+ * `moveNode`'s sibling-chain surgery (client mutations.ts), applied to a
+ * working-copy map instead of the live collection: reads come from `idx`
+ * (rebuilt from the working copy before each call), writes mutate `working`.
+ * Same guards as the client (can't land after self, become own parent, or move
+ * to the exact spot it already holds — the last would corrupt the follower
+ * repoint). Never adds or removes an entry, only relinks `parentId`/
+ * `prevSiblingId`.
+ */
+function applyMoveInPlace(
+  working: Map<string, MutNode>,
+  idx: TreeIndex,
+  nodeId: string,
+  newParentId: string | null,
+  afterSiblingId: string | null,
+): void {
+  const node = idx.byId.get(nodeId)
+  if (!node) return
+  if (afterSiblingId === nodeId || newParentId === nodeId) return
+  if (
+    newParentId === node.parentId &&
+    (afterSiblingId ?? null) === (node.prevSiblingId ?? null)
+  ) {
+    return
+  }
+
+  const oldSiblings = childrenOf(idx, node.parentId)
+  const oi = oldSiblings.findIndex((n) => n.id === nodeId)
+  const oldNext = oi !== -1 && oi + 1 < oldSiblings.length ? oldSiblings[oi + 1]! : null
+
+  const newSiblings = childrenOf(idx, newParentId)
+  let newNext: Node | null = null
+  if (afterSiblingId === null) {
+    newNext = newSiblings[0] ?? null
+  } else {
+    const ni = newSiblings.findIndex((n) => n.id === afterSiblingId)
+    newNext = ni !== -1 && ni + 1 < newSiblings.length ? newSiblings[ni + 1]! : null
+  }
+
+  if (oldNext) working.get(oldNext.id)!.prevSiblingId = node.prevSiblingId
+  const w = working.get(nodeId)!
+  w.parentId = newParentId
+  w.prevSiblingId = afterSiblingId
+  if (newNext && newNext.id !== nodeId) working.get(newNext.id)!.prevSiblingId = nodeId
+}
+
+/**
+ * Move existing nodes (each with its whole subtree) to become children of
+ * `newParentId` (null = top level), preserving the given order — the pure twin
+ * of the client's `moveManyNodes` (mutations.ts). It replays `moveNode`'s chain
+ * surgery on a working copy, rebuilding the index between moves so a run of
+ * mutual siblings can't tear the chain, then diffs the copy to emit the touched
+ * `parentId`/`prevSiblingId` updates.
+ *
+ * STRUCTURAL ONLY (ADR 0027): the plan is exclusively `update` ops — never an
+ * insert or delete — so ids, subtrees, `origin` provenance, mirrors, and every
+ * other field ride through untouched. A move reorganizes; it never recreates.
+ * A mirror `newParentId` redirects to its true source (children hang off the
+ * content node, ADR 0022), matching planAddNode/planMirrorNode.
+ *
+ * Validation is atomic all-or-nothing: a missing node, a missing parent, a
+ * destination inside a moved subtree (WouldCycle), or a node listed alongside
+ * its own moved ancestor (RedundantDescendant) fails the WHOLE call.
+ */
+export function planReparent(
+  index: TreeIndex,
+  args: {
+    nodeIds: readonly string[]
+    newParentId: string | null
+    position: 'first' | 'last'
+    timestamp: number
+  },
+):
+  | { ops: ChangeOp[]; movedIds: string[]; parentId: string | null }
+  | NodeNotFound
+  | WouldCycle
+  | RedundantDescendant {
+  // A literal duplicate id is benign — dedup, keeping first-seen order.
+  const nodeIds = [...new Set(args.nodeIds)]
+
+  // 1. Every moved node must exist.
+  for (const id of nodeIds) {
+    if (!index.byId.has(id)) return new NodeNotFound({ nodeId: id })
+  }
+
+  // 2. The destination must exist; a mirror parent redirects to its true source
+  //    so children hang off the content node (ADR 0022).
+  let parentId: string | null = null
+  if (args.newParentId !== null) {
+    if (!index.byId.has(args.newParentId)) return new NodeNotFound({ nodeId: args.newParentId })
+    parentId = trueSourceOf(index, args.newParentId)
+  }
+
+  // 3. No node may land inside its own subtree (self or descendant) — checked
+  //    against the resolved parent, where the node actually lands.
+  if (parentId !== null) {
+    for (const id of nodeIds) {
+      if (isSelfOrAncestor(index, parentId, id)) {
+        return new WouldCycle({ nodeId: id, parentId })
+      }
+    }
+  }
+
+  // 4. No node may be listed alongside an ancestor also being moved.
+  const moving = new Set(nodeIds)
+  for (const id of nodeIds) {
+    let cursor = index.byId.get(id)!.parentId
+    let guard = index.byId.size + 1
+    while (cursor && guard-- > 0) {
+      if (moving.has(cursor)) return new RedundantDescendant({ nodeId: id, ancestorId: cursor })
+      cursor = index.byId.get(cursor)?.parentId ?? null
+    }
+  }
+
+  // Replay the moves on a mutable clone, rebuilding the index between each so
+  // reads reflect prior moves (the rebuild-between-moves guard moveManyNodes
+  // needs when the moved nodes are siblings of one another).
+  const working = new Map<string, MutNode>()
+  for (const [id, n] of index.byId) working.set(id, { ...n })
+
+  // 'last': chain after the target's current last child. 'first': chain from the
+  // head (after = null), each move landing after the previously-moved node, so
+  // the run keeps its order at the front and pushes existing children down.
+  let after: string | null = null
+  if (args.position === 'last') {
+    const kids = childrenOf(index, parentId)
+    after = kids.length ? kids[kids.length - 1]!.id : null
+  }
+
+  for (const id of nodeIds) {
+    const idx = buildTreeIndex([...working.values()] as Node[])
+    applyMoveInPlace(working, idx, id, parentId, after)
+    after = id
+  }
+
+  // Diff: one update per node whose parent or predecessor actually changed.
+  const ops: ChangeOp[] = []
+  for (const [id, w] of working) {
+    const orig = index.byId.get(id)!
+    if (w.parentId !== orig.parentId || w.prevSiblingId !== orig.prevSiblingId) {
+      ops.push({ op: 'update', value: { ...w, updatedAt: args.timestamp } })
+    }
+  }
+  return { ops, movedIds: nodeIds, parentId }
 }
 
 // --- Daily-note planning ------------------------------------------------------

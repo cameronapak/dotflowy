@@ -140,6 +140,7 @@ describe('MCP transport', () => {
       'add_node',
       'update_node',
       'delete_node',
+      'move_nodes',
       'add_to_today',
       'mirror_node',
       'mirror_to_today',
@@ -222,6 +223,27 @@ describe('MCP tools', () => {
     expect(fake.nodes.has('a')).toBe(false)
     expect(fake.nodes.has('a1')).toBe(false)
     expect(fake.nodes.get('b')?.prevSiblingId).toBeNull()
+  })
+
+  test('move_nodes reparents in one atomic batch without recreating nodes', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'move_nodes', { nodeIds: ['b'], newParentId: 'a' })
+    expect(json.result?.isError).toBeUndefined()
+    expect(fake.batches).toHaveLength(1)
+    // The id survives — a move is an update, never an insert/delete.
+    expect(fake.batches[0]!.every((op) => op.op === 'update')).toBe(true)
+    expect(fake.nodes.get('b')?.parentId).toBe('a')
+    expect(fake.nodes.has('b')).toBe(true)
+    expect(toolText(json)).toContain('Moved 1 node(s)')
+  })
+
+  test('move_nodes refuses a move into a moved node’s own subtree as isError', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'move_nodes', { nodeIds: ['a'], newParentId: 'a1' })
+    expect(json.error).toBeUndefined()
+    expect(json.result?.isError).toBe(true)
+    expect(fake.batches).toHaveLength(0)
+    expect(fake.nodes.get('a')?.parentId).toBeNull()
   })
 
   test('update_node with no fields is a tool error, not a crash', async () => {
