@@ -19,11 +19,11 @@ import { createId } from '../src/data/tree'
 import type { ChangeOp, Node } from '../src/data/wire-schema'
 import {
   DAILY_CONTAINER_TEXT,
-  DATE_KEY_PATTERN,
   type TreeIndex,
   buildTreeIndex,
   flattenSubtree,
   formatDayText,
+  isValidDateKey,
   formatOutlineLines,
   planAddNode,
   planAddToDaily,
@@ -129,9 +129,9 @@ const containerIdOf = (store: OutlineStore): Effect.Effect<string | null> =>
 const resolveDateKey = (date: string | null | undefined): Effect.Effect<string, ToolError> =>
   date == null
     ? Effect.sync(() => new Date().toISOString().slice(0, 10))
-    : DATE_KEY_PATTERN.test(date)
+    : isValidDateKey(date)
       ? Effect.succeed(date)
-      : Effect.fail(new ToolError({ reason: `invalid date "${date}" — expected YYYY-MM-DD` }))
+      : Effect.fail(new ToolError({ reason: `invalid date "${date}" — expected a real YYYY-MM-DD` }))
 
 // --- Protection (ADR 0015, server-enforced) -----------------------------------
 

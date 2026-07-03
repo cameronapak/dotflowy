@@ -327,6 +327,26 @@ describe('daily planning', () => {
     expect(plan).toBeInstanceOf(MirrorCycle)
   })
 
+  test('planMirrorToDaily refuses mirroring the container onto a not-yet-created day', () => {
+    // Regression: a fresh day isn't in the snapshot, so walking up from its id
+    // finds nothing — the guard must fall back to the container it will hang
+    // under, or it builds a self-cycle (day under container, mirror->container
+    // under day).
+    const nodes = [
+      ...fixture(),
+      makeNode({ id: 'cont', text: DAILY_CONTAINER_TEXT, prevSiblingId: 'b' }),
+    ]
+    const plan = planMirrorToDaily(index(nodes), {
+      dateKey: '2026-07-03',
+      containerId: 'cont',
+      dayId: 'day', // not present in the snapshot
+      sourceId: 'cont',
+      mirrorId: 'mm',
+      timestamp: T,
+    })
+    expect(plan).toBeInstanceOf(MirrorCycle)
+  })
+
   test('planMirrorToDaily mirrors an outside node onto the day', () => {
     const nodes = [
       ...fixture(),
@@ -350,6 +370,13 @@ describe('daily planning', () => {
   test('formatDayText renders the seeded full date', () => {
     expect(formatDayText('2026-07-03')).toBe('Friday, July 3, 2026')
     expect(formatDayText('not-a-date')).toBe('not-a-date')
+  })
+
+  test('formatDayText returns the raw key for a shaped-but-impossible date', () => {
+    // Date.UTC rolls these over ("2026-13-45" -> 2027-02-14); the round-trip
+    // guard must reject them instead of seeding a date months off the key.
+    expect(formatDayText('2026-13-45')).toBe('2026-13-45')
+    expect(formatDayText('2026-02-31')).toBe('2026-02-31')
   })
 })
 

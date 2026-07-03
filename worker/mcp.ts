@@ -95,6 +95,12 @@ function accepted(): Response {
   return new Response(null, { status: 202, headers: CORS_HEADERS })
 }
 
+/** The CORS preflight response — storeless, so worker/index.ts can answer the
+ *  pre-auth OPTIONS on /mcp without fabricating an outline store. */
+export function mcpCorsPreflight(): Response {
+  return new Response(null, { status: 204, headers: CORS_HEADERS })
+}
+
 // --- tools/list ------------------------------------------------------------------
 // Computed once at module load: the registry is static, and deriving the JSON
 // Schema from each tool's Effect Schema here guarantees the published contract
@@ -202,14 +208,14 @@ function dispatch(
 // --- HTTP surface ------------------------------------------------------------------
 
 /**
- * Handle one HTTP exchange on /api/mcp for an already-authenticated user.
+ * Handle one HTTP exchange on /mcp (or its /api/mcp alias) for an already-authenticated user.
  * Total: every failure mode becomes a well-formed HTTP/JSON-RPC response, so
  * the caller (worker/index.ts) can treat this as infallible routing.
  */
 export function handleMcp(request: Request, store: OutlineStore): Effect.Effect<Response> {
   switch (request.method) {
     case 'OPTIONS':
-      return Effect.succeed(new Response(null, { status: 204, headers: CORS_HEADERS }))
+      return Effect.succeed(mcpCorsPreflight())
     case 'POST':
       break
     default:
@@ -240,5 +246,9 @@ export function handleMcp(request: Request, store: OutlineStore): Effect.Effect<
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),
+    // Honor the "total routing" contract: an unexpected defect outside
+    // handleToolCall (which self-guards) still answers inside the protocol
+    // rather than escaping as an HTTP 500 the client can't parse.
+    Effect.catchDefect(() => Effect.succeed(rpcError(null, INTERNAL_ERROR, 'internal error'))),
   )
 }

@@ -9,3 +9,10 @@ BETTER_AUTH_SECRET=replace-me
 # the dev proxy's custom-domain simulation makes the inferred origin the prod
 # domain. In prod set the real origin via BETTER_AUTH_URL.
 # BETTER_AUTH_URL=http://localhost:8787
+
+# Optional companion to the above: the same custom-domain simulation also
+# rewrites the request Origin header to the prod domain, so Better Auth's CSRF
+# check rejects local sign-in unless that origin is trusted. Set this to make
+# the OAuth login flow work under `wrangler dev`. Local-only; in prod the origin
+# IS the prod domain and is already trusted via BETTER_AUTH_URL.
+# BETTER_AUTH_TRUSTED_ORIGINS=http://app.dotflowy.com,https://app.dotflowy.com

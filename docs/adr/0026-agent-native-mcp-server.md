@@ -4,8 +4,9 @@ status: accepted
 
 # The agent-native MCP server
 
-**What.** The Worker exposes the outline to AI agents over the Model Context Protocol: `POST /api/mcp`
-(stateless Streamable HTTP), authenticated with real OAuth 2.1, serving eight tools — `get_outline`,
+**What.** The Worker exposes the outline to AI agents over the Model Context Protocol: `POST /mcp`
+(the ecosystem-default path clients probe; `/api/mcp` stays a working alias), stateless Streamable
+HTTP, authenticated with real OAuth 2.1, serving eight tools — `get_outline`,
 `search_nodes`, `add_node`, `update_node`, `delete_node`, `add_to_today`, `mirror_node`,
 `mirror_to_today`. The posture is **agent-native**: whatever a human can do in the editor an agent can
 do through the same data path, within reason — an agent's write lands in the per-user DO through the
@@ -53,10 +54,12 @@ server-side — an agent can't delete, blank, task-ify, or complete it.
 layer ([ADR 0011](./0011-the-auth-gate.md)) — ships all of it as the `mcp` plugin: authorization/token/
 registration endpoints under `/api/auth/mcp/*`, tokens in D1 (migration `0004`), `getMcpSession` for
 bearer validation. The Worker serves the two discovery documents at the **site root** (spec requirement;
-`worker/index.ts` routes them before the assets shortcut) and gates `/api/mcp` on the bearer token —
+`worker/index.ts` routes them before the assets shortcut, and matches them by PREFIX so RFC 9728
+path-aware probes like `/.well-known/oauth-protected-resource/mcp` resolve to the same
+path-independent metadata) and gates `/mcp` on the bearer token —
 whose `userId` routes through the same `resolveUserId` to the same per-user DO as a browser session.
 One identity model, two credentials. Rejected: hand-rolled API keys (a second auth system, and
-mainstream MCP clients wouldn't discover it) and cookie-session auth on `/api/mcp` (no MCP client has
+mainstream MCP clients wouldn't discover it) and cookie-session auth on `/mcp` (no MCP client has
 the cookie, and it would drag CSRF concerns onto an endpoint meant for non-browser callers).
 
 **The SPA's AuthScreen doubles as the OAuth login page.** A signed-out authorize redirects to `/` with

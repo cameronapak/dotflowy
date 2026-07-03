@@ -47,7 +47,7 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
     trustedOrigins: ['http://localhost:3000', 'http://localhost:3210'],
-    // OAuth 2.1 authorization server for the MCP endpoint (/api/mcp): PKCE
+    // OAuth 2.1 authorization server for the MCP endpoint (/mcp): PKCE
     // authorization-code flow with dynamic client registration, tokens in D1
     // (migration 0004). The SPA's AuthScreen doubles as the login page — the
     // authorize endpoint stashes the OAuth query in a signed cookie, sends the

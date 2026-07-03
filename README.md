@@ -47,7 +47,7 @@ What works:
 - Bookmarks (the header star pins the current zoom view) and a `Cmd/Ctrl+K` quick-switcher to jump anywhere
 - A `/` command palette (to-do, plain bullet, move) and a move-to dialog
 - Dark mode, undo / redo
-- An MCP server (`/api/mcp`, OAuth-gated) so AI agents can read and edit the outline — add to today's daily note, mirror nodes, search — with live sync into open editors
+- An MCP server (`/mcp`, OAuth-gated) so AI agents can read and edit the outline — add to today's daily note, mirror nodes, search — with live sync into open editors
 
 ### Keyboard
 
@@ -165,7 +165,7 @@ See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md) for t
 
 ## Agents (MCP)
 
-The outline is also reachable by AI agents over the [Model Context Protocol](https://modelcontextprotocol.io): point an MCP client at `https://<your-deployment>/api/mcp` and it walks the standard OAuth flow (sign in with your normal account; the client registers itself). Agents get read tools (`get_outline`, `search_nodes`) and write tools (`add_node`, `update_node`, `delete_node`, `add_to_today`, `mirror_node`, `mirror_to_today`); every write lands through the same atomic per-user Durable Object path as the editor, so open tabs see agent edits live. Design + rejected alternatives: [the agent-native MCP server](docs/adr/0026-agent-native-mcp-server.md).
+The outline is also reachable by AI agents over the [Model Context Protocol](https://modelcontextprotocol.io): point an MCP client at `https://<your-deployment>/mcp` and it walks the standard OAuth flow (sign in with your normal account; the client registers itself). Agents get read tools (`get_outline`, `search_nodes`) and write tools (`add_node`, `update_node`, `delete_node`, `add_to_today`, `mirror_node`, `mirror_to_today`); every write lands through the same atomic per-user Durable Object path as the editor, so open tabs see agent edits live. Design + rejected alternatives: [the agent-native MCP server](docs/adr/0026-agent-native-mcp-server.md).
 
 ## Project layout
 
@@ -215,7 +215,7 @@ worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + 
   index.ts            #   session gate + resolveUserId + routes /api to the user's DO (own tsconfig)
   auth.ts             #   createAuth(env): Better Auth (email + password + the MCP OAuth provider), sessions in D1
   outline-do.ts       #   UserOutlineDO: per-user SQLite (nodes + kv), the outline store
-  mcp.ts              #   the MCP endpoint: stateless JSON-RPC over /api/mcp (Effect pipeline)
+  mcp.ts              #   the MCP endpoint: stateless JSON-RPC over /mcp (Effect pipeline)
   mcp-tools.ts        #   the MCP tool registry (Effect Schema inputs + handlers over the user's DO)
   outline-ops.ts      #   pure server-side outline planners (snapshot -> atomic ChangeOp batch)
 migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP)

@@ -310,12 +310,23 @@ const MONTHS = [
  *  the client's `formatDayText`, minus the locale dependence (the Worker has no
  *  user locale; fixed English matches the app's chrome). */
 export function formatDayText(dateKey: string): string {
-  const m = DATE_KEY_PATTERN.exec(dateKey)
-  if (!m) return dateKey
+  if (!isValidDateKey(dateKey)) return dateKey
   const [y, mo, d] = dateKey.split('-').map(Number) as [number, number, number]
   const date = new Date(Date.UTC(y, mo - 1, d, 12))
-  if (Number.isNaN(date.getTime())) return dateKey
   return `${WEEKDAYS[date.getUTCDay()]}, ${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`
+}
+
+/**
+ * Whether `dateKey` is a REAL calendar date, not merely `YYYY-MM-DD` shaped.
+ * `Date.UTC` silently rolls impossible parts over ("2026-13-45" -> 2027-02-14,
+ * "2026-02-31" -> 2026-03-03), so require the components to round-trip. The
+ * `DATE_KEY_PATTERN` test alone lets those bogus keys through.
+ */
+export function isValidDateKey(dateKey: string): boolean {
+  if (!DATE_KEY_PATTERN.test(dateKey)) return false
+  const [y, mo, d] = dateKey.split('-').map(Number) as [number, number, number]
+  const date = new Date(Date.UTC(y, mo - 1, d, 12))
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d
 }
 
 /**
@@ -415,10 +426,14 @@ export function planMirrorToDaily(
   if (!source) return new NodeNotFound({ nodeId: args.sourceId })
 
   const trueSourceId = trueSourceOf(index, args.sourceId)
-  // A brand-new day node has no ancestors; an existing one walks up through the
-  // container, so mirroring the container (or an ancestor of the day) into the
-  // day is refused here exactly like any other cycle.
-  if (wouldMirrorCycle(index, trueSourceId, args.dayId)) {
+  // Cycle guard: the mirror lands under the day, which is (or will become) a
+  // child of the container. If the day isn't in the snapshot yet, walking up
+  // from its id finds nothing — so check against the container it will hang
+  // under, otherwise mirroring the container onto a fresh day slips through and
+  // builds a self-cycle (day under container, mirror->container under day). An
+  // existing day is checked directly (also catches mirroring the day onto itself).
+  const cycleParent = index.byId.has(args.dayId) ? args.dayId : args.containerId
+  if (wouldMirrorCycle(index, trueSourceId, cycleParent)) {
     return new MirrorCycle({ sourceId: trueSourceId })
   }
 

@@ -37,8 +37,7 @@ import {
 import { oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from 'better-auth/plugins'
 import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
-import { handleMcp } from './mcp'
-import type { OutlineStore } from './mcp-tools'
+import { handleMcp, mcpCorsPreflight } from './mcp'
 import { isHttpUrlString, unfurlTitle } from './unfurl'
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
@@ -95,23 +94,6 @@ const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
  * belongs.
  */
 const OWNER_DO_ID = 'default'
-
-/** Handed to `handleMcp` for the CORS preflight, which runs before auth and
- *  must never touch a user's outline — reaching this store is a routing bug. */
-const unreachableStore: OutlineStore = {
-  getNodes: () => {
-    throw new Error('unreachable: MCP preflight touched the outline store')
-  },
-  applyBatch: () => {
-    throw new Error('unreachable: MCP preflight touched the outline store')
-  },
-  getKv: () => {
-    throw new Error('unreachable: MCP preflight touched the outline store')
-  },
-  getOrCreateKv: () => {
-    throw new Error('unreachable: MCP preflight touched the outline store')
-  },
-}
 
 function resolveUserId(sessionUserId: string, env: Env): string {
   if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID) return OWNER_DO_ID
@@ -393,9 +375,11 @@ function handleApiRequest(
     // mcp plugin, stored in D1), not the session cookie, so it's gated here —
     // before the cookie-session check below. Same identity model though: the
     // token's user id routes to the same per-user DO as the browser session,
-    // so an agent and the editor share one outline, live. ADR 0026.
-    if (url.pathname === '/api/mcp') {
-      if (request.method === 'OPTIONS') return yield* handleMcp(request, unreachableStore)
+    // so an agent and the editor share one outline, live. ADR 0026. Served at
+    // the ecosystem-default `/mcp` (what clients probe); `/api/mcp` stays a
+    // working alias so an already-configured client keeps connecting.
+    if (url.pathname === '/mcp' || url.pathname === '/api/mcp') {
+      if (request.method === 'OPTIONS') return mcpCorsPreflight()
       const token = yield* Effect.promise(() =>
         auth.api.getMcpSession({ headers: request.headers }),
       )
@@ -489,16 +473,23 @@ export default {
     // the site root — clients resolve them from the resource origin, not from
     // Better Auth's /api/auth base path — and they're public by spec. The
     // helpers proxy to the mcp plugin's metadata endpoints.
-    if (url.pathname === '/.well-known/oauth-authorization-server') {
+    // Prefix-match, not exact: RFC 9728 clients probe a PATH-AWARE variant
+    // (`/.well-known/oauth-protected-resource/mcp`) before the root one. The
+    // metadata is path-independent (resource = origin), so answer either shape;
+    // an exact match 404s the suffixed probe and the SDK chokes parsing it.
+    if (url.pathname.startsWith('/.well-known/oauth-authorization-server')) {
       return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request)
     }
-    if (url.pathname === '/.well-known/oauth-protected-resource') {
+    if (url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
       return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(request)
     }
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve
-    // them without instantiating auth — only the data API is gated, below.
-    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
+    // them without instantiating auth — only the data API (and the token-gated
+    // `/mcp`, handled in the pipeline below) is gated.
+    if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/')) {
+      return env.ASSETS.fetch(request)
+    }
 
     // Run the typed pipeline. Typed errors (validation) are caught here and
     // mapped to exact HTTP status codes. Defects (unexpected DO/D1 failures)
