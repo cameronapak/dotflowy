@@ -729,25 +729,22 @@ h2 > span.protected-lock {
 }
 
 .bullet-dot {
-  @apply block size-[7px] rounded-full bg-accent-foreground/80;
+  @apply block size-[5px] rounded-full bg-accent-foreground/70;
 }
 
 /*
- * Inactive bullet dim. When a bullet in the outline holds focus, every OTHER
- * row's dot softens so the active line reads as the focus point. Pure CSS, no
- * JS state; composes with the existing faded/context opacities on .outline-row
- * (this rule sits on .bullet-dot, so row-level dims never compound with it).
- * Hover restores the dot to full strength so a swept pointer still reads each
- * row as reachable. Scoped to .outline-list so a focused zoomed-title (a
- * different region) doesn't dim list dots.
+ * Inactive bullet dim + smaller. When a bullet in the outline holds focus,
+ * every OTHER row's dot is dimmed (lighter/muted color, "not dark") so the
+ * active/focused bullet stands out clearly as "dark". Base size reduced.
+ * Pure CSS. Row hover restores strength.
  */
 .outline-list:focus-within .outline-row:not(:focus-within) .bullet-dot {
-  opacity: 0.3;
-  transition: opacity 0.15s ease;
+  @apply bg-muted-foreground/50;
+  transition: background-color 0.15s ease;
 }
 
 .outline-list:focus-within .outline-row:hover .bullet-dot {
-  opacity: 1;
+  @apply bg-accent-foreground/70;
 }
 
 
