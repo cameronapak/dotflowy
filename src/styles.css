@@ -396,7 +396,7 @@ h2 > span.protected-lock {
 .collapse-toggle {
   position: absolute;
   left: -15px;
-  top: 2px;
+  top: 3px;
   width: 16px;
   height: 24px;
   padding: 0;
