@@ -132,6 +132,35 @@ describe('planAddNode', () => {
     })
     expect(plan).toBeInstanceOf(NodeNotFound)
   })
+
+  test('stamps the provenance origin onto the created node (default null)', () => {
+    // The MCP write path passes the caller's harness name; the created node
+    // carries it verbatim (write-once). Every content planner threads it the
+    // same way — planAddNode stands in for all of them here.
+    const agent = planAddNode(index(fixture()), {
+      id: 'ai',
+      text: 'x',
+      parentId: 'a',
+      position: 'last',
+      isTask: false,
+      origin: 'Claude',
+      timestamp: T,
+    })
+    if (agent instanceof Error) throw agent
+    expect(inserted(agent.ops)[0]!.origin).toBe('Claude')
+
+    // Omitting origin (a non-MCP caller) defaults to null — human-authored.
+    const human = planAddNode(index(fixture()), {
+      id: 'me',
+      text: 'x',
+      parentId: 'a',
+      position: 'last',
+      isTask: false,
+      timestamp: T,
+    })
+    if (human instanceof Error) throw human
+    expect(inserted(human.ops)[0]!.origin).toBeNull()
+  })
 })
 
 describe('planUpdateNode', () => {

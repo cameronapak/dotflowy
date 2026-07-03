@@ -34,6 +34,7 @@ const node = (id: string): Node => ({
   mirrorOf: null,
   createdAt: 1,
   updatedAt: 1,
+  origin: null,
 })
 
 type AnyBody = Schema.Codec<unknown, unknown, never, never>

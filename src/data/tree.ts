@@ -209,6 +209,9 @@ export function makeNode(partial: Partial<Node> & Pick<Node, 'id'>): Node {
     mirrorOf: null,
     createdAt: now(),
     updatedAt: now(),
+    // Human by default: every client-side create leaves this null. The MCP
+    // planners override it with the agent's harness name (outline-ops.ts).
+    origin: null,
     ...partial,
   }
 }

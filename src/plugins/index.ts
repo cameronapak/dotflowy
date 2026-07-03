@@ -9,9 +9,14 @@ import code from "./code";
 import daily from "./daily";
 import emphasis from "./emphasis";
 import links from "./links";
+import provenance from "./provenance";
 import routeBible from "./route-bible";
 import tags from "./tags";
 import todos from "./todos";
 import type { PluginDef } from "./types";
 
-export const plugins: PluginDef[] = [code, links, routeBible, tags, emphasis, todos, daily];
+// `provenance` leads: it only contributes a Seam F slot (+ its own styles), and
+// as the first entry its origin mark renders leftmost — right after the bullet
+// dot, ahead of the todos checkbox / daily badge. No tokens/keymap/commands, so
+// its array position has no precedence side effects.
+export const plugins: PluginDef[] = [provenance, code, links, routeBible, tags, emphasis, todos, daily];

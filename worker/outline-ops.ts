@@ -69,6 +69,10 @@ function newNode(args: {
   text: string
   isTask?: boolean
   mirrorOf?: string | null
+  /** Provenance: the agent harness that created this node, or null/omitted for
+   *  structural scaffolding the DO would create either way (the daily container
+   *  and day nodes stay null — they aren't the agent's content contribution). */
+  origin?: string | null
   timestamp: number
 }): Node {
   return makeNode({
@@ -78,6 +82,7 @@ function newNode(args: {
     text: args.text,
     isTask: args.isTask ?? false,
     mirrorOf: args.mirrorOf ?? null,
+    origin: args.origin ?? null,
     createdAt: args.timestamp,
     updatedAt: args.timestamp,
   })
@@ -103,6 +108,7 @@ export function planAddNode(
     parentId: string | null
     position: 'first' | 'last'
     isTask: boolean
+    origin?: string | null
     timestamp: number
   },
 ): { ops: ChangeOp[]; nodeId: string; parentId: string | null } | NodeNotFound {
@@ -229,7 +235,13 @@ export function planDeleteNode(
  */
 export function planMirrorNode(
   index: TreeIndex,
-  args: { sourceId: string; targetParentId: string | null; id: string; timestamp: number },
+  args: {
+    sourceId: string
+    targetParentId: string | null
+    id: string
+    origin?: string | null
+    timestamp: number
+  },
 ): { ops: ChangeOp[]; nodeId: string; sourceId: string } | NodeNotFound | MirrorCycle {
   const source = index.byId.get(args.sourceId)
   if (!source) return new NodeNotFound({ nodeId: args.sourceId })
@@ -258,6 +270,7 @@ export function planMirrorNode(
         prevSiblingId: last ? last.id : null,
         text: index.byId.get(trueSourceId)?.text ?? '',
         mirrorOf: trueSourceId,
+        origin: args.origin,
         timestamp: args.timestamp,
       }),
     },
@@ -388,6 +401,7 @@ export function planAddToDaily(
     newNodeId: string
     text: string
     isTask: boolean
+    origin?: string | null
     timestamp: number
   },
 ): { ops: ChangeOp[]; nodeId: string } {
@@ -403,6 +417,7 @@ export function planAddToDaily(
       prevSiblingId: last ? last.id : null,
       text: args.text,
       isTask: args.isTask,
+      origin: args.origin,
       timestamp: args.timestamp,
     }),
   })
@@ -419,6 +434,7 @@ export function planMirrorToDaily(
     dayId: string
     sourceId: string
     mirrorId: string
+    origin?: string | null
     timestamp: number
   },
 ): { ops: ChangeOp[]; nodeId: string; sourceId: string } | NodeNotFound | MirrorCycle {
@@ -448,6 +464,7 @@ export function planMirrorToDaily(
       prevSiblingId: last ? last.id : null,
       text: index.byId.get(trueSourceId)?.text ?? '',
       mirrorOf: trueSourceId,
+      origin: args.origin,
       timestamp: args.timestamp,
     }),
   })

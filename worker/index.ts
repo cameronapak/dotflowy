@@ -100,6 +100,22 @@ function resolveUserId(sessionUserId: string, env: Env): string {
   return sessionUserId
 }
 
+/**
+ * The provenance stamp for an MCP write: the human-facing name of the OAuth
+ * client behind the bearer token. Dynamic client registration records it in
+ * `oauthApplication.name` ("Claude", "MCP Inspector", …), so a node an agent
+ * creates carries WHICH agent made it. One indexed lookup, on the MCP path only.
+ * Falls back to a generic `'agent'` when the token carries no client id or the
+ * client registered no name — the marker still reads as "not the user", unnamed.
+ */
+async function resolveMcpOrigin(env: Env, clientId: string | null): Promise<string> {
+  if (!clientId) return 'agent'
+  const row = await env.DB.prepare('SELECT name FROM oauthApplication WHERE clientId = ?')
+    .bind(clientId)
+    .first<{ name: string }>()
+  return row?.name?.trim() || 'agent'
+}
+
 function rowToNode(r: NodeRow): Node {
   return {
     id: r.id,
@@ -115,6 +131,9 @@ function rowToNode(r: NodeRow): Node {
     mirrorOf: null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+    // Legacy D1 rows predate provenance and were all authored by the owner in
+    // the editor, so they import as human (null) — never agent-stamped.
+    origin: null,
   }
 }
 
@@ -398,7 +417,12 @@ function handleApiRequest(
       }
       const mcpUserId = resolveUserId(token.userId, env)
       const mcpStub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(mcpUserId))
-      return yield* handleMcp(request, mcpStub)
+      // Provenance: which agent is calling. The bearer token's OAuth client maps
+      // to a registered harness name; every node its write tools create is
+      // stamped with it, so the editor can mark agent edits apart from the user's.
+      const clientId = (token as { clientId?: string }).clientId ?? null
+      const origin = yield* Effect.promise(() => resolveMcpOrigin(env, clientId))
+      return yield* handleMcp(request, mcpStub, origin)
     }
 
     // Identity = the validated session's stable user id. No session → 401.

@@ -39,6 +39,12 @@ export const NodeSchema = Schema.Struct({
   mirrorOf: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
+  // Provenance (write-once): null = human, a harness name = the agent that made
+  // it over MCP. Mirrors the client's `nodeSchema` field-for-field; the client
+  // always sends it (makeNode), the DO always returns it (rowToNode), so a body
+  // without it is malformed (→ 400). Backfilled to null on any legacy/e2e row
+  // that omits it (collection.ts withNodeDefaults, DO ADD COLUMN default NULL).
+  origin: Schema.NullOr(Schema.String),
 })
 export type Node = Schema.Schema.Type<typeof NodeSchema>
 

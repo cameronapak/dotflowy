@@ -53,7 +53,15 @@ function makeStore(seed: Node[] = [], kvRows: Array<{ key: string; nodeId: strin
 // --- Request plumbing -----------------------------------------------------------
 
 // Each test request is its own stateless HTTP exchange, so a fixed id is fine.
-async function rpc(store: OutlineStore, method: string, params?: unknown, id: number | null = 1) {
+async function rpc(
+  store: OutlineStore,
+  method: string,
+  params?: unknown,
+  id: number | null = 1,
+  // The provenance stamp the Worker resolves from the bearer token in prod; a
+  // fixed harness name here so the stamping assertions have something to check.
+  origin: string | null = 'TestAgent',
+) {
   const body: Record<string, unknown> = { jsonrpc: '2.0', method }
   if (id !== null) body['id'] = id
   if (params !== undefined) body['params'] = params
@@ -62,7 +70,7 @@ async function rpc(store: OutlineStore, method: string, params?: unknown, id: nu
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
-  return Effect.runPromise(handleMcp(request, store))
+  return Effect.runPromise(handleMcp(request, store, origin))
 }
 
 async function callTool(store: OutlineStore, name: string, args: unknown) {
@@ -154,7 +162,7 @@ describe('MCP transport', () => {
   test('malformed JSON is -32700 and a batch array is -32600', async () => {
     const { store } = makeStore()
     const bad = await Effect.runPromise(
-      handleMcp(new Request('http://test/api/mcp', { method: 'POST', body: '{nope' }), store),
+      handleMcp(new Request('http://test/api/mcp', { method: 'POST', body: '{nope' }), store, null),
     )
     expect(((await bad.json()) as any).error.code).toBe(-32700)
 
@@ -162,6 +170,7 @@ describe('MCP transport', () => {
       handleMcp(
         new Request('http://test/api/mcp', { method: 'POST', body: '[]' }),
         store,
+        null,
       ),
     )
     expect(((await batch.json()) as any).error.code).toBe(-32600)
@@ -170,7 +179,7 @@ describe('MCP transport', () => {
   test('GET is declined with 405 (stateless: no server stream)', async () => {
     const { store } = makeStore()
     const res = await Effect.runPromise(
-      handleMcp(new Request('http://test/api/mcp', { method: 'GET' }), store),
+      handleMcp(new Request('http://test/api/mcp', { method: 'GET' }), store, null),
     )
     expect(res.status).toBe(405)
   })
@@ -197,6 +206,9 @@ describe('MCP tools', () => {
     expect(fake.batches).toHaveLength(1)
     const insert = fake.batches[0]!.find((op) => op.op === 'insert')
     expect(insert && insert.op === 'insert' && insert.value.parentId).toBe('a')
+    // Provenance: the resolved harness name is stamped onto the created node, so
+    // the editor can mark an agent's edit apart from the user's own (write-once).
+    expect(insert && insert.op === 'insert' && insert.value.origin).toBe('TestAgent')
     expect(toolText(json)).toContain('Added "new bullet"')
   })
 

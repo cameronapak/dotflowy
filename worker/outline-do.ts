@@ -24,6 +24,7 @@ interface NodeRow {
   mirrorOf: string | null
   createdAt: number
   updatedAt: number
+  origin: string | null
 }
 
 /** A side-collection row, as carried during the one-time D1 import. */
@@ -83,6 +84,7 @@ function rowToNode(r: NodeRow): Node {
     mirrorOf: r.mirrorOf,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+    origin: r.origin,
   }
 }
 
@@ -184,6 +186,17 @@ export class UserOutlineDO extends DurableObject<Env> {
         if (!hasMirrorOf) sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`)
       },
     },
+    {
+      // Node provenance (write-once): who created a node. NULL = human (every
+      // pre-existing row backfills to NULL, the correct "made by the user"
+      // default); a harness name = an agent via MCP. Exactly-once tail step, so
+      // no existence guard needed (ADR 0023). ADD COLUMN defaults existing rows
+      // to NULL, which is exactly the semantics we want.
+      version: 2,
+      up: (sql) => {
+        sql.exec(`ALTER TABLE nodes ADD COLUMN origin TEXT`)
+      },
+    },
   ]
 
   /** Run every migration newer than the recorded schema version, each atomically
@@ -228,7 +241,7 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   getNodes(): Node[] {
     return this.readRows<NodeRow>(
-      'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes',
+      'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes',
     ).map(rowToNode)
   }
 
@@ -240,9 +253,13 @@ export class UserOutlineDO extends DurableObject<Env> {
   private putNode(n: Node): ChangeOp {
     const existed =
       this.sql.exec('SELECT 1 FROM nodes WHERE id = ?', n.id).toArray().length > 0
+    // `origin` is WRITE-ONCE: it's in the INSERT column list but deliberately
+    // absent from the ON CONFLICT SET, so a later upsert (a move/reparent that
+    // re-puts the full node) can never flip a node's provenance. Existing rows
+    // keep whatever they were born with; legacy rows stay NULL (human).
     this.sql.exec(
-      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
          isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
@@ -258,6 +275,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       n.mirrorOf,
       n.createdAt,
       n.updatedAt,
+      n.origin,
     )
     return { op: existed ? 'update' : 'insert', value: n }
   }
@@ -324,7 +342,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           // Broadcast the full post-patch row (canonical booleans, every field) so
           // a remote client applies an unambiguous update regardless of rowUpdateMode.
           const row = this.readRows<NodeRow>(
-            'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt FROM nodes WHERE id = ?',
+            'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes WHERE id = ?',
             u.id,
           )[0] as NodeRow | undefined
           if (row) ops.push({ op: 'update', value: rowToNode(row) })

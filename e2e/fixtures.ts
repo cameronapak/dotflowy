@@ -15,6 +15,8 @@ export interface SeedNode {
   bookmarkedAt?: number | null;
   /** Source node id this is a mirror of (ADR 0022); omit/null for a normal node. */
   mirrorOf?: string | null;
+  /** Provenance: agent harness name if created via MCP; omit/null for human. */
+  origin?: string | null;
 }
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
@@ -31,6 +33,7 @@ interface ApiNode {
   mirrorOf: string | null;
   createdAt: number;
   updatedAt: number;
+  origin: string | null;
 }
 
 /** One op in a change frame, as the DO broadcasts and the batch POST carries.
@@ -53,6 +56,10 @@ function toNode(n: SeedNode): ApiNode {
     mirrorOf: n.mirrorOf ?? null,
     createdAt: 0,
     updatedAt: 0,
+    // Every seeded node is "human" (null) — the origin marker only lights up for
+    // MCP-created nodes, which the e2e mock never produces. Required by the wire
+    // schema the client decodes inbound frames against, so it must be present.
+    origin: n.origin ?? null,
   };
 }
 

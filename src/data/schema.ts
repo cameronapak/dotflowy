@@ -46,6 +46,14 @@ export const nodeSchema = Schema.Struct({
   mirrorOf: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
+  // Provenance (write-once). `null` = created by the human in the editor (every
+  // node born from a keystroke, and every row that predates this field); a
+  // non-null string = the harness name of the agent that created it via the MCP
+  // server (e.g. "Claude"). Stamped server-side at the one MCP write choke point
+  // (worker/outline-ops.ts newNode); the client always sets it to null via
+  // makeNode. Required + nullable, no default (ADR 0003). Read only for display
+  // (the provenance plugin's origin marker) -- never a semantic branch.
+  origin: Schema.NullOr(Schema.String),
 })
 
 export type Node = Schema.Schema.Type<typeof nodeSchema>

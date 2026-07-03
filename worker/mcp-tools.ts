@@ -66,7 +66,15 @@ export interface ToolDef {
   input: Schema.Struct<any>
   /** MCP `readOnlyHint` — true for tools that never write. */
   readOnly: boolean
-  handle: (input: any, store: OutlineStore) => Effect.Effect<string, ToolError>
+  /** `origin` is the caller's provenance stamp — the OAuth client's harness name
+   *  (worker/index.ts resolves it from the bearer token), written onto every node
+   *  a write tool creates so the editor can tell agent edits from the user's own.
+   *  Read-only tools ignore it. */
+  handle: (
+    input: any,
+    store: OutlineStore,
+    origin: string | null,
+  ) => Effect.Effect<string, ToolError>
 }
 
 // --- Shared plumbing ----------------------------------------------------------
@@ -319,7 +327,7 @@ export const tools: ReadonlyArray<ToolDef> = [
       'Add a new bullet to the outline — under a parent node or at the top level. Returns the new node id.',
     input: AddNodeInput,
     readOnly: false,
-    handle: (input: typeof AddNodeInput.Type, store) =>
+    handle: (input: typeof AddNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store)
         const timestamp = yield* clock
@@ -330,6 +338,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             parentId: input.parentId ?? null,
             position: input.position ?? 'last',
             isTask: input.isTask ?? false,
+            origin,
             timestamp,
           }),
         )
@@ -392,7 +401,7 @@ export const tools: ReadonlyArray<ToolDef> = [
       "Add a new bullet to the user's daily note, creating today's note (and the Daily container) if needed. One of the fastest ways to capture something for the user.",
     input: AddToTodayInput,
     readOnly: false,
-    handle: (input: typeof AddToTodayInput.Type, store) =>
+    handle: (input: typeof AddToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
         const dateKey = yield* resolveDateKey(input.date)
         const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
@@ -406,6 +415,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           newNodeId: createId(),
           text: input.text,
           isTask: input.isTask ?? false,
+          origin,
           timestamp,
         })
         yield* commit(store, plan.ops)
@@ -418,7 +428,7 @@ export const tools: ReadonlyArray<ToolDef> = [
       'Mirror a node (a live synced instance, like a Notion synced block) into another parent — the node appears in both places and edits sync. Omit parentId to mirror to the top level.',
     input: MirrorNodeInput,
     readOnly: false,
-    handle: (input: typeof MirrorNodeInput.Type, store) =>
+    handle: (input: typeof MirrorNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store)
         const timestamp = yield* clock
@@ -427,6 +437,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             sourceId: input.nodeId,
             targetParentId: input.parentId ?? null,
             id: createId(),
+            origin,
             timestamp,
           }),
         )
@@ -443,7 +454,7 @@ export const tools: ReadonlyArray<ToolDef> = [
       "Mirror an existing node onto the user's daily note — it stays where it is AND appears under today, fully synced. Creates today's note if needed.",
     input: MirrorToTodayInput,
     readOnly: false,
-    handle: (input: typeof MirrorToTodayInput.Type, store) =>
+    handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
         const dateKey = yield* resolveDateKey(input.date)
         const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
@@ -457,6 +468,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             dayId,
             sourceId: input.nodeId,
             mirrorId: createId(),
+            origin,
             timestamp,
           }),
         )

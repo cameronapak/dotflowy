@@ -147,6 +147,7 @@ function handleToolCall(
   id: JsonRpcId,
   params: unknown,
   store: OutlineStore,
+  origin: string | null,
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params)
   if (!call) {
@@ -164,7 +165,7 @@ function handleToolCall(
   return decodeInput(call.arguments ?? {}).pipe(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>
-      tool.handle(input, store).pipe(
+      tool.handle(input, store, origin).pipe(
         Effect.map((text) => rpcResult(id, { content: [{ type: 'text', text }] })),
         Effect.catchTag('ToolError', (e) =>
           Effect.succeed(
@@ -185,6 +186,7 @@ function handleToolCall(
 function dispatch(
   message: typeof JsonRpcMessageSchema.Type,
   store: OutlineStore,
+  origin: string | null,
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -199,7 +201,7 @@ function dispatch(
     case 'tools/list':
       return Effect.succeed(rpcResult(id, { tools: toolList }))
     case 'tools/call':
-      return handleToolCall(id, message.params, store)
+      return handleToolCall(id, message.params, store, origin)
     default:
       return Effect.succeed(rpcError(id, METHOD_NOT_FOUND, `method not found: ${message.method}`))
   }
@@ -211,8 +213,17 @@ function dispatch(
  * Handle one HTTP exchange on /mcp (or its /api/mcp alias) for an already-authenticated user.
  * Total: every failure mode becomes a well-formed HTTP/JSON-RPC response, so
  * the caller (worker/index.ts) can treat this as infallible routing.
+ *
+ * `origin` is the caller's provenance stamp — the resolved harness name of the
+ * OAuth client behind the bearer token (worker/index.ts), written onto every
+ * node a write tool creates. Null when it can't be resolved (falls back to a
+ * generic marker there).
  */
-export function handleMcp(request: Request, store: OutlineStore): Effect.Effect<Response> {
+export function handleMcp(
+  request: Request,
+  store: OutlineStore,
+  origin: string | null,
+): Effect.Effect<Response> {
   switch (request.method) {
     case 'OPTIONS':
       return Effect.succeed(mcpCorsPreflight())
@@ -242,7 +253,7 @@ export function handleMcp(request: Request, store: OutlineStore): Effect.Effect<
     const message = yield* Schema.decodeUnknownEffect(JsonRpcMessageSchema)(raw).pipe(
       Effect.mapError((issue) => rpcError(null, INVALID_REQUEST, issue.message)),
     )
-    return yield* dispatch(message, store)
+    return yield* dispatch(message, store, origin)
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),
