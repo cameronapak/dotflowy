@@ -492,8 +492,23 @@ h2 > span.protected-lock {
 }
 
 .bullet-dot {
-  @apply block size-2 rounded-full bg-accent-foreground/80;
+  @apply block size-2 rounded-full bg-accent-foreground/70;
 }
+
+/*
+ * Inactive bullet dim. When a bullet in the outline holds focus, every OTHER
+ * row's dot is dimmed (lighter/muted color) so the active/focused bullet stands
+ * out clearly. Pure CSS. Row hover restores strength.
+ */
+.outline-list:focus-within .outline-row:not(:focus-within) .bullet-dot {
+  @apply bg-muted-foreground/50;
+  transition: background-color 0.15s ease;
+}
+
+.outline-list:focus-within .outline-row:hover .bullet-dot {
+  @apply bg-accent-foreground/70;
+}
+
 
 .checkbox {
   flex: 0 0 auto;
