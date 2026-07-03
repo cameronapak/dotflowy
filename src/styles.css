@@ -504,10 +504,6 @@ h2 > span.protected-lock {
 .outline-list:focus-within .outline-row:not(:focus-within) .bullet-dot {
   @apply bg-muted-foreground/50;
 }
-/*
-.outline-list:focus-within .outline-row:hover .bullet-dot {
-  @apply bg-accent-foreground/70;
-}*/
 
 .checkbox {
   flex: 0 0 auto;
