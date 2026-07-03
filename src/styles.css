@@ -461,7 +461,7 @@ h2 > span.protected-lock {
 }
 
 .bullet {
-  @apply size-5 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none mt-1;
+  @apply size-4 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none mt-1;
   flex: 0 0 auto;
   cursor: pointer;
   display: flex;
@@ -492,7 +492,8 @@ h2 > span.protected-lock {
 }
 
 .bullet-dot {
-  @apply block size-2 rounded-full bg-accent-foreground/70;
+  @apply block size-1.75 rounded-full bg-accent-foreground/70;
+  transition: background-color 0.15s ease;
 }
 
 /*
@@ -502,13 +503,11 @@ h2 > span.protected-lock {
  */
 .outline-list:focus-within .outline-row:not(:focus-within) .bullet-dot {
   @apply bg-muted-foreground/50;
-  transition: background-color 0.15s ease;
 }
-
+/*
 .outline-list:focus-within .outline-row:hover .bullet-dot {
   @apply bg-accent-foreground/70;
-}
-
+}*/
 
 .checkbox {
   flex: 0 0 auto;
