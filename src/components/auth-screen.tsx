@@ -8,7 +8,23 @@ import { Input } from "./ui/input";
  * Rendered by the root AuthGate when there's no session; a successful auth
  * action updates the session store, which flips the gate to the editor. The
  * app shell is public (worker/index.ts), so this loads without a session.
+ *
+ * This screen doubles as the OAuth LOGIN PAGE for MCP clients (ADR 0026): the
+ * authorize endpoint redirects a signed-out user here with the OAuth query
+ * intact, so after a successful sign-in we hand the browser back to the
+ * authorize endpoint (a top-level navigation — the code must reach the
+ * client's redirect_uri as a real redirect, which a fetch can't deliver).
  */
+
+/** The OAuth authorize query carried over from /api/auth/mcp/authorize, if
+ *  this page load is an OAuth login hop rather than a plain visit. */
+function pendingOAuthQuery(): string | null {
+  const params = new URLSearchParams(window.location.search)
+  const isAuthorize =
+    params.has("client_id") && params.has("redirect_uri") && params.has("response_type")
+  return isAuthorize ? params.toString() : null
+}
+
 export function AuthScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -23,6 +39,12 @@ export function AuthScreen() {
     e.preventDefault();
     setError(null);
     setBusy(true);
+    const oauthQuery = pendingOAuthQuery();
+    // Resume the OAuth flow with a TOP-LEVEL navigation once a session exists.
+    // Keeps `busy` true — the page is navigating away.
+    const resumeAuthorize = () => {
+      window.location.assign(`/api/auth/mcp/authorize?${oauthQuery}`);
+    };
     // try/catch (not try/finally): the catch is total and never re-throws, so
     // `setBusy(false)` always runs after the block -- equivalent to a finally,
     // but React Compiler can't yet lower a TryStatement with a finalizer, so a
@@ -35,11 +57,26 @@ export function AuthScreen() {
             password,
           })
         : await signIn.email({ email, password });
-      if (res.error) {
+      // A real credential/validation failure (>= 400) shows the error; on an
+      // OAuth hop anything else (success, or the mcp plugin's after-hook 302
+      // that fetch couldn't follow cross-origin) means the session was set —
+      // resume the authorize flow.
+      if (res.error && (res.error.status ?? 500) >= 400) {
         setError(res.error.message ?? "Something went wrong. Try again.");
+      } else if (oauthQuery) {
+        resumeAuthorize();
+        return;
       }
       // On success the session store updates and the gate swaps in the editor.
     } catch {
+      if (oauthQuery) {
+        // The after-hook redirect can throw inside fetch (mixed content /
+        // CORS) even though sign-in itself succeeded and set the session
+        // cookie. Resuming authorize is correct either way: with a session it
+        // completes; without one it just lands back on this login screen.
+        resumeAuthorize();
+        return;
+      }
       setError("Network error. Check your connection and try again.");
     }
     setBusy(false);

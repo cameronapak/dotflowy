@@ -13,6 +13,7 @@
  */
 
 import { betterAuth } from 'better-auth'
+import { mcp } from 'better-auth/plugins'
 
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
@@ -25,12 +26,16 @@ export interface AuthEnv {
   BETTER_AUTH_URL?: string
 }
 
-export function createAuth(env: AuthEnv) {
+export function createAuth(env: AuthEnv, requestOrigin?: string) {
   return betterAuth({
     // Better Auth accepts a D1 binding directly (kysely under the hood).
     database: env.DB,
     secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL,
+    // Most of Better Auth infers the base URL from the request, but the mcp
+    // plugin's OAuth discovery metadata REQUIRES an explicit one (it's the
+    // OAuth `issuer`). Prod pins it via BETTER_AUTH_URL; otherwise fall back
+    // to the calling request's origin (correct on any deployment + local dev).
+    baseURL: env.BETTER_AUTH_URL ?? requestOrigin,
     emailAndPassword: {
       enabled: true,
       // v1 has no transactional email wired, so signup can't gate on a
@@ -42,6 +47,14 @@ export function createAuth(env: AuthEnv) {
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
     trustedOrigins: ['http://localhost:3000', 'http://localhost:3210'],
+    // OAuth 2.1 authorization server for the MCP endpoint (/mcp): PKCE
+    // authorization-code flow with dynamic client registration, tokens in D1
+    // (migration 0004). The SPA's AuthScreen doubles as the login page — the
+    // authorize endpoint stashes the OAuth query in a signed cookie, sends the
+    // signed-out user to `/`, and resumes the flow after sign-in (the plugin's
+    // after-hook plus AuthScreen's explicit authorize-redirect fallback).
+    // See docs/adr/0026-agent-native-mcp-server.md.
+    plugins: [mcp({ loginPage: '/' })],
   })
 }
 

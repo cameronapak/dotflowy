@@ -47,6 +47,7 @@ What works:
 - Bookmarks (the header star pins the current zoom view) and a `Cmd/Ctrl+K` quick-switcher to jump anywhere
 - A `/` command palette (to-do, plain bullet, move) and a move-to dialog
 - Dark mode, undo / redo
+- An MCP server (`/mcp`, OAuth-gated) so AI agents can read and edit the outline — add to today's daily note, mirror nodes, search — with live sync into open editors
 
 ### Keyboard
 
@@ -162,6 +163,10 @@ A returning owner's pre-DO outline is carried over **server-side**: the Worker d
 
 See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md) for the design and rejected alternatives (incl. why a Durable Object over D1-direct or ElectricSQL).
 
+## Agents (MCP)
+
+The outline is also reachable by AI agents over the [Model Context Protocol](https://modelcontextprotocol.io): point an MCP client at `https://<your-deployment>/mcp` and it walks the standard OAuth flow (sign in with your normal account; the client registers itself). Agents get read tools (`get_outline`, `search_nodes`) and write tools (`add_node`, `update_node`, `delete_node`, `add_to_today`, `mirror_node`, `mirror_to_today`); every write lands through the same atomic per-user Durable Object path as the editor, so open tabs see agent edits live. Design + rejected alternatives: [the agent-native MCP server](docs/adr/0026-agent-native-mcp-server.md).
+
 ## Project layout
 
 ```
@@ -208,13 +213,22 @@ src/
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + /api/kv to per-user DOs
   index.ts            #   session gate + resolveUserId + routes /api to the user's DO (own tsconfig)
-  auth.ts             #   createAuth(env): Better Auth (email + password), sessions in D1
+  auth.ts             #   createAuth(env): Better Auth (email + password + the MCP OAuth provider), sessions in D1
   outline-do.ts       #   UserOutlineDO: per-user SQLite (nodes + kv), the outline store
-migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth)
+  mcp.ts              #   the MCP endpoint: stateless JSON-RPC over /mcp (Effect pipeline)
+  mcp-tools.ts        #   the MCP tool registry (Effect Schema inputs + handlers over the user's DO)
+  outline-ops.ts      #   pure server-side outline planners (snapshot -> atomic ChangeOp batch)
+migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP)
 wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
 docs/adr/             # one ADR per load-bearing decision (history in git log)
 vite.config.ts        # SPA mode + /api dev proxy
 ```
+
+## Contributing
+
+Setup, the local dev loops, the pre-PR check matrix, and repo conventions live in
+[`CONTRIBUTING.md`](./CONTRIBUTING.md). Agent-facing rules are in
+[`AGENTS.md`](./AGENTS.md).
 
 ## License
 
