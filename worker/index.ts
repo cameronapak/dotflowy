@@ -34,8 +34,11 @@ import {
   NodesPatchBody,
   NodesPostBody,
 } from './wire'
+import { oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from 'better-auth/plugins'
 import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
+import { handleMcp } from './mcp'
+import type { OutlineStore } from './mcp-tools'
 import { isHttpUrlString, unfurlTitle } from './unfurl'
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
@@ -92,6 +95,24 @@ const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
  * belongs.
  */
 const OWNER_DO_ID = 'default'
+
+/** Handed to `handleMcp` for the CORS preflight, which runs before auth and
+ *  must never touch a user's outline — reaching this store is a routing bug. */
+const unreachableStore: OutlineStore = {
+  getNodes: () => {
+    throw new Error('unreachable: MCP preflight touched the outline store')
+  },
+  applyBatch: () => {
+    throw new Error('unreachable: MCP preflight touched the outline store')
+  },
+  getKv: () => {
+    throw new Error('unreachable: MCP preflight touched the outline store')
+  },
+  getOrCreateKv: () => {
+    throw new Error('unreachable: MCP preflight touched the outline store')
+  },
+}
+
 function resolveUserId(sessionUserId: string, env: Env): string {
   if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID) return OWNER_DO_ID
   return sessionUserId
@@ -360,11 +381,40 @@ function handleApiRequest(
   env: Env,
 ): Effect.Effect<Response, UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest> {
   return Effect.gen(function* () {
-    const auth = createAuth(env)
+    const auth = createAuth(env, url.origin)
 
-    // Better Auth owns everything under /api/auth/* (sign-up/in/out, session).
+    // Better Auth owns everything under /api/auth/* (sign-up/in/out, session,
+    // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
     if (url.pathname.startsWith('/api/auth/')) {
       return yield* Effect.promise(() => auth.handler(request))
+    }
+
+    // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
+    // mcp plugin, stored in D1), not the session cookie, so it's gated here —
+    // before the cookie-session check below. Same identity model though: the
+    // token's user id routes to the same per-user DO as the browser session,
+    // so an agent and the editor share one outline, live. ADR 0026.
+    if (url.pathname === '/api/mcp') {
+      if (request.method === 'OPTIONS') return yield* handleMcp(request, unreachableStore)
+      const token = yield* Effect.promise(() =>
+        auth.api.getMcpSession({ headers: request.headers }),
+      )
+      if (!token?.userId) {
+        // RFC 9728: point the client at the protected-resource metadata so it
+        // can discover the authorization server and start the OAuth flow.
+        return new Response(JSON.stringify({ error: 'unauthorized' }), {
+          status: 401,
+          headers: {
+            'content-type': 'application/json',
+            'www-authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+            'access-control-allow-origin': '*',
+            'access-control-expose-headers': 'WWW-Authenticate',
+          },
+        })
+      }
+      const mcpUserId = resolveUserId(token.userId, env)
+      const mcpStub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(mcpUserId))
+      return yield* handleMcp(request, mcpStub)
     }
 
     // Identity = the validated session's stable user id. No session → 401.
@@ -434,6 +484,17 @@ function handleApiRequest(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+
+    // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). These MUST live at
+    // the site root — clients resolve them from the resource origin, not from
+    // Better Auth's /api/auth base path — and they're public by spec. The
+    // helpers proxy to the mcp plugin's metadata endpoints.
+    if (url.pathname === '/.well-known/oauth-authorization-server') {
+      return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request)
+    }
+    if (url.pathname === '/.well-known/oauth-protected-resource') {
+      return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(request)
+    }
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve
     // them without instantiating auth — only the data API is gated, below.
