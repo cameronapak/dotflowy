@@ -1,4 +1,10 @@
-import { useState, type ComponentType, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import {
   CheckIcon,
   Code2Icon,
@@ -13,6 +19,8 @@ import {
   SiCursor,
 } from "@icons-pack/react-simple-icons";
 import { toast } from "sonner";
+import { cn } from "../lib/utils";
+import { useIsMobile } from "../hooks/use-mobile";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -273,6 +281,48 @@ const CLIENTS: Client[] = [
   },
 ];
 
+/**
+ * Animates its own height as `children` reflow -- here, when the active tab
+ * panel swaps and the natural height jumps. A CSS `height` transition (not a
+ * keyframe) so a rapid tab-switch interrupts and retargets cleanly mid-flight;
+ * height is measured off the padded inner via ResizeObserver so wrap/reflow
+ * stays in sync, and `motion-reduce` opts reduced-motion users straight to the
+ * snap.
+ */
+function AnimateHeight({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  const inner = useRef<HTMLDivElement>(null);
+  // undefined on first paint = natural `auto` height, so the initial open never
+  // animates from 0; the first measure sets it to its own value (no motion).
+  const [height, setHeight] = useState<number>();
+
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const measure = () => setHeight(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div
+      style={{ height }}
+      className="overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none"
+    >
+      <div ref={inner} className={className}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function McpConnectDialog({
   open,
   onOpenChange,
@@ -280,6 +330,7 @@ export function McpConnectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const isMobile = useIsMobile();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
@@ -301,32 +352,46 @@ export function McpConnectDialog({
         <Separator />
 
         <Tabs
-          orientation="vertical"
+          orientation={isMobile ? "horizontal" : "vertical"}
           defaultValue="claude"
           className="min-h-0 flex-1 gap-0"
         >
+          {/* Desktop: a vertical rail (line indicator). Mobile: a horizontal,
+              scrollable segmented strip -- a w-40 rail would eat half a phone's
+              width. `orientation` also flips the arrow-key nav axis, so it's
+              driven off the media query, not pure CSS. */}
           <TabsList
-            variant="line"
-            className="h-auto w-40 shrink-0 flex-col items-stretch gap-0.5 border-r p-2"
+            variant={isMobile ? "default" : "line"}
+            className={cn(
+              isMobile
+                ? "w-full justify-start overflow-x-auto"
+                : "h-auto w-40 shrink-0 flex-col items-stretch gap-0.5 border-r p-2",
+            )}
           >
             {CLIENTS.map((c) => (
-              <TabsTrigger key={c.id} value={c.id} className="justify-start">
+              <TabsTrigger
+                key={c.id}
+                value={c.id}
+                className={cn("justify-start", isMobile && "flex-none")}
+              >
                 <c.icon />
                 {c.name}
               </TabsTrigger>
             ))}
           </TabsList>
 
-          <div className="min-w-0 flex-1 overflow-y-auto p-5">
-            {CLIENTS.map((c) => (
-              <TabsContent
-                key={c.id}
-                value={c.id}
-                className="flex flex-col gap-4"
-              >
-                {c.content}
-              </TabsContent>
-            ))}
+          <div className="min-w-0 flex-1 overflow-y-auto">
+            <AnimateHeight className="p-5">
+              {CLIENTS.map((c) => (
+                <TabsContent
+                  key={c.id}
+                  value={c.id}
+                  className="flex flex-col gap-4"
+                >
+                  {c.content}
+                </TabsContent>
+              ))}
+            </AnimateHeight>
           </div>
         </Tabs>
       </DialogContent>
