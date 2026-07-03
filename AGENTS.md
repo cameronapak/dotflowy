@@ -76,6 +76,22 @@ Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to thi
 
 `README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose *why* isn't visible in the code live as numbered ADRs in [`docs/adr/`](./docs/adr/) — read the one a rule below points at.
 
+## Local setup
+
+**[`CONTRIBUTING.md`](./CONTRIBUTING.md) is the canonical setup + local-dev guide** — prerequisites, first-time setup, the two dev loops, the pre-PR gate matrix, and the MCP/OAuth local-testing gotcha. Don't re-derive the setup from scratch; follow it.
+
+The short version, to get a working local instance:
+
+```sh
+bun install
+cp .dev.vars.example .dev.vars   # then set BETTER_AUTH_SECRET (openssl rand -base64 32)
+bun run db:migrate:local         # once: local D1 schema
+bun run dev:api                  # terminal 1: wrangler dev (Worker + DO + local D1) on :8787
+bun run dev                      # terminal 2: vite dev on :3000 (proxies /api -> :8787)
+```
+
+The app is a static SPA that talks to the Worker over `/api/*`, so both servers must run. Testing the OAuth-gated `/mcp` endpoint locally needs `BETTER_AUTH_URL` + `BETTER_AUTH_TRUSTED_ORIGINS` in `.dev.vars` (the `wrangler dev` custom-domain simulation rewrites both the issuer and the request `Origin` to the prod domain) — see `.dev.vars.example` and [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
+
 ## Error Handling
 
 **Effect replaced errore** ([ADR 0012](./docs/adr/0012-effect-replaces-errore.md)). Effect's typed-error channel is the error model; the errore.org library is fully removed from `src/` and dropped from `package.json`. Don't reintroduce it. The value-as-error pattern (return `Error | T`, check `instanceof Error`) still appears where it fits (e.g. `bootstrapOutline`), but the error type is now an Effect `Data.TaggedError`, not an errore class. See `kv-client-effect.ts` for the Effect v4 patterns in use (`Data.TaggedError` tagged errors, `Schedule.both` retry, `Effect.timeoutOrElse`); the Worker (`worker/index.ts`) is already a full Effect pipeline.

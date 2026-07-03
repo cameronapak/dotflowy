@@ -224,6 +224,12 @@ docs/adr/             # one ADR per load-bearing decision (history in git log)
 vite.config.ts        # SPA mode + /api dev proxy
 ```
 
+## Contributing
+
+Setup, the local dev loops, the pre-PR check matrix, and repo conventions live in
+[`CONTRIBUTING.md`](./CONTRIBUTING.md). Agent-facing rules are in
+[`AGENTS.md`](./AGENTS.md).
+
 ## License
 
 Copyright © FAITH TOOLS SOFTWARE SOLUTIONS, LLC. Released under the [O'Saasy License](./LICENSE). Source is available for learning, modification, and self-hosting; offering a competing hosted SaaS product is reserved to the copyright holder.
