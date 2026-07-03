@@ -6,12 +6,12 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BotIcon,
   CheckIcon,
-  Code2Icon,
   CopyIcon,
   ExternalLinkIcon,
-  MessageSquareIcon,
   PuzzleIcon,
+  SquareCodeIcon,
 } from "lucide-react";
 import {
   SiAnthropic,
@@ -223,7 +223,7 @@ const CLIENTS: Client[] = [
   {
     id: "vscode",
     name: "VS Code",
-    icon: Code2Icon,
+    icon: SquareCodeIcon,
     content: (
       <>
         <p className="text-sm text-muted-foreground">
@@ -244,7 +244,7 @@ const CLIENTS: Client[] = [
   {
     id: "chatgpt",
     name: "ChatGPT",
-    icon: MessageSquareIcon,
+    icon: BotIcon,
     content: (
       <>
         <p className="text-sm text-muted-foreground">
