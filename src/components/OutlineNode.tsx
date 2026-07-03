@@ -6,7 +6,6 @@ import {
   useRef,
   type PointerEvent,
 } from "react";
-import { ChevronRight } from "lucide-react";
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
@@ -302,9 +301,7 @@ function OutlineNodeBody({
             hasChildren && commands.onToggleCollapsed(node.id, !node.collapsed)
           }
           tabIndex={-1}
-        >
-          {hasChildren && <ChevronRight size={14} strokeWidth={2.5} />}
-        </button>
+        />
         <button
           type="button"
           className="bullet touch-hitbox"

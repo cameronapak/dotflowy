@@ -44,6 +44,13 @@ describe('buildVisibleRows — mirror-free parity (the default path)', () => {
     expect(rows.find((r) => r.id === 'A')?.depth).toBe(0)
   })
 
+  test('rail owners follow the rendered ancestor chain', () => {
+    const rows = buildVisibleRows(index, null, show)
+    expect(rows.find((r) => r.id === 'A')?.railOwnerIds).toEqual([])
+    expect(rows.find((r) => r.id === 'a1')?.railOwnerIds).toEqual(['A'])
+    expect(rows.find((r) => r.id === 'a2')?.railOwnerIds).toEqual(['A'])
+  })
+
   test('a node carrying mirrorOf is treated as normal while the flag is OFF', () => {
     // Same node set, but B mirrors A. With mirrors disabled (default arg) B is an
     // ordinary leaf — no source windowing, no resolution. Byte-identical to today.
@@ -100,6 +107,8 @@ describe('buildVisibleRows — mirrors enabled (ADR 0022)', () => {
     expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length) // all keys unique
     // The mirrored copies still read their own (real) content.
     for (const r of a1Rows) expect(r.contentId).toBe('a1')
+    expect(a1Rows[0]!.railOwnerIds).toEqual(['A'])
+    expect(a1Rows[1]!.railOwnerIds).toEqual(['P', 'M'])
   })
 
   test('two mirrors of the same source keep distinct keys', () => {

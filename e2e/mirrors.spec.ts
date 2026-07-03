@@ -102,10 +102,11 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
     await load(page, MIRROR_TREE, true);
     await expect(page.locator('li[data-node-id="a1"]')).toHaveCount(2);
 
-    // Collapse the MIRROR via its own chevron -> its windowed copy of a1/a2
+    // Collapse the MIRROR via its own guide rail -> its windowed copy of a1/a2
     // disappears, but the real source A stays expanded (one copy remains).
     await page
-      .locator('li[data-node-id="M"] > .outline-row > .collapse-toggle')
+      .locator('.rail-toggle[data-rail-owner-id="M"]')
+      .first()
       .click();
     await expect(page.locator('li[data-node-id="a1"]')).toHaveCount(1);
     // The surviving copy is the real one, under the source.

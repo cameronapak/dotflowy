@@ -86,6 +86,10 @@
    * a glance. Tuned for light surfaces. */
   --mirror-source: oklch(0.58 0.13 250);
   --mirror-instance: oklch(0.6 0.16 300);
+  /* Tree guide lines: flat solid gray, lighter than --border so they stay
+   * subtle behind content without alpha blending. */
+  --tree-guide: oklch(0.88 0 0);
+  --tree-guide-hover: oklch(0.68 0 0);
 }
 
 .dark {
@@ -123,6 +127,9 @@
   /* Brighter on dark surfaces (see :root). */
   --mirror-source: oklch(0.72 0.13 250);
   --mirror-instance: oklch(0.74 0.16 300);
+  /* Tree guide lines (see :root). */
+  --tree-guide: oklch(0.35 0 0);
+  --tree-guide-hover: oklch(0.5 0 0);
 }
 
 @layer base {
@@ -205,6 +212,212 @@
   margin: 0;
 }
 
+/*
+ * Hierarchy connector lines (tree guides). Each descendant row paints a 1px
+ * vertical rail for every ancestor column, aligned to the ancestor bullet-dot
+ * centers: 14px, then +24px per depth (38px, 62px, ...). Anchoring to bullets --
+ * not the old disclosure gutter -- keeps the rails visually attached to the outline's
+ * primary markers and lines up the first rail with the add-child button.
+ *
+ * The flat, absolutely-positioned list means each row draws its OWN guide
+ * segment for its own height; stacked rows visually connect into continuous
+ * vertical rails. Normal guides are flat; on rail hover, only the collapsable
+ * subtree's segments under the hovered ancestor light up (see
+ * .outline-node.rail-hovered::before). Depths 0 and beyond 8 have no guides
+ * (0 has no ancestors; 8+ is rare enough that indentation alone suffices).
+ */
+.outline-node[data-depth="1"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px
+  );
+}
+
+.outline-node[data-depth="2"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px
+  );
+}
+
+.outline-node[data-depth="3"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px,
+    transparent 62px,
+    var(--tree-guide) 62px,
+    var(--tree-guide) 63px,
+    transparent 63px
+  );
+}
+
+.outline-node[data-depth="4"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px,
+    transparent 62px,
+    var(--tree-guide) 62px,
+    var(--tree-guide) 63px,
+    transparent 63px,
+    transparent 86px,
+    var(--tree-guide) 86px,
+    var(--tree-guide) 87px,
+    transparent 87px
+  );
+}
+
+.outline-node[data-depth="5"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px,
+    transparent 62px,
+    var(--tree-guide) 62px,
+    var(--tree-guide) 63px,
+    transparent 63px,
+    transparent 86px,
+    var(--tree-guide) 86px,
+    var(--tree-guide) 87px,
+    transparent 87px,
+    transparent 110px,
+    var(--tree-guide) 110px,
+    var(--tree-guide) 111px,
+    transparent 111px
+  );
+}
+
+.outline-node[data-depth="6"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px,
+    transparent 62px,
+    var(--tree-guide) 62px,
+    var(--tree-guide) 63px,
+    transparent 63px,
+    transparent 86px,
+    var(--tree-guide) 86px,
+    var(--tree-guide) 87px,
+    transparent 87px,
+    transparent 110px,
+    var(--tree-guide) 110px,
+    var(--tree-guide) 111px,
+    transparent 111px,
+    transparent 134px,
+    var(--tree-guide) 134px,
+    var(--tree-guide) 135px,
+    transparent 135px
+  );
+}
+
+.outline-node[data-depth="7"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px,
+    transparent 62px,
+    var(--tree-guide) 62px,
+    var(--tree-guide) 63px,
+    transparent 63px,
+    transparent 86px,
+    var(--tree-guide) 86px,
+    var(--tree-guide) 87px,
+    transparent 87px,
+    transparent 110px,
+    var(--tree-guide) 110px,
+    var(--tree-guide) 111px,
+    transparent 111px,
+    transparent 134px,
+    var(--tree-guide) 134px,
+    var(--tree-guide) 135px,
+    transparent 135px,
+    transparent 158px,
+    var(--tree-guide) 158px,
+    var(--tree-guide) 159px,
+    transparent 159px
+  );
+}
+
+.outline-node[data-depth="8"] {
+  background-image: linear-gradient(
+    to right,
+    transparent 14px,
+    var(--tree-guide) 14px,
+    var(--tree-guide) 15px,
+    transparent 15px,
+    transparent 38px,
+    var(--tree-guide) 38px,
+    var(--tree-guide) 39px,
+    transparent 39px,
+    transparent 62px,
+    var(--tree-guide) 62px,
+    var(--tree-guide) 63px,
+    transparent 63px,
+    transparent 86px,
+    var(--tree-guide) 86px,
+    var(--tree-guide) 87px,
+    transparent 87px,
+    transparent 110px,
+    var(--tree-guide) 110px,
+    var(--tree-guide) 111px,
+    transparent 111px,
+    transparent 134px,
+    var(--tree-guide) 134px,
+    var(--tree-guide) 135px,
+    transparent 135px,
+    transparent 158px,
+    var(--tree-guide) 158px,
+    var(--tree-guide) 159px,
+    transparent 159px,
+    transparent 182px,
+    var(--tree-guide) 182px,
+    var(--tree-guide) 183px,
+    transparent 183px
+  );
+}
+
 .outline-row {
   position: relative;
   display: flex;
@@ -216,6 +429,10 @@
 
 .outline-row:hover {
   background: var(--row-hover);
+}
+
+.outline-row[data-collapsed-branch="true"] {
+  padding-bottom: 16px;
 }
 
 /*
@@ -388,16 +605,16 @@ h2 > span.protected-lock {
 }
 
 /*
- * Collapse/expand chevron. Sits in the left gutter (absolute, so toggling
- * it never reflows the bullet) and only shows on row hover or while the row
- * holds focus, except when the row is collapsed, where it stays visible so the
- * hidden subtree is discoverable. Childless rows render no glyph.
+ * Invisible collapse/expand target. It stays in the left gutter so mouse users
+ * can still collapse a parent without adding a visible glyph to the tree; the
+ * outline itself is rendered by bullets + guide rails. Childless rows render an
+ * empty, non-visible target.
  */
 .collapse-toggle {
   position: absolute;
-  left: -15px;
+  left: -10px;
   top: 2px;
-  width: 16px;
+  width: 14px;
   height: 24px;
   padding: 0;
   border: none;
@@ -408,39 +625,51 @@ h2 > span.protected-lock {
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.1s ease;
-}
-
-.collapse-toggle:hover {
-  color: var(--fg);
-}
-
-/*
- * A single chevron (points right) rotates to point down when expanded, so
- * open/close reads as one continuous motion instead of an icon swap.
- */
-.collapse-toggle svg {
-  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
-}
-
-.collapse-toggle[data-collapsed="false"] svg {
-  transform: rotate(90deg);
 }
 
 .collapse-toggle[data-has-children="false"] {
   cursor: default;
 }
 
-.outline-row:hover .collapse-toggle[data-has-children="true"],
-.outline-row:focus-within .collapse-toggle[data-has-children="true"],
-.collapse-toggle[data-collapsed="true"] {
-  opacity: 1;
+/*
+ * Clickable guide-rail hit targets (tree helper). The visible rail is the <li>
+ * background-image; these (now wider) transparent buttons sit over each
+ * ancestor rail so the rail is the disclosure control. Hover highlights only
+ * the collapsable part under the specific ancestor (scoped by ownerId), not
+ * the whole column.
+ */
+.rail-toggle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  z-index: 3;
+}
+
+/* A collapsed branch has no descendant rows, so it needs its own visible rail
+ * stub under the parent bullet. That stub is the expand target. */
+.collapsed-rail-toggle {
+  top: 22px;
+  bottom: auto;
+  height: 18px;
+  background-image: linear-gradient(
+    to right,
+    transparent calc(50% - 0.5px),
+    var(--tree-guide) calc(50% - 0.5px),
+    var(--tree-guide) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
 }
 
 /*
- * The chevron lives in the empty left margin, so it can grow its tap target
+ * The target lives in the empty left margin, so it can grow its tap target
  * LEFTWARD (into nothing) for a full 44px width without colliding with the
- * bullet to its right. Anchored to the chevron's right edge so the boundary
+ * bullet to its right. Anchored to the target's right edge so the boundary
  * with the bullet stays clean.
  */
 .collapse-toggle.touch-hitbox::before {
@@ -450,14 +679,22 @@ h2 > span.protected-lock {
 }
 
 /*
- * Touch devices have no hover, so the reveal-on-hover chevron would be an
- * invisible (if tappable) target. Keep it visible for any parent row so the
- * collapse affordance is discoverable. Childless rows still render no glyph.
+ * Tree helper hover highlight. Hovering a rail (or its collapsed stub) sets
+ * --hovered-rail-x and adds .rail-hovered only to descendant rows under that
+ * specific ancestor (via railOwnerIds). The ::before draws the brighter line
+ * only on the collapsable part of that line (not the whole depth column).
+ * Clickable hit area for rails is widened for easier targeting.
  */
-@media (hover: none) {
-  .collapse-toggle[data-has-children="true"] {
-    opacity: 1;
-  }
+.outline-node.rail-hovered::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--hovered-rail-x, 0);
+  width: 1px;
+  background-color: var(--tree-guide-hover);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .bullet {
@@ -492,8 +729,27 @@ h2 > span.protected-lock {
 }
 
 .bullet-dot {
-  @apply block size-2 rounded-full bg-accent-foreground/80;
+  @apply block size-[7px] rounded-full bg-accent-foreground/80;
 }
+
+/*
+ * Inactive bullet dim. When a bullet in the outline holds focus, every OTHER
+ * row's dot softens so the active line reads as the focus point. Pure CSS, no
+ * JS state; composes with the existing faded/context opacities on .outline-row
+ * (this rule sits on .bullet-dot, so row-level dims never compound with it).
+ * Hover restores the dot to full strength so a swept pointer still reads each
+ * row as reachable. Scoped to .outline-list so a focused zoomed-title (a
+ * different region) doesn't dim list dots.
+ */
+.outline-list:focus-within .outline-row:not(:focus-within) .bullet-dot {
+  opacity: 0.3;
+  transition: opacity 0.15s ease;
+}
+
+.outline-list:focus-within .outline-row:hover .bullet-dot {
+  opacity: 1;
+}
+
 
 .checkbox {
   flex: 0 0 auto;
@@ -816,7 +1072,6 @@ body.dragging-active * {
     animation: none !important;
   }
 
-  .collapse-toggle svg,
   .outline-children-wrap,
   .outline-children-wrap > .outline-children {
     transition: none !important;
@@ -825,13 +1080,13 @@ body.dragging-active * {
 
 /*
  * Comfortable touch target WITHOUT width inflation. The gutter controls
- * (chevron, bullet, checkbox) sit too close to each other -- and to the text
+ * (collapse target, bullet, checkbox) sit too close to each other -- and to the text
  * -- to each claim 44px of WIDTH, so two centered 44px boxes used to overlap
- * and fight over the same taps (later-painted element won, so chevron taps
+ * and fight over the same taps (later-painted element won, so collapse taps
  * zoomed). We expand the target VERTICALLY only; each box stays as wide as its
  * control, so the boxes no longer physically overlap and there's no z-index
  * race. Width-expansion is opt-in per control where there's room (see the
- * chevron override below).
+ * collapse-target override above).
  */
 @utility touch-hitbox {
   position: relative;
