@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   CircleCheckIcon,
   ClipboardCopyIcon,
@@ -5,11 +6,13 @@ import {
   MonitorIcon,
   MoonIcon,
   MoreHorizontalIcon,
+  PlugZapIcon,
   SunIcon,
   SunMoonIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
+import { McpConnectDialog } from "./mcp-connect-dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -39,9 +42,7 @@ import { childrenOf } from "../data/tree";
 async function copyOutlineAsMarkdown() {
   const index = getTreeIndex();
   const rootId = getViewRootId();
-  const rootIds = rootId
-    ? [rootId]
-    : childrenOf(index, null).map((n) => n.id);
+  const rootIds = rootId ? [rootId] : childrenOf(index, null).map((n) => n.id);
   const markdown = outlineToMarkdown(index, rootIds);
   if (!markdown) {
     toast("Nothing to copy");
@@ -72,68 +73,79 @@ async function copyOutlineAsMarkdown() {
 export function HeaderMoreMenu() {
   const { theme, setTheme } = useTheme();
   const { showCompleted, setShowCompleted } = useShowCompleted();
+  // The connect dialog is a sibling of the menu (not nested in its content) so
+  // it survives the menu closing on item select.
+  const [connectOpen, setConnectOpen] = useState(false);
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" title="More">
-            <MoreHorizontalIcon />
-            <span className="sr-only">More actions</span>
-          </Button>
-        }
-      />
-      <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem onClick={copyOutlineAsMarkdown}>
-          <ClipboardCopyIcon />
-          Copy as Markdown
-        </DropdownMenuItem>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="ghost" size="icon-sm" title="More">
+              <MoreHorizontalIcon />
+              <span className="sr-only">More actions</span>
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuItem onClick={copyOutlineAsMarkdown}>
+            <ClipboardCopyIcon />
+            Copy as Markdown
+          </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setConnectOpen(true)}>
+            <PlugZapIcon />
+            Connect apps (MCP)
+          </DropdownMenuItem>
 
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <SunMoonIcon />
-            Theme
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuRadioGroup
-              value={theme}
-              onValueChange={(value) =>
-                setTheme(value as "light" | "dark" | "system")
-              }
-            >
-              <DropdownMenuRadioItem value="light">
-                <SunIcon />
-                Light
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">
-                <MoonIcon />
-                Dark
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="system">
-                <MonitorIcon />
-                System
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+          <DropdownMenuSeparator />
 
-        <DropdownMenuCheckboxItem
-          checked={showCompleted}
-          onCheckedChange={setShowCompleted}
-        >
-          <CircleCheckIcon />
-          Show completed
-        </DropdownMenuCheckboxItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <SunMoonIcon />
+              Theme
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup
+                value={theme}
+                onValueChange={(value) =>
+                  setTheme(value as "light" | "dark" | "system")
+                }
+              >
+                <DropdownMenuRadioItem value="light">
+                  <SunIcon />
+                  Light
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="dark">
+                  <MoonIcon />
+                  Dark
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="system">
+                  <MonitorIcon />
+                  System
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
 
-        <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem
+            checked={showCompleted}
+            onCheckedChange={setShowCompleted}
+          >
+            <CircleCheckIcon />
+            Show completed
+          </DropdownMenuCheckboxItem>
 
-        <DropdownMenuItem variant="destructive" onClick={() => signOut()}>
-          <LogOutIcon />
-          Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem variant="destructive" onClick={() => signOut()}>
+            <LogOutIcon />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+    </>
   );
 }

@@ -29,6 +29,7 @@
     "@base-ui/react": "^1.6.0",
     "@floating-ui/react-dom": "^2.1.8",
     "@fontsource-variable/geist": "^5.2.9",
+    "@icons-pack/react-simple-icons": "^13.13.0",
     "@tanstack/query-core": "^5.101.1",
     "@tanstack/query-db-collection": "^1.0.42",
     "@tanstack/react-db": "^0.1.87",
