@@ -281,7 +281,7 @@ h2 > span.protected-lock {
 }
 
 .outline-row.node-acted {
-  animation: node-acted-fade 2.2s ease-out;
+  animation: node-acted-fade 0.9s ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -461,7 +461,7 @@ h2 > span.protected-lock {
 }
 
 .bullet {
-  @apply size-4 flex items-center justify-center bg-transparent transition-all duration-150 p-0 border-none mt-1.5;
+  @apply size-4 flex items-center justify-center bg-transparent transition duration-150 p-0 border-none mt-1.5;
   flex: 0 0 auto;
   cursor: pointer;
   display: flex;
