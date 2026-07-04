@@ -1,6 +1,11 @@
 # The auth gate
 
-Identity is **Better Auth** (`worker/auth.ts`): email + password self-serve signup, sessions in D1.
+Identity is **Better Auth** (`worker/auth.ts`): email + password signup, sessions in D1. Signup is
+**invite-gated during alpha**: a `hooks.before` on `/sign-up/email` rejects any request whose
+`inviteCode` isn't in the comma-separated `INVITE_CODES` secret — server-side (hiding the signup UI
+wouldn't stop a direct POST) and fail-closed (unset = signup off; sign-in untouched). The public
+`POST /api/waitlist` (worker/index.ts, per-IP rate-limited, D1 `waitlist` table) collects emails
+from people who want an invite. Delete the hook + secret to reopen self-serve signup.
 Better Auth's `user` table IS the global identity store and `user.id` is the stable, permanent key
 the Worker routes each user's outline Durable Object by. The Worker builds auth **per request**
 (`createAuth(env)`) because the D1 binding only exists inside `fetch` — it cannot be a module

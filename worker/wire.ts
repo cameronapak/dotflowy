@@ -58,3 +58,11 @@ export const KvUpsertBody = Schema.Struct({
 
 /** DELETE /api/kv. */
 export const KvDeleteBody = Schema.Struct({ keys: Schema.Array(Schema.String) })
+
+/** POST /api/waitlist — public alpha-waitlist signup (invite-only signup gate,
+ *  worker/auth.ts). Email plausibility is checked in the route handler; the
+ *  schema only guards the shape. */
+export const WaitlistPostBody = Schema.Struct({
+  email: Schema.String,
+  source: Schema.optional(Schema.String),
+})

@@ -4,6 +4,10 @@
 # Better Auth signing secret. Generate one: `openssl rand -base64 32`
 BETTER_AUTH_SECRET=replace-me
 
+# Comma-separated invite codes gating signup (alpha is invite-only). Unset or
+# empty = signup closed. In prod: `wrangler secret put INVITE_CODES`.
+INVITE_CODES=dev-invite
+
 # Optional: pin the OAuth issuer the MCP discovery metadata advertises (ADR
 # 0026). Needed to test the MCP OAuth flow against `wrangler dev` — without it
 # the dev proxy's custom-domain simulation makes the inferred origin the prod

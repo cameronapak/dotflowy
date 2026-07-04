@@ -30,8 +30,12 @@ export function AuthScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Alpha is invite-only (the gate is server-side in worker/auth.ts); people
+  // without a code leave their email on the waitlist instead.
+  const [waitlist, setWaitlist] = useState<"idle" | "busy" | "done">("idle");
 
   const isSignup = mode === "signup";
 
@@ -50,12 +54,17 @@ export function AuthScreen() {
     // but React Compiler can't yet lower a TryStatement with a finalizer, so a
     // finally here opts the whole component out of compilation.
     try {
+      // `inviteCode` rides along in the body for the server-side invite gate
+      // (worker/auth.ts hooks.before). A variable, not an inline literal, so
+      // the extra field clears the client types' excess-property check.
+      const signupBody = {
+        name: name.trim() || email.split("@")[0] || email,
+        email,
+        password,
+        inviteCode: inviteCode.trim(),
+      };
       const res = isSignup
-        ? await signUp.email({
-            name: name.trim() || email.split("@")[0] || email,
-            email,
-            password,
-          })
+        ? await signUp.email(signupBody)
         : await signIn.email({ email, password });
       // A real credential/validation failure (>= 400) shows the error; on an
       // OAuth hop anything else (success, or the mcp plugin's after-hook 302
@@ -80,6 +89,28 @@ export function AuthScreen() {
       setError("Network error. Check your connection and try again.");
     }
     setBusy(false);
+  }
+
+  async function joinWaitlist() {
+    setError(null);
+    const addr = email.trim();
+    if (!addr) {
+      setError("Enter your email above first, then join the waitlist.");
+      return;
+    }
+    setWaitlist("busy");
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: addr, source: "app" }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setWaitlist("done");
+    } catch {
+      setWaitlist("idle");
+      setError("Couldn't join the waitlist. Try again.");
+    }
   }
 
   return (
@@ -119,6 +150,16 @@ export function AuthScreen() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          {isSignup && (
+            <Input
+              type="text"
+              placeholder="Invite code"
+              autoComplete="off"
+              required
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+            />
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -137,9 +178,29 @@ export function AuthScreen() {
               setError(null);
             }}
           >
-            {isSignup ? "Sign in" : "Create an account"}
+            {isSignup ? "Sign in" : "Have an invite?"}
           </button>
         </p>
+
+        {isSignup && (
+          <p className="mt-2 text-center text-sm text-muted-foreground">
+            {waitlist === "done" ? (
+              "You're on the list — an invite will land in your inbox."
+            ) : (
+              <>
+                No invite code?{" "}
+                <button
+                  type="button"
+                  className="font-medium text-foreground underline-offset-4 hover:underline"
+                  onClick={joinWaitlist}
+                  disabled={waitlist === "busy"}
+                >
+                  {waitlist === "busy" ? "…" : "Join the waitlist"}
+                </button>
+              </>
+            )}
+          </p>
+        )}
       </div>
     </main>
   );

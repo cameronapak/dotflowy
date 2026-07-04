@@ -6,9 +6,11 @@
  * Each request is routed to the current user's Durable Object (UserOutlineDO),
  * whose colocated SQLite holds that user's entire outline. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
  *
- * Identity = Better Auth (worker/auth.ts), email + password self-serve signup,
- * sessions in D1. The static shell is PUBLIC (the login screen must load); only
- * the data API (/api/nodes, /api/kv) is gated, by a valid session. The DO
+ * Identity = Better Auth (worker/auth.ts), email + password signup gated by an
+ * invite code during alpha (INVITE_CODES), sessions in D1. The static shell is
+ * PUBLIC (the login screen must load); only the data API (/api/nodes, /api/kv)
+ * is gated, by a valid session. /api/waitlist is the one other public route —
+ * it collects emails from people who want an invite. The DO
  * routing key is the session's stable `user.id` — a DO name is *permanent*, so
  * it must never be an email or any value that can change (see resolveUserId).
  *
@@ -33,6 +35,7 @@ import {
   NodesDeleteBody,
   NodesPatchBody,
   NodesPostBody,
+  WaitlistPostBody,
 } from './wire'
 import { oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from 'better-auth/plugins'
 import { createAuth } from './auth'
@@ -58,6 +61,13 @@ interface Env extends AuthEnv {
   APP_OWNER?: string
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
   UNFURL_LIMIT: RateLimit
+  /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
+  WAITLIST_LIMIT: RateLimit
+  /** Comma-separated emails allowed on admin surfaces (the waitlist view).
+   *  Fail-closed: unset = no admins. Email is fine HERE (unlike DO keying) —
+   *  it's an allowlist entry, not a permanent storage key; if the admin's
+   *  email changes, update the var in wrangler.jsonc. */
+  ADMIN_EMAILS?: string
 }
 
 /** A legacy D1 node row (booleans as 0/1). Only read during the one-time import
@@ -137,10 +147,10 @@ function rowToNode(r: NodeRow): Node {
   }
 }
 
-function json(data: unknown, status = 200): Response {
+function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
   })
 }
 
@@ -367,6 +377,83 @@ function handleKv(
   })
 }
 
+// --- Waitlist (public) --------------------------------------------------------
+
+/** Origins allowed to POST the waitlist form cross-origin: the landing site
+ *  (prod + its local dev port). Same-origin app requests need no CORS. */
+const WAITLIST_ALLOWED_ORIGINS = new Set([
+  'https://dotflowy.com',
+  'https://www.dotflowy.com',
+  'http://localhost:3100',
+])
+
+function waitlistCorsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin')
+  return origin && WAITLIST_ALLOWED_ORIGINS.has(origin)
+    ? { 'access-control-allow-origin': origin, vary: 'Origin' }
+    : {}
+}
+
+/** Good-enough shape check for an address someone wants an invite sent to.
+ *  Deliverability is unknowable here; this only rejects obvious junk. */
+function isPlausibleEmail(email: string): boolean {
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+/** Is this session's email on the ADMIN_EMAILS allowlist? Fail-closed. */
+function isAdminSession(session: { user: { email: string } } | null, env: Env): boolean {
+  if (!session) return false
+  const admins = (env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+  return admins.includes(session.user.email.toLowerCase())
+}
+
+/**
+ * POST /api/waitlist — the alpha waitlist behind the invite-only signup gate
+ * (worker/auth.ts). PUBLIC by design (the people submitting have no account),
+ * so it's hardened the other way: per-IP rate limit, shape-validated body,
+ * normalized email into one D1 table. A duplicate email is a silent no-op and
+ * still returns ok — the response never reveals whether an address is already
+ * on the list.
+ */
+function handleWaitlist(request: Request, env: Env): Effect.Effect<Response, BadRequest> {
+  return Effect.gen(function* () {
+    const cors = waitlistCorsHeaders(request)
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...cors,
+          'access-control-allow-methods': 'POST, OPTIONS',
+          'access-control-allow-headers': 'content-type',
+          'access-control-max-age': '86400',
+        },
+      })
+    }
+    if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405, cors)
+
+    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+    const { success } = yield* Effect.promise(() => env.WAITLIST_LIMIT.limit({ key: ip }))
+    if (!success) return json({ error: 'rate limited' }, 429, cors)
+
+    const { email, source } = yield* decodeBody(request, WaitlistPostBody)
+    const normalized = email.trim().toLowerCase()
+    if (!isPlausibleEmail(normalized)) {
+      return yield* Effect.fail(new BadRequest({ reason: 'invalid email' }))
+    }
+    yield* Effect.promise(() =>
+      env.DB.prepare(
+        'INSERT INTO waitlist (email, source, createdAt) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING',
+      )
+        .bind(normalized, source === 'landing' ? 'landing' : 'app', Date.now())
+        .run(),
+    )
+    return json({ ok: true }, 200, cors)
+  })
+}
+
 // --- Main API pipeline ------------------------------------------------------
 
 /**
@@ -388,6 +475,29 @@ function handleApiRequest(
     // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
     if (url.pathname.startsWith('/api/auth/')) {
       return yield* Effect.promise(() => auth.handler(request))
+    }
+
+    // Alpha waitlist: POST is PUBLIC (submitters have no account yet) — must
+    // sit before the session gate below; its hardening lives in handleWaitlist.
+    // GET is the ADMIN view (the /admin/waitlist page): session + the
+    // ADMIN_EMAILS allowlist. Non-admins get the same 404 as a route that
+    // doesn't exist — the admin surface shouldn't advertise itself.
+    if (url.pathname === '/api/waitlist') {
+      if (request.method === 'GET') {
+        const session = yield* Effect.promise(() =>
+          auth.api.getSession({ headers: request.headers }),
+        )
+        if (!isAdminSession(session, env)) {
+          return yield* Effect.fail(new RouteNotFound({ path: url.pathname }))
+        }
+        const { results } = yield* Effect.promise(() =>
+          env.DB.prepare(
+            'SELECT email, source, createdAt FROM waitlist ORDER BY createdAt DESC',
+          ).all<{ email: string; source: string; createdAt: number }>(),
+        )
+        return json({ entries: results })
+      }
+      return yield* handleWaitlist(request, env)
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the

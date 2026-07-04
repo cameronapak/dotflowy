@@ -13,6 +13,7 @@
  */
 
 import { betterAuth } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { mcp } from 'better-auth/plugins'
 
 /** The slice of the Worker env Better Auth needs. */
@@ -24,6 +25,10 @@ export interface AuthEnv {
   /** The deployment's public origin (e.g. https://dotflowy.example.com), used
    *  for cookie/redirect URLs and as a trusted origin. Unset in local dev. */
   BETTER_AUTH_URL?: string
+  /** Comma-separated invite codes gating signup (alpha is invite-only). Unset
+   *  or empty = signup CLOSED — nobody can create an account. Rotate the
+   *  secret to revoke every outstanding code at once. */
+  INVITE_CODES?: string
 }
 
 export function createAuth(env: AuthEnv, requestOrigin?: string) {
@@ -47,6 +52,27 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
     trustedOrigins: ['http://localhost:3000', 'http://localhost:3210'],
+    // Invite-only alpha: /sign-up/email is the ONLY account-creation path (the
+    // mcp plugin's dynamic registration creates OAuth clients, not users), so
+    // gating it here closes signup entirely. Server-side on purpose — hiding
+    // the signup UI wouldn't stop a direct POST to the endpoint. An unset
+    // INVITE_CODES fails CLOSED: no codes, no signups; sign-in is untouched.
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/sign-up/email') return
+        const codes = (env.INVITE_CODES ?? '')
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean)
+        const supplied =
+          typeof ctx.body?.inviteCode === 'string' ? ctx.body.inviteCode.trim() : ''
+        if (!supplied || !codes.includes(supplied)) {
+          throw new APIError('FORBIDDEN', {
+            message: 'Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.',
+          })
+        }
+      }),
+    },
     // OAuth 2.1 authorization server for the MCP endpoint (/mcp): PKCE
     // authorization-code flow with dynamic client registration, tokens in D1
     // (migration 0004). The SPA's AuthScreen doubles as the login page — the
