@@ -168,7 +168,7 @@ Flat by default. Depth comes from hairline borders and near-imperceptible tonal 
 - Sticky top bar, Paper at 80% with `backdrop-blur`, a bottom Hairline. Logo is the bullet Dot plus mono "dotflowy". Actions are Ghost buttons at `sm` size; "Sign in" drops below `sm`. Primary "Get started" is the grayscale Primary button.
 
 ### Signature: The Live Outline Demo
-A self-contained toy outline (`HeroOutlineDemo`) inside a Floating Panel with faux window chrome. It is the page's hero and its proof. Rows are Dot + text; the bullet Dot zooms on click, the chevron collapses. It uses real product moves (Enter-split, Tab indent, click-to-zoom) with local state only. Show, don't tell: the demo is the pitch.
+The REAL Dotflowy editor (`HeroOutlineEmbed`), embedded live in a Floating Panel with faux window chrome. It is the page's hero and its proof — literally the product, running an anonymous in-memory backend (`?demo=1`, no auth, no Worker), so it can never drift from the app. Every real move works: Enter-split, Tab nesting, `#tags` with color, to-dos, rich links, click-a-Dot to zoom, and the Provenance Mark on the one AI-drafted node. The iframe is client-only and lazy (a skeleton holds first paint; it fades in when the panel nears the viewport), so the "fast" promise holds. Show, don't tell: the demo is the pitch.
 
 ### Signature: The Provenance Mark
 A single muted Geist-Mono-adjacent lucide `Sparkle` (`text-muted-foreground`) placed before a node's text, marking content an AI assistant created (mirrors `src/plugins/provenance`). Static, single-hued, quiet, with a "Created by [agent] · [time]" caption. It is the entire visual language of AI on this brand.

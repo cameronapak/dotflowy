@@ -16,3 +16,10 @@ BETTER_AUTH_SECRET=replace-me
 # the OAuth login flow work under `wrangler dev`. Local-only; in prod the origin
 # IS the prod domain and is already trusted via BETTER_AUTH_URL.
 # BETTER_AUTH_TRUSTED_ORIGINS=http://app.dotflowy.com,https://app.dotflowy.com
+
+# Optional: extra CSP `frame-ancestors` sources allowed to embed the anonymous
+# landing demo (`?demo=1`) — needed to test the landing hero iframe against
+# `wrangler dev` (the landing dev server runs on :3100). Space-separated CSP
+# host sources. Never set in prod: there, only https://dotflowy.com may frame
+# the demo, and the authenticated app is never framable cross-origin at all.
+# DEMO_FRAME_ANCESTORS=http://localhost:3100

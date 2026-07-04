@@ -6,6 +6,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "cf:dev"],
       "port": 8787
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd landing && exec bun run dev"],
+      "port": 3100
     }
   ]
 }

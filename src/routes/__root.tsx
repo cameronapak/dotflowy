@@ -15,9 +15,17 @@ import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
+import { isDemoMode, installDemoBackend } from '../data/demo-backend'
 import { FAVICON_DARK, FAVICON_LIGHT } from '../lib/favicon'
 import { LEGACY_THEME_KEY, THEME_KEY } from '../lib/storage-keys'
 import '../styles.css'
+
+// Anonymous landing-demo mode (Approach B). Installed at MODULE LOAD — before
+// React mounts and before the collection's first subscribe — so the in-memory
+// fetch/WebSocket mock is in place by the time the editor connects. No-op unless
+// the URL opted in (`?demo=1`); never runs server-side (guarded by window). See
+// demo-backend.ts.
+if (isDemoMode()) installDemoBackend()
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
 // the resolution logic in theme-provider.tsx (same storage key).
@@ -83,6 +91,18 @@ function RootComponent() {
  * render nothing to avoid flashing the login screen at an authed user.
  */
 function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
+  // The anonymous landing demo runs entirely in-memory (demo-backend.ts) and
+  // must NOT require — or touch — a real session, so it skips the session gate
+  // entirely. Kept hook-free (the real gate is a separate component) so neither
+  // branch conditionally calls a hook — the demo path can't take `useSession`,
+  // whose stubbed `{ session: null }` would otherwise render the AuthScreen.
+  if (isDemoMode()) return <>{children}</>
+  return <SessionGate>{children}</SessionGate>
+}
+
+/** The real gate: render the editor only behind a Better Auth session, the
+ *  login screen otherwise. Always calls `useSession` (never behind a branch). */
+function SessionGate({ children }: Readonly<{ children: ReactNode }>) {
   const { data: session, isPending } = useSession()
   if (isPending) return null
   if (!session) return <AuthScreen />
@@ -90,8 +110,17 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+  // demo-embed (html.demo-embed in styles.css) makes the document
+  // non-scrollable so the landing iframe never traps the visitor's scroll. It
+  // must live HERE, in the React-rendered className — React's first commit
+  // replaces the whole class attribute, so a pre-render classList.add from
+  // demo-backend.ts gets wiped. isDemoMode() is latched at first read, so this
+  // is stable for the page session.
   return (
-    <html lang="en" className="[scrollbar-gutter:stable]">
+    <html
+      lang="en"
+      className={`[scrollbar-gutter:stable]${isDemoMode() ? ' demo-embed' : ''}`}
+    >
       <head>
         <link
           rel="icon"

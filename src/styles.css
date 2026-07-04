@@ -137,6 +137,19 @@
     @apply font-sans;
     overscroll-behavior: none;
   }
+
+  /* Landing demo embed (?demo=1 — __root.tsx renders the class). The doc is
+     framed CROSS-ORIGIN, and browsers never chain a cross-origin frame's
+     overscroll to the embedder — so any scrollable overflow here traps the
+     visitor's wheel inside the hero. Make the document non-scrollable instead:
+     with nothing to scroll, the gesture passes through and the landing page
+     scrolls on past. The curated seed fits the frame; overflow just clips. */
+  html.demo-embed,
+  html.demo-embed body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: auto;
+  }
 }
 
 .subtitle {

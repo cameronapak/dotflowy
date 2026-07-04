@@ -3,6 +3,7 @@ import { BookmarkStar } from "./bookmarks";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { NodeSearchButton } from "./node-switcher";
 import { headerSlots } from "../plugins/registry";
+import { isDemoMode } from "../data/demo-backend";
 import type { PluginContext } from "../plugins/types";
 
 /**
@@ -37,16 +38,21 @@ export function Header({
             then the focused-node action (BookmarkStar renders itself + its
             trailing divider only when zoomed), then search, and finally the
             "More" overflow holding the secondary set-once actions (theme, show
-            completed, sign out). See header-more-menu.tsx for the v1/v2 split. */}
-        <div className="flex shrink-0 items-center gap-1">
-          {getCtx &&
-            headerSlots.map((s) => (
-              <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
-            ))}
-          <BookmarkStar />
-          <NodeSearchButton />
-          <HeaderMoreMenu />
-        </div>
+            completed, sign out). See header-more-menu.tsx for the v1/v2 split.
+            Hidden in the anonymous landing demo: sign-out is meaningless there
+            and the search/bookmark chrome would distract from the outline
+            itself. The breadcrumb (children, with its Home zoom-out) stays. */}
+        {!isDemoMode() && (
+          <div className="flex shrink-0 items-center gap-1">
+            {getCtx &&
+              headerSlots.map((s) => (
+                <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
+              ))}
+            <BookmarkStar />
+            <NodeSearchButton />
+            <HeaderMoreMenu />
+          </div>
+        )}
       </div>
     </header>
   );

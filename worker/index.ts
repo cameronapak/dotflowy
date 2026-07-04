@@ -58,6 +58,13 @@ interface Env extends AuthEnv {
   APP_OWNER?: string
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
   UNFURL_LIMIT: RateLimit
+  /** Extra space-separated CSP `frame-ancestors` sources allowed to embed the
+   *  anonymous demo document (`?demo=1`) — local-only, set in `.dev.vars` (e.g.
+   *  `http://localhost:3100` for the landing dev server). Hostname sniffing
+   *  can't gate this instead: `wrangler dev`'s custom-domain simulation rewrites
+   *  the request URL to the prod domain (same gotcha as BETTER_AUTH_URL). Unset
+   *  in prod, where only https://dotflowy.com may frame the demo. */
+  DEMO_FRAME_ANCESTORS?: string
 }
 
 /** A legacy D1 node row (booleans as 0/1). Only read during the one-time import
@@ -510,9 +517,25 @@ export default {
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve
     // them without instantiating auth — only the data API (and the token-gated
-    // `/mcp`, handled in the pipeline below) is gated.
+    // `/mcp`, handled in the pipeline below) is gated. Stamp a frame-ancestors
+    // CSP: the marketing site (dotflowy.com) may embed ONLY the anonymous demo
+    // document (`/?demo=1`, an in-memory sandbox with no real data — src/data/
+    // demo-backend.ts); the authenticated app stays `frame-ancestors 'self'`, so
+    // a compromised dotflowy.com can't clickjack a logged-in editor or the OAuth
+    // consent screen. Either way this is a hardening: the shell had no
+    // frame-ancestors before, so it was framable by any origin.
     if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/')) {
-      return env.ASSETS.fetch(request)
+      const res = await env.ASSETS.fetch(request)
+      const out = new Response(res.body, res)
+      const framable = url.searchParams.has('demo')
+      const extraAncestors = env.DEMO_FRAME_ANCESTORS
+        ? ` ${env.DEMO_FRAME_ANCESTORS}`
+        : ''
+      out.headers.set(
+        'Content-Security-Policy',
+        `frame-ancestors 'self'${framable ? ` https://dotflowy.com${extraAncestors}` : ''}`,
+      )
+      return out
     }
 
     // Run the typed pipeline. Typed errors (validation) are caught here and

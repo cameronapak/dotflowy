@@ -4,7 +4,7 @@ import { ArrowRight, Sparkle, Star } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { Kbd } from "./Kbd";
-import { HeroOutlineDemo } from "./HeroOutlineDemo";
+import { HeroOutlineEmbed } from "./HeroOutlineEmbed";
 
 // Single source of truth for the outbound links. Handle is `cameronapak`
 // (matches the README's GitHub badges).
@@ -143,7 +143,7 @@ function Hero() {
       </div>
 
       <div className="mx-auto mt-14 max-w-3xl">
-        <HeroOutlineDemo />
+        <HeroOutlineEmbed />
       </div>
     </Section>
   );
