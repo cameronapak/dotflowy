@@ -269,6 +269,17 @@ describe('MCP tools', () => {
     expect(fake.batches).toHaveLength(0)
   })
 
+  test('add_subtree onto a day with an empty forest fails BEFORE claiming any daily ids', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'add_subtree', { date: '2026-07-03', nodes: [] })
+    expect(json.result?.isError).toBe(true)
+    expect(fake.batches).toHaveLength(0)
+    // The size guard runs before the kv claims, so no orphan container/day
+    // mapping is left pointing at nodes that were never inserted (ADR 0028).
+    expect(fake.kv.has('container')).toBe(false)
+    expect(fake.kv.has('2026-07-03')).toBe(false)
+  })
+
   test('add_subtree publishes its recursive input as a named $def', async () => {
     const { store } = makeStore()
     const json = (await (await rpc(store, 'tools/list')).json()) as any

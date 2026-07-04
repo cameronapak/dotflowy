@@ -486,21 +486,38 @@ export function planReparent(
  *  shape the `add_subtree` tool accepts. Fresh content only: no id (the caller
  *  mints them), no mirror, no completed/collapsed state (ADR 0028). */
 export interface SubtreeInput {
-  text: string
-  isTask?: boolean | null
-  children?: readonly SubtreeInput[] | null
+  readonly text: string
+  readonly isTask?: boolean | null
+  readonly children?: readonly SubtreeInput[] | null
 }
 
-/** Total node count of a forest (roots + every descendant), for the size cap. */
+/** Total node count of a forest (roots + every descendant), for the size cap.
+ *  Pushes children one at a time — NOT `push(...children)` — so a pathologically
+ *  wide `children` array can't `RangeError` on argument-count before the cap
+ *  gets a chance to reject it. */
 function countForest(nodes: readonly SubtreeInput[]): number {
   let n = 0
   const stack: SubtreeInput[] = [...nodes]
   while (stack.length) {
     const node = stack.pop()!
     n++
-    if (node.children) stack.push(...node.children)
+    if (node.children) for (const child of node.children) stack.push(child)
   }
   return n
+}
+
+/** The size verdict for a batch forest, or `null` when it's within bounds.
+ *  Shared by both subtree planners AND the handler's pre-claim check (ADR 0028),
+ *  so the cap has one owner and the daily path can't claim ids for a forest that
+ *  will be rejected. */
+export function guardForestSize(
+  nodes: readonly SubtreeInput[],
+  maxNodes: number,
+): EmptyForest | BatchTooLarge | null {
+  const count = countForest(nodes)
+  if (count === 0) return new EmptyForest()
+  if (count > maxNodes) return new BatchTooLarge({ count, max: maxNodes })
+  return null
 }
 
 /**
@@ -571,9 +588,8 @@ export function planAddSubtree(
     maxNodes: number
   },
 ): { ops: ChangeOp[]; rootIds: string[]; parentId: string | null } | NodeNotFound | EmptyForest | BatchTooLarge {
-  const count = countForest(args.nodes)
-  if (count === 0) return new EmptyForest()
-  if (count > args.maxNodes) return new BatchTooLarge({ count, max: args.maxNodes })
+  const tooBig = guardForestSize(args.nodes, args.maxNodes)
+  if (tooBig) return tooBig
 
   let parentId: string | null = null
   if (args.parentId !== null) {
@@ -763,9 +779,8 @@ export function planAddSubtreeToDaily(
     maxNodes: number
   },
 ): { ops: ChangeOp[]; rootIds: string[] } | EmptyForest | BatchTooLarge {
-  const count = countForest(args.nodes)
-  if (count === 0) return new EmptyForest()
-  if (count > args.maxNodes) return new BatchTooLarge({ count, max: args.maxNodes })
+  const tooBig = guardForestSize(args.nodes, args.maxNodes)
+  if (tooBig) return tooBig
 
   const { ops } = planEnsureDaily(index, args)
   // A pre-existing day may already have children; a just-planned one can't.

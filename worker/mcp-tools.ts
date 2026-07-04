@@ -25,6 +25,8 @@ import {
   formatDayText,
   isValidDateKey,
   formatOutlineLines,
+  guardForestSize,
+  type SubtreeInput,
   planAddNode,
   planAddSubtree,
   planAddSubtreeToDaily,
@@ -229,20 +231,15 @@ const AddNodeInput = Schema.Struct({
 
 /** One node in an `add_subtree` forest — recursive via `Schema.suspend`, which
  *  publishes as a named `$ref`/`$defs` in `tools/list` (ADR 0028). Fresh content
- *  only: text + optional to-do flag + optional nested children. */
-interface SubtreeNodeType {
-  readonly text: string
-  readonly isTask?: boolean | null
-  readonly children?: readonly SubtreeNodeType[] | null
-}
-
-const SubtreeNodeInput: Schema.Codec<SubtreeNodeType> = Schema.Struct({
+ *  only: text + optional to-do flag + optional nested children. The decoded type
+ *  IS the planner's own `SubtreeInput` — one shape, one source. */
+const SubtreeNodeInput: Schema.Codec<SubtreeInput> = Schema.Struct({
   text: Schema.String.annotate({ description: 'The bullet text.' }),
   isTask: optional(
     Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
   ),
   children: optional(
-    Schema.Array(Schema.suspend((): Schema.Codec<SubtreeNodeType> => SubtreeNodeInput)).annotate({
+    Schema.Array(Schema.suspend((): Schema.Codec<SubtreeInput> => SubtreeNodeInput)).annotate({
       description: 'Nested child bullets, each with this same shape.',
     }),
   ),
@@ -450,6 +447,13 @@ export const tools: ReadonlyArray<ToolDef> = [
         // append the forest under the day (position is ignored — always last).
         if (input.date != null) {
           const dateKey = yield* resolveDateKey(input.date)
+          // Validate the forest BEFORE claiming any daily-index ids, so an empty
+          // or over-cap forest can't leave orphan container/day mappings pointing
+          // at nodes we never insert (ADR 0028 all-or-nothing).
+          const sizeError = guardForestSize(input.nodes, MAX_BATCH_NODES)
+          if (sizeError != null) {
+            return yield* Effect.fail(new ToolError({ reason: sizeError.message }))
+          }
           const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
           const dayId = yield* claimDailyId(store, dateKey, createId())
           const index = yield* loadIndex(store)
