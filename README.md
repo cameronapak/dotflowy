@@ -73,7 +73,7 @@ Not built yet: sharing, email verification.
 | Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
 | Data | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
 | Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md)) |
-| Auth | Better Auth (email + password) | Self-serve signup; its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1 |
+| Auth | Better Auth (email + password) | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1 |
 | Validation | Effect Schema | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker |
 | Build | Vite 8 | What Start uses |
 | Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
@@ -110,13 +110,14 @@ bun run cf:dev             # build + wrangler dev
 
 # ship it
 wrangler secret put BETTER_AUTH_SECRET   # once: the auth signing secret
+wrangler secret put INVITE_CODES         # comma-separated invite codes (unset = signup closed)
 bun run db:migrate:remote  # before the first deploy
 bun run deploy             # build + wrangler deploy
 ```
 
 `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
 
-**Auth.** Identity is **Better Auth** (email + password self-serve signup), sessions in D1. The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/adr/0011-the-auth-gate.md).
+**Auth.** Identity is **Better Auth** (email + password), sessions in D1. Signup is **invite-only during alpha**: creating an account requires a code from the `INVITE_CODES` secret (comma-separated; unset = signup closed), and the public `POST /api/waitlist` collects emails from anyone who wants in (viewable by admins — the `ADMIN_EMAILS` var — at `/admin/waitlist`). The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/adr/0011-the-auth-gate.md).
 
 ## How it works
 

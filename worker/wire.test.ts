@@ -19,6 +19,7 @@ import {
   NodesDeleteBody,
   NodesPatchBody,
   NodesPostBody,
+  WaitlistPostBody,
   type Node,
 } from './wire'
 
@@ -142,5 +143,17 @@ describe('kv bodies (/api/kv)', () => {
 
   it('rejects a non-string key in a delete body', () => {
     rejects(KvDeleteBody, { keys: [1] })
+  })
+})
+
+describe('WaitlistPostBody (POST /api/waitlist)', () => {
+  it('accepts an email with an optional source', () => {
+    accepts(WaitlistPostBody, { email: 'a@b.com', source: 'landing' })
+    accepts(WaitlistPostBody, { email: 'a@b.com' })
+  })
+
+  it('rejects a missing or non-string email', () => {
+    rejects(WaitlistPostBody, {})
+    rejects(WaitlistPostBody, { email: 42 })
   })
 })

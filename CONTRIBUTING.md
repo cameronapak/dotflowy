@@ -31,6 +31,8 @@ cp .dev.vars.example .dev.vars
 # then set BETTER_AUTH_SECRET in .dev.vars, e.g.:
 #   openssl rand -base64 32
 # The Worker fails closed without it.
+# Signup is invite-gated (alpha): the example file ships INVITE_CODES=dev-invite,
+# which is the code to use when creating a local account. No codes = signup closed.
 
 # Apply the local D1 schema (auth tables + the legacy import source). Once.
 bun run db:migrate:local
