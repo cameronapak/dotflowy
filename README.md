@@ -166,7 +166,7 @@ See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md) for t
 
 ## Agents (MCP)
 
-The outline is also reachable by AI agents over the [Model Context Protocol](https://modelcontextprotocol.io): point an MCP client at `https://<your-deployment>/mcp` and it walks the standard OAuth flow (sign in with your normal account; the client registers itself). Agents get read tools (`get_outline`, `search_nodes`) and write tools (`add_node`, `update_node`, `delete_node`, `move_nodes`, `add_to_today`, `mirror_node`, `mirror_to_today`); every write lands through the same atomic per-user Durable Object path as the editor, so open tabs see agent edits live. Design + rejected alternatives: [the agent-native MCP server](docs/adr/0026-agent-native-mcp-server.md).
+The outline is also reachable by AI agents over the [Model Context Protocol](https://modelcontextprotocol.io): point an MCP client at `https://<your-deployment>/mcp` and it walks the standard OAuth flow (sign in with your normal account; the client registers itself). Agents get read tools (`get_outline`, `search_nodes`) and write tools (`add_node`, `add_subtree`, `update_node`, `delete_node`, `move_nodes`, `add_to_today`, `mirror_node`, `mirror_to_today`); every write lands through the same atomic per-user Durable Object path as the editor, so open tabs see agent edits live. Design + rejected alternatives: [the agent-native MCP server](docs/adr/0026-agent-native-mcp-server.md).
 
 ## Project layout
 

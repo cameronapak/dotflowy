@@ -11,7 +11,9 @@ import { describe, expect, test } from 'bun:test'
 import { makeNode } from '../src/data/tree'
 import type { ChangeOp, Node } from '../src/data/wire-schema'
 import {
+  BatchTooLarge,
   DAILY_CONTAINER_TEXT,
+  EmptyForest,
   MirrorCycle,
   NodeNotFound,
   RedundantDescendant,
@@ -22,6 +24,8 @@ import {
   formatDayText,
   formatOutlineLines,
   planAddNode,
+  planAddSubtree,
+  planAddSubtreeToDaily,
   planAddToDaily,
   planDeleteNode,
   planEnsureDaily,
@@ -390,6 +394,202 @@ describe('planReparent', () => {
 
   test('listing a node alongside its own moved ancestor is RedundantDescendant', () => {
     expect(move(fixture(), { nodeIds: ['a', 'a1'], newParentId: 'b', position: 'last', timestamp: T })).toBeInstanceOf(RedundantDescendant)
+  })
+})
+
+describe('planAddSubtree', () => {
+  /** A deterministic id factory: n0, n1, n2, ... in emission order. */
+  const idFactory = () => {
+    let i = 0
+    return () => `n${i++}`
+  }
+
+  test('wires a run of sibling roots into one unbroken chain (the trap)', () => {
+    // Three top-level roots under `a`: looping planAddNode over a stale index
+    // would give each the same prevSiblingId (a2) and tear the chain. By
+    // construction each root chains to the previous one.
+    const plan = planAddSubtree(index(fixture()), {
+      nodes: [{ text: 'one' }, { text: 'two' }, { text: 'three' }],
+      parentId: 'a',
+      position: 'last',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    const nodes = inserted(plan.ops)
+    expect(nodes.map((n) => n.id)).toEqual(['n0', 'n1', 'n2'])
+    expect(nodes.map((n) => n.parentId)).toEqual(['a', 'a', 'a'])
+    // First root chains after the parent's existing last child (a2), the rest
+    // chain to their predecessor — no shared predecessor, no self-ref.
+    expect(nodes.map((n) => n.prevSiblingId)).toEqual(['a2', 'n0', 'n1'])
+    expect(plan.rootIds).toEqual(['n0', 'n1', 'n2'])
+    expect(plan.parentId).toBe('a')
+  })
+
+  test('nests children depth-first, each level its own chain', () => {
+    const plan = planAddSubtree(index([]), {
+      nodes: [
+        {
+          text: 'root',
+          children: [
+            { text: 'c1', children: [{ text: 'g1' }, { text: 'g2' }] },
+            { text: 'c2' },
+          ],
+        },
+      ],
+      parentId: null,
+      position: 'last',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    const byId = new Map(inserted(plan.ops).map((n) => [n.id, n]))
+    // n0 root, n1 c1, n2 g1, n3 g2, n4 c2  (depth-first emission order)
+    expect(byId.get('n0')!.parentId).toBeNull()
+    expect(byId.get('n0')!.prevSiblingId).toBeNull()
+    expect(byId.get('n1')!.parentId).toBe('n0')
+    expect(byId.get('n1')!.prevSiblingId).toBeNull()
+    expect(byId.get('n2')!.parentId).toBe('n1')
+    expect(byId.get('n2')!.prevSiblingId).toBeNull()
+    expect(byId.get('n3')!.parentId).toBe('n1')
+    expect(byId.get('n3')!.prevSiblingId).toBe('n2')
+    // c2 is the root's second child, chaining after c1
+    expect(byId.get('n4')!.parentId).toBe('n0')
+    expect(byId.get('n4')!.prevSiblingId).toBe('n1')
+    expect(plan.rootIds).toEqual(['n0'])
+  })
+
+  test('position "first" puts the run at the head and repoints the old head to the run tail', () => {
+    const plan = planAddSubtree(index(fixture()), {
+      nodes: [{ text: 'one' }, { text: 'two' }],
+      parentId: 'a',
+      position: 'first',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    const inserts = inserted(plan.ops)
+    expect(inserts[0]!.prevSiblingId).toBeNull()
+    expect(inserts[1]!.prevSiblingId).toBe('n0')
+    // a's former first child (a1) now follows the LAST root of the run (n1)
+    const repointed = updated(plan.ops)
+    expect(repointed).toHaveLength(1)
+    expect(repointed[0]!.id).toBe('a1')
+    expect(repointed[0]!.prevSiblingId).toBe('n1')
+  })
+
+  test('a mirror parent redirects to its true source', () => {
+    const nodes = [...fixture(), makeNode({ id: 'm', text: 'alpha', mirrorOf: 'a', prevSiblingId: 'b' })]
+    const plan = planAddSubtree(index(nodes), {
+      nodes: [{ text: 'x' }],
+      parentId: 'm',
+      position: 'last',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    expect(inserted(plan.ops)[0]!.parentId).toBe('a')
+    expect(plan.parentId).toBe('a')
+  })
+
+  test('stamps origin onto every authored node, root and descendant', () => {
+    const plan = planAddSubtree(index([]), {
+      nodes: [{ text: 'root', children: [{ text: 'kid' }] }],
+      parentId: null,
+      position: 'last',
+      origin: 'Claude',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    expect(inserted(plan.ops).every((n) => n.origin === 'Claude')).toBe(true)
+  })
+
+  test('empty forest is EmptyForest', () => {
+    expect(
+      planAddSubtree(index(fixture()), {
+        nodes: [],
+        parentId: 'a',
+        position: 'last',
+        timestamp: T,
+        newId: idFactory(),
+        maxNodes: 500,
+      }),
+    ).toBeInstanceOf(EmptyForest)
+  })
+
+  test('a forest over the cap is BatchTooLarge (descendants counted)', () => {
+    // 1 root + 2 children = 3 nodes; cap of 2 must reject.
+    const plan = planAddSubtree(index([]), {
+      nodes: [{ text: 'root', children: [{ text: 'a' }, { text: 'b' }] }],
+      parentId: null,
+      position: 'last',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 2,
+    })
+    expect(plan).toBeInstanceOf(BatchTooLarge)
+  })
+
+  test('a missing parent is NodeNotFound', () => {
+    expect(
+      planAddSubtree(index(fixture()), {
+        nodes: [{ text: 'x' }],
+        parentId: 'ghost',
+        position: 'last',
+        timestamp: T,
+        newId: idFactory(),
+        maxNodes: 500,
+      }),
+    ).toBeInstanceOf(NodeNotFound)
+  })
+
+  test('planAddSubtreeToDaily materializes the day and appends the forest after its last child', () => {
+    const nodes = [
+      ...fixture(),
+      makeNode({ id: 'cont', text: DAILY_CONTAINER_TEXT, prevSiblingId: 'b' }),
+      makeNode({ id: 'day', text: 'Friday, July 3, 2026', parentId: 'cont' }),
+      makeNode({ id: 'existing', text: 'already here', parentId: 'day' }),
+    ]
+    const plan = planAddSubtreeToDaily(index(nodes), {
+      nodes: [{ text: 'one' }, { text: 'two' }],
+      dateKey: '2026-07-03',
+      containerId: 'cont',
+      dayId: 'day',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    const inserts = inserted(plan.ops)
+    expect(inserts.map((n) => n.parentId)).toEqual(['day', 'day'])
+    expect(inserts[0]!.prevSiblingId).toBe('existing')
+    expect(inserts[1]!.prevSiblingId).toBe(inserts[0]!.id)
+    expect(plan.rootIds).toHaveLength(2)
+  })
+
+  test('planAddSubtreeToDaily creates the container + day when absent, then appends', () => {
+    const plan = planAddSubtreeToDaily(index(fixture()), {
+      nodes: [{ text: 'one' }],
+      dateKey: '2026-07-03',
+      containerId: 'cont',
+      dayId: 'day',
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 500,
+    })
+    if (plan instanceof Error) throw plan
+    const ids = inserted(plan.ops).map((n) => n.id)
+    // container + day (materialized) + the one forest node
+    expect(ids).toContain('cont')
+    expect(ids).toContain('day')
+    const entry = inserted(plan.ops).find((n) => n.parentId === 'day' && n.id.startsWith('n'))!
+    expect(entry.prevSiblingId).toBeNull()
   })
 })
 
