@@ -16,3 +16,7 @@ dist
 # (repo root) and the dedicated Effect index at repos/effect-smol/.codegraph/,
 # so a vendored-subtree index never dirties the tree or fights a subtree pull.
 .codegraph/
+
+.impeccable/
+
+.shipstudio/
