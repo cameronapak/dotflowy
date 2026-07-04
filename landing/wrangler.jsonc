@@ -1,0 +1,22 @@
+{
+  // Static marketing site for the apex domain. Assets-only Worker (no `main`):
+  // Cloudflare serves dist/client directly. The app itself lives in a separate
+  // Worker on app.dotflowy.com (see ../wrangler.jsonc).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dotflowy-landing",
+  "compatibility_date": "2026-06-23",
+  // Custom domain declared in code so it survives a fresh deploy. Declaring
+  // `routes` without `workers_dev` disables the *.workers.dev fallback URL, so
+  // dotflowy.com is the only origin.
+  "routes": [{ "pattern": "dotflowy.com", "custom_domain": true }],
+  "assets": {
+    // TanStack Start SPA build output. `build` copies _shell.html -> index.html
+    // so the root resolves.
+    "directory": "./dist/client",
+    // Any unmatched path serves index.html so the client router takes over.
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
