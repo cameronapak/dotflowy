@@ -146,8 +146,6 @@
      scrolls on past. The curated seed fits the frame; overflow just clips. */
   html.demo-embed,
   html.demo-embed body {
-    height: 100%;
-    overflow: hidden;
     overscroll-behavior: auto;
   }
 }
