@@ -19,10 +19,12 @@ import { Input } from "./ui/input";
 /** The OAuth authorize query carried over from /api/auth/mcp/authorize, if
  *  this page load is an OAuth login hop rather than a plain visit. */
 function pendingOAuthQuery(): string | null {
-  const params = new URLSearchParams(window.location.search)
+  const params = new URLSearchParams(window.location.search);
   const isAuthorize =
-    params.has("client_id") && params.has("redirect_uri") && params.has("response_type")
-  return isAuthorize ? params.toString() : null
+    params.has("client_id") &&
+    params.has("redirect_uri") &&
+    params.has("response_type");
+  return isAuthorize ? params.toString() : null;
 }
 
 export function AuthScreen() {
@@ -185,7 +187,7 @@ export function AuthScreen() {
         {isSignup && (
           <p className="mt-2 text-center text-sm text-muted-foreground">
             {waitlist === "done" ? (
-              "You're on the list — an invite will land in your inbox."
+              "You're on the list! An invite will land in your inbox when Dotflowy is ready."
             ) : (
               <>
                 No invite code?{" "}
