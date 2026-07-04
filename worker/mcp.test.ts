@@ -138,6 +138,7 @@ describe('MCP transport', () => {
       'get_outline',
       'search_nodes',
       'add_node',
+      'add_subtree',
       'update_node',
       'delete_node',
       'move_nodes',
@@ -211,6 +212,72 @@ describe('MCP tools', () => {
     // the editor can mark an agent's edit apart from the user's own (write-once).
     expect(insert && insert.op === 'insert' && insert.value.origin).toBe('TestAgent')
     expect(toolText(json)).toContain('Added "new bullet"')
+  })
+
+  test('add_subtree inserts a nested forest as ONE atomic batch, stamping origin on all', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'add_subtree', {
+      parentId: 'a',
+      nodes: [{ text: 'one', children: [{ text: 'one-a' }, { text: 'one-b' }] }, { text: 'two' }],
+    })
+    expect(json.result?.isError).toBeUndefined()
+    expect(fake.batches).toHaveLength(1)
+    const inserts = fake.batches[0]!.flatMap((op) => (op.op === 'insert' ? [op.value] : []))
+    // 2 roots + 2 grandchildren = 4 fresh nodes, all agent-stamped.
+    expect(inserts).toHaveLength(4)
+    expect(inserts.every((n) => n.origin === 'TestAgent')).toBe(true)
+    // The two top-level roots chain, both under a, first after a's existing child.
+    const roots = inserts.filter((n) => n.parentId === 'a')
+    expect(roots).toHaveLength(2)
+    expect(roots[0]!.prevSiblingId).toBe('a1')
+    expect(roots[1]!.prevSiblingId).toBe(roots[0]!.id)
+    // The reply renders the created bullets with their ids.
+    expect(toolText(json)).toContain('one-a')
+    expect(toolText(json)).toContain('(id:')
+  })
+
+  test('add_subtree onto the daily note creates the day and appends the forest', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'add_subtree', {
+      date: '2026-07-03',
+      nodes: [{ text: 'research', children: [{ text: 'finding' }] }],
+    })
+    expect(json.result?.isError).toBeUndefined()
+    expect(fake.batches).toHaveLength(1)
+    // Daily container + day claimed in the kv index.
+    expect(fake.kv.has('container')).toBe(true)
+    expect(fake.kv.has('2026-07-03')).toBe(true)
+    expect(toolText(json)).toContain('Friday, July 3, 2026')
+  })
+
+  test('add_subtree with BOTH parentId and date is a loud isError, nothing written', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'add_subtree', {
+      parentId: 'a',
+      date: '2026-07-03',
+      nodes: [{ text: 'x' }],
+    })
+    expect(json.result?.isError).toBe(true)
+    expect(toolText(json)).toContain('not both')
+    expect(fake.batches).toHaveLength(0)
+  })
+
+  test('add_subtree with a missing parent is isError with no write', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'add_subtree', { parentId: 'ghost', nodes: [{ text: 'x' }] })
+    expect(json.result?.isError).toBe(true)
+    expect(fake.batches).toHaveLength(0)
+  })
+
+  test('add_subtree publishes its recursive input as a named $def', async () => {
+    const { store } = makeStore()
+    const json = (await (await rpc(store, 'tools/list')).json()) as any
+    const addSubtree = json.result.tools.find((t: any) => t.name === 'add_subtree')
+    expect(addSubtree.inputSchema.type).toBe('object')
+    expect(addSubtree.inputSchema.required).toEqual(['nodes'])
+    // The recursive SubtreeNode shape is emitted as a $def and referenced.
+    expect(addSubtree.inputSchema.$defs?.SubtreeNode).toBeDefined()
+    expect(JSON.stringify(addSubtree.inputSchema)).toContain('#/$defs/SubtreeNode')
   })
 
   test('update_node edits fields; delete_node cascades', async () => {

@@ -26,6 +26,8 @@ import {
   isValidDateKey,
   formatOutlineLines,
   planAddNode,
+  planAddSubtree,
+  planAddSubtreeToDaily,
   planAddToDaily,
   planDeleteNode,
   planMirrorNode,
@@ -225,6 +227,52 @@ const AddNodeInput = Schema.Struct({
   ),
 })
 
+/** One node in an `add_subtree` forest — recursive via `Schema.suspend`, which
+ *  publishes as a named `$ref`/`$defs` in `tools/list` (ADR 0028). Fresh content
+ *  only: text + optional to-do flag + optional nested children. */
+interface SubtreeNodeType {
+  readonly text: string
+  readonly isTask?: boolean | null
+  readonly children?: readonly SubtreeNodeType[] | null
+}
+
+const SubtreeNodeInput: Schema.Codec<SubtreeNodeType> = Schema.Struct({
+  text: Schema.String.annotate({ description: 'The bullet text.' }),
+  isTask: optional(
+    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
+  ),
+  children: optional(
+    Schema.Array(Schema.suspend((): Schema.Codec<SubtreeNodeType> => SubtreeNodeInput)).annotate({
+      description: 'Nested child bullets, each with this same shape.',
+    }),
+  ),
+}).annotate({ identifier: 'SubtreeNode' })
+
+const AddSubtreeInput = Schema.Struct({
+  nodes: Schema.Array(SubtreeNodeInput).annotate({
+    description:
+      'The bullets to create, as a nested forest. Each node may carry its own `children`, so a whole outline lands in one call.',
+  }),
+  parentId: optional(
+    Schema.String.annotate({
+      description:
+        'Parent node id to add under. Omit for the top level. Mutually exclusive with `date`.',
+    }),
+  ),
+  date: optional(
+    Schema.String.annotate({
+      description:
+        "Add onto the daily note for this YYYY-MM-DD instead of a parent (pass the user's local date). Mutually exclusive with `parentId`.",
+    }),
+  ),
+  position: optional(
+    Schema.Literals(['first', 'last']).annotate({
+      description:
+        'Insert the forest as the first or last children of the parent (default: last). Ignored for the `date` path, which always appends.',
+    }),
+  ),
+})
+
 const UpdateNodeInput = Schema.Struct({
   nodeId: Schema.String.annotate({ description: 'The node to update.' }),
   text: optional(Schema.String.annotate({ description: 'New bullet text.' })),
@@ -294,6 +342,23 @@ const MirrorToTodayInput = Schema.Struct({
 
 const MAX_OUTLINE_NODES = 500
 const MAX_SEARCH_HITS = 25
+/** One `add_subtree` batch = one DO `transactionSync` = one sync frame; cap the
+ *  forest at the same ceiling an agent hits reading back (ADR 0028). */
+const MAX_BATCH_NODES = 500
+
+/** Render a freshly-planned forest as the agent-facing bullet list with ids —
+ *  built from the plan's own insert ops, so no extra read of the store. */
+const renderCreatedForest = (ops: ReadonlyArray<ChangeOp>, rootIds: ReadonlyArray<string>): string => {
+  const created = buildTreeIndex(ops.flatMap((o) => (o.op === 'insert' ? [o.value] : [])))
+  const lines = rootIds.flatMap((id) => {
+    const r = flattenSubtree(created, id, {
+      maxDepth: Number.POSITIVE_INFINITY,
+      maxNodes: MAX_BATCH_NODES,
+    })
+    return r instanceof Error ? [] : r.lines
+  })
+  return formatOutlineLines(lines)
+}
 
 export const tools: ReadonlyArray<ToolDef> = [
   {
@@ -364,6 +429,64 @@ export const tools: ReadonlyArray<ToolDef> = [
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
           : 'at the top level'
         return `Added "${input.text}" ${where} (id: ${plan.nodeId}).`
+      }),
+  },
+  {
+    name: 'add_subtree',
+    description:
+      "Add a whole nested outline — a forest of bullets, each with its own children — in ONE atomic call. Use this instead of many add_node calls when building structure. Target a parent (parentId), the top level (omit both), or the user's daily note (date). Returns the created bullets with their ids.",
+    input: AddSubtreeInput,
+    readOnly: false,
+    handle: (input: typeof AddSubtreeInput.Type, store, origin) =>
+      Effect.gen(function* () {
+        if (input.parentId != null && input.date != null) {
+          return yield* Effect.fail(
+            new ToolError({ reason: 'pass either parentId or date, not both' }),
+          )
+        }
+        const timestamp = yield* clock
+
+        // Daily path: claim the container + day ids atomically, then ensure-and-
+        // append the forest under the day (position is ignored — always last).
+        if (input.date != null) {
+          const dateKey = yield* resolveDateKey(input.date)
+          const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
+          const dayId = yield* claimDailyId(store, dateKey, createId())
+          const index = yield* loadIndex(store)
+          const plan = yield* unwrap(
+            planAddSubtreeToDaily(index, {
+              nodes: input.nodes,
+              dateKey,
+              containerId,
+              dayId,
+              origin,
+              timestamp,
+              newId: createId,
+              maxNodes: MAX_BATCH_NODES,
+            }),
+          )
+          yield* commit(store, plan.ops)
+          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`
+        }
+
+        // Parent (or top-level) path.
+        const index = yield* loadIndex(store)
+        const plan = yield* unwrap(
+          planAddSubtree(index, {
+            nodes: input.nodes,
+            parentId: input.parentId ?? null,
+            position: input.position ?? 'last',
+            origin,
+            timestamp,
+            newId: createId,
+            maxNodes: MAX_BATCH_NODES,
+          }),
+        )
+        yield* commit(store, plan.ops)
+        const where = plan.parentId
+          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
+          : 'at the top level'
+        return `Added ${plan.rootIds.length} top-level bullet(s) ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`
       }),
   },
   {

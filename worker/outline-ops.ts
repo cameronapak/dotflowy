@@ -81,6 +81,22 @@ export class RedundantDescendant extends Data.TaggedError('RedundantDescendant')
   }
 }
 
+/** A batch-insert forest with more nodes than one atomic frame may carry
+ *  (ADR 0028). One `applyBatch` is one DO `transactionSync`; the cap keeps an
+ *  agent from dropping thousands of rows in a single frame. */
+export class BatchTooLarge extends Data.TaggedError('BatchTooLarge')<{ count: number; max: number }> {
+  get message() {
+    return `too many nodes: ${this.count} exceeds the ${this.max}-node batch limit — split into smaller add_subtree calls`
+  }
+}
+
+/** `add_subtree` was handed no nodes — nothing to create (ADR 0028). */
+export class EmptyForest extends Data.TaggedError('EmptyForest')<Record<never, never>> {
+  get message() {
+    return 'nothing to add — pass at least one node'
+  }
+}
+
 // --- Node construction --------------------------------------------------------
 
 /** A complete wire node with caller-supplied identity + clock. `makeNode` owns
@@ -464,6 +480,126 @@ export function planReparent(
   return { ops, movedIds: nodeIds, parentId }
 }
 
+// --- Subtree (batch insert) planning ------------------------------------------
+
+/** A node to create in a batch, with its own nested children — the recursive
+ *  shape the `add_subtree` tool accepts. Fresh content only: no id (the caller
+ *  mints them), no mirror, no completed/collapsed state (ADR 0028). */
+export interface SubtreeInput {
+  text: string
+  isTask?: boolean | null
+  children?: readonly SubtreeInput[] | null
+}
+
+/** Total node count of a forest (roots + every descendant), for the size cap. */
+function countForest(nodes: readonly SubtreeInput[]): number {
+  let n = 0
+  const stack: SubtreeInput[] = [...nodes]
+  while (stack.length) {
+    const node = stack.pop()!
+    n++
+    if (node.children) stack.push(...node.children)
+  }
+  return n
+}
+
+/**
+ * Emit a forest depth-first under `parentId`, chaining each node's
+ * `prevSiblingId` to the previously-emitted sibling AT ITS LEVEL. The first root
+ * chains from `firstPrev` (the parent's existing anchor sibling, or null).
+ *
+ * CORRECT BY CONSTRUCTION (ADR 0028): the wiring reads NOTHING from the tree
+ * index — the caller handed us the whole shape, so sibling order comes from the
+ * emission order, not from `childrenOf`. This is why the batch tool does NOT
+ * loop `planAddNode` (which re-reads the stale last-sibling each call and would
+ * give every new root the same predecessor, tearing the chain).
+ */
+function emitForest(
+  nodes: readonly SubtreeInput[],
+  parentId: string | null,
+  firstPrev: string | null,
+  origin: string | null | undefined,
+  timestamp: number,
+  newId: () => string,
+): { ops: ChangeOp[]; rootIds: string[] } {
+  const ops: ChangeOp[] = []
+  const walk = (siblings: readonly SubtreeInput[], parent: string | null, initialPrev: string | null): string[] => {
+    const ids: string[] = []
+    let prev = initialPrev
+    for (const input of siblings) {
+      const id = newId()
+      ops.push({
+        op: 'insert',
+        value: newNode({
+          id,
+          parentId: parent,
+          prevSiblingId: prev,
+          text: input.text,
+          isTask: input.isTask ?? false,
+          origin,
+          timestamp,
+        }),
+      })
+      ids.push(id)
+      if (input.children && input.children.length) walk(input.children, id, null)
+      prev = id
+    }
+    return ids
+  }
+  return { ops, rootIds: walk(nodes, parentId, firstPrev) }
+}
+
+/**
+ * Insert a whole nested forest under `parentId` (null = top level) in ONE batch
+ * — the batch twin of `planAddNode`. Interior links are wired by construction
+ * (`emitForest`); only the top-level run reads the parent's existing children to
+ * anchor, reusing `planAddNode`'s first/last rule: `last` chains the run after
+ * the current last child; `first` puts it at the head and repoints the old head
+ * to the run's LAST root. A mirror parent redirects to its true source (ADR
+ * 0022). Fails the whole call on an empty forest, an over-cap payload, or a
+ * missing parent — all-or-nothing, matching the one-frame model (ADR 0009).
+ */
+export function planAddSubtree(
+  index: TreeIndex,
+  args: {
+    nodes: readonly SubtreeInput[]
+    parentId: string | null
+    position: 'first' | 'last'
+    origin?: string | null
+    timestamp: number
+    newId: () => string
+    maxNodes: number
+  },
+): { ops: ChangeOp[]; rootIds: string[]; parentId: string | null } | NodeNotFound | EmptyForest | BatchTooLarge {
+  const count = countForest(args.nodes)
+  if (count === 0) return new EmptyForest()
+  if (count > args.maxNodes) return new BatchTooLarge({ count, max: args.maxNodes })
+
+  let parentId: string | null = null
+  if (args.parentId !== null) {
+    if (!index.byId.has(args.parentId)) return new NodeNotFound({ nodeId: args.parentId })
+    parentId = trueSourceOf(index, args.parentId)
+  }
+
+  const siblings = childrenOf(index, parentId)
+  const head = args.position === 'first' ? (siblings[0] ?? null) : null
+  const firstPrev =
+    args.position === 'first' ? null : siblings.length ? siblings[siblings.length - 1]!.id : null
+
+  const { ops, rootIds } = emitForest(
+    args.nodes,
+    parentId,
+    firstPrev,
+    args.origin,
+    args.timestamp,
+    args.newId,
+  )
+  if (head) {
+    ops.push(updateOp(head, { prevSiblingId: rootIds[rootIds.length - 1]! }, args.timestamp))
+  }
+  return { ops, rootIds, parentId }
+}
+
 // --- Daily-note planning ------------------------------------------------------
 // The daily plugin's identity model, server-side: the `daily-index` kv
 // side-collection maps `container` -> the "Daily" container node and a local
@@ -608,6 +744,36 @@ export function planAddToDaily(
     }),
   })
   return { ops, nodeId: args.newNodeId }
+}
+
+/** Ensure the day exists, then append a whole nested forest as its LAST children
+ *  — one combined batch for `add_subtree`'s `date` path. Always appends
+ *  (position is a `parentId`-path concept); the size cap is enforced here too so
+ *  the daily path can't smuggle an over-cap payload past it (ADR 0028). */
+export function planAddSubtreeToDaily(
+  index: TreeIndex,
+  args: {
+    nodes: readonly SubtreeInput[]
+    dateKey: string
+    containerId: string
+    dayId: string
+    origin?: string | null
+    timestamp: number
+    newId: () => string
+    maxNodes: number
+  },
+): { ops: ChangeOp[]; rootIds: string[] } | EmptyForest | BatchTooLarge {
+  const count = countForest(args.nodes)
+  if (count === 0) return new EmptyForest()
+  if (count > args.maxNodes) return new BatchTooLarge({ count, max: args.maxNodes })
+
+  const { ops } = planEnsureDaily(index, args)
+  // A pre-existing day may already have children; a just-planned one can't.
+  const siblings = index.byId.has(args.dayId) ? childrenOf(index, args.dayId) : []
+  const firstPrev = siblings.length ? siblings[siblings.length - 1]!.id : null
+  const emitted = emitForest(args.nodes, args.dayId, firstPrev, args.origin, args.timestamp, args.newId)
+  ops.push(...emitted.ops)
+  return { ops, rootIds: emitted.rootIds }
 }
 
 /** Ensure the day exists, then mirror `sourceId` as its LAST child — one
