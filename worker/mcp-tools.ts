@@ -490,7 +490,8 @@ export const tools: ReadonlyArray<ToolDef> = [
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
           : 'at the top level'
-        return `Added ${plan.rootIds.length} top-level bullet(s) ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`
+        const kind = plan.parentId ? 'bullet(s)' : 'top-level bullet(s)'
+        return `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`
       }),
   },
   {
