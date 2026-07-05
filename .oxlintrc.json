@@ -5,6 +5,25 @@
     "correctness": "error"
   },
   "rules": {},
+  "overrides": [
+    {
+      "files": ["src/plugins/**/*.ts", "src/plugins/**/*.tsx"],
+      "excludeFiles": ["src/plugins/kit.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@/components/ui/*", "**/components/ui/*"],
+                "message": "Import blessed UI from '@/plugins/kit' (the curated Lane-A shadcn surface, ADR 0031), not directly from components/ui."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
   "env": {
     "builtin": true
   },

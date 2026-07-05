@@ -1,6 +1,5 @@
 import { X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge, Button } from "@/plugins/kit";
 import { useTagFilter } from "./use-tag-filter";
 
 function TagPill({

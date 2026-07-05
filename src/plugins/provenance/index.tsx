@@ -19,11 +19,7 @@
 // hover; the mark itself stays quiet.
 
 import { SparkleIcon } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
 import type { Node } from "../../data/tree";
 import { definePlugin } from "../types";
 import { cn } from "@/lib/utils";

@@ -280,7 +280,7 @@ The editor is a clean core extended by **plugins** — modules compiled into the
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `NodeProtection`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
 - **`index.ts`** — the one explicit ordered array `plugins = [code, links, routeBible, tags, emphasis, todos, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
-- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `pluginStyles`, `registerWidget`). The core consumes these and stays generic.
+- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `registerWidget`). The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
 
@@ -304,7 +304,7 @@ Feature → seams: **code** A · **links** A+B+I · **route-bible** A(widget)+B 
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineNode`; the `/` palette still runs `useSlashMenu` (only its command *list* is registry-driven).
 
-**Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans.
+**Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans. **Plugin UI comes from `src/plugins/kit.ts`** — the curated shadcn surface a Lane-A plugin may use (ADR 0031); a plugin importing `@/components/ui/*` directly is an oxlint error (`no-restricted-imports` override on `src/plugins/**`). Add a component to the kit when a plugin needs it; there is no plugin `styles` seam (style via Tailwind utilities on your `El`/JSX).
 
 ## Tag filtering + colors (`src/plugins/tags/`)
 
@@ -342,7 +342,7 @@ Bold / italic / strikethrough / underline — `**b**`, `*i*`, `~~s~~`, `~u~` (Be
 - **Fold = the link atom, reused verbatim.** A run folds to `<em data-src="*i*" contenteditable="false">i</em>` — the exact `data-src` atom shape a folded link uses, so `readSource` + the source-offset caret math handle it with **zero new machinery** (keyed on `data-src`, ADR 0001 D6). No `inline-code.ts` changes. This is why emphasis is a `folds: true` `TokenSpec`, not a bespoke shape.
 - **Reveal = real, walk-through markers.** When the caret is within/adjacent (`revealOffset ∈ [start, end]`) the run swaps to `*<em>i</em>*` where the `*` are **real, dimmed `.md-punct` text** OUTSIDE the styled tag — so the caret steps through the fence one char at a time and can land at `*i|*`. Same reveal watcher as links; the fold/reveal focus+blur guard in **both** render paths (`OutlineRow`/`OutlineNode`) is now the generic **`hasFoldingToken`**, not `hasLink`.
 - **Precedence coupling.** `**`/`*` and `~~`/`~` share a leading char, so bold (30) + strike (31) sit before italic (32) + underline (33) in the combined regex (double-char wins on overlap). v1 is FLAT — no nesting, no `***triple***`. The single-tilde `~underline~` collides with the "approximately" tilde by design (Bear parity; creation is Cmd+U/`/underline`, so it's rarely hand-typed).
-- **Creation:** Seam C (`/bold` etc.) + Seam D (`Mod+B`/`Mod+I`/`Mod+U`/`Mod+Shift+X`, all browser-native contentEditable commands the keymap's preventDefault overrides) via `wrap.ts` (source-space wrap-or-insert). First plugin to use the `styles` seam. Search/display flatten via `flattenInline` (`src/data/inline-text.ts` = `stripEmphasis ∘ stripLinks`). Covered by `e2e/emphasis.spec.ts`.
+- **Creation:** Seam C (`/bold` etc.) + Seam D (`Mod+B`/`Mod+I`/`Mod+U`/`Mod+Shift+X`, all browser-native contentEditable commands the keymap's preventDefault overrides) via `wrap.ts` (source-space wrap-or-insert). Styles its tags with Tailwind utilities on the token `El` (the `util` field) — there is no plugin `styles` seam (ADR 0031 retired raw plugin CSS). Search/display flatten via `flattenInline` (`src/data/inline-text.ts` = `stripEmphasis ∘ stripLinks`). Covered by `e2e/emphasis.spec.ts`.
 - **Inline code shares this model.** The `code` plugin (`` `code` ``) is now a `folds: true` token too — backticks hide, reveal as dimmed `.md-punct` text INSIDE the `<code>` box on proximity (was: always-visible backticks). Same atom-when-folded shape, no extra core machinery. `e2e/inline-code.spec.ts`.
 
 ## Environment gotcha: adding a React-importing dependency

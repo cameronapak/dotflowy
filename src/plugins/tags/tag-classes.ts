@@ -1,4 +1,4 @@
-import { badgeVariants } from "@/components/ui/badge-variants";
+import { badgeVariants } from "@/plugins/kit";
 import { cn } from "@/lib/utils";
 
 /** Inline `#tag` chip in bullet text (Seam A — injected as HTML, not `<Badge>`). */

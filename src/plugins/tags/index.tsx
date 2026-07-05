@@ -13,7 +13,7 @@ import {
   type MenuTrigger,
   type PluginContext,
 } from "../types";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/plugins/kit";
 import { TAG_CHIP_CLASS } from "./tag-classes";
 import { TagFilterSubheader } from "./filter-bar";
 import { addTagToFilter } from "./use-tag-filter";
