@@ -152,12 +152,19 @@ export function MobileActionsBar({
         aria-label="Editing actions"
         data-mobile-bar
         className={cn(
-          "flex items-center gap-1 rounded-full px-1.5 py-1",
+          // max-w-full + overflow-x-auto: on a narrow / browser-zoomed viewport the
+          // pill can't outgrow the padded outer (the outer's px-3 keeps it off the
+          // screen edges), and if the buttons don't fit it scrolls horizontally
+          // instead of clipping. Buttons are shrink-0, so they keep their 44px
+          // targets and the strip scrolls rather than squashing; justify-start (the
+          // flex default) keeps the leftmost button reachable when it does scroll.
+          "flex max-w-full items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
           // Frosted-glass material: translucent, blurred, hairline edge + soft
           // shadow (depth from shadow, not a hard border) — the iOS accessory
           // pill's grammar, resolved through our own theme tokens so it adapts to
-          // light/dark. mb-1.5 floats it off the very bottom edge.
-          "mb-1.5 border border-border/50 bg-background/80 shadow-lg backdrop-blur-xl",
+          // light/dark. A more see-through now (/50). mb-1.5 floats it off
+          // the very bottom edge.
+          "mb-1.5 border border-border/50 bg-background/50 shadow-lg backdrop-blur-xl",
           "ring-1 ring-black/5 dark:ring-white/10",
         )}
       >
