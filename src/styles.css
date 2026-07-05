@@ -736,6 +736,25 @@ h2.zoomed-title {
   @apply line-through;
 }
 
+/*
+ * Empty-bullet caret placement. `.node-text` is a block, and any before-text
+ * decoration (the todo checkbox, daily/provenance badges) floats left ahead of
+ * it inside `.row-body`. For a NON-empty node the first line is shortened by the
+ * float, so text sits after the decoration; but an EMPTY editable's caret is
+ * drawn at the element's own content origin (x=0), which lands BEFORE the float
+ * -- a pseudo-element can't move it, since the caret only tracks editable
+ * content. Giving the empty span its own block formatting context (`flow-root`)
+ * places its border box BESIDE the float (a BFC can't overlap a float's margin
+ * box), so its content origin -- and the caret -- sits after the checkbox while
+ * the span still fills the remaining row width (click target intact). Reverts to
+ * a plain block the instant a character is typed, leaving the multiline
+ * wrap-under-icons behavior on real text untouched. The ::before keeps the empty
+ * line's box height so the caret renders at full height.
+ */
+.node-text:empty {
+  display: flow-root;
+}
+
 .node-text:empty::before {
   content: "";
   display: inline-block;
