@@ -21,6 +21,13 @@ const MIRRORS_KEY = "dotflowy:flag:mirrors";
 // "off" is the escape hatch if a regression turns up.
 const MIRRORS_DEFAULT = true;
 
+const MOBILE_BAR_KEY = "dotflowy:flag:mobile-bar";
+
+// Compiled default ON. The mobile actions bar (ADR 0030) ships to touch users;
+// localStorage "off" is the escape hatch (and the e2e lever). Deleted once
+// dogfooded, same lifecycle as `isVirtualized`.
+const MOBILE_BAR_DEFAULT = true;
+
 /**
  * Whether the editor renders the flat, windowed outline (Phase B) instead of the
  * recursive DOM tree. Read at render time. SSR/prerender has no window and never
@@ -55,4 +62,21 @@ export function isMirrorsEnabled(): boolean {
     // localStorage can throw (private mode / disabled); fall back to the default.
   }
   return MIRRORS_DEFAULT;
+}
+
+/**
+ * Whether the mobile actions bar (ADR 0030) is compiled in. The bar only ever
+ * MOUNTS on a coarse pointer (checked at render); this flag is the rollback
+ * escape hatch and e2e lever, same localStorage shape as {@link isVirtualized}.
+ */
+export function isMobileBar(): boolean {
+  if (typeof window === "undefined") return MOBILE_BAR_DEFAULT;
+  try {
+    const v = window.localStorage.getItem(MOBILE_BAR_KEY);
+    if (v === "on") return true;
+    if (v === "off") return false;
+  } catch {
+    // localStorage can throw (private mode / disabled); fall back to the default.
+  }
+  return MOBILE_BAR_DEFAULT;
 }
