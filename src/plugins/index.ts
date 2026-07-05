@@ -10,6 +10,7 @@ import code from "./code";
 import daily from "./daily";
 import emphasis from "./emphasis";
 import links from "./links";
+import nodeLinks from "./node-links";
 import provenance from "./provenance";
 import routeBible from "./route-bible";
 import tags from "./tags";
@@ -25,6 +26,7 @@ export const plugins: PluginDef[] = [
   provenance,
   code,
   links,
+  nodeLinks,
   routeBible,
   tags,
   emphasis,

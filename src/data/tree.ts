@@ -1,4 +1,5 @@
 import type { Node } from './schema'
+import { parseNodeLinks } from './node-links'
 import { orderSiblings } from './sibling-chain'
 
 export type { Node } from './schema'
@@ -28,6 +29,14 @@ export interface TreeIndex {
    * `mirrorOf` is null), so it costs nothing today.
    */
   mirrorsBySource: Map<string, string[]>
+  /**
+   * Reverse LINK index (ADR 0032): a target node's id -> ids of the nodes whose
+   * TEXT links to it (`[[targetId]]` tokens, parsed by node-links.ts). Derived,
+   * never stored on the target; deduped by referring node. Built here and
+   * maintained incrementally in tree-store.ts. Powers the zoomed view's
+   * "{n} backlinks" chrome. Empty for a link-free outline.
+   */
+  linksByTarget: Map<string, string[]>
 }
 
 /** Synthetic parent id for top-level nodes (those with parentId === null). */
@@ -69,7 +78,19 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     else mirrorsBySource.set(node.mirrorOf, [node.id])
   }
 
-  return { childrenByParent, byId, mirrorsBySource }
+  // Reverse link index (ADR 0032): bucket each referrer under every node its
+  // text links to. parseNodeLinks bails on link-free text, so this pass costs
+  // one `includes` per node when no links exist.
+  const linksByTarget = new Map<string, string[]>()
+  for (const node of nodes) {
+    for (const target of parseNodeLinks(node.text)) {
+      const list = linksByTarget.get(target)
+      if (list) list.push(node.id)
+      else linksByTarget.set(target, [node.id])
+    }
+  }
+
+  return { childrenByParent, byId, mirrorsBySource, linksByTarget }
 }
 
 export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {

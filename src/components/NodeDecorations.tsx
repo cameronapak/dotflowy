@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
 import { slotsAt } from "../plugins/registry";
-import { flattenInline } from "../data/inline-text";
+import { flattenNodeText } from "../data/node-links";
+import { getTreeIndex } from "../data/tree-store";
 import { SheetHeader, SheetTitle } from "./ui/sheet";
 import type { Node } from "../data/tree";
 import type { PluginContext, SlotPosition } from "../plugins/types";
@@ -31,7 +32,9 @@ function NodeOverflowPanel({
   return (
     <>
       <SheetHeader>
-        <SheetTitle>{flattenInline(node.text) || "Untitled"}</SheetTitle>
+        <SheetTitle>
+          {flattenNodeText(getTreeIndex(), node.text) || "Untitled"}
+        </SheetTitle>
       </SheetHeader>
       <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
         {slots.map((slot) => (

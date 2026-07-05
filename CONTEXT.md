@@ -20,6 +20,14 @@ _Avoid_: original, master, target
 Any one rendering of a node's content at a location. The source is an instance; each mirror is an instance. Instances are equal for editing — there is no read-only one.
 _Avoid_: occurrence, appearance
 
+**Link**:
+An inline reference to another node, stored in the referring node's text. A link is a pointer you travel through — click it and you go to the target — never a window into the target's content. Contrast with Mirror, which makes content live in two places; a link only points.
+_Avoid_: wiki-link, mention, internal link
+
+**Backlink**:
+The reverse view of a link: from a node, the set of nodes whose text links to it. Derived from links, never stored on the target.
+_Avoid_: reference (too generic), citation
+
 **Render path**:
 The chain of node ids from the current view root down to a rendered row. A row's identity (its key, its focus/caret/drag address) — distinct from the node id, because the same node can render at more than one path once mirrors exist.
 _Avoid_: trail (that's the ancestor breadcrumb, a different walk)
