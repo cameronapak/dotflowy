@@ -62,7 +62,9 @@ function ProvenanceMark({
         <SparkleIcon
           className={cn([
             "text-muted-foreground",
-            placement === "row" && "size-4 mt-1.5",
+            // Row vertical alignment is the shared `.outline-row [data-origin]`
+            // rule (scales with reading size, ADR 0029); only fix the icon size.
+            placement === "row" && "size-4",
             placement === "title" && "size-5 mt-2 mr-2",
           ])}
           aria-label={label}

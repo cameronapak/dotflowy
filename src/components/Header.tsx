@@ -36,8 +36,9 @@ export function Header({
         {/* Right cluster: plugin header slots lead (the daily Today button),
             then the focused-node action (BookmarkStar renders itself + its
             trailing divider only when zoomed), then search, and finally the
-            "More" overflow holding the secondary set-once actions (theme, show
-            completed, sign out). See header-more-menu.tsx for the v1/v2 split. */}
+            "More" overflow holding the secondary set-once actions (theme, text
+            size, show completed, sign out). See header-more-menu.tsx for the
+            v1/v2 split. */}
         <div className="flex shrink-0 items-center gap-1">
           {getCtx &&
             headerSlots.map((s) => (

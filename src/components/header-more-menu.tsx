@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ALargeSmallIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
   LogOutIcon,
@@ -29,6 +30,7 @@ import {
 import { signOut } from "../lib/auth-client";
 import { useShowCompleted } from "./show-completed-provider";
 import { useTheme } from "./theme-provider";
+import { useTextSize, type TextSize } from "./text-size-provider";
 import { outlineToMarkdown } from "../data/markdown";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
@@ -58,9 +60,9 @@ async function copyOutlineAsMarkdown() {
 
 /**
  * Header overflow ("More") menu. Holds the secondary, set-once controls --
- * theme, show-completed, sign out -- so the header bar keeps only the primary,
- * frequently reached actions (search, the contextual bookmark star, plugin
- * header slots).
+ * theme, text size (ADR 0029), show-completed, sign out -- so the header bar
+ * keeps only the primary, frequently reached actions (search, the contextual
+ * bookmark star, plugin header slots).
  *
  * This is the static v1 of the header-action overflow: the pinned/overflow
  * split is a fixed default. User-customizable pinning (Chrome-extension style)
@@ -72,6 +74,7 @@ async function copyOutlineAsMarkdown() {
  */
 export function HeaderMoreMenu() {
   const { theme, setTheme } = useTheme();
+  const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   // The connect dialog is a sibling of the menu (not nested in its content) so
   // it survives the menu closing on item select.
@@ -124,6 +127,29 @@ export function HeaderMoreMenu() {
                 <DropdownMenuRadioItem value="system">
                   <MonitorIcon />
                   System
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <ALargeSmallIcon />
+              Text size
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup
+                value={textSize}
+                onValueChange={(value) => setTextSize(value as TextSize)}
+              >
+                <DropdownMenuRadioItem value="small">
+                  Small
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="default">
+                  Default
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="large">
+                  Large
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>

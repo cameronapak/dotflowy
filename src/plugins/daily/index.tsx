@@ -231,7 +231,8 @@ function DailyBadge({
       variant={isToday ? "default" : "secondary"}
       className={cn([
         "shrink-0 border!",
-        placement === "row" && "mt-1",
+        // Row vertical alignment is the shared `.outline-row [data-daily-date]`
+        // rule (scales with reading size, ADR 0029); title keeps its own nudge.
         placement === "title" && "mt-2",
         isToday ? "border-transparent" : "border-border",
       ])}

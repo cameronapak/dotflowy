@@ -237,8 +237,10 @@
   user-select: none;
 }
 
+/* 12px lock glyph; K=2.25px aligns it to the text optical center while scaling
+   with the reading size (ADR 0029). */
 .outline-row .protected-lock {
-  margin-top: 8px;
+  margin-top: calc(var(--reading-line-box) / 2 - 2.25px);
 }
 
 h2 span.protected-lock {
@@ -406,7 +408,11 @@ h2 span.protected-lock {
 .collapse-toggle {
   position: absolute;
   left: -15px;
-  top: 3px;
+  /* Absolutely positioned, so it aligns via `top` (not margin) -- but to the
+     same text optical center as the bullet, scaling with the reading size. The
+     24px box centers the chevron, so top = optical center - half the box
+     (ADR 0029). */
+  top: calc(var(--reading-line-box) / 2 - 6.25px);
   width: 16px;
   height: 24px;
   padding: 0;
@@ -471,7 +477,7 @@ h2 span.protected-lock {
 }
 
 .bullet {
-  @apply size-4 flex items-center justify-center bg-transparent transition duration-150 p-0 border-none mt-1.5;
+  @apply size-4 flex items-center justify-center bg-transparent transition duration-150 p-0 border-none;
   flex: 0 0 auto;
   cursor: pointer;
   display: flex;
@@ -515,25 +521,66 @@ h2 span.protected-lock {
   @apply bg-muted-foreground/50;
 }
 
+/*
+ * Leading-decoration vertical alignment (ADR 0029). Every glyph/pill before the
+ * text aligns to the text's OPTICAL center (its x-height midline), NOT the
+ * geometric line-box center -- text mass sits low in the line box, so pure
+ * geometric centering reads ~2.5px high (measured, near-constant across sizes).
+ * The margin scales with half the line box (tracks the reading size); the
+ * subtracted K folds in each glyph's half-height AND that 2.5px optical nudge.
+ * Fixed-height glyphs (bullet/checkbox/provenance = 16px) share K=4.25px.
+ */
+.outline-row .bullet,
+.outline-row .checkbox,
+.outline-row [data-origin] {
+  margin-top: calc(var(--reading-line-box) / 2 - 4.25px);
+}
+
+/*
+ * Coarse-pointer touch targets (ADR 0029). On touch the bullet's tap target was
+ * only 16px wide (the touch-hitbox expands height to 44px but leaves width at
+ * the control's size). Grow the bullet box + dot toward a comfortable ~24px --
+ * a full 44px WIDTH would overlap the chevron and text caret (see the
+ * touch-hitbox note) -- and open the row's vertical rhythm so caret taps land.
+ */
+@media (pointer: coarse) {
+  .outline-row {
+    padding: 6px 4px;
+  }
+  .bullet {
+    width: 24px;
+    height: 24px;
+    /* The box grew 8px, so the dot centers 4px lower in it -- K rises 4.25->7.25
+       to keep the dot on the text optical center while still scaling (ADR 0029). */
+    margin-top: calc(var(--reading-line-box) / 2 - 7.25px);
+  }
+  .bullet-dot {
+    width: 9px;
+    height: 9px;
+  }
+}
+
 .checkbox {
   flex: 0 0 auto;
   cursor: pointer;
 }
 
 /* The list row is `align-items: flex-start`, so the checkbox needs a nudge onto
-   the text baseline. The zoomed title is flex-centered (and renders the same
-   checkbox via the title slot), so it must NOT inherit this -- scope it to the
-   row. Mirrors the daily badge's row-only `mt-1`. */
-.outline-row .checkbox {
-  margin-top: 6px;
+   the first text line. It rides the shared 16px-glyph rule above (bullet /
+   checkbox / provenance, K=6.75px) so it scales with the reading size; the
+   zoomed title is flex-centered and keeps its own `h2.zoomed-title .checkbox`
+   rule. */
+
+/* The mirror badge is a 20px (`h-5`) bordered pill; K=5.25px aligns it to the
+   text optical center while scaling with the reading size (ADR 0029). */
+.outline-row .mirror-badge {
+  margin-top: calc(var(--reading-line-box) / 2 - 5.25px);
 }
 
-/* The mirror badge is a bordered pill in the same flex-start row; left at the
-   top it reads as jammed into the row's top edge, and a fixed margin would need
-   per-height tuning (cf. the checkbox's 6px and the daily badge's `mt-1`, each
-   tuned to its own height). */
-.outline-row .mirror-badge {
-  @apply mt-1.25;
+/* The daily date badge is a 20px (`h-5`) pill; K=6.25px aligns it to the text
+   optical center while scaling with the reading size (ADR 0029). */
+.outline-row [data-daily-date] {
+  margin-top: calc(var(--reading-line-box) / 2 - 6.25px);
 }
 
 h2.zoomed-title {
@@ -570,6 +617,29 @@ h2.zoomed-title {
   margin-right: 6px;
 }
 
+/*
+ * Reading size (ADR 0029). One lever scales the outline's body text and,
+ * proportionally, the zoomed page title. Driven by `data-text-size` on <html>
+ * (text-size-provider.tsx + the no-flash script in __root.tsx); absent = the
+ * 17px default baseline. The old default was the inherited 16px with tight
+ * ~1.25 leading -- 17px + 1.5 leading is the new floor for every user.
+ */
+:root {
+  --reading-font-size: 17px;
+  /* The first-line box height (font-size x line-height). Leading decorations
+     center on it via `calc(var(--reading-line-box) / 2 - Kpx)` so their vertical
+     offset tracks the reading size instead of a margin frozen at the old 16px
+     line -- K is each glyph's historical default nudge, so DEFAULT is unchanged
+     and only the scaling is added (ADR 0029). */
+  --reading-line-box: calc(var(--reading-font-size) * 1.5);
+}
+:root[data-text-size="small"] {
+  --reading-font-size: 15px;
+}
+:root[data-text-size="large"] {
+  --reading-font-size: 19px;
+}
+
 .node-text {
   /* Block, not the span default inline: an inline contentEditable only spans
      its text, killing click-to-focus in the empty space after it. (In the
@@ -578,7 +648,9 @@ h2.zoomed-title {
   display: block;
   flex: 1 1 auto;
   min-height: 24px;
-  padding: 2px 0;
+  padding: 3px 0;
+  font-size: var(--reading-font-size);
+  line-height: 1.5;
   outline: none;
   white-space: pre-wrap;
   word-break: break-word;
@@ -911,7 +983,10 @@ body.dragging-active * {
 }
 
 .zoomed-title-text {
-  font-size: 24px;
+  /* Scales with the reading-size lever (ADR 0029). 1.4x the body size keeps the
+     title ~24px at the default (17px) -- its historical value -- while tracking
+     Small/Large so the title never dwarfs or drowns in the body text. */
+  font-size: calc(var(--reading-font-size) * 1.4);
   line-height: 1.3;
   /* Inherits `display: block` from .node-text -- deliberately NOT the old
      inline-block: an atomic inline-block box can't flow line-by-line around

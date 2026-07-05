@@ -6,6 +6,7 @@ import {
   Scripts,
 } from '@tanstack/react-router'
 import { ThemeProvider } from '../components/theme-provider'
+import { TextSizeProvider } from '../components/text-size-provider'
 import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
 import { MoveDialog } from '../components/move-dialog'
@@ -16,7 +17,7 @@ import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
 import { FAVICON_DARK, FAVICON_LIGHT } from '../lib/favicon'
-import { LEGACY_THEME_KEY, THEME_KEY } from '../lib/storage-keys'
+import { LEGACY_THEME_KEY, THEME_KEY, TEXT_SIZE_KEY } from '../lib/storage-keys'
 import '../styles.css'
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -44,6 +45,19 @@ const noFlashThemeScript = `
 })();
 `
 
+// Runs before first paint so the outline never flashes the default reading size
+// then resizes. Mirrors text-size-provider.tsx (same storage key + attribute).
+const noFlashTextSizeScript = `
+(function () {
+  try {
+    var s = localStorage.getItem('${TEXT_SIZE_KEY}');
+    if (s === 'small' || s === 'large') {
+      document.documentElement.setAttribute('data-text-size', s);
+    }
+  } catch (e) {}
+})();
+`
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -59,16 +73,18 @@ function RootComponent() {
   return (
     <RootDocument>
       <ThemeProvider>
-        <AuthGate>
-          <ShowCompletedProvider>
-            <Outlet />
-            <NodeSwitcher />
-            <MoveDialog />
-            <MirrorPlaces />
-            <TagColorStyles />
-            <PluginStyles />
-          </ShowCompletedProvider>
-        </AuthGate>
+        <TextSizeProvider>
+          <AuthGate>
+            <ShowCompletedProvider>
+              <Outlet />
+              <NodeSwitcher />
+              <MoveDialog />
+              <MirrorPlaces />
+              <TagColorStyles />
+              <PluginStyles />
+            </ShowCompletedProvider>
+          </AuthGate>
+        </TextSizeProvider>
         {/* Outside the gate so auth-screen errors can still toast. */}
         <Toaster />
       </ThemeProvider>
@@ -100,6 +116,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
           id="dotflowy-favicon"
         />
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: noFlashTextSizeScript }} />
         <HeadContent />
       </head>
       <body>
