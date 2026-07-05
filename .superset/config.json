@@ -1,4 +1,4 @@
 {
   "setup": ["./.superset/setup.sh"],
-  "run": ["./.superset/run.sh"]
+  "run": ["bun run cf:dev"]
 }
