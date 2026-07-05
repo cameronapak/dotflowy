@@ -1,11 +1,15 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
-  Check,
-  ChevronDown,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import {
   Indent,
   Outdent,
   Redo2,
-  Slash,
+  SquareCheck,
+  SquareSlash,
   Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,8 +29,6 @@ export interface MobileBarActions {
   /** Insert a literal "/" at the caret so the row's own detectSlash opens the
    *  command palette (insert-and-open, not a toggle). */
   insertSlash: () => void;
-  /** Blur the focused span to dismiss the software keyboard. */
-  dismiss: () => void;
 }
 
 /** A coarse pointer ("this is a finger"). Mirrors use-mobile.ts's store shape. */
@@ -69,28 +71,27 @@ function useOutlineEditing(findFocusedId: () => string | null): boolean {
 /**
  * One toolbar button. `onPointerDown` + `preventDefault` keeps the caret and
  * keyboard alive across the tap (a plain click would blur the span and drop the
- * button's target). The dismiss button reuses this and its `run` is the lone
- * `el.blur()` — the preventDefault still fires, so the tap is deterministic.
+ * button's target) — EVERY button does this now; there is no blur/dismiss button,
+ * since iOS's own "Done" and Android's back gesture already dismiss the keyboard
+ * (ADR 0030). `scale(0.96)` on press gives the tap tactile feedback.
  */
 function BarButton({
   label,
   onRun,
   children,
-  className,
 }: {
   label: string;
   onRun: () => void;
   children: ReactNode;
-  className?: string;
 }) {
   return (
     <button
       type="button"
       aria-label={label}
       className={cn(
-        "flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-foreground/80",
+        "flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-foreground/80",
+        "transition-transform duration-100 ease-out active:scale-[0.96]",
         "active:bg-accent active:text-accent-foreground",
-        className,
       )}
       onPointerDown={(e) => {
         // Keep focus on the contentEditable — see the component doc.
@@ -104,7 +105,7 @@ function BarButton({
 }
 
 function Divider() {
-  return <span className="mx-0.5 h-6 w-px shrink-0 bg-border" aria-hidden />;
+  return <span className="mx-0.5 h-6 w-px shrink-0 bg-border/60" aria-hidden />;
 }
 
 /**
@@ -112,6 +113,12 @@ function Divider() {
  * pointer and shows ONLY while a bullet is focused; rides above the software
  * keyboard via visualViewport. Presence = pointer, visibility = focus, position =
  * viewport — three orthogonal signals, kept separate on purpose.
+ *
+ * Styled as a floating frosted-glass CAPSULE, not a full-width edge bar, so it
+ * reads as a sibling of iOS's own keyboard accessory pill (which the web can't
+ * remove) rather than a second bar fighting it: same shape grammar (inset, big
+ * radius, translucent, soft shadow), our app-action tier above their system tier.
+ * We match the FAMILY, not iOS's exact tokens (those drift per OS version).
  */
 export function MobileActionsBar({
   actions,
@@ -124,59 +131,60 @@ export function MobileActionsBar({
   const editing = useOutlineEditing(findFocusedId);
   const keyboardOffset = useKeyboardViewport();
 
-  // Presence gate: a mouse user never mounts the bar (the CSS @media below is a
-  // second line of defense). Visibility gate: no bar without a focused bullet, so
-  // every action has a valid target by construction.
+  // Presence gate: a mouse user never mounts the bar. Visibility gate: no bar
+  // without a focused bullet, so every action has a valid target by construction.
   if (!coarse || !editing) return null;
 
   return (
+    // Outer layer owns positioning: fixed to the bottom, lifted above the software
+    // keyboard by the visualViewport gap, and the safe-area pad when it sits at the
+    // real bottom (no keyboard). The pill inside centers within this.
     <div
-      role="toolbar"
-      aria-label="Editing actions"
-      data-mobile-bar
-      className={cn(
-        "fixed inset-x-0 bottom-0 z-40 flex items-center gap-1 overflow-x-auto",
-        "border-t border-border bg-background/95 px-2 py-1 backdrop-blur",
-        "transition-transform duration-200 ease-out",
-      )}
+      className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 transition-transform duration-200 ease-out"
       style={{
         transform: `translateY(-${keyboardOffset}px)`,
-        // Only pad for the home-indicator safe area when the bar sits at the real
-        // bottom (no keyboard shrinking the viewport); when lifted above the
-        // keyboard the keyboard itself covers that inset.
         paddingBottom:
           keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined,
       }}
     >
-      <BarButton label="Outdent" onRun={actions.outdent}>
-        <Outdent className="size-5" />
-      </BarButton>
-      <BarButton label="Indent" onRun={actions.indent}>
-        <Indent className="size-5" />
-      </BarButton>
-      <Divider />
-      <BarButton label="Undo" onRun={actions.undo}>
-        <Undo2 className="size-5" />
-      </BarButton>
-      <BarButton label="Redo" onRun={actions.redo}>
-        <Redo2 className="size-5" />
-      </BarButton>
-      <Divider />
-      <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
-        <Check className="size-5" />
-      </BarButton>
-      <BarButton label="Command menu" onRun={actions.insertSlash}>
-        <Slash className="size-5" />
-      </BarButton>
-      {/* Dismiss is pushed to the far right so a mistap doesn't land on it and
-          collapse the keyboard mid-edit. */}
-      <BarButton
-        label="Close keyboard"
-        onRun={actions.dismiss}
-        className="ms-auto"
+      <div
+        role="toolbar"
+        aria-label="Editing actions"
+        data-mobile-bar
+        className={cn(
+          "flex items-center gap-1 rounded-full px-1.5 py-1",
+          // Frosted-glass material: translucent, blurred, hairline edge + soft
+          // shadow (depth from shadow, not a hard border) — the iOS accessory
+          // pill's grammar, resolved through our own theme tokens so it adapts to
+          // light/dark. mb-1.5 floats it off the very bottom edge.
+          "mb-1.5 border border-border/50 bg-background/80 shadow-lg backdrop-blur-xl",
+          "ring-1 ring-black/5 dark:ring-white/10",
+        )}
       >
-        <ChevronDown className="size-5" />
-      </BarButton>
+        <BarButton label="Outdent" onRun={actions.outdent}>
+          <Outdent className="size-5" />
+        </BarButton>
+        <BarButton label="Indent" onRun={actions.indent}>
+          <Indent className="size-5" />
+        </BarButton>
+        <Divider />
+        <BarButton label="Undo" onRun={actions.undo}>
+          <Undo2 className="size-5" />
+        </BarButton>
+        <BarButton label="Redo" onRun={actions.redo}>
+          <Redo2 className="size-5" />
+        </BarButton>
+        <Divider />
+        {/* A boxed check, deliberately NOT a bare ✓ — iOS's accessory pill shows a
+            bare "Done" check right below, and two identical checks that mean
+            different things (complete-bullet vs dismiss-keyboard) read as a bug. */}
+        <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
+          <SquareCheck className="size-5" />
+        </BarButton>
+        <BarButton label="Command menu" onRun={actions.insertSlash}>
+          <SquareSlash className="size-5" />
+        </BarButton>
+      </div>
     </div>
   );
 }

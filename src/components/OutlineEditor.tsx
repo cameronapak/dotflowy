@@ -1139,8 +1139,6 @@ function useMobileBarActions({
         if (!focusedEl()) return;
         document.execCommand("insertText", false, "/");
       },
-      // The lone focus-preservation exception: dismissing the keyboard IS a blur.
-      dismiss: () => focusedEl()?.blur(),
     };
   }, [refs, findFocusedId, pendingFocus, commands]);
 }

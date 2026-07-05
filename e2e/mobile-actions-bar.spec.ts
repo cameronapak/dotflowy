@@ -128,17 +128,17 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(page.locator('[role="listbox"]')).toBeVisible();
   });
 
-  test("dismiss blurs the bullet and hides the bar", async ({ page }) => {
+  test("blur hides the bar (system Done / back dismisses the keyboard)", async ({
+    page,
+  }) => {
+    // There is no dismiss button (iOS's own Done / Android's back cover it, ADR
+    // 0030); blurring the bullet is what hides the bar. Simulate the dismiss by
+    // blurring the focused span directly.
     await load(page);
     await text(page, "alpha").click();
     await expect(bar(page)).toBeVisible();
-    await btn(page, "Close keyboard").click();
-    // Blur drops focus -> the visibility gate hides the bar.
+    await text(page, "alpha").evaluate((el) => (el as HTMLElement).blur());
     await expect(bar(page)).toHaveCount(0);
-    const focused = await text(page, "alpha").evaluate(
-      (el) => el === document.activeElement,
-    );
-    expect(focused).toBe(false);
   });
 });
 
