@@ -550,13 +550,84 @@ h2 span.protected-lock {
   .bullet {
     width: 24px;
     height: 24px;
-    /* The box grew 8px, so the dot centers 4px lower in it -- K rises 4.25->7.25
-       to keep the dot on the text optical center while still scaling (ADR 0029). */
-    margin-top: calc(var(--reading-line-box) / 2 - 7.25px);
+  }
+  /* The box grew 8px, so the dot centers 4px lower in it -- K rises 4.25->8.25
+     (desktop K + boxGrowth/2) to keep the dot on the SAME text optical center as
+     the fine-pointer bullet while still scaling (ADR 0029). MUST be
+     `.outline-row .bullet` (0,1,1), not `.bullet` (0,1,0): the base optical-align
+     rule is `.outline-row .bullet` and a media query adds NO specificity, so a
+     bare `.bullet` here silently loses to it and the coarse offset never lands. */
+  .outline-row .bullet {
+    margin-top: calc(var(--reading-line-box) / 2 - 8.25px);
   }
   .bullet-dot {
     width: 9px;
     height: 9px;
+  }
+
+  /*
+   * Right-edge chevron (ADR 0029, Workflowy-mobile parity). CSS-only relocation:
+   * the same absolutely-positioned .collapse-toggle flips from the left gutter
+   * (left:-15px) to the row's right edge. Because <li> is width:100% with depth
+   * as paddingInlineStart, right:0 lands on the viewport edge at every depth --
+   * one clean chevron column. Its touch-hitbox ::before (right:0, 44px, growing
+   * leftward) now grows into the reserved right padding below, not the margin.
+   *
+   * Vertical re-alignment: the chevron is `position:absolute`, so its `top` is
+   * measured from .outline-row's PADDING box, while the bullet and text are flex
+   * items measured from the CONTENT box. The desktop `top` (K=6.25) silently
+   * folds in the 2px desktop row padding; at coarse's 6px padding the chevron
+   * would ride 4px too HIGH relative to the content, so add that 4px back
+   * (6.25 - 4 = 2.25) to land it on the same optical center as the bullet/text.
+   * Ties to the coarse `.outline-row { padding: 6px 4px }` above -- keep in step.
+   */
+  .collapse-toggle {
+    left: auto;
+    right: 0;
+    top: calc(var(--reading-line-box) / 2 - 2.25px);
+  }
+
+  /*
+   * Accordion chevron direction (right edge only). In the left gutter the
+   * chevron reads as a tree twisty: collapsed points right, expanded rotates to
+   * down. On the RIGHT edge that right-pointing rest state reads wrong -- a
+   * right-side disclosure is an accordion, so it points DOWN when collapsed
+   * ("expand below") and UP when expanded ("collapse"): a 180deg flip, the
+   * Material/iOS expansion-panel convention. Base glyph is a ChevronRight, so
+   * collapsed = rotate(90) (down), expanded = rotate(-90) (up).
+   *
+   * Prefixed with `.outline-row` on purpose: the base rule
+   * `.collapse-toggle[data-collapsed="false"] svg` is (0,2,1) and a media query
+   * adds NO specificity, so a bare `.collapse-toggle svg` here would lose to it
+   * for expanded rows and the flip never lands -- the same trap as the coarse
+   * bullet margin above. `.outline-row .collapse-toggle svg` is (0,2,1) and the
+   * expanded override (0,3,1) both out-rank it.
+   */
+  .outline-row .collapse-toggle svg {
+    transform: rotate(90deg);
+  }
+  .outline-row .collapse-toggle[data-collapsed="false"] svg {
+    transform: rotate(-90deg);
+  }
+
+  /*
+   * A childless row still renders an EMPTY .collapse-toggle button whose 44px
+   * hitbox would otherwise sit at the right edge and swallow taps meant for
+   * tap-to-edit (a childless collapse is a no-op). Remove it so those taps fall
+   * through to the row-body handler. `:not([data-has-children="true"])` also
+   * covers the broken-mirror leaf, which carries no data-has-children at all.
+   */
+  .collapse-toggle:not([data-has-children="true"]) {
+    display: none;
+  }
+
+  /*
+   * Reserve room so wrapped text never runs under the right-edge chevron. The
+   * text cell shrinks by the chevron's tap zone; a tap in this reserved band is
+   * dead space -> tap-to-edit, consistent with the rest of the row.
+   */
+  .row-body {
+    padding-inline-end: 44px;
   }
 }
 
@@ -972,7 +1043,8 @@ body.dragging-active * {
 }
 
 .zoomed-title {
-  margin: 0 0 14px;
+  /* This inline start padding on mobile is meant to compensate for visual alignment*/
+  @apply max-sm:ps-1;
   font-weight: 600;
   /* Still flex, but the single item is now the .row-body cell (mirroring
      .outline-row): the leading decorations float inside it, so a long wrapped

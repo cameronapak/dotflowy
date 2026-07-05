@@ -33,6 +33,7 @@ import {
 } from "./paste";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
+import { focusTextFromRowTap } from "./caret-place";
 
 interface OutlineNodeProps {
   // The node id. The node itself and its visible children are read reactively
@@ -324,7 +325,15 @@ function OutlineNodeBody({
             float left inside it (a flex item can't float, hence the wrapper),
             shortening only the first line box. Menus stay outside -- they
             position against .outline-row. Mirrors OutlineRow. */}
-        <div className="row-body">
+        {/* Tap-to-edit (ADR 0029): dead-space tap (target === currentTarget)
+            focuses the text and drops a caret. Mirrors OutlineRow. */}
+        <div
+          className="row-body"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            focusTextFromRowTap(textRef.current, e.clientX, e.clientY);
+          }}
+        >
           {beforeTextSlots.map((slot) => (
             <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
           ))}

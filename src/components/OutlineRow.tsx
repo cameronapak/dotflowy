@@ -40,7 +40,11 @@ import {
 } from "./paste";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
-import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
+import {
+  focusTextFromRowTap,
+  placeCaretAtEnd,
+  placeCaretAtStart,
+} from "./caret-place";
 import { flashRow } from "./flash-node";
 import type { NodeCommands } from "./OutlineNode";
 
@@ -425,7 +429,16 @@ function RowChrome({
             float left inside it (a flex item can't float, hence the wrapper),
             shortening only the first line box. Menus stay outside -- they
             position against .outline-row. */}
-        <div className="row-body">
+        {/* Tap-to-edit (ADR 0029): a tap on the cell's DEAD SPACE (target ===
+            currentTarget, so never the text/links/chips/slots -- those are
+            children) focuses the text and drops a caret at the tapped point. */}
+        <div
+          className="row-body"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            focusTextFromRowTap(textRef.current, e.clientX, e.clientY);
+          }}
+        >
           {beforeTextSlots.map((slot) => (
             <Fragment key={slot.id}>{slot.render(content, pluginCtx)}</Fragment>
           ))}

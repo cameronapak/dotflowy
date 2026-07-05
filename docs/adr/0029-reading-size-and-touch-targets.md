@@ -21,6 +21,11 @@ status: accepted
    the `touch-hitbox` only ever expanded it *vertically* to 44px) and rows gain vertical padding, so
    zoom taps and caret taps stop missing on mobile.
 
+4. **Right-edge chevron + tap-to-edit (coarse pointer, added later).** A second increment, modelled on
+   Workflowy mobile: on coarse pointers the collapse chevron moves from the left gutter to the row's
+   **right edge**, and tapping a row's dead space (not just the text glyphs) places a caret. Desktop
+   (fine pointer) is untouched — it keeps the left hover-reveal chevron.
+
 **Why a preference at all, and why device-local.** The trigger was the owner running the app at
 browser zoom **125%** — Dotflowy-specific, not a global browsing habit — which is whole-UI zoom used
 as a blunt instrument for "text too small." A single global default can't satisfy both "don't
@@ -51,6 +56,57 @@ and the text caret (right), 6px away on each side; a 44px-*wide* target overlaps
 them for taps (the existing CSS comment documents exactly this). Phase 1 grows the bullet to a
 pragmatic ~24px on coarse pointers — a large improvement over 16px with zero overlap risk — and
 leaves full-width tap routing (e.g. a coarse-pointer row-left hit region) to a later pass.
+
+**Why the chevron goes right on touch (increment 4), and how.** Two reasons it belongs on the right,
+both Workflowy-mobile-proven: (a) it frees the left gutter to a single, unambiguous thumb target —
+the bullet (zoom/drag) — instead of two 6px-apart controls fighting for taps; (b) a right-pinned
+chevron forms one clean column at every depth (`<li>` is `width:100%` with depth as
+`paddingInlineStart`, so the row's right edge is the viewport edge regardless of nesting). It is
+**scoped to `@media (pointer: coarse)`** — a mouse user, even in a narrow window, keeps the left
+hover-reveal chevron that Dotflowy's clean-margin desktop aesthetic depends on; pointer type, not
+viewport width, is the honest "this is a finger" signal (and it is the seam ADR 0029 already uses).
+The move is **CSS-only, no DOM reorder**: `.collapse-toggle` stays first in source order (tab order
+sane, both render paths — `OutlineRow` live + `OutlineNode` rollback — move for free off the shared
+class) and flips from `left:-15px` to `right:0` under the media query, with `padding-inline-end`
+reserved on the row so wrapped text never runs under it. Its `::before` tap target spans full row
+height × 44px. On the right edge the chevron also **changes semantics**: the left-gutter glyph is a
+tree twisty (collapsed points right, expanded rotates to down), but a right-side disclosure reads as
+an **accordion** — so under the media query it points **down when collapsed** ("expand below") and
+**up when expanded** ("collapse"), a 180° flip matching the Material/iOS expansion-panel convention
+(the user's own framing: "it should be pointing downwards, like an accordion, since it's on the right
+side"). Same specificity trap as the bullet margin below: the rotation override is written
+`.outline-row .collapse-toggle[data-collapsed="false"] svg` so it out-ranks the base `(0,2,1)` rotate
+rule the media query cannot. Guarded by an accordion-direction assertion (reads the rendered transform
+matrix, not a class) in `e2e/mobile-touch-rows.spec.ts`. **Vertical-alignment gotcha:** the chevron is `position:absolute`, so its `top` is
+measured from `.outline-row`'s *padding* box, while the bullet and text are flex items measured from
+the *content* box; the desktop `top` calc silently folds in the 2px desktop row padding, so when
+coarse padding grows to 6px the chevron rides 4px too high and must add that delta back (`K` 6.25 →
+2.25) to re-share the bullet/text optical center. Same reason the coarse bullet's `K` rises 4.25 →
+8.25 when its box grows 16 → 24px — **but that coarse bullet margin MUST be written as
+`.outline-row .bullet` (0,1,1), not a bare `.bullet` (0,1,0)**: a media query adds no specificity, so
+a bare selector silently loses to the base `.outline-row .bullet` optical-align rule and the coarse
+offset never lands (the dot drops ~4px, aligned only when DevTools' inspector flips the emulated
+pointer back to fine). Keep these tied to the coarse `.outline-row` padding — change one, re-check the
+others. Guarded by a numeric alignment assertion in `e2e/mobile-touch-rows.spec.ts`.
+
+*(A companion tweak, obvious from the code so not elaborated here: the `max-w-[720px]` column's
+horizontal padding drops 24 → 16px under the `sm` breakpoint via `max-sm:px-4` — width-gated, not
+pointer-gated, since it is about screen real estate, and applied to all four column spots (outline +
+its fallback, Header, Subheader) so they stay aligned.)*
+
+**Why tap-to-edit, and why on both pointer types.** Tapping the empty band of a row and having
+nothing happen is the actual touch frustration (the text glyph is a narrow target); placing a caret
+from a dead-space tap is also plain standard-editor behavior (Notion, Workflowy desktop, every code
+editor), so scoping it to touch would make *desktop* feel broken by comparison — hence **both**
+pointers. Robustness comes from three choices: it reuses the existing cross-browser `caretFromPoint`
+(standard API + WebKit fallback, already used for vertical caret motion); the handler lives on
+`.row-body` and guards on **`e.target === e.currentTarget`**, so — because `.row-body` is a block and
+the text is an inline `.node-text` span — dead space hits the block *directly* while text, folded
+links, chips, checkboxes, and badges hit those children, excluding every interactive element with no
+`closest()` walk; and it touches zero hot-path typing code (one `onClick`, caret via `caretFromPoint`
+with an end-of-text fallback). It leaves node drag-select (starts on the text span) and bullet drag
+(on the dot) untouched, and focusing this way is consistent with the ADR 0018 selection-exclusivity
+model (focus clears a node selection).
 
 **Rejected alternatives.**
 - **Bump the global font-size to match 125%.** Overshoots every non-complaining user on n=1 evidence;

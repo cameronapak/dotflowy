@@ -251,7 +251,7 @@ A second editing mode that selects whole **nodes** (not text), so one action hit
 ## Zoom + view transitions
 
 Clicking a bullet zooms it to a temporary root. Two rules:
-- **The dot zooms (click) and drags (press + move); collapse/expand is the hover chevron** in the left gutter. Don't move zoom onto the collapse control.
+- **The dot zooms (click) and drags (press + move); collapse/expand is the chevron** — in the **left gutter** (hover-reveal) on a fine pointer, relocated to the row's **right edge** on `@media (pointer: coarse)` (Workflowy-mobile parity, CSS-only, ADR 0029). Don't move zoom onto the collapse control.
 - **`rootId` is route-owned** (`routes/index.tsx` → `null`, `routes/$nodeId.tsx` → `nodeId`); don't add editor-local zoom state.
 
 It's URL-driven via the route; the pivot morphs with a `view-transition-name`. Screenshots can't verify view transitions — see *Verifying UI changes* below.
