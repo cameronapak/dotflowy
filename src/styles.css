@@ -920,6 +920,18 @@ body.dragging-active * {
   gap: 4px;
   font-size: 12px;
   min-width: 0;
+  /* When the trail is wider than its (narrow, mobile) container, scroll it
+     horizontally instead of squishing each crumb to a single letter. The trail
+     is still capped by the "…" collapse, so this scroll is always short.
+     `overscroll-behavior-x: contain` stops a horizontal swipe from triggering
+     the browser's back-navigation gesture. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.breadcrumb::-webkit-scrollbar {
+  display: none;
 }
 
 .breadcrumb .crumb {
@@ -927,6 +939,9 @@ body.dragging-active * {
   align-items: center;
   gap: 4px;
   min-width: 0;
+  /* Never shrink below the crumb's own (already ellipsis-capped) width -- the
+     container scrolls instead. This is what stops the single-letter squish. */
+  flex: 0 0 auto;
 }
 
 .breadcrumb .sep {
@@ -938,7 +953,9 @@ body.dragging-active * {
 .breadcrumb .crumb-link {
   @apply text-muted-foreground;
   text-decoration: none;
-  max-width: 220px;
+  /* Cap each crumb so one long title can't dominate; the `42vw` clamp keeps a
+     single crumb from eating a narrow viewport, while desktop keeps the 220px. */
+  max-width: min(220px, 42vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -961,18 +978,32 @@ body.dragging-active * {
   @apply text-primary underline;
 }
 
-/* Home and the collapsed "…" never shrink; only long crumbs truncate. */
+/* Nothing shrinks -- the row scrolls instead (see .breadcrumb). Long crumb
+   *text* still ellipsis-truncates via the max-width above. */
 .breadcrumb > .crumb-link {
   flex: 0 0 auto;
 }
 
-.breadcrumb .crumb {
-  flex: 0 1 auto;
-}
-
 .breadcrumb .crumb-collapsed {
   flex: 0 0 auto;
-  position: relative;
+}
+
+/* Mobile compact form (Home > … > direct parent). Home and the "…" stay fixed;
+   the single parent crumb flex-shrinks to fill the leftover width and ellipsizes,
+   so Home is ALWAYS visible and the row never needs to scroll. */
+.breadcrumb[data-compact] .crumb {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.breadcrumb[data-compact] .crumb-collapsed {
+  flex: 0 0 auto;
+}
+
+.breadcrumb[data-compact] .crumb-link {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
 }
 
 /* The "…" control: a small pill that reads as the collapsed middle. */
@@ -987,60 +1018,13 @@ body.dragging-active * {
   line-height: 0;
 }
 
-.breadcrumb .crumb-ellipsis:hover,
-.breadcrumb .crumb-collapsed:focus-within .crumb-ellipsis {
+.breadcrumb .crumb-ellipsis:hover {
   @apply text-primary;
 }
 
-/* Dropdown of hidden ancestors. CSS-driven: shown on hover or keyboard focus. */
-.breadcrumb .crumb-dropdown {
-  @apply absolute shadow-lg rounded-lg bg-card!;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 20;
-  display: none;
-  flex-direction: column;
-  min-width: 160px;
-  max-width: 280px;
-  padding: 4px;
-}
-
-/* Invisible bridge across the gap between the "…" button and the panel, so the
-   dropdown stays open while the mouse travels from one to the other. */
-.breadcrumb .crumb-dropdown::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  height: 6px;
-}
-
-.breadcrumb .crumb-collapsed:hover .crumb-dropdown,
-.breadcrumb .crumb-collapsed:focus-within .crumb-dropdown {
-  display: flex;
-}
-
-.breadcrumb .crumb-dropdown-item {
-  display: block;
-  width: 100%;
-  padding: 5px 8px;
-  border: none;
-  border-radius: 5px;
-  background: none;
-  font: inherit;
-  @apply text-muted-foreground;
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.breadcrumb .crumb-dropdown-item:hover,
-.breadcrumb .crumb-dropdown-item:focus-visible {
-  @apply bg-secondary text-primary;
-}
+/* The hidden-ancestors panel is now the shared Base UI dropdown menu (portaled
+   to the body), so the old CSS-positioned .crumb-dropdown rules are gone -- a
+   positioned panel would be clipped by the breadcrumb's horizontal overflow. */
 
 .zoomed-title {
   /* This inline start padding on mobile is meant to compensate for visual alignment*/

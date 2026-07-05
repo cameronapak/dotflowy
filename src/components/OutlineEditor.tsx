@@ -124,7 +124,14 @@ import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import { useShowCompleted } from "./show-completed-provider";
 import { openMoveDialog } from "./move-dialog-opener";
 import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { openLinkAtCaret } from "./link-keymap";
+import { useIsMobile } from "../hooks/use-mobile";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
 // history state, so the incoming view knows which element to name -- and so it
@@ -1600,15 +1607,50 @@ function BreadcrumbTrail({
   rootId: string | null;
   onNavigate: (toRootId: string | null, pivot: string) => void;
 }) {
-  // Only collapse when at least two crumbs would be hidden — folding a single
-  // crumb into a "…" saves no space.
-  const collapse = trail.length > LEADING + TRAILING + 1;
-  const lead = collapse ? trail.slice(0, LEADING) : trail;
-  const hidden = collapse ? trail.slice(LEADING, trail.length - TRAILING) : [];
-  const tail = collapse ? trail.slice(trail.length - TRAILING) : [];
+  // Two collapse shapes:
+  //  - Mobile: a fixed, always-fits form -- Home > … > direct parent. Everything
+  //    between Home and the immediate parent folds into the "…" menu, so the two
+  //    anchors that matter (root + parent) are always visible and the row never
+  //    needs to scroll.
+  //  - Desktop: has room, so keep more context -- the first ancestor + the last
+  //    two, folding only the deep middle (collapse fires at 5+ ancestors).
+  const isMobile = useIsMobile();
+  let lead: Node[];
+  let hidden: Node[];
+  let tail: Node[];
+  if (isMobile) {
+    // Drop the focused node itself -- it's the page title right below -- so the
+    // trail ends at the direct parent: Home > … > parent.
+    const ancestors = trail.slice(0, -1);
+    lead = [];
+    hidden = ancestors.slice(0, -1); // [] until there are 2+ ancestors
+    tail = ancestors.slice(-1); // the direct parent (empty only at the top level)
+  } else {
+    // Only collapse when at least two crumbs would be hidden — folding a single
+    // crumb into a "…" saves no space.
+    const collapse = trail.length > LEADING + TRAILING + 1;
+    lead = collapse ? trail.slice(0, LEADING) : trail;
+    hidden = collapse ? trail.slice(LEADING, trail.length - TRAILING) : [];
+    tail = collapse ? trail.slice(trail.length - TRAILING) : [];
+  }
+
+  // Safety net for the desktop trail: if a narrowed window still overflows, the
+  // row scrolls horizontally (rather than squishing crumbs) and lands on the
+  // deepest crumb. The mobile compact form never needs this -- it flex-shrinks
+  // the single parent crumb to fit (see .breadcrumb[data-compact] in styles.css).
+  const navRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = navRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [rootId, trail.length]);
 
   return (
-    <nav className="breadcrumb" aria-label="Breadcrumb">
+    <nav
+      ref={navRef}
+      className="breadcrumb"
+      aria-label="Breadcrumb"
+      data-compact={isMobile ? "" : undefined}
+    >
       {/* Zooming out: the current root is the pivot (title -> list item). */}
       <Button
         type="button"
@@ -1630,7 +1672,7 @@ function BreadcrumbTrail({
             onNavigate={onNavigate}
           />
         ))}
-      {rootId && collapse && (
+      {rootId && hidden.length > 0 && (
         <CollapsedCrumbs
           hidden={hidden}
           rootId={rootId}
@@ -1674,9 +1716,12 @@ function Crumb({
 }
 
 /**
- * The collapsed middle of a deep trail. The "…" button reveals the hidden
- * ancestors in a dropdown on hover or keyboard focus (CSS-driven via
- * :hover / :focus-within, so no open/close state to manage).
+ * The collapsed middle of a deep trail. The "…" opens the hidden ancestors in a
+ * dropdown menu. Uses the shared Base UI menu (like the header's More menu) so
+ * its panel is *portaled* to the body -- essential here, since the breadcrumb is
+ * a horizontal scroll container and a CSS-positioned panel would be clipped by
+ * its overflow. Portaling also gives touch (tap-to-open), keyboard navigation,
+ * and menu ARIA for free.
  */
 function CollapsedCrumbs({
   hidden,
@@ -1690,27 +1735,38 @@ function CollapsedCrumbs({
   return (
     <span className="crumb crumb-collapsed">
       <ChevronRight className="sep" size={13} strokeWidth={2} />
-      <button
-        type="button"
-        className="crumb-ellipsis"
-        aria-label="Show hidden breadcrumbs"
-        aria-haspopup="menu"
-      >
-        <MoreHorizontal size={14} strokeWidth={2} />
-      </button>
-      <div className="crumb-dropdown" role="menu">
-        {hidden.map((ancestor) => (
-          <button
-            key={ancestor.id}
-            type="button"
-            role="menuitem"
-            className="crumb-dropdown-item"
-            onClick={() => onNavigate(ancestor.id, rootId)}
-          >
-            {ancestor.text || "Untitled"}
-          </button>
-        ))}
-      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              className="crumb-ellipsis"
+              aria-label="Show hidden breadcrumbs"
+            >
+              <MoreHorizontal size={14} strokeWidth={2} />
+            </button>
+          }
+        />
+        {/* Explicit width overrides the shared content's `w-(--anchor-width)`,
+            which would otherwise pin the panel to the tiny "…" trigger's width.
+            Near-full-viewport on mobile, capped at 22rem on desktop; each label
+            ellipsis-truncates within it. */}
+        <DropdownMenuContent
+          align="start"
+          className="w-[min(22rem,calc(100vw-1.5rem))]"
+        >
+          {hidden.map((ancestor) => (
+            <DropdownMenuItem
+              key={ancestor.id}
+              onClick={() => onNavigate(ancestor.id, rootId)}
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {ancestor.text || "Untitled"}
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </span>
   );
 }
