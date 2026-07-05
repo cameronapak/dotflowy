@@ -659,6 +659,100 @@ body.dragging-active * {
   font-size: 13px;
 }
 
+/*
+ * Loading spinner + first-load reveal. Kills the first-render flash where the
+ * outline painted zero rows and then jumped to the full tree the instant sync
+ * landed. See OutlineLoading.tsx and useSyncReady (collection.ts).
+ *
+ * The spinner wrapper fades in on a DELAY: for the ~140ms before it, animation-
+ * fill-mode `both` holds the `from` frame (opacity 0), so a fast snapshot (the
+ * common case) swaps to real content before the spinner is ever visible -- no
+ * spinner flash. Only a genuinely slow load reveals it.
+ */
+.outline-loading {
+  display: flex;
+  justify-content: center;
+  padding-top: 44px;
+  animation: loading-appear 200ms ease-out 140ms both;
+}
+
+@keyframes loading-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.outline-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid var(--muted-foreground);
+  /* One transparent edge is what reads as a spinner rather than a ring. */
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.5;
+  animation: outline-spin 0.65s linear infinite;
+}
+
+@keyframes outline-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * The real content's one-shot entrance, applied ONLY when it directly replaces a
+ * skeleton (revealOnLoad in OutlineEditor) -- never on a zoom, which owns its own
+ * morph. It runs on the wrapper, so it's a single container fade, never per row:
+ * zero cost on the virtualized keystroke path.
+ */
+.outline-reveal {
+  animation: outline-reveal 260ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes outline-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * Reduced motion: keep the spinner's DELAY (so a fast load still shows nothing,
+ * no flash) but drop the fade and the spin -- a full ring gently pulsing opacity
+ * instead of rotating -- and make the reveal instant.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .outline-loading {
+    animation-duration: 1ms;
+  }
+
+  .outline-spinner {
+    border-right-color: var(--muted-foreground);
+    animation: outline-spinner-pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes outline-spinner-pulse {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 0.15;
+    }
+  }
+
+  .outline-reveal {
+    animation: none;
+  }
+}
+
 .add-top {
   margin-top: 16px;
   background: transparent;

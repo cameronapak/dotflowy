@@ -29,6 +29,7 @@ import {
   useHasNodes,
   useMirrorCount,
   useNode,
+  useSyncReady,
   useTrail,
   useTreeIndex,
   useVisibleChildIds,
@@ -38,6 +39,7 @@ import { isMirrorsEnabled, isVirtualized } from "../data/flags";
 import { MirrorBadge } from "./mirror-chrome";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { OutlineRow } from "./OutlineRow";
+import { OutlineLoading } from "./OutlineLoading";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
 import {
   getViewIsHidden,
@@ -367,6 +369,23 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const trail = useTrail(rootId);
   const hasNodes = useHasNodes();
 
+  // Loading vs empty. `hasNodes` (byId.size > 0) can't tell "still syncing" from
+  // "genuinely empty new account" -- both are zero rows -- which is what made the
+  // outline flash from empty to full on first paint. `useSyncReady` flips once,
+  // when the first frame lands, so we hold a skeleton until then instead of
+  // painting an empty list that a moment later fills in.
+  const syncReady = useSyncReady();
+  const loading = !syncReady;
+  // One-shot reveal latch, scoped to THIS editor instance. We only fade the real
+  // content in when it directly replaces a skeleton (i.e. this mount actually
+  // showed a loading state). The editor remounts per zoom route, and `syncReady`
+  // is already true by then, so a later zoom never showed a skeleton and never
+  // fades -- the zoom morph owns that transition. A monotonic ref latch, safe to
+  // set in render (this component opts out of React Compiler; see "use no memo").
+  const showedSkeletonRef = useRef(false);
+  if (loading) showedSkeletonRef.current = true;
+  const revealOnLoad = !loading && showedSkeletonRef.current;
+
   // --- Phase B: windowed rendering (ADR 0019) -------------------------------
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
@@ -499,7 +518,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       >
         {overlayNode}
 
-        {zoomedNode && (
+        {loading ? (
+          <OutlineLoading />
+        ) : (
+          <div className={revealOnLoad ? "outline-reveal" : undefined}>
+            {zoomedNode && (
           <ZoomedTitle
             node={zoomedNode}
             isPivot={pivotId === zoomedNode.id}
@@ -610,6 +633,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
               </Button>
             )}
           </>
+        )}
+          </div>
         )}
       </div>
     </>

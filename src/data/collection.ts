@@ -51,6 +51,33 @@ export function nodesLoadError(): Error | null {
   return initialError
 }
 
+/**
+ * Whether the first sync frame (snapshot, resume, or initial error) has landed --
+ * i.e. the collection is ready to render its real state. Distinct from
+ * `useHasNodes`, which reads `byId.size > 0` and so CONFLATES "still loading" with
+ * "genuinely empty": on first paint both look like zero nodes, which is exactly
+ * the state that made the outline flash from empty to populated. This flag flips
+ * true exactly once, the moment sync is ready, so the shell can hold a loading
+ * spinner until then. Session-lived on purpose: a mid-session reconnect keeps it true, so
+ * we never flash the loading state again once the outline has been shown.
+ */
+let syncReady = false
+const syncReadyListeners = new Set<() => void>()
+export function isSyncReady(): boolean {
+  return syncReady
+}
+export function subscribeSyncReady(listener: () => void): () => void {
+  syncReadyListeners.add(listener)
+  return () => {
+    syncReadyListeners.delete(listener)
+  }
+}
+function markSyncReady(): void {
+  if (syncReady) return
+  syncReady = true
+  for (const listener of syncReadyListeners) listener()
+}
+
 /** Force the outline to reconcile against server truth now (a fresh snapshot).
  *  Used by the daily plugin's claim loser-path; a no-op before the socket
  *  connects (or during the `/` prerender). */
@@ -305,6 +332,8 @@ export const nodesCollection = createCollection({
         if (ready) return
         ready = true
         markReady()
+        // Release the shell's loading spinner (module signal, see markSyncReady).
+        markSyncReady()
       }
       const getCursor = (): number | null =>
         (metadata?.collection.get('cursor') as number | undefined) ?? null

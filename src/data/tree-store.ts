@@ -1,6 +1,6 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import type { ChangeMessage } from '@tanstack/react-db'
-import { nodesCollection } from './collection'
+import { isSyncReady, nodesCollection, subscribeSyncReady } from './collection'
 import {
   buildTreeIndex,
   buildTrail,
@@ -382,6 +382,17 @@ export function useHasNodes(): boolean {
     () => getTreeIndex().byId.size > 0,
     () => false,
   )
+}
+
+/**
+ * Whether the first sync frame has landed (see {@link isSyncReady}). A primitive
+ * boolean snapshot that flips once, so it re-renders the shell exactly when
+ * loading ends -- never on a keystroke. The shell gates its loading spinner on
+ * `!ready`, which (unlike {@link useHasNodes}) tells a not-yet-synced outline
+ * apart from a genuinely empty new account.
+ */
+export function useSyncReady(): boolean {
+  return useSyncExternalStore(subscribeSyncReady, isSyncReady, () => false)
 }
 
 /** The current visible-structure revision (see {@link structureRev}). O(1). */
