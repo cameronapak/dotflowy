@@ -41,6 +41,22 @@ conflict reconciliation, WebSocket Hibernation for live fan-out, and the natural
 sharing. Electric gives real-time out of the box but isn't Cloudflare-native (must be hosted
 elsewhere) — off-goal for an all-Cloudflare deploy.
 
+**Convergent public reference: Lunora (`lunora.sh`, alpha 2026).** An independent local-first
+engine that lands on this same design — "the DO *is* the log" (an append-only changelog written in
+the write's own storage transaction), the DO is the WebSocket fan-out, hibernation makes idle
+sockets ~free, and the client runs the dataflow via TanStack DB while the DO ships row-ops rather
+than re-running queries. Useful outside validation of ADR 0008/0009; two deliberate divergences
+worth recording: (1) Lunora runs the write logic **authoritatively in the DO** (client keeps an
+optional optimistic twin); we ship pre-computed `{ops}` from the client's `tree.ts` and validate
+their *shape* at the trust boundary ([ADR 0014](./0014-validate-the-worker-do-trust-boundary.md))
+instead. We keep client-planned ops on purpose — single-writer-per-DO removes the concurrent-writer
+conflicts that authoritative re-run buys, and the MCP path already re-plans server-side via the
+shared `tree.ts` (`worker/outline-ops.ts`). (2) Lunora's **"shape = read-as-permission"** (the
+client picks the partition, the server's `where` AND-composed with a row-level-security predicate
+through one WHERE compiler picks the rows) is the pattern to reach for **when subtree sharing
+lands** — partial replication and authorization as one mechanism, not a filter bolted next to an
+auth check. Irrelevant today (one user = one DO = the whole outline), noted for the sharing seam.
+
 **The SPA / no-SSR constraint lives here too:** the React app is a pure static SPA — never open the
 sync socket or touch `nodesCollection` during a server/render pass (`collection.ts` guards with
 `typeof window`; the tree store skips its subscription on the server; hooks supply
