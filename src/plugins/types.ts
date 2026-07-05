@@ -158,6 +158,14 @@ export interface PluginContext {
    *  the plugin owns (e.g. the tag color picker). A thin generic host: the core
    *  just mounts the node; the overlay handles its own positioning + dismiss. */
   openOverlay: (node: ReactNode | null) => void;
+  /** Open (or dismiss, with null) a Tier-3 side PANEL -- the contained host for
+   *  rich UI that shouldn't crowd the outline surface (ADR 0031). Unlike
+   *  `openOverlay` (a self-positioning popover), the core wraps the node in a
+   *  `Sheet`: a slide-in panel with its own backdrop + dismiss. This is where a
+   *  node's overflowed decorations expand to, and the only surface a future
+   *  Lane-B (untrusted MCP App) may render into. The node must supply its own
+   *  `SheetHeader`/`SheetTitle`. */
+  openPanel: (node: ReactNode | null) => void;
 }
 
 // --- Seam B: delegated interaction ------------------------------------------

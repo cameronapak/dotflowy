@@ -1,8 +1,46 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
 import { slotsAt } from "../plugins/registry";
+import { flattenInline } from "../data/inline-text";
+import { SheetHeader, SheetTitle } from "./ui/sheet";
 import type { Node } from "../data/tree";
 import type { PluginContext, SlotPosition } from "../plugins/types";
+
+type AfterTextPosition = Extract<
+  SlotPosition,
+  "row:after-text" | "title:after-text"
+>;
+
+/**
+ * The default target of the overflow affordance (ADR 0031, step 03): the node's
+ * decorations rendered UNCLIPPED in the Tier-3 side panel. Where the budget hid
+ * things, this shows the full set. Deliberately minimal -- a header with the
+ * node's (flattened) text plus every trailing slot -- and grows as real
+ * consumers arrive.
+ */
+function NodeOverflowPanel({
+  node,
+  position,
+  getCtx,
+}: {
+  node: Node;
+  position: AfterTextPosition;
+  getCtx: () => PluginContext;
+}) {
+  const slots = slotsAt(position);
+  return (
+    <>
+      <SheetHeader>
+        <SheetTitle>{flattenInline(node.text) || "Untitled"}</SheetTitle>
+      </SheetHeader>
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
+        {slots.map((slot) => (
+          <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
+        ))}
+      </div>
+    </>
+  );
+}
 
 /**
  * The trailing node-decoration zone (Seam F `*:after-text` -- ADR 0031, the
@@ -36,13 +74,12 @@ export function NodeDecorations({
   onExpand,
 }: {
   node: Node;
-  position: Extract<SlotPosition, "row:after-text" | "title:after-text">;
+  position: AfterTextPosition;
   /** The stable PluginContext factory the row passes everywhere. */
   getCtx: () => PluginContext;
-  /** Open the node's full-detail panel showing the decorations that overflowed
-   *  the budget. Wired to the Tier-3 panel host in a later step; until a handler
-   *  is passed, the overflow affordance stays hidden (a clip + fade, no button
-   *  that goes nowhere). */
+  /** Override what the overflow affordance opens. Defaults to the node's detail
+   *  in the Tier-3 side panel (`ctx.openPanel`), so the hidden decorations are
+   *  always reachable -- a consumer only passes this to do something else. */
   onExpand?: () => void;
 }) {
   // The compiled-in plugin set makes this a load-time constant, so a node with
@@ -73,6 +110,16 @@ export function NodeDecorations({
 
   if (!hasSlots) return null;
 
+  // The affordance always has somewhere to go: open the node's full detail in
+  // the side panel unless a consumer overrides it. So it shows whenever the
+  // budget actually hid something (overflowing), never as a dead control.
+  const handleExpand =
+    onExpand ??
+    (() =>
+      getCtx().openPanel(
+        <NodeOverflowPanel node={node} position={position} getCtx={getCtx} />,
+      ));
+
   return (
     <span className="node-deco" data-overflowing={overflowing || undefined}>
       <span className="node-deco-zone" ref={zoneRef}>
@@ -82,13 +129,13 @@ export function NodeDecorations({
           ))}
         </span>
       </span>
-      {overflowing && onExpand && (
+      {overflowing && (
         <button
           type="button"
           className="node-deco-more touch-hitbox"
           aria-label="Show all decorations"
           title="Show all"
-          onClick={onExpand}
+          onClick={handleExpand}
           tabIndex={-1}
         >
           <Ellipsis size={14} />

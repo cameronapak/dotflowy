@@ -112,6 +112,7 @@ import {
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
 import { NodeDecorations } from "./NodeDecorations";
+import { Sheet, SheetContent } from "./ui/sheet";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { healProtectedText } from "./protected-text";
 import {
@@ -291,6 +292,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // A plugin-owned overlay (the tag color picker), mounted once below. The core
   // is a thin host -- the overlay portals + dismisses itself (ADR 0001 Seam B).
   const [overlayNode, setOverlayNode] = useState<ReactNode>(null);
+  // Tier-3 side panel content (ADR 0031). Null = closed. Set via ctx.openPanel;
+  // mounted in a `Sheet` below (the overflow-to-panel host + future Lane-B home).
+  const [panelNode, setPanelNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
   };
@@ -362,6 +366,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         zoom: (id) => navigateZoom(id, id),
       },
       openOverlay: (node) => setOverlayNode(node),
+      openPanel: (node) => setPanelNode(node),
     }),
     [commands, navigateZoom],
   );
@@ -562,6 +567,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         )}
 
         {overlayNode}
+
+        {/* Tier-3 side panel host (ADR 0031). A plugin (or the node-decoration
+            overflow affordance) opens rich, contained UI here via ctx.openPanel;
+            the Sheet owns the backdrop + dismiss so it can't crowd the outline. */}
+        <Sheet
+          open={panelNode != null}
+          onOpenChange={(open) => {
+            if (!open) setPanelNode(null);
+          }}
+        >
+          <SheetContent side="right">{panelNode}</SheetContent>
+        </Sheet>
 
         {loading ? (
           <OutlineLoading />
