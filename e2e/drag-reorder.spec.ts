@@ -27,7 +27,7 @@ async function load(page: Page) {
   await seedOutline(page, flatList());
   await page.goto("/");
   await expect(
-    page.locator('li[data-node-id="a0"] > .outline-row > .node-text'),
+    page.locator('li[data-node-id="a0"] > .outline-row .node-text'),
   ).toBeVisible();
 }
 

@@ -17,7 +17,7 @@ async function load(page: Page, tree: SeedNode[] = STANDARD_TREE) {
   await seedOutline(page, tree);
   await page.goto("/");
   await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row > .node-text'),
+    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
   ).toBeVisible();
 }
 
@@ -217,7 +217,7 @@ test.describe("daily notes", () => {
     );
     expect(containerId).not.toBe("");
     const containerText = page.locator(
-      `li[data-node-id="${containerId}"] > .outline-row > .node-text`,
+      `li[data-node-id="${containerId}"] > .outline-row .node-text`,
     );
 
     // Select the whole word and delete it through the real input path (selecting
@@ -239,7 +239,7 @@ test.describe("daily notes", () => {
     // Blur by focusing another bullet -> the name heals AND a toast explains
     // why, so the restore isn't a mystery.
     await page
-      .locator('li[data-node-id="alpha"] > .outline-row > .node-text')
+      .locator('li[data-node-id="alpha"] > .outline-row .node-text')
       .click();
     await expect(containerText).toHaveText("Daily");
     await expect(page.getByText(/needs a name/i)).toBeVisible();
@@ -358,7 +358,7 @@ test.describe("daily notes", () => {
     // "/" follow whitespace so detectSlash fires; "/today" uniquely matches
     // "Move to Today" (see move-dialog.spec for the pattern).
     const charlie = page.locator(
-      'li[data-node-id="charlie"] > .outline-row > .node-text',
+      'li[data-node-id="charlie"] > .outline-row .node-text',
     );
     await charlie.click();
     await expect(charlie).toBeFocused();
@@ -500,7 +500,7 @@ test.describe("daily notes", () => {
 
     await page.goto("/");
     await expect(
-      page.locator('li[data-node-id="alpha"] > .outline-row > .node-text'),
+      page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
     ).toBeVisible();
 
     await todayButton(page).click();
@@ -585,7 +585,7 @@ test.describe("daily notes", () => {
 
     await page.goto("/");
     await expect(
-      page.locator('li[data-node-id="alpha"] > .outline-row > .node-text'),
+      page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
     ).toBeVisible();
 
     await todayButton(page).click();
@@ -619,7 +619,7 @@ test.describe("daily notes", () => {
 
     // The same gesture DOES delete an ordinary node -- the guard is specific.
     await page
-      .locator('li[data-node-id="bravo"] > .outline-row > .node-text')
+      .locator('li[data-node-id="bravo"] > .outline-row .node-text')
       .click();
     await page.keyboard.press(`${modifier()}+Shift+Backspace`);
     await expect(page.locator('li[data-node-id="bravo"]')).toHaveCount(0);

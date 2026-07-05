@@ -35,7 +35,7 @@ async function loadBig(page: Page) {
   await seedOutline(page, bigTree());
   await page.goto("/");
   await expect(
-    page.locator('li[data-node-id="p0"] > .outline-row > .node-text'),
+    page.locator('li[data-node-id="p0"] > .outline-row .node-text'),
   ).toBeVisible();
 }
 

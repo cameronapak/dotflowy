@@ -8,7 +8,7 @@ function modifier() {
 
 // A node's OWN editable text span, its row, and its collapse chevron.
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row`);
 const chevron = (page: Page, id: string) =>

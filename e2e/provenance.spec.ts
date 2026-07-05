@@ -19,7 +19,7 @@ const TREE: SeedNode[] = [
 ];
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 const mark = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .provenance-mark`);
 

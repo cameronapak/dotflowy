@@ -140,8 +140,13 @@ export function formatDayBadge(key: string, today = localDateKey()): string {
 
 // --- Non-reactive lookups (click handlers + the protection predicate) -------
 
+// Reads the module `rows` cache (below), NOT `dailyIndexCollection.toArray`:
+// the protection predicate runs during render (useIsProtected's synchronous
+// getSnapshot), and the cache is the render-safe path useDailyDate has always
+// used. The cache is rebuilt synchronously on every collection change
+// (includeInitialState), so event-time callers read the same freshness.
 function findRow(pred: (r: DailyRow) => boolean): DailyRow | undefined {
-  return dailyIndexCollection.toArray.find(pred)
+  return getRows().find(pred)
 }
 
 /** The container node id, or null if it hasn't been created yet. */
@@ -252,6 +257,16 @@ export function subscribeDailyIndex(cb: () => void): () => void {
   return () => {
     listeners.delete(cb)
   }
+}
+
+/** Start the index's kv fetch eagerly (the plugin `preload` seam, called once
+ *  at editor mount). Without this the fetch starts lazily at the FIRST badge/
+ *  lock render -- i.e. only after the outline snapshot has already painted --
+ *  so the day badges and the container lock popped in a beat later (a layout
+ *  shift). Preloading lets the kv fetch race the nodes snapshot instead of
+ *  queuing behind it. */
+export function preloadDailyIndex(): void {
+  ensureStarted()
 }
 
 function getRows(): DailyRow[] {

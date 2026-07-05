@@ -5,7 +5,7 @@ import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 // is a direct child of this node's .outline-row. Child bullets live in a nested
 // <ul> further down the <li>, so the `>` chain can't reach them.
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 async function caretAtEdge(page: Page, id: string, edge: "start" | "end") {
   await text(page, id).evaluate((el: HTMLElement, atEnd) => {

@@ -82,7 +82,7 @@ async function load(page: Page) {
   await seedOutline(page, perfTree());
   await page.goto("/");
   await expect(
-    page.locator('li[data-node-id="few"] > .outline-row > .node-text'),
+    page.locator('li[data-node-id="few"] > .outline-row .node-text'),
   ).toBeVisible();
 }
 

@@ -93,6 +93,7 @@ import {
   dispatchClick,
   dispatchContextMenu,
   keymapSpecs,
+  pluginPreloads,
   slotsAt,
   useIsProtected,
   useViewFilter,
@@ -631,6 +632,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
  */
 function useBootstrapOutline() {
   useEffect(() => {
+    // Kick every plugin's eager data fetch (the daily index) before the outline
+    // snapshot lands, so async decorations resolve by first paint instead of
+    // popping in after it. Client-only and post-auth here by construction.
+    for (const preload of pluginPreloads) preload();
     bootstrapOutline()
       .then((err) => {
         if (err instanceof Error)

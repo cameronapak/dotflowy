@@ -8,7 +8,7 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // v1 is flat: no nesting.
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);

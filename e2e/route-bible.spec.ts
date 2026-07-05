@@ -8,7 +8,7 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // chip does NOT fold/reveal -- its text equals its source whether focused or not.
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 // The chip is the `<dotflowy-widget>` atom carrying data-bible-ref (ADR 0028).
 const chip = (page: Page, id: string) =>

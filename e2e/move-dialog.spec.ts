@@ -3,7 +3,7 @@ import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // A node's OWN editable text span (see keyboard-nav.spec.ts for the `>` chain).
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);

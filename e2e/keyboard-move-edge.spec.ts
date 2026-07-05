@@ -6,7 +6,7 @@ function modifier() {
 }
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 // "nodeId is a child of ancestorId", asserted via the row's data-parent-id (the
 // node's real parent) rather than DOM nesting -- the flat windowed render has no

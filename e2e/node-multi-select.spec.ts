@@ -40,14 +40,14 @@ function expectInViewport(
 }
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 const li = (page: Page, id: string) => page.locator(`li[data-node-id="${id}"]`);
 
 const focused = (page: Page) => page.locator(".node-text:focus");
 
 const orderedTexts = (page: Page) =>
-  page.locator(".outline-row > .node-text").allTextContents();
+  page.locator(".outline-row .node-text").allTextContents();
 
 // Cmd on macOS, Control elsewhere.
 const MOD = process.platform === "darwin" ? "Meta" : "Control";

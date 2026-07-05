@@ -609,6 +609,13 @@ export interface PluginDef {
    *  each notification. Returns an unsubscribe. Omit when protection is static
    *  (decidable synchronously, correct at first render). */
   protectsChanged?(cb: () => void): () => void;
+  /** Kick off this plugin's async data (a side-collection fetch) eagerly, once,
+   *  at editor mount -- client-only and post-auth by construction. A plugin
+   *  whose decorations depend on lazily-fetched state (the daily index) provides
+   *  this so the fetch races the outline snapshot instead of starting at the
+   *  first decorated render and popping in after paint. Idempotent by contract:
+   *  the reactive read path may also start the same fetch. */
+  preload?(): void;
   /** Seam G: render-time view transforms (hide-completed, the tag filter). */
   viewTransforms?: ViewTransform[];
   /** Seam H: caret autocomplete menus (the `#` tag menu). */

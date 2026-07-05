@@ -59,6 +59,7 @@ import {
   getDayKey,
   isContainerNode,
   localDateKey,
+  preloadDailyIndex,
   setMapping,
   subscribeDailyIndex,
   useDailyDate,
@@ -415,6 +416,12 @@ export default definePlugin({
   // resolves. Without this the core's `useIsProtected` only re-evaluates on an
   // unrelated re-render (e.g. zoom), so the lock appears late.
   protectsChanged: subscribeDailyIndex,
+
+  // Start the daily-index kv fetch at editor mount, so the date badges and the
+  // container lock are (usually) resolvable by the time the outline snapshot
+  // paints -- lazily it would only start at the first badge render, landing
+  // after paint and shifting layout.
+  preload: preloadDailyIndex,
 
   // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
   // switcher and the /move picker, even though the node's text is the full date.

@@ -4,7 +4,7 @@ import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 // A node's OWN editable text span -- same locator the nav spec uses. Child
 // bullets live in a nested <ul>, so the `>` chain can't reach them.
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 // The bullet that currently holds the caret. After an Enter-split the new
 // sibling is focused, but its id is freshly generated, so we find it by focus.
@@ -14,7 +14,7 @@ const focused = (page: Page) => page.locator(".node-text:focus");
 // empty new bullet shows up as ""). Used to assert sibling vs child placement
 // when the new node's id is unknown.
 const orderedTexts = (page: Page) =>
-  page.locator(".outline-row > .node-text").allTextContents();
+  page.locator(".outline-row .node-text").allTextContents();
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);

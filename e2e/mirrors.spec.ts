@@ -24,7 +24,7 @@ const MIRROR_TREE: SeedNode[] = [
 ];
 
 const text = (page: Page, nodeId: string) =>
-  page.locator(`li[data-node-id="${nodeId}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${nodeId}"] > .outline-row .node-text`);
 
 async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
   await page.addInitScript(() => {
@@ -203,7 +203,7 @@ test.describe("node mirrors -- create via the picker (ADR 0022)", () => {
     const mirror = page.locator('li[data-mirror="instance"]');
     await expect(mirror).toHaveCount(1);
     await expect(mirror).toHaveAttribute("data-parent-id", "D");
-    await expect(mirror.locator("> .outline-row > .node-text")).toContainText(
+    await expect(mirror.locator("> .outline-row .node-text")).toContainText(
       "alpha source",
     );
     // a1/a2 now each render twice: under real A, and under the new mirror.
@@ -324,9 +324,9 @@ test.describe("node mirrors -- caret nav (ADR 0022)", () => {
   // by attribute. Document order IS the flat visible order, so nth(0) is the real
   // row under the source and nth(1) is the windowed copy under the mirror.
   const a1Copies = (page: Page) =>
-    page.locator('li[data-node-id="a1"] > .outline-row > .node-text');
+    page.locator('li[data-node-id="a1"] > .outline-row .node-text');
   const a2Copies = (page: Page) =>
-    page.locator('li[data-node-id="a2"] > .outline-row > .node-text');
+    page.locator('li[data-node-id="a2"] > .outline-row .node-text');
 
   test("ArrowDown from a mirror enters its windowed child, not the source's row", async ({
     page,

@@ -27,7 +27,7 @@ const MIRROR_TREE: SeedNode[] = [
 
 // All copies of a node's editable span (a windowed source child has two).
 const spans = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 const focused = (page: Page) => page.locator(".node-text:focus");
 
 // Platform Cmd/Ctrl, matching the app's `Mod+...` hotkeys (Playwright has no

@@ -4,13 +4,7 @@
 // combined regex + dispatch from here, staying generic over which plugins
 // exist; this file is the only place that knows the plugin set for tokens.
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import { plugins } from "./index";
 import { registerWidget } from "../components/plugin-widget";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
@@ -407,6 +401,13 @@ export function isProtected(nodeId: string): boolean {
   return getProtection(nodeId) !== null;
 }
 
+/** Every plugin's eager-fetch kick (array order). The editor calls each once at
+ *  mount so lazily-fetched decoration data (the daily index) races the outline
+ *  snapshot instead of starting at the first decorated render. */
+export const pluginPreloads = plugins
+  .map((p) => p.preload)
+  .filter((f): f is NonNullable<typeof f> => f != null);
+
 // Every plugin that can change its protection state asynchronously (array
 // order). A plugin whose protection is static (decidable at first render)
 // provides none, and never perturbs `useIsProtected`.
@@ -429,19 +430,16 @@ function subscribeProtection(onChange: () => void): () => void {
  *  mapping after fetch). Use this in render; without it a node's lock only
  *  re-evaluates on an unrelated re-render.
  *
- *  The live read (`isProtected` -> a plugin's collection accessor) runs in an
- *  effect, never in render: touching a lazy collection during render would
- *  start its sync mid-render (a setState-in-render warning). Starts `false`
- *  (prerender-safe, like `useDailyDate`) and resolves post-mount. */
+ *  A SYNCHRONOUS first read on purpose: the old useState(false)+useEffect shape
+ *  painted every mount lock-less and flipped a frame later -- a layout shift on
+ *  every scroll-driven row mount in the windowed list, even with the data long
+ *  since local. Safe to read in render because a plugin's `protects` reads its
+ *  module row cache (daily-index.ts `getRows`), the same render path
+ *  `useDailyDate` has always used -- not the lazy collection directly. Server
+ *  snapshot is `false` (prerender-safe, like `useDailyDate`). */
 export function useIsProtected(nodeId: string): boolean {
-  const [protectedNode, setProtectedNode] = useState(false);
-  useEffect(() => {
-    const update = () => setProtectedNode(isProtected(nodeId));
-    const unsubscribe = subscribeProtection(update);
-    update();
-    return unsubscribe;
-  }, [nodeId]);
-  return protectedNode;
+  const getSnapshot = useCallback(() => isProtected(nodeId), [nodeId]);
+  return useSyncExternalStore(subscribeProtection, getSnapshot, () => false);
 }
 
 // --- Seam J: search providers ----------------------------------------------

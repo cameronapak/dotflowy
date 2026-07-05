@@ -8,7 +8,7 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // click-to-open, the Edit Link popover, copy/cut-as-source, and the paste paths.
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 async function load(page: Page, tree: SeedNode[]) {
   // Record window.open calls so we can assert click-to-open without juggling

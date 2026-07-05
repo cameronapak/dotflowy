@@ -7,7 +7,7 @@ import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 //    sibling chain (the "fan"/"dangle" corruption the cure exists to prevent).
 
 const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .node-text`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
 interface NodeOp {
   op: "insert" | "update" | "delete";
@@ -118,7 +118,7 @@ test.describe("atomic structural writes", () => {
     // data-parent-id is alpha (the flat render has no nested <ul>; ADR 0019).
     await expect(
       page.locator(
-        'li[data-parent-id="alpha"] > .outline-row > .node-text:focus',
+        'li[data-parent-id="alpha"] > .outline-row .node-text:focus',
       ),
     ).toBeVisible();
 
