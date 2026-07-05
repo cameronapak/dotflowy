@@ -320,131 +320,137 @@ function OutlineNodeBody({
             data-collapsed={effectiveCollapsed}
           />
         </button>
-        {beforeTextSlots.map((slot) => (
-          <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
-        ))}
-        {protectedNode && <ProtectedLock size={12} />}
-        <span
-          ref={(el) => {
-            textRef.current = el;
-            registerRef(node.id, el);
-          }}
-          className={`node-text${isPivot ? " vt-morph" : ""}`}
-          style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
-          contentEditable
-          suppressContentEditableWarning
-          spellCheck={false}
-          aria-label={node.text.trim() || "Empty bullet"}
-          aria-multiline="true"
-          data-completed={node.completed}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            // readSource (not textContent) is the markdown source: a focused
-            // bullet may still hold folded links, whose label != source.
-            const text = readSource(el);
-            // Plugin autoformat (Seam I): a markdown-style shortcut rewrites the
-            // line (todos' "[]"/"[ ]" -> task + strip marker). The plugin's
-            // side effect runs first (flip the type), then the core writes the
-            // new text and places the caret. Suspended during IME composition.
-            if (!composingRef.current) {
-              const af = autoformat({ text, node });
-              if (af) {
-                af.before?.(pluginCtx());
-                commands.onTextChange(node.id, af.text);
-                decorate(el, af.text, af.caret, false);
-                syncedRef.current = af.text;
-                setCaretOffset(el, af.caret);
-                return;
+        {/* Block cell so wrapped text flows UNDER the slot icons: the icons
+            float left inside it (a flex item can't float, hence the wrapper),
+            shortening only the first line box. Menus stay outside -- they
+            position against .outline-row. Mirrors OutlineRow. */}
+        <div className="row-body">
+          {beforeTextSlots.map((slot) => (
+            <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
+          ))}
+          {protectedNode && <ProtectedLock size={12} />}
+          <span
+            ref={(el) => {
+              textRef.current = el;
+              registerRef(node.id, el);
+            }}
+            className={`node-text${isPivot ? " vt-morph" : ""}`}
+            style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={false}
+            aria-label={node.text.trim() || "Empty bullet"}
+            aria-multiline="true"
+            data-completed={node.completed}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              // readSource (not textContent) is the markdown source: a focused
+              // bullet may still hold folded links, whose label != source.
+              const text = readSource(el);
+              // Plugin autoformat (Seam I): a markdown-style shortcut rewrites the
+              // line (todos' "[]"/"[ ]" -> task + strip marker). The plugin's
+              // side effect runs first (flip the type), then the core writes the
+              // new text and places the caret. Suspended during IME composition.
+              if (!composingRef.current) {
+                const af = autoformat({ text, node });
+                if (af) {
+                  af.before?.(pluginCtx());
+                  commands.onTextChange(node.id, af.text);
+                  decorate(el, af.text, af.caret, false);
+                  syncedRef.current = af.text;
+                  setCaretOffset(el, af.caret);
+                  return;
+                }
               }
-            }
-            commands.onTextChange(node.id, text);
-            slash.handleInput();
-            menus.handleInput();
-            // Re-decorate live, revealing the link under the caret. Preserves
-            // the caret. Suspended during IME composition; compositionend
-            // handles that case.
-            if (!composingRef.current) {
+              commands.onTextChange(node.id, text);
+              slash.handleInput();
+              menus.handleInput();
+              // Re-decorate live, revealing the link under the caret. Preserves
+              // the caret. Suspended during IME composition; compositionend
+              // handles that case.
+              if (!composingRef.current) {
+                decorate(el, text, getCaretOffset(el), true);
+                syncedRef.current = text;
+              }
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={(e) => {
+              composingRef.current = false;
+              const el = e.currentTarget;
+              const text = readSource(el);
+              commands.onTextChange(node.id, text);
               decorate(el, text, getCaretOffset(el), true);
               syncedRef.current = text;
-            }
-          }}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={(e) => {
-            composingRef.current = false;
-            const el = e.currentTarget;
-            const text = readSource(el);
-            commands.onTextChange(node.id, text);
-            decorate(el, text, getCaretOffset(el), true);
-            syncedRef.current = text;
-          }}
-          onPaste={(e) => {
-            const el = e.currentTarget;
-            const next = pasteIntoBullet(e, el, node.id, pluginCtx, (t) =>
-              commands.onTextChange(node.id, t),
-            );
-            if (next !== null) syncedRef.current = next;
-          }}
-          // Copy/cut hand back the markdown SOURCE (a folded link's rendered
-          // text drops the url half). See copySourceSelection (ADR 0005).
-          onCopy={(e) => copySourceSelection(e, e.currentTarget)}
-          onCut={(e) => {
-            const el = e.currentTarget;
-            const next = cutSourceSelection(e, el, (t) =>
-              commands.onTextChange(node.id, t),
-            );
-            if (next !== null) syncedRef.current = next;
-          }}
-          onFocus={(e) => {
-            // A caret and a node selection are mutually exclusive (ADR 0018):
-            // focusing any bullet leaves selection mode. Covers "click clears ->
-            // normal edit" and the caret landing after a while-selected arrow.
-            clearSelection();
-            // Per-link reveal: watch the caret so exactly the link it's on shows
-            // raw markdown (ADR 0005). The watcher lives only while focused.
-            const el = e.currentTarget;
-            caretWatchRef.current?.();
-            caretWatchRef.current = watchCaretReveal(
-              el,
-              () => composingRef.current,
-            );
-            // Reveal the link under the caret (the watcher only fires on
-            // subsequent moves). A link-free bullet is a no-op -- nothing folds
-            // -- so the native click caret stands untouched. Deferred to the
-            // next frame so a CLICK at the line's end settles on the folded
-            // layout before the link expands; see revealLinkAtCaret.
-            if (!hasFoldingToken(node.text)) return;
-            revealLinkAtCaret(el, (t) => {
-              syncedRef.current = t;
-            });
-          }}
-          onBlur={(e) => {
-            slash.close();
-            menus.close();
-            caretWatchRef.current?.();
-            caretWatchRef.current = null;
-            const el = e.currentTarget;
-            const text = readSource(el);
-            // A protected node left empty heals: restore its name + shake/toast.
-            const restored = healProtectedText(node.id, text, el);
-            if (restored !== null) {
-              syncedRef.current = restored;
-            } else if (hasFoldingToken(text)) {
-              // Fold: re-render every folding run (link, emphasis) as clean HTML.
-              decorate(el, text, null, false);
-              syncedRef.current = text;
-            }
-          }}
-          // The "/" and "#" menus own Arrow/Enter/Tab/Esc while open; the
-          // outline shortcuts above defer via `enabled`. The plugin menus get
-          // first crack (the "#" trigger is the more specific), then the slash
-          // menu.
-          onKeyDown={(e) => {
-            if (menus.handleKeyDown(e)) return;
-            slash.handleKeyDown(e);
-          }}
-        />
+            }}
+            onPaste={(e) => {
+              const el = e.currentTarget;
+              const next = pasteIntoBullet(e, el, node.id, pluginCtx, (t) =>
+                commands.onTextChange(node.id, t),
+              );
+              if (next !== null) syncedRef.current = next;
+            }}
+            // Copy/cut hand back the markdown SOURCE (a folded link's rendered
+            // text drops the url half). See copySourceSelection (ADR 0005).
+            onCopy={(e) => copySourceSelection(e, e.currentTarget)}
+            onCut={(e) => {
+              const el = e.currentTarget;
+              const next = cutSourceSelection(e, el, (t) =>
+                commands.onTextChange(node.id, t),
+              );
+              if (next !== null) syncedRef.current = next;
+            }}
+            onFocus={(e) => {
+              // A caret and a node selection are mutually exclusive (ADR 0018):
+              // focusing any bullet leaves selection mode. Covers "click clears ->
+              // normal edit" and the caret landing after a while-selected arrow.
+              clearSelection();
+              // Per-link reveal: watch the caret so exactly the link it's on shows
+              // raw markdown (ADR 0005). The watcher lives only while focused.
+              const el = e.currentTarget;
+              caretWatchRef.current?.();
+              caretWatchRef.current = watchCaretReveal(
+                el,
+                () => composingRef.current,
+              );
+              // Reveal the link under the caret (the watcher only fires on
+              // subsequent moves). A link-free bullet is a no-op -- nothing folds
+              // -- so the native click caret stands untouched. Deferred to the
+              // next frame so a CLICK at the line's end settles on the folded
+              // layout before the link expands; see revealLinkAtCaret.
+              if (!hasFoldingToken(node.text)) return;
+              revealLinkAtCaret(el, (t) => {
+                syncedRef.current = t;
+              });
+            }}
+            onBlur={(e) => {
+              slash.close();
+              menus.close();
+              caretWatchRef.current?.();
+              caretWatchRef.current = null;
+              const el = e.currentTarget;
+              const text = readSource(el);
+              // A protected node left empty heals: restore its name + shake/toast.
+              const restored = healProtectedText(node.id, text, el);
+              if (restored !== null) {
+                syncedRef.current = restored;
+              } else if (hasFoldingToken(text)) {
+                // Fold: re-render every folding run (link, emphasis) as clean HTML.
+                decorate(el, text, null, false);
+                syncedRef.current = text;
+              }
+            }}
+            // The "/" and "#" menus own Arrow/Enter/Tab/Esc while open; the
+            // outline shortcuts above defer via `enabled`. The plugin menus get
+            // first crack (the "#" trigger is the more specific), then the slash
+            // menu.
+            onKeyDown={(e) => {
+              if (menus.handleKeyDown(e)) return;
+              slash.handleKeyDown(e);
+            }}
+          />
+        </div>
         {slash.menu}
         {menus.menu}
       </div>

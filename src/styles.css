@@ -222,7 +222,9 @@
  * Protected-node lock. A muted glyph leading the text of a node a plugin
  * forbids deleting (the daily "Daily" container) -- a quiet, always-on
  * signifier, not a control. Sits in its own column between the bullet and the
- * text (the row's `gap` spaces it); `align-self: center` lands it on the name.
+ * text. It floats inside .row-body in both render paths, so a margin nudges it
+ * onto the first text line (floats ignore align-self; the align rules below
+ * only center the glyph within its own box).
  * Decorative, so it carries a title tooltip but no pointer affordance.
  */
 .protected-lock {
@@ -235,12 +237,20 @@
   user-select: none;
 }
 
-h2 > span.protected-lock {
+.outline-row .protected-lock {
+  margin-top: 8px;
+}
+
+h2 span.protected-lock {
   gap: 0px;
   --size-of-bullet: 20px;
   --size-of-gap: 6px;
   width: calc(var(--size-of-bullet) + var(--size-of-gap));
   justify-content: center;
+  /* Floated in .row-body, so align-self can't center it -- nudge the 16px
+     glyph onto the 24px/1.3 title line instead (center ~18px, cf. the title
+     checkbox's mt-2 and mirror-badge's mt-2.5). */
+  margin-top: 10px;
 }
 
 /*
@@ -527,16 +537,45 @@ h2 > span.protected-lock {
 }
 
 h2.zoomed-title {
-  & > button.mirror-badge {
+  & button.mirror-badge {
     @apply mt-2.5;
   }
 
-  & > .checkbox {
+  & .checkbox {
     @apply mt-2;
   }
 }
 
+/*
+ * The row's text cell. A block (not flex) on purpose: the slot icons before the
+ * text FLOAT left inside it, so only the first line box is shortened and a
+ * wrapped line flows back UNDER the icons -- flex siblings would pin every
+ * wrapped line to the text column's left edge. Floats can't apply to flex
+ * items, hence this wrapper between the flex row and the icons. A flex item
+ * establishes its own formatting context, so the floats are contained without
+ * a clearfix.
+ */
+.row-body {
+  /* Explicit: the zoomed title renders this cell as a <span> (an h2 only
+     permits phrasing content), which would otherwise stay inline. */
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Every before-text decoration (checkbox, badges, lock, provenance mark)
+   floats; the 6px replaces the flex row's gap it no longer receives. */
+.row-body > :not(.node-text) {
+  float: left;
+  margin-right: 6px;
+}
+
 .node-text {
+  /* Block, not the span default inline: an inline contentEditable only spans
+     its text, killing click-to-focus in the empty space after it. (In the
+     zoomed title -- still a flex <h2> -- this blockification is what the flex
+     item already got.) */
+  display: block;
   flex: 1 1 auto;
   min-height: 24px;
   padding: 2px 0;
@@ -769,12 +808,9 @@ body.dragging-active * {
 .zoomed-title {
   margin: 0 0 14px;
   font-weight: 600;
-  /* Flex so a protected node's leading lock (.protected-lock) sits in its own
-     column and centers on the big title text -- mirroring how .outline-row
-     places the same glyph. Single-child (unprotected) titles are unaffected: no
-     lock, no gap. The pivot text is a non-growing flex item here just as it is
-     in the list row, so the zoom morph's two endpoints stay geometrically
-     consistent (see .vt-morph below). */
+  /* Still flex, but the single item is now the .row-body cell (mirroring
+     .outline-row): the leading decorations float inside it, so a long wrapped
+     title flows back under its icons instead of staying in a narrow column. */
   display: flex;
   align-items: start;
   gap: 4px;
@@ -783,12 +819,13 @@ body.dragging-active * {
 .zoomed-title-text {
   font-size: 24px;
   line-height: 1.3;
-  /* inline-block gives a tight, atomic snapshot box that wraps the text,
-     matching the pivot list-item's (shrunk) box so the morph is a clean
-     scale + translate rather than a slide from mismatched geometry. The
+  /* Inherits `display: block` from .node-text -- deliberately NOT the old
+     inline-block: an atomic inline-block box can't flow line-by-line around
+     the floated icons, which would pin a wrapped title to the text column.
+     Block also matches the list row's morph endpoint (its .node-text is a
+     full-width block too), so the zoom morph geometry stays consistent. The
      morph name itself is applied dynamically (.vt-morph) to whichever node
      is the zoom pivot, so it works for both zoom-in and zoom-out. */
-  display: inline-block;
 }
 
 /* A completed zoom root shows full completed styling: line-through (from the

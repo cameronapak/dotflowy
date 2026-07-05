@@ -421,105 +421,111 @@ function RowChrome({
             data-collapsed={effectiveCollapsed}
           />
         </button>
-        {beforeTextSlots.map((slot) => (
-          <Fragment key={slot.id}>{slot.render(content, pluginCtx)}</Fragment>
-        ))}
-        <span
-          ref={(el) => {
-            textRef.current = el;
-            registerRef(rowKey, el);
-          }}
-          className={`node-text${isPivot ? " vt-morph" : ""}`}
-          style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
-          contentEditable
-          suppressContentEditableWarning
-          spellCheck={false}
-          aria-label={content.text.trim() || "Empty bullet"}
-          aria-multiline="true"
-          data-completed={content.completed}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            const text = readSource(el);
-            if (!composingRef.current) {
-              const af = autoformat({ text, node: content });
-              if (af) {
-                af.before?.(pluginCtx());
-                commands.onTextChange(content.id, af.text);
-                decorate(el, af.text, af.caret, false);
-                syncedRef.current = af.text;
-                setCaretOffset(el, af.caret);
-                return;
+        {/* Block cell so wrapped text flows UNDER the slot icons: the icons
+            float left inside it (a flex item can't float, hence the wrapper),
+            shortening only the first line box. Menus stay outside -- they
+            position against .outline-row. */}
+        <div className="row-body">
+          {beforeTextSlots.map((slot) => (
+            <Fragment key={slot.id}>{slot.render(content, pluginCtx)}</Fragment>
+          ))}
+          <span
+            ref={(el) => {
+              textRef.current = el;
+              registerRef(rowKey, el);
+            }}
+            className={`node-text${isPivot ? " vt-morph" : ""}`}
+            style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={false}
+            aria-label={content.text.trim() || "Empty bullet"}
+            aria-multiline="true"
+            data-completed={content.completed}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              const text = readSource(el);
+              if (!composingRef.current) {
+                const af = autoformat({ text, node: content });
+                if (af) {
+                  af.before?.(pluginCtx());
+                  commands.onTextChange(content.id, af.text);
+                  decorate(el, af.text, af.caret, false);
+                  syncedRef.current = af.text;
+                  setCaretOffset(el, af.caret);
+                  return;
+                }
               }
-            }
-            commands.onTextChange(content.id, text);
-            slash.handleInput();
-            menus.handleInput();
-            if (!composingRef.current) {
+              commands.onTextChange(content.id, text);
+              slash.handleInput();
+              menus.handleInput();
+              if (!composingRef.current) {
+                decorate(el, text, getCaretOffset(el), true);
+                syncedRef.current = text;
+              }
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={(e) => {
+              composingRef.current = false;
+              const el = e.currentTarget;
+              const text = readSource(el);
+              commands.onTextChange(content.id, text);
               decorate(el, text, getCaretOffset(el), true);
               syncedRef.current = text;
-            }
-          }}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={(e) => {
-            composingRef.current = false;
-            const el = e.currentTarget;
-            const text = readSource(el);
-            commands.onTextChange(content.id, text);
-            decorate(el, text, getCaretOffset(el), true);
-            syncedRef.current = text;
-          }}
-          onPaste={(e) => {
-            const el = e.currentTarget;
-            const next = pasteIntoBullet(e, el, content.id, pluginCtx, (t) =>
-              commands.onTextChange(content.id, t),
-            );
-            if (next !== null) syncedRef.current = next;
-          }}
-          // Copy/cut hand back the markdown SOURCE (a folded link's rendered
-          // text drops the url half). See copySourceSelection (ADR 0005).
-          onCopy={(e) => copySourceSelection(e, e.currentTarget)}
-          onCut={(e) => {
-            const el = e.currentTarget;
-            const next = cutSourceSelection(e, el, (t) =>
-              commands.onTextChange(content.id, t),
-            );
-            if (next !== null) syncedRef.current = next;
-          }}
-          onFocus={(e) => {
-            clearSelection();
-            const el = e.currentTarget;
-            caretWatchRef.current?.();
-            caretWatchRef.current = watchCaretReveal(
-              el,
-              () => composingRef.current,
-            );
-            if (!hasFoldingToken(content.text)) return;
-            revealLinkAtCaret(el, (t) => {
-              syncedRef.current = t;
-            });
-          }}
-          onBlur={(e) => {
-            slash.close();
-            menus.close();
-            caretWatchRef.current?.();
-            caretWatchRef.current = null;
-            const el = e.currentTarget;
-            const text = readSource(el);
-            const restored = healProtectedText(content.id, text, el);
-            if (restored !== null) {
-              syncedRef.current = restored;
-            } else if (hasFoldingToken(text)) {
-              decorate(el, text, null, false);
-              syncedRef.current = text;
-            }
-          }}
-          onKeyDown={(e) => {
-            if (menus.handleKeyDown(e)) return;
-            slash.handleKeyDown(e);
-          }}
-        />
+            }}
+            onPaste={(e) => {
+              const el = e.currentTarget;
+              const next = pasteIntoBullet(e, el, content.id, pluginCtx, (t) =>
+                commands.onTextChange(content.id, t),
+              );
+              if (next !== null) syncedRef.current = next;
+            }}
+            // Copy/cut hand back the markdown SOURCE (a folded link's rendered
+            // text drops the url half). See copySourceSelection (ADR 0005).
+            onCopy={(e) => copySourceSelection(e, e.currentTarget)}
+            onCut={(e) => {
+              const el = e.currentTarget;
+              const next = cutSourceSelection(e, el, (t) =>
+                commands.onTextChange(content.id, t),
+              );
+              if (next !== null) syncedRef.current = next;
+            }}
+            onFocus={(e) => {
+              clearSelection();
+              const el = e.currentTarget;
+              caretWatchRef.current?.();
+              caretWatchRef.current = watchCaretReveal(
+                el,
+                () => composingRef.current,
+              );
+              if (!hasFoldingToken(content.text)) return;
+              revealLinkAtCaret(el, (t) => {
+                syncedRef.current = t;
+              });
+            }}
+            onBlur={(e) => {
+              slash.close();
+              menus.close();
+              caretWatchRef.current?.();
+              caretWatchRef.current = null;
+              const el = e.currentTarget;
+              const text = readSource(el);
+              const restored = healProtectedText(content.id, text, el);
+              if (restored !== null) {
+                syncedRef.current = restored;
+              } else if (hasFoldingToken(text)) {
+                decorate(el, text, null, false);
+                syncedRef.current = text;
+              }
+            }}
+            onKeyDown={(e) => {
+              if (menus.handleKeyDown(e)) return;
+              slash.handleKeyDown(e);
+            }}
+          />
+        </div>
         {slash.menu}
         {menus.menu}
       </div>
