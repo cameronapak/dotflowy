@@ -21,8 +21,7 @@ import {
   SunIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge, Button } from "@/plugins/kit";
 import { definePlugin, type PluginContext } from "../types";
 import { capture, drop } from "../../data/history";
 import { isMirrorsEnabled } from "../../data/flags";

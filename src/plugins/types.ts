@@ -158,6 +158,14 @@ export interface PluginContext {
    *  the plugin owns (e.g. the tag color picker). A thin generic host: the core
    *  just mounts the node; the overlay handles its own positioning + dismiss. */
   openOverlay: (node: ReactNode | null) => void;
+  /** Open (or dismiss, with null) a Tier-3 side PANEL -- the contained host for
+   *  rich UI that shouldn't crowd the outline surface (ADR 0031). Unlike
+   *  `openOverlay` (a self-positioning popover), the core wraps the node in a
+   *  `Sheet`: a slide-in panel with its own backdrop + dismiss. This is where a
+   *  node's overflowed decorations expand to, and the only surface a future
+   *  Lane-B (untrusted MCP App) may render into. The node must supply its own
+   *  `SheetHeader`/`SheetTitle`. */
+  openPanel: (node: ReactNode | null) => void;
 }
 
 // --- Seam B: delegated interaction ------------------------------------------
@@ -384,7 +392,17 @@ export interface KeymapSpec {
 // contribute nothing for a given node (the checkbox only shows on a task).
 // Unlike a token (Seam A, El descriptor), a slot is plain JSX.
 
-export type SlotPosition = "row:before-text" | "title:before-text";
+// `before-text` slots lead the node (a small leading decoration: the todos
+// checkbox, the daily badge). `after-text` slots trail it -- the budgeted
+// trailing decoration zone (ADR 0031): the core caps how much of the bullet
+// they may occupy (see NodeDecorations + `--node-deco-budget`), so an author
+// gets any component but the outline surface can't be crowded out. Both the
+// row bullet and the zoomed title expose both positions.
+export type SlotPosition =
+  | "row:before-text"
+  | "title:before-text"
+  | "row:after-text"
+  | "title:after-text";
 
 export interface SlotSpec {
   id: string;
@@ -564,23 +582,11 @@ export interface SearchAction {
  */
 export interface PluginDef {
   id: string;
-  /**
-   * Plugin-owned static CSS (ADR 0001). The core mounts every plugin's `styles`
-   * once via `<PluginStyles>` (a React 19 hoisted `<style>`), so a plugin ships
-   * its styling IN ITS FOLDER instead of bleeding into core `styles.css`.
-   * Namespace every selector by the plugin's own prefix -- this is colocation +
-   * no-bleed-by-convention, NOT Shadow-DOM isolation (impossible for an inline
-   * chip living inside the editor's contentEditable). Currently no plugin uses
-   * this: route-bible, its first mover, moved to the widget seam (`component` +
-   * `WidgetEl`), which renders real TSX + Tailwind with no CSS (ADR 0006). Kept
-   * as the home for a plugin's static CSS when one needs it.
-   *
-   * RAW CSS only: this string is not run through the Tailwind build, so no
-   * `@apply` and no utility classes -- spell the rules out. Dynamic, data-driven
-   * stylesheets (the tag-color generator) stay bespoke `<style>` components;
-   * this seam is for a plugin's static CSS.
-   */
-  styles?: string;
+  // NOTE: there is deliberately NO `styles` seam (ADR 0031 retired raw plugin
+  // CSS -- a plugin could restyle the whole app through it). A plugin styles its
+  // own tokens/slots with Tailwind utility classes on the `El`/JSX it returns
+  // (see emphasis's `util`), and dynamic, data-driven sheets (the tag-color
+  // generator) stay bespoke `<style>` components keyed on their own data.
   /** Seam A: inline tokens, composed into the one combined regex. */
   tokens?: TokenSpec[];
   /** Seam B: delegated interactions on chips/links in the contentEditable. */

@@ -13,7 +13,7 @@
 // they await a row-decoration / reserved-key seam.
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Checkbox } from "@/plugins/kit";
 import { cn } from "@/lib/utils";
 import { definePlugin, type PluginContext } from "../types";
 import { type Node } from "../../data/tree";

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Ban } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/plugins/kit";
 import { cn } from "@/lib/utils";
 import {
   TAG_COLORS,

@@ -12,7 +12,6 @@ import { NodeSwitcher } from '../components/node-switcher'
 import { MoveDialog } from '../components/move-dialog'
 import { MirrorPlaces } from '../components/mirror-places'
 import { TagColorStyles } from '../plugins/tags/tag-color-menu'
-import { PluginStyles } from '../components/plugin-styles'
 import { Toaster } from '../components/ui/sonner'
 import { AuthScreen } from '../components/auth-screen'
 import { useSession } from '../lib/auth-client'
@@ -81,7 +80,6 @@ function RootComponent() {
               <MoveDialog />
               <MirrorPlaces />
               <TagColorStyles />
-              <PluginStyles />
             </ShowCompletedProvider>
           </AuthGate>
         </TextSizeProvider>

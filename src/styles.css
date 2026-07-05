@@ -243,6 +243,65 @@
   margin-top: calc(var(--reading-line-box) / 2 - 2.25px);
 }
 
+/*
+ * Trailing node decoration zone (Seam F `*:after-text`, ADR 0031 -- the
+ * anti-ugly node budget). A plugin's rich decorations render at the row's
+ * trailing edge, but the core caps how much of the bullet they may occupy:
+ * `--node-deco-budget` clips the zone and a trailing fade + overflow affordance
+ * signal "more". Freedom is capped by SPACE, not vocabulary, so the outline
+ * surface can't be crowded out no matter what a (trusted, compiled-in) plugin
+ * renders. Spans (valid in both the `<li>` row and the phrasing-only `<h2>`
+ * title), laid out flex. The overflow boolean comes from one ResizeObserver in
+ * NodeDecorations.tsx -- never measured per scroll frame (ADR 0019 / ADR 0014).
+ */
+:root {
+  --node-deco-budget: 200px;
+}
+.node-deco {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Hug the row's trailing edge (works in the flex `.outline-row` regardless of
+     whether `.row-body` grows). */
+  margin-inline-start: auto;
+  align-self: center;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.node-deco-zone {
+  display: flex;
+  overflow: hidden;
+  max-width: var(--node-deco-budget);
+}
+/* Fade the clipped trailing edge only while overflowing, so a mid-item cut reads
+   as intentional and a flush fit isn't dimmed for no reason. */
+.node-deco[data-overflowing] .node-deco-zone {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 22px),
+    transparent
+  );
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+}
+.node-deco-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+}
+.node-deco-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--muted-foreground);
+  border-radius: 4px;
+}
+.node-deco-more:hover {
+  color: var(--foreground);
+  background: var(--row-hover);
+}
+
 h2 span.protected-lock {
   gap: 0px;
   --size-of-bullet: 20px;

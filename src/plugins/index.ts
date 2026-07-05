@@ -5,6 +5,7 @@
 // (D7). Dogfooded: code/links/tags are themselves entries, built on the same
 // public API, so the core can't grow feature-specific branches.
 
+import childCount from "./child-count";
 import code from "./code";
 import daily from "./daily";
 import emphasis from "./emphasis";
@@ -15,7 +16,7 @@ import tags from "./tags";
 import todos from "./todos";
 import type { PluginDef } from "./types";
 
-// `provenance` leads: it only contributes a Seam F slot (+ its own styles), and
+// `provenance` leads: it only contributes a Seam F slot, and
 // as the first entry its origin mark renders leftmost — right after the bullet
 // dot, ahead of the todos checkbox / daily badge. No tokens/keymap/commands, so
 // its array position has no precedence side effects.
@@ -28,4 +29,5 @@ export const plugins: PluginDef[] = [
   tags,
   emphasis,
   daily,
+  childCount,
 ];

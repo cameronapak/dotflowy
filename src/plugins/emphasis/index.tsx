@@ -46,7 +46,13 @@ interface EmphasisKind {
   // must beat `~`, so bold/strike are < italic/underline.
   precedence: number;
   tag: "em" | "strong" | "del" | "u";
+  /** Semantic hook class (`md-bold` …), kept stable for selectors. */
   class: string;
+  /** Tailwind utility that carries the actual weight/decoration. Explicit (a
+   *  class selector) so a CSS reset on the bare tag can't strip the semantics --
+   *  this is why emphasis needs NO plugin stylesheet (ADR 0031: no raw plugin
+   *  CSS). The literal appears here so Tailwind's content scan emits it. */
+  util: string;
   label: string;
   description: string;
   icon: typeof BoldIcon;
@@ -54,10 +60,10 @@ interface EmphasisKind {
 }
 
 const KINDS: readonly EmphasisKind[] = [
-  { kind: "bold", id: "emphasis-bold", pattern: BOLD_PATTERN, precedence: 30, tag: "strong", class: "md-bold", label: "Bold", description: "Wrap in **bold**", icon: BoldIcon, hotkey: "Mod+B" },
-  { kind: "strike", id: "emphasis-strike", pattern: STRIKETHROUGH_PATTERN, precedence: 31, tag: "del", class: "md-strike", label: "Strikethrough", description: "Wrap in ~~strikethrough~~", icon: StrikethroughIcon, hotkey: "Mod+Shift+X" },
-  { kind: "italic", id: "emphasis-italic", pattern: ITALIC_PATTERN, precedence: 32, tag: "em", class: "md-italic", label: "Italic", description: "Wrap in *italic*", icon: ItalicIcon, hotkey: "Mod+I" },
-  { kind: "underline", id: "emphasis-underline", pattern: UNDERLINE_PATTERN, precedence: 33, tag: "u", class: "md-underline", label: "Underline", description: "Wrap in ~underline~ (Bear-style)", icon: UnderlineIcon, hotkey: "Mod+U" },
+  { kind: "bold", id: "emphasis-bold", pattern: BOLD_PATTERN, precedence: 30, tag: "strong", class: "md-bold", util: "font-bold", label: "Bold", description: "Wrap in **bold**", icon: BoldIcon, hotkey: "Mod+B" },
+  { kind: "strike", id: "emphasis-strike", pattern: STRIKETHROUGH_PATTERN, precedence: 31, tag: "del", class: "md-strike", util: "line-through", label: "Strikethrough", description: "Wrap in ~~strikethrough~~", icon: StrikethroughIcon, hotkey: "Mod+Shift+X" },
+  { kind: "italic", id: "emphasis-italic", pattern: ITALIC_PATTERN, precedence: 32, tag: "em", class: "md-italic", util: "italic", label: "Italic", description: "Wrap in *italic*", icon: ItalicIcon, hotkey: "Mod+I" },
+  { kind: "underline", id: "emphasis-underline", pattern: UNDERLINE_PATTERN, precedence: 33, tag: "u", class: "md-underline", util: "underline", label: "Underline", description: "Wrap in ~underline~ (Bear-style)", icon: UnderlineIcon, hotkey: "Mod+U" },
 ];
 
 // A folded emphasis run: one ATOMIC styled tag (`<em>`/`<strong>`/`<del>`/`<u>`).
@@ -74,7 +80,10 @@ function foldedEmphasisEl(
   return {
     tag: kind.tag,
     attrs: {
-      class: kind.class,
+      // Semantic hook + Tailwind utility (weight/decoration) + cursor-text (the
+      // atom is contenteditable=false, so it needs an explicit text cursor).
+      // No plugin stylesheet -- the utilities carry it (ADR 0031).
+      class: `${kind.class} ${kind.util} cursor-text`,
       "data-emphasis": true,
       contenteditable: "false",
       "data-src": tok,
@@ -106,7 +115,11 @@ function revealedEmphasisEl(
     attrs: { class: "emphasis-reveal", "data-emphasis-reveal": true },
     children: [
       punct(marker),
-      { tag: kind.tag, attrs: { class: kind.class }, children: [interior] },
+      {
+        tag: kind.tag,
+        attrs: { class: `${kind.class} ${kind.util}` },
+        children: [interior],
+      },
       punct(marker),
     ],
   };
@@ -145,17 +158,10 @@ export default definePlugin({
     },
   })),
 
-  // Plugin-owned CSS (ADR 0001) -- kept in the plugin folder, not core
-  // styles.css. Explicit weight/decoration so a CSS reset can't strip the
-  // semantics of the folded tags; revealed markers reuse the core `.md-punct`
-  // dimming (shared with links).
-  styles: `
-    strong.md-bold { font-weight: 700; }
-    em.md-italic { font-style: italic; }
-    del.md-strike { text-decoration: line-through; }
-    u.md-underline { text-decoration: underline; }
-    [data-emphasis] { cursor: text; }
-  `,
+  // No plugin stylesheet (ADR 0031 retires the raw-CSS seam): the weight /
+  // decoration ride Tailwind utilities on each token's own tag (see `util`
+  // above), and the revealed markers reuse the core `.md-punct` dimming (shared
+  // with links, in styles.css).
 
   // Seam C: a `/` command per kind. Always available (any bullet can take
   // emphasis); the wrap inserts an empty marker pair and places the caret inside
