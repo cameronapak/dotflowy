@@ -384,7 +384,17 @@ export interface KeymapSpec {
 // contribute nothing for a given node (the checkbox only shows on a task).
 // Unlike a token (Seam A, El descriptor), a slot is plain JSX.
 
-export type SlotPosition = "row:before-text" | "title:before-text";
+// `before-text` slots lead the node (a small leading decoration: the todos
+// checkbox, the daily badge). `after-text` slots trail it -- the budgeted
+// trailing decoration zone (ADR 0031): the core caps how much of the bullet
+// they may occupy (see NodeDecorations + `--node-deco-budget`), so an author
+// gets any component but the outline surface can't be crowded out. Both the
+// row bullet and the zoomed title expose both positions.
+export type SlotPosition =
+  | "row:before-text"
+  | "title:before-text"
+  | "row:after-text"
+  | "title:after-text";
 
 export interface SlotSpec {
   id: string;

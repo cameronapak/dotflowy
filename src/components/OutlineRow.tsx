@@ -19,6 +19,7 @@ import { isMirrorsEnabled } from "../data/flags";
 import { MirrorBadge } from "./mirror-chrome";
 import type { PluginContext, SlotSpec } from "../plugins/types";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
+import { NodeDecorations } from "./NodeDecorations";
 import { clearSelection } from "../data/selection-state";
 import { useSelectionFill } from "../data/selection-fill";
 import { useSlashMenu } from "./slash-menu";
@@ -539,6 +540,14 @@ function RowChrome({
             }}
           />
         </div>
+        {/* Trailing decoration zone (Seam F `row:after-text`, ADR 0031). Flex
+            sibling of `.row-body`, hugs the trailing edge; dormant until a
+            plugin registers a trailing slot. */}
+        <NodeDecorations
+          node={content}
+          position="row:after-text"
+          getCtx={pluginCtx}
+        />
         {slash.menu}
         {menus.menu}
       </div>

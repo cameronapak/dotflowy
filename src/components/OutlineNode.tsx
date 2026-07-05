@@ -13,6 +13,7 @@ import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
+import { NodeDecorations } from "./NodeDecorations";
 import { clearSelection, useSelectionEdge } from "../data/selection-state";
 import { useSlashMenu } from "./slash-menu";
 import { useMenus } from "./menu-engine";
@@ -460,6 +461,13 @@ function OutlineNodeBody({
             }}
           />
         </div>
+        {/* Trailing decoration zone (Seam F `row:after-text`, ADR 0031). Kept
+            in lockstep with OutlineRow during the virtualization flag window. */}
+        <NodeDecorations
+          node={node}
+          position="row:after-text"
+          getCtx={pluginCtx}
+        />
         {slash.menu}
         {menus.menu}
       </div>

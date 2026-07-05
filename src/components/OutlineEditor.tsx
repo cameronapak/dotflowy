@@ -111,6 +111,7 @@ import {
 } from "../plugins/registry";
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import { useDragReorder } from "./use-drag-reorder";
+import { NodeDecorations } from "./NodeDecorations";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { healProtectedText } from "./protected-text";
 import {
@@ -1681,6 +1682,15 @@ function ZoomedTitle({
           }}
         />
       </span>
+      {/* Trailing decoration zone for the zoomed title (Seam F
+          `title:after-text`, ADR 0031) -- mirrors OutlineRow's `row:after-text`
+          so the two render paths can't drift. Dormant until a trailing slot
+          registers. */}
+      <NodeDecorations
+        node={node}
+        position="title:after-text"
+        getCtx={getCtx}
+      />
     </h2>
   );
 }
