@@ -10,7 +10,7 @@ import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import { Search, BookmarkIcon } from "lucide-react";
 import { useTree } from "../data/useTree";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
-import { flattenInline } from "../data/inline-text";
+import { flattenNodeText } from "../data/node-links";
 import { isMirrorsEnabled } from "../data/flags";
 import {
   searchAliases,
@@ -74,7 +74,10 @@ const BOOKMARKS_HEADING = (
 
 // One pass over the nodes (skip empties, project to the searchable shape), then
 // index. Module scope: pure, and a single iteration over potentially many nodes.
-function buildFuse(nodes: Node[]): Fuse<Searchable> {
+// The projection is the INDEX-AWARE flatten (ADR 0032): a `[[id]]` node link
+// contributes its target's text to the corpus, never a raw uuid -- and matches
+// line up with the same projection ResultRow displays.
+function buildFuse(index: TreeIndex, nodes: Node[]): Fuse<Searchable> {
   // With mirrors on (ADR 0022) a mirror INSTANCE shares its source's content, so
   // indexing it too would surface the same node twice -- dedup the search corpus
   // to the source. Flag off, a `mirrorOf` node is an ordinary node and is kept.
@@ -85,7 +88,7 @@ function buildFuse(nodes: Node[]): Fuse<Searchable> {
     if (mirrorsOn && n.mirrorOf != null) continue;
     searchable.push({
       node: n,
-      text: flattenInline(n.text),
+      text: flattenNodeText(index, n.text),
       aliases: searchAliases(n),
     });
   }
@@ -176,8 +179,8 @@ function SwitcherDialog({
   // INDEX rebuilds on every keystroke (verified in the compiled output). Keyed
   // on [open, nodes] so typing only re-runs `results` (the cheap search) below.
   const fuse = useMemo(
-    () => (open ? buildFuse(nodes) : null),
-    [open, nodes],
+    () => (open ? buildFuse(index, nodes) : null),
+    [open, index, nodes],
   );
 
   const q = query.trim();
@@ -324,13 +327,14 @@ function ResultRow({
 }) {
   // Ancestors, top-down, excluding the node itself -- the disambiguating
   // breadcrumb ("Work › Q3 › Notes"). Displayed, never searched (ADR 0012).
-  // Links flatten to their label so a crumb never shows raw `[..](..)`.
+  // Links flatten to their label so a crumb never shows raw `[..](..)`; node
+  // links flatten to their target's text (ADR 0032).
   const crumbs = buildTrail(index, node.id)
     .slice(0, -1)
-    .map((n) => flattenInline(n.text).trim() || "Untitled")
+    .map((n) => flattenNodeText(index, n.text).trim() || "Untitled")
     .join(" › ");
 
-  const title = flattenInline(node.text).trim() || "Untitled";
+  const title = flattenNodeText(index, node.text).trim() || "Untitled";
   // A plugin's display-only suffix (Seam J) -- the daily plugin's "Today" -- so a
   // day note reads "Tuesday, June 23, 2026 (Today)". Not part of node.text, so
   // it's rendered as a separate, un-highlighted span after the title.

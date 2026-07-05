@@ -14,7 +14,7 @@ import {
   type Node,
   type TreeIndex,
 } from "../data/tree";
-import { flattenInline } from "../data/inline-text";
+import { flattenNodeText } from "../data/node-links";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMirrorPlacesOpener } from "./mirror-places-opener";
 import { Badge } from "./ui/badge";
@@ -99,7 +99,9 @@ function MirrorPlacesInner({
   }, [index, source]);
 
   const open = source !== null;
-  const title = source ? flattenInline(source.text).trim() || "Untitled" : "";
+  const title = source
+    ? flattenNodeText(index, source.text).trim() || "Untitled"
+    : "";
 
   function goToPlace(place: Place) {
     onClose();
@@ -149,11 +151,12 @@ function MirrorPlacesInner({
 }
 
 /** Ancestor texts top-down, excluding the node itself -- the disambiguating
- *  breadcrumb. Empty = the occurrence sits at the top level. */
-function crumbsFor(index: TreeIndex, id: string): string[] {
+ *  breadcrumb. Empty = the occurrence sits at the top level. Shared with the
+ *  backlinks list (ADR 0032) -- same jump-list grammar. */
+export function crumbsFor(index: TreeIndex, id: string): string[] {
   return buildTrail(index, id)
     .slice(0, -1)
-    .map((n) => flattenInline(n.text).trim() || "Untitled");
+    .map((n) => flattenNodeText(index, n.text).trim() || "Untitled");
 }
 
 function PlaceRow({
@@ -192,9 +195,9 @@ function PlaceRow({
  * The parent crumb is rigid (shrink-0, capped at 60% so a giant name can't
  * evict the trail entirely); ancestors shrink first, down to a min-w-6 sliver.
  * End-truncating the joined string would hide exactly the crumb that tells
- * the places apart.
+ * the places apart. Shared with the backlinks list (ADR 0032).
  */
-function Crumbs({ crumbs }: { crumbs: string[] }) {
+export function Crumbs({ crumbs }: { crumbs: string[] }) {
   if (crumbs.length === 0) {
     return <span className="truncate text-sm text-muted-foreground">Home</span>;
   }

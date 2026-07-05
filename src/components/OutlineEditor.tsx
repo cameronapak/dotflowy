@@ -36,6 +36,7 @@ import {
   useVisibleRows,
 } from "../data/tree-store";
 import { isMirrorsEnabled, isMobileBar, isVirtualized } from "../data/flags";
+import { Backlinks } from "./backlinks";
 import { MirrorBadge } from "./mirror-chrome";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { OutlineRow } from "./OutlineRow";
@@ -585,23 +586,30 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         ) : (
           <div className={revealOnLoad ? "outline-reveal" : undefined}>
             {zoomedNode && (
-              <ZoomedTitle
-                node={zoomedNode}
-                isPivot={pivotId === zoomedNode.id}
-                registerRef={registerRef}
-                getCtx={pluginCtx}
-                onTextChange={(text) => setText(zoomedNode.id, text)}
-                onAddChild={() =>
-                  runStructural(() => {
-                    const newId = insertChildAtStart(
-                      getTreeIndex(),
-                      zoomedNode.id,
-                    );
-                    pendingFocus.current = newId;
-                  })
-                }
-                onArrowDown={() => commands.onMoveFocus(zoomedNode.id, "down")}
-              />
+              <>
+                <ZoomedTitle
+                  node={zoomedNode}
+                  isPivot={pivotId === zoomedNode.id}
+                  registerRef={registerRef}
+                  getCtx={pluginCtx}
+                  onTextChange={(text) => setText(zoomedNode.id, text)}
+                  onAddChild={() =>
+                    runStructural(() => {
+                      const newId = insertChildAtStart(
+                        getTreeIndex(),
+                        zoomedNode.id,
+                      );
+                      pendingFocus.current = newId;
+                    })
+                  }
+                  onArrowDown={() =>
+                    commands.onMoveFocus(zoomedNode.id, "down")
+                  }
+                />
+                {/* "{n} backlinks" under the title (ADR 0032) -- core chrome in
+                    the mirror-badge family; renders nothing at zero. */}
+                <Backlinks nodeId={zoomedNode.id} />
+              </>
             )}
 
             {noMatches && filter?.emptyMessage ? (

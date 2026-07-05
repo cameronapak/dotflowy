@@ -10,6 +10,7 @@ import {
   type Node,
   type TreeIndex,
 } from './tree'
+import { parseNodeLinks } from './node-links'
 import { buildVisibleRows, type VisibleRow } from './visible-order'
 import { isMirrorsEnabled } from './flags'
 import type { TagFilter } from './tags'
@@ -47,6 +48,7 @@ let index: TreeIndex = {
   byId: new Map(),
   childrenByParent: new Map(),
   mirrorsBySource: new Map(),
+  linksByTarget: new Map(),
 }
 const listeners = new Set<() => void>()
 let started = false
@@ -108,6 +110,11 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // batches today, but tracked independently so the reverse index stays correct
   // (and its Map identity is refreshed) even on a bare field edit that flips it.
   let mirrorsChanged = false
+  // Outbound-link transitions (ADR 0032): a text edit that completes or deletes
+  // a `[[id]]` token. Tracked like mirrorsChanged so the backlink reverse index
+  // refreshes on a bare field edit; parseNodeLinks bails on link-free text, so
+  // the keystroke hot path pays two `includes` scans of the edited node's text.
+  let linksChanged = false
   for (const change of changes) {
     if (change.type === 'delete') {
       const prev = index.byId.get(change.key as string)
@@ -120,11 +127,33 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
         removeMirror(prev.mirrorOf, prev.id)
         mirrorsChanged = true
       }
+      for (const target of parseNodeLinks(prev.text)) {
+        removeLink(target, prev.id)
+        linksChanged = true
+      }
       continue
     }
     const next = change.value
     const prev = index.byId.get(next.id)
     index.byId.set(next.id, next)
+    if ((prev?.text ?? '') !== next.text) {
+      const before = prev ? parseNodeLinks(prev.text) : []
+      const after = parseNodeLinks(next.text)
+      if (before.length > 0 || after.length > 0) {
+        for (const t of before) {
+          if (!after.includes(t)) {
+            removeLink(t, next.id)
+            linksChanged = true
+          }
+        }
+        for (const t of after) {
+          if (!before.includes(t)) {
+            addLink(t, next.id)
+            linksChanged = true
+          }
+        }
+      }
+    }
     if (prev && (prev.collapsed !== next.collapsed || prev.completed !== next.completed)) {
       visibilityChanged = true
     }
@@ -184,6 +213,11 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     // memoized on its reference can't go stale. Untouched on the keystroke path.
     mirrorsBySource:
       structural || mirrorsChanged ? new Map(index.mirrorsBySource) : index.mirrorsBySource,
+    // Same discipline for the backlink reverse index (ADR 0032): fresh on a
+    // structural change or when a text edit flipped an outbound link. A plain
+    // (link-free) keystroke keeps the reference.
+    linksByTarget:
+      structural || linksChanged ? new Map(index.linksByTarget) : index.linksByTarget,
   }
   // Bump the flat-list signal on a structural change OR a visibility flip; a
   // pure text/isTask edit leaves it untouched (the typing hot path). See
@@ -232,6 +266,26 @@ function removeMirror(sourceId: string, id: string) {
   const i = ids.indexOf(id)
   if (i !== -1) ids.splice(i, 1)
   if (ids.length === 0) index.mirrorsBySource.delete(sourceId)
+}
+
+/** Register a referring node under a link target in the backlink reverse index
+ *  (ADR 0032). Guards against a duplicate from a redelivered change. */
+function addLink(targetId: string, referrerId: string) {
+  const ids = index.linksByTarget.get(targetId)
+  if (ids) {
+    if (!ids.includes(referrerId)) ids.push(referrerId)
+  } else {
+    index.linksByTarget.set(targetId, [referrerId])
+  }
+}
+
+/** Drop a referrer from a target's backlink bucket; prune when it empties. */
+function removeLink(targetId: string, referrerId: string) {
+  const ids = index.linksByTarget.get(targetId)
+  if (!ids) return
+  const i = ids.indexOf(referrerId)
+  if (i !== -1) ids.splice(i, 1)
+  if (ids.length === 0) index.linksByTarget.delete(targetId)
 }
 
 /**
@@ -318,6 +372,21 @@ export function useMirrorCount(id: string, enabled = true): number {
     getSnapshot,
     () => 0,
   )
+}
+
+/**
+ * Subscribe to how many nodes LINK to `id` (ADR 0032) -- the number behind the
+ * zoomed view's "{n} backlinks" line. Deduped by referring node (the reverse
+ * index stores each referrer once regardless of how many times its text repeats
+ * the token). A primitive snapshot, so the one mounted consumer (the zoomed
+ * title's chrome) re-renders only when the count actually changes.
+ */
+export function useBacklinkCount(id: string): number {
+  const getSnapshot = useCallback(
+    () => getTreeIndex().linksByTarget.get(id)?.length ?? 0,
+    [id],
+  )
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => 0)
 }
 
 /**
