@@ -35,7 +35,7 @@ import {
   useVisibleChildIds,
   useVisibleRows,
 } from "../data/tree-store";
-import { isMirrorsEnabled, isVirtualized } from "../data/flags";
+import { isMirrorsEnabled, isMobileBar, isVirtualized } from "../data/flags";
 import { MirrorBadge } from "./mirror-chrome";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { OutlineRow } from "./OutlineRow";
@@ -132,6 +132,10 @@ import {
 } from "./ui/dropdown-menu";
 import { openLinkAtCaret } from "./link-keymap";
 import { useIsMobile } from "../hooks/use-mobile";
+import {
+  MobileActionsBar,
+  type MobileBarActions,
+} from "./MobileActionsBar";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
 // history state, so the incoming view knows which element to name -- and so it
@@ -361,6 +365,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [commands, navigateZoom],
   );
 
+  // Zero-arg command surface for the mobile actions bar (ADR 0030). A thin facade
+  // over the same `commands`/`undo`/`redo` the keyboard uses; each method resolves
+  // the focused bullet internally, so the bar inherits runStructural atomicity,
+  // protection guards, and undo coalescing for free. Stable identity.
+  const mobileBarActions = useMobileBarActions({
+    refs,
+    findFocusedId,
+    pendingFocus,
+    commands,
+  });
+
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
   // actions menu's ops. Installs window key/mouse listeners only while a
   // selection is active, and clears any stale selection on this view's mount.
@@ -535,6 +550,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}
       >
+        {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
+            pointer and only while a bullet is focused (both gated inside the
+            component), so on desktop this renders nothing. ADR 0030. */}
+        {isMobileBar() && (
+          <MobileActionsBar
+            actions={mobileBarActions}
+            findFocusedId={findFocusedId}
+          />
+        )}
+
         {overlayNode}
 
         {loading ? (
@@ -1043,6 +1068,81 @@ function focusKeyFor(instanceId: string, activeKey: string): string {
     true,
   );
   return focusKeyAfterEdit(rows, instanceId, activeKey) ?? instanceId;
+}
+
+/**
+ * Facade for the mobile actions bar (ADR 0030): the existing per-bullet commands
+ * (+ undo/redo) re-exposed as zero-arg methods, each resolving the focused bullet
+ * through `findFocusedId()`. The bar's buttons preventDefault on pointerdown so
+ * the contentEditable stays focused, which guarantees `findFocusedId()` is
+ * non-null at call time. It adds no new mutation path: indent/outdent/complete
+ * route through `commands` (inheriting runStructural + protection guards), and
+ * undo/redo mirror the useOutlineFocus hotkeys verbatim. Stable identity so the
+ * bar's props never change on a keystroke.
+ */
+function useMobileBarActions({
+  refs,
+  findFocusedId,
+  pendingFocus,
+  commands,
+}: {
+  refs: Map<string, HTMLSpanElement | null>;
+  findFocusedId: () => string | null;
+  pendingFocus: RefObject<string | null>;
+  commands: NodeCommands;
+}): MobileBarActions {
+  return useMemo<MobileBarActions>(() => {
+    const focusedEl = (): HTMLSpanElement | null => {
+      const key = findFocusedId();
+      return key ? (refs.get(key) ?? null) : null;
+    };
+    return {
+      // onIndent/onOutdent re-resolve findFocusedId() internally; passing the key
+      // is belt-and-suspenders (and a no-op guard when focus is somehow gone).
+      indent: () => {
+        const key = findFocusedId();
+        if (key) commands.onIndent(key);
+      },
+      outdent: () => {
+        const key = findFocusedId();
+        if (key) commands.onOutdent(key);
+      },
+      // Verbatim twins of the Mod+Z / Mod+Shift+Z hotkeys in useOutlineFocus.
+      undo: () =>
+        runStructural(() => {
+          const focusId = undo(getTreeIndex(), findFocusedId());
+          if (focusId) pendingFocus.current = focusId;
+        }),
+      redo: () =>
+        runStructural(() => {
+          const focusId = redo(getTreeIndex(), findFocusedId());
+          if (focusId) pendingFocus.current = focusId;
+        }),
+      // Flip completion relative to the CONTENT node's current state (mirror-aware,
+      // like onDeleteNode); onToggleCompleted enforces the protected-node guard.
+      toggleComplete: () => {
+        const key = findFocusedId();
+        if (!key) return;
+        const idx = getTreeIndex();
+        const instanceId = instanceIdForKey(key);
+        const contentId = isMirrorsEnabled()
+          ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
+          : instanceId;
+        const node = idx.byId.get(contentId);
+        if (!node) return;
+        commands.onToggleCompleted(contentId, !node.completed);
+      },
+      // Simulate the "/" keystroke so the row's own detectSlash opens the palette.
+      // execCommand fires a native input event, which the row's onInput handler
+      // (text sync + slash detection) reads via readSource — don't hand-splice DOM.
+      insertSlash: () => {
+        if (!focusedEl()) return;
+        document.execCommand("insertText", false, "/");
+      },
+      // The lone focus-preservation exception: dismissing the keyboard IS a blur.
+      dismiss: () => focusedEl()?.blur(),
+    };
+  }, [refs, findFocusedId, pendingFocus, commands]);
 }
 
 interface NodeCommandsArgs {
