@@ -19,4 +19,13 @@ import type { PluginDef } from "./types";
 // as the first entry its origin mark renders leftmost — right after the bullet
 // dot, ahead of the todos checkbox / daily badge. No tokens/keymap/commands, so
 // its array position has no precedence side effects.
-export const plugins: PluginDef[] = [provenance, code, links, routeBible, tags, emphasis, todos, daily];
+export const plugins: PluginDef[] = [
+  todos,
+  provenance,
+  code,
+  links,
+  routeBible,
+  tags,
+  emphasis,
+  daily,
+];
