@@ -670,6 +670,22 @@ h2 span.protected-lock {
   }
 
   /*
+   * Reserve the chevron column for the trailing decoration zone (ADR 0031 x
+   * ADR 0029). On coarse the chevron flips to `right:0` and is `position:
+   * absolute` (out of the flex flow), so `.node-deco` -- which hugs the row's
+   * trailing edge via `margin-inline-start:auto` -- would otherwise extend the
+   * full content width and render a decoration directly UNDER the chevron. The
+   * first consumer proves it: a child-count badge only shows on a COLLAPSED row,
+   * which always has children, so it always co-occurs with the chevron. Push the
+   * zone in by the 16px chevron box + a gap so the badge sits just left of it.
+   * Desktop keeps the chevron in the left gutter, so no reservation is needed
+   * there.
+   */
+  .node-deco {
+    margin-inline-end: 24px;
+  }
+
+  /*
    * A childless row still renders an EMPTY .collapse-toggle button whose 44px
    * hitbox would otherwise sit at the right edge and swallow taps meant for
    * tap-to-edit (a childless collapse is a no-op). Remove it so those taps fall
