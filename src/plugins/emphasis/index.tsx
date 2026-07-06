@@ -180,6 +180,9 @@ export default definePlugin({
       label.toLowerCase(),
     ],
     available: () => true,
+    // Wrap is caret/selection-scoped -- excluded from the Cmd+K command center,
+    // which has no live caret (ADR 0034). Slash palette + Seam D still run it.
+    caretScoped: true,
     run: (nodeId: string, ctx: PluginContext) =>
       wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
   })),
