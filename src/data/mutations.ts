@@ -689,19 +689,18 @@ export function toggleBookmark(nodeId: string, bookmarked: boolean) {
 }
 
 /**
- * Insert a multi-line paste as a tree of bullets. The FIRST item replaces the
- * text of the focused node (the caller already wrote that text); subsequent
- * items are inserted as siblings/children relative to `afterId`, following the
- * depth deltas in `items`. Depth 0 = same level as `afterId`; depth N+1 = child
- * of the node at depth N.
+ * Insert the remaining lines of a multi-line paste as a tree of bullets. The
+ * first pasted line has already replaced the focused node's text; these items
+ * are inserted as siblings/children relative to `afterId`, following the depth
+ * deltas in `items`. Depth 0 = same level as `afterId`; depth N+1 = child of
+ * the node at depth N.
  *
  * The index is rebuilt from the live collection between each insert (each insert
  * mutates `nodesCollection` optimistically), so sibling-chain relinks read
  * accurate state. Wrap the whole call in `runStructural` (ADR 0009) so the batch
  * lands as one atomic frame.
  *
- * Returns the last inserted node id (for focus). `items[0]` is NOT inserted
- * here -- the caller owns writing the first line's text into the existing node.
+ * Returns the last inserted node id (for focus).
  */
 export function insertFromPaste(
   afterId: string,
