@@ -20,41 +20,40 @@ async function loadWithSpotlight(page: Page, on: boolean) {
   await expect(text(page, "alpha")).toBeVisible();
 }
 
-// Spotlight focus mode (ADR 0033): the focused bullet + its ancestor chain stay
-// full opacity; every other row dims to 0.3. Painted by a generated stylesheet
-// keyed on data-node-id, gated by `spotlight-on` on <body>.
+// Spotlight focus mode (ADR 0033): while a bullet is focused, every other row
+// dims to 0.3 and ONLY the focused bullet stays full (single-node -- ancestors
+// dim too). Pure CSS via `.spotlight-on:has(.node-text:focus)` + `:focus-within`.
 test.describe("spotlight focus mode", () => {
-  test("focusing a nested bullet lights it and its ancestors, dims the rest", async ({
+  test("focusing a bullet lights only it and dims everything else", async ({
     page,
   }) => {
     await loadWithSpotlight(page, true);
 
-    // Nothing focused yet -> mode is on but not dimming.
-    await expect(page.locator("body")).not.toHaveClass(/spotlight-on/);
+    // Mode is on, but with no caret in the outline nothing dims (`:has` fails).
+    await expect(row(page, "alpha")).toHaveCSS("opacity", "1");
+    await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
 
     await text(page, "alpha-1").click();
     await expect(text(page, "alpha-1")).toBeFocused();
-    await expect(page.locator("body")).toHaveClass(/spotlight-on/);
 
-    // Focused node + its parent (the ancestor chain up to the root) stay full.
+    // Only the focused bullet is full...
     await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
-    await expect(row(page, "alpha")).toHaveCSS("opacity", "1");
-
-    // A sibling and an unrelated top-level node dim.
+    // ...its parent dims like everything else (single-node, no ancestor chain)...
+    await expect(row(page, "alpha")).toHaveCSS("opacity", "0.3");
+    // ...as do a sibling and an unrelated top-level node.
     await expect(row(page, "alpha-2")).toHaveCSS("opacity", "0.3");
     await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
   });
 
-  test("the lit set follows the caret to another bullet", async ({ page }) => {
+  test("the lit bullet follows the caret", async ({ page }) => {
     await loadWithSpotlight(page, true);
 
     await text(page, "alpha-1").click();
+    await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
     await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
 
-    // Move to bravo (a top-level node, no ancestors): only bravo is lit now.
     await text(page, "bravo").click();
     await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
-    await expect(row(page, "alpha")).toHaveCSS("opacity", "0.3");
     await expect(row(page, "alpha-1")).toHaveCSS("opacity", "0.3");
   });
 
@@ -65,13 +64,12 @@ test.describe("spotlight focus mode", () => {
     await text(page, "alpha-1").click();
     await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
 
-    // Nothing focused -> the `spotlight-on` class drops, so nothing is dimmed.
+    // No caret -> `:has(.node-text:focus)` fails -> nothing is dimmed.
     await page.evaluate(() =>
       (document.activeElement as HTMLElement | null)?.blur(),
     );
-    await expect(page.locator("body")).not.toHaveClass(/spotlight-on/);
     await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
-    await expect(row(page, "alpha")).toHaveCSS("opacity", "1");
+    await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
   });
 
   test("with the mode off, focusing dims nothing", async ({ page }) => {

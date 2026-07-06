@@ -364,15 +364,21 @@ h2 span.protected-lock {
 }
 
 /*
- * Spotlight focus mode (ADR 0033). While a bullet is focused, `spotlight-on` is
- * on <body> and every content row dims to 0.3; the generated `[data-spotlight]`
- * stylesheet lights the active branch (focused row + ancestors) back to 1. When
- * nothing is focused the class is removed entirely, so the outline is full.
- * `spotlight-fade` (added only when the focus change came from a pointer) eases
- * the change; keyboard nav leaves it off so rapid arrow-stepping snaps instantly.
+ * Spotlight focus mode (ADR 0033). `spotlight-on` on <body> = mode enabled; the
+ * dim itself is PURE CSS. While a bullet caret is focused (`:has(.node-text:
+ * focus)`) every content row drops to 0.3, and the focused row -- and ONLY it
+ * (`:focus-within`) -- stays full. Single-node by design (ADR 0033): dimmed
+ * context is still legible. At rest (nothing focused) `:has` fails, so the whole
+ * outline is full -- which also means node-selection mode (no caret) never dims.
+ * `spotlight-fade` (present only after a pointer interaction) eases the change;
+ * keyboard nav leaves it off so rapid arrow-stepping snaps instantly.
  */
-.spotlight-on .outline-row {
+.spotlight-on:has(.node-text:focus) .outline-row {
   opacity: 0.3;
+}
+
+.spotlight-on li[data-node-id]:focus-within > .outline-row {
+  opacity: 1;
 }
 
 .spotlight-on.spotlight-fade .outline-row {
