@@ -37,6 +37,7 @@ import { hasFoldingToken } from "../plugins/registry";
 import {
   copySourceSelection,
   cutSourceSelection,
+  type MultiLinePasteHandler,
   pasteIntoBullet,
 } from "./paste";
 import { healProtectedText } from "./protected-text";
@@ -108,6 +109,9 @@ export interface OutlineRowProps {
   pivotId: string | null;
   isHidden: (node: Node) => boolean;
   filter: TagFilter | null;
+  // Multi-line paste handler (markdown lists). Optional; when provided, a
+  // multi-line paste creates real sibling/child bullets instead of flattening.
+  multiLinePaste: MultiLinePasteHandler | null;
   // Focus plumbing, claimed on mount. Stable refs (from useOutlineFocus).
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
@@ -192,6 +196,7 @@ function RowChrome({
   pivotId,
   isHidden,
   filter,
+  multiLinePaste,
   pendingFocus,
   pendingFocusAtStart,
   pendingFlash,
@@ -491,8 +496,13 @@ function RowChrome({
             }}
             onPaste={(e) => {
               const el = e.currentTarget;
-              const next = pasteIntoBullet(e, el, content.id, pluginCtx, (t) =>
-                commands.onTextChange(content.id, t),
+              const next = pasteIntoBullet(
+                e,
+                el,
+                content.id,
+                pluginCtx,
+                (t) => commands.onTextChange(content.id, t),
+                multiLinePaste ?? undefined,
               );
               if (next !== null) syncedRef.current = next;
             }}

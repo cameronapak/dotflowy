@@ -687,3 +687,76 @@ export function toggleCollapsed(nodeId: string, collapsed: boolean) {
 export function toggleBookmark(nodeId: string, bookmarked: boolean) {
   update(nodeId, { bookmarkedAt: bookmarked ? now() : null })
 }
+
+/**
+ * Insert a multi-line paste as a tree of bullets. The FIRST item replaces the
+ * text of the focused node (the caller already wrote that text); subsequent
+ * items are inserted as siblings/children relative to `afterId`, following the
+ * depth deltas in `items`. Depth 0 = same level as `afterId`; depth N+1 = child
+ * of the node at depth N.
+ *
+ * The index is rebuilt from the live collection between each insert (each insert
+ * mutates `nodesCollection` optimistically), so sibling-chain relinks read
+ * accurate state. Wrap the whole call in `runStructural` (ADR 0009) so the batch
+ * lands as one atomic frame.
+ *
+ * Returns the last inserted node id (for focus). `items[0]` is NOT inserted
+ * here -- the caller owns writing the first line's text into the existing node.
+ */
+export function insertFromPaste(
+  afterId: string,
+  items: { text: string; depth: number; isTask: boolean; completed: boolean }[],
+): string {
+  if (items.length === 0) return afterId
+
+  // Read the anchor's parent once (all depth-0 items share it).
+  let anchorParentId: string | null
+  {
+    const start = buildTreeIndex(nodesCollection.toArray)
+    const anchor = start.byId.get(afterId)
+    anchorParentId = anchor?.parentId ?? null
+  }
+
+  // Track the last-inserted node at EACH depth, so when we return to a
+  // shallower depth we use the right predecessor (not a deeply-nested one).
+  // lastAtDepth[0] starts as the anchor itself.
+  const lastAtDepth: (string | null)[] = [afterId]
+  // depthStack[n] = the node whose children are at depth n+1 (= lastAtDepth[n]
+  // when it opened that level). Initialized with the anchor at depth 0.
+  const depthStack: (string | null)[] = [null, afterId]
+  // Track the chronologically last inserted id (for focus).
+  let lastInserted = afterId
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!
+    const index = buildTreeIndex(nodesCollection.toArray)
+
+    if (item.depth === 0) {
+      // Sibling of the anchor: insert after the last depth-0 node.
+      const after = lastAtDepth[0] ?? afterId
+      const newId = insertSibling(index, anchorParentId, after, item.isTask, item.text)
+      if (item.isTask && item.completed) toggleCompleted(newId, true)
+      lastAtDepth[0] = newId
+      depthStack[1] = newId
+      lastInserted = newId
+    } else {
+      // Child: parent is the node that opened this depth (depthStack[depth]).
+      // Fallback to the anchor's parent if the stack is somehow empty.
+      const parentForThis =
+        depthStack[item.depth] ?? lastAtDepth[item.depth - 1] ?? afterId
+      while (depthStack.length <= item.depth + 1) depthStack.push(null)
+      while (lastAtDepth.length <= item.depth) lastAtDepth.push(null)
+
+      // Insert as the last child of parentForThis.
+      const siblings = childrenOf(index, parentForThis)
+      const after = siblings.length > 0 ? siblings[siblings.length - 1]!.id : null
+      const newId = insertSibling(index, parentForThis, after, item.isTask, item.text)
+      if (item.isTask && item.completed) toggleCompleted(newId, true)
+      lastAtDepth[item.depth] = newId
+      depthStack[item.depth + 1] = newId
+      lastInserted = newId
+    }
+  }
+
+  return lastInserted
+}

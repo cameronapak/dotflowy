@@ -71,6 +71,7 @@ import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
   indent,
   insertChildAtStart,
+  insertFromPaste,
   insertSibling,
   moveDown,
   moveNode,
@@ -98,6 +99,7 @@ import { hasLink } from "../data/links";
 import {
   copySourceSelection,
   cutSourceSelection,
+  type MultiLinePasteHandler,
   pasteIntoBullet,
 } from "./paste";
 import {
@@ -402,6 +404,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     commands,
   });
 
+  // Multi-line markdown paste (e.g. Obsidian lists): creates real sibling/child
+  // bullets from a pasted markdown list. Stable identity.
+  const multiLinePaste = useMultiLinePaste(pendingFocus, findFocusedId, refs);
+
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
   // actions menu's ops. Installs window key/mouse listeners only while a
   // selection is active, and clears any stale selection on this view's mount.
@@ -611,6 +617,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   isPivot={pivotId === zoomedNode.id}
                   registerRef={registerRef}
                   getCtx={pluginCtx}
+                  multiLinePaste={multiLinePaste}
                   onTextChange={(text) => setText(zoomedNode.id, text)}
                   onAddChild={() =>
                     runStructural(() => {
@@ -666,6 +673,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                           pivotId={pivotId}
                           isHidden={isHidden}
                           filter={filter}
+                          multiLinePaste={multiLinePaste}
                           pendingFocus={pendingFocus}
                           pendingFocusAtStart={pendingFocusAtStart}
                           pendingFlash={pendingFlash}
@@ -695,6 +703,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                         ancestorCompleted={false}
                         isHidden={isHidden}
                         filter={filter}
+                        multiLinePaste={multiLinePaste}
                       />
                     ))}
                   </ul>
@@ -1188,6 +1197,69 @@ function useMobileBarActions({
   }, [refs, findFocusedId, pendingFocus, commands]);
 }
 
+/**
+ * Build a stable callback for multi-line paste (markdown lists from Obsidian,
+ * etc.). The first line's text was already written to the focused bullet by
+ * `pasteIntoBullet`; this handler creates the remaining lines as real sibling/
+ * child bullets in ONE atomic `runStructural` batch (ADR 0009), then sets
+ * `pendingFocus` so the editor focuses the last created bullet.
+ *
+ * `findFocusedId` resolves the anchor node (the focused row, mirror-aware).
+ * Returns null when there's no focused node or no remaining items.
+ */
+function useMultiLinePaste(
+  pendingFocus: RefObject<string | null>,
+  findFocusedId: () => string | null,
+  refs: Map<string, HTMLSpanElement | null>,
+): MultiLinePasteHandler {
+  return useCallback<MultiLinePasteHandler>(
+    (allItems) => {
+      // allItems[0] is the first line (already written); remaining starts at 1.
+      if (allItems.length <= 1) return null;
+      const anchorKey = findFocusedId();
+      if (!anchorKey) return null;
+      const anchorId = instanceIdForKey(anchorKey);
+      if (!anchorId) return null;
+
+      const lastId = runStructural(() => {
+        // Apply the first line's task state to the anchor bullet.
+        const first = allItems[0]!;
+        if (first.isTask) {
+          const rowEl = refs.get(anchorKey)?.closest(".outline-row") ?? null;
+          if (!guardProtected(anchorId, "task", rowEl)) {
+            setIsTask(anchorId, true);
+            if (first.completed) {
+              if (!guardProtected(anchorId, "complete", rowEl)) {
+                toggleCompleted(anchorId, true);
+              }
+            } else {
+              toggleCompleted(anchorId, false);
+            }
+          }
+        }
+        const remaining = allItems.slice(1);
+        // Re-anchor depths relative to the first line's depth (baseline = 0).
+        const baseDepth = first.depth;
+        let prevDepth = 0;
+        const reindexed = remaining.map((it) => {
+          // Lines outdented above the first pasted line can't become parents of
+          // the focused bullet, so clamp them to same-level siblings. Also keep
+          // the no-skip-level invariant after re-basing to the first line.
+          const rawDepth = Math.max(0, it.depth - baseDepth);
+          const depth = Math.min(rawDepth, prevDepth + 1);
+          prevDepth = depth;
+          return { ...it, depth };
+        });
+        return insertFromPaste(anchorId, reindexed);
+      });
+
+      if (lastId) pendingFocus.current = lastId;
+      return lastId;
+    },
+    [pendingFocus, findFocusedId, refs],
+  );
+}
+
 interface NodeCommandsArgs {
   refs: Map<string, HTMLSpanElement | null>;
   pendingFocus: RefObject<string | null>;
@@ -1550,6 +1622,7 @@ function ZoomedTitle({
   isPivot,
   registerRef,
   getCtx,
+  multiLinePaste,
   onTextChange,
   onAddChild,
   onArrowDown,
@@ -1560,6 +1633,8 @@ function ZoomedTitle({
   /** The PluginContext factory, so the plugin keymap (Seam D) works on the
    *  title too -- Mod+Enter / Mod+D toggle completion of the zoomed node. */
   getCtx: () => PluginContext;
+  /** Multi-line paste handler (markdown lists). */
+  multiLinePaste: MultiLinePasteHandler;
   onTextChange: (text: string) => void;
   onAddChild: () => void;
   onArrowDown: () => void;
@@ -1680,7 +1755,14 @@ function ZoomedTitle({
           }}
           onPaste={(e) => {
             const el = e.currentTarget;
-            const next = pasteIntoBullet(e, el, node.id, getCtx, onTextChange);
+            const next = pasteIntoBullet(
+              e,
+              el,
+              node.id,
+              getCtx,
+              onTextChange,
+              multiLinePaste,
+            );
             if (next !== null) syncedRef.current = next;
           }}
           // Copy/cut hand back the markdown SOURCE (a folded link's rendered

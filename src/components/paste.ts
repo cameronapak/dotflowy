@@ -15,6 +15,11 @@
 // splice into source space directly, then re-decorate.
 
 import type { ClipboardEvent } from "react";
+import {
+  normalizeDepths,
+  parseMarkdownPaste,
+  type ParsedItem,
+} from "../data/markdown-paste";
 import { afterPaste, pasteReplacement } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 import {
@@ -25,6 +30,15 @@ import {
 } from "./inline-code";
 
 /**
+ * When a multi-line paste is detected (and no plugin claimed it), this callback
+ * is invoked with all parsed items. The first item has already been written into
+ * the current bullet; the handler creates the remaining siblings/children.
+ * Returns the id of the last created bullet (for focus), or null to signal
+ * "no structural insert happened".
+ */
+export type MultiLinePasteHandler = (items: ParsedItem[]) => string | null;
+
+/**
  * Handle a paste into a (focused) contentEditable bullet/title. Returns the new
  * source text on success (so the caller can update its synced-text ref), or
  * null if there was no clipboard to read.
@@ -33,6 +47,10 @@ import {
  * `afterPaste`, ADR 0016) -- e.g. the links plugin fetching a pasted URL's title
  * and swapping it into the label. `getCtx` is the same stable PluginContext
  * factory used everywhere; it's only called when a paste actually happened.
+ *
+ * `onMultiLine` (optional) handles multi-line pastes (e.g. a markdown list from
+ * Obsidian). When provided and the paste spans multiple lines, it creates real
+ * sibling bullets via runStructural and returns the last id (for focus).
  */
 export function pasteIntoBullet(
   e: ClipboardEvent<HTMLElement>,
@@ -40,6 +58,7 @@ export function pasteIntoBullet(
   nodeId: string,
   getCtx: () => PluginContext,
   onText: (text: string) => void,
+  onMultiLine?: MultiLinePasteHandler,
 ): string | null {
   const cd = e.clipboardData;
   if (!cd) return null;
@@ -61,14 +80,38 @@ export function pasteIntoBullet(
   const hasSelection = end > start;
 
   // A plugin decides the replacement (e.g. the links plugin wraps a selection
-  // or auto-links a URL); otherwise plain text, formatting stripped (bullets
-  // are single-line, so newlines collapse to spaces -- no tree-from-paste v1).
+  // or auto-links a URL). If a plugin claims it, we use that string and skip
+  // multi-line parsing (a pasted URL is single-purpose).
   const replacement = pasteReplacement({
     plain,
     html,
     selectedText,
     hasSelection,
   });
+
+  // Multi-line paste: parse markdown list syntax into items and hand off to the
+  // editor's structural handler (creates real sibling/child bullets). Only when
+  // no plugin claimed the paste and a handler was provided.
+  if (!replacement && onMultiLine) {
+    const items = parseMarkdownPaste(plain);
+    if (items && items.length > 0) {
+      normalizeDepths(items);
+      const [first, ...rest] = items;
+      const firstText = first!.text;
+      // Write the first line into the current bullet (replacing the selection).
+      const next = source.slice(0, start) + firstText + source.slice(end);
+      onText(next);
+      decorate(el, next, start + firstText.length, false);
+      setCaretOffset(el, start + firstText.length);
+      // Fire afterPaste for the first line (e.g. a URL title unfurl).
+      afterPaste({ inserted: firstText, nodeId, el }, getCtx());
+      // Create the remaining bullets; the handler owns focus, and the
+      // synced-text ref update from `next` is the caller's job.
+      onMultiLine([first!, ...rest]);
+      return next;
+    }
+  }
+
   const inserted = replacement ?? plain.replace(/\r?\n/g, " ");
 
   const next = source.slice(0, start) + inserted + source.slice(end);

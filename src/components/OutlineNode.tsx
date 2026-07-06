@@ -30,6 +30,7 @@ import { hasFoldingToken } from "../plugins/registry";
 import {
   copySourceSelection,
   cutSourceSelection,
+  type MultiLinePasteHandler,
   pasteIntoBullet,
 } from "./paste";
 import { healProtectedText } from "./protected-text";
@@ -69,6 +70,9 @@ interface OutlineNodeProps {
   // otherwise dimmed ancestor context. Filtering is render-time, so `collapsed`
   // is ignored -- matches inside collapsed subtrees are revealed. See ADR 0015.
   filter: TagFilter | null;
+  // Multi-line paste handler (markdown lists). Optional; when provided, a
+  // multi-line paste creates real sibling/child bullets instead of flattening.
+  multiLinePaste: MultiLinePasteHandler | null;
 }
 
 export interface NodeCommands {
@@ -131,6 +135,7 @@ function OutlineNodeBody({
   ancestorCompleted,
   isHidden,
   filter,
+  multiLinePaste,
 }: Omit<OutlineNodeProps, "nodeId"> & { node: Node }) {
   const textRef = useRef<HTMLSpanElement | null>(null);
   // Inline `code` is decorated LIVE -- the contentEditable always holds
@@ -396,8 +401,13 @@ function OutlineNodeBody({
             }}
             onPaste={(e) => {
               const el = e.currentTarget;
-              const next = pasteIntoBullet(e, el, node.id, pluginCtx, (t) =>
-                commands.onTextChange(node.id, t),
+              const next = pasteIntoBullet(
+                e,
+                el,
+                node.id,
+                pluginCtx,
+                (t) => commands.onTextChange(node.id, t),
+                multiLinePaste ?? undefined,
               );
               if (next !== null) syncedRef.current = next;
             }}
@@ -483,6 +493,7 @@ function OutlineNodeBody({
           pivotId={pivotId}
           isHidden={isHidden}
           filter={filter}
+          multiLinePaste={multiLinePaste}
         />
       )}
     </li>
@@ -508,13 +519,14 @@ function OutlineNodeChildren({
   pivotId,
   isHidden,
   filter,
+  multiLinePaste,
 }: {
   childIds: string[];
   collapsed: boolean;
   ancestorCompleted: boolean;
 } & Pick<
   OutlineNodeProps,
-  "commands" | "pluginCtx" | "registerRef" | "pivotId" | "isHidden" | "filter"
+  "commands" | "pluginCtx" | "registerRef" | "pivotId" | "isHidden" | "filter" | "multiLinePaste"
 >) {
   return (
     <div className="outline-children-wrap" data-collapsed={collapsed}>
@@ -530,6 +542,7 @@ function OutlineNodeChildren({
             ancestorCompleted={ancestorCompleted}
             isHidden={isHidden}
             filter={filter}
+            multiLinePaste={multiLinePaste}
           />
         ))}
       </ul>
