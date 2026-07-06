@@ -138,6 +138,27 @@ export function useBulletKeymap({
             },
           },
           {
+            // Space on a selected atom activates that atom's secondary keyboard
+            // action. Plain text space remains native.
+            hotkey: "Space",
+            callback: (e) => {
+              const el = textRef.current;
+              const atom = el ? getSelectedAtom(el) : null;
+              if (!atom) return;
+              const rect = atom.getBoundingClientRect();
+              const handled = dispatchClick(atom, pluginCtx(), {
+                preventDefault: () => e.preventDefault(),
+                stopPropagation: () => e.stopPropagation(),
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+                source: "keyboard",
+                key: " ",
+              });
+              if (!handled) return;
+            },
+            options: { preventDefault: false, stopPropagation: false },
+          },
+          {
             // Shift+Enter: same as Enter -- split into a sibling, never insert a
             // literal newline. Captured explicitly so the contentEditable's
             // default line break can't fire; bullets are single-line.

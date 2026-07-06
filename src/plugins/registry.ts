@@ -23,6 +23,7 @@ import type {
   NodeProtection,
   PasteInput,
   PluginContext,
+  PointerInteractionEvent,
   SearchAction,
   SearchActionContext,
   SlotPosition,
@@ -142,6 +143,54 @@ export function dispatchClick(
     const el = target.closest(s.selector);
     if (el) {
       s.onClick(el as HTMLElement, ctx, e);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function dispatchPointerDown(
+  target: HTMLElement,
+  ctx: PluginContext,
+  e: PointerInteractionEvent,
+): boolean {
+  for (const s of interactionSpecs) {
+    if (!s.onPointerDown) continue;
+    const el = target.closest(s.selector);
+    if (el) {
+      s.onPointerDown(el as HTMLElement, ctx, e);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function dispatchPointerUp(
+  target: HTMLElement,
+  ctx: PluginContext,
+  e: PointerInteractionEvent,
+): boolean {
+  for (const s of interactionSpecs) {
+    if (!s.onPointerUp) continue;
+    const el = target.closest(s.selector);
+    if (el) {
+      s.onPointerUp(el as HTMLElement, ctx, e);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function dispatchPointerCancel(
+  target: HTMLElement,
+  ctx: PluginContext,
+  e: PointerInteractionEvent,
+): boolean {
+  for (const s of interactionSpecs) {
+    if (!s.onPointerCancel) continue;
+    const el = target.closest(s.selector);
+    if (el) {
+      s.onPointerCancel(el as HTMLElement, ctx, e);
       return true;
     }
   }

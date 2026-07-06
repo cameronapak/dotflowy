@@ -16,6 +16,10 @@ import { getViewRootId } from "../../data/view-state";
 import { openBiblePassageEditPopover } from "./passage-edit-popover";
 import { definePlugin, type WidgetEl } from "../types";
 
+const LONG_PRESS_MS = 550;
+const longPressTimers = new WeakMap<HTMLElement, number>();
+const longPressed = new WeakSet<HTMLElement>();
+
 // The chip is a `<dotflowy-widget>` atom mounting BibleChip (ADR 0006). `source`
 // is the verbatim reference ("Jn 3:16") -- the atom's source text AND the
 // component's label. `data-bible-ref` + `data-href` are the Seam-B interaction
@@ -27,6 +31,35 @@ function bibleRefWidget(tok: string, url: string): WidgetEl {
     source: tok,
     attrs: { "data-bible-ref": true, "data-href": url },
   };
+}
+
+function clearLongPress(el: HTMLElement): void {
+  const timer = longPressTimers.get(el);
+  if (timer != null) window.clearTimeout(timer);
+  longPressTimers.delete(el);
+}
+
+function openEditForChip(
+  el: HTMLElement,
+  ctx: Parameters<typeof openBiblePassageEditPopover>[1],
+): void {
+  const token = el.getAttribute("data-src") ?? "";
+  const nodeId =
+    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
+    getViewRootId();
+  if (!token || !nodeId) return;
+  const focusTarget = el.closest<HTMLElement>(".node-text");
+  const rect = el.getBoundingClientRect();
+  openBiblePassageEditPopover(
+    {
+      nodeId,
+      token,
+      focusTarget,
+      x: rect.left,
+      y: rect.bottom + 6,
+    },
+    ctx,
+  );
 }
 
 export default definePlugin({
@@ -51,11 +84,9 @@ export default definePlugin({
     },
   ],
 
-  // Seam B: a pointer click edits the source reference in a compact passage
-  // selector, while keyboard activation on a selected atom preserves the quick
-  // route.bible open behavior. The selector matches the atom element (which
-  // carries `data-bible-ref`); a click on an inner icon resolves to it via
-  // `closest`.
+  // Seam B: click/tap keeps the fast route.bible open path; editing is an
+  // intentional secondary gesture (long-press or context menu), so the common
+  // interaction stays simple.
   interactions: [
     {
       selector: "[data-bible-ref]",
@@ -65,25 +96,34 @@ export default definePlugin({
         if (!href) return;
         e.preventDefault();
         e.stopPropagation();
-        if (e.source === "keyboard") {
-          window.open(href, "_blank", "noopener,noreferrer");
+        clearLongPress(el);
+        if (e.source === "keyboard" && e.key === " ") {
+          openEditForChip(el, ctx);
           return;
         }
-        const token = el.getAttribute("data-src") ?? "";
-        const nodeId =
-          el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-          getViewRootId();
-        if (!token || !nodeId) return;
-        const rect = el.getBoundingClientRect();
-        openBiblePassageEditPopover(
-          {
-            nodeId,
-            token,
-            x: rect.left,
-            y: rect.bottom + 6,
-          },
-          ctx,
-        );
+        if (longPressed.has(el)) {
+          longPressed.delete(el);
+          return;
+        }
+        window.open(href, "_blank", "noopener,noreferrer");
+      },
+      onPointerDown: (el, ctx, e) => {
+        clearLongPress(el);
+        const timer = window.setTimeout(() => {
+          longPressed.add(el);
+          e.preventDefault();
+          e.stopPropagation();
+          openEditForChip(el, ctx);
+        }, LONG_PRESS_MS);
+        longPressTimers.set(el, timer);
+      },
+      onPointerUp: (el) => clearLongPress(el),
+      onPointerCancel: (el) => clearLongPress(el),
+      onContextMenu: (el, ctx, e) => {
+        clearLongPress(el);
+        e.preventDefault();
+        e.stopPropagation();
+        openEditForChip(el, ctx);
       },
     },
   ],

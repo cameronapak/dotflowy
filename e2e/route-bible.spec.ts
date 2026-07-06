@@ -35,6 +35,13 @@ const opened = (page: Page) =>
 const passagePopover = (page: Page) =>
   page.locator("[data-bible-passage-popover]");
 
+const activeNodeId = (page: Page) =>
+  page.evaluate(() =>
+    document.activeElement
+      ?.closest("[data-node-id]")
+      ?.getAttribute("data-node-id") ?? null,
+  );
+
 async function caretAtSource(page: Page, id: string, target: number) {
   await text(page, id).evaluate((el, target) => {
     el.focus();
@@ -160,7 +167,7 @@ test.describe("Scripture reference chips", () => {
     await expect(chips.nth(1)).toHaveText("Romans 8:28");
   });
 
-  test("clicking a chip opens a passage editor with an Open action", async ({
+  test("clicking a chip opens its route.bible URL in a new tab", async ({
     page,
   }) => {
     await load(page, [
@@ -168,15 +175,29 @@ test.describe("Scripture reference chips", () => {
     ]);
 
     await chip(page, "n").click();
-    await expect(passagePopover(page)).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "Passage" })).toHaveValue(
-      "1 Cor 13:4-7",
-    );
-    await page.getByRole("button", { name: "Open passage" }).click();
 
     expect(await opened(page)).toEqual([
       "https://route.bible/1co.13.4-7?src=dotflowy",
     ]);
+  });
+
+  test("holding a chip opens the passage editor", async ({ page }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "1 Cor 13:4-7" },
+    ]);
+
+    const box = await chip(page, "n").boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(650);
+    await page.mouse.up();
+
+    await expect(passagePopover(page)).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Passage" })).toHaveValue(
+      "1 Cor 13:4-7",
+    );
+    expect(await opened(page)).toEqual([]);
   });
 
   test("the passage editor rewrites a chip through parsed input", async ({
@@ -186,8 +207,8 @@ test.describe("Scripture reference chips", () => {
       { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
     ]);
 
-    await chip(page, "n").click();
-    await page.getByRole("textbox", { name: "Passage" }).fill("rom 8:28");
+    await chip(page, "n").click({ button: "right" });
+    await page.getByRole("combobox", { name: "Passage" }).fill("rom 8:28");
     await expect(page.locator("[data-bible-passage-suggestions]")).toContainText(
       "Romans 8:28",
     );
@@ -199,6 +220,66 @@ test.describe("Scripture reference chips", () => {
       "data-href",
       "https://route.bible/rom.8.28?src=dotflowy",
     );
+  });
+
+  test("the passage editor hides end verse until a start verse exists", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "Read Proverbs 4" },
+    ]);
+
+    await chip(page, "n").click({ button: "right" });
+    await passagePopover(page).locator("summary").click();
+    await expect(page.getByRole("combobox", { name: "End verse" })).toHaveCount(0);
+
+    await page.getByRole("combobox", { name: "Start verse" }).selectOption("13");
+
+    await expect(page.getByRole("combobox", { name: "End verse" })).toBeVisible();
+  });
+
+  test("closing the passage editor refocuses the node", async ({ page }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
+    ]);
+
+    await chip(page, "n").click({ button: "right" });
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    await expect.poll(() => activeNodeId(page)).toBe("n");
+  });
+
+  test("the passage autocomplete supports keyboard selection", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
+    ]);
+
+    await chip(page, "n").click({ button: "right" });
+    const input = page.getByRole("combobox", { name: "Passage" });
+    await input.fill("rom 8");
+    await expect(page.getByRole("option", { name: /Romans 8/ })).toBeVisible();
+    await input.press("Enter");
+    await expect(input).toHaveValue("Romans 8");
+  });
+
+  test("Space on a hovered chip opens the passage editor", async ({ page }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+    ]);
+
+    await caretAtSource(page, "n", 0);
+    const box = await chip(page, "n").boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.keyboard.press("Space");
+
+    await expect(passagePopover(page)).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Passage" })).toHaveValue(
+      "John 3:16",
+    );
+    expect(await opened(page)).toEqual([]);
   });
 
   test("Left/Right can select a chip and Enter opens it", async ({ page }) => {
