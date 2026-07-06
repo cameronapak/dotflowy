@@ -364,6 +364,28 @@ h2 span.protected-lock {
 }
 
 /*
+ * Spotlight focus mode (ADR 0033). While a bullet is focused, `spotlight-on` is
+ * on <body> and every content row dims to 0.3; the generated `[data-spotlight]`
+ * stylesheet lights the active branch (focused row + ancestors) back to 1. When
+ * nothing is focused the class is removed entirely, so the outline is full.
+ * `spotlight-fade` (added only when the focus change came from a pointer) eases
+ * the change; keyboard nav leaves it off so rapid arrow-stepping snaps instantly.
+ */
+.spotlight-on .outline-row {
+  opacity: 0.3;
+}
+
+.spotlight-on.spotlight-fade .outline-row {
+  transition: opacity 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-on.spotlight-fade .outline-row {
+    transition: none;
+  }
+}
+
+/*
  * "Rejected" shake. A protected node (the Daily container) can't be deleted;
  * rather than silently no-op, the row shakes side-to-side -- the same "no" a
  * password field gives a wrong entry. One-shot class (`.node-rejected`), added
