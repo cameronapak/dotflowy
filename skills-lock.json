@@ -78,6 +78,12 @@
       "sourceType": "github",
       "skillPath": "skills/shadcn/SKILL.md",
       "computedHash": "d81caa0f86aabab65b25e302d454f23a3328760386ed9078345584c0d5c8058e"
+    },
+    "wayfinder": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/in-progress/wayfinder/SKILL.md",
+      "computedHash": "9c40fce711bf19beb5e1a71db905eef2b57dbb233ba62ede1978e19568472023"
     }
   }
 }

@@ -5,6 +5,7 @@ import {
   ChevronsUpDownIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
+  FocusIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
@@ -31,6 +32,10 @@ import {
 } from "./ui/dropdown-menu";
 import { signOut } from "../lib/auth-client";
 import { useShowCompleted } from "./show-completed-provider";
+import {
+  setSpotlightEnabled,
+  useSpotlightEnabled,
+} from "./spotlight-mode";
 import { useTheme } from "./theme-provider";
 import { useTextSize, type TextSize } from "./text-size-provider";
 import { outlineToMarkdown } from "../data/markdown";
@@ -152,6 +157,7 @@ export function HeaderMoreMenu() {
   const { theme, setTheme } = useTheme();
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
+  const spotlight = useSpotlightEnabled();
   // The connect dialog is a sibling of the menu (not nested in its content) so
   // it survives the menu closing on item select.
   const [connectOpen, setConnectOpen] = useState(false);
@@ -262,6 +268,14 @@ export function HeaderMoreMenu() {
           >
             <CircleCheckIcon />
             Show completed
+          </DropdownMenuCheckboxItem>
+
+          <DropdownMenuCheckboxItem
+            checked={spotlight}
+            onCheckedChange={setSpotlightEnabled}
+          >
+            <FocusIcon />
+            Spotlight mode
           </DropdownMenuCheckboxItem>
 
           <DropdownMenuSeparator />

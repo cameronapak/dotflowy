@@ -60,7 +60,7 @@ The project vendors the Effect v4 source at `repos/effect-smol/` (via `git subtr
 
 ### Issue tracker
 
-Issues and PRDs live as local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs live as GitHub issues (`gh` CLI) in `cameronapak/dotflowy`; external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -269,6 +269,14 @@ It's URL-driven via the route; the pivot morphs with a `view-transition-name`. S
 ## Bookmarks
 
 A bookmark is a **saved zoom view**, stored as `bookmarkedAt: number | null` on the node (delete the node, the bookmark goes with it). The header **star** (`BookmarkStar`, `bookmarks.tsx`) pins the current zoom root; **browsing** them lives in the Cmd+K switcher's empty state (the standalone popover was removed). **No sidebar** — the unused `ui/sidebar.tsx` is the documented promotion path. A new persistent `Node` field that needs values on existing rows can be backfilled at snapshot load in `collection.ts` (see `healSiblingChains`, which normalizes persisted data there).
+
+## Spotlight focus mode (ADR 0033)
+
+An opt-in view mode ([ADR 0033](./docs/adr/0033-spotlight-focus-mode.md)) that dims the outline to `opacity: 0.3` while a bullet is focused, except the **single focused bullet** (ancestors dim too — single-node by design; dimmed context stays legible at 0.3, and a lone bright line reads calmer than a lit ancestor "ladder"). Toggled from the header More menu ("Spotlight mode"), **default OFF**, persisted per-browser in `localStorage` (`dotflowy:spotlight`) — a view preference, **not** synced data and **not** a `dotflowy:flag:*` dev flag.
+
+- **The dim is PURE CSS — no JS in the dim path.** Single-node lighting is exactly `:focus-within`, and "dim only while a caret is in the outline" is exactly `:has(.node-text:focus)`: `.spotlight-on:has(.node-text:focus) .outline-row { opacity:.3 }` + `.spotlight-on li[data-node-id]:focus-within > .outline-row { opacity:1 }` (`styles.css`). No focus listeners, no generated stylesheet, no tree walk. (The earlier ancestor-chain design needed a JS `TreeIndex` walk + a `data-node-id`-keyed generated stylesheet — dropping ancestors removed that whole need; see ADR 0033's rejected alternatives.) At rest (no caret) `:has` fails so the outline is full, which also means node multi-selection (no caret) never dims. The header/subheader stay full (chrome). The zoomed `.zoomed-title` (`ZoomedTitle`, an `h2`) gets its own mirrored pair of rules so it dims like a parent while a child is focused and stays full only on `:focus-within` (the light rule repeats the `:has()` prefix to out-specify the dim).
+- **JS is just the two `<body>` classes.** The engine (`src/data/spotlight.ts`) toggles `spotlight-on` (the mode) and `spotlight-fade` (the input modality). The toggle store mirrors `show-completed-provider` (`useSyncExternalStore`); `useSpotlightEnabled()`/`setSpotlightEnabled` live in `spotlight-mode.tsx`, and `<SpotlightController>` (mounted once in `__root.tsx`) `installSpotlight`/`uninstallSpotlight` on toggle (adds `spotlight-on` + the modality listeners).
+- **Transition is input-modality-aware:** a global capture `keydown`/`pointerdown` toggles `spotlight-fade`, so a pointer-driven focus eases (~120ms) but keyboard arrow-nav snaps instantly; `prefers-reduced-motion` forces instant. `e2e/spotlight.spec.ts` covers the lit bullet, caret-follow, blur reset, and mode-off.
 
 ## Node quick-switcher (Cmd+K search)
 

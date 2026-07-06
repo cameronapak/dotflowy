@@ -364,6 +364,45 @@ h2 span.protected-lock {
 }
 
 /*
+ * Spotlight focus mode (ADR 0033). `spotlight-on` on <body> = mode enabled; the
+ * dim itself is PURE CSS. While a bullet caret is focused (`:has(.node-text:
+ * focus)`) every content row drops to 0.3, and the focused row -- and ONLY it
+ * (`:focus-within`) -- stays full. Single-node by design (ADR 0033): dimmed
+ * context is still legible. At rest (nothing focused) `:has` fails, so the whole
+ * outline is full -- which also means node-selection mode (no caret) never dims.
+ * `spotlight-fade` (present only after a pointer interaction) eases the change;
+ * keyboard nav leaves it off so rapid arrow-stepping snaps instantly.
+ */
+.spotlight-on:has(.node-text:focus) .outline-row,
+.spotlight-on:has(.node-text:focus) .zoomed-title {
+  opacity: 0.3;
+}
+
+.spotlight-on li[data-node-id]:focus-within > .outline-row {
+  opacity: 1;
+}
+
+/* When zoomed, the root renders as `.zoomed-title` (an h2, not an `.outline-row`),
+   so it dims like any parent while a child bullet is focused. It stays full ONLY
+   when the title itself holds the caret -- `:focus-within` here must out-specify
+   the dim rule above ((0,5,0) > (0,4,0)), hence the repeated `:has()` prefix. */
+.spotlight-on:has(.node-text:focus) .zoomed-title:focus-within {
+  opacity: 1;
+}
+
+.spotlight-on.spotlight-fade .outline-row,
+.spotlight-on.spotlight-fade .zoomed-title {
+  transition: opacity 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-on.spotlight-fade .outline-row,
+  .spotlight-on.spotlight-fade .zoomed-title {
+    transition: none;
+  }
+}
+
+/*
  * "Rejected" shake. A protected node (the Daily container) can't be deleted;
  * rather than silently no-op, the row shakes side-to-side -- the same "no" a
  * password field gives a wrong entry. One-shot class (`.node-rejected`), added
