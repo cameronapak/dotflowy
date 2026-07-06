@@ -90,6 +90,7 @@ import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
   decorate,
   getCaretOffset,
+  getSelectedAtom,
   readSource,
   revealLinkAtCaret,
   watchCaretReveal,
@@ -283,8 +284,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   };
   const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    dispatchClick(e.target as HTMLElement, pluginCtx(), {
+    const target = getSelectedAtom(e.currentTarget) ?? (e.target as HTMLElement);
+    const rect = target.getBoundingClientRect();
+    dispatchClick(target, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
       stopPropagation: () => e.stopPropagation(),
       clientX: rect.left + rect.width / 2,

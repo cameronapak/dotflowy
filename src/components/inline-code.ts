@@ -146,6 +146,9 @@ function foldedSrcLen(el: HTMLElement): number {
     : (el.getAttribute("data-src") ?? "").length;
 }
 
+const SELECTED_ATOM_ATTR = "data-atom-selected";
+let atomSelectionListenerInstalled = false;
+
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
 // the source once a folding token hides part of its source (a folded link shows
 // only its label; folded code/emphasis hide their markers), so
@@ -312,6 +315,113 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
   }
 }
 
+/** Return the currently selected atomic token, if the DOM selection is exactly
+ *  one `data-src` atom inside `el`. */
+export function getSelectedAtom(el: HTMLElement): HTMLElement | null {
+  const child = selectedAtomFromSelection();
+  return child && el.contains(child) ? child : null;
+}
+
+function selectedAtomFromSelection(): HTMLElement | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount !== 1) return null;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return null;
+  if (range.startContainer !== range.endContainer) return null;
+  const parent = range.startContainer;
+  const child = parent.childNodes.item(range.startOffset);
+  if (
+    range.endOffset !== range.startOffset + 1 ||
+    !child ||
+    !isAtom(child)
+  ) {
+    return null;
+  }
+  return child;
+}
+
+/** Make Left/Right treat an adjacent atom as a selectable stop: first keypress
+ *  selects the chip, second keypress moves the caret past it. */
+export function selectAdjacentAtom(
+  el: HTMLElement,
+  direction: "left" | "right",
+): boolean {
+  const selected = getSelectedAtom(el);
+  if (selected) {
+    placeAtWidget(selected, direction === "left" ? "before" : "after");
+    return true;
+  }
+
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount !== 1) return false;
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed || !el.contains(range.endContainer)) return false;
+
+  const caret = getCaretOffset(el);
+  const atom = atomAtSourceBoundary(el, caret, direction);
+  if (!atom) return false;
+  selectAtom(atom);
+  return true;
+}
+
+function atomAtSourceBoundary(
+  el: HTMLElement,
+  offset: number,
+  direction: "left" | "right",
+): HTMLElement | null {
+  let total = 0;
+  let found: HTMLElement | null = null;
+  const visit = (node: Node) => {
+    if (found) return;
+    if (node.nodeType === 3 /* text */) {
+      total += node.textContent?.length ?? 0;
+      return;
+    }
+    if (isAtom(node)) {
+      const atom = node as HTMLElement;
+      const len = foldedSrcLen(atom);
+      if (
+        (direction === "left" && total + len === offset) ||
+        (direction === "right" && total === offset)
+      ) {
+        found = atom;
+        return;
+      }
+      total += len;
+      return;
+    }
+    node.childNodes.forEach(visit);
+  };
+  el.childNodes.forEach(visit);
+  return found;
+}
+
+function selectAtom(atom: HTMLElement): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  installAtomSelectionListener();
+  const range = document.createRange();
+  range.selectNode(atom);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  syncAtomSelectionMarkers(atom);
+}
+
+function installAtomSelectionListener(): void {
+  if (atomSelectionListenerInstalled) return;
+  atomSelectionListenerInstalled = true;
+  document.addEventListener("selectionchange", () => {
+    syncAtomSelectionMarkers(selectedAtomFromSelection());
+  });
+}
+
+function syncAtomSelectionMarkers(selected: HTMLElement | null): void {
+  document.querySelectorAll(`[${SELECTED_ATOM_ATTR}]`).forEach((el) => {
+    if (el !== selected) el.removeAttribute(SELECTED_ATOM_ATTR);
+  });
+  selected?.setAttribute(SELECTED_ATOM_ATTR, "true");
+}
+
 // Collapse the selection just before/after an atomic folded-link widget, by
 // addressing the position in its parent (the caret never goes inside it).
 function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
@@ -324,6 +434,7 @@ function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+  widget.removeAttribute(SELECTED_ATOM_ATTR);
 }
 
 // Per-link reveal reflow. While a bullet is focused, watch the caret: as it
