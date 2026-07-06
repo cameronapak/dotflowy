@@ -126,6 +126,7 @@ export function useBulletKeymap({
                     stopPropagation: () => e.stopPropagation(),
                     clientX: rect.left + rect.width / 2,
                     clientY: rect.top + rect.height / 2,
+                    source: "keyboard",
                   });
                   if (handled) return;
                 }

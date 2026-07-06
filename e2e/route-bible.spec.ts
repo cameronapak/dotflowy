@@ -2,10 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Route Bible plugin (ADR 0026): a Scripture reference in node.text renders as a
-// non-folding chip (Seam A) that opens route.bible on click (Seam B). Detection
-// is liberal-regex-PROPOSES / grab-bcv-parser-DISPOSES, so a valid reference
-// chips and a non-reference falls through to plain text. Unlike a rich link the
-// chip does NOT fold/reveal -- its text equals its source whether focused or not.
+// non-folding chip (Seam A) that opens a passage edit popover on click (Seam B).
+// Detection is liberal-regex-PROPOSES / grab-bcv-parser-DISPOSES, so a valid
+// reference chips and a non-reference falls through to plain text. Unlike a rich
+// link the chip does NOT fold/reveal -- its text equals its source whether
+// focused or not.
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
@@ -30,6 +31,9 @@ async function load(page: Page, tree: SeedNode[]) {
 
 const opened = (page: Page) =>
   page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+
+const passagePopover = (page: Page) =>
+  page.locator("[data-bible-passage-popover]");
 
 async function caretAtSource(page: Page, id: string, target: number) {
   await text(page, id).evaluate((el, target) => {
@@ -156,7 +160,7 @@ test.describe("Scripture reference chips", () => {
     await expect(chips.nth(1)).toHaveText("Romans 8:28");
   });
 
-  test("clicking a chip opens its route.bible URL in a new tab", async ({
+  test("clicking a chip opens a passage editor with an Open action", async ({
     page,
   }) => {
     await load(page, [
@@ -164,10 +168,37 @@ test.describe("Scripture reference chips", () => {
     ]);
 
     await chip(page, "n").click();
+    await expect(passagePopover(page)).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Passage" })).toHaveValue(
+      "1 Cor 13:4-7",
+    );
+    await page.getByRole("button", { name: "Open passage" }).click();
 
     expect(await opened(page)).toEqual([
       "https://route.bible/1co.13.4-7?src=dotflowy",
     ]);
+  });
+
+  test("the passage editor rewrites a chip through parsed input", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
+    ]);
+
+    await chip(page, "n").click();
+    await page.getByRole("textbox", { name: "Passage" }).fill("rom 8:28");
+    await expect(page.locator("[data-bible-passage-suggestions]")).toContainText(
+      "Romans 8:28",
+    );
+    await page.getByRole("button", { name: "Done" }).click();
+
+    await expect(text(page, "n")).toContainText("Read Romans 8:28 today");
+    await expect(chip(page, "n")).toHaveText("Romans 8:28");
+    await expect(chip(page, "n")).toHaveAttribute(
+      "data-href",
+      "https://route.bible/rom.8.28?src=dotflowy",
+    );
   });
 
   test("Left/Right can select a chip and Enter opens it", async ({ page }) => {

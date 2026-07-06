@@ -291,6 +291,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       stopPropagation: () => e.stopPropagation(),
       clientX: rect.left + rect.width / 2,
       clientY: rect.top + rect.height / 2,
+      source: "keyboard",
     });
   };
   // A plugin-owned overlay (the tag color picker), mounted once below. The core

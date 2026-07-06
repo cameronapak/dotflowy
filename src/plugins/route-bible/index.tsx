@@ -12,6 +12,8 @@
 
 import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
 import { BibleChip } from "./chip";
+import { getViewRootId } from "../../data/view-state";
+import { openBiblePassageEditPopover } from "./passage-edit-popover";
 import { definePlugin, type WidgetEl } from "../types";
 
 // The chip is a `<dotflowy-widget>` atom mounting BibleChip (ADR 0006). `source`
@@ -49,21 +51,39 @@ export default definePlugin({
     },
   ],
 
-  // Seam B: a chip opens its route.bible URL in a new tab; its mousedown blocks
-  // the editing caret (the chip lives inside the contentEditable). Mirrors the
-  // links plugin's open-on-click. The selector matches the atom element (which
+  // Seam B: a pointer click edits the source reference in a compact passage
+  // selector, while keyboard activation on a selected atom preserves the quick
+  // route.bible open behavior. The selector matches the atom element (which
   // carries `data-bible-ref`); a click on an inner icon resolves to it via
   // `closest`.
   interactions: [
     {
       selector: "[data-bible-ref]",
       blockCaretOnMouseDown: true,
-      onClick: (el, _ctx, e) => {
+      onClick: (el, ctx, e) => {
         const href = el.dataset.href;
         if (!href) return;
         e.preventDefault();
         e.stopPropagation();
-        window.open(href, "_blank", "noopener,noreferrer");
+        if (e.source === "keyboard") {
+          window.open(href, "_blank", "noopener,noreferrer");
+          return;
+        }
+        const token = el.getAttribute("data-src") ?? "";
+        const nodeId =
+          el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
+          getViewRootId();
+        if (!token || !nodeId) return;
+        const rect = el.getBoundingClientRect();
+        openBiblePassageEditPopover(
+          {
+            nodeId,
+            token,
+            x: rect.left,
+            y: rect.bottom + 6,
+          },
+          ctx,
+        );
       },
     },
   ],

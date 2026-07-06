@@ -182,6 +182,7 @@ export interface InteractionEvent {
   stopPropagation(): void;
   clientX: number;
   clientY: number;
+  source?: "pointer" | "keyboard";
 }
 
 export interface InteractionSpec {
