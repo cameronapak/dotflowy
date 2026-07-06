@@ -29,6 +29,13 @@ async function goHome(page: Page) {
   await expect(page).toHaveURL(/\/$/);
 }
 
+async function clientNavigate(page: Page, path: string) {
+  await page.evaluate((to) => {
+    window.history.pushState({}, "", to);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, path);
+}
+
 // Open the Cmd+K node switcher and type a query. cmdk autofocuses its input a
 // beat AFTER the dialog mounts; when Cmd+K fires right after a navigation, the
 // editor's post-nav focus effect can win that race and the dialog input never
@@ -628,8 +635,7 @@ test.describe("daily notes", () => {
   test("/today redirects to today's daily note, creating it on first visit", async ({
     page,
   }) => {
-    await load(page);
-
+    await seedOutline(page, STANDARD_TREE);
     await page.goto("/today");
 
     // The redirect is async (wait for collection ready + get-or-create day),
@@ -647,17 +653,16 @@ test.describe("daily notes", () => {
   test("/today is idempotent: a second visit lands on the same note", async ({
     page,
   }) => {
-    await load(page);
-
+    await seedOutline(page, STANDARD_TREE);
     await page.goto("/today");
     await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
     const firstUrl = page.url();
 
-    await page.goto("/");
-    await page.goto("/today");
+    await goHome(page);
+    await clientNavigate(page, "/today");
     await expect(page).toHaveURL(firstUrl);
 
-    await page.goto("/");
+    await goHome(page);
     await expect(page.locator("[data-daily-date]")).toHaveCount(1);
   });
 });

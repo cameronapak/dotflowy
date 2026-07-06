@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { nodesCollection } from "../data/collection";
@@ -11,15 +11,12 @@ export const Route = createFileRoute("/today")({
   component: TodayRedirect,
 });
 
-// Module-level guard: StrictMode double-mounts the effect, and the async
-// get-or-create should only run once. Set synchronously before the first
-// await so the second mount bails.
-let redirected = false;
-
 function TodayRedirect() {
+  const redirectStarted = useRef(false);
+
   useEffect(() => {
-    if (redirected) return;
-    redirected = true;
+    if (redirectStarted.current) return;
+    redirectStarted.current = true;
 
     // Subscribe to the tree store so the nodes collection's sync starts
     // (the WebSocket opens on the first subscribeChanges call, gated by
