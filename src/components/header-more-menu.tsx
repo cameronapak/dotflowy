@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   ALargeSmallIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
   LogOutIcon,
@@ -35,6 +37,9 @@ import { outlineToMarkdown } from "../data/markdown";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { childrenOf } from "../data/tree";
+import { toggleCollapsed } from "../data/mutations";
+import { runStructural } from "../data/structural";
+import { capture } from "../data/history";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -74,6 +79,59 @@ async function copyOutlineAsMarkdown() {
   } catch {
     toast.error("Couldn't copy to clipboard");
   }
+}
+
+/**
+ * Collect the collapsible nodes under the current view whose `collapsed` flag
+ * needs to change to `collapsed`. Scope is the zoom root's subtree (read live at
+ * click time), or the whole outline at home -- same contextual rule as
+ * `copyOutlineAsMarkdown`. We seed the walk from the root's CHILDREN so the zoom
+ * root itself is never collapsed (that would hide the whole view). Only nodes
+ * that actually have children are collapsible; leaves are skipped. Already-in-
+ * target-state nodes are filtered out so a bulk toggle ships no redundant PATCHes.
+ * The walk descends through already-collapsed branches (the index is unaffected
+ * by the flag), so "Expand all" reaches every nested node.
+ */
+function collapsibleTargets(collapsed: boolean): {
+  ids: string[];
+  rootId: string | null;
+} {
+  const index = getTreeIndex();
+  const rootId = getViewRootId();
+  const targets: string[] = [];
+  const seen = new Set<string>();
+  const stack = childrenOf(index, rootId).map((n) => n.id);
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const kids = childrenOf(index, id);
+    if (kids.length === 0) continue;
+    if ((index.byId.get(id)?.collapsed ?? false) !== collapsed) targets.push(id);
+    for (const k of kids) stack.push(k.id);
+  }
+  return { ids: targets, rootId };
+}
+
+/**
+ * Collapse or expand every collapsible node under the current view in ONE
+ * atomic batch. Wrapped in `runStructural` so N `collapsed` field edits ship as
+ * a single DO frame (one round-trip, one broadcast) instead of N PATCHes, and a
+ * single `capture` before the batch makes it one undo step -- mirroring how the
+ * per-row `onToggleCollapsed` command captures once. `runStructural` is generic
+ * over any `nodesCollection` write; these are field edits, not chain relinks, so
+ * the sibling chain is untouched.
+ */
+function setViewCollapsed(collapsed: boolean) {
+  const { ids, rootId } = collapsibleTargets(collapsed);
+  if (ids.length === 0) {
+    toast(collapsed ? "Already collapsed" : "Already expanded");
+    return;
+  }
+  capture(getTreeIndex(), rootId);
+  runStructural(() => {
+    for (const id of ids) toggleCollapsed(id, collapsed);
+  });
 }
 
 /**
@@ -131,6 +189,18 @@ export function HeaderMoreMenu() {
           >
             <GitHubIcon />
             GitHub
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
+            <ChevronsDownUpIcon />
+            Collapse all
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
+            <ChevronsUpDownIcon />
+            Expand all
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
