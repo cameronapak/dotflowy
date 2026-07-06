@@ -3,6 +3,7 @@ import {
   ALargeSmallIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
+  CodeXmlIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
@@ -100,6 +101,19 @@ export function HeaderMoreMenu() {
           <DropdownMenuItem onClick={() => setConnectOpen(true)}>
             <PlugZapIcon />
             Connect apps (MCP)
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() =>
+              window.open(
+                "https://git.new/dotflowy",
+                "_blank",
+                "noopener,noreferrer",
+              )
+            }
+          >
+            <CodeXmlIcon />
+            GitHub
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
