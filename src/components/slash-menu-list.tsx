@@ -1,4 +1,10 @@
-import type { ComponentType, CSSProperties, Ref } from "react";
+import {
+  useEffect,
+  useRef,
+  type ComponentType,
+  type CSSProperties,
+  type Ref,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -38,6 +44,15 @@ export function SlashMenuList({
   /** Attach the floating element (e.g. floating-ui's `refs.setFloating`). */
   ref?: Ref<HTMLDivElement>;
 }) {
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
+
+  // Keyboard nav walks past the visible window (the list scrolls at max-h-72),
+  // so follow the highlight. `items.length` is a dep because a refiltered list
+  // can leave the container scrolled while `activeIndex` stays 0.
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, items.length]);
+
   return (
     <div
       ref={ref}
@@ -59,6 +74,7 @@ export function SlashMenuList({
             return (
               <button
                 key={item.id}
+                ref={i === activeIndex ? activeItemRef : null}
                 type="button"
                 role="option"
                 aria-selected={i === activeIndex}
