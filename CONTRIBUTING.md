@@ -54,6 +54,29 @@ bun run dev       # terminal 2: vite dev on :3000 (proxies /api -> :8787)
 Open http://localhost:3000. Vite gives you HMR; the Worker reloads on its own
 edits. This is the loop for almost all work.
 
+If Vite chooses another port because :3000 is busy, open the URL from the Vite
+log. The browser should talk to the Worker through Vite's `/api` proxy, so check
+both paths when debugging local setup:
+
+```sh
+curl -i http://localhost:3000/api/nodes
+# unauthenticated curl may return 401, but it should be a Worker response
+```
+
+HTTP success is not enough; the outline sync path is a WebSocket. After signing
+in locally, verify the browser can `fetch("/api/nodes")` with a 200 and that
+`ws://localhost:3000/api/sync` opens and emits the initial snapshot. If the
+browser logs "WebSocket is closed before the connection is established" or
+bootstrap says "sync socket closed before initial data", the `/api/sync` upgrade
+is not reaching Wrangler. The Vite proxy needs WebSocket support for `/api`
+(`ws: true` in object form), and Vite must be restarted after any
+`vite.config.ts` proxy edit.
+
+Local auth testing should use a real local account created with the invite code
+from `.dev.vars.example`. If you temporarily add an auth bypass for manual
+testing, keep it uncommitted and exclude it from PRs unless the PR is explicitly
+about productizing that bypass.
+
 ### Production-like loop (one server)
 
 ```sh
