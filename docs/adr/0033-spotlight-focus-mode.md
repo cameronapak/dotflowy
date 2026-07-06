@@ -8,8 +8,10 @@ status: accepted
 **except the single focused bullet**, which stays full — so the line you're on stands out. Toggled from
 the header More menu ("Spotlight mode"), default OFF, persisted per-browser in `localStorage`. Dimming is
 live only while a bullet holds the caret; the moment nothing is focused, the whole outline returns to full
-opacity. Scoped to `.outline-row` content — the header, subheader, and zoomed page title never dim (they
-are context, not content).
+opacity. The header and subheader never dim (they are chrome, not content). When **zoomed**, the root
+renders as the `.zoomed-title` (an `h2`, not an `.outline-row`); it dims like any parent while a child
+bullet is focused and stays full only when the title itself holds the caret — so zooming in and editing a
+child spotlights the child, not the whole page header.
 
 **Why single-node, not the focused node + its ancestor chain (the UX call).** An earlier draft lit the
 active *branch* (focused bullet + every ancestor up to the zoom root). We dropped the ancestors. Dimmed

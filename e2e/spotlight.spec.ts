@@ -72,6 +72,31 @@ test.describe("spotlight focus mode", () => {
     await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
   });
 
+  test("zoomed in, the page title dims while a child bullet is focused", async ({
+    page,
+  }) => {
+    await seedOutline(page, STANDARD_TREE);
+    await page.addInitScript(() => {
+      window.localStorage.setItem("dotflowy:spotlight", "true");
+    });
+    // Zoom into alpha: it now renders as the h2 page title, alpha-1 a child row.
+    await page.goto("/alpha");
+    const title = page.locator("h2.zoomed-title");
+    const titleText = page.locator("h2.zoomed-title .node-text");
+    await expect(titleText).toBeVisible();
+
+    // Focus a child bullet -> the title dims like any parent, the child is full.
+    await text(page, "alpha-1").click();
+    await expect(text(page, "alpha-1")).toBeFocused();
+    await expect(title).toHaveCSS("opacity", "0.3");
+    await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
+
+    // Focus the title itself -> it's the caret's node now, so it stays full.
+    await titleText.click();
+    await expect(titleText).toBeFocused();
+    await expect(title).toHaveCSS("opacity", "1");
+  });
+
   test("with the mode off, focusing dims nothing", async ({ page }) => {
     await loadWithSpotlight(page, false);
     await text(page, "alpha-1").click();
