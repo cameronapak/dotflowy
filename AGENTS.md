@@ -60,7 +60,7 @@ The project vendors the Effect v4 source at `repos/effect-smol/` (via `git subtr
 
 ### Issue tracker
 
-Issues and PRDs live as local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs live as GitHub issues (`gh` CLI) in `cameronapak/dotflowy`; external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
