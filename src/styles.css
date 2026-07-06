@@ -2,6 +2,7 @@
 @import "shadcn/tailwind.css";
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -46,6 +47,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
