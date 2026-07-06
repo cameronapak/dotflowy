@@ -84,6 +84,7 @@ import {
 } from "../data/mutations";
 import { bootstrapOutline } from "../data/seed";
 import { runStructural } from "../data/structural";
+import { setNodeActionBridge } from "../data/command-bridge";
 import { capture, drop, redo, undo } from "../data/history";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
@@ -371,6 +372,24 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     }),
     [commands, navigateZoom],
   );
+
+  // Publish the node-action surface for the Cmd+K command center (ADR 0034). The
+  // switcher is mounted in `__root`, OUTSIDE this editor, so it reads these live
+  // through the module bridge. All four are stable identity, so this is a
+  // one-shot publish, torn down on unmount (e.g. the login screen).
+  useEffect(() => {
+    const focusNode = (id: string) => {
+      pendingFocus.current = id;
+      requestAnimationFrame(() => refs.get(id)?.focus());
+    };
+    setNodeActionBridge({
+      commands,
+      getCtx: pluginCtx,
+      findFocusedId,
+      focusNode,
+    });
+    return () => setNodeActionBridge(null);
+  }, [commands, pluginCtx, findFocusedId, refs, pendingFocus]);
 
   // Zero-arg command surface for the mobile actions bar (ADR 0030). A thin facade
   // over the same `commands`/`undo`/`redo` the keyboard uses; each method resolves

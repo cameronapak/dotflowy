@@ -69,7 +69,7 @@ function GitHubIcon() {
  * Scope is the zoom root (read live at click time), or every top-level node at
  * home -- the header is contextual to the current zoom view. See ADR 0017.
  */
-async function copyOutlineAsMarkdown() {
+export async function copyOutlineAsMarkdown() {
   const index = getTreeIndex();
   const rootId = getViewRootId();
   const rootIds = rootId ? [rootId] : childrenOf(index, null).map((n) => n.id);
@@ -127,7 +127,7 @@ function collapsibleTargets(collapsed: boolean): {
  * over any `nodesCollection` write; these are field edits, not chain relinks, so
  * the sibling chain is untouched.
  */
-function setViewCollapsed(collapsed: boolean) {
+export function setViewCollapsed(collapsed: boolean) {
   const { ids, rootId } = collapsibleTargets(collapsed);
   if (ids.length === 0) {
     toast(collapsed ? "Already collapsed" : "Already expanded");

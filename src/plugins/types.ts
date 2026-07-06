@@ -348,6 +348,14 @@ export interface CommandSpec {
   /** Hide the command for nodes it doesn't apply to (e.g. "To-do" once the
    *  bullet already is a task). */
   available(node: Node): boolean;
+  /**
+   * Marks a command whose `run` needs a live caret/text-selection inside the
+   * bullet (e.g. emphasis wrap). The `/` palette and Seam D still run it (a caret
+   * is present there), but the Cmd+K command center EXCLUDES it: opening the
+   * overlay steals the caret, so there's nothing to wrap (ADR 0034). Omit for
+   * whole-node commands (To-do, Send to Today).
+   */
+  caretScoped?: boolean;
   /** Run the command against the focused node. */
   run(nodeId: string, ctx: PluginContext): void;
   /**
