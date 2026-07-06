@@ -31,6 +31,71 @@ async function load(page: Page, tree: SeedNode[]) {
 const opened = (page: Page) =>
   page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
 
+async function caretAtSource(page: Page, id: string, target: number) {
+  await text(page, id).evaluate((el, target) => {
+    el.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    let remaining = target as number;
+    let placed = false;
+    const visit = (node: Node): void => {
+      if (placed) return;
+      if (node.nodeType === 3 /* text */) {
+        const len = node.textContent?.length ?? 0;
+        if (remaining <= len) {
+          const r = document.createRange();
+          r.setStart(node, remaining);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+          placed = true;
+        } else remaining -= len;
+        return;
+      }
+      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+        const e = node as HTMLElement;
+        const len =
+          Number(e.getAttribute("data-src-len")) ||
+          (e.getAttribute("data-src") ?? "").length;
+        if (remaining <= len) {
+          const parent = e.parentNode!;
+          const idx = Array.prototype.indexOf.call(parent.childNodes, e);
+          const r = document.createRange();
+          r.setStart(parent, remaining === 0 ? idx : idx + 1);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+          placed = true;
+          return;
+        }
+        remaining -= len;
+        return;
+      }
+      node.childNodes.forEach(visit);
+    };
+    visit(el);
+    if (!placed) {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  }, target);
+}
+
+const selectedBibleRef = (page: Page) =>
+  page.evaluate(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount !== 1) return null;
+    const range = sel.getRangeAt(0);
+    if (range.collapsed || range.startContainer !== range.endContainer) return null;
+    const node = range.startContainer.childNodes.item(range.startOffset);
+    return node instanceof HTMLElement && node.hasAttribute("data-bible-ref")
+      ? node.getAttribute("data-src")
+      : null;
+  });
+
 test.describe("Scripture reference chips", () => {
   test("a chapter:verse reference chips with the resolver URL; a non-reference stays plain text", async ({
     page,
@@ -102,6 +167,29 @@ test.describe("Scripture reference chips", () => {
 
     expect(await opened(page)).toEqual([
       "https://route.bible/1co.13.4-7?src=dotflowy",
+    ]);
+  });
+
+  test("Left/Right can select a chip and Enter opens it", async ({ page }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+    ]);
+
+    await caretAtSource(page, "n", "See ".length);
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => selectedBibleRef(page)).toBe("John 3:16");
+    await expect(chip(page, "n")).toHaveAttribute("data-atom-selected", "true");
+
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => selectedBibleRef(page)).toBeNull();
+    await expect(chip(page, "n")).not.toHaveAttribute("data-atom-selected", /.*/);
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => selectedBibleRef(page)).toBe("John 3:16");
+    await expect(chip(page, "n")).toHaveAttribute("data-atom-selected", "true");
+
+    await page.keyboard.press("Enter");
+    expect(await opened(page)).toEqual([
+      "https://route.bible/jhn.3.16?src=dotflowy",
     ]);
   });
 });
