@@ -136,6 +136,11 @@ async function ensureDay(
     if (!index.byId.get(existing)!.text.trim()) {
       setText(existing, formatDayText(key));
     }
+    // Backfill a first bullet if the note exists but has no children (e.g.
+    // created before this seeding landed). Same atomic batch as the heal.
+    if (childrenOf(index, existing).length === 0) {
+      runStructural(() => appendChild(existing, null, ''));
+    }
     return existing;
   }
   const candidate = createId();
@@ -143,15 +148,18 @@ async function ensureDay(
   const ok = await ensureNodeExists(
     winner,
     () =>
-      runStructural(() =>
+      runStructural(() => {
         insertChildAtStart(
           index,
           containerId,
           false,
           formatDayText(key),
           winner,
-        ),
-      ),
+        );
+        // Seed a first empty bullet so the note is ready to type into,
+        // not a bare title. Same atomic batch as the day node itself.
+        appendChild(winner, null, '');
+      }),
     !won,
   );
   setMapping(key, winner);

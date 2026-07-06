@@ -33,7 +33,7 @@ function TodayRedirect() {
         const index = buildTreeIndex(nodesCollection.toArray);
         const dayId = await getOrCreateDay(localDateKey(), index);
         if (dayId) {
-          window.location.replace(`/${dayId}`);
+          window.location.replace(`/${dayId}?focus=last`);
         } else {
           toast.error("Couldn't open today's daily note");
           window.location.replace("/");
