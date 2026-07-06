@@ -1154,6 +1154,20 @@ body.dragging-active * {
   opacity: 0.4;
 }
 
+/* The zoomed pivot's `.node-text` carries an inline `view-transition-name`
+   (the morph target) while it's the zoom root, which makes it its own stacking
+   context -- lifting the full-width title box above the floated before-text
+   decorations, so a click over the checkbox lands on the contentEditable title
+   instead. Float only shortens the text's LINE boxes, not the block box behind
+   them (see `.row-body > :not(.node-text)`). Positioning the decorations at
+   z-index 1 paints them back above the stacking-context title so the checkbox
+   is clickable again. Title-only: the list row's `.node-text` has no
+   view-transition-name, so its float already wins the hit-test. */
+.zoomed-title .row-body > :not(.node-text) {
+  position: relative;
+  z-index: 1;
+}
+
 /* During a zoom, the pivot's text box wraps its text tightly so the title
    and the list item morph cleanly into each other (no slide from a stretched
    flex box). Scoped to the active zoom transition so the live layout reverts
