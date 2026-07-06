@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TodayRouteImport } from './routes/today'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
 
+const TodayRoute = TodayRouteImport.update({
+  id: '/today',
+  path: '/today',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NodeIdRoute = NodeIdRouteImport.update({
   id: '/$nodeId',
   path: '/$nodeId',
@@ -32,35 +38,46 @@ const AdminWaitlistRoute = AdminWaitlistRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/today': typeof TodayRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/today': typeof TodayRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/today': typeof TodayRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$nodeId' | '/admin/waitlist'
+  fullPaths: '/' | '/$nodeId' | '/today' | '/admin/waitlist'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$nodeId' | '/admin/waitlist'
-  id: '__root__' | '/' | '/$nodeId' | '/admin/waitlist'
+  to: '/' | '/$nodeId' | '/today' | '/admin/waitlist'
+  id: '__root__' | '/' | '/$nodeId' | '/today' | '/admin/waitlist'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NodeIdRoute: typeof NodeIdRoute
+  TodayRoute: typeof TodayRoute
   AdminWaitlistRoute: typeof AdminWaitlistRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/today': {
+      id: '/today'
+      path: '/today'
+      fullPath: '/today'
+      preLoaderRoute: typeof TodayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$nodeId': {
       id: '/$nodeId'
       path: '/$nodeId'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NodeIdRoute: NodeIdRoute,
+  TodayRoute: TodayRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,
 }
 export const routeTree = rootRouteImport

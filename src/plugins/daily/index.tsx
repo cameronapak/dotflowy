@@ -174,6 +174,8 @@ async function getOrCreateDay(
   });
 }
 
+export { getOrCreateDay };
+
 /** get-or-create the day, then zoom to it (the Today button + future picker). */
 async function goToDate(key: string, ctx: PluginContext): Promise<void> {
   const dayId = await getOrCreateDay(key, ctx.tree);

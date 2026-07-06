@@ -624,4 +624,40 @@ test.describe("daily notes", () => {
     await page.keyboard.press(`${modifier()}+Shift+Backspace`);
     await expect(page.locator('li[data-node-id="bravo"]')).toHaveCount(0);
   });
+
+  test("/today redirects to today's daily note, creating it on first visit", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await page.goto("/today");
+
+    // The redirect is async (wait for collection ready + get-or-create day),
+    // so wait for it to leave /today before asserting the zoom view.
+    await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
+    await expect(page).not.toHaveURL(/\/$/, { timeout: 10000 });
+    const year = String(new Date().getFullYear());
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+    const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
+    await expect(titleBadge).toBeVisible();
+    await expect(titleBadge).toHaveAttribute("data-daily-today", "");
+  });
+
+  test("/today is idempotent: a second visit lands on the same note", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await page.goto("/today");
+    await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
+    const firstUrl = page.url();
+
+    await page.goto("/");
+    await page.goto("/today");
+    await expect(page).toHaveURL(firstUrl);
+
+    await page.goto("/");
+    await expect(page.locator("[data-daily-date]")).toHaveCount(1);
+  });
 });
