@@ -109,7 +109,7 @@ test.describe("Highlight: fold when blurred (ADR 0035)", () => {
 });
 
 test.describe("Highlight: reveal + re-fold", () => {
-  test("caret on the run reveals fences AND the color emoji as real text", async ({
+  test("caret on the run reveals fences; the emoji stays hidden behind the pen atom", async ({
     page,
   }) => {
     await load(page, [
@@ -119,14 +119,38 @@ test.describe("Highlight: reveal + re-fold", () => {
     // Source length: 2 fences + 2 (emoji is one astral code point = 2 UTF-16
     // units) + 6 interior + 2 fences = 12.
     await caretAtSource(page, "n", 12);
-    await expect.poll(() => text(page, "n").textContent()).toBe("==🔴urgent==");
+    // The emoji is NEVER displayed -- the visible text is fences + interior;
+    // the pen affordance carries the emoji as its atom source, so readSource
+    // (and copy/export) still reconstructs `==🔴urgent==`.
+    await expect.poll(() => text(page, "n").textContent()).toBe("==urgent==");
     await expect(text(page, "n").locator("[data-highlight-reveal]")).toHaveCount(1);
-    // Fences render INSIDE the painted <mark> (the code-box model): the mark's
-    // own text carries the full source slice.
+    await expect(
+      text(page, "n").locator(".highlight-pen-icon"),
+    ).toHaveAttribute("data-src", "🔴");
+    // Fences render INSIDE the painted <mark> (the code-box model).
     await expect(text(page, "n").locator("mark .md-punct")).toHaveCount(2);
-    await expect(mark(page, "n")).toHaveText("==🔴urgent==");
-    // The revealed <mark> is no longer an atom.
+    // The revealed <mark> itself is no longer an atom.
     await expect(mark(page, "n")).not.toHaveAttribute("data-src", /.*/);
+  });
+
+  test("typing in a revealed colored run keeps the hidden emoji (color survives edits)", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "==🔴urgent==" },
+    ]);
+    await text(page, "n").click();
+    await caretAtSource(page, "n", 12);
+    await expect.poll(() => text(page, "n").textContent()).toBe("==urgent==");
+    // Caret between the interior and the closing fence: `==🔴urgent|==`.
+    await caretAtSource(page, "n", 10);
+    await page.keyboard.type("!");
+    await expect.poll(() => text(page, "n").textContent()).toBe("==urgent!==");
+    // The pen atom carried the emoji through the edit -- still red.
+    await expect(mark(page, "n")).toHaveAttribute("data-highlight", "red");
+    await expect(
+      text(page, "n").locator(".highlight-pen-icon"),
+    ).toHaveAttribute("data-src", "🔴");
   });
 
   test("moving the caret away re-folds the run", async ({ page }) => {

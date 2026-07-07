@@ -4,18 +4,19 @@
 // walk-through text.
 //
 // COLOR rides IN the source, Lettera-style: an optional leading circle emoji
-// (`==🔴urgent==`) names one of six tag-palette colors. Folded, the emoji is
-// HIDDEN (the interior renders without it while `data-src` still carries the
-// full run, so readSource + the caret math need zero new machinery); revealed,
-// it's ordinary text the caret steps through -- backspacing it de-colors the
-// run. A bare run is blue. Painting reuses the tags palette's `--tag-*`
-// custom properties (mounted globally by TagColorStyles), so highlight colors
-// and tag colors can never drift apart.
+// (`==🔴urgent==`) names one of six tag-palette colors. The emoji is NEVER
+// displayed -- it's an export/interchange encoding, not editor chrome. Folded,
+// the interior renders without it while `data-src` carries the full run;
+// revealed, the pen affordance is its atom (data-src = the emoji), so
+// readSource + copy/export still round-trip `==🔴urgent==`. Color is chosen
+// via the pen's menu (or right-click); a bare run is blue. Painting reuses
+// the tags palette's `--tag-*` custom properties (mounted globally by
+// TagColorStyles), so highlight colors and tag colors can never drift apart.
 //
 // Pure logic (pattern, parse, build, strip) lives in src/data/highlight.ts.
 //
-// Seams contributed: A (folding token), B (right-click recolor), C (slash
-// command), D (keymap).
+// Seams contributed: A (folding token), B (pen-click + right-click recolor),
+// C (slash command), D (keymap).
 
 import { HighlighterIcon } from "lucide-react";
 import {
@@ -24,6 +25,7 @@ import {
   type HighlightColor,
 } from "../../data/highlight";
 import { getViewRootId } from "../../data/view-state";
+import { readSource } from "../../components/inline-code";
 import { wrapSelectionOrInsert } from "../../components/wrap";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { openHighlightColorMenu } from "./highlight-color-menu";
@@ -65,13 +67,16 @@ function foldedHighlightEl(tok: string): El {
   };
 }
 
-// A revealed run: the `==` fences as dimmed `.md-punct` REAL text and the
-// color emoji (when present) as ordinary text, all INSIDE the still-painted
-// `<mark>` -- the code-box model (fences live within the container because a
-// highlight HAS a visible container), not emphasis's flanking markers.
-// Nothing carries `data-src`, so the caret walks through fence and emoji one
-// step at a time -- `==🔴|urgent==` is a reachable position, and backspacing
-// the emoji de-colors the run.
+// A revealed run: the `==` fences as dimmed `.md-punct` REAL text INSIDE the
+// still-painted `<mark>` -- the code-box model (fences live within the
+// container because a highlight HAS a visible container), not emphasis's
+// flanking markers. The color emoji is NEVER visible, even revealed: the pen
+// affordance IS its atom (`data-src` = the emoji), exactly the revealed
+// link's url-chip pattern (ADR 0005) -- readSource reconstructs the full run
+// and the caret jumps over the pen as one 2-unit step, so copy/export still
+// yields `==🔴urgent==` while the editor shows only `==urgent==` behind a
+// pen. Backspacing the pen atom deletes the emoji -> de-colors the run. On a
+// bare (default-color) run the pen carries no source and is caret-invisible.
 function revealedHighlightEl(tok: string): El {
   const { color, emoji, interior } = parseHighlight(tok);
   const punct = (s: string): El => ({
@@ -79,9 +84,6 @@ function revealedHighlightEl(tok: string): El {
     attrs: { class: "md-punct" },
     children: [s],
   });
-  // The Bear-style color affordance: a text-free highlighter pen (CSS mask,
-  // styles.css) right after the opening fence. Zero source length, so the
-  // caret math never sees it; clicking it opens the color menu (Seam B).
   const pen: El = {
     tag: "span",
     attrs: {
@@ -89,6 +91,8 @@ function revealedHighlightEl(tok: string): El {
       "aria-hidden": "true",
       contenteditable: "false",
       title: "Highlight color",
+      "data-src": emoji ?? undefined,
+      "data-src-len": emoji ? emoji.length : undefined,
     },
   };
   return {
@@ -98,9 +102,7 @@ function revealedHighlightEl(tok: string): El {
       "data-highlight": color,
       "data-highlight-reveal": true,
     },
-    children: emoji
-      ? [punct("=="), pen, emoji, interior, punct("==")]
-      : [punct("=="), pen, interior, punct("==")],
+    children: [punct("=="), pen, interior, punct("==")],
   };
 }
 
@@ -138,7 +140,9 @@ export default definePlugin({
       blockCaretOnMouseDown: true,
       onClick: (el, ctx, e) => {
         const markEl = el.closest<HTMLElement>("[data-highlight-reveal]");
-        const token = markEl?.textContent;
+        // readSource, not textContent: the pen atom carries the hidden color
+        // emoji in its data-src, so the walk reconstructs the full run.
+        const token = markEl ? readSource(markEl) : null;
         if (!markEl || !token) return;
         e.preventDefault();
         e.stopPropagation();
@@ -157,9 +161,11 @@ export default definePlugin({
     {
       selector: "mark[data-highlight], [data-highlight-reveal]",
       onContextMenu: (el, ctx, e) => {
+        // Folded: the atom's own data-src. Revealed: a readSource walk (the
+        // pen atom inside carries the hidden emoji).
+        const reveal = el.closest<HTMLElement>("[data-highlight-reveal]");
         const token =
-          el.getAttribute("data-src") ??
-          el.closest("[data-highlight-reveal]")?.textContent;
+          el.getAttribute("data-src") ?? (reveal ? readSource(reveal) : null);
         if (!token) return;
         e.preventDefault();
         e.stopPropagation();
