@@ -7,8 +7,9 @@ import { runPromise } from './nodes-client-effect'
 import { makeSyncStream } from './realtime'
 import type { ChangeOp, ServerMessage, SyncEvent } from './realtime'
 import { appRuntime } from './runtime'
-import { buildTreeIndex, now } from './tree'
+import { buildTreeIndex, childrenOf, now } from './tree'
 import { chainDisagreements } from './sibling-chain'
+import { isMirrorsEnabled } from './flags'
 
 /**
  * Single source of truth for all outline nodes.
@@ -289,6 +290,76 @@ function healSiblingChains(nodes: Node[]): void {
 }
 
 /**
+ * Rescue nodes stranded UNDER a mirror instance (ADR 0022). A mirror windows its
+ * SOURCE's children, so a node whose `parentId` points at a mirror instance
+ * (`parent.mirrorOf != null`) is orphaned -- the render walk reads the source's
+ * children, never the instance's, so the node is invisible (the "disappears on
+ * Tab" bug, before keyboard indent learned to resolve the mirror boundary the
+ * drag path already did). Repoint each such node at the true source, appended
+ * after the source's current real children, so it reappears in every instance;
+ * runs alongside `healSiblingChains` at snapshot load and persists the same way.
+ *
+ * Gated on the mirrors flag ON PURPOSE: with mirrors OFF, a node carrying
+ * `mirrorOf` renders as a plain node with its OWN children, so a child parented
+ * to it is legitimately placed and must NOT be moved. Early-returns on any
+ * flag-off / mirror-free / orphan-free outline (the mirrorOf lookups all miss).
+ */
+function healMirrorOrphans(nodes: Node[]): void {
+  if (!isMirrorsEnabled()) return
+  const byId = new Map<string, Node>()
+  for (const n of nodes) byId.set(n.id, n)
+
+  // Group orphans by their true source. `parent.mirrorOf` is already the true
+  // source (mirror-of-mirror is flattened at creation -- ADR 0022), so there's
+  // no chain to resolve here.
+  const orphansBySource = new Map<string, string[]>()
+  for (const n of nodes) {
+    if (n.parentId == null) continue
+    const source = byId.get(n.parentId)?.mirrorOf
+    // A broken mirror (source deleted) renders as a leaf, not a window -- repointing
+    // the child at a missing id would persist a dangling parentId AND stop the node
+    // matching this heal on the next snapshot. Leave it and heal once the source
+    // (if ever) returns.
+    if (!source || !byId.has(source)) continue
+    const list = orphansBySource.get(source)
+    if (list) list.push(n.id)
+    else orphansBySource.set(source, [n.id])
+  }
+  if (orphansBySource.size === 0) return
+
+  // Thread each rescued run after the source's current LAST real child (its own
+  // children hang off the source id, so the orphans -- bucketed under the mirror
+  // instance id -- are excluded from this read). Keeps the orphans' snapshot
+  // order among themselves.
+  const index = buildTreeIndex(nodes)
+  const fixes: { id: string; parentId: string; prevSiblingId: string | null }[] = []
+  for (const [source, orphanIds] of orphansBySource) {
+    const existing = childrenOf(index, source)
+    let prev: string | null =
+      existing.length > 0 ? existing[existing.length - 1]!.id : null
+    for (const id of orphanIds) {
+      fixes.push({ id, parentId: source, prevSiblingId: prev })
+      prev = id
+    }
+  }
+
+  queueMicrotask(() => {
+    for (const fix of fixes) {
+      try {
+        nodesCollection.update(fix.id, (draft) => {
+          draft.parentId = fix.parentId
+          draft.prevSiblingId = fix.prevSiblingId
+          draft.updatedAt = now()
+        })
+      } catch {
+        // A node may have been deleted between snapshot and microtask; harmless --
+        // isolate per fix so one stale id doesn't abort the rest. Next snapshot retries.
+      }
+    }
+  })
+}
+
+/**
  * Backfill nullable-required fields added after some rows were persisted (ADR
  * 0022's `mirrorOf`, and node `origin`). The per-user DO adds each column with a
  * NULL default in its migrator, so a healthy DO always sends them; this guards
@@ -378,6 +449,10 @@ export const nodesCollection = createCollection({
           // outline is in hand (deferred so it writes outside this commit).
           // Copy: msg.nodes is a readonly wire array; the heal path wants Node[].
           healSiblingChains(msg.nodes.slice())
+          // Rescue any node stranded under a mirror instance (ADR 0022 boundary
+          // gap). Queued AFTER the chain heal so its parentId+prevSiblingId write
+          // wins on the rescued node if both touch it.
+          healMirrorOrphans(msg.nodes.slice())
         } else if (msg.type === 'resume') {
           // The gap since our cursor. Empty = already current; the cursor is
           // unchanged so there's nothing to write.

@@ -224,7 +224,7 @@ function makeSelectionOps({
     if (ids.length === 0) return;
     runStructural(() => {
       capture(getTreeIndex(), ids[0]!);
-      if (indentManyNodes(ids)) refreshSelection();
+      if (indentManyNodes(ids, isMirrorsEnabled())) refreshSelection();
       else drop();
     });
   };

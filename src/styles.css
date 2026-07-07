@@ -715,10 +715,10 @@ h2 span.protected-lock {
    * ADR 0029). On coarse the chevron flips to `right:0` and is `position:
    * absolute` (out of the flex flow), so `.node-deco` -- which hugs the row's
    * trailing edge via `margin-inline-start:auto` -- would otherwise extend the
-   * full content width and render a decoration directly UNDER the chevron. The
-   * first consumer proves it: a child-count badge only shows on a COLLAPSED row,
-   * which always has children, so it always co-occurs with the chevron. Push the
-   * zone in by the 16px chevron box + a gap so the badge sits just left of it.
+   * full content width and render a decoration directly UNDER the chevron. Any
+   * trailing decoration on a COLLAPSED row always co-occurs with the chevron
+   * (a collapsed row has children), so push the zone in by the 16px chevron box
+   * + a gap so the decoration sits just left of it.
    * Desktop keeps the chevron in the left gutter, so no reservation is needed
    * there.
    */

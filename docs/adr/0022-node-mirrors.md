@@ -99,6 +99,13 @@ for instances (Notion's red/blue, revealed only when you're working in it) — *
   a "source not found" leaf, never throws.
 - **Reverse index** (`sourceId → instance ids`) maintained in the tree-store like `childrenByParent` — powers
   the count badge and the promote lookup without an O(n) scan per delete.
+- **Orphan rescue at snapshot load** (`healMirrorOrphans`, `collection.ts`, the `healSiblingChains` sibling).
+  Any node whose `parentId` points at a mirror **instance** (`parent.mirrorOf != null`) is by definition
+  orphaned — a mirror windows its source's children, so the instance-parented node is never rendered. This is
+  the data left behind by the pre-fix keyboard-indent bug (mirrors ship default-ON, so real outlines have it).
+  The heal repoints each such node at the true source, appended after the source's real children, and persists
+  it. **Gated on `isMirrorsEnabled()`**: with the flag OFF a `mirrorOf` node renders its own children, so that
+  child is legitimately placed and must NOT be moved. Early-returns on any flag-off / mirror-free outline.
 - **Single-DO safety.** Source and all instances live in the same per-user Durable Object
   ([ADR 0008](./0008-sync-via-a-per-user-durable-object.md)); a mirror is always intra-DO, so there's no
   cross-boundary consistency problem. (Cross-user mirrors would be a different decision — out of scope.)
@@ -128,6 +135,16 @@ Even though we chose A1, the build is sequenced so daily value arrives before th
   `flash`/drag/multi-select inside mirrored subtrees, and structural mutations redirecting at the mirror
   boundary (insert a child under a mirror → under the source). The caret-sensitive, regression-prone part;
   heavy e2e.
+  - **Boundary redirect covers EVERY structural entry point, not just drag.** The first cut resolved the
+    mirror boundary only in the drag `onMove` handler; keyboard **indent** (`Tab`), the **edge reparent**
+    (`Cmd+Shift+↑/↓` nudging into an uncle/aunt), and **multi-select `Tab`** (`indentManyNodes`) each derive
+    their new parent *inside* the mutation primitive, so a mirror prev-sibling/uncle sent the node under the
+    **instance** id — whose row windows the *source's* children and never the node, so it **vanished**. Fixed
+    by resolving `trueSourceOf` at each derivation site (`indent`, `reparentIntoParent{Prev,Next}Sibling`,
+    `indentManyNodes`). The flag is passed **as a `resolveMirror` param**, never a `flags.ts` read — `mutations.ts`
+    stays pure and OFF runs byte-identical old code (matching the drag call site, which gates on
+    `isMirrorsEnabled()`). Collapse-expand still targets the visible **instance** (a local field). `outdent` is
+    unaffected — its target is a grandparent, always a real content node. e2e: `mirror-editing.spec.ts`.
 - **Stage 3 — promote-on-delete** (direct + cascade-aware) and its undo/redo.
 
 ## Don't regress

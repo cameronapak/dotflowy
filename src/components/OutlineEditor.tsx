@@ -1458,7 +1458,7 @@ function useNodeCommands({
               const instanceId = instanceIdForKey(activeKey);
               // Moving the node reparents it, which drops focus. Re-focus after render.
               capture(getTreeIndex(), activeKey);
-              if (indent(getTreeIndex(), instanceId))
+              if (indent(getTreeIndex(), instanceId, isMirrorsEnabled()))
                 return { instanceId, activeKey };
               drop(); // no move happened; discard the redundant undo point
               return null;
@@ -1507,6 +1507,7 @@ function useNodeCommands({
               const moved = moveUp(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
+                resolveMirror: isMirrorsEnabled(),
               });
               if (moved) return { instanceId, activeKey };
               drop();
@@ -1529,6 +1530,7 @@ function useNodeCommands({
               const moved = moveDown(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
+                resolveMirror: isMirrorsEnabled(),
               });
               if (moved) return { instanceId, activeKey };
               drop();
