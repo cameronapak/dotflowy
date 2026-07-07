@@ -5,6 +5,7 @@ import {
   ChevronsUpDownIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
+  DownloadIcon,
   FocusIcon,
   LogOutIcon,
   MonitorIcon,
@@ -39,6 +40,10 @@ import {
 import { useTheme } from "./theme-provider";
 import { useTextSize, type TextSize } from "./text-size-provider";
 import { outlineToMarkdown } from "../data/markdown";
+import { exportOpml } from "../data/opml-export";
+import { downloadTextFile } from "../data/download";
+import { localDateKey } from "../data/date-links";
+import { flattenInline } from "../data/inline-text";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { childrenOf } from "../data/tree";
@@ -84,6 +89,39 @@ export async function copyOutlineAsMarkdown() {
   } catch {
     toast.error("Couldn't copy to clipboard");
   }
+}
+
+/**
+ * Download the current view as an OPML file (ADR 0037). Scope mirrors
+ * `copyOutlineAsMarkdown`: the zoom root's subtree (root INCLUDED), or the
+ * whole outline at home -- read live at click time. Serialization is entirely
+ * the shared core (`exportOpml`); this shell only picks the scope, names the
+ * file, and hands the string to the browser.
+ *
+ * Filename: `dotflowy-export-<YYYY-MM-DD>.opml` at home; a zoomed export
+ * swaps `export` for a slug of the root's flattened text
+ * (`dotflowy-<slug>-<date>.opml`). The date is the LOCAL calendar day
+ * (`localDateKey`, never `toISOString` -- the daily-notes rule).
+ */
+export function exportOutlineAsOpml() {
+  const index = getTreeIndex();
+  const rootId = getViewRootId();
+  const root = rootId ? (index.byId.get(rootId) ?? null) : null;
+  const rootText = root ? flattenInline(root.text) : "";
+  const slug = rootText
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  const date = localDateKey();
+  const filename = slug
+    ? `dotflowy-${slug}-${date}.opml`
+    : `dotflowy-export-${date}.opml`;
+  const opml = exportOpml(index, root ? root.id : null, {
+    title: rootText || "dotflowy export",
+  });
+  downloadTextFile(filename, "text/x-opml;charset=utf-8", opml);
 }
 
 /**
@@ -177,6 +215,11 @@ export function HeaderMoreMenu() {
           <DropdownMenuItem onClick={copyOutlineAsMarkdown}>
             <ClipboardCopyIcon />
             Copy as Markdown
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={exportOutlineAsOpml}>
+            <DownloadIcon />
+            Export OPML
           </DropdownMenuItem>
 
           <DropdownMenuItem onClick={() => setConnectOpen(true)}>

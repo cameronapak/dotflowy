@@ -7,6 +7,7 @@ import {
   ChevronsUpDownIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   FocusIcon,
   LogOutIcon,
@@ -26,6 +27,7 @@ import { useTheme } from "./theme-provider";
 import { useTextSize, type TextSize } from "./text-size-provider";
 import {
   copyOutlineAsMarkdown,
+  exportOutlineAsOpml,
   setViewCollapsed,
 } from "./header-more-menu";
 
@@ -67,6 +69,15 @@ export function useGlobalActions(opts: {
         run: () => {
           void copyOutlineAsMarkdown();
         },
+      },
+      {
+        id: "g:export-opml",
+        label: "Export OPML",
+        description: "Download the current view as an OPML file",
+        icon: DownloadIcon,
+        scope: "global",
+        keywords: ["export", "opml", "download", "file", "workflowy", "backup"],
+        run: exportOutlineAsOpml,
       },
       {
         id: "g:collapse-all",
