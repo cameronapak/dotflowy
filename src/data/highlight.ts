@@ -20,6 +20,8 @@
 // This module is DOM-free and side-effect-free; the decoration half lives in
 // src/plugins/highlight.
 
+import { spliceToken } from "../plugins/token-kit";
+
 export type HighlightColor =
   | "red"
   | "orange"
@@ -116,7 +118,6 @@ export function spliceHighlightRun(
   oldRun: string,
   newRun: string,
 ): string | null {
-  const at = text.indexOf(oldRun);
-  if (at < 0) return null;
-  return text.slice(0, at) + newRun + text.slice(at + oldRun.length);
+  // Delegates to the shared spliceToken (src/plugins/token-kit.ts).
+  return spliceToken(text, oldRun, newRun);
 }

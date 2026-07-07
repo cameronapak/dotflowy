@@ -1,0 +1,60 @@
+// Shared helpers for token plugins (ADR 0001). One blessed home for the small
+// pieces the folding + editable tokens all need, so the rule lives in one place
+// instead of N copies. Pure/DOM helpers only — no UI barrel imports.
+
+import { getTreeIndex } from "../data/tree-store";
+import { getViewRootId } from "../data/view-state";
+import type { NodeCommands } from "../components/OutlineNode";
+import type { TokenView } from "./types";
+
+/** True iff the caret sits within or adjacent to a token's source span — the
+ *  fold/reveal rule every folding token shares (inclusive boundaries, so the
+ *  caret can arrive from either edge). Replaces the copy-pasted predicate. */
+export function isRevealed({ revealOffset, start, end }: TokenView): boolean {
+  return revealOffset != null && revealOffset >= start && revealOffset <= end;
+}
+
+/** Splice a verbatim token replacement into `text` at its first occurrence, or
+ *  null if the token is no longer present (it was edited/deleted since). The
+ *  pure core of every token write-back. */
+export function spliceToken(
+  text: string,
+  oldToken: string,
+  newToken: string,
+): string | null {
+  const at = text.indexOf(oldToken);
+  if (at < 0) return null;
+  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
+}
+
+/** Verbatim-match-or-drop write-back against a node's LIVE text: resolve a
+ *  mirror row to its source, read the current text, splice `oldToken`→`newToken`
+ *  at its first occurrence, and write back only if it still matches and actually
+ *  changed. A no-op if the node is gone or the token was edited away — the guard
+ *  that keeps a stale editor write from corrupting a since-changed bullet. */
+export function replaceTokenInNode(
+  nodeId: string,
+  oldToken: string,
+  newToken: string,
+  mutations: NodeCommands,
+): void {
+  if (newToken === oldToken) return;
+  const index = getTreeIndex();
+  const clicked = index.byId.get(nodeId);
+  if (!clicked) return;
+  const targetId = clicked.mirrorOf ?? nodeId;
+  const current = index.byId.get(targetId)?.text;
+  if (current == null) return;
+  const next = spliceToken(current, oldToken, newToken);
+  if (next != null && next !== current) mutations.onTextChange(targetId, next);
+}
+
+/** The node id owning `el` (nearest `[data-node-id]` ancestor), or the zoom root
+ *  when the element lives in the zoomed title (which has no row id), or null. The
+ *  single resolution used by every Seam-B interaction handler. */
+export function resolveNodeId(el: HTMLElement): string | null {
+  return (
+    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
+    getViewRootId()
+  );
+}

@@ -23,10 +23,9 @@ import {
   HIGHLIGHT_DEFAULT_COLOR,
   HIGHLIGHT_EMOJI,
   parseHighlight,
-  spliceHighlightRun,
   type HighlightColor,
 } from "../../data/highlight";
-import { getTreeIndex } from "../../data/tree-store";
+import { replaceTokenInNode } from "../token-kit";
 import type { NodeCommands } from "../../components/OutlineNode";
 import type { PluginContext } from "../types";
 
@@ -41,15 +40,7 @@ export function applyHighlightEdit(
 ): void {
   const { interior } = parseHighlight(oldRun);
   const newRun = color == null ? interior : buildHighlightRun(color, interior);
-  if (newRun === oldRun) return;
-  const index = getTreeIndex();
-  const clicked = index.byId.get(nodeId);
-  if (!clicked) return;
-  const targetId = clicked.mirrorOf ?? nodeId;
-  const current = index.byId.get(targetId)?.text;
-  if (current == null) return;
-  const next = spliceHighlightRun(current, oldRun, newRun);
-  if (next != null && next !== current) mutations.onTextChange(targetId, next);
+  replaceTokenInNode(nodeId, oldRun, newRun, mutations);
 }
 
 /** Mount the menu through the overlay host (the same thin `ctx.openOverlay`

@@ -24,9 +24,9 @@ import {
   parseHighlight,
   type HighlightColor,
 } from "../../data/highlight";
-import { getViewRootId } from "../../data/view-state";
 import { mdPunct, readSource } from "../../components/inline-code";
 import { wrapSelectionOrInsert } from "../../components/wrap";
+import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { openHighlightColorMenu } from "./highlight-color-menu";
 
@@ -113,11 +113,8 @@ export default definePlugin({
       pattern: HIGHLIGHT_PATTERN,
       precedence: 35,
       folds: true,
-      render: (tok, { revealOffset, start, end }) => {
-        const reveal =
-          revealOffset != null && revealOffset >= start && revealOffset <= end;
-        return reveal ? revealedHighlightEl(tok) : foldedHighlightEl(tok);
-      },
+      render: (tok, view) =>
+        isRevealed(view) ? revealedHighlightEl(tok) : foldedHighlightEl(tok),
     },
   ],
 
@@ -141,10 +138,7 @@ export default definePlugin({
         if (!markEl || !token) return;
         e.preventDefault();
         e.stopPropagation();
-        const nodeId =
-          markEl
-            .closest<HTMLElement>("[data-node-id]")
-            ?.getAttribute("data-node-id") ?? getViewRootId();
+        const nodeId = resolveNodeId(markEl);
         if (!nodeId) return;
         const rect = markEl.getBoundingClientRect();
         openHighlightColorMenu(
@@ -165,10 +159,7 @@ export default definePlugin({
         e.preventDefault();
         e.stopPropagation();
         // Row id, or the zoom root when the run lives in the zoomed title.
-        const nodeId =
-          el
-            .closest<HTMLElement>("[data-node-id]")
-            ?.getAttribute("data-node-id") ?? getViewRootId();
+        const nodeId = resolveNodeId(el);
         if (!nodeId) return;
         openHighlightColorMenu(
           { nodeId, token, x: e.clientX, y: e.clientY },

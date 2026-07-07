@@ -12,12 +12,9 @@ import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDismissable } from "../../components/use-dismissable";
 import { Button, Input } from "@/plugins/kit";
-import {
-  encodeUrlForMarkdown,
-  replaceLinkToken,
-  sanitizeLinkLabel,
-} from "../../data/links";
+import { encodeUrlForMarkdown, sanitizeLinkLabel } from "../../data/links";
 import { getTreeIndex } from "../../data/tree-store";
+import { replaceTokenInNode } from "../token-kit";
 import type { NodeCommands } from "../../components/OutlineNode";
 import type { PluginContext } from "../types";
 
@@ -37,15 +34,7 @@ export function submitLinkEdit(
   if (!trimmedUrl) return;
   const safeLabel = sanitizeLinkLabel(label) || trimmedUrl;
   const newToken = `[${safeLabel}](${encodeUrlForMarkdown(trimmedUrl)})`;
-  if (newToken === oldToken) return;
-  const index = getTreeIndex();
-  const clicked = index.byId.get(nodeId);
-  if (!clicked) return;
-  const targetId = clicked.mirrorOf ?? nodeId;
-  const current = index.byId.get(targetId)?.text;
-  if (current == null) return;
-  const next = replaceLinkToken(current, oldToken, newToken);
-  if (next != null && next !== current) mutations.onTextChange(targetId, next);
+  replaceTokenInNode(nodeId, oldToken, newToken, mutations);
 }
 
 /** Mount the popover through the overlay host (the same thin `ctx.openOverlay`

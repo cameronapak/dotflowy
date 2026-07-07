@@ -42,6 +42,7 @@ import {
 } from "../types";
 import { mdPunct } from "../../components/inline-code";
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
+import { isRevealed } from "../token-kit";
 
 /** The four marker pairs. Keys match the slash-command ids and the keymap
  *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
@@ -157,10 +158,7 @@ function partsOf(tok: string): { marker: string; interior: string } {
 // edge) -- mirrors the link reveal rule verbatim.
 function renderEmphasis(kind: EmphasisKind, tok: string, view: TokenView): El {
   const { marker, interior } = partsOf(tok);
-  const { revealOffset, start, end } = view;
-  const reveal =
-    revealOffset != null && revealOffset >= start && revealOffset <= end;
-  return reveal
+  return isRevealed(view)
     ? revealedEmphasisEl(kind, interior, marker)
     : foldedEmphasisEl(kind, interior, tok);
 }
