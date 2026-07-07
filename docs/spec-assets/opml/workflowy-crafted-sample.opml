@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<opml version="2.0">
+  <head>
+    <ownerEmail>
+      cameronandrewpak@gmail.com
+    </ownerEmail>
+  </head>
+  <body>
+    <outline text="dotflowy OPML sample (safe to delete)">
+      <outline text="plain text with special chars &amp;lt; &amp;gt; &amp; &amp;quot; ' and emoji 🙂🚀" />
+      <outline text="&lt;b&gt;bold text&lt;/b&gt;" />
+      <outline text="&lt;i&gt;italic text&lt;/i&gt;" />
+      <outline text="&lt;u&gt;underline text&lt;/u&gt;" />
+      <outline text="&lt;s&gt;strikethrough and &lt;mark class=&quot;colored c-red&quot;&gt;colored&lt;/mark&gt; &lt;mark class=&quot;colored bc-green&quot;&gt;text&lt;/mark&gt;&lt;/s&gt;" />
+      <outline text="&lt;code&gt;inline code text&lt;/code&gt;" />
+      <outline text="&lt;a href=&quot;https://example.com/path?q=1&amp;r=2&quot;&gt;a labeled link&lt;/a&gt;" />
+      <outline text="bare url &lt;a href=&quot;https://workflowy.com&quot;&gt;https://workflowy.com&lt;/a&gt; in text" />
+      <outline text="due &lt;time startYear=&quot;2026&quot; startMonth=&quot;7&quot; startDay=&quot;8&quot;&gt;Wed, Jul 8, 2026&lt;/time&gt; " />
+      <outline text="bullet with a multi-line note" _note="note line one with a link &lt;a href=&quot;https://example.com/notes?x=1&amp;y=2&quot;&gt;https://example.com/notes?x=1&amp;y=2&lt;/a&gt;&#10;note line two after a hard newline&#10;" />
+      <outline text="tagged #dotflowy #import-test and a mention &lt;mention id=&quot;2544228&quot; by=&quot;2544228&quot; ts=&quot;130585935&quot;&gt; &lt;/mention&gt;  and a tag-style time @work" />
+      <outline _complete="true" text="a completed bullet" />
+      <outline text="mirror source node" />
+      <outline text="mirror source node" />
+      <outline text="level 1 of deep nesting">
+        <outline text="level 2">
+          <outline text="level 3">
+            <outline text="level 4">
+              <outline text="level 5">
+                <outline text="level 6 deepest" />
+              </outline>
+            </outline>
+          </outline>
+        </outline>
+      </outline>
+    </outline>
+  </body>
+</opml>
