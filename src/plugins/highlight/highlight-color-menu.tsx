@@ -1,10 +1,12 @@
-// The highlight recolor menu (ADR 0035): a swatch row opened by right-clicking
-// a highlight run (the tags color picker's shape, through the same thin
-// ctx.openOverlay host). Picking a color REWRITES THE SOURCE -- the color
-// emoji is spliced in or out of the run's text -- because a highlight's color
-// lives in `node.text`, not a side-collection (that's what keeps the markdown
-// self-describing when pasted elsewhere). The leading Ban swatch removes the
-// highlight entirely (fences + emoji stripped, interior kept).
+// The highlight color menu (ADR 0035): a Bear-style vertical list -- Default
+// on top, then the named colors (check on the current one), Remove highlight
+// at the bottom -- opened by clicking the revealed run's highlighter pen or by
+// right-clicking a highlight anywhere (both Seam B, through the same thin
+// ctx.openOverlay host the tag picker uses). Picking a color REWRITES THE
+// SOURCE -- the color emoji is spliced in or out of the run's text -- because
+// a highlight's color lives in `node.text`, not a side-collection (that's what
+// keeps the markdown self-describing when pasted elsewhere). "Default" is the
+// bare `==run==` form (blue, no emoji).
 //
 // Write-back is verbatim-match-or-drop (spliceHighlightRun): the menu captures
 // the run at open time; if the line was edited underneath it, the pick drops
@@ -13,12 +15,10 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Ban } from "lucide-react";
-import { Button } from "@/plugins/kit";
+import { Ban, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   buildHighlightRun,
-  HIGHLIGHT_EMOJI,
   parseHighlight,
   spliceHighlightRun,
   type HighlightColor,
@@ -69,10 +69,28 @@ export function openHighlightColorMenu(
   );
 }
 
+// "Default" leads (the bare-run blue), the rest follow in palette order --
+// aria-labels carry the color name so tests/AT can address "Default (blue)".
+const ROWS: ReadonlyArray<{
+  color: HighlightColor;
+  label: string;
+  ariaLabel: string;
+}> = [
+  { color: "blue", label: "Default", ariaLabel: "Default (blue)" },
+  { color: "red", label: "Red", ariaLabel: "Red" },
+  { color: "orange", label: "Orange", ariaLabel: "Orange" },
+  { color: "amber", label: "Amber", ariaLabel: "Amber" },
+  { color: "green", label: "Green", ariaLabel: "Green" },
+  { color: "purple", label: "Purple", ariaLabel: "Purple" },
+];
+
+const ROW_CLASS =
+  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground";
+
 /**
- * The swatch row itself: remove-highlight, then the six palette colors, the
- * current one ringed. Anchored at the pointer, clamped on screen, dismissed on
- * outside pointerdown or Escape -- TagColorMenu's mechanics verbatim.
+ * The list itself: anchored below the run (pen click) or at the pointer
+ * (right-click), clamped on screen, dismissed on outside pointerdown or
+ * Escape -- TagColorMenu's mechanics on a Bear-shaped body.
  */
 export function HighlightColorMenu({
   token,
@@ -97,7 +115,7 @@ export function HighlightColorMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    // Defer so the opening (contextmenu) event doesn't immediately close it.
+    // Defer so the opening (click/contextmenu) event doesn't immediately close it.
     const id = window.setTimeout(() => {
       window.addEventListener("pointerdown", onPointerDown);
       window.addEventListener("keydown", onKey);
@@ -109,9 +127,9 @@ export function HighlightColorMenu({
     };
   }, [onClose]);
 
-  // Keep the popover on screen (it's ~220px wide, ~44px tall).
-  const left = Math.min(x, window.innerWidth - 228);
-  const top = Math.min(y, window.innerHeight - 56);
+  // Keep the menu on screen (~176px wide, ~290px tall).
+  const left = Math.max(8, Math.min(x, window.innerWidth - 192));
+  const top = Math.max(8, Math.min(y, window.innerHeight - 300));
 
   return createPortal(
     <div
@@ -119,41 +137,47 @@ export function HighlightColorMenu({
       role="menu"
       aria-label="Highlight color"
       data-highlight-menu
-      className="bg-popover fixed z-50 flex items-center gap-1 rounded-lg border p-1.5 shadow-md"
-      style={{ left: Math.max(8, left), top: Math.max(8, top) }}
+      className="bg-popover text-popover-foreground fixed z-50 flex w-44 flex-col rounded-lg border p-1 shadow-md"
+      style={{ left, top }}
     >
-      <Button
-        type="button"
-        variant="outline"
-        size="icon-xs"
-        role="menuitem"
-        aria-label="Remove highlight"
-        title="Remove highlight"
-        className="text-muted-foreground"
-        onClick={() => onPick(null)}
-      >
-        <Ban />
-      </Button>
-      {HIGHLIGHT_EMOJI.map(({ color }) => (
-        <Button
+      {ROWS.map(({ color, label, ariaLabel }) => (
+        <button
           key={color}
           type="button"
-          variant="outline"
-          size="icon-xs"
           role="menuitemradio"
           aria-checked={current === color}
-          aria-label={color}
-          title={color}
-          className={cn(
-            current === color &&
-              "ring-2 ring-ring ring-offset-1 ring-offset-popover",
-          )}
-          style={{ background: `var(--tag-${color})` }}
+          aria-label={ariaLabel}
+          className={ROW_CLASS}
           onClick={() => onPick(color)}
         >
-          <span style={{ color: `var(--tag-${color}-fg)` }}>a</span>
-        </Button>
+          <Check
+            className={cn(
+              "size-3.5 shrink-0",
+              current !== color && "invisible",
+            )}
+          />
+          <span
+            aria-hidden="true"
+            className="size-3.5 shrink-0 rounded-full border"
+            style={{
+              background: `var(--tag-${color})`,
+              borderColor: `var(--tag-${color}-fg)`,
+            }}
+          />
+          {label}
+        </button>
       ))}
+      <div role="separator" className="bg-border my-1 h-px" />
+      <button
+        type="button"
+        role="menuitem"
+        aria-label="Remove highlight"
+        className={cn(ROW_CLASS, "text-muted-foreground")}
+        onClick={() => onPick(null)}
+      >
+        <Ban className="size-3.5 shrink-0" />
+        Remove highlight
+      </button>
     </div>,
     document.body,
   );

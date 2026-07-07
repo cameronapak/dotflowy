@@ -170,6 +170,40 @@ test.describe("Highlight: creation", () => {
   });
 });
 
+test.describe("Highlight: pen affordance (Bear-style)", () => {
+  test("the revealed run's pen opens the color menu; picking recolors", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "==hi==" },
+    ]);
+    // Reveal (caret in the run) -- the pen leads the run after the opening ==.
+    await text(page, "n").click();
+    await caretAtSource(page, "n", 6);
+    await expect.poll(() => text(page, "n").textContent()).toBe("==hi==");
+    const pen = text(page, "n").locator(".highlight-pen-icon");
+    await expect(pen).toBeVisible();
+    await pen.click();
+    const menu = page.locator("[data-highlight-menu]");
+    await expect(menu).toBeVisible();
+    // The current color's row is checked.
+    await expect(
+      menu.getByRole("menuitemradio", { name: "blue" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await menu.getByRole("menuitemradio", { name: "green" }).click();
+    await expect(mark(page, "n")).toHaveAttribute("data-highlight", "green");
+    await expect
+      .poll(async () =>
+        mark(page, "n").evaluate(
+          (el) =>
+            el.getAttribute("data-src") ??
+            el.closest("[data-highlight-reveal]")?.textContent,
+        ),
+      )
+      .toBe("==🟢hi==");
+  });
+});
+
 test.describe("Highlight: right-click recolor (source rewrite)", () => {
   test("picking a color splices its emoji into the source", async ({
     page,

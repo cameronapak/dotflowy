@@ -79,6 +79,18 @@ function revealedHighlightEl(tok: string): El {
     attrs: { class: "md-punct" },
     children: [s],
   });
+  // The Bear-style color affordance: a text-free highlighter pen (CSS mask,
+  // styles.css) right after the opening fence. Zero source length, so the
+  // caret math never sees it; clicking it opens the color menu (Seam B).
+  const pen: El = {
+    tag: "span",
+    attrs: {
+      class: "highlight-pen-icon",
+      "aria-hidden": "true",
+      contenteditable: "false",
+      title: "Highlight color",
+    },
+  };
   return {
     tag: "mark",
     attrs: {
@@ -87,8 +99,8 @@ function revealedHighlightEl(tok: string): El {
       "data-highlight-reveal": true,
     },
     children: emoji
-      ? [punct("=="), emoji, interior, punct("==")]
-      : [punct("=="), interior, punct("==")],
+      ? [punct("=="), pen, emoji, interior, punct("==")]
+      : [punct("=="), pen, interior, punct("==")],
   };
 }
 
@@ -112,11 +124,36 @@ export default definePlugin({
     },
   ],
 
-  // Seam B: right-click a highlight (folded atom OR revealed run) to recolor
-  // or remove it. The folded atom carries the run in `data-src`; a revealed
-  // mark's textContent IS the source slice (fences + emoji + interior are all
-  // real text inside it), so both resolve to the same verbatim token.
+  // Seam B: the revealed run's highlighter pen opens the color menu on a
+  // plain click (Bear's flow) -- listed FIRST so the pen wins dispatch over
+  // the run itself; its mousedown blocks the caret so the tap doesn't move
+  // the selection. Right-click anywhere on a highlight (folded atom OR
+  // revealed run) opens the same menu. The folded atom carries the run in
+  // `data-src`; a revealed mark's textContent IS the source slice (fences +
+  // emoji + interior are all real text inside it; the pen contributes
+  // nothing), so both resolve to the same verbatim token.
   interactions: [
+    {
+      selector: ".highlight-pen-icon",
+      blockCaretOnMouseDown: true,
+      onClick: (el, ctx, e) => {
+        const markEl = el.closest<HTMLElement>("[data-highlight-reveal]");
+        const token = markEl?.textContent;
+        if (!markEl || !token) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const nodeId =
+          markEl.closest<HTMLElement>("[data-node-id]")?.getAttribute(
+            "data-node-id",
+          ) ?? getViewRootId();
+        if (!nodeId) return;
+        const rect = markEl.getBoundingClientRect();
+        openHighlightColorMenu(
+          { nodeId, token, x: rect.left, y: rect.bottom + 6 },
+          ctx,
+        );
+      },
+    },
     {
       selector: "mark[data-highlight], [data-highlight-reveal]",
       onContextMenu: (el, ctx, e) => {
