@@ -11,6 +11,7 @@ import {
 } from '../../data/kv-api'
 import { Effect, Schema } from 'effect'
 import { kvGetOrCreateE } from '../../data/kv-client-effect'
+import { localDateKey } from '../../data/date-links'
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0001). A row maps a
@@ -78,14 +79,11 @@ export const dailyIndexCollection = createCollection(
 /**
  * Local-time date key `YYYY-MM-DD`. Deliberately NOT `toISOString` (that's UTC):
  * the day boundary is the user's local midnight (SPA, no server clock -- ADR
- * 0004).
+ * 0004). The one implementation lives in the pure date-links layer (ADR 0038 --
+ * the `[[YYYY-MM-DD]]` token's interior IS this key), re-exported here so the
+ * key format can't fork.
  */
-export function localDateKey(d = new Date()): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
+export { localDateKey } from '../../data/date-links'
 
 /** Parse a `YYYY-MM-DD` key to a *local* Date at noon (a TZ-safe midpoint that
  *  never slips a day under DST). Null on a malformed key. */

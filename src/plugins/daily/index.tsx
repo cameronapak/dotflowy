@@ -5,6 +5,9 @@
 //   - Seam F (header): the "Today" button (ADR 0002) -- node-less chrome.
 //   - Protected nodes: the "Daily" container can't be deleted (ADR 0015).
 //   - Seam F (row): the date badge on each day note.
+//   - Seam A + B (ADR 0038): the `[[YYYY-MM-DD]]` date token -- a chip whose
+//     click travels to that day's note (lazy get-or-create; a chip render
+//     never touches the index). Grammar/parse live in src/data/date-links.ts.
 //
 // Identity lives in a side-collection (`daily-index.ts`), never on the `Node`
 // schema or in text. Node creation is composed from the existing low-level
@@ -64,6 +67,9 @@ import {
   useDailyDate,
 } from "./daily-index";
 import { useDailyNavigationPending, withDailyNavigation } from "./pending";
+import { DATE_LINK_PATTERN, parseDateLink } from "../../data/date-links";
+import { DateLinkChip } from "./date-chip";
+import type { WidgetEl } from "../types";
 import { cn } from "@/lib/utils";
 
 // --- get-or-create ----------------------------------------------------------
@@ -174,14 +180,29 @@ async function getOrCreateDay(
   });
 }
 
-/** get-or-create the day, then zoom to it (the Today button + future picker). */
+/** get-or-create the day, then zoom to it (the Today button + date chips). */
 async function goToDate(key: string, ctx: PluginContext): Promise<void> {
   const dayId = await getOrCreateDay(key, ctx.tree);
   if (!dayId) {
-    toast.error("Couldn't open today's daily note");
+    toast.error("Couldn't open that daily note");
     return;
   }
   ctx.nav.zoom(dayId);
+}
+
+// --- Seam A + B: the `[[YYYY-MM-DD]]` date token (ADR 0038) ------------------
+
+// The atom: `source` is the verbatim token (what the caret math counts and
+// copy reads back); `data-date-link` carries the day KEY (interior's first 10
+// chars) for the Seam-B click handler. The core adds `data-src`/
+// `contenteditable`. An atom but NOT folding: no caret reveal, backspace
+// deletes the whole token.
+function dateWidget(tok: string, key: string): WidgetEl {
+  return {
+    kind: "widget",
+    source: tok,
+    attrs: { "data-date-link": key },
+  };
 }
 
 // --- header slot: the "Today" button ----------------------------------------
@@ -246,6 +267,46 @@ function DailyBadge({
 
 export default definePlugin({
   id: "daily",
+
+  // Seam A: the `[[YYYY-MM-DD]]` date token (ADR 0038), rendered as a
+  // badge-language chip (a BibleChip-class TSX atom -- ADR 0006).
+  tokens: [
+    {
+      id: "date-link",
+      pattern: DATE_LINK_PATTERN,
+      // After node-links (5): both start `[[`, but the interiors are disjoint
+      // by construction (date-shaped vs id-shaped), so the slot only needs to
+      // be distinct. Before code (10) so a date pasted into a bullet wins over
+      // a stray backtick span. NOT folding -- the chip never reveals raw
+      // source on caret proximity; backspace deletes the whole token.
+      precedence: 6,
+      component: DateLinkChip,
+      render: (tok) => {
+        const parsed = parseDateLink(tok);
+        // Regex proposes shape, the calendar disposes: `[[2026-13-45]]` falls
+        // through to plain text, never a chip (the route-bible discipline).
+        return parsed ? dateWidget(tok, parsed.key) : tok;
+      },
+    },
+  ],
+
+  // Seam B: a date chip travels to that day's note -- the Today-button
+  // semantics (lazy get-or-create + zoom). This click is the ONLY place a
+  // chip touches the daily index; rendering never mints (ADR 0038). Mousedown
+  // blocks the editing caret (the chip lives inside the contentEditable).
+  interactions: [
+    {
+      selector: "[data-date-link]",
+      blockCaretOnMouseDown: true,
+      onClick: (el, ctx, e) => {
+        const key = el.dataset.dateLink;
+        if (!key) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void goToDate(key, ctx);
+      },
+    },
+  ],
 
   // Seam F (header): jump to today, creating it on first use. Reads ctx lazily.
   headerSlots: [
