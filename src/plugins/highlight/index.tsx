@@ -66,10 +66,12 @@ function foldedHighlightEl(tok: string): El {
 }
 
 // A revealed run: the `==` fences as dimmed `.md-punct` REAL text and the
-// color emoji (when present) as ordinary text, flanking the still-painted
-// `<mark>` interior. Nothing carries `data-src`, so the caret walks through
-// fence and emoji one step at a time -- `==🔴|urgent==` is a reachable
-// position, and backspacing the emoji de-colors the run.
+// color emoji (when present) as ordinary text, all INSIDE the still-painted
+// `<mark>` -- the code-box model (fences live within the container because a
+// highlight HAS a visible container), not emphasis's flanking markers.
+// Nothing carries `data-src`, so the caret walks through fence and emoji one
+// step at a time -- `==🔴|urgent==` is a reachable position, and backspacing
+// the emoji de-colors the run.
 function revealedHighlightEl(tok: string): El {
   const { color, emoji, interior } = parseHighlight(tok);
   const punct = (s: string): El => ({
@@ -77,20 +79,16 @@ function revealedHighlightEl(tok: string): El {
     attrs: { class: "md-punct" },
     children: [s],
   });
-  const mark: El = {
+  return {
     tag: "mark",
     attrs: {
       class: `${MARK_CLASS} ${COLOR_CLASS[color]}`,
       "data-highlight": color,
+      "data-highlight-reveal": true,
     },
-    children: [interior],
-  };
-  return {
-    tag: "span",
-    attrs: { class: "highlight-reveal", "data-highlight-reveal": true },
     children: emoji
-      ? [punct("=="), emoji, mark, punct("==")]
-      : [punct("=="), mark, punct("==")],
+      ? [punct("=="), emoji, interior, punct("==")]
+      : [punct("=="), interior, punct("==")],
   };
 }
 
@@ -116,8 +114,8 @@ export default definePlugin({
 
   // Seam B: right-click a highlight (folded atom OR revealed run) to recolor
   // or remove it. The folded atom carries the run in `data-src`; a revealed
-  // run's wrapper textContent IS the source slice (fences + emoji + interior
-  // are all real text), so both resolve to the same verbatim token.
+  // mark's textContent IS the source slice (fences + emoji + interior are all
+  // real text inside it), so both resolve to the same verbatim token.
   interactions: [
     {
       selector: "mark[data-highlight], [data-highlight-reveal]",

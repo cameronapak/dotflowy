@@ -120,8 +120,11 @@ test.describe("Highlight: reveal + re-fold", () => {
     // units) + 6 interior + 2 fences = 12.
     await caretAtSource(page, "n", 12);
     await expect.poll(() => text(page, "n").textContent()).toBe("==🔴urgent==");
-    await expect(text(page, "n").locator(".highlight-reveal")).toHaveCount(1);
-    await expect(text(page, "n").locator(".md-punct")).toHaveCount(2);
+    await expect(text(page, "n").locator("[data-highlight-reveal]")).toHaveCount(1);
+    // Fences render INSIDE the painted <mark> (the code-box model): the mark's
+    // own text carries the full source slice.
+    await expect(text(page, "n").locator("mark .md-punct")).toHaveCount(2);
+    await expect(mark(page, "n")).toHaveText("==🔴urgent==");
     // The revealed <mark> is no longer an atom.
     await expect(mark(page, "n")).not.toHaveAttribute("data-src", /.*/);
   });
@@ -147,7 +150,8 @@ test.describe("Highlight: creation", () => {
     await text(page, "n").click();
     await page.keyboard.press("Meta+a");
     await page.keyboard.press("Meta+Shift+h");
-    await expect(mark(page, "n")).toHaveText("alphabravo");
+    // The caret sits in the fresh run, so it's REVEALED: fences inside the mark.
+    await expect(mark(page, "n")).toHaveText("==alphabravo==");
     await expect(mark(page, "n")).toHaveAttribute("data-highlight", "blue");
   });
 
@@ -161,7 +165,8 @@ test.describe("Highlight: creation", () => {
     await page.keyboard.type("/highlight");
     await page.keyboard.press("Enter");
     await page.keyboard.type("X");
-    await expect(mark(page, "n")).toHaveText("X");
+    // Caret inside the run -- revealed, fences inside the mark.
+    await expect(mark(page, "n")).toHaveText("==X==");
   });
 });
 
