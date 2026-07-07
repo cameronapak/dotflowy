@@ -381,6 +381,47 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     expect(chainErrors).toEqual([]);
   });
 
+  test("Tab on a node whose prev sibling is a mirror OF ITSELF is a safe no-op (cycle guard)", async ({
+    page,
+  }) => {
+    // Mirror resolution turns the prev-sibling id into its SOURCE. If that prev
+    // sibling is a mirror of the moving node itself (or a descendant), the source
+    // resolves back to the node -> parenting it under itself corrupts the tree.
+    // `indent` splices raw (not via moveNode), so it must guard the way moveNode
+    // does. This proves the guard: Tab is refused, X stays put, chain intact.
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+
+    // M mirrors X and sits directly before it, so X's prev sibling resolves to X.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "X" },
+      { id: "X", parentId: "P", prevSiblingId: "M", text: "targetnode" },
+    ];
+    await load(page, tree, true);
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
+
+    await spans(page, "X").click();
+    await expect(spans(page, "X")).toBeFocused();
+    await page.keyboard.press("Tab");
+
+    // No-op: X is still a single row under P, never self-parented, chain clean.
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
+    await expect(page.locator('li[data-node-id="X"]')).toHaveAttribute(
+      "data-parent-id",
+      "P",
+    );
+    await expect(focused(page)).toHaveText("targetnode");
+    expect(chainErrors).toEqual([]);
+  });
+
   test("deleting a mirror instance removes only that instance, not the source", async ({
     page,
   }) => {

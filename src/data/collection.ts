@@ -316,7 +316,11 @@ function healMirrorOrphans(nodes: Node[]): void {
   for (const n of nodes) {
     if (n.parentId == null) continue
     const source = byId.get(n.parentId)?.mirrorOf
-    if (!source) continue
+    // A broken mirror (source deleted) renders as a leaf, not a window -- repointing
+    // the child at a missing id would persist a dangling parentId AND stop the node
+    // matching this heal on the next snapshot. Leave it and heal once the source
+    // (if ever) returns.
+    if (!source || !byId.has(source)) continue
     const list = orphansBySource.get(source)
     if (list) list.push(n.id)
     else orphansBySource.set(source, [n.id])
@@ -340,17 +344,17 @@ function healMirrorOrphans(nodes: Node[]): void {
   }
 
   queueMicrotask(() => {
-    try {
-      for (const fix of fixes) {
+    for (const fix of fixes) {
+      try {
         nodesCollection.update(fix.id, (draft) => {
           draft.parentId = fix.parentId
           draft.prevSiblingId = fix.prevSiblingId
           draft.updatedAt = now()
         })
+      } catch {
+        // A node may have been deleted between snapshot and microtask; harmless --
+        // isolate per fix so one stale id doesn't abort the rest. Next snapshot retries.
       }
-    } catch {
-      // A node may have been deleted between snapshot and microtask; harmless --
-      // the next snapshot retries.
     }
   })
 }

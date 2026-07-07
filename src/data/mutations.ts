@@ -217,6 +217,21 @@ export function indent(
     ? trueSourceOf(index, newParent.id)
     : newParent.id
 
+  // Cycle guard (ADR 0022 + ADR 0010): mirror resolution can point
+  // `newParentContentId` at `nodeId` itself (a mirror of `nodeId` sitting as its
+  // prev sibling) or at a descendant of `nodeId`, which would self-parent the
+  // node and corrupt the tree. `indent` splices raw (not via `moveNode`), so it
+  // must guard the way `moveNode` does. A no-op off-flag (the prev sibling can
+  // never be `nodeId` or its descendant), so flag-OFF stays byte-identical.
+  if (resolveMirror) {
+    let cursor: Node | undefined = index.byId.get(newParentContentId)
+    let guard = index.byId.size + 1
+    while (cursor && guard-- > 0) {
+      if (cursor.id === nodeId) return false
+      cursor = cursor.parentId ? index.byId.get(cursor.parentId) : undefined
+    }
+  }
+
   const oldParent = node.parentId
   const oldSiblings = childrenOf(index, oldParent)
   const i = oldSiblings.findIndex((n) => n.id === nodeId)
@@ -616,6 +631,19 @@ export function indentManyNodes(
   // `indent`). Off-flag it's the id itself; the collapse-expand above still
   // targets the visible instance.
   const target = resolveMirror ? trueSourceOf(index, targetId) : targetId
+  // If the mirror target resolves INTO the selected run (its prev sibling is a
+  // mirror of a selected root or one of their descendants), `moveManyNodes` would
+  // skip the cyclic node via `moveNode`'s guard and silently split the run. Abort
+  // the whole indent instead (a no-op). Only reachable under mirror resolution.
+  if (resolveMirror && target !== targetId) {
+    const selected = new Set(rootIds)
+    let cursor: string | null = target
+    let guard = index.byId.size + 1
+    while (cursor && guard-- > 0) {
+      if (selected.has(cursor)) return 0
+      cursor = index.byId.get(cursor)?.parentId ?? null
+    }
+  }
   return moveManyNodes(target, rootIds)
 }
 
