@@ -82,6 +82,19 @@ export type TagColor = (typeof TAG_COLORS)[number];
 
 const TAG_COLOR_SET = new Set<string>(TAG_COLORS);
 
+/** Legacy color names -> current palette. `amber` was renamed to `yellow`
+ *  (identical oklch) when the highlight plugin adopted the shared `--tag-*`
+ *  vars; persisted kv rows may still carry "amber", so resolve it rather than
+ *  silently dropping the user's chosen color. */
+const LEGACY_COLOR_ALIAS: Record<string, TagColor> = { amber: "yellow" };
+
+/** The current palette color for a stored value, applying legacy aliases;
+ *  null when the value isn't a (known or aliased) palette color. */
+function resolveTagColor(color: string): TagColor | null {
+  const c = LEGACY_COLOR_ALIAS[color] ?? color;
+  return TAG_COLOR_SET.has(c) ? (c as TagColor) : null;
+}
+
 const tagColorSchema = Schema.Struct({
   /** Normalized tag name (no `#`, lowercased) -- the row key. */
   tag: Schema.String,
@@ -144,12 +157,13 @@ export function clearTagColor(tag: string) {
 export function tagColorsCss(rows: TagColorRow[]): string {
   const lines: string[] = [];
   for (const r of rows) {
-    if (TAG_COLOR_SET.has(r.color) && /^[\p{L}\p{N}_-]+$/u.test(r.tag)) {
+    const color = resolveTagColor(r.color);
+    if (color && /^[\p{L}\p{N}_-]+$/u.test(r.tag)) {
       lines.push(
-        `[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${r.color});color:var(--tag-${r.color}-fg);border-color:transparent}`,
+        `[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${color});color:var(--tag-${color}-fg);border-color:transparent}`,
       );
       lines.push(
-        `[data-tag="${r.tag}" i][data-tag-pill][data-tag] [data-tag-pill-remove]:hover{background:color-mix(in oklch,var(--tag-${r.color}-fg) 14%,transparent);color:var(--tag-${r.color}-fg)}`,
+        `[data-tag="${r.tag}" i][data-tag-pill][data-tag] [data-tag-pill-remove]:hover{background:color-mix(in oklch,var(--tag-${color}-fg) 14%,transparent);color:var(--tag-${color}-fg)}`,
       );
     }
   }
@@ -200,7 +214,7 @@ export function useTagColor(tag: string): TagColor | null {
   const key = normalizeTag(tag);
   const getSnapshot = useCallback(() => {
     const row = getRows().find((r) => r.tag === key);
-    return row && TAG_COLOR_SET.has(row.color) ? (row.color as TagColor) : null;
+    return row ? resolveTagColor(row.color) : null;
   }, [key]);
   return useSyncExternalStore(subscribe, getSnapshot, () => null);
 }
