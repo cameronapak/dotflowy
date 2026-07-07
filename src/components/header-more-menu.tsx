@@ -10,6 +10,7 @@ import {
   FocusIcon,
   LogOutIcon,
   MonitorIcon,
+  MessageSquareWarningIcon,
   MoonIcon,
   MoreHorizontalIcon,
   PlugZapIcon,
@@ -52,6 +53,7 @@ import { toggleCollapsed } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import { capture } from "../data/history";
 import { openOpmlImport } from "./opml-import-opener";
+import { openFeedbackReport } from "../data/feedback";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -232,6 +234,11 @@ export function HeaderMoreMenu() {
           <DropdownMenuItem onClick={() => setConnectOpen(true)}>
             <PlugZapIcon />
             Connect apps (MCP)
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={() => openFeedbackReport()}>
+            <MessageSquareWarningIcon />
+            Report a bug
           </DropdownMenuItem>
 
           <DropdownMenuItem

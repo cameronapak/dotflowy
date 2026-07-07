@@ -12,6 +12,7 @@ import {
   FileUpIcon,
   FocusIcon,
   LogOutIcon,
+  MessageSquareWarningIcon,
   MonitorIcon,
   MoonIcon,
   PlugZapIcon,
@@ -32,6 +33,7 @@ import {
   setViewCollapsed,
 } from "./header-more-menu";
 import { openOpmlImport } from "./opml-import-opener";
+import { openFeedbackReport } from "../data/feedback";
 
 /**
  * The GLOBAL-scope half of the Cmd+K command center (ADR 0034): the header +
@@ -186,6 +188,15 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["mcp", "connect", "apps", "agent", "ai", "claude"],
         run: openConnect,
+      },
+      {
+        id: "g:feedback",
+        label: "Report a bug",
+        description: "Open a pre-filled GitHub issue",
+        icon: MessageSquareWarningIcon,
+        scope: "global",
+        keywords: ["feedback", "bug", "report", "issue", "problem", "github"],
+        run: () => openFeedbackReport(),
       },
       {
         id: "g:github",
