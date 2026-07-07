@@ -23,7 +23,7 @@
 export type HighlightColor =
   | "red"
   | "orange"
-  | "amber"
+  | "yellow"
   | "green"
   | "blue"
   | "purple";
@@ -36,7 +36,7 @@ export const HIGHLIGHT_EMOJI: ReadonlyArray<{
 }> = [
   { emoji: "🔴", color: "red" },
   { emoji: "🟠", color: "orange" },
-  { emoji: "🟡", color: "amber" },
+  { emoji: "🟡", color: "yellow" },
   { emoji: "🟢", color: "green" },
   { emoji: "🔵", color: "blue" },
   { emoji: "🟣", color: "purple" },

@@ -39,7 +39,7 @@ const HIGHLIGHT_MARKER = { pre: "==", post: "==" };
 const COLOR_CLASS: Record<HighlightColor, string> = {
   red: "bg-[var(--tag-red)]",
   orange: "bg-[var(--tag-orange)]",
-  amber: "bg-[var(--tag-amber)]",
+  yellow: "bg-[var(--tag-yellow)]",
   green: "bg-[var(--tag-green)]",
   blue: "bg-[var(--tag-blue)]",
   purple: "bg-[var(--tag-purple)]",
@@ -142,9 +142,9 @@ export default definePlugin({
         e.preventDefault();
         e.stopPropagation();
         const nodeId =
-          markEl.closest<HTMLElement>("[data-node-id]")?.getAttribute(
-            "data-node-id",
-          ) ?? getViewRootId();
+          markEl
+            .closest<HTMLElement>("[data-node-id]")
+            ?.getAttribute("data-node-id") ?? getViewRootId();
         if (!nodeId) return;
         const rect = markEl.getBoundingClientRect();
         openHighlightColorMenu(
@@ -166,9 +166,9 @@ export default definePlugin({
         e.stopPropagation();
         // Row id, or the zoom root when the run lives in the zoomed title.
         const nodeId =
-          el.closest<HTMLElement>("[data-node-id]")?.getAttribute(
-            "data-node-id",
-          ) ?? getViewRootId();
+          el
+            .closest<HTMLElement>("[data-node-id]")
+            ?.getAttribute("data-node-id") ?? getViewRootId();
         if (!nodeId) return;
         openHighlightColorMenu(
           { nodeId, token, x: e.clientX, y: e.clientY },

@@ -53,7 +53,7 @@ describe("parseHighlight", () => {
       emoji: "🔴",
       interior: "urgent",
     });
-    expect(parseHighlight("==🟡note==").color).toBe("amber");
+    expect(parseHighlight("==🟡note==").color).toBe("yellow");
     expect(parseHighlight("==🟣deep==").color).toBe("purple");
   });
 
@@ -87,7 +87,14 @@ describe("buildHighlightRun", () => {
   });
 
   test("build/parse round-trip", () => {
-    for (const color of ["red", "orange", "amber", "green", "blue", "purple"] as const) {
+    for (const color of [
+      "red",
+      "orange",
+      "yellow",
+      "green",
+      "blue",
+      "purple",
+    ] as const) {
       expect(parseHighlight(buildHighlightRun(color, "x")).color).toBe(color);
     }
   });
