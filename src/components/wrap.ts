@@ -128,13 +128,22 @@ export function toggleWrapSelection(
   return true;
 }
 
-/** TOGGLE a highlight over the selection. A whole `==run==` selected (typically
- *  a folded highlight atom) is stripped back to its interior WITH its color
- *  emoji removed (via parseHighlight); anything else is wrapped in the bare,
- *  default-blue `==` fence (recolor stays the right-click menu). The toolbar's
- *  one highlight button; emphasis's clean marker toggle can't own this because
- *  the color emoji rides inside the source (ADR 0035). Returns false when
- *  nothing is focused. */
+/** The highlight fence, as a MarkerPair, so highlight shares the toolbar's
+ *  `detectMarkerWrap` lit-state detector (see below). */
+const HIGHLIGHT_MARKER: MarkerPair = { pre: "==", post: "==" };
+
+/** TOGGLE a highlight over the selection. An already-highlighted run -- whether
+ *  the whole `==run==` is selected (a folded atom) OR just the interior is
+ *  selected with the fences flanking it (`detectMarkerWrap`'s "outside" case,
+ *  which is exactly how the toolbar leaves the selection after a wrap) -- is
+ *  stripped back to its interior WITH its color emoji removed (via
+ *  parseHighlight); anything else is wrapped in the bare, default-blue `==`
+ *  fence (recolor stays the right-click menu). The toolbar's one highlight
+ *  button. Detection MUST match the button's lit state (which also uses
+ *  `detectMarkerWrap`) or a lit button re-press would double-wrap into
+ *  `====run====` instead of toggling off. Emphasis's clean marker toggle can't
+ *  own the strip because the color emoji rides inside the source (ADR 0035).
+ *  Returns false when nothing is focused. */
 export function toggleHighlightSelection(
   nodeId: string,
   onTextChange: (id: string, text: string) => void,
@@ -148,19 +157,23 @@ export function toggleHighlightSelection(
     end: source.length,
   };
   const { start, end } = range;
-  const sel = source.slice(start, end);
+  const mode = detectMarkerWrap(source, start, end, HIGHLIGHT_MARKER);
 
-  // Already a highlight run selected whole -> strip fences + color emoji.
-  if (sel.length > 4 && sel.startsWith("==") && sel.endsWith("==")) {
-    const inner = parseHighlight(sel).interior;
-    const next = source.slice(0, start) + inner + source.slice(end);
+  // Already highlighted -> normalize to the full `==run==` span (so
+  // parseHighlight sees the fences and drops the color emoji), then strip.
+  if (mode) {
+    const runStart = mode === "inside" ? start : start - 2;
+    const runEnd = mode === "inside" ? end : end + 2;
+    const inner = parseHighlight(source.slice(runStart, runEnd)).interior;
+    const next = source.slice(0, runStart) + inner + source.slice(runEnd);
     onTextChange(nodeId, next);
-    decorate(el, next, start + inner.length, false);
-    setSelectionOffsets(el, start, start + inner.length);
+    decorate(el, next, runStart + inner.length, false);
+    setSelectionOffsets(el, runStart, runStart + inner.length);
     return true;
   }
 
   // Otherwise wrap in the bare (default-blue) fence.
+  const sel = source.slice(start, end);
   const next = source.slice(0, start) + "==" + sel + "==" + source.slice(end);
   const innerStart = start + 2;
   onTextChange(nodeId, next);

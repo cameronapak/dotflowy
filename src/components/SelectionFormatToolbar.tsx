@@ -54,16 +54,19 @@ const MARKERS: ReadonlyArray<[key: string, marker: MarkerPair]> = [
 ];
 
 /** A coarse pointer never gets this toolbar — that's the mobile actions bar's
- *  world (ADR 0030). We gate on `(pointer: fine)`, the inverse seam. */
+ *  world (ADR 0030). We gate on `(pointer: fine)`, the inverse seam. One shared
+ *  MediaQueryList (the value only flips on hardware/OS change), so the
+ *  selection-tick re-renders don't each allocate a fresh matchMedia. */
+const fineMql =
+  typeof window === "undefined" ? null : window.matchMedia("(pointer: fine)");
 function subscribeFine(onChange: () => void) {
-  const mql = window.matchMedia("(pointer: fine)");
-  mql.addEventListener("change", onChange);
-  return () => mql.removeEventListener("change", onChange);
+  fineMql?.addEventListener("change", onChange);
+  return () => fineMql?.removeEventListener("change", onChange);
 }
 function useFinePointer(): boolean {
   return useSyncExternalStore(
     subscribeFine,
-    () => window.matchMedia("(pointer: fine)").matches,
+    () => fineMql?.matches ?? false,
     () => false,
   );
 }
