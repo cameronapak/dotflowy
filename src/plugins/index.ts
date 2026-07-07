@@ -5,7 +5,6 @@
 // (D7). Dogfooded: code/links/tags are themselves entries, built on the same
 // public API, so the core can't grow feature-specific branches.
 
-import childCount from "./child-count";
 import code from "./code";
 import daily from "./daily";
 import emphasis from "./emphasis";
@@ -33,5 +32,4 @@ export const plugins: PluginDef[] = [
   emphasis,
   highlight,
   daily,
-  childCount,
 ];
