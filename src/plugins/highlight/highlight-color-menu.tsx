@@ -156,13 +156,12 @@ export function HighlightColorMenu({
               current !== color && "invisible",
             )}
           />
+          {/* Soft theme `border` over the fill -- the tag color menu's swatch
+              treatment; a `--tag-*-fg` ring reads too harsh at this size. */}
           <span
             aria-hidden="true"
             className="size-3.5 shrink-0 rounded-full border"
-            style={{
-              background: `var(--tag-${color})`,
-              borderColor: `var(--tag-${color}-fg)`,
-            }}
+            style={{ background: `var(--tag-${color})` }}
           />
           {label}
         </button>
