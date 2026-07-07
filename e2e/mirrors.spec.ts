@@ -30,11 +30,12 @@ async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
   await page.addInitScript(() => {
     localStorage.setItem("dotflowy:flag:virtualized", "on");
   });
-  if (mirrors) {
-    await page.addInitScript(() => {
-      localStorage.setItem("dotflowy:flag:mirrors", "on");
-    });
-  }
+  // Set the flag EXPLICITLY -- the compiled default is ON (flags.ts), so the
+  // "off" parity cases must write "off", not rely on leaving it unset (which
+  // leaves mirrors on and runs the wrong path).
+  await page.addInitScript((on) => {
+    localStorage.setItem("dotflowy:flag:mirrors", on ? "on" : "off");
+  }, mirrors);
   await seedOutline(page, tree);
   await page.goto("/");
   await expect(text(page, "A")).toBeVisible();

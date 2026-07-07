@@ -51,11 +51,12 @@ async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
   await page.addInitScript(() => {
     localStorage.setItem("dotflowy:flag:virtualized", "on");
   });
-  if (mirrors) {
-    await page.addInitScript(() => {
-      localStorage.setItem("dotflowy:flag:mirrors", "on");
-    });
-  }
+  // Set the mirrors flag EXPLICITLY -- the compiled default is ON (flags.ts), so
+  // relying on "don't set it" for the off case actually leaves mirrors on and the
+  // parity tests run against the wrong path. Always write the concrete value.
+  await page.addInitScript((on) => {
+    localStorage.setItem("dotflowy:flag:mirrors", on ? "on" : "off");
+  }, mirrors);
   await seedOutline(page, tree);
   await page.goto("/");
   await expect(spans(page, "A")).toBeVisible();
@@ -182,6 +183,201 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     );
     await expect(spans(page, "a2").nth(1)).toBeFocused();
 
+    expect(chainErrors).toEqual([]);
+  });
+
+  test("Tab on a node whose PREV SIBLING is a mirror parents it into the SOURCE, not the vanishing instance", async ({
+    page,
+  }) => {
+    // The reported bug: indenting under a mirror sent the node under the INSTANCE
+    // id, whose row windows the SOURCE's children and never the node -> it
+    // disappeared. The drag path resolved the mirror boundary; keyboard indent
+    // did not. Fix: `indent(index, id, resolveMirror)` parents into the source,
+    // so the node windows into every instance (matching drag). Guard the chain
+    // tripwire too -- a bad reparent could tear the sibling chain.
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+
+    // X sits directly after the mirror M under P, so X's prev sibling IS the
+    // mirror instance -- the exact trigger.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+      { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
+      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      { id: "X", parentId: "P", prevSiblingId: "M", text: "extranode" },
+    ];
+    await load(page, tree, true);
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
+
+    // Tab X. It must parent into A (M's source), NOT the instance id.
+    await spans(page, "X").click();
+    await expect(spans(page, "X")).toBeFocused();
+    await page.keyboard.press("Tab");
+
+    // X is still here (not vanished) and now windows into BOTH instances: the
+    // real copy under source A and the windowed copy under mirror M -- so it
+    // renders twice, both parented to the content node A.
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(2);
+    await expect(page.locator('li[data-node-id="X"]').nth(0)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(page.locator('li[data-node-id="X"]').nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    // Focus survived on X (never dropped into the void).
+    await expect(focused(page)).toHaveText("extranode");
+    expect(chainErrors).toEqual([]);
+  });
+
+  test("flag OFF: Tab under a mirrorOf node indents normally (no source redirect)", async ({
+    page,
+  }) => {
+    // The escape hatch must run today's exact code: OFF, a `mirrorOf` node is a
+    // plain leaf, so X indents under IT (not the phantom source). Proves the fix
+    // is gated on the flag, not an unconditional `mirrorOf` read.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+      { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
+      { id: "M", parentId: "P", prevSiblingId: null, text: "placeholder", mirrorOf: "A" },
+      { id: "X", parentId: "P", prevSiblingId: "M", text: "extranode" },
+    ];
+    await load(page, tree, false);
+    await expect(spans(page, "a1")).toHaveCount(1); // no windowing
+
+    await spans(page, "X").click();
+    await expect(spans(page, "X")).toBeFocused();
+    await page.keyboard.press("Tab");
+
+    // X indented under the plain M, rendering once. No redirect to A.
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
+    await expect(page.locator('li[data-node-id="X"]')).toHaveAttribute(
+      "data-parent-id",
+      "M",
+    );
+  });
+
+  test("edge reparent (Cmd+Shift+Up) into a mirror UNCLE lands in the source, not the vanishing instance", async ({
+    page,
+  }) => {
+    // moveUp at the first-child edge reparents into the parent's PREVIOUS sibling
+    // (the "uncle"). When that uncle is a mirror, the same boundary applies as Tab:
+    // land in the SOURCE so the node windows into every instance, never under the
+    // instance id (which would orphan it).
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+
+    // Q's prev sibling is the mirror M; X is Q's FIRST child, so Cmd+Shift+Up on X
+    // hits the edge and reparents into the uncle M -> its source A.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+      { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
+      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      { id: "Q", parentId: "P", prevSiblingId: "M", text: "queue" },
+      { id: "X", parentId: "Q", prevSiblingId: null, text: "extranode" },
+    ];
+    await load(page, tree, true);
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
+
+    await spans(page, "X").click();
+    await expect(spans(page, "X")).toBeFocused();
+    await page.keyboard.press(`${modifier()}+Shift+ArrowUp`);
+
+    // X windows into both instances now (child of source A, appended after a1).
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(2);
+    await expect(page.locator('li[data-node-id="X"]').nth(0)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(page.locator('li[data-node-id="X"]').nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(focused(page)).toHaveText("extranode");
+    expect(chainErrors).toEqual([]);
+  });
+
+  test("multi-select Tab under a mirror indents the whole run into the source (indentManyNodes)", async ({
+    page,
+  }) => {
+    // The selection-mode Tab path (indentManyNodes) derives its target the same
+    // way single indent does -- the run's prev sibling. A mirror there must
+    // redirect the entire run to the source, not strand it under the instance.
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+
+    // X, Y are a contiguous run under P whose prev sibling (the node before the
+    // run) is the mirror M.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
+      { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
+      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      { id: "X", parentId: "P", prevSiblingId: "M", text: "extraone" },
+      { id: "Y", parentId: "P", prevSiblingId: "X", text: "extratwo" },
+    ];
+    await load(page, tree, true);
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
+    await expect(page.locator('li[data-node-id="Y"]')).toHaveCount(1);
+
+    // Select the run X..Y: focus X, first Shift+Down selects X, second extends to
+    // Y. Both roots now carry the selection edge (top/bottom) -- proves the
+    // MULTI-node path (indentManyNodes), not single indent.
+    await caretIn(spans(page, "X"), 99);
+    await page.keyboard.press("Shift+ArrowDown");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(page.locator('li[data-node-id="X"]')).toHaveAttribute(
+      "data-selected",
+      "top",
+    );
+    await expect(page.locator('li[data-node-id="Y"]')).toHaveAttribute(
+      "data-selected",
+      "bottom",
+    );
+
+    await page.keyboard.press("Tab");
+
+    // The whole run landed under the source A and windows into both instances.
+    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(2);
+    await expect(page.locator('li[data-node-id="Y"]')).toHaveCount(2);
+    await expect(page.locator('li[data-node-id="X"]').nth(0)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(page.locator('li[data-node-id="Y"]').nth(0)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(page.locator('li[data-node-id="X"]').nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
+    await expect(page.locator('li[data-node-id="Y"]').nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "A",
+    );
     expect(chainErrors).toEqual([]);
   });
 

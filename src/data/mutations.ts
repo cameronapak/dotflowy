@@ -190,13 +190,32 @@ export function mirrorManyNodes(
  * Effect on siblings:
  *  - node's old next sibling's prevSiblingId becomes node's old prevSiblingId
  *  - node's prevSiblingId becomes the previous sibling's id (now its parent)
+ *
+ * `resolveMirror` (ADR 0022): when the previous sibling is a MIRROR, parent into
+ * its SOURCE instead of the instance id, so the node windows into every instance
+ * -- matching the drag path. The caller passes `isMirrorsEnabled()`; it's a param
+ * (not a `flags.ts` read) so this module stays pure, and OFF it runs today's exact
+ * code (byte-identical: no mirror boundary crossed).
  */
-export function indent(index: TreeIndex, nodeId: string): boolean {
+export function indent(
+  index: TreeIndex,
+  nodeId: string,
+  resolveMirror = false,
+): boolean {
   const node = index.byId.get(nodeId)
   if (!node || !node.prevSiblingId) return false
 
   const newParent = index.byId.get(node.prevSiblingId)
   if (!newParent) return false
+
+  // Resolve BEFORE the child read and parentId write below, or a mirror prev
+  // sibling parents the node under the INSTANCE id, whose row renders the
+  // source's children and never the node -> it vanishes. Off-flag this is the id
+  // itself. Collapse-expand still targets the VISIBLE instance (`newParent.id`)
+  // -- collapse is a local field.
+  const newParentContentId = resolveMirror
+    ? trueSourceOf(index, newParent.id)
+    : newParent.id
 
   const oldParent = node.parentId
   const oldSiblings = childrenOf(index, oldParent)
@@ -211,7 +230,7 @@ export function indent(index: TreeIndex, nodeId: string): boolean {
   // AFTER the move can already include the node itself -- it would then point its
   // own prevSiblingId at itself (a self-referencing chain). node is a sibling of
   // newParent here, never already its child, so the pre-move read excludes it.
-  const newSiblings = childrenOf(index, newParent.id)
+  const newSiblings = childrenOf(index, newParentContentId)
   const lastExisting = newSiblings.length > 0
     ? newSiblings[newSiblings.length - 1]!
     : null
@@ -219,7 +238,7 @@ export function indent(index: TreeIndex, nodeId: string): boolean {
   // Node becomes last child of newParent. If that parent was collapsed, the
   // node would be indented out of sight, so expand it to keep the node visible.
   update(nodeId, {
-    parentId: newParent.id,
+    parentId: newParentContentId,
     prevSiblingId: lastExisting ? lastExisting.id : null,
   })
   if (newParent.collapsed) update(newParent.id, { collapsed: false })
@@ -299,6 +318,14 @@ interface MoveOpts {
    * the visible subtree, so an edge move there is a no-op. See ADR 0009.
    */
   rootId?: string | null
+  /**
+   * Resolve a mirror uncle/aunt to its SOURCE at an edge reparent (ADR 0022), so
+   * the moved node windows into every instance instead of vanishing under the
+   * instance id. The caller passes `isMirrorsEnabled()`; OFF (default) it's
+   * today's exact behavior. Kept a param, not a `flags.ts` read, to keep this
+   * module pure (matches the drag call site).
+   */
+  resolveMirror?: boolean
 }
 
 /**
@@ -309,20 +336,25 @@ function reparentIntoParentPrevSibling(
   index: TreeIndex,
   node: Node,
   rootId: string | null,
+  resolveMirror: boolean,
 ): boolean {
   if (node.parentId === null || node.parentId === rootId) return false
   const parent = index.byId.get(node.parentId)
   if (!parent?.prevSiblingId) return false
 
   const uncleId = parent.prevSiblingId
-  const uncleChildren = childrenOf(index, uncleId)
+  // ADR 0022: a mirror uncle windows its SOURCE's children, so land there (both
+  // the last-child read and the move target). Off-flag it's the id itself;
+  // collapse-expand stays on the visible instance.
+  const uncleContentId = resolveMirror ? trueSourceOf(index, uncleId) : uncleId
+  const uncleChildren = childrenOf(index, uncleContentId)
   const afterSiblingId =
     uncleChildren.length > 0 ? uncleChildren[uncleChildren.length - 1]!.id : null
 
   const uncle = index.byId.get(uncleId)
   if (uncle?.collapsed) update(uncle.id, { collapsed: false })
 
-  return moveNode(index, node.id, uncleId, afterSiblingId)
+  return moveNode(index, node.id, uncleContentId, afterSiblingId)
 }
 
 /**
@@ -333,6 +365,7 @@ function reparentIntoParentNextSibling(
   index: TreeIndex,
   node: Node,
   rootId: string | null,
+  resolveMirror: boolean,
 ): boolean {
   if (node.parentId === null || node.parentId === rootId) return false
   const parent = index.byId.get(node.parentId)
@@ -346,7 +379,10 @@ function reparentIntoParentNextSibling(
 
   if (aunt.collapsed) update(aunt.id, { collapsed: false })
 
-  return moveNode(index, node.id, aunt.id, null)
+  // ADR 0022: a mirror aunt windows its SOURCE's children; parent into the
+  // source (off-flag it's the id itself). Collapse stays on the instance.
+  const auntContentId = resolveMirror ? trueSourceOf(index, aunt.id) : aunt.id
+  return moveNode(index, node.id, auntContentId, null)
 }
 
 /**
@@ -379,7 +415,13 @@ export function moveUp(
     }
   }
 
-  if (!vp) return reparentIntoParentPrevSibling(index, node, opts.rootId ?? null)
+  if (!vp)
+    return reparentIntoParentPrevSibling(
+      index,
+      node,
+      opts.rootId ?? null,
+      opts.resolveMirror ?? false,
+    )
 
   // Swap: detach node, then re-insert it immediately before vp. A hidden
   // sibling between them stays put (rides along below vp).
@@ -420,7 +462,12 @@ export function moveDown(
   }
 
   if (k === -1) {
-    return reparentIntoParentNextSibling(index, node, opts.rootId ?? null)
+    return reparentIntoParentNextSibling(
+      index,
+      node,
+      opts.rootId ?? null,
+      opts.resolveMirror ?? false,
+    )
   }
 
   // Swap: detach node, then re-insert it immediately after vn.
@@ -554,7 +601,10 @@ export function moveManyNodes(
  * Reuses `moveManyNodes`, so it's the same rebuild-between-moves batch; wrap the
  * whole call in `runStructural` so it lands as ONE atomic frame (ADR 0009).
  */
-export function indentManyNodes(rootIds: string[]): number {
+export function indentManyNodes(
+  rootIds: string[],
+  resolveMirror = false,
+): number {
   if (rootIds.length === 0) return 0
   const index = buildTreeIndex(nodesCollection.toArray)
   // The run is contiguous, so the first root's prev sibling sits OUTSIDE it --
@@ -562,7 +612,11 @@ export function indentManyNodes(rootIds: string[]): number {
   const targetId = index.byId.get(rootIds[0]!)?.prevSiblingId
   if (!targetId) return 0
   if (index.byId.get(targetId)?.collapsed) update(targetId, { collapsed: false })
-  return moveManyNodes(targetId, rootIds)
+  // ADR 0022: a mirror target parents the run into its SOURCE (matches single
+  // `indent`). Off-flag it's the id itself; the collapse-expand above still
+  // targets the visible instance.
+  const target = resolveMirror ? trueSourceOf(index, targetId) : targetId
+  return moveManyNodes(target, rootIds)
 }
 
 /**
