@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveBibleRef } from './bible'
+import { bibleRefUrlAtOffset, resolveBibleRef } from './bible'
 
 describe('resolveBibleRef', () => {
   test('resolves real references to a route.bible url with attribution', () => {
@@ -17,5 +17,23 @@ describe('resolveBibleRef', () => {
     expect(resolveBibleRef('Revelation 99:99')).toBeNull()
     expect(resolveBibleRef('just some plain text')).toBeNull()
     expect(resolveBibleRef('')).toBeNull()
+  })
+})
+
+describe('bibleRefUrlAtOffset', () => {
+  const text = 'Read John 3:16 today'
+
+  test('returns the route.bible URL when the caret touches the reference', () => {
+    expect(bibleRefUrlAtOffset(text, 'Read '.length)).toBe(
+      'https://route.bible/jhn.3.16?src=dotflowy',
+    )
+    expect(bibleRefUrlAtOffset(text, 'Read John 3:16'.length)).toBe(
+      'https://route.bible/jhn.3.16?src=dotflowy',
+    )
+  })
+
+  test('returns null outside a valid reference', () => {
+    expect(bibleRefUrlAtOffset(text, 0)).toBeNull()
+    expect(bibleRefUrlAtOffset('Hello 3', 'Hello 3'.length)).toBeNull()
   })
 })

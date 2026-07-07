@@ -57,9 +57,14 @@ export function openLinkEditPopover(
     url: string;
     x: number;
     y: number;
+    restoreFocus?: () => void;
   },
   ctx: PluginContext,
 ): void {
+  const close = () => {
+    ctx.openOverlay(null);
+    requestAnimationFrame(() => args.restoreFocus?.());
+  };
   ctx.openOverlay(
     <LinkEditPopover
       label={args.label}
@@ -69,7 +74,7 @@ export function openLinkEditPopover(
       onSubmit={(label, url) =>
         submitLinkEdit(args.nodeId, args.token, label, url, ctx.mutations)
       }
-      onClose={() => ctx.openOverlay(null)}
+      onClose={close}
     />,
   );
 }

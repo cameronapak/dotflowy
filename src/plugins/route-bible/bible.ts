@@ -51,3 +51,18 @@ export function resolveBibleRef(token: string): { url: string } | null {
     return null;
   }
 }
+
+/** Return the route.bible URL whose source reference contains or touches
+ *  `offset`, in contentEditable SOURCE space. Atomic chips can only place the
+ *  caret before or after themselves, so the end boundary is intentionally
+ *  openable. */
+export function bibleRefUrlAtOffset(text: string, offset: number): string | null {
+  for (const m of text.matchAll(new RegExp(BIBLE_REF_PATTERN, "g"))) {
+    const start = m.index ?? 0;
+    const token = m[0] ?? "";
+    const end = start + token.length;
+    if (offset < start || offset > end) continue;
+    return resolveBibleRef(token)?.url ?? null;
+  }
+  return null;
+}

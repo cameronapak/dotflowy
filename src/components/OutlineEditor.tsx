@@ -134,7 +134,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { openLinkAtCaret } from "./link-keymap";
+import { openInlineTargetAtCaret } from "./link-keymap";
 import { useIsMobile } from "../hooks/use-mobile";
 import {
   MobileActionsBar,
@@ -279,6 +279,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // a right-click picks a color, all decided by the plugins. See ADR 0001.
   // (onContentMouseDown is pure and lives at module scope above.)
   const onContentClick = (e: ReactMouseEvent) => {
+    if (e.metaKey || e.ctrlKey) {
+      const textEl = (e.target as HTMLElement).closest<HTMLElement>(".node-text");
+      if (textEl && openInlineTargetAtCaret(textEl)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
     dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
   const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
@@ -1626,7 +1634,13 @@ function ZoomedTitle({
         hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
         callback: () => {
           const el = ref.current;
-          if (k.hotkey === "Mod+Enter" && el && openLinkAtCaret(el)) return;
+          if (
+            k.hotkey === "Mod+Enter" &&
+            el &&
+            openInlineTargetAtCaret(el, getCtx(), { linkParens: "edit" })
+          ) {
+            return;
+          }
           k.run(node.id, getCtx());
         },
       })),
