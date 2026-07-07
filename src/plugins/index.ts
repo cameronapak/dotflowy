@@ -9,6 +9,7 @@ import childCount from "./child-count";
 import code from "./code";
 import daily from "./daily";
 import emphasis from "./emphasis";
+import highlight from "./highlight";
 import links from "./links";
 import nodeLinks from "./node-links";
 import provenance from "./provenance";
@@ -30,6 +31,7 @@ export const plugins: PluginDef[] = [
   routeBible,
   tags,
   emphasis,
+  highlight,
   daily,
   childCount,
 ];

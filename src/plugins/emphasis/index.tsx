@@ -34,8 +34,25 @@ import {
   STRIKETHROUGH_PATTERN,
   UNDERLINE_PATTERN,
 } from "../../data/emphasis";
-import { definePlugin, type El, type PluginContext, type TokenView } from "../types";
-import { MARKERS, wrapSelectionOrInsert } from "./wrap";
+import {
+  definePlugin,
+  type El,
+  type PluginContext,
+  type TokenView,
+} from "../types";
+import { mdPunct } from "../../components/inline-code";
+import { type MarkerPair, wrapSelectionOrInsert } from "../../components/wrap";
+
+/** The four marker pairs. Keys match the slash-command ids and the keymap
+ *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
+ *  the highlight plugin). */
+const MARKERS: Record<"bold" | "italic" | "underline" | "strike", MarkerPair> =
+  {
+    bold: { pre: "**", post: "**" },
+    italic: { pre: "*", post: "*" },
+    underline: { pre: "~", post: "~" },
+    strike: { pre: "~~", post: "~~" },
+  };
 
 // The four emphasis kinds, shared across the token + command + keymap shapes.
 // `kind` is the key into MARKERS (the marker pair) and the discriminator for
@@ -109,22 +126,17 @@ function revealedEmphasisEl(
   interior: string,
   marker: string,
 ): El {
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   return {
     tag: "span",
     attrs: { class: "emphasis-reveal", "data-emphasis-reveal": true },
     children: [
-      punct(marker),
+      mdPunct(marker),
       {
         tag: kind.tag,
         attrs: { class: `${kind.class} ${kind.util}` },
         children: [interior],
       },
-      punct(marker),
+      mdPunct(marker),
     ],
   };
 }
@@ -213,7 +225,7 @@ export default definePlugin({
     // which has no live caret (ADR 0034). Slash palette + Seam D still run it.
     caretScoped: true,
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
+      wrapSelectionOrInsert(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 
   // Seam D: the same four kinds on hotkeys, wired on the bullet AND the zoomed
@@ -226,6 +238,6 @@ export default definePlugin({
     id,
     hotkey,
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
+      wrapSelectionOrInsert(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 });

@@ -146,6 +146,15 @@ function foldedSrcLen(el: HTMLElement): number {
     : (el.getAttribute("data-src") ?? "").length;
 }
 
+/** A dimmed `.md-punct` span holding revealed syntax scaffolding (a fence or
+ *  marker) as REAL, walk-through text -- shared by every folding token that
+ *  reveals its markers (emphasis, highlight, the link reveal keys the same
+ *  class). Kept here, next to the reveal machinery, so the folding-token
+ *  plugins don't each re-declare the builder. */
+export function mdPunct(s: string): El {
+  return { tag: "span", attrs: { class: "md-punct" }, children: [s] };
+}
+
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
 // the source once a folding token hides part of its source (a folded link shows
 // only its label; folded code/emphasis hide their markers), so
