@@ -50,7 +50,31 @@ a toggle whose value rarely needs to follow the user. `localStorage` is the righ
 synced settings collection is a clean later move. It is a real user toggle, **not** a `dotflowy:flag:*` dev
 flag — those are default-ON rollback hatches deleted after dogfooding; this is default-OFF and persists.
 
+**The on-state header indicator (awareness + off-switch).** At rest — no caret in the outline — the
+pure-CSS dim shows *nothing*, so there is no passive signal that the mode is even on, and turning it off
+means digging into the More menu. Both are fixed by one control: `SpotlightIndicator`
+(`src/components/spotlight-indicator.tsx`), a chip in the header's right cluster (leading it) that is
+present **only while spotlight is on** and, clicked, turns it off. Three calls, each with its rejected
+alternative:
+
+- **Header, not the subheader band.** A subheader banner ("Spotlight mode is on") would spell the state
+  out loudest, but it costs a full extra row of vertical chrome and collides with the tag filter (the sole
+  subheader tenant) — and shouting is exactly what a *calm* focus mode shouldn't do. A header chip costs
+  zero vertical space and sidesteps the coexistence problem entirely.
+- **Present-only-when-on, not a permanent toggle.** The chip's mere presence *is* the awareness signal:
+  present-vs-absent is a bigger perceptual delta than a permanent button's lit-vs-dim, and it keeps the
+  header uncluttered for everyone who never enables the mode. Turning spotlight *on* stays in the More menu
+  + Cmd+K; this surface is awareness + off only. Mirrors `BookmarkStar`'s "render nothing when N/A."
+- **A solid fill carries the state on mobile.** The app is grayscale (`--primary` is chroma-0), so a
+  low-opacity tint reads as an ordinary ghost-button hover — invisible. The active chip is a **solid**
+  `--primary` pill (the grayscale system's "active" idiom, same emphasis as the daily "Today" badge),
+  unmissable even at icon-only size. Desktop adds a "Spotlight" label; on `max-sm` (a tight header that
+  must not crowd the breadcrumb) the label collapses to an SR-only span and the solid fill alone signals
+  the mode. No toast on click — the chip vanishing plus the outline no longer dimming is feedback enough.
+
 **Rejected alternatives.**
+- **A subheader "Spotlight mode is on" banner.** Loudest awareness, but a permanent extra row that fights
+  the mode's calm intent and collides with the tag filter. See the header-indicator note above.
 - **Ancestor-chain (active + parents) lit.** Busier "ladder" look that dilutes focus; the dimmed parents
   are already legible at 0.3, so it buys little. The three-tier gradient is the fallback if context is ever
   needed, not this.
