@@ -15,6 +15,13 @@ export function openInlineTargetAtCaret(
   ctx?: PluginContext,
   options: OpenInlineTargetOptions = {},
 ): boolean {
+  // getCaretOffset falls back to 0 when the selection lives outside `el`, and
+  // offset 0 touches a line-leading token -- a Mod+click routed here before the
+  // browser placed the caret would open the wrong link. No caret, no target.
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !el.contains(sel.getRangeAt(0).endContainer)) {
+    return false;
+  }
   const text = readSource(el);
   const caret = getCaretOffset(el);
   if (options.linkParens === "edit" && ctx && openLinkEditAtCaret(el, text, caret, ctx)) {

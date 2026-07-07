@@ -64,7 +64,12 @@ export function openLinkEditPopover(
 ): void {
   const close = () => {
     ctx.openOverlay(null);
-    requestAnimationFrame(() => args.restoreFocus?.());
+    requestAnimationFrame(() => {
+      // An outside-pointerdown dismiss may have already focused another
+      // bullet; restoring would steal the caret from where the user clicked.
+      if (document.activeElement?.closest(".node-text")) return;
+      args.restoreFocus?.();
+    });
   };
   ctx.openOverlay(
     <LinkEditPopover
