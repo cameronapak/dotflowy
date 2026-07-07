@@ -1,4 +1,4 @@
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { type Node, type TreeIndex } from "../data/tree";
 import {
   buildVisibleRows,
@@ -467,6 +467,15 @@ export function useDragReorder(deps: DragDeps) {
     }
     return false;
   }, []);
+
+  // Unmount teardown. `cleanup` is otherwise only reached via `onUp`
+  // (pointerup/cancel); if this component unmounts mid-drag (the windowed source
+  // row scrolls out, a zoom/route change, a big sync re-render), the document
+  // pointer listeners + rAF loop + injected pill/indicator + `dragging-active`
+  // body class would all leak. An empty-dep effect whose cleanup runs only on
+  // unmount removes exactly that. cleanup() self-guards on a null drag, so this
+  // is a no-op when nothing is in flight. cleanup is stable ([] deps).
+  useEffect(() => cleanup, [cleanup]);
 
   return { startDrag, consumeClick };
 }
