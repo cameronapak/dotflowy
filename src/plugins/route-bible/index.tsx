@@ -18,8 +18,20 @@ import { openUrlInFocusedTab } from "../../components/open-url";
 import { definePlugin, type WidgetEl } from "../types";
 
 const LONG_PRESS_MS = 550;
-const longPressTimers = new WeakMap<HTMLElement, number>();
-const longPressed = new WeakSet<HTMLElement>();
+// Cancel the press if the pointer travels past this (a scroll/drag that started
+// on a chip, not a long-press).
+const LONG_PRESS_MOVE_PX = 10;
+const longPressTimers = new WeakMap<HTMLElement, LongPress>();
+// The click that follows a fired long-press must NOT also open the URL. The
+// chip element is re-decorated (and replaced) when the popover steals focus, so
+// an element-keyed flag would miss the follow-up click -- a self-expiring
+// timestamp window is element-independent.
+let suppressClickUntil = 0;
+
+interface LongPress {
+  timer: number;
+  cleanup: () => void;
+}
 
 // The chip is a `<dotflowy-widget>` atom mounting BibleChip (ADR 0006). `source`
 // is the verbatim reference ("Jn 3:16") -- the atom's source text AND the
@@ -35,8 +47,11 @@ function bibleRefWidget(tok: string, url: string): WidgetEl {
 }
 
 function clearLongPress(el: HTMLElement): void {
-  const timer = longPressTimers.get(el);
-  if (timer != null) window.clearTimeout(timer);
+  const pending = longPressTimers.get(el);
+  if (pending) {
+    window.clearTimeout(pending.timer);
+    pending.cleanup();
+  }
   longPressTimers.delete(el);
 }
 
@@ -102,8 +117,8 @@ export default definePlugin({
           openEditForChip(el, ctx);
           return;
         }
-        if (longPressed.has(el)) {
-          longPressed.delete(el);
+        if (performance.now() < suppressClickUntil) {
+          suppressClickUntil = 0;
           return;
         }
         const textEl = el.closest<HTMLElement>(".node-text");
@@ -113,13 +128,31 @@ export default definePlugin({
       },
       onPointerDown: (el, ctx, e) => {
         clearLongPress(el);
+        const startX = e.clientX;
+        const startY = e.clientY;
+        // A press that drifts (scroll/drag) or releases anywhere -- not just back
+        // on the chip -- must cancel the timer. The seam only dispatches
+        // pointerup/cancel that land ON the chip, so watch the window directly.
+        const onMove = (ev: PointerEvent) => {
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > LONG_PRESS_MOVE_PX) {
+            clearLongPress(el);
+          }
+        };
+        const onEnd = () => clearLongPress(el);
+        const cleanup = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onEnd);
+          window.removeEventListener("pointercancel", onEnd);
+        };
         const timer = window.setTimeout(() => {
-          longPressed.add(el);
-          e.preventDefault();
-          e.stopPropagation();
+          clearLongPress(el);
+          suppressClickUntil = performance.now() + 700;
           openEditForChip(el, ctx);
         }, LONG_PRESS_MS);
-        longPressTimers.set(el, timer);
+        longPressTimers.set(el, { timer, cleanup });
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onEnd);
+        window.addEventListener("pointercancel", onEnd);
       },
       onPointerUp: (el) => clearLongPress(el),
       onPointerCancel: (el) => clearLongPress(el),

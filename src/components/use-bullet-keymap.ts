@@ -151,8 +151,14 @@ export function useBulletKeymap({
               const el = textRef.current;
               const atom = el ? getSelectedAtom(el) : null;
               if (!atom) return;
+              // An atom is selected (a range around a contenteditable=false
+              // widget): a native space would REPLACE it, silently dropping the
+              // token. Always swallow the space here; then activate the atom's
+              // keyboard action if a plugin claims it.
+              e.preventDefault();
+              e.stopPropagation();
               const rect = atom.getBoundingClientRect();
-              const handled = dispatchClick(atom, pluginCtx(), {
+              dispatchClick(atom, pluginCtx(), {
                 preventDefault: () => e.preventDefault(),
                 stopPropagation: () => e.stopPropagation(),
                 clientX: rect.left + rect.width / 2,
@@ -160,7 +166,6 @@ export function useBulletKeymap({
                 source: "keyboard",
                 key: " ",
               });
-              if (!handled) return;
             },
             options: { preventDefault: false, stopPropagation: false },
           },

@@ -107,66 +107,6 @@ async function caretAtSource(page: Page, id: string, target: number) {
 const passagePopover = (page: Page) =>
   page.locator("[data-bible-passage-popover]");
 
-const activeNodeId = (page: Page) =>
-  page.evaluate(() =>
-    document.activeElement
-      ?.closest("[data-node-id]")
-      ?.getAttribute("data-node-id") ?? null,
-  );
-
-async function caretAtSource(page: Page, id: string, target: number) {
-  await text(page, id).evaluate((el, target) => {
-    el.focus();
-    const sel = window.getSelection();
-    if (!sel) return;
-    let remaining = target as number;
-    let placed = false;
-    const visit = (node: Node): void => {
-      if (placed) return;
-      if (node.nodeType === 3 /* text */) {
-        const len = node.textContent?.length ?? 0;
-        if (remaining <= len) {
-          const r = document.createRange();
-          r.setStart(node, remaining);
-          r.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(r);
-          placed = true;
-        } else remaining -= len;
-        return;
-      }
-      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
-        const e = node as HTMLElement;
-        const len =
-          Number(e.getAttribute("data-src-len")) ||
-          (e.getAttribute("data-src") ?? "").length;
-        if (remaining <= len) {
-          const parent = e.parentNode!;
-          const idx = Array.prototype.indexOf.call(parent.childNodes, e);
-          const r = document.createRange();
-          r.setStart(parent, remaining === 0 ? idx : idx + 1);
-          r.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(r);
-          placed = true;
-          return;
-        }
-        remaining -= len;
-        return;
-      }
-      node.childNodes.forEach(visit);
-    };
-    visit(el);
-    if (!placed) {
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      r.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(r);
-    }
-  }, target);
-}
-
 const selectedBibleRef = (page: Page) =>
   page.evaluate(() => {
     const sel = window.getSelection();

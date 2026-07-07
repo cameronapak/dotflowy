@@ -148,6 +148,10 @@ function foldedSrcLen(el: HTMLElement): number {
 
 const SELECTED_ATOM_ATTR = "data-atom-selected";
 let atomSelectionListenerInstalled = false;
+// The single atom currently carrying SELECTED_ATOM_ATTR. Tracking it lets the
+// selectionchange handler clear the marker in O(1) instead of sweeping the whole
+// document on every caret move.
+let markedAtom: HTMLElement | null = null;
 
 /** A dimmed `.md-punct` span holding revealed syntax scaffolding (a fence or
  *  marker) as REAL, walk-through text -- shared by every folding token that
@@ -373,6 +377,10 @@ export function selectAdjacentAtom(
   return true;
 }
 
+function isSelectableChip(atom: HTMLElement): boolean {
+  return atom.hasAttribute("data-bible-ref");
+}
+
 function atomAtSourceBoundary(
   el: HTMLElement,
   offset: number,
@@ -389,9 +397,15 @@ function atomAtSourceBoundary(
     if (isAtom(node)) {
       const atom = node as HTMLElement;
       const len = foldedSrcLen(atom);
+      // Only INTERACTIVE chips are arrow-selectable stops. A plain folding atom
+      // (bold/code/link/highlight) has no keyboard action and no selected-state
+      // affordance, so range-selecting it would just arm a silent deletion on
+      // the next keystroke. (Currently that's the Bible chip; generalize to a
+      // plugin opt-in when a second consumer appears.)
       if (
-        (direction === "left" && total + len === offset) ||
-        (direction === "right" && total === offset)
+        isSelectableChip(atom) &&
+        ((direction === "left" && total + len === offset) ||
+          (direction === "right" && total === offset))
       ) {
         found = atom;
         return;
@@ -425,9 +439,10 @@ function installAtomSelectionListener(): void {
 }
 
 function syncAtomSelectionMarkers(selected: HTMLElement | null): void {
-  document.querySelectorAll(`[${SELECTED_ATOM_ATTR}]`).forEach((el) => {
-    if (el !== selected) el.removeAttribute(SELECTED_ATOM_ATTR);
-  });
+  if (markedAtom && markedAtom !== selected) {
+    markedAtom.removeAttribute(SELECTED_ATOM_ATTR);
+  }
+  markedAtom = selected;
   selected?.setAttribute(SELECTED_ATOM_ATTR, "true");
 }
 
@@ -499,6 +514,7 @@ function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
   sel.removeAllRanges();
   sel.addRange(range);
   widget.removeAttribute(SELECTED_ATOM_ATTR);
+  if (markedAtom === widget) markedAtom = null;
 }
 
 // Per-link reveal reflow. While a bullet is focused, watch the caret: as it

@@ -306,9 +306,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   };
   const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const hoveredChip = e.currentTarget.querySelector<HTMLElement>(
+    // A hovered chip is an activation target only when it lives inside the
+    // node currently being edited -- otherwise an ordinary Space keystroke,
+    // with the mouse merely resting over some other row's chip, would open
+    // that chip's editor and swallow the space.
+    const hovered = e.currentTarget.querySelector<HTMLElement>(
       "[data-bible-ref]:hover",
     );
+    const active = document.activeElement;
+    const hoveredChip =
+      hovered && active instanceof HTMLElement && active.contains(hovered)
+        ? hovered
+        : null;
     const target =
       getSelectedAtom(e.currentTarget) ?? hoveredChip ?? (e.target as HTMLElement);
     const rect = target.getBoundingClientRect();
