@@ -87,6 +87,12 @@ export async function seedOutline(
   opts: {
     echoDelayMs?: number;
     postDelayMs?: number;
+    /** Split a structural batch's echo into N frames (chunked ops, consecutive
+     *  seqs, staggered by echoDelayMs each), replying with the FINAL seq —
+     *  mirrors the DO's chunked recordChange (worker/outline-do.ts, issue
+     *  #124), which commits a >500-op batch as multiple consecutive-seq
+     *  changelog rows and echoes them as multiple frames. */
+    echoChunks?: number;
     /** Pre-seed plugin side-collections, keyed by collection namespace (e.g.
      *  `"daily-index"`). Each row is stored as `key -> value` exactly as a write
      *  would land, so the app's first GET returns it. Lets a spec start with a
@@ -111,15 +117,17 @@ export async function seedOutline(
   // seq so the client can hold its optimistic overlay until the echo lands.
   let seq = 0;
   let socket: WebSocketRoute | null = null;
-  const broadcast = (ops: ApiChangeOp[]): number => {
+  const broadcast = (ops: ApiChangeOp[], extraDelayMs = 0): number => {
     seq += 1;
     const at = seq;
     const frame = JSON.stringify({ type: "change", seq: at, ops });
     const deliver = () => socket?.send(frame);
-    if (echoDelayMs > 0) setTimeout(deliver, echoDelayMs);
+    const delay = echoDelayMs + extraDelayMs;
+    if (delay > 0) setTimeout(deliver, delay);
     else deliver();
     return at;
   };
+  const echoChunks = opts.echoChunks ?? 1;
 
   const reply = (route: Route, data: unknown) =>
     route.fulfill({
@@ -173,7 +181,19 @@ export async function seedOutline(
               if (op.op === "delete") store.delete(op.key);
               else store.set(op.value.id, op.value);
             }
-            const at = broadcast(body.ops);
+            let at: number;
+            if (echoChunks > 1 && body.ops.length > 1) {
+              const size = Math.ceil(body.ops.length / echoChunks);
+              at = 0;
+              for (let i = 0; i * size < body.ops.length; i++) {
+                at = broadcast(
+                  body.ops.slice(i * size, (i + 1) * size),
+                  i * echoDelayMs,
+                );
+              }
+            } else {
+              at = broadcast(body.ops);
+            }
             if (postDelayMs > 0) {
               await new Promise((r) => setTimeout(r, postDelayMs));
             }
