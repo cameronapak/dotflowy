@@ -100,6 +100,29 @@ test.describe("Inline emphasis: fold when blurred (ADR 0025)", () => {
     expect(await text(page, "n").textContent()).toBe("a hi b");
   });
 
+  test("a _run_ folds to the same <em> as *run* (underscore italic)", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "a _hi_ b" },
+    ]);
+    await expect(run(page, "n", "em")).toHaveText("hi");
+    // Same folded atom shape as the asterisk form: source in data-src (`_hi_`),
+    // markers hidden (the visible line reads "a hi b").
+    await expect(run(page, "n", "em")).toHaveAttribute("data-src", "_hi_");
+    expect(await text(page, "n").textContent()).toBe("a hi b");
+  });
+
+  test("intraword underscores are NOT emphasis (snake_case stays literal)", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "call foo_bar_baz()" },
+    ]);
+    await expect(run(page, "n", "em")).toHaveCount(0);
+    expect(await text(page, "n").textContent()).toBe("call foo_bar_baz()");
+  });
+
   test("**bold**, ~~strike~~, ~underline~ each fold into their host tag", async ({
     page,
   }) => {
