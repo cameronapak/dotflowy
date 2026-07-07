@@ -31,7 +31,21 @@ import {
   UNDERLINE_PATTERN,
 } from "../../data/emphasis";
 import { definePlugin, type El, type PluginContext } from "../types";
-import { MARKERS, wrapSelectionOrInsert } from "./wrap";
+import {
+  type MarkerPair,
+  wrapSelectionOrInsert,
+} from "../../components/wrap";
+
+/** The four marker pairs. Keys match the slash-command ids and the keymap
+ *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
+ *  the highlight plugin). */
+const MARKERS: Record<"bold" | "italic" | "underline" | "strike", MarkerPair> =
+  {
+    bold: { pre: "**", post: "**" },
+    italic: { pre: "*", post: "*" },
+    underline: { pre: "~", post: "~" },
+    strike: { pre: "~~", post: "~~" },
+  };
 
 // The four emphasis kinds, shared across the token + command + keymap shapes.
 // `kind` is the key into MARKERS (the marker pair) and the discriminator for
@@ -184,7 +198,7 @@ export default definePlugin({
     // which has no live caret (ADR 0034). Slash palette + Seam D still run it.
     caretScoped: true,
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
+      wrapSelectionOrInsert(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 
   // Seam D: the same four kinds on hotkeys, wired on the bullet AND the zoomed
@@ -197,6 +211,6 @@ export default definePlugin({
     id,
     hotkey,
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
+      wrapSelectionOrInsert(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 });

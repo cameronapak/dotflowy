@@ -1,42 +1,30 @@
-// Emphasis entry helpers (ADR 0025). The slash commands (`/bold`, `/italic`,
-// `/underline`, `/strikethrough`) and the per-bullet keymap (Cmd+B / Cmd+I /
-// Cmd+U / Cmd+Shift+X) both want the same behavior: wrap the current SELECTION
-// in the marker pair, or -- with no selection -- insert an empty marker pair
-// and place the caret inside it. Both operate in SOURCE space (readSource +
-// getSelectionRange + setCaretOffset) so a folded link elsewhere on the line
-// keeps its url; mirrors paste.ts's mechanics.
+// Selection-wrap helper for marker-fenced inline tokens (ADR 0025 / 0035).
+// The emphasis slash commands + keymap (`/bold`, Cmd+B, ...) and the highlight
+// plugin (`/highlight`, Cmd+Shift+H) all want the same behavior: wrap the
+// current SELECTION in a marker pair, or -- with no selection -- insert an
+// empty pair and place the caret inside it. Operates in SOURCE space
+// (readSource + getSelectionRange + setCaretOffset) so a folded link elsewhere
+// on the line keeps its url; mirrors paste.ts's mechanics.
 //
-// Both call sites fire while a bullet (or the zoomed title) is focused, so the
-// contentEditable is `document.activeElement`. Resolving it from the editor's
-// refs registry would require a new seam; reading the active element keeps the
-// plugin contract unchanged.
+// Every call site fires while a bullet (or the zoomed title) is focused, so
+// the contentEditable is `document.activeElement`. Resolving it from the
+// editor's refs registry would require a new seam; reading the active element
+// keeps the plugin contract unchanged.
 
 import {
   decorate,
   getSelectionRange,
   readSource,
   setCaretOffset,
-} from "../../components/inline-code";
+} from "./inline-code";
 
-/** A marker pair for one of the four emphasis kinds. `pre`/`post` are always
- *  equal-length in v1 (italic `*`/`*`, bold `**`/`**`, strike `~~`/`~~`,
- *  underline `~`/`~`) but kept separate so a future asymmetry (rare) doesn't
- *  require an API change. */
+/** One marker pair (`**`/`**`, `==`/`==`, ...). `pre`/`post` are equal-length
+ *  for every current consumer but kept separate so a future asymmetry (rare)
+ *  doesn't require an API change. */
 export interface MarkerPair {
   pre: string;
   post: string;
 }
-
-/** The four marker pairs. Keys match the slash-command ids and the keymap
- *  wiring. Bold before strikethrough before italic before underline mirrors
- *  the registry precedence order -- not load-bearing here (the wrap doesn't
- *  re-parse), but consistent. */
-export const MARKERS: Record<"bold" | "italic" | "underline" | "strike", MarkerPair> = {
-  bold: { pre: "**", post: "**" },
-  italic: { pre: "*", post: "*" },
-  underline: { pre: "~", post: "~" },
-  strike: { pre: "~~", post: "~~" },
-};
 
 /** Wrap the current selection (or insert an empty pair) inside the focused
  *  contentEditable. Writes the new source through `onTextChange`, re-decorates,
@@ -53,7 +41,7 @@ export const MARKERS: Record<"bold" | "italic" | "underline" | "strike", MarkerP
  *  so a stray keypress with nothing focused does nothing). */
 export function wrapSelectionOrInsert(
   nodeId: string,
-  kind: keyof typeof MARKERS,
+  marker: MarkerPair,
   onTextChange: (id: string, text: string) => void,
 ): boolean {
   // The wrap fires only from a focused bullet/title keymap or a slash command,
@@ -61,7 +49,6 @@ export function wrapSelectionOrInsert(
   const el = document.activeElement as HTMLElement | null;
   if (!el || !el.isContentEditable) return false;
 
-  const marker = MARKERS[kind];
   // SOURCE-space read so a folded link on the same line keeps its url.
   const source = readSource(el);
   const range = getSelectionRange(el) ?? {
