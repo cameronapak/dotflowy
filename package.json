@@ -31,6 +31,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@icons-pack/react-simple-icons": "^13.13.0",
+    "@rgrove/parse-xml": "^4",
     "@tanstack/query-core": "^5.101.1",
     "@tanstack/query-db-collection": "^1.0.42",
     "@tanstack/react-db": "^0.1.87",
