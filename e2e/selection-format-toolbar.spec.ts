@@ -85,6 +85,31 @@ test.describe("selection format toolbar (fine pointer)", () => {
     await expect(mark).toContainText("alphabravo");
   });
 
+  test("stays hidden when a chip atom is selected (nothing to format)", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+    ]);
+    // Selecting the whole line -> toolbar (control: the surface works here).
+    await selectAll(page, "n");
+    await expect(bar(page)).toBeVisible();
+
+    // Arrow-selecting the Bible chip wraps its contenteditable=false atom in a
+    // non-collapsed range inside the span. That's not a formatting target, so the
+    // toolbar must NOT appear (a native marker wrap would drop the token).
+    await text(page, "n").evaluate((el) => {
+      const chip = el.querySelector<HTMLElement>("[data-bible-ref]");
+      const sel = window.getSelection();
+      if (!chip || !sel) return;
+      const range = document.createRange();
+      range.selectNode(chip);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    await expect(bar(page)).toBeHidden();
+  });
+
   test("link opens the edit popover and creates a link", async ({ page }) => {
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
