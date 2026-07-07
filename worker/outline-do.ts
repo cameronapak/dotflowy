@@ -4,6 +4,8 @@ import { DurableObject } from 'cloudflare:workers'
 
 import type { ChangeFrame, ChangeOp, Node, ServerMessage } from '../src/data/wire-schema'
 
+import { planChangeFrames } from './changelog'
+
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
 // the shared wire module — the one leaf the client and the Worker both derive
 // from, so the DO can't drift from what the client sends. Re-export the two the
@@ -297,15 +299,18 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   /**
    * Apply a heterogeneous batch of ops (insert/update/delete) as ONE atomic
-   * frame: every SQL write — the ops AND the seq bump / changelog row — runs
+   * commit: every SQL write — the ops AND the seq bumps / changelog rows — runs
    * inside a single `transactionSync`, so a throw on any op rolls the whole batch
-   * back; only on full commit does `broadcastChange` emit one frame (one seq).
-   * This is the structural write path — an insert-and-repoint (or delete-and-
-   * repoint) lands all-or-nothing, so no reader ever observes a half-relinked
-   * sibling chain, even if an op faults mid-loop. Returns the seq the frame
-   * committed at (the current seq if the batch was empty), which the originating
-   * client waits for before dropping its optimistic overlay (so a fast follow-up
-   * edit can't read a reverted state). See docs/adr/0009 and docs/adr/0014.
+   * back; only on full commit does `broadcastChange` emit the frames. A batch
+   * over 500 ops commits as multiple consecutive-seq changelog rows/frames
+   * (chunked `recordChange`, issue #124 — SQLite's 2 MB row cap), but the
+   * commit itself is still all-or-nothing. This is the structural write path —
+   * an insert-and-repoint (or delete-and-repoint) lands all-or-nothing, so no
+   * reader ever observes a half-relinked sibling chain, even if an op faults
+   * mid-loop. Returns the FINAL seq the batch committed at (the current seq if
+   * the batch was empty), which the originating client waits for before
+   * dropping its optimistic overlay (so a fast follow-up edit can't read a
+   * reverted state). See docs/adr/0009 and docs/adr/0014.
    *
    * Insert/update ops carry the full post-mutation node (an upsert); the DO
    * recomputes insert-vs-update from row existence, so the client's op type is
@@ -370,50 +375,61 @@ export class UserOutlineDO extends DurableObject<Env> {
     return row ? Number(row.value) : 0
   }
 
-  /** Allocate the next monotonic sequence number and persist it. */
-  private bumpSeq(): number {
-    const next = this.currentSeq() + 1
+  /** Persist a committed sequence number (the meta cursor `currentSeq` reads). */
+  private setSeq(seq: number): void {
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seq', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      String(next),
+      String(seq),
     )
-    return next
   }
 
   /**
-   * Record a batch of ops at a new seq and prune the changelog to its window —
-   * the SQL half of a commit, run INSIDE the caller's `transactionSync` alongside
-   * the row writes so the seq bump and the changelog row roll back with the ops
-   * on any fault. A no-op for an empty batch (e.g. a patch that touched no
-   * writable columns), so the seq only advances on real changes. Returns the
-   * frame (committed seq + ops) for `broadcastChange` to emit once the
+   * Record a batch of ops as ≤500-op changelog rows and prune the changelog to
+   * its window — the SQL half of a commit, run INSIDE the caller's
+   * `transactionSync` alongside the row writes so the seq bump and every
+   * changelog row roll back with the ops on any fault. A large batch (an OPML
+   * import can be thousands of ops, megabytes of JSON) is CHUNKED via
+   * `planChangeFrames` (worker/changelog.ts) into consecutive-seq rows so no
+   * single row nears SQLite's 2 MB cap; op order is preserved across chunk
+   * boundaries, so every frame prefix stays chain-valid for a live remote
+   * client. A no-op for an empty batch (e.g. a patch that touched no writable
+   * columns), so the seq only advances on real changes. Returns the frames
+   * (committed seqs + ops) for `broadcastChange` to emit, in order, once the
    * transaction has committed.
    */
-  private recordChange(ops: ChangeOp[]): ChangeFrame {
-    if (!ops.length) return { seq: this.currentSeq(), ops }
-    const seq = this.bumpSeq()
-    this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', seq, JSON.stringify(ops))
-    this.sql.exec('DELETE FROM changelog WHERE seq <= ?', seq - CHANGELOG_KEEP)
-    return { seq, ops }
+  private recordChange(ops: ChangeOp[]): ChangeFrame[] {
+    const frames = planChangeFrames(ops, this.currentSeq())
+    if (!frames.length) return frames
+    for (const f of frames) {
+      this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', f.seq, JSON.stringify(f.ops))
+    }
+    const finalSeq = frames[frames.length - 1].seq
+    this.setSeq(finalSeq)
+    this.sql.exec('DELETE FROM changelog WHERE seq <= ?', finalSeq - CHANGELOG_KEEP)
+    return frames
   }
 
   /**
-   * Broadcast a committed frame to every connected device, and return its seq.
-   * Runs AFTER `recordChange`'s `transactionSync` has committed — events only go
-   * out for state that durably landed, never for a batch that rolled back. A
-   * no-op for an empty frame (nothing changed, so nobody is notified).
+   * Broadcast the committed frames to every connected device, in seq order, and
+   * return the FINAL seq (what the originating client `waitForSeq`s before
+   * dropping its optimistic overlay). Runs AFTER `recordChange`'s
+   * `transactionSync` has committed — events only go out for state that durably
+   * landed, never for a batch that rolled back. A no-op for an empty commit
+   * (nothing changed, so nobody is notified; returns the current seq).
    *
    * Broadcasting is free (outgoing WS); the send runs inside the DO window the
    * triggering write already opened, so it adds negligible billed duration.
    */
-  private broadcastChange(frame: ChangeFrame): number {
-    if (frame.ops.length) {
+  private broadcastChange(frames: readonly ChangeFrame[]): number {
+    if (!frames.length) return this.currentSeq()
+    const sockets = this.ctx.getWebSockets()
+    for (const frame of frames) {
       const data = JSON.stringify({
         type: 'change',
         seq: frame.seq,
         ops: frame.ops,
       } satisfies ServerMessage)
-      for (const ws of this.ctx.getWebSockets()) {
+      for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
         try {
           ws.send(data)
@@ -422,7 +438,7 @@ export class UserOutlineDO extends DurableObject<Env> {
         }
       }
     }
-    return frame.seq
+    return frames[frames.length - 1].seq
   }
 
   /**
