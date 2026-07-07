@@ -52,10 +52,15 @@ with zero new cross-component menu-state plumbing. It is **insert-and-open, not 
 via Escape or picking a command). A real toggle would need the bar to observe another component's menu state,
 which is not worth the plumbing for v1.
 
-**Why `onPointerDown` + `preventDefault` on every button.** Tapping a button must not steal focus from the
-contentEditable, or the caret and keyboard collapse and the action loses its target. `preventDefault()` on
-`pointerdown` keeps the span focused across the tap — **every** button does this, with no exception now that
-there is no dismiss button. (Dismissing is delegated to the system: iOS "Done" / Android back.)
+**Why `onPointerDown` + `preventDefault`, but the action fires on `pointerup`.** Tapping a button must not
+steal focus from the contentEditable, or the caret and keyboard collapse and the action loses its target.
+`preventDefault()` on `pointerdown` keeps the span focused across the tap — **every** button does this, with no
+exception now that there is no dismiss button. (Dismissing is delegated to the system: iOS "Done" / Android
+back.) But the **action runs on `pointerup`, and only if the finger stayed within a small threshold** of where
+it landed: the pill is `overflow-x-auto`, and firing on `pointerdown` meant a horizontal scroll of the strip
+triggered whatever button the finger started on. The `preventDefault` stays on `pointerdown` (it preserves
+focus and does NOT block the overflow scroll, which is governed by `touch-action`); the tap-vs-scroll split is
+the bullet-dot's movement-threshold mechanic (`use-drag-reorder.ts`).
 
 **Why the bar is dumb chrome (a facade over the existing commands).** A `useMobileBarActions` hook inside
 `OutlineEditor` closes over `refs` / `findFocusedId` / the existing `commands` (`useNodeCommands`) /

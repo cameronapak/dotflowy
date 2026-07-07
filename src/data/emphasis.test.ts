@@ -4,6 +4,7 @@ import {
   emphasisMarkerLen,
   hasEmphasis,
   ITALIC_PATTERN,
+  ITALIC_UNDERSCORE_PATTERN,
   STRIKETHROUGH_PATTERN,
   stripEmphasis,
   UNDERLINE_PATTERN,
@@ -12,7 +13,16 @@ import {
 // Match a single pattern against `text` (anchored) -- mirrors how the combined
 // regex would dispatch a same-shape run.
 function matches(pattern: string, text: string): boolean {
-  return new RegExp(`^(?:${pattern})$`).test(text)
+  // `u` flag: the underscore-italic pattern uses `\p{L}`/`\p{N}`, which are only
+  // property escapes under a unicode regex (and the combined token regex is
+  // `gu`). Harmless for the `*`/`~` patterns.
+  return new RegExp(`^(?:${pattern})$`, 'u').test(text)
+}
+
+// Match a pattern anywhere in `text` (unanchored) -- for the intraword-guarded
+// underscore pattern, whose lookarounds need real neighboring context.
+function matchesAnywhere(pattern: string, text: string): boolean {
+  return new RegExp(pattern, 'u').test(text)
 }
 
 describe('individual patterns', () => {
@@ -45,6 +55,22 @@ describe('individual patterns', () => {
   test('underline rejects a literal ~ inside', () => {
     expect(matches(UNDERLINE_PATTERN, '~a~b~')).toBe(false)
   })
+
+  test('underscore italic matches a single-_ run', () => {
+    expect(matches(ITALIC_UNDERSCORE_PATTERN, '_hi_')).toBe(true)
+    expect(matches(ITALIC_UNDERSCORE_PATTERN, '_a_b_c_')).toBe(false) // no nesting
+  })
+
+  test('underscore italic matches when word-bounded in free text', () => {
+    expect(matchesAnywhere(ITALIC_UNDERSCORE_PATTERN, 'a _hi_ b')).toBe(true)
+    expect(matchesAnywhere(ITALIC_UNDERSCORE_PATTERN, '(_hi_)')).toBe(true)
+  })
+
+  test('underscore italic is INTRAWORD-guarded (snake_case stays literal)', () => {
+    expect(matchesAnywhere(ITALIC_UNDERSCORE_PATTERN, 'snake_case_here')).toBe(false)
+    expect(matchesAnywhere(ITALIC_UNDERSCORE_PATTERN, 'a1_b_c2')).toBe(false)
+    expect(matchesAnywhere(ITALIC_UNDERSCORE_PATTERN, 'word_italic_')).toBe(false)
+  })
 })
 
 describe('prefix disambiguation (lower precedence wins on overlap)', () => {
@@ -75,6 +101,11 @@ describe('hasEmphasis', () => {
     expect(hasEmphasis('*italic*')).toBe(true)
     expect(hasEmphasis('a **bold** b')).toBe(true)
     expect(hasEmphasis('~~strike~~ and ~underline~')).toBe(true)
+    expect(hasEmphasis('an _underscore_ italic')).toBe(true)
+  })
+
+  test('does not treat intraword underscores as emphasis', () => {
+    expect(hasEmphasis('snake_case_name')).toBe(false)
   })
 
   test('is false for plain text and unclosed markers', () => {
@@ -90,6 +121,11 @@ describe('stripEmphasis', () => {
     expect(stripEmphasis('**bold**')).toBe('bold')
     expect(stripEmphasis('~~strike~~')).toBe('strike')
     expect(stripEmphasis('~underline~')).toBe('underline')
+    expect(stripEmphasis('_italic_')).toBe('italic')
+  })
+
+  test('leaves intraword underscores in place (search parity with render)', () => {
+    expect(stripEmphasis('call foo_bar_baz()')).toBe('call foo_bar_baz()')
   })
 
   test('preserves text between runs', () => {
@@ -114,6 +150,7 @@ describe('emphasisMarkerLen', () => {
     expect(emphasisMarkerLen('~~strike~~')).toBe(2)
     expect(emphasisMarkerLen('*italic*')).toBe(1)
     expect(emphasisMarkerLen('~underline~')).toBe(1)
+    expect(emphasisMarkerLen('_italic_')).toBe(1)
   })
 
   test('returns 0 for an unrecognized run (defensive)', () => {

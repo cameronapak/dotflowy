@@ -102,6 +102,7 @@ import {
 } from "./paste";
 import {
   blocksCaret,
+  commandSpecs,
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
@@ -140,6 +141,15 @@ import {
   MobileActionsBar,
   type MobileBarActions,
 } from "./MobileActionsBar";
+import {
+  SelectionFormatToolbar,
+  type SelectionFormatActions,
+} from "./SelectionFormatToolbar";
+import {
+  toggleHighlightSelection,
+  toggleWrapSelection,
+  type MarkerPair,
+} from "./wrap";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
 // history state, so the incoming view knows which element to name -- and so it
@@ -410,6 +420,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     commands,
   });
 
+  // Desktop (fine-pointer) selection formatting toolbar (ADR 0036). Same facade
+  // shape as the mobile bar, routed into the emphasis/highlight/link paths.
+  const selectionFormatActions = useSelectionFormatActions({
+    findFocusedId,
+    commands,
+    getCtx: pluginCtx,
+  });
+
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
   // actions menu's ops. Installs window key/mouse listeners only while a
   // selection is active, and clears any stale selection on this view's mount.
@@ -593,6 +611,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             findFocusedId={findFocusedId}
           />
         )}
+
+        {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
+            Gates itself on a fine pointer + a single-span selection, so it
+            renders nothing on touch or when nothing is selected. */}
+        <SelectionFormatToolbar actions={selectionFormatActions} />
 
         {overlayNode}
 
@@ -1194,6 +1217,56 @@ function useMobileBarActions({
       },
     };
   }, [refs, findFocusedId, pendingFocus, commands]);
+}
+
+/**
+ * Zero-arg command surface for the desktop selection formatting toolbar (ADR
+ * 0036), the fine-pointer twin of useMobileBarActions. Resolves the focused
+ * (mirror-aware) content node internally and routes into the SAME
+ * emphasis/highlight/link paths the keyboard uses — no new mutation path. The
+ * link action reuses the links plugin's `/link` CommandSpec, so it's absent when
+ * that plugin isn't loaded. Stable identity.
+ */
+function useSelectionFormatActions({
+  findFocusedId,
+  commands,
+  getCtx,
+}: {
+  findFocusedId: () => string | null;
+  commands: NodeCommands;
+  getCtx: () => PluginContext;
+}): SelectionFormatActions {
+  return useMemo<SelectionFormatActions>(() => {
+    // The focused span's CONTENT node id (mirror row -> its source), the id the
+    // source text lives under — same resolution as the mobile bar's toggleComplete.
+    const contentId = (): string | null => {
+      const key = findFocusedId();
+      if (!key) return null;
+      const instanceId = instanceIdForKey(key);
+      return isMirrorsEnabled()
+        ? (getTreeIndex().byId.get(instanceId)?.mirrorOf ?? instanceId)
+        : instanceId;
+    };
+    const linkSpec = commandSpecs.find((c) => c.id === "link") ?? null;
+    return {
+      toggleMarker: (marker: MarkerPair) => {
+        const id = contentId();
+        // reselect = true: keep the interior selected so the button stays lit and
+        // a re-press toggles off (the toolbar's whole point).
+        if (id) toggleWrapSelection(id, marker, commands.onTextChange, true);
+      },
+      toggleHighlight: () => {
+        const id = contentId();
+        if (id) toggleHighlightSelection(id, commands.onTextChange);
+      },
+      createLink: linkSpec
+        ? () => {
+            const id = contentId();
+            if (id) linkSpec.run(id, getCtx());
+          }
+        : null,
+    };
+  }, [findFocusedId, commands, getCtx]);
 }
 
 interface NodeCommandsArgs {

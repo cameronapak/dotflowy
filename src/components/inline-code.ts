@@ -146,6 +146,15 @@ function foldedSrcLen(el: HTMLElement): number {
     : (el.getAttribute("data-src") ?? "").length;
 }
 
+/** A dimmed `.md-punct` span holding revealed syntax scaffolding (a fence or
+ *  marker) as REAL, walk-through text -- shared by every folding token that
+ *  reveals its markers (emphasis, highlight, the link reveal keys the same
+ *  class). Kept here, next to the reveal machinery, so the folding-token
+ *  plugins don't each re-declare the builder. */
+export function mdPunct(s: string): El {
+  return { tag: "span", attrs: { class: "md-punct" }, children: [s] };
+}
+
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
 // the source once a folding token hides part of its source (a folded link shows
 // only its label; folded code/emphasis hide their markers), so
@@ -310,6 +319,61 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
     sel.removeAllRanges();
     sel.addRange(range);
   }
+}
+
+// Resolve an absolute SOURCE offset to a live DOM point (the inverse of
+// sourceOffsetUpTo). Text nodes contribute their length; an atom contributes its
+// full source length and any point inside it snaps to the atom's edge in its
+// parent (the caret never enters an atom). Falls back to the end of `el`.
+function domPointAt(
+  el: HTMLElement,
+  offset: number,
+): { node: Node; offset: number } {
+  let remaining = offset;
+  let point: { node: Node; offset: number } | null = null;
+  const visit = (node: Node) => {
+    if (point) return;
+    if (node.nodeType === 3 /* text */) {
+      const len = node.textContent?.length ?? 0;
+      if (remaining <= len) point = { node, offset: remaining };
+      else remaining -= len;
+      return;
+    }
+    if (isAtom(node)) {
+      const len = foldedSrcLen(node);
+      if (remaining <= len) {
+        const parent = node.parentNode;
+        if (parent) {
+          const idx = Array.prototype.indexOf.call(parent.childNodes, node);
+          point = { node: parent, offset: remaining === 0 ? idx : idx + 1 };
+        }
+      } else remaining -= len;
+      return;
+    }
+    node.childNodes.forEach(visit);
+  };
+  el.childNodes.forEach(visit);
+  return point ?? { node: el, offset: el.childNodes.length };
+}
+
+// Select the SOURCE range `[start, end]` within `el` (start === end collapses to
+// a caret). The selection toolbar (ADR 0036) re-selects the just-wrapped
+// interior so a re-press toggles it back off and the button stays lit; unlike
+// setCaretOffset it addresses two points, one per edge.
+export function setSelectionOffsets(
+  el: HTMLElement,
+  start: number,
+  end: number,
+): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const a = domPointAt(el, start);
+  const b = domPointAt(el, end);
+  const range = document.createRange();
+  range.setStart(a.node, a.offset);
+  range.setEnd(b.node, b.offset);
+  sel.removeAllRanges();
+  sel.addRange(range);
 }
 
 // Collapse the selection just before/after an atomic folded-link widget, by

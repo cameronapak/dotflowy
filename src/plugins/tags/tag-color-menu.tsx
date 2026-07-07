@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import { Ban } from "lucide-react";
 import { Button } from "@/plugins/kit";
 import { cn } from "@/lib/utils";
+import { useDismissable } from "../../components/use-dismissable";
 import {
   TAG_COLORS,
   clearTagColor,
@@ -49,25 +50,7 @@ export function TagColorMenu({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const current = useTagColor(tag);
-
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    // Defer so the opening (contextmenu) event doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKey);
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+  useDismissable(ref, onClose);
 
   // Keep the popover on screen (it's ~248px wide, ~44px tall).
   const left = Math.min(x, window.innerWidth - 256);

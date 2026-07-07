@@ -9,9 +9,11 @@
 // remap on reveal) lives in inline-code.ts; the slash/keyboard entry lives in
 // the emphasis plugin.
 //
-// v1 is FLAT: no nesting, no `***bold+italic***`, no `_underscore_` variants.
-// A run that doesn't cleanly match one of the four patterns renders as literal
-// text. See ADR 0025.
+// v1 is FLAT: no nesting, no `***bold+italic***`. Italic accepts BOTH `*x*` and
+// `_x_` (the underscore form is render-only -- creation via /italic + Cmd+I
+// stays `*`); the underscore form is intraword-guarded (`snake_case` stays
+// literal), matching CommonMark. A run that doesn't cleanly match one of the
+// patterns renders as literal text. See ADR 0025.
 
 // Each run is `<markers><non-empty interior></markers>` on a single line. The
 // interior forbids the marker char itself (so `*a*b` matches the italic run
@@ -24,6 +26,14 @@
 export const BOLD_PATTERN = "\\*\\*[^*\\n]+\\*\\*";
 /** Italic: `*x*` -- interior has no literal `*`. */
 export const ITALIC_PATTERN = "\\*[^*\\n]+\\*";
+/** Italic (underscore form): `_x_` -- interior has no literal `_`. INTRAWORD-
+ *  GUARDED: the opening `_` must not follow a letter/digit and the closing `_`
+ *  must not precede one, so `snake_case_here` stays literal text (CommonMark's
+ *  underscore rule). The two lookarounds are zero-width, so the matched run is
+ *  still just `_x_` -- marker length 1, same as the asterisk italic. Renders to
+ *  the same `<em>` as `*x*`; there is no separate underscore semantic. */
+export const ITALIC_UNDERSCORE_PATTERN =
+  "(?<![\\p{L}\\p{N}])_[^_\\n]+_(?![\\p{L}\\p{N}])";
 /** Strikethrough: `~~x~~` (GFM) -- interior has no literal `~`. */
 export const STRIKETHROUGH_PATTERN = "~~[^~\\n]+~~";
 /** Underline: `~x~` (Bear-style, non-standard but portable within dotflowy) --
@@ -42,8 +52,13 @@ export const UNDERLINE_PATTERN = "~[^~\\n]+~";
  *  back-to-back matches. Mirrors `tags.ts`'s pattern. */
 function anyEmphasisRegex(): RegExp {
   return new RegExp(
-    [BOLD_PATTERN, STRIKETHROUGH_PATTERN, ITALIC_PATTERN, UNDERLINE_PATTERN]
-      .join("|"),
+    [
+      BOLD_PATTERN,
+      STRIKETHROUGH_PATTERN,
+      ITALIC_PATTERN,
+      ITALIC_UNDERSCORE_PATTERN,
+      UNDERLINE_PATTERN,
+    ].join("|"),
     "gu",
   );
 }
@@ -78,7 +93,7 @@ export function emphasisMarkerLen(run: string): number {
   // The opening marker is a run of identical chars at the start; the patterns
   // guarantee the closing marker has the same length. Count the leading run.
   const ch = run[0];
-  if (ch !== "*" && ch !== "~") return 0;
+  if (ch !== "*" && ch !== "~" && ch !== "_") return 0;
   let n = 0;
   while (n < run.length && run[n] === ch) n++;
   return n;
