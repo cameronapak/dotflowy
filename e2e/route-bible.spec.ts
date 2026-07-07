@@ -18,10 +18,17 @@ const chip = (page: Page, id: string) =>
 async function load(page: Page, tree: SeedNode[]) {
   // Capture window.open so we can assert click-to-open without a real popup.
   await page.addInitScript(() => {
-    (window as unknown as { __opened: string[] }).__opened = [];
+    const state = window as unknown as { __opened: string[]; __focusedTabs: number };
+    state.__opened = [];
+    state.__focusedTabs = 0;
     window.open = ((url?: string | URL) => {
-      (window as unknown as { __opened: string[] }).__opened.push(String(url));
-      return null;
+      state.__opened.push(String(url));
+      return {
+        opener: window,
+        focus: () => {
+          state.__focusedTabs += 1;
+        },
+      };
     }) as typeof window.open;
   });
   await seedOutline(page, tree);
@@ -31,6 +38,71 @@ async function load(page: Page, tree: SeedNode[]) {
 
 const opened = (page: Page) =>
   page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+const focusedTabs = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __focusedTabs: number }).__focusedTabs,
+  );
+const activeNodeId = (page: Page) =>
+  page.evaluate(() =>
+    document.activeElement
+      ?.closest<HTMLElement>("[data-node-id]")
+      ?.getAttribute("data-node-id") ?? null,
+  );
+
+const MOD = process.platform === "darwin" ? "Meta" : "Control";
+
+async function caretAtSource(page: Page, id: string, target: number) {
+  await text(page, id).evaluate((el, target) => {
+    el.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    let remaining = target as number;
+    let placed = false;
+    const visit = (node: Node): void => {
+      if (placed) return;
+      if (node.nodeType === 3 /* text */) {
+        const len = node.textContent?.length ?? 0;
+        if (remaining <= len) {
+          const r = document.createRange();
+          r.setStart(node, remaining);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+          placed = true;
+        } else remaining -= len;
+        return;
+      }
+      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+        const e = node as HTMLElement;
+        const len =
+          Number(e.getAttribute("data-src-len")) ||
+          (e.getAttribute("data-src") ?? "").length;
+        if (remaining <= len) {
+          const parent = e.parentNode!;
+          const idx = Array.prototype.indexOf.call(parent.childNodes, e);
+          const r = document.createRange();
+          r.setStart(parent, remaining === 0 ? idx : idx + 1);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+          placed = true;
+          return;
+        }
+        remaining -= len;
+        return;
+      }
+      node.childNodes.forEach(visit);
+    };
+    visit(el);
+    if (!placed) {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  }, target);
+}
 
 const passagePopover = (page: Page) =>
   page.locator("[data-bible-passage-popover]");
@@ -179,6 +251,12 @@ test.describe("Scripture reference chips", () => {
     expect(await opened(page)).toEqual([
       "https://route.bible/1co.13.4-7?src=dotflowy",
     ]);
+    expect(await focusedTabs(page)).toBe(1);
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      window.dispatchEvent(new Event("focus"));
+    });
+    await expect.poll(() => activeNodeId(page)).toBe("n");
   });
 
   test("holding a chip opens the passage editor", async ({ page }) => {
@@ -303,5 +381,55 @@ test.describe("Scripture reference chips", () => {
     expect(await opened(page)).toEqual([
       "https://route.bible/jhn.3.16?src=dotflowy",
     ]);
+  });
+
+  test("Mod+Enter after a chip opens and focuses its route.bible URL", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+    ]);
+
+    await caretAtSource(page, "n", "See John 3:16".length);
+    await page.keyboard.press(`${MOD}+Enter`);
+
+    expect(await opened(page)).toEqual([
+      "https://route.bible/jhn.3.16?src=dotflowy",
+    ]);
+    expect(await focusedTabs(page)).toBe(1);
+  });
+
+  test("Mod-click after a chip opens and focuses its route.bible URL", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+    ]);
+
+    await text(page, "n").evaluate((el: HTMLElement) => {
+      el.focus();
+      const atom = el.querySelector<HTMLElement>("[data-bible-ref]");
+      if (!atom) throw new Error("missing bible chip");
+      const parent = atom.parentNode!;
+      const idx = Array.prototype.indexOf.call(parent.childNodes, atom);
+      const range = document.createRange();
+      range.setStart(parent, idx + 1);
+      range.collapse(true);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      el.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          metaKey: true,
+        }),
+      );
+    });
+
+    expect(await opened(page)).toEqual([
+      "https://route.bible/jhn.3.16?src=dotflowy",
+    ]);
+    expect(await focusedTabs(page)).toBe(1);
   });
 });

@@ -10,7 +10,7 @@ import {
   readSource,
   selectAdjacentAtom,
 } from "./inline-code";
-import { openLinkAtCaret } from "./link-keymap";
+import { openInlineTargetAtCaret } from "./link-keymap";
 import type { NodeCommands } from "./OutlineNode";
 
 interface BulletKeymapArgs {
@@ -106,7 +106,13 @@ export function useBulletKeymap({
             hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
             callback: () => {
               const el = textRef.current;
-              if (k.hotkey === "Mod+Enter" && el && openLinkAtCaret(el)) return;
+              if (
+                k.hotkey === "Mod+Enter" &&
+                el &&
+                openInlineTargetAtCaret(el, pluginCtx(), { linkParens: "edit" })
+              ) {
+                return;
+              }
               k.run(node.id, pluginCtx());
             },
           })),

@@ -1420,3 +1420,30 @@ dotflowy-widget[data-bible-ref][data-atom-selected] > span {
 :root {
   --link-edit-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>');
 }
+
+/* The highlight color affordance (ADR 0035, Bear-style): a small highlighter
+   pen painted with the current text color via an SVG mask (lucide
+   `highlighter`), leading a REVEALED run right after the opening `==`. A
+   text-free span like the link pencil, so source/caret math is unaffected.
+   Clicking it opens the highlight color menu (Seam B). */
+.highlight-pen-icon {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.15em;
+  vertical-align: -0.05em;
+  background-color: currentColor;
+  opacity: 0.55;
+  cursor: pointer;
+  user-select: none;
+  -webkit-mask: var(--highlight-pen-icon) no-repeat center / contain;
+  mask: var(--highlight-pen-icon) no-repeat center / contain;
+}
+
+[data-highlight-reveal]:hover .highlight-pen-icon {
+  opacity: 1;
+}
+
+:root {
+  --highlight-pen-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>');
+}

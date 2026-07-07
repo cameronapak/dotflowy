@@ -10,8 +10,11 @@
 // so `readSource` and the source-offset caret math in inline-code.ts already
 // handle it with ZERO new machinery (they key on `data-src`).
 //
-// v1 is FLAT: no nesting, no `***bold+italic***`, no `_underscore_` variants.
-// An unmatched or nested attempt renders as literal text. See ADR 0025.
+// v1 is FLAT: no nesting, no `***bold+italic***`. Italic accepts BOTH `*x*` and
+// `_x_` -- the underscore form is a render-only token folding to the SAME `<em>`
+// (creation via /italic + Cmd+I still emits `*`); it is intraword-guarded so
+// `snake_case` stays literal. An unmatched or nested attempt renders as literal
+// text. See ADR 0025.
 //
 // Pure logic (patterns, strip, marker length) lives in src/data/emphasis.ts.
 //
@@ -27,11 +30,29 @@ import {
   BOLD_PATTERN,
   emphasisMarkerLen,
   ITALIC_PATTERN,
+  ITALIC_UNDERSCORE_PATTERN,
   STRIKETHROUGH_PATTERN,
   UNDERLINE_PATTERN,
 } from "../../data/emphasis";
-import { definePlugin, type El, type PluginContext } from "../types";
-import { MARKERS, wrapSelectionOrInsert } from "./wrap";
+import {
+  definePlugin,
+  type El,
+  type PluginContext,
+  type TokenView,
+} from "../types";
+import { mdPunct } from "../../components/inline-code";
+import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
+
+/** The four marker pairs. Keys match the slash-command ids and the keymap
+ *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
+ *  the highlight plugin). */
+const MARKERS: Record<"bold" | "italic" | "underline" | "strike", MarkerPair> =
+  {
+    bold: { pre: "**", post: "**" },
+    italic: { pre: "*", post: "*" },
+    underline: { pre: "~", post: "~" },
+    strike: { pre: "~~", post: "~~" },
+  };
 
 // The four emphasis kinds, shared across the token + command + keymap shapes.
 // `kind` is the key into MARKERS (the marker pair) and the discriminator for
@@ -105,22 +126,17 @@ function revealedEmphasisEl(
   interior: string,
   marker: string,
 ): El {
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   return {
     tag: "span",
     attrs: { class: "emphasis-reveal", "data-emphasis-reveal": true },
     children: [
-      punct(marker),
+      mdPunct(marker),
       {
         tag: kind.tag,
         attrs: { class: `${kind.class} ${kind.util}` },
         children: [interior],
       },
-      punct(marker),
+      mdPunct(marker),
     ],
   };
 }
@@ -133,6 +149,26 @@ function partsOf(tok: string): { marker: string; interior: string } {
   return { marker: tok.slice(0, len), interior: tok.slice(len, tok.length - len) };
 }
 
+// Render one emphasis run of `kind` to its folded or revealed El. Shared by the
+// four canonical `*`/`~` tokens and the render-only `_x_` italic variant (which
+// reuses the italic kind), so the fold/reveal rule lives in exactly one place.
+// Reveal iff the caret sits within or adjacent to the run (offset in
+// `[start, end]`, boundaries inclusive so you can arrow/click in from either
+// edge) -- mirrors the link reveal rule verbatim.
+function renderEmphasis(kind: EmphasisKind, tok: string, view: TokenView): El {
+  const { marker, interior } = partsOf(tok);
+  const { revealOffset, start, end } = view;
+  const reveal =
+    revealOffset != null && revealOffset >= start && revealOffset <= end;
+  return reveal
+    ? revealedEmphasisEl(kind, interior, marker)
+    : foldedEmphasisEl(kind, interior, tok);
+}
+
+// The italic kind, reused by the underscore-italic token (same `<em>`, class,
+// util) -- there is no separate underscore semantic.
+const ITALIC_KIND = KINDS.find((k) => k.kind === "italic")!;
+
 export default definePlugin({
   id: "emphasis",
 
@@ -140,23 +176,28 @@ export default definePlugin({
   // opts them into the core's caret-reveal fast path (hasFoldingToken), so the
   // per-line watcher re-decorates as the caret crosses a run's edge -- the same
   // mechanism the rich link uses.
-  tokens: KINDS.map((kind) => ({
-    id: kind.id,
-    pattern: kind.pattern,
-    precedence: kind.precedence,
-    folds: true,
-    render: (tok, { revealOffset, start, end }) => {
-      const { marker, interior } = partsOf(tok);
-      // Reveal iff the caret sits within or adjacent to the run (offset in
-      // `[start, end]`, boundaries inclusive so you can arrow/click in from
-      // either edge) -- mirrors the link reveal rule verbatim.
-      const reveal =
-        revealOffset != null && revealOffset >= start && revealOffset <= end;
-      return reveal
-        ? revealedEmphasisEl(kind, interior, marker)
-        : foldedEmphasisEl(kind, interior, tok);
+  tokens: [
+    ...KINDS.map((kind) => ({
+      id: kind.id,
+      pattern: kind.pattern,
+      precedence: kind.precedence,
+      folds: true,
+      render: (tok: string, view: TokenView) => renderEmphasis(kind, tok, view),
+    })),
+    // The underscore italic form (`_x_`) -- a render-only token folding to the
+    // SAME `<em>` as `*x*` (reuses ITALIC_KIND). No leading-char overlap with
+    // the `*`/`~` runs, so its precedence only needs to be distinct (34, after
+    // underline). No slash command / keymap: `_` is an alternative INPUT syntax,
+    // not a second italic semantic (creation stays `*` via /italic + Cmd+I).
+    {
+      id: "emphasis-italic-underscore",
+      pattern: ITALIC_UNDERSCORE_PATTERN,
+      precedence: 34,
+      folds: true,
+      render: (tok: string, view: TokenView) =>
+        renderEmphasis(ITALIC_KIND, tok, view),
     },
-  })),
+  ],
 
   // No plugin stylesheet (ADR 0031 retires the raw-CSS seam): the weight /
   // decoration ride Tailwind utilities on each token's own tag (see `util`
@@ -183,8 +224,10 @@ export default definePlugin({
     // Wrap is caret/selection-scoped -- excluded from the Cmd+K command center,
     // which has no live caret (ADR 0034). Slash palette + Seam D still run it.
     caretScoped: true,
+    // Toggle, not add-only: re-running on an already-wrapped selection unwraps
+    // it (ADR 0036), so /bold and the toolbar's bold button agree.
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
+      toggleWrapSelection(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 
   // Seam D: the same four kinds on hotkeys, wired on the bullet AND the zoomed
@@ -197,6 +240,6 @@ export default definePlugin({
     id,
     hotkey,
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, kind, ctx.mutations.onTextChange),
+      toggleWrapSelection(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 });

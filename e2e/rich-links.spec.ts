@@ -12,12 +12,19 @@ const text = (page: Page, id: string) =>
 
 async function load(page: Page, tree: SeedNode[]) {
   // Record window.open calls so we can assert click-to-open without juggling
-  // real popups (noopener tabs are flaky to capture).
+  // real popups.
   await page.addInitScript(() => {
-    (window as unknown as { __opened: string[] }).__opened = [];
+    const state = window as unknown as { __opened: string[]; __focusedTabs: number };
+    state.__opened = [];
+    state.__focusedTabs = 0;
     window.open = ((url?: string | URL) => {
-      (window as unknown as { __opened: string[] }).__opened.push(String(url));
-      return null;
+      state.__opened.push(String(url));
+      return {
+        opener: window,
+        focus: () => {
+          state.__focusedTabs += 1;
+        },
+      };
     }) as typeof window.open;
   });
   await seedOutline(page, tree);
@@ -57,6 +64,16 @@ async function blurActive(page: Page) {
 
 const opened = (page: Page) =>
   page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+const focusedTabs = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __focusedTabs: number }).__focusedTabs,
+  );
+const activeNodeId = (page: Page) =>
+  page.evaluate(() =>
+    document.activeElement
+      ?.closest<HTMLElement>("[data-node-id]")
+      ?.getAttribute("data-node-id") ?? null,
+  );
 
 const LINK = "[Anthropic](https://anthropic.com)";
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
@@ -118,8 +135,15 @@ test.describe("Rich links fold and reveal", () => {
     // The resolved href (anchor.href) is what we open -- a bare domain
     // normalizes to a trailing slash, which is the correct target.
     expect(await opened(page)).toEqual(["https://anthropic.com/"]);
-    // Still folded -- the click opened, it didn't focus into edit mode.
+    expect(await focusedTabs(page)).toBe(1);
+    // Still folded until the user returns to this tab.
     await expect(text(page, "n").locator("a[data-link]")).toBeVisible();
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      window.dispatchEvent(new Event("focus"));
+    });
+    await expect.poll(() => activeNodeId(page)).toBe("n");
+    await expect(text(page, "n").locator(".link-reveal")).toBeVisible();
   });
 
   test("Mod+Enter inside a markdown link opens it instead of completing the node", async ({
@@ -144,7 +168,101 @@ test.describe("Rich links fold and reveal", () => {
     await page.keyboard.press(`${MOD}+Enter`);
 
     expect(await opened(page)).toEqual(["https://anthropic.com"]);
+    expect(await focusedTabs(page)).toBe(1);
     await expect(text(page, "n")).toHaveAttribute("data-completed", "false");
+  });
+
+  test("Mod+Enter inside a revealed link's parens opens the edit popover", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await focusBullet(page, "n");
+    await expect(text(page, "n").locator(".link-url-chip")).toBeVisible();
+    await text(page, "n").evaluate((el: HTMLElement) => {
+      const chip = el.querySelector(".link-url-chip");
+      if (!chip) throw new Error("missing link url chip");
+      const range = document.createRange();
+      range.setStartBefore(chip);
+      range.collapse(true);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    await page.keyboard.press(`${MOD}+Enter`);
+
+    await expect(page.locator("[data-link-edit-popover]")).toBeVisible();
+    await expect(page.getByLabel("Link URL")).toHaveValue("https://anthropic.com");
+    expect(await opened(page)).toEqual([]);
+    expect(await focusedTabs(page)).toBe(0);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.locator("[data-link-edit-popover]")).toHaveCount(0);
+    await expect.poll(() => activeNodeId(page)).toBe("n");
+  });
+
+  test("Mod+Enter after a revealed link's closing paren opens the link", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await focusBullet(page, "n");
+    await expect(text(page, "n").locator(".link-url-chip")).toBeVisible();
+    await text(page, "n").evaluate((el: HTMLElement) => {
+      const reveal = el.querySelector(".link-reveal");
+      const closeParen = reveal?.lastChild;
+      if (!closeParen?.firstChild) throw new Error("missing closing paren");
+      const range = document.createRange();
+      range.setStart(closeParen.firstChild, 1);
+      range.collapse(true);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    await page.keyboard.press(`${MOD}+Enter`);
+
+    expect(await opened(page)).toEqual(["https://anthropic.com"]);
+    expect(await focusedTabs(page)).toBe(1);
+    await expect(page.locator("[data-link-edit-popover]")).toHaveCount(0);
+  });
+
+  test("Mod-click behind a revealed link's closing paren opens and focuses it", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LINK },
+    ]);
+
+    await focusBullet(page, "n");
+    await expect(text(page, "n").locator(".link-url-chip")).toBeVisible();
+
+    await text(page, "n").evaluate((el: HTMLElement) => {
+      const reveal = el.querySelector(".link-reveal");
+      const closeParen = reveal?.lastChild;
+      if (!closeParen?.firstChild) throw new Error("missing closing paren");
+      const range = document.createRange();
+      range.setStart(closeParen.firstChild, 1);
+      range.collapse(true);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      el.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          metaKey: true,
+        }),
+      );
+    });
+
+    expect(await opened(page)).toEqual(["https://anthropic.com"]);
+    expect(await focusedTabs(page)).toBe(1);
   });
 });
 
@@ -338,6 +456,14 @@ test.describe("Creating links by paste", () => {
   test("pasting a bare URL auto-links it and folds it immediately", async ({
     page,
   }) => {
+    await page.route(
+      (url) => url.pathname === "/api/unfurl",
+      (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ title: null }),
+        }),
+    );
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "" },
     ]);
@@ -544,6 +670,7 @@ test.describe("Edit Link popover", () => {
 
     // Closed, and the token was rewritten in place (a field edit).
     await expect(popover(page)).toHaveCount(0);
+    await expect.poll(() => activeNodeId(page)).toBe("n");
     const anchor = text(page, "n").locator("a[data-link]");
     await expect(anchor).toHaveText("Claude");
     await expect(anchor).toHaveAttribute("href", "https://claude.ai");
@@ -562,6 +689,7 @@ test.describe("Edit Link popover", () => {
     await popover(page).getByRole("button", { name: "Cancel" }).click();
 
     await expect(popover(page)).toHaveCount(0);
+    await expect.poll(() => activeNodeId(page)).toBe("n");
     expect(await readSrc(page, "n")).toBe(LINK);
   });
 

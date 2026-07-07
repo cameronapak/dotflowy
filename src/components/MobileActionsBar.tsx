@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -68,12 +69,23 @@ function useOutlineEditing(findFocusedId: () => string | null): boolean {
   return editing;
 }
 
+/** Finger travel (px) past which a press is a scroll, not a tap. The pill is
+ *  `overflow-x-auto`, so a horizontal drag to scroll it must NOT fire an action
+ *  — mirrors the bullet-dot drag/click split (use-drag-reorder.ts). */
+const TAP_MOVE_THRESHOLD = 10;
+
 /**
  * One toolbar button. `onPointerDown` + `preventDefault` keeps the caret and
  * keyboard alive across the tap (a plain click would blur the span and drop the
  * button's target) — EVERY button does this now; there is no blur/dismiss button,
  * since iOS's own "Done" and Android's back gesture already dismiss the keyboard
  * (ADR 0030). `scale(0.96)` on press gives the tap tactile feedback.
+ *
+ * The action fires on `pointerup`, and ONLY if the finger stayed within
+ * `TAP_MOVE_THRESHOLD` of where it landed — firing on `pointerdown` meant a
+ * horizontal scroll of the pill triggered the button under your finger. The
+ * `preventDefault` stays on `pointerdown` (that's what preserves focus; it does
+ * NOT block the overflow scroll, which is governed by `touch-action`).
  */
 function BarButton({
   label,
@@ -84,6 +96,8 @@ function BarButton({
   onRun: () => void;
   children: ReactNode;
 }) {
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const moved = useRef(false);
   return (
     <button
       type="button"
@@ -96,7 +110,24 @@ function BarButton({
       onPointerDown={(e) => {
         // Keep focus on the contentEditable — see the component doc.
         e.preventDefault();
-        onRun();
+        start.current = { x: e.clientX, y: e.clientY };
+        moved.current = false;
+      }}
+      onPointerMove={(e) => {
+        if (!start.current || moved.current) return;
+        if (
+          Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) >
+          TAP_MOVE_THRESHOLD
+        ) {
+          moved.current = true;
+        }
+      }}
+      onPointerUp={() => {
+        if (start.current && !moved.current) onRun();
+        start.current = null;
+      }}
+      onPointerCancel={() => {
+        start.current = null;
       }}
     >
       {children}

@@ -14,6 +14,7 @@ import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
 import { BibleChip } from "./chip";
 import { getViewRootId } from "../../data/view-state";
 import { openBiblePassageEditPopover } from "./passage-edit-popover";
+import { openUrlInFocusedTab } from "../../components/open-url";
 import { definePlugin, type WidgetEl } from "../types";
 
 const LONG_PRESS_MS = 550;
@@ -105,7 +106,10 @@ export default definePlugin({
           longPressed.delete(el);
           return;
         }
-        window.open(href, "_blank", "noopener,noreferrer");
+        const textEl = el.closest<HTMLElement>(".node-text");
+        openUrlInFocusedTab(href, {
+          restoreFocus: () => textEl?.focus({ preventScroll: true }),
+        });
       },
       onPointerDown: (el, ctx, e) => {
         clearLongPress(el);

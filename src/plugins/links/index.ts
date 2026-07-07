@@ -7,6 +7,7 @@
 // just the decoration half expressed as El descriptors.
 
 import { Effect } from "effect";
+import { LinkIcon } from "lucide-react";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
@@ -15,11 +16,13 @@ import {
   sanitizeLinkLabel,
   swapLinkLabel,
 } from "../../data/links";
+import { getSelectionRange, readSource } from "../../components/inline-code";
+import { openUrlInFocusedTab } from "../../components/open-url";
 import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
 import { getViewRootId } from "../../data/view-state";
 import { definePlugin, type El, type PluginContext } from "../types";
-import { openLinkEditPopover } from "./link-edit-popover";
+import { openLinkCreatePopover, openLinkEditPopover } from "./link-edit-popover";
 
 // Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so
 // it always matches what the tokenizer fed us.
@@ -163,6 +166,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
     el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
     getViewRootId();
   if (!nodeId) return;
+  const textEl = el.closest<HTMLElement>(".node-text");
   const rect = rectEl.getBoundingClientRect();
   openLinkEditPopover(
     {
@@ -172,6 +176,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
       url: parts[2] ?? "",
       x: rect.left,
       y: rect.bottom + 6,
+      restoreFocus: () => textEl?.focus({ preventScroll: true }),
     },
     ctx,
   );
@@ -230,6 +235,42 @@ function singleAnchor(html: string): { text: string; href: string } | null {
   return { text, href };
 }
 
+// Seam C `/link` + the desktop toolbar's link button (ADR 0036): wrap the
+// current selection in a link and open the edit popover to fill the url. Reads
+// the focused contentEditable directly (the same seam wrap.ts uses); resolves a
+// mirror row to its source node so the write lands where the text lives. With no
+// selection it opens the popover with an empty label (type both). Positioned at
+// the selection rect, falling back to the span.
+function createLinkFromSelection(nodeId: string, ctx: PluginContext): void {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || !el.isContentEditable) return;
+
+  const contentId = getTreeIndex().byId.get(nodeId)?.mirrorOf ?? nodeId;
+  const source = readSource(el);
+  const range = getSelectionRange(el) ?? {
+    start: source.length,
+    end: source.length,
+  };
+  const selText = source.slice(range.start, range.end);
+
+  let x = window.innerWidth / 2;
+  let y = window.innerHeight / 2;
+  const sel = window.getSelection();
+  const rect =
+    sel && sel.rangeCount > 0
+      ? sel.getRangeAt(0).getBoundingClientRect()
+      : el.getBoundingClientRect();
+  if (rect.width || rect.height) {
+    x = rect.left;
+    y = rect.bottom + 6;
+  }
+
+  openLinkCreatePopover(
+    { nodeId: contentId, source, start: range.start, end: range.end, selText, x, y },
+    ctx,
+  );
+}
+
 export default definePlugin({
   id: "links",
   tokens: [
@@ -250,6 +291,24 @@ export default definePlugin({
           ? revealedLinkEl(label, url)
           : foldedLinkEl(label, url, tok);
       },
+    },
+  ],
+
+  // Seam C: `/link` wraps the selection in a link and opens the edit popover.
+  // caretScoped -- it needs the live selection the overlay-based Cmd+K can't hold
+  // (ADR 0034), so it's a slash-palette + toolbar action, not a command-center
+  // row. The desktop selection toolbar (ADR 0036) runs this same command.
+  commands: [
+    {
+      id: "link",
+      label: "Link",
+      description: "Wrap the selection in a link",
+      icon: LinkIcon,
+      keywords: ["link", "url", "hyperlink", "anchor", "href"],
+      available: () => true,
+      caretScoped: true,
+      run: (nodeId: string, ctx: PluginContext) =>
+        createLinkFromSelection(nodeId, ctx),
     },
   ],
 
@@ -276,7 +335,10 @@ export default definePlugin({
         e.preventDefault();
         e.stopPropagation();
         const href = (el as HTMLAnchorElement).href;
-        window.open(href, "_blank", "noopener,noreferrer");
+        const textEl = el.closest<HTMLElement>(".node-text");
+        openUrlInFocusedTab(href, {
+          restoreFocus: () => textEl?.focus({ preventScroll: true }),
+        });
       },
     },
   ],

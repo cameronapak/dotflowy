@@ -35,7 +35,7 @@ export function stripLinks(text: string): string {
   return text.replace(LINK_RE(), (_full, label: string) => label);
 }
 
-/** Return the markdown link whose editable label/url contains `offset`.
+/** Return the markdown link whose source token contains or touches `offset`.
  *  The offset is in SOURCE space, matching contentEditable caret helpers. */
 export function linkAtOffset(text: string, offset: number): LinkAtOffset | null {
   for (const m of text.matchAll(LINK_RE())) {
@@ -43,15 +43,8 @@ export function linkAtOffset(text: string, offset: number): LinkAtOffset | null 
     const token = m[0] ?? "";
     const label = m[1] ?? "";
     const url = m[2] ?? "";
-    const labelStart = start + 1;
-    const labelEnd = labelStart + label.length;
-    const urlStart = labelEnd + 2; // `](`
-    const urlEnd = urlStart + url.length;
-    const inLabel = offset >= labelStart && offset <= labelEnd;
-    const inUrl = offset >= urlStart && offset <= urlEnd;
-    if (inLabel || inUrl) {
-      return { label, url, start, end: start + token.length };
-    }
+    const end = start + token.length;
+    if (offset >= start && offset <= end) return { label, url, start, end };
   }
   return null;
 }
