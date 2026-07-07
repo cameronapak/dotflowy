@@ -43,7 +43,7 @@ describe('outlineToMarkdown', () => {
     )
   })
 
-  test('emits node.text verbatim (links, tags, code are already markdown)', () => {
+  test('emits markdown source for links, tags, and code', () => {
     const node = makeNode({
       id: 'n',
       text: 'see [docs](https://x.dev) #ref `code`',
@@ -52,6 +52,30 @@ describe('outlineToMarkdown', () => {
 
     expect(outlineToMarkdown(index, ['n'])).toBe(
       '- see [docs](https://x.dev) #ref `code`',
+    )
+  })
+
+  test('exports route-bible references as readable markdown links', () => {
+    const node = makeNode({
+      id: 'n',
+      text: 'Read John 3:16 and Genesis 1',
+    })
+    const index = buildTreeIndex([node])
+
+    expect(outlineToMarkdown(index, ['n'])).toBe(
+      '- Read [John 3:16](https://route.bible/jhn.3.16?src=dotflowy) and [Genesis 1](https://route.bible/gen.1?src=dotflowy)',
+    )
+  })
+
+  test('does not relink route-bible references inside existing links or code', () => {
+    const node = makeNode({
+      id: 'n',
+      text: 'see [John 3:16](https://example.com) and `Romans 8:28`',
+    })
+    const index = buildTreeIndex([node])
+
+    expect(outlineToMarkdown(index, ['n'])).toBe(
+      '- see [John 3:16](https://example.com) and `Romans 8:28`',
     )
   })
 

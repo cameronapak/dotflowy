@@ -104,14 +104,14 @@ function revealedHighlightEl(tok: string): El {
 export default definePlugin({
   id: "highlight",
 
-  // Seam A: one folding token. Precedence 34 sits after the emphasis block
-  // (30-33); `=` shares a leading char with nothing, so there's no
-  // double-vs-single coupling to order around.
+  // Seam A: one folding token. Precedence 35 sits after the emphasis block
+  // (30-34, incl. underscore-italic at 34); `=` shares a leading char with
+  // nothing, so there's no double-vs-single coupling to order around.
   tokens: [
     {
       id: "highlight",
       pattern: HIGHLIGHT_PATTERN,
-      precedence: 34,
+      precedence: 35,
       folds: true,
       render: (tok, { revealOffset, start, end }) => {
         const reveal =

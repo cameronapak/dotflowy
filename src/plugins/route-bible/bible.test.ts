@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveBibleRef } from './bible'
+import { bibleRefsToMarkdownLinks, resolveBibleRef } from './bible'
 
 describe('resolveBibleRef', () => {
   test('resolves real references to a route.bible url with attribution', () => {
@@ -17,5 +17,21 @@ describe('resolveBibleRef', () => {
     expect(resolveBibleRef('Revelation 99:99')).toBeNull()
     expect(resolveBibleRef('just some plain text')).toBeNull()
     expect(resolveBibleRef('')).toBeNull()
+  })
+})
+
+describe('bibleRefsToMarkdownLinks', () => {
+  test('converts valid references to route.bible markdown links', () => {
+    expect(bibleRefsToMarkdownLinks('Read John 3:16 today')).toBe(
+      'Read [John 3:16](https://route.bible/jhn.3.16?src=dotflowy) today',
+    )
+  })
+
+  test('leaves invalid candidates and existing markdown/code alone', () => {
+    expect(
+      bibleRefsToMarkdownLinks(
+        'Hello 3 [John 3:16](https://example.com) `Romans 8:28`',
+      ),
+    ).toBe('Hello 3 [John 3:16](https://example.com) `Romans 8:28`')
   })
 })
