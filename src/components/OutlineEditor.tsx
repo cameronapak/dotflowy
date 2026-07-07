@@ -91,7 +91,8 @@ import {
 import { bootstrapOutline } from "../data/seed";
 import { runStructural } from "../data/structural";
 import { setNodeActionBridge } from "../data/command-bridge";
-import { capture, drop, redo, undo } from "../data/history";
+import { capture, drop } from "../data/history";
+import { runHistoryRestore } from "./history-restore";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
   decorate,
@@ -927,24 +928,25 @@ function useOutlineFocus(): OutlineFocus {
   // native contentEditable undo (preventDefault). The focused id is handed in so
   // redo can return focus where the action left it; the restored id becomes the
   // next pending focus.
-  // undo/redo replay a snapshot as a mix of insert/update/delete -- the same
-  // multi-node relink a structural mutation does, so they ride the same atomic
-  // batch (one frame, held until echo). See runStructural / PLAN.md.
+  // undo/redo replay a snapshot diff as a mix of insert/update/delete -- the
+  // same multi-node relink a structural mutation does, so they ride the same
+  // atomic batch (one frame, held until echo). runHistoryRestore picks the
+  // apply path by diff size: small diffs stay synchronous (this must not regress
+  // the keystroke-adjacent path); huge ones (undoing a 17k-node import/delete)
+  // stream through runStructuralSliced behind a modal progress dialog.
   useHotkey(
     "Mod+Z",
     () =>
-      runStructural(() => {
-        const focusId = undo(getTreeIndex(), findFocusedId());
-        if (focusId) pendingFocus.current = focusId;
+      runHistoryRestore("undo", findFocusedId(), (id) => {
+        pendingFocus.current = id;
       }),
     { preventDefault: true },
   );
   useHotkey(
     "Mod+Shift+Z",
     () =>
-      runStructural(() => {
-        const focusId = redo(getTreeIndex(), findFocusedId());
-        if (focusId) pendingFocus.current = focusId;
+      runHistoryRestore("redo", findFocusedId(), (id) => {
+        pendingFocus.current = id;
       }),
     { preventDefault: true },
   );
@@ -1244,14 +1246,12 @@ function useMobileBarActions({
       },
       // Verbatim twins of the Mod+Z / Mod+Shift+Z hotkeys in useOutlineFocus.
       undo: () =>
-        runStructural(() => {
-          const focusId = undo(getTreeIndex(), findFocusedId());
-          if (focusId) pendingFocus.current = focusId;
+        runHistoryRestore("undo", findFocusedId(), (id) => {
+          pendingFocus.current = id;
         }),
       redo: () =>
-        runStructural(() => {
-          const focusId = redo(getTreeIndex(), findFocusedId());
-          if (focusId) pendingFocus.current = focusId;
+        runHistoryRestore("redo", findFocusedId(), (id) => {
+          pendingFocus.current = id;
         }),
       // Flip completion relative to the CONTENT node's current state (mirror-aware,
       // like onDeleteNode); onToggleCompleted enforces the protected-node guard.
