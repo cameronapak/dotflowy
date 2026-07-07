@@ -31,10 +31,8 @@ import {
   UNDERLINE_PATTERN,
 } from "../../data/emphasis";
 import { definePlugin, type El, type PluginContext } from "../types";
-import {
-  type MarkerPair,
-  wrapSelectionOrInsert,
-} from "../../components/wrap";
+import { mdPunct } from "../../components/inline-code";
+import { type MarkerPair, wrapSelectionOrInsert } from "../../components/wrap";
 
 /** The four marker pairs. Keys match the slash-command ids and the keymap
  *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
@@ -119,22 +117,17 @@ function revealedEmphasisEl(
   interior: string,
   marker: string,
 ): El {
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   return {
     tag: "span",
     attrs: { class: "emphasis-reveal", "data-emphasis-reveal": true },
     children: [
-      punct(marker),
+      mdPunct(marker),
       {
         tag: kind.tag,
         attrs: { class: `${kind.class} ${kind.util}` },
         children: [interior],
       },
-      punct(marker),
+      mdPunct(marker),
     ],
   };
 }

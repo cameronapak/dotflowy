@@ -8,8 +8,9 @@
 // a late unfurl), Done drops the edit instead of corrupting the line -- the
 // same contract as the unfurl label swap (ADR 0016).
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDismissable } from "../../components/use-dismissable";
 import { Button, Input } from "@/plugins/kit";
 import {
   encodeUrlForMarkdown,
@@ -99,24 +100,7 @@ export function LinkEditPopover({
   const [label, setLabel] = useState(initialLabel);
   const [url, setUrl] = useState(initialUrl);
 
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    // Defer so the opening click doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKey);
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+  useDismissable(ref, onClose);
 
   // Keep the popover on screen (~320px wide, ~150px tall).
   const left = Math.max(8, Math.min(x, window.innerWidth - 336));

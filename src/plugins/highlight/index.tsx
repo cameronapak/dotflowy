@@ -25,7 +25,7 @@ import {
   type HighlightColor,
 } from "../../data/highlight";
 import { getViewRootId } from "../../data/view-state";
-import { readSource } from "../../components/inline-code";
+import { mdPunct, readSource } from "../../components/inline-code";
 import { wrapSelectionOrInsert } from "../../components/wrap";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { openHighlightColorMenu } from "./highlight-color-menu";
@@ -79,11 +79,6 @@ function foldedHighlightEl(tok: string): El {
 // bare (default-color) run the pen carries no source and is caret-invisible.
 function revealedHighlightEl(tok: string): El {
   const { color, emoji, interior } = parseHighlight(tok);
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   const pen: El = {
     tag: "span",
     attrs: {
@@ -102,7 +97,7 @@ function revealedHighlightEl(tok: string): El {
       "data-highlight": color,
       "data-highlight-reveal": true,
     },
-    children: [punct("=="), pen, interior, punct("==")],
+    children: [mdPunct("=="), pen, interior, mdPunct("==")],
   };
 }
 

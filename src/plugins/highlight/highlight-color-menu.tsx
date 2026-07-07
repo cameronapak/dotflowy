@@ -13,12 +13,15 @@
 // instead of corrupting the line -- the Edit Link popover's contract. A mirror
 // row edits its SOURCE node (`mirrorOf`), matching where the text lives.
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import { Ban, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDismissable } from "../../components/use-dismissable";
 import {
   buildHighlightRun,
+  HIGHLIGHT_DEFAULT_COLOR,
+  HIGHLIGHT_EMOJI,
   parseHighlight,
   spliceHighlightRun,
   type HighlightColor,
@@ -69,19 +72,18 @@ export function openHighlightColorMenu(
   );
 }
 
-// "Default" leads (the bare-run blue), the rest follow in palette order --
-// aria-labels carry the color name so tests/AT can address "Default (blue)".
-const ROWS: ReadonlyArray<{
-  color: HighlightColor;
-  label: string;
-  ariaLabel: string;
-}> = [
-  { color: "blue", label: "Default", ariaLabel: "Default (blue)" },
-  { color: "red", label: "Red", ariaLabel: "Red" },
-  { color: "orange", label: "Orange", ariaLabel: "Orange" },
-  { color: "amber", label: "Amber", ariaLabel: "Amber" },
-  { color: "green", label: "Green", ariaLabel: "Green" },
-  { color: "purple", label: "Purple", ariaLabel: "Purple" },
+// "Default" leads (the bare-run default color), the rest follow the palette
+// order in HIGHLIGHT_EMOJI -- the ONE source of truth for the color set, so a
+// new palette color can't silently drift out of the menu. The Default row's
+// aria-label carries the color name (computed at render) so tests/AT can
+// address "Default (blue)".
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+const ROWS: ReadonlyArray<{ color: HighlightColor; label: string }> = [
+  { color: HIGHLIGHT_DEFAULT_COLOR, label: "Default" },
+  ...HIGHLIGHT_EMOJI.filter((e) => e.color !== HIGHLIGHT_DEFAULT_COLOR).map(
+    (e) => ({ color: e.color, label: capitalize(e.color) }),
+  ),
 ];
 
 const ROW_CLASS =
@@ -107,25 +109,7 @@ export function HighlightColorMenu({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const current = parseHighlight(token).color;
-
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    // Defer so the opening (click/contextmenu) event doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKey);
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+  useDismissable(ref, onClose);
 
   // Keep the menu on screen (~176px wide, ~290px tall).
   const left = Math.max(8, Math.min(x, window.innerWidth - 192));
@@ -140,13 +124,15 @@ export function HighlightColorMenu({
       className="bg-popover text-popover-foreground fixed z-50 flex w-44 flex-col rounded-lg border p-1 shadow-md"
       style={{ left, top }}
     >
-      {ROWS.map(({ color, label, ariaLabel }) => (
+      {ROWS.map(({ color, label }) => (
         <button
           key={color}
           type="button"
           role="menuitemradio"
           aria-checked={current === color}
-          aria-label={ariaLabel}
+          aria-label={
+            color === HIGHLIGHT_DEFAULT_COLOR ? `Default (${color})` : label
+          }
           className={ROW_CLASS}
           onClick={() => onPick(color)}
         >
