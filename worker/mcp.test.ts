@@ -145,6 +145,8 @@ describe('MCP transport', () => {
       'add_to_today',
       'mirror_node',
       'mirror_to_today',
+      'import_opml',
+      'export_opml',
     ])
     const addNode = json.result.tools.find((t: any) => t.name === 'add_node')
     expect(addNode.inputSchema.type).toBe('object')
@@ -437,6 +439,160 @@ describe('MCP tools', () => {
     expect(json.error).toBeUndefined()
     expect(json.result?.isError).toBe(true)
     expect(toolText(json)).toContain('not found')
+  })
+
+  test('import_opml lands the forest as ONE atomic batch with origin stamped, and answers with a receipt', async () => {
+    const fake = makeStore(fixture())
+    const opml = [
+      '<?xml version="1.0"?>',
+      '<opml version="2.0"><head><title>t</title></head><body>',
+      '<outline text="one" _note="a note line"><outline text="one-a" _complete="true" /></outline>',
+      '<outline text="two" _task="true" />',
+      '</body></opml>',
+    ].join('\n')
+    const json = await callTool(fake.store, 'import_opml', { opml, parentId: 'a' })
+    expect(json.result?.isError).toBeUndefined()
+    expect(fake.batches).toHaveLength(1)
+    const inserts = fake.batches[0]!.flatMap((op) => (op.op === 'insert' ? [op.value] : []))
+    // 2 roots + 1 child + 1 note-derived bullet = 4 fresh nodes, all under a,
+    // all provenance-stamped.
+    expect(inserts).toHaveLength(4)
+    expect(inserts.every((n) => n.origin === 'TestAgent')).toBe(true)
+    const roots = inserts.filter((n) => n.parentId === 'a')
+    expect(roots.map((n) => n.text)).toEqual(['one', 'two'])
+    expect(roots[0]!.prevSiblingId).toBe('a1')
+    expect(roots[1]!.prevSiblingId).toBe(roots[0]!.id)
+    expect(inserts.find((n) => n.text === 'two')?.isTask).toBe(true)
+    expect(inserts.find((n) => n.text === 'one-a')?.completed).toBe(true)
+    // The receipt is compact — root ids + texts, counts, landing spot — never
+    // the echoed forest.
+    const text = toolText(json)
+    expect(text).toContain('Imported 4 node(s) under "alpha" (id: a).')
+    expect(text).toContain(`- "one" (id: ${roots[0]!.id})`)
+    expect(text).toContain('1 _note attribute(s) -> 1 child bullet(s)')
+    expect(text).toContain('No fidelity degradations.')
+    expect(text).not.toContain('one-a')
+  })
+
+  test('import_opml with BOTH parentId and date is a loud isError, nothing written', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'import_opml', {
+      opml: '<opml version="2.0"><body><outline text="x" /></body></opml>',
+      parentId: 'a',
+      date: '2026-07-03',
+    })
+    expect(json.result?.isError).toBe(true)
+    expect(toolText(json)).toContain('not both')
+    expect(fake.batches).toHaveLength(0)
+  })
+
+  test('import_opml onto a date creates the day and appends; dryRun claims nothing', async () => {
+    const fake = makeStore(fixture())
+    const opml = '<opml version="2.0"><body><outline text="from-agent" /></body></opml>'
+
+    const dry = await callTool(fake.store, 'import_opml', { opml, date: '2026-07-03', dryRun: true })
+    expect(dry.result?.isError).toBeUndefined()
+    expect(toolText(dry)).toContain('Dry run')
+    expect(toolText(dry)).toContain('Nothing was written.')
+    expect(fake.batches).toHaveLength(0)
+    // A dry run must not claim daily-index ids either — a kv claim IS a write.
+    expect(fake.kv.has('container')).toBe(false)
+    expect(fake.kv.has('2026-07-03')).toBe(false)
+
+    const real = await callTool(fake.store, 'import_opml', { opml, date: '2026-07-03' })
+    expect(real.result?.isError).toBeUndefined()
+    expect(fake.batches).toHaveLength(1)
+    const dayId = fake.kv.get('2026-07-03')!.nodeId
+    const imported = [...fake.nodes.values()].find((n) => n.text === 'from-agent')
+    expect(imported?.parentId).toBe(dayId)
+    expect(toolText(real)).toContain('Friday, July 3, 2026')
+  })
+
+  test('import_opml dryRun onto a parent plans the same receipt and commits nothing', async () => {
+    const fake = makeStore(fixture())
+    const json = await callTool(fake.store, 'import_opml', {
+      opml: '<opml version="2.0"><body><outline text="x" /></body></opml>',
+      parentId: 'a',
+      dryRun: true,
+    })
+    expect(json.result?.isError).toBeUndefined()
+    expect(toolText(json)).toContain('Dry run — would import 1 node(s) under "alpha" (id: a).')
+    expect(fake.batches).toHaveLength(0)
+    expect(fake.nodes.size).toBe(3)
+  })
+
+  test('import_opml over the 5,000-node ceiling is refused with guidance, nothing written', async () => {
+    const fake = makeStore(fixture())
+    const opml = `<opml version="2.0"><body>${'<outline text="x" />'.repeat(5001)}</body></opml>`
+    const json = await callTool(fake.store, 'import_opml', { opml })
+    expect(json.result?.isError).toBe(true)
+    expect(toolText(json)).toContain('5001 exceeds the 5000-node ceiling')
+    // Reject-with-guidance names the app importer as the migration door.
+    expect(toolText(json)).toContain("app's own OPML import")
+    expect(fake.batches).toHaveLength(0)
+  })
+
+  test('import_opml surfaces a parse error with line/column, and rejects a missing parent', async () => {
+    const fake = makeStore(fixture())
+    const truncated = await callTool(fake.store, 'import_opml', {
+      opml: '<opml version="2.0"><body><outline text="x"',
+    })
+    expect(truncated.result?.isError).toBe(true)
+    expect(toolText(truncated)).toMatch(/line \d+, column \d+/)
+    expect(fake.batches).toHaveLength(0)
+
+    const ghost = await callTool(fake.store, 'import_opml', {
+      opml: '<opml version="2.0"><body><outline text="x" /></body></opml>',
+      parentId: 'ghost',
+    })
+    expect(ghost.result?.isError).toBe(true)
+    expect(toolText(ghost)).toContain('not found')
+    expect(fake.batches).toHaveLength(0)
+  })
+
+  test('export_opml returns the raw OPML string with no preamble, scoped by nodeId', async () => {
+    const { store } = makeStore(fixture())
+    const whole = toolText(await callTool(store, 'export_opml', {}))
+    expect(whole.startsWith('<?xml version="1.0"?>')).toBe(true)
+    expect(whole).toContain('<outline text="alpha">')
+    expect(whole).toContain('<outline text="bravo" />')
+
+    const scoped = toolText(await callTool(store, 'export_opml', { nodeId: 'a' }))
+    // Scope mirrors get_outline: the root is included, siblings are not.
+    expect(scoped).toContain('<outline text="alpha">')
+    expect(scoped).toContain('<outline text="alpha one" />')
+    expect(scoped).not.toContain('bravo')
+    expect(scoped).toContain('<title>alpha</title>')
+  })
+
+  test('export_opml round-trips through import_opml', async () => {
+    const fake = makeStore(fixture())
+    const opml = toolText(await callTool(fake.store, 'export_opml', { nodeId: 'a' }))
+    const json = await callTool(fake.store, 'import_opml', { opml, parentId: 'b' })
+    expect(json.result?.isError).toBeUndefined()
+    const inserts = fake.batches[0]!.flatMap((op) => (op.op === 'insert' ? [op.value] : []))
+    expect(inserts.map((n) => n.text)).toEqual(['alpha', 'alpha one'])
+    expect(inserts[1]!.parentId).toBe(inserts[0]!.id)
+  })
+
+  test('export_opml over the 5,000-node ceiling rejects, never truncates', async () => {
+    const seed: Node[] = [makeNode({ id: 'root', text: 'root' })]
+    let prev: string | null = null
+    for (let i = 0; i < 5001; i++) {
+      const id = `c${i}`
+      seed.push(makeNode({ id, text: `child ${i}`, parentId: 'root', prevSiblingId: prev }))
+      prev = id
+    }
+    const { store } = makeStore(seed)
+    const json = await callTool(store, 'export_opml', { nodeId: 'root' })
+    expect(json.result?.isError).toBe(true)
+    expect(toolText(json)).toContain('5002 nodes, over the 5000-node ceiling')
+    expect(toolText(json)).toContain('nodeId')
+
+    // Scoping down to a subtree under the ceiling still works.
+    const scoped = await callTool(store, 'export_opml', { nodeId: 'c0' })
+    expect(scoped.result?.isError).toBeUndefined()
+    expect(toolText(scoped)).toContain('<outline text="child 0" />')
   })
 
   test('a store fault becomes -32603 without leaking internals', async () => {
