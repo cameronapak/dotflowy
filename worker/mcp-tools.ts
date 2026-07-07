@@ -15,8 +15,15 @@
  */
 
 import { Data, Effect, Schema } from 'effect'
-import { createId } from '../src/data/tree'
+import { childrenOf, createId } from '../src/data/tree'
 import type { ChangeOp, Node } from '../src/data/wire-schema'
+import {
+  OPML_MCP_MAX_NODES,
+  type OpmlImportReport,
+  parseOpml,
+  planOpmlImport,
+} from '../src/data/opml-import'
+import { exportOpml } from '../src/data/opml-export'
 import {
   DAILY_CONTAINER_TEXT,
   type TreeIndex,
@@ -32,6 +39,7 @@ import {
   planAddSubtreeToDaily,
   planAddToDaily,
   planDeleteNode,
+  planEnsureDaily,
   planMirrorNode,
   planMirrorToDaily,
   planReparent,
@@ -335,6 +343,45 @@ const MirrorToTodayInput = Schema.Struct({
   date: dateField,
 })
 
+// The OPML pair (ADR 0037). The document travels as a plain string — a
+// non-recursive input, so no `identifier` annotation is needed (unlike
+// add_subtree's forest). Deliberately NO url-fetch argument: fetching a
+// caller-supplied URL from the Worker is an authenticated SSRF surface
+// re-treading unfurl.ts for territory the string argument already covers.
+
+const ImportOpmlInput = Schema.Struct({
+  opml: Schema.String.annotate({
+    description: 'The OPML document to import, as an XML string (e.g. a Workflowy export).',
+  }),
+  parentId: optional(
+    Schema.String.annotate({
+      description:
+        'Parent node id to import under. Omit for the top level. Mutually exclusive with `date`.',
+    }),
+  ),
+  date: optional(
+    Schema.String.annotate({
+      description:
+        "Import onto the daily note for this YYYY-MM-DD instead of a parent (pass the user's local date). Mutually exclusive with `parentId`.",
+    }),
+  ),
+  dryRun: optional(
+    Schema.Boolean.annotate({
+      description:
+        'Parse and plan without writing anything; returns the same receipt (default: false).',
+    }),
+  ),
+})
+
+const ExportOpmlInput = Schema.Struct({
+  nodeId: optional(
+    Schema.String.annotate({
+      description:
+        'Root node to export (the node and its whole subtree). Omit to export the whole outline.',
+    }),
+  ),
+})
+
 // --- The tools ----------------------------------------------------------------
 
 const MAX_OUTLINE_NODES = 500
@@ -355,6 +402,72 @@ const renderCreatedForest = (ops: ReadonlyArray<ChangeOp>, rootIds: ReadonlyArra
     return r instanceof Error ? [] : r.lines
   })
   return formatOutlineLines(lines)
+}
+
+// --- OPML receipt (ADR 0037) ----------------------------------------------------
+// import_opml never echoes the forest back (the caller already holds the
+// document); it answers with a COMPACT receipt — root ids + texts, counts, and
+// the degradation tally with zero-count lines omitted. This is the only place
+// MCP disclosure can live, so the "degraded, never silent" bar lands here.
+
+/** Cap the receipt's root listing — a wide document can carry thousands of
+ *  top-level outlines, and the receipt must stay compact. */
+const MAX_RECEIPT_ROOTS = 20
+
+const tallyLines = (record: Record<string, number>): string[] =>
+  Object.entries(record).map(([msg, n]) => `- ${msg}: ${n}`)
+
+const renderImportReceipt = (args: {
+  report: OpmlImportReport
+  rootIds: ReadonlyArray<string>
+  rootTexts: ReadonlyArray<string>
+  landing: string
+  dryRun: boolean
+}): string => {
+  const { report } = args
+  const lines: string[] = [
+    args.dryRun
+      ? `Dry run — would import ${report.nodesPost} node(s) ${args.landing}. Nothing was written.`
+      : `Imported ${report.nodesPost} node(s) ${args.landing}.`,
+    `Root bullet(s) (${args.rootIds.length}):`,
+  ]
+  const shown = args.rootIds.slice(0, MAX_RECEIPT_ROOTS)
+  shown.forEach((id, i) => {
+    lines.push(`- "${args.rootTexts[i] || '(empty)'}" (id: ${id})`)
+  })
+  if (args.rootIds.length > shown.length) {
+    lines.push(`- … and ${args.rootIds.length - shown.length} more`)
+  }
+  const counts: string[] = []
+  if (report.nodesPost !== report.nodesPre) {
+    counts.push(
+      `${report.nodesPre} OPML outline(s) became ${report.nodesPost} bullet(s) after note/newline splitting`,
+    )
+  }
+  if (report.notes) counts.push(`${report.notes} _note attribute(s) -> ${report.noteLines} child bullet(s)`)
+  if (report.textNewlineSplits) counts.push(`${report.textNewlineSplits} bullet(s) split on embedded newlines`)
+  if (report.emptyText) counts.push(`${report.emptyText} empty-text bullet(s)`)
+  if (report.mirrorsLinked) counts.push(`${report.mirrorsLinked} mirror(s) re-linked`)
+  if (report.mirrorsDetached) counts.push(`${report.mirrorsDetached} mirror(s) imported as detached copies`)
+  if (counts.length) {
+    lines.push('Counts:')
+    for (const c of counts) lines.push(`- ${c}`)
+  }
+  if (report.degradedTotal === 0) {
+    lines.push('No fidelity degradations.')
+  } else {
+    lines.push(`Fidelity degradations (${report.degradedTotal}):`)
+    lines.push(...tallyLines(report.degraded))
+  }
+  if (Object.keys(report.anomalies).length) {
+    lines.push('Tolerated HTML anomalies:')
+    lines.push(...tallyLines(report.anomalies))
+  }
+  if (Object.keys(report.unknownAttributes).length) {
+    lines.push('Unknown OPML attributes (ignored):')
+    lines.push(...tallyLines(report.unknownAttributes))
+  }
+  return lines.join('\n')
 }
 
 export const tools: ReadonlyArray<ToolDef> = [
@@ -654,6 +767,159 @@ export const tools: ReadonlyArray<ToolDef> = [
         )
         yield* commit(store, plan.ops)
         return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${dayId}).`
+      }),
+  },
+  {
+    name: 'import_opml',
+    description:
+      "Import an OPML document (e.g. a Workflowy export) as new bullets — under a parent (parentId), onto the user's daily note (date), or at the top level. Lands as ONE atomic batch and returns a compact receipt (root ids, counts, any fidelity degradations), never the echoed outline. Ceiling: 5,000 nodes — a full Workflowy migration belongs in the app's own OPML import. Pass dryRun to preview the receipt without writing.",
+    input: ImportOpmlInput,
+    readOnly: false,
+    handle: (input: typeof ImportOpmlInput.Type, store, origin) =>
+      Effect.gen(function* () {
+        if (input.parentId != null && input.date != null) {
+          return yield* Effect.fail(
+            new ToolError({ reason: 'pass either parentId or date, not both' }),
+          )
+        }
+        const dryRun = input.dryRun ?? false
+        // The shared core (src/data/opml-import.ts) owns parse + mapping +
+        // degradation counting — this handler is a thin shell over it, so the
+        // MCP surface can't drift from the app importer (ADR 0037).
+        const { forest, report } = yield* parseOpml(input.opml).pipe(
+          Effect.mapError((e) => new ToolError({ reason: e.message })),
+        )
+        // Ceiling + emptiness BEFORE any kv claim or plan (the add_subtree
+        // guard-before-claim rule, ADR 0028) — counted post-split by the shared
+        // core, so the two surfaces can't disagree on what "too big" means.
+        if (report.nodesPost === 0) {
+          return yield* Effect.fail(
+            new ToolError({ reason: 'the OPML document contains no outline nodes' }),
+          )
+        }
+        if (report.nodesPost > OPML_MCP_MAX_NODES) {
+          return yield* Effect.fail(
+            new ToolError({
+              reason: `too many nodes to import: ${report.nodesPost} exceeds the ${OPML_MCP_MAX_NODES}-node ceiling for import_opml — for a large or full migration, use the app's own OPML import instead`,
+            }),
+          )
+        }
+        const timestamp = yield* clock
+        const rootTexts = forest.map((n) => n.text)
+
+        // Daily path (mirrors add_subtree's date targeting: always appends).
+        if (input.date != null) {
+          const dateKey = yield* resolveDateKey(input.date)
+          if (dryRun) {
+            // A dry run must not claim daily-index ids (a kv claim IS a write);
+            // plan against a detached parent purely for the receipt's counts.
+            const plan = yield* unwrap(
+              planOpmlImport(forest, {
+                parentId: null,
+                firstPrev: null,
+                origin,
+                timestamp,
+                newId: createId,
+                maxNodes: OPML_MCP_MAX_NODES,
+              }),
+            )
+            return renderImportReceipt({
+              report,
+              rootIds: plan.rootIds,
+              rootTexts,
+              landing: `onto ${formatDayText(dateKey)}`,
+              dryRun: true,
+            })
+          }
+          const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
+          const dayId = yield* claimDailyId(store, dateKey, createId())
+          const index = yield* loadIndex(store)
+          const ensure = planEnsureDaily(index, { dateKey, containerId, dayId, timestamp })
+          const siblings = index.byId.has(dayId) ? childrenOf(index, dayId) : []
+          const firstPrev = siblings.length ? siblings[siblings.length - 1]!.id : null
+          const plan = yield* unwrap(
+            planOpmlImport(forest, {
+              parentId: dayId,
+              firstPrev,
+              origin,
+              timestamp,
+              newId: createId,
+              maxNodes: OPML_MCP_MAX_NODES,
+            }),
+          )
+          yield* commit(store, [...ensure.ops, ...plan.ops])
+          return renderImportReceipt({
+            report,
+            rootIds: plan.rootIds,
+            rootTexts,
+            landing: `onto ${formatDayText(dateKey)} (daily note id: ${dayId})`,
+            dryRun: false,
+          })
+        }
+
+        // Parent (or top-level) path. No synthetic wrapper container — the
+        // fresh-container rule is app-UI presentation, not data semantics.
+        const index = yield* loadIndex(store)
+        let parentId: string | null = null
+        if (input.parentId != null) {
+          if (!index.byId.has(input.parentId)) {
+            return yield* Effect.fail(
+              new ToolError({ reason: `node not found: ${input.parentId}` }),
+            )
+          }
+          parentId = trueSourceOf(index, input.parentId)
+        }
+        const siblings = childrenOf(index, parentId)
+        const firstPrev = siblings.length ? siblings[siblings.length - 1]!.id : null
+        const plan = yield* unwrap(
+          planOpmlImport(forest, {
+            parentId,
+            firstPrev,
+            origin,
+            timestamp,
+            newId: createId,
+            maxNodes: OPML_MCP_MAX_NODES,
+          }),
+        )
+        if (!dryRun) yield* commit(store, plan.ops)
+        const landing = parentId
+          ? `under "${index.byId.get(parentId)?.text ?? parentId}" (id: ${parentId})`
+          : 'at the top level'
+        return renderImportReceipt({ report, rootIds: plan.rootIds, rootTexts, landing, dryRun })
+      }),
+  },
+  {
+    name: 'export_opml',
+    description:
+      'Export the outline (or one node and its whole subtree via nodeId) as an OPML 2.0 document in the Workflowy dialect. Returns the raw OPML string with no preamble. Ceiling: 5,000 nodes — pass nodeId to scope a large outline.',
+    input: ExportOpmlInput,
+    readOnly: true,
+    handle: (input: typeof ExportOpmlInput.Type, store) =>
+      Effect.gen(function* () {
+        const index = yield* loadIndex(store)
+        const rootId = input.nodeId ?? null
+        if (rootId !== null && !index.byId.has(rootId)) {
+          return yield* Effect.fail(new ToolError({ reason: `node not found: ${rootId}` }))
+        }
+        // The same walk the serializer performs (mirror windows included, cycle
+        // caps identical) sizes the scope; over the ceiling the WHOLE call is
+        // refused — truncated OPML that still parses is silent loss (ADR 0037).
+        const flat = yield* unwrap(
+          flattenSubtree(index, rootId, {
+            maxDepth: Number.POSITIVE_INFINITY,
+            maxNodes: Number.POSITIVE_INFINITY,
+          }),
+        )
+        if (flat.lines.length > OPML_MCP_MAX_NODES) {
+          return yield* Effect.fail(
+            new ToolError({
+              reason: `the export scope holds ${flat.lines.length} nodes, over the ${OPML_MCP_MAX_NODES}-node ceiling for export_opml — pass a nodeId to export a smaller subtree, or use the app's own OPML export for the whole outline`,
+            }),
+          )
+        }
+        const rootNode = rootId !== null ? index.byId.get(trueSourceOf(index, rootId)) : null
+        const title = rootNode?.text.trim() ? rootNode.text : 'dotflowy'
+        return exportOpml(index, rootId, { title })
       }),
   },
 ]
