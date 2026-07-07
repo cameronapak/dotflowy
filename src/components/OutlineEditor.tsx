@@ -12,6 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { Cause, Effect, Fiber } from "effect";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Link,
@@ -90,6 +91,7 @@ import {
 } from "../data/mutations";
 import { bootstrapOutline } from "../data/seed";
 import { runStructural } from "../data/structural";
+import { appRuntime } from "../data/runtime";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { capture, drop } from "../data/history";
 import { runHistoryRestore } from "./history-restore";
@@ -432,6 +434,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     consumeClick,
   });
 
+  // Live plugin async fibers (ctx.run), interrupted on editor unmount (ADR 0039).
+  const runningFibers = useRef(new Set<Fiber.Fiber<void, never>>());
+
   // PluginContext factory (ADR 0001 D8): the promoted command set + tree reads +
   // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
   // the live tree via getTreeIndex() at call time; stable identity.
@@ -444,9 +449,33 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       },
       openOverlay: (node) => setOverlayNode(node),
       openPanel: (node) => setPanelNode(node),
+      run: (effect) => {
+        const guarded = effect.pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() =>
+              console.error("[plugin] async task failed:", Cause.pretty(cause)),
+            ),
+          ),
+          Effect.asVoid,
+        );
+        const set = runningFibers.current;
+        let fiber: Fiber.Fiber<void, never>;
+        fiber = appRuntime.runFork(
+          guarded.pipe(Effect.ensuring(Effect.sync(() => set.delete(fiber)))),
+        );
+        set.add(fiber);
+      },
     }),
     [commands, navigateZoom],
   );
+
+  // Interrupt any still-running plugin fibers when the editor unmounts (ADR 0039).
+  useEffect(() => {
+    const fibers = runningFibers.current;
+    return () => {
+      for (const f of fibers) appRuntime.runFork(Fiber.interrupt(f));
+    };
+  }, []);
 
   // Publish the node-action surface for the Cmd+K command center (ADR 0034). The
   // switcher is mounted in `__root`, OUTSIDE this editor, so it reads these live

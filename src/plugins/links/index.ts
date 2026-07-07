@@ -6,7 +6,7 @@
 // The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
 // just the decoration half expressed as El descriptors.
 
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import { LinkIcon } from "lucide-react";
 import {
   bareHttpUrl,
@@ -18,7 +18,6 @@ import {
 } from "../../data/links";
 import { getSelectionRange, readSource } from "../../components/inline-code";
 import { openUrlInFocusedTab } from "../../components/open-url";
-import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
 import { getViewRootId } from "../../data/view-state";
 import { definePlugin, type El, type PluginContext } from "../types";
@@ -205,7 +204,13 @@ function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
       return typeof data.title === "string" && data.title ? data.title : null;
     },
     catch: (cause) => cause,
-  }).pipe(Effect.orElseSucceed(() => null));
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(8),
+      orElse: () => Effect.succeed<string | null>(null),
+    }),
+    Effect.orElseSucceed(() => null),
+  );
 }
 
 // The just-folded <a> for `token` inside `el` (matched on its `data-src`, which
@@ -380,12 +385,13 @@ export default definePlugin({
       const anchor = findFoldedAnchor(el, token);
       anchor?.classList.add(UNFURLING_CLASS);
 
-      // Fork the unfurl on the app runtime (a tracked fiber, not a floating
-      // `void promise.then`). NOTE: it's app-scoped, not node-scoped -- nothing
-      // interrupts it when the bullet is deleted, so the continuation's own
-      // guards (current == null, verbatim swapLinkLabel match) are what keep a
-      // late title from writing into a deleted or since-edited bullet.
-      appRuntime.runFork(
+      // Run the unfurl through the plugin async seam (ctx.run, ADR 0039): a
+      // tracked fiber on the shared runtime, interrupted on editor unmount. It's
+      // editor-scoped, not node-scoped -- nothing interrupts it when just the
+      // bullet is deleted, so the continuation's own guards (current == null,
+      // verbatim swapLinkLabel match) are what keep a late title from writing
+      // into a deleted or since-edited bullet.
+      ctx.run(
         fetchLinkTitleE(label).pipe(
           Effect.flatMap((title) =>
             Effect.sync(() => {
