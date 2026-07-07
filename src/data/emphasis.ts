@@ -74,6 +74,15 @@ export function hasEmphasis(text: string): boolean {
  *  verbatim. A run with empty interior can't match (the patterns require a
  *  non-empty interior), so there's nothing to collapse. */
 export function stripEmphasis(text: string): string {
+  // Bail before constructing the (unicode-lookaround, per-call-built)
+  // alternation regex when none of the marker chars are present -- the
+  // dominant cost of `flattenInline` on marker-free text (measured ~1.5us/node
+  // from RegExp construction alone), which the `[[` node-link picker's scan
+  // pays per node while the menu is open. Mirrors `stripLinks`/
+  // `stripHighlights`'s parallel guards.
+  if (!text.includes("*") && !text.includes("_") && !text.includes("~")) {
+    return text;
+  }
   return text.replace(anyEmphasisRegex(), (run) => {
     // Every pattern uses the SAME marker char on both edges with equal length
     // (1 for italic/underline, 2 for bold/strike). Count the leading run of

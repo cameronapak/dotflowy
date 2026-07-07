@@ -13,7 +13,7 @@ import {
 import { parseNodeLinks } from './node-links'
 import { buildVisibleRows, type VisibleRow } from './visible-order'
 import { isMirrorsEnabled } from './flags'
-import type { TagFilter } from './tags'
+import { parseTags, type TagFilter } from './tags'
 
 /**
  * A single, app-wide subscription to the nodes collection that derives one
@@ -49,6 +49,7 @@ let index: TreeIndex = {
   childrenByParent: new Map(),
   mirrorsBySource: new Map(),
   linksByTarget: new Map(),
+  tagCorpus: new Map(),
 }
 const listeners = new Set<() => void>()
 let started = false
@@ -115,6 +116,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // refreshes on a bare field edit; parseNodeLinks bails on link-free text, so
   // the keystroke hot path pays two `includes` scans of the edited node's text.
   let linksChanged = false
+  // Tag-corpus transitions (the tags.ts split): a text edit that adds/removes a
+  // `#tag`. Tracked the same way as linksChanged; parseTags bails on tag-free
+  // text so a tag-free keystroke pays the same cheap `includes` scan.
+  let tagsChanged = false
   for (const change of changes) {
     if (change.type === 'delete') {
       const prev = index.byId.get(change.key as string)
@@ -130,6 +135,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       for (const target of parseNodeLinks(prev.text)) {
         removeLink(target, prev.id)
         linksChanged = true
+      }
+      for (const tag of parseTags(prev.text)) {
+        removeTagOccurrence(tag)
+        tagsChanged = true
       }
       continue
     }
@@ -150,6 +159,22 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
           if (!before.includes(t)) {
             addLink(t, next.id)
             linksChanged = true
+          }
+        }
+      }
+      const tagsBefore = prev ? parseTags(prev.text) : []
+      const tagsAfter = parseTags(next.text)
+      if (tagsBefore.length > 0 || tagsAfter.length > 0) {
+        for (const t of tagsBefore) {
+          if (!tagsAfter.includes(t)) {
+            removeTagOccurrence(t)
+            tagsChanged = true
+          }
+        }
+        for (const t of tagsAfter) {
+          if (!tagsBefore.includes(t)) {
+            addTagOccurrence(t)
+            tagsChanged = true
           }
         }
       }
@@ -218,6 +243,9 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     // (link-free) keystroke keeps the reference.
     linksByTarget:
       structural || linksChanged ? new Map(index.linksByTarget) : index.linksByTarget,
+    // Same discipline for the tag corpus: fresh on a structural change or when a
+    // text edit added/removed a tag. A tag-free keystroke keeps the reference.
+    tagCorpus: structural || tagsChanged ? new Map(index.tagCorpus) : index.tagCorpus,
   }
   // Bump the flat-list signal on a structural change OR a visibility flip; a
   // pure text/isTask edit leaves it untouched (the typing hot path). See
@@ -286,6 +314,26 @@ function removeLink(targetId: string, referrerId: string) {
   const i = ids.indexOf(referrerId)
   if (i !== -1) ids.splice(i, 1)
   if (ids.length === 0) index.linksByTarget.delete(targetId)
+}
+
+/** Register one occurrence of `tag` in the maintained corpus (the tags.ts
+ *  split): first-seen casing wins the entry's display `tag`, same rule
+ *  `collectAllTags` applies in a full rebuild. */
+function addTagOccurrence(tag: string) {
+  const key = tag.toLowerCase()
+  const entry = index.tagCorpus.get(key)
+  if (entry) entry.count++
+  else index.tagCorpus.set(key, { tag, count: 1 })
+}
+
+/** Drop one occurrence; prune the entry once its count reaches zero (the tag no
+ *  longer appears anywhere in the outline). */
+function removeTagOccurrence(tag: string) {
+  const key = tag.toLowerCase()
+  const entry = index.tagCorpus.get(key)
+  if (!entry) return
+  entry.count--
+  if (entry.count <= 0) index.tagCorpus.delete(key)
 }
 
 /**

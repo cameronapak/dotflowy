@@ -30,8 +30,12 @@ export function hasLink(text: string): boolean {
 }
 
 /** Flatten links to their label text -- the projection used for fuzzy search
- *  and for clean display in result rows (ADR 0005). */
+ *  and for clean display in result rows (ADR 0005). Bails before building the
+ *  regex when `text` can't contain a link (no `[`) -- `flattenInline` chains
+ *  this on every node text in the `[[` node-link picker's scan while it's
+ *  open, so a link-free node should cost one `includes` check. */
 export function stripLinks(text: string): string {
+  if (!text.includes("[")) return text;
   return text.replace(LINK_RE(), (_full, label: string) => label);
 }
 

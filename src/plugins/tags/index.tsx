@@ -5,7 +5,7 @@
 // stays in src/data/tags.ts and the color side-collection in
 // src/data/tag-colors.ts (Seam E); this folder wires them.
 
-import { buildTagFilter, collectAllTags, parseQuery, TAG_PATTERN } from "../../data/tags";
+import { buildTagFilter, collectTagCorpus, parseQuery, TAG_PATTERN } from "../../data/tags";
 import {
   definePlugin,
   type El,
@@ -161,7 +161,9 @@ export default definePlugin({
         // already has a tag would never autocomplete a second one. Keep the
         // full corpus and filter out just the self-match token.
         const inProgress = ("#" + trigger.query).toLowerCase();
-        const all = collectAllTags(ctx.tree);
+        // Read the maintained corpus (tree-store.ts) instead of rescanning
+        // every node's text on each keystroke while the menu is open.
+        const all = collectTagCorpus(ctx.tree.tagCorpus);
         const matches = (q
           ? all.filter((t) => t.slice(1).toLowerCase().includes(q))
           : all
