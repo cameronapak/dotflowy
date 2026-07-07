@@ -86,6 +86,58 @@ export function runStructuralTracked<T>(body: () => T): {
   return { result, persisted: tx.isPersisted.promise.then(() => undefined) }
 }
 
+/**
+ * `runStructuralTracked` for a batch too large to apply in one synchronous
+ * burst — the OPML import, where ~18k optimistic inserts lock the main thread
+ * for seconds and the modal progress dialog freezes mid-paint (a "hang" to the
+ * user, ADR 0037). Applies `slices` as multiple `mutate` calls on ONE
+ * manually-committed transaction, yielding to the event loop between slices so
+ * the browser paints the progress the caller's `onProgress` just rendered,
+ * then commits once. The wire guarantees are UNCHANGED from `runStructural`:
+ * still one batch POST → one DO `applyBatch` → one echo-hold → one undo point.
+ * Slicing is purely a main-thread scheduling concern, never a wire one.
+ *
+ * The returned promise settles like `runStructuralTracked`'s `persisted`:
+ * resolves once the batch's echo has landed, rejects when anything failed —
+ * a slice that throws (schema validation) rolls the whole transaction back
+ * first, so failure always means "nothing was imported".
+ */
+export async function runStructuralSliced(
+  slices: ReadonlyArray<() => void>,
+  onProgress?: () => void,
+): Promise<void> {
+  // Nesting guard (same as runStructuralTracked): inside an ambient
+  // transaction, apply synchronously — the outer transaction owns persistence,
+  // and yielding mid-ambient-transaction would detach the later slices.
+  if (getActiveTransaction()) {
+    for (const slice of slices) slice()
+    return
+  }
+  const tx = createTransaction({
+    autoCommit: false,
+    mutationFn: async ({ transaction }) => {
+      const ops = transaction.mutations.map(toChangeOp)
+      if (ops.length === 0) return
+      await runPromise(
+        persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
+      )
+    },
+  })
+  try {
+    for (const slice of slices) {
+      tx.mutate(slice)
+      onProgress?.()
+      // Yield so the progress update paints before the next slice's burst.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  } catch (error) {
+    tx.rollback()
+    throw error
+  }
+  if (import.meta.env.DEV) assertTouchedChainsClean(tx.mutations)
+  await tx.commit()
+}
+
 /** A PendingMutation, narrowed to the fields the batch wire format needs. */
 type MutationLike = { type: string; key: unknown; modified: unknown }
 

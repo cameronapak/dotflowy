@@ -137,6 +137,51 @@ test.describe("OPML import", () => {
     );
   });
 
+  test("a multi-slice import (>500 nodes) applies in yielding slices yet lands as ONE atomic batch", async ({
+    page,
+  }) => {
+    // Delay the batch POST *response* so the dialog rests in its post-apply
+    // "saving" phase — deterministic proof the sliced optimistic apply
+    // finished (applied === count) while the single wire batch is in flight.
+    await seedOutline(page, STANDARD_TREE, { postDelayMs: 600 });
+    await page.goto("/");
+    await expect(text(page, "alpha")).toBeVisible();
+
+    // 1,250 bullets -> 1 container slice + 3 chunk slices of <=500.
+    const bullets = Array.from(
+      { length: 1250 },
+      (_, i) => `    <outline text="imported bullet ${i + 1}" />`,
+    ).join("\n");
+    const big = `<?xml version="1.0"?>\n<opml version="2.0">\n  <head><title>big</title></head>\n  <body>\n${bullets}\n  </body>\n</opml>\n`;
+    await pickFile(page, {
+      name: "big.opml",
+      mimeType: "text/xml",
+      buffer: Buffer.from(big),
+    });
+
+    await expect(page.getByTestId("opml-summary")).toContainText(
+      "1,250 bullets",
+    );
+    await page.getByTestId("opml-confirm").click();
+    await expect(page.getByTestId("opml-importing")).toContainText(
+      "Saving 1,250 bullets as one atomic batch.",
+    );
+    await expect(page.getByTestId("opml-success")).toBeVisible();
+    await expect(page.getByTestId("opml-success")).toContainText(
+      "1,250 bullets",
+    );
+    await page.getByRole("button", { name: "Done" }).click();
+
+    // ONE collapsed container, nothing rendered from inside it, and the whole
+    // batch persisted to the (mock) server store across a reload.
+    await page.goto("/");
+    await expect(text(page, "alpha")).toBeVisible();
+    await expect(containerRow(page)).toHaveCount(1);
+    await expect(
+      page.locator("li[data-node-id]", { hasText: "imported bullet" }),
+    ).toHaveCount(0);
+  });
+
   test("a truncated file shows the parse error (line/column) and writes nothing", async ({
     page,
   }) => {

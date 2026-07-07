@@ -27,7 +27,7 @@ import {
 } from "../data/opml-import";
 import { nodesCollection } from "../data/collection";
 import { capture, drop } from "../data/history";
-import { runStructuralTracked } from "../data/structural";
+import { runStructuralSliced } from "../data/structural";
 import { getTreeIndex } from "../data/tree-store";
 import { childrenOf, makeNode, now } from "../data/tree";
 
@@ -41,12 +41,19 @@ import { childrenOf, makeNode, now } from "../data/tree";
  *
  * The commit is the client write path, not a new endpoint: one history
  * `capture` (a single Cmd+Z removes the whole import), then ONE
- * `runStructuralTracked` batch — every insert lands as one `POST /api/nodes
- * {ops}` → DO `applyBatch`, whose reply carries the FINAL seq of the chunked
- * changelog (>500-op batches echo as several frames) and `waitForSeq` holds the
- * optimistic overlay across all of them. Any fault rejects the transaction,
- * TanStack rolls the optimistic state back, and the dialog reports "nothing was
- * imported" — retry-safe, never a half-import.
+ * `runStructuralSliced` transaction — every insert lands as one `POST
+ * /api/nodes {ops}` → DO `applyBatch`, whose reply carries the FINAL seq of the
+ * chunked changelog (>500-op batches echo as several frames) and `waitForSeq`
+ * holds the optimistic overlay across all of them. Any fault rejects the
+ * transaction, TanStack rolls the optimistic state back, and the dialog reports
+ * "nothing was imported" — retry-safe, never a half-import.
+ *
+ * The optimistic inserts are applied in ~500-node SLICES that yield to the
+ * event loop between applications (multiple `mutate` calls on the one
+ * manually-committed transaction): a 17k-node import is seconds of main-thread
+ * work, and a single synchronous burst froze the dialog mid-paint — spinner
+ * dead, app "hung". Slicing keeps the progress counter painting while changing
+ * nothing on the wire.
  *
  * Everything lands under one fresh top-level container ("Imported from
  * Workflowy — {date}"), ALWAYS appended (re-import = a second container, no
@@ -58,9 +65,14 @@ import { childrenOf, makeNode, now } from "../data/tree";
 type Stage =
   | { kind: "closed" }
   | { kind: "summary"; data: OpmlImportResult; fileName: string }
-  | { kind: "importing"; count: number }
+  | { kind: "importing"; count: number; applied: number }
   | { kind: "success"; containerId: string; count: number }
   | { kind: "error"; title: string; detail: string | null };
+
+/** How many nodes one optimistic slice inserts before yielding for a paint —
+ *  sized to keep each slice comfortably under a perceptible pause while
+ *  keeping the yield overhead negligible (a 17k import is ~36 slices). */
+const IMPORT_SLICE_NODES = 500;
 
 function plural(n: number, unit: string): string {
   return `${n} ${unit}${n === 1 ? "" : "s"}`;
@@ -195,9 +207,9 @@ export function OpmlImportDialog() {
   const onConfirm = async () => {
     if (stage.kind !== "summary") return;
     const { forest, report } = stage.data;
-    setStage({ kind: "importing", count: report.nodesPost });
-    // Let the modal progress state paint before the synchronous optimistic
-    // insert burst occupies the main thread.
+    setStage({ kind: "importing", count: report.nodesPost, applied: 0 });
+    // Let the modal progress state paint before planning (id minting for every
+    // node) occupies the main thread.
     await new Promise((r) => setTimeout(r, 0));
 
     const index = getTreeIndex();
@@ -223,29 +235,44 @@ export function OpmlImportDialog() {
 
     // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole import.
     capture(index, null);
-    const { persisted } = runStructuralTracked(() => {
-      nodesCollection.insert(
-        makeNode({
-          id: containerId,
-          prevSiblingId: lastTop,
-          text: containerText(timestamp),
-          collapsed: true,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        }),
-      );
-      // The plan is insert-only, emitted depth-first pre-order with the sibling
-      // chain wired by construction — replayed verbatim into the collection.
-      for (const op of plan.ops) {
-        if (op.op !== "delete") nodesCollection.insert(op.value);
-      }
-    });
+    // The plan is insert-only, emitted depth-first pre-order with the sibling
+    // chain wired by construction — replayed verbatim into the collection, in
+    // yielding slices so the progress counter below actually paints. `applied`
+    // is read by the progress callback after each slice lands.
+    let applied = 0;
+    const slices: Array<() => void> = [
+      () => {
+        nodesCollection.insert(
+          makeNode({
+            id: containerId,
+            prevSiblingId: lastTop,
+            text: containerText(timestamp),
+            collapsed: true,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        );
+      },
+    ];
+    for (let i = 0; i < plan.ops.length; i += IMPORT_SLICE_NODES) {
+      const chunk = plan.ops.slice(i, i + IMPORT_SLICE_NODES);
+      slices.push(() => {
+        for (const op of chunk) {
+          if (op.op !== "delete") nodesCollection.insert(op.value);
+        }
+        applied += chunk.length;
+      });
+    }
     try {
-      await persisted;
+      await runStructuralSliced(slices, () =>
+        setStage({ kind: "importing", count: plan.count, applied }),
+      );
       setStage({ kind: "success", containerId, count: plan.count });
     } catch {
-      // The transaction rolled back, so the outline already matches the
-      // captured snapshot — drop the redundant undo point.
+      // The transaction rolled back (a failed slice rolls back inside
+      // runStructuralSliced; a failed send rolls back in TanStack), so the
+      // outline already matches the captured snapshot — drop the redundant
+      // undo point.
       drop();
       setStage({
         kind: "error",
@@ -297,8 +324,9 @@ export function OpmlImportDialog() {
               <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
               <DialogTitle>Importing…</DialogTitle>
               <DialogDescription>
-                Saving {stage.count.toLocaleString()} bullets as one atomic
-                batch.
+                {stage.applied < stage.count
+                  ? `Adding bullets… ${stage.applied.toLocaleString()} / ${stage.count.toLocaleString()}`
+                  : `Saving ${stage.count.toLocaleString()} bullets as one atomic batch.`}
               </DialogDescription>
             </div>
           )}
