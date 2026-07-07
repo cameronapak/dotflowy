@@ -9,6 +9,7 @@ import {
   ClipboardCopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  FileUpIcon,
   FocusIcon,
   LogOutIcon,
   MonitorIcon,
@@ -30,6 +31,7 @@ import {
   exportOutlineAsOpml,
   setViewCollapsed,
 } from "./header-more-menu";
+import { openOpmlImport } from "./opml-import-opener";
 
 /**
  * The GLOBAL-scope half of the Cmd+K command center (ADR 0034): the header +
@@ -69,6 +71,15 @@ export function useGlobalActions(opts: {
         run: () => {
           void copyOutlineAsMarkdown();
         },
+      },
+      {
+        id: "g:import-opml",
+        label: "Import OPML…",
+        description: "Import a Workflowy OPML export",
+        icon: FileUpIcon,
+        scope: "global",
+        keywords: ["import", "opml", "workflowy", "migrate", "file"],
+        run: () => openOpmlImport(),
       },
       {
         id: "g:export-opml",

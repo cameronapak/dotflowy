@@ -34,11 +34,32 @@ import { chainDisagreements } from './sibling-chain'
  * one atomic frame, and the per-keystroke text path must not await an echo.
  */
 export function runStructural<T>(body: () => T): T {
+  const { result, persisted } = runStructuralTracked(body)
+  // Nobody consumes the outcome here — a failed batch already rolls the
+  // transaction back — so mark the derived promise handled to avoid an
+  // unhandled-rejection report for every offline structural write.
+  persisted.catch(() => {})
+  return result
+}
+
+/**
+ * `runStructural`, plus a `persisted` promise that settles when the batch's
+ * echo has landed (resolves) or the send failed and the optimistic overlay
+ * rolled back (rejects). For flows that must REPORT the outcome — the OPML
+ * import dialog awaits it to flip from "importing" to success/failure (ADR
+ * 0037: any fault means "nothing was imported"). Same single-batch guarantees
+ * as `runStructural`; this only exposes the transaction's own completion.
+ */
+export function runStructuralTracked<T>(body: () => T): {
+  result: T
+  persisted: Promise<void>
+} {
   // Nesting guard: a compound flow (e.g. the daily get-or-create, which creates
   // a container then a day) may call runStructural while already inside one.
   // Join the outer transaction so the whole flow is ONE frame; never open a
-  // second (which would re-tear the very thing we're fixing).
-  if (getActiveTransaction()) return body()
+  // second (which would re-tear the very thing we're fixing). The outer
+  // transaction owns persistence, so there is nothing separate to track.
+  if (getActiveTransaction()) return { result: body(), persisted: Promise.resolve() }
 
   let result!: T
   const tx = createTransaction({
@@ -50,7 +71,9 @@ export function runStructural<T>(body: () => T): T {
       // P1 (atomic, writeSem-serialized send) → P2 (hold optimistic until the
       // echo) as ONE Effect program, bridged once here at the async mutationFn
       // seam (ADR 0021). waitForSeqE never fails, so the only rejection — which
-      // rolls the transaction back — comes from the batch send.
+      // rolls the transaction back — comes from the batch send. A chunked
+      // >500-op batch replies with its FINAL seq (worker/outline-do.ts), so
+      // waiting on it spans the whole multi-frame echo.
       await runPromise(
         persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
       )
@@ -60,7 +83,7 @@ export function runStructural<T>(body: () => T): T {
     result = body()
   })
   if (import.meta.env.DEV) assertTouchedChainsClean(tx.mutations)
-  return result
+  return { result, persisted: tx.isPersisted.promise.then(() => undefined) }
 }
 
 /** A PendingMutation, narrowed to the fields the batch wire format needs. */
