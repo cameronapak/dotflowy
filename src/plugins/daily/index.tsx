@@ -16,6 +16,7 @@
 // capture/pending-focus semantics are editor-edit concerns a get-or-create that
 // navigates away doesn't want.
 
+import { Effect } from "effect";
 import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
@@ -216,7 +217,10 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
       disabled={pending}
       aria-busy={pending}
       data-daily-nav-pending={pending ? "" : undefined}
-      onClick={() => void goToDate(localDateKey(), getCtx())}
+      onClick={() => {
+        const ctx = getCtx();
+        ctx.run(Effect.promise(() => goToDate(localDateKey(), ctx)));
+      }}
     >
       {pending ? (
         <Loader2Icon className="animate-spin" />
@@ -303,7 +307,7 @@ export default definePlugin({
         if (!key) return;
         e.preventDefault();
         e.stopPropagation();
-        void goToDate(key, ctx);
+        ctx.run(Effect.promise(() => goToDate(key, ctx)));
       },
     },
   ],
@@ -518,10 +522,12 @@ export default definePlugin({
         hint: "Creates today's daily note",
         icon: CalendarDaysIcon,
         run: () =>
-          void getOrCreateDay(key, ctx.index).then((id) => {
-            if (id) ctx.goTo(id);
-            else toast.error("Couldn't open today's daily note");
-          }),
+          void getOrCreateDay(key, ctx.index)
+            .then((id) => {
+              if (id) ctx.goTo(id);
+              else toast.error("Couldn't open today's daily note");
+            })
+            .catch(() => toast.error("Couldn't open today's daily note")),
       },
     ];
   },
