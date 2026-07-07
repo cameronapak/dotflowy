@@ -17,6 +17,7 @@ import {
   swapLinkLabel,
 } from "../../data/links";
 import { getSelectionRange, readSource } from "../../components/inline-code";
+import { openUrlInFocusedTab } from "../../components/open-url";
 import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
 import { getViewRootId } from "../../data/view-state";
@@ -165,6 +166,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
     el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
     getViewRootId();
   if (!nodeId) return;
+  const textEl = el.closest<HTMLElement>(".node-text");
   const rect = rectEl.getBoundingClientRect();
   openLinkEditPopover(
     {
@@ -174,6 +176,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
       url: parts[2] ?? "",
       x: rect.left,
       y: rect.bottom + 6,
+      restoreFocus: () => textEl?.focus({ preventScroll: true }),
     },
     ctx,
   );
@@ -332,7 +335,10 @@ export default definePlugin({
         e.preventDefault();
         e.stopPropagation();
         const href = (el as HTMLAnchorElement).href;
-        window.open(href, "_blank", "noopener,noreferrer");
+        const textEl = el.closest<HTMLElement>(".node-text");
+        openUrlInFocusedTab(href, {
+          restoreFocus: () => textEl?.focus({ preventScroll: true }),
+        });
       },
     },
   ],

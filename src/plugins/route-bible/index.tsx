@@ -12,6 +12,7 @@
 
 import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
 import { BibleChip } from "./chip";
+import { openUrlInFocusedTab } from "../../components/open-url";
 import { definePlugin, type WidgetEl } from "../types";
 
 // The chip is a `<dotflowy-widget>` atom mounting BibleChip (ADR 0006). `source`
@@ -63,7 +64,10 @@ export default definePlugin({
         if (!href) return;
         e.preventDefault();
         e.stopPropagation();
-        window.open(href, "_blank", "noopener,noreferrer");
+        const textEl = el.closest<HTMLElement>(".node-text");
+        openUrlInFocusedTab(href, {
+          restoreFocus: () => textEl?.focus({ preventScroll: true }),
+        });
       },
     },
   ],
