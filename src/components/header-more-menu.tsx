@@ -6,6 +6,7 @@ import {
   CircleCheckIcon,
   ClipboardCopyIcon,
   DownloadIcon,
+  FileUpIcon,
   FocusIcon,
   LogOutIcon,
   MonitorIcon,
@@ -50,6 +51,7 @@ import { childrenOf } from "../data/tree";
 import { toggleCollapsed } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import { capture } from "../data/history";
+import { openOpmlImport } from "./opml-import-opener";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -215,6 +217,11 @@ export function HeaderMoreMenu() {
           <DropdownMenuItem onClick={copyOutlineAsMarkdown}>
             <ClipboardCopyIcon />
             Copy as Markdown
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={() => openOpmlImport()}>
+            <FileUpIcon />
+            Import OPML…
           </DropdownMenuItem>
 
           <DropdownMenuItem onClick={exportOutlineAsOpml}>

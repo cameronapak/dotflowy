@@ -10,6 +10,7 @@ import { TextSizeProvider } from '../components/text-size-provider'
 import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
 import { MoveDialog } from '../components/move-dialog'
+import { OpmlImportDialog } from '../components/opml-import-dialog'
 import { MirrorPlaces } from '../components/mirror-places'
 import { TagColorStyles } from '../plugins/tags/tag-color-menu'
 import { SpotlightController } from '../components/spotlight-mode'
@@ -79,6 +80,7 @@ function RootComponent() {
               <Outlet />
               <NodeSwitcher />
               <MoveDialog />
+              <OpmlImportDialog />
               <MirrorPlaces />
               <TagColorStyles />
               <SpotlightController />
