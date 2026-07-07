@@ -41,7 +41,7 @@ import {
   type TokenView,
 } from "../types";
 import { mdPunct } from "../../components/inline-code";
-import { type MarkerPair, wrapSelectionOrInsert } from "../../components/wrap";
+import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 
 /** The four marker pairs. Keys match the slash-command ids and the keymap
  *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
@@ -224,8 +224,10 @@ export default definePlugin({
     // Wrap is caret/selection-scoped -- excluded from the Cmd+K command center,
     // which has no live caret (ADR 0034). Slash palette + Seam D still run it.
     caretScoped: true,
+    // Toggle, not add-only: re-running on an already-wrapped selection unwraps
+    // it (ADR 0036), so /bold and the toolbar's bold button agree.
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
+      toggleWrapSelection(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 
   // Seam D: the same four kinds on hotkeys, wired on the bullet AND the zoomed
@@ -238,6 +240,6 @@ export default definePlugin({
     id,
     hotkey,
     run: (nodeId: string, ctx: PluginContext) =>
-      wrapSelectionOrInsert(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
+      toggleWrapSelection(nodeId, MARKERS[kind], ctx.mutations.onTextChange),
   })),
 });

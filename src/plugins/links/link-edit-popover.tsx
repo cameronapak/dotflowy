@@ -75,6 +75,72 @@ export function openLinkEditPopover(
   );
 }
 
+/** CREATE a link over a selection (ADR 0036): build `[label](url)` and splice it
+ *  into the node's LIVE text at the captured range. Verbatim-safe like
+ *  submitLinkEdit -- if the line is unchanged since the popover opened we splice
+ *  by offset, otherwise we fall back to the first occurrence of the selected
+ *  text; if neither matches (the line was edited out from under us) the create
+ *  is dropped rather than corrupting the line. No url = no link (Cancel-like). */
+export function submitLinkCreate(
+  args: {
+    nodeId: string;
+    source: string;
+    start: number;
+    end: number;
+    selText: string;
+  },
+  label: string,
+  url: string,
+  mutations: NodeCommands,
+): void {
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return;
+  const safeLabel = sanitizeLinkLabel(label) || trimmedUrl;
+  const token = `[${safeLabel}](${encodeUrlForMarkdown(trimmedUrl)})`;
+  const current = getTreeIndex().byId.get(args.nodeId)?.text;
+  if (current == null) return;
+
+  let next: string | null = null;
+  if (current === args.source) {
+    next = current.slice(0, args.start) + token + current.slice(args.end);
+  } else if (args.selText) {
+    const at = current.indexOf(args.selText);
+    if (at >= 0)
+      next =
+        current.slice(0, at) + token + current.slice(at + args.selText.length);
+  }
+  if (next != null && next !== current) mutations.onTextChange(args.nodeId, next);
+}
+
+/** Open the create-link popover prefilled with the selected text as the label
+ *  and an empty url, positioned at the selection. Reuses LinkEditPopover so
+ *  create + edit share one UI. */
+export function openLinkCreatePopover(
+  args: {
+    nodeId: string;
+    source: string;
+    start: number;
+    end: number;
+    selText: string;
+    x: number;
+    y: number;
+  },
+  ctx: PluginContext,
+): void {
+  ctx.openOverlay(
+    <LinkEditPopover
+      label={args.selText}
+      url=""
+      x={args.x}
+      y={args.y}
+      onSubmit={(label, url) =>
+        submitLinkCreate(args, label, url, ctx.mutations)
+      }
+      onClose={() => ctx.openOverlay(null)}
+    />,
+  );
+}
+
 /**
  * The popover itself: anchored below the clicked link (fixed, clamped on
  * screen), dismissed on outside pointerdown or Escape, submitted on Done or
