@@ -3,8 +3,10 @@ import {
   buildTrail,
   buildTreeIndex,
   childrenOf,
+  countSubtreeNodes,
   makeNode,
   orphanedMirrorsBy,
+  planRemoveSubtrees,
   trueSourceOf,
   wouldMirrorCycle,
 } from './tree'
@@ -192,5 +194,56 @@ describe('buildTrail', () => {
 
   test('null root yields an empty trail', () => {
     expect(buildTrail(index, null)).toEqual([])
+  })
+})
+
+describe('countSubtreeNodes + planRemoveSubtrees', () => {
+  // top-level: x -> p -> y ; p's children a -> b -> c ; b's children b1 -> b2
+  const fixture = () =>
+    buildTreeIndex([
+      makeNode({ id: 'x', prevSiblingId: null }),
+      makeNode({ id: 'p', prevSiblingId: 'x' }),
+      makeNode({ id: 'y', prevSiblingId: 'p' }),
+      makeNode({ id: 'a', parentId: 'p', prevSiblingId: null }),
+      makeNode({ id: 'b', parentId: 'p', prevSiblingId: 'a' }),
+      makeNode({ id: 'c', parentId: 'p', prevSiblingId: 'b' }),
+      makeNode({ id: 'b1', parentId: 'b', prevSiblingId: null }),
+      makeNode({ id: 'b2', parentId: 'b', prevSiblingId: 'b1' }),
+    ])
+
+  test('counts roots + all descendants, deduping overlapping roots', () => {
+    const index = fixture()
+    expect(countSubtreeNodes(index, ['p'])).toBe(6)
+    expect(countSubtreeNodes(index, ['b'])).toBe(3)
+    // b sits inside p's subtree -- counted once
+    expect(countSubtreeNodes(index, ['p', 'b'])).toBe(6)
+    expect(countSubtreeNodes(index, ['ghost'])).toBe(0)
+  })
+
+  test('single root: deletes children-before-parent, repoints the follower', () => {
+    const index = fixture()
+    const plan = planRemoveSubtrees(index, ['p'])
+    expect(plan.deleteIds).toHaveLength(6)
+    // reverse pre-order: the root is deleted LAST, every child before its parent
+    expect(plan.deleteIds[plan.deleteIds.length - 1]).toBe('p')
+    expect(plan.deleteIds.indexOf('b1')).toBeLessThan(plan.deleteIds.indexOf('b'))
+    expect(plan.deleteIds.indexOf('b2')).toBeLessThan(plan.deleteIds.indexOf('b'))
+    // y followed p -> repointed to p's prev (x)
+    expect(plan.repoints).toEqual([{ id: 'y', prevSiblingId: 'x' }])
+  })
+
+  test('contiguous run: the survivor walks the whole doomed chain to its head', () => {
+    const index = fixture()
+    const plan = planRemoveSubtrees(index, ['a', 'b'])
+    expect(plan.deleteIds).toHaveLength(4)
+    // c followed b; a and b are both doomed -> c becomes the head (null prev)
+    expect(plan.repoints).toEqual([{ id: 'c', prevSiblingId: null }])
+  })
+
+  test('tail root needs no repoint; unknown ids are skipped', () => {
+    const index = fixture()
+    const plan = planRemoveSubtrees(index, ['y', 'ghost'])
+    expect(plan.deleteIds).toEqual(['y'])
+    expect(plan.repoints).toEqual([])
   })
 })

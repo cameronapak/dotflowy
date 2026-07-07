@@ -11,6 +11,7 @@ import { ShowCompletedProvider } from '../components/show-completed-provider'
 import { NodeSwitcher } from '../components/node-switcher'
 import { MoveDialog } from '../components/move-dialog'
 import { OpmlImportDialog } from '../components/opml-import-dialog'
+import { DeleteConfirmDialog } from '../components/delete-confirm-dialog'
 import { MirrorPlaces } from '../components/mirror-places'
 import { TagColorStyles } from '../plugins/tags/tag-color-menu'
 import { SpotlightController } from '../components/spotlight-mode'
@@ -81,6 +82,7 @@ function RootComponent() {
               <NodeSwitcher />
               <MoveDialog />
               <OpmlImportDialog />
+              <DeleteConfirmDialog />
               <MirrorPlaces />
               <TagColorStyles />
               <SpotlightController />

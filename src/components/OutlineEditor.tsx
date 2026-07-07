@@ -51,9 +51,14 @@ import {
 import {
   buildTreeIndex,
   childrenOf,
+  countSubtreeNodes,
   type Node,
   type TreeIndex,
 } from "../data/tree";
+import {
+  DELETE_CONFIRM_THRESHOLD,
+  openDeleteConfirm,
+} from "./delete-confirm-opener";
 import {
   buildVisibleRows,
   findVisibleNeighbor,
@@ -1537,36 +1542,48 @@ function useNodeCommands({
           }
         },
 
-        onDeleteNode: (id) =>
+        onDeleteNode: (id) => {
+          // Delete the INSTANCE (position is local, ADR 0022): backspacing a
+          // mirror's own row removes that mirror, never its source (which would
+          // strand the other instances -- promote-on-source-delete is Stage 3).
+          // Address by the focused key; the keymap passes the content id in a
+          // mirror.
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
+          const idx = getTreeIndex();
+          const mirrorsOn = isMirrorsEnabled();
+          const contentId = mirrorsOn
+            ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
+            : instanceId;
+          // A protected node can't be deleted. This is the single funnel every
+          // delete path flows through, so the core enforces it here: shake the
+          // row + toast why (guardProtected), and bail before removing anything.
+          // Protection follows CONTENT (the source); the shake lands on the row
+          // the user acted on (the active key). The node isn't removed, so its
+          // row still exists.
+          if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
+          // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
+          // v1 blocks). A mirror's own row is never a source, so this no-ops
+          // there -- backspacing a mirror still works. Flag-gated: off-flag a
+          // mirrorOf node is just a normal node, so the guard never runs.
+          if (
+            mirrorsOn &&
+            guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey))
+          )
+            return;
+          // Big-subtree gate: deleting a threshold-plus subtree asks first, then
+          // runs as the dialog's sliced progress flow (capture + plan + one
+          // sliced batch happen there) -- the import-freeze lesson, inverted.
+          const count = countSubtreeNodes(idx, [instanceId]);
+          if (count >= DELETE_CONFIRM_THRESHOLD) {
+            openDeleteConfirm({
+              rootIds: [instanceId],
+              count,
+              captureKey: activeKey,
+            });
+            return;
+          }
           runStructural(() => {
-            // Delete the INSTANCE (position is local, ADR 0022): backspacing a
-            // mirror's own row removes that mirror, never its source (which would
-            // strand the other instances -- promote-on-source-delete is Stage 3).
-            // Address by the focused key; the keymap passes the content id in a
-            // mirror.
-            const activeKey = findFocusedId() ?? id;
-            const instanceId = instanceIdForKey(activeKey);
-            const idx = getTreeIndex();
-            const mirrorsOn = isMirrorsEnabled();
-            const contentId = mirrorsOn
-              ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
-              : instanceId;
-            // A protected node can't be deleted. This is the single funnel every
-            // delete path flows through, so the core enforces it here: shake the
-            // row + toast why (guardProtected), and bail before removing anything.
-            // Protection follows CONTENT (the source); the shake lands on the row
-            // the user acted on (the active key). The node isn't removed, so its
-            // row still exists.
-            if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
-            // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
-            // v1 blocks). A mirror's own row is never a source, so this no-ops
-            // there -- backspacing a mirror still works. Flag-gated: off-flag a
-            // mirrorOf node is just a normal node, so the guard never runs.
-            if (
-              mirrorsOn &&
-              guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey))
-            )
-              return;
             capture(idx, activeKey);
             // Focus the row directly ABOVE the deleted one (Workflowy backspace
             // behavior), computed before the mutation so the neighbor still
@@ -1584,7 +1601,8 @@ function useNodeCommands({
             const target = above ?? focusId;
             if (target) pendingFocus.current = target;
             else drop(); // node didn't exist; nothing was deleted
-          }),
+          });
+        },
 
         onToggleCompleted: (id, completed) => {
           // A protected node can't be marked done (completing it would strike
