@@ -1,6 +1,7 @@
 import type { Node } from './schema'
 import { parseNodeLinks } from './node-links'
 import { orderSiblings } from './sibling-chain'
+import { parseTags, type TagEntry } from './tags'
 
 export type { Node } from './schema'
 
@@ -37,6 +38,14 @@ export interface TreeIndex {
    * "{n} backlinks" chrome. Empty for a link-free outline.
    */
   linksByTarget: Map<string, string[]>
+  /**
+   * Maintained `#tag` corpus (the `src/data/tags.ts` split): a case-folded key
+   * -> {@link TagEntry}, built here and maintained incrementally in
+   * tree-store.ts alongside `linksByTarget`. Powers the `#` autocomplete picker
+   * via `collectTagCorpus` (tags.ts) so it reads O(distinct tags) instead of
+   * re-scanning every node's text per keystroke while the menu is open.
+   */
+  tagCorpus: Map<string, TagEntry>
 }
 
 /** Synthetic parent id for top-level nodes (those with parentId === null). */
@@ -90,7 +99,21 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     }
   }
 
-  return { childrenByParent, byId, mirrorsBySource, linksByTarget }
+  // Tag corpus (the tags.ts split): bucket each distinct tag under its
+  // case-folded key, first-seen casing wins -- the same dedupe rule
+  // `collectAllTags` applies in one pass, kept live instead of rebuilt.
+  // parseTags bails before any regex work on tag-free text.
+  const tagCorpus = new Map<string, TagEntry>()
+  for (const node of nodes) {
+    for (const tag of parseTags(node.text)) {
+      const key = tag.toLowerCase()
+      const entry = tagCorpus.get(key)
+      if (entry) entry.count++
+      else tagCorpus.set(key, { tag, count: 1 })
+    }
+  }
+
+  return { childrenByParent, byId, mirrorsBySource, linksByTarget, tagCorpus }
 }
 
 export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {

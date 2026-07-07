@@ -104,8 +104,11 @@ export function buildHighlightRun(
 }
 
 /** The interior text of every highlight run, fences + color emoji stripped --
- *  the search/display projection (the `stripEmphasis` sibling). */
+ *  the search/display projection (the `stripEmphasis` sibling). Bails before
+ *  building the regex when `text` has no `==` (see `stripLinks`'s parallel
+ *  guard -- `flattenInline` chains this on every scanned node text). */
 export function stripHighlights(text: string): string {
+  if (!text.includes("==")) return text;
   return text.replace(highlightRegex(), (run) => parseHighlight(run).interior);
 }
 
