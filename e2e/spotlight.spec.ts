@@ -106,3 +106,42 @@ test.describe("spotlight focus mode", () => {
     await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
   });
 });
+
+// The header indicator (ADR 0033): a chip that is present ONLY while spotlight
+// is on -- the passive at-rest awareness signal (the dim only shows while a
+// caret is in the outline) AND the one-click off-switch. Its presence == the
+// mode is active; clicking it turns the mode off, so the chip disappears.
+test.describe("spotlight header indicator", () => {
+  const indicator = (page: Page) =>
+    page.locator("[data-spotlight-indicator]");
+
+  test("is absent when spotlight is off", async ({ page }) => {
+    await loadWithSpotlight(page, false);
+    await expect(indicator(page)).toHaveCount(0);
+  });
+
+  test("is present at rest when spotlight is on (no caret needed)", async ({
+    page,
+  }) => {
+    await loadWithSpotlight(page, true);
+    // No bullet focused: the dim shows nothing, but the chip still signals on.
+    await expect(indicator(page)).toBeVisible();
+  });
+
+  test("clicking it turns spotlight off: chip vanishes and dimming stops", async ({
+    page,
+  }) => {
+    await loadWithSpotlight(page, true);
+    await expect(indicator(page)).toBeVisible();
+
+    // Turn the mode off from the header.
+    await indicator(page).click();
+    await expect(indicator(page)).toHaveCount(0);
+    await expect(page.locator("body")).not.toHaveClass(/spotlight-on/);
+
+    // Focusing a bullet no longer dims its neighbors.
+    await text(page, "alpha-1").click();
+    await expect(text(page, "alpha-1")).toBeFocused();
+    await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
+  });
+});
