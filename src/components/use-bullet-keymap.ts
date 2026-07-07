@@ -1,10 +1,15 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import { useLayoutEffect, useState, type RefObject } from "react";
 import type { Node } from "../data/schema";
-import { keymapSpecs } from "../plugins/registry";
+import { dispatchClick, keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
 import { selectSingle } from "../data/selection-state";
-import { getCaretOffset, readSource } from "./inline-code";
+import {
+  getCaretOffset,
+  getSelectedAtom,
+  readSource,
+  selectAdjacentAtom,
+} from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import type { NodeCommands } from "./OutlineNode";
 
@@ -116,13 +121,53 @@ export function useBulletKeymap({
             // text to its right moves into a new sibling below (caret at the end is
             // just the empty-tail case of the same split).
             hotkey: "Enter",
-            callback: () => {
+            callback: (e) => {
               const el = textRef.current;
+              if (el) {
+                const atom = getSelectedAtom(el);
+                if (atom) {
+                  const rect = atom.getBoundingClientRect();
+                  const handled = dispatchClick(atom, pluginCtx(), {
+                    preventDefault: () => e.preventDefault(),
+                    stopPropagation: () => e.stopPropagation(),
+                    clientX: rect.left + rect.width / 2,
+                    clientY: rect.top + rect.height / 2,
+                    source: "keyboard",
+                  });
+                  if (handled) return;
+                }
+              }
               commands.onEnter(
                 node.id,
                 el ? getCaretOffset(el) : node.text.length,
               );
             },
+          },
+          {
+            // Space on a selected atom activates that atom's secondary keyboard
+            // action. Plain text space remains native.
+            hotkey: "Space",
+            callback: (e) => {
+              const el = textRef.current;
+              const atom = el ? getSelectedAtom(el) : null;
+              if (!atom) return;
+              // An atom is selected (a range around a contenteditable=false
+              // widget): a native space would REPLACE it, silently dropping the
+              // token. Always swallow the space here; then activate the atom's
+              // keyboard action if a plugin claims it.
+              e.preventDefault();
+              e.stopPropagation();
+              const rect = atom.getBoundingClientRect();
+              dispatchClick(atom, pluginCtx(), {
+                preventDefault: () => e.preventDefault(),
+                stopPropagation: () => e.stopPropagation(),
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+                source: "keyboard",
+                key: " ",
+              });
+            },
+            options: { preventDefault: false, stopPropagation: false },
           },
           {
             // Shift+Enter: same as Enter -- split into a sibling, never insert a
@@ -289,6 +334,11 @@ export function useBulletKeymap({
             hotkey: "ArrowLeft",
             callback: (e) => {
               const el = textRef.current;
+              if (el && selectAdjacentAtom(el, "left")) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
               if (!el || !isCollapsedCaretAtStart(el)) return;
               e.preventDefault();
               e.stopPropagation();
@@ -301,6 +351,11 @@ export function useBulletKeymap({
             hotkey: "ArrowRight",
             callback: (e) => {
               const el = textRef.current;
+              if (el && selectAdjacentAtom(el, "right")) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
               if (!el || !isCaretAtEnd(el)) return;
               e.preventDefault();
               e.stopPropagation();

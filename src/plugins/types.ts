@@ -182,6 +182,12 @@ export interface InteractionEvent {
   stopPropagation(): void;
   clientX: number;
   clientY: number;
+  source?: "pointer" | "keyboard";
+  key?: string;
+}
+
+export interface PointerInteractionEvent extends InteractionEvent {
+  pointerType: string;
 }
 
 export interface InteractionSpec {
@@ -193,6 +199,22 @@ export interface InteractionSpec {
   blockCaretOnMouseDown?: boolean;
   /** Handle a click on the matched element (the element, not the raw target). */
   onClick?: (el: HTMLElement, ctx: PluginContext, e: InteractionEvent) => void;
+  /** Handle pointer press/release on the matched element. */
+  onPointerDown?: (
+    el: HTMLElement,
+    ctx: PluginContext,
+    e: PointerInteractionEvent,
+  ) => void;
+  onPointerUp?: (
+    el: HTMLElement,
+    ctx: PluginContext,
+    e: PointerInteractionEvent,
+  ) => void;
+  onPointerCancel?: (
+    el: HTMLElement,
+    ctx: PluginContext,
+    e: PointerInteractionEvent,
+  ) => void;
   /** Handle a right-click / context menu on the matched element. */
   onContextMenu?: (
     el: HTMLElement,

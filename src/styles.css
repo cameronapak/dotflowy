@@ -1399,6 +1399,24 @@ body.dragging-active * {
   margin-left: 0;
 }
 
+dotflowy-widget[data-bible-ref][data-atom-selected] > span {
+  border-color: oklch(0.62 0.15 250);
+  background: oklch(0.94 0.05 250);
+  color: oklch(0.33 0.14 255);
+  box-shadow:
+    0 0 0 1px oklch(0.62 0.15 250),
+    0 0 0 4px oklch(0.62 0.15 250 / 0.18);
+}
+
+.dark dotflowy-widget[data-bible-ref][data-atom-selected] > span {
+  border-color: oklch(0.74 0.13 245);
+  background: oklch(0.3 0.08 250);
+  color: oklch(0.9 0.05 245);
+  box-shadow:
+    0 0 0 1px oklch(0.74 0.13 245),
+    0 0 0 4px oklch(0.74 0.13 245 / 0.24);
+}
+
 :root {
   --link-edit-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>');
 }

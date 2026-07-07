@@ -19,6 +19,7 @@ import {
   type MarkerPair,
   readActiveSelectionSource,
 } from "./wrap";
+import { getSelectedAtom } from "./inline-code";
 
 /**
  * The zero-arg command surface the desktop formatting toolbar drives (ADR 0036).
@@ -95,6 +96,12 @@ function computeSelection(): SelectionInfo | null {
   const host = outlineSpanOf(range.startContainer);
   if (!host || !host.isContentEditable) return null;
   if (outlineSpanOf(range.endContainer) !== host) return null;
+
+  // Arrow-selecting a chip (e.g. a Bible ref) wraps its contenteditable=false
+  // atom in a non-collapsed range inside the span — which otherwise looks like a
+  // formatting target. A folded widget atom can't be source-wrapped, so suppress
+  // the toolbar when the selection is exactly one atom (ADR 0036).
+  if (getSelectedAtom(host)) return null;
 
   const rect = range.getBoundingClientRect();
   if (!rect.width && !rect.height) return null;

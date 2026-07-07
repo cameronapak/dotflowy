@@ -8,6 +8,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -90,6 +91,7 @@ import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
   decorate,
   getCaretOffset,
+  getSelectedAtom,
   readSource,
   revealLinkAtCaret,
   watchCaretReveal,
@@ -106,6 +108,9 @@ import {
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
+  dispatchPointerCancel,
+  dispatchPointerDown,
+  dispatchPointerUp,
   keymapSpecs,
   pluginPreloads,
   slotsAt,
@@ -301,12 +306,28 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   };
   const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    dispatchClick(e.target as HTMLElement, pluginCtx(), {
+    // A hovered chip is an activation target only when it lives inside the
+    // node currently being edited -- otherwise an ordinary Space keystroke,
+    // with the mouse merely resting over some other row's chip, would open
+    // that chip's editor and swallow the space.
+    const hovered = e.currentTarget.querySelector<HTMLElement>(
+      "[data-bible-ref]:hover",
+    );
+    const active = document.activeElement;
+    const hoveredChip =
+      hovered && active instanceof HTMLElement && active.contains(hovered)
+        ? hovered
+        : null;
+    const target =
+      getSelectedAtom(e.currentTarget) ?? hoveredChip ?? (e.target as HTMLElement);
+    const rect = target.getBoundingClientRect();
+    dispatchClick(target, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
       stopPropagation: () => e.stopPropagation(),
       clientX: rect.left + rect.width / 2,
       clientY: rect.top + rect.height / 2,
+      source: "keyboard",
+      key: e.key,
     });
   };
   // A plugin-owned overlay (the tag color picker), mounted once below. The core
@@ -317,6 +338,36 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const [panelNode, setPanelNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
+  };
+  const onContentPointerDown = (e: ReactPointerEvent) => {
+    dispatchPointerDown(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType,
+      source: "pointer",
+    });
+  };
+  const onContentPointerUp = (e: ReactPointerEvent) => {
+    dispatchPointerUp(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType,
+      source: "pointer",
+    });
+  };
+  const onContentPointerCancel = (e: ReactPointerEvent) => {
+    dispatchPointerCancel(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType,
+      source: "pointer",
+    });
   };
 
   // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
@@ -598,6 +649,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         aria-label="Outline"
         className="mx-auto max-w-[720px] p-6 max-sm:p-4 mb-[50vh]"
         onMouseDown={onContentMouseDown}
+        onPointerDown={onContentPointerDown}
+        onPointerUp={onContentPointerUp}
+        onPointerCancel={onContentPointerCancel}
         onClick={onContentClick}
         onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}

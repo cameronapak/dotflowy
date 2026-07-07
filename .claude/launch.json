@@ -2,10 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
+      "name": "cf:dev",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "cf:dev"],
-      "port": 8787
+      "port": 8787,
+      "autoPort": false
     }
   ]
 }

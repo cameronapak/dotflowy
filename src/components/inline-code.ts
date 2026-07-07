@@ -146,6 +146,13 @@ function foldedSrcLen(el: HTMLElement): number {
     : (el.getAttribute("data-src") ?? "").length;
 }
 
+const SELECTED_ATOM_ATTR = "data-atom-selected";
+let atomSelectionListenerInstalled = false;
+// The single atom currently carrying SELECTED_ATOM_ATTR. Tracking it lets the
+// selectionchange handler clear the marker in O(1) instead of sweeping the whole
+// document on every caret move.
+let markedAtom: HTMLElement | null = null;
+
 /** A dimmed `.md-punct` span holding revealed syntax scaffolding (a fence or
  *  marker) as REAL, walk-through text -- shared by every folding token that
  *  reveals its markers (emphasis, highlight, the link reveal keys the same
@@ -321,6 +328,124 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
   }
 }
 
+/** Return the currently selected atomic token, if the DOM selection is exactly
+ *  one `data-src` atom inside `el`. */
+export function getSelectedAtom(el: HTMLElement): HTMLElement | null {
+  const child = selectedAtomFromSelection();
+  return child && el.contains(child) ? child : null;
+}
+
+function selectedAtomFromSelection(): HTMLElement | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount !== 1) return null;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return null;
+  if (range.startContainer !== range.endContainer) return null;
+  const parent = range.startContainer;
+  const child = parent.childNodes.item(range.startOffset);
+  if (
+    range.endOffset !== range.startOffset + 1 ||
+    !child ||
+    !isAtom(child)
+  ) {
+    return null;
+  }
+  return child;
+}
+
+/** Make Left/Right treat an adjacent atom as a selectable stop: first keypress
+ *  selects the chip, second keypress moves the caret past it. */
+export function selectAdjacentAtom(
+  el: HTMLElement,
+  direction: "left" | "right",
+): boolean {
+  const selected = getSelectedAtom(el);
+  if (selected) {
+    placeAtWidget(selected, direction === "left" ? "before" : "after");
+    return true;
+  }
+
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount !== 1) return false;
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed || !el.contains(range.endContainer)) return false;
+
+  const caret = getCaretOffset(el);
+  const atom = atomAtSourceBoundary(el, caret, direction);
+  if (!atom) return false;
+  selectAtom(atom);
+  return true;
+}
+
+function isSelectableChip(atom: HTMLElement): boolean {
+  return atom.hasAttribute("data-bible-ref");
+}
+
+function atomAtSourceBoundary(
+  el: HTMLElement,
+  offset: number,
+  direction: "left" | "right",
+): HTMLElement | null {
+  let total = 0;
+  let found: HTMLElement | null = null;
+  const visit = (node: Node) => {
+    if (found) return;
+    if (node.nodeType === 3 /* text */) {
+      total += node.textContent?.length ?? 0;
+      return;
+    }
+    if (isAtom(node)) {
+      const atom = node as HTMLElement;
+      const len = foldedSrcLen(atom);
+      // Only INTERACTIVE chips are arrow-selectable stops. A plain folding atom
+      // (bold/code/link/highlight) has no keyboard action and no selected-state
+      // affordance, so range-selecting it would just arm a silent deletion on
+      // the next keystroke. (Currently that's the Bible chip; generalize to a
+      // plugin opt-in when a second consumer appears.)
+      if (
+        isSelectableChip(atom) &&
+        ((direction === "left" && total + len === offset) ||
+          (direction === "right" && total === offset))
+      ) {
+        found = atom;
+        return;
+      }
+      total += len;
+      return;
+    }
+    node.childNodes.forEach(visit);
+  };
+  el.childNodes.forEach(visit);
+  return found;
+}
+
+function selectAtom(atom: HTMLElement): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  installAtomSelectionListener();
+  const range = document.createRange();
+  range.selectNode(atom);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  syncAtomSelectionMarkers(atom);
+}
+
+function installAtomSelectionListener(): void {
+  if (atomSelectionListenerInstalled) return;
+  atomSelectionListenerInstalled = true;
+  document.addEventListener("selectionchange", () => {
+    syncAtomSelectionMarkers(selectedAtomFromSelection());
+  });
+}
+
+function syncAtomSelectionMarkers(selected: HTMLElement | null): void {
+  if (markedAtom && markedAtom !== selected) {
+    markedAtom.removeAttribute(SELECTED_ATOM_ATTR);
+  }
+  markedAtom = selected;
+  selected?.setAttribute(SELECTED_ATOM_ATTR, "true");
+}
+
 // Resolve an absolute SOURCE offset to a live DOM point (the inverse of
 // sourceOffsetUpTo). Text nodes contribute their length; an atom contributes its
 // full source length and any point inside it snaps to the atom's edge in its
@@ -388,6 +513,8 @@ function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+  widget.removeAttribute(SELECTED_ATOM_ATTR);
+  if (markedAtom === widget) markedAtom = null;
 }
 
 // Per-link reveal reflow. While a bullet is focused, watch the caret: as it
