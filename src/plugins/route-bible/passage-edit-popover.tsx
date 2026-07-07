@@ -9,15 +9,14 @@ import {
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { getTreeIndex } from "../../data/tree-store";
 import type { NodeCommands } from "../../components/OutlineNode";
 import { placeCaretAtEnd } from "../../components/caret-place";
 import { Button, Input } from "../kit";
+import { replaceTokenInNode } from "../token-kit";
 import type { PluginContext } from "../types";
 import {
   formatStructuredBibleRef,
   normalizeBibleRef,
-  replaceBibleRefToken,
   suggestBibleRefs,
 } from "./bible";
 
@@ -64,15 +63,7 @@ export function submitBiblePassageEdit(
   const normalized = normalizeBibleRef(input);
   if (!normalized) return;
   const newToken = normalized.label;
-  if (newToken === oldToken) return;
-  const index = getTreeIndex();
-  const clicked = index.byId.get(nodeId);
-  if (!clicked) return;
-  const targetId = clicked.mirrorOf ?? nodeId;
-  const current = index.byId.get(targetId)?.text;
-  if (current == null) return;
-  const next = replaceBibleRefToken(current, oldToken, newToken);
-  if (next != null && next !== current) mutations.onTextChange(targetId, next);
+  replaceTokenInNode(nodeId, oldToken, newToken, mutations);
 }
 
 export function openBiblePassageEditPopover(

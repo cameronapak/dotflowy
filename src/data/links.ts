@@ -8,6 +8,8 @@
 // caret remap on reveal) lives in inline-code.ts; the link-aware paste cases in
 // the links plugin, over the core paste handler in paste.ts.
 
+import { spliceToken } from "../plugins/token-kit";
+
 // A link token: `[label](url)`. The label is "anything but `]`", the url is
 // "anything but `)`". Kept deliberately simple -- URLs that would break it (a
 // literal `)`, `(`, or space) are percent-encoded by encodeUrlForMarkdown when
@@ -103,9 +105,8 @@ export function replaceLinkToken(
   oldToken: string,
   newToken: string,
 ): string | null {
-  const at = text.indexOf(oldToken);
-  if (at < 0) return null;
-  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
+  // Delegates to the shared spliceToken (src/plugins/token-kit.ts).
+  return spliceToken(text, oldToken, newToken);
 }
 
 /** Verbatim-match-or-drop label swap (ADR 0016): replace the FIRST occurrence

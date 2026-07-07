@@ -12,9 +12,9 @@
 
 import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
 import { BibleChip } from "./chip";
-import { getViewRootId } from "../../data/view-state";
 import { openBiblePassageEditPopover } from "./passage-edit-popover";
 import { openUrlInFocusedTab } from "../../components/open-url";
+import { resolveNodeId } from "../token-kit";
 import { definePlugin, type WidgetEl } from "../types";
 
 const LONG_PRESS_MS = 550;
@@ -60,9 +60,7 @@ function openEditForChip(
   ctx: Parameters<typeof openBiblePassageEditPopover>[1],
 ): void {
   const token = el.getAttribute("data-src") ?? "";
-  const nodeId =
-    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-    getViewRootId();
+  const nodeId = resolveNodeId(el);
   if (!token || !nodeId) return;
   const focusTarget = el.closest<HTMLElement>(".node-text");
   const rect = el.getBoundingClientRect();

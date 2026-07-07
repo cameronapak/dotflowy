@@ -16,11 +16,15 @@ import {
   sanitizeLinkLabel,
   swapLinkLabel,
 } from "../../data/links";
-import { getSelectionRange, readSource } from "../../components/inline-code";
+import {
+  getSelectionRange,
+  mdPunct,
+  readSource,
+} from "../../components/inline-code";
 import { openUrlInFocusedTab } from "../../components/open-url";
 import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
-import { getViewRootId } from "../../data/view-state";
+import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { openLinkCreatePopover, openLinkEditPopover } from "./link-edit-popover";
 
@@ -109,19 +113,14 @@ function foldedLinkEl(label: string, url: string, tok: string): El {
 // text. Clicking the chip opens the Edit Link popover. Everything except the
 // chip stays 1:1 with its slice of the source.
 function revealedLinkEl(label: string, url: string): El {
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   return {
     tag: "span",
     attrs: { class: "link-reveal", "data-link-reveal": true },
     children: [
-      punct("["),
+      mdPunct("["),
       { tag: "span", attrs: { class: "link-label" }, children: [label] },
-      punct("]"),
-      punct("("),
+      mdPunct("]"),
+      mdPunct("("),
       {
         tag: "span",
         attrs: {
@@ -133,7 +132,7 @@ function revealedLinkEl(label: string, url: string): El {
         },
         children: [editIconEl()],
       },
-      punct(")"),
+      mdPunct(")"),
     ],
   };
 }
@@ -162,9 +161,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
   }
   const parts = LINK_PARTS.exec(token);
   if (!parts) return;
-  const nodeId =
-    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-    getViewRootId();
+  const nodeId = resolveNodeId(el);
   if (!nodeId) return;
   const textEl = el.closest<HTMLElement>(".node-text");
   const rect = rectEl.getBoundingClientRect();
@@ -281,13 +278,11 @@ export default definePlugin({
       // `#tag` or `code` run inside a label/url never becomes its own chip.
       precedence: 0,
       folds: true,
-      render: (tok, { revealOffset, start, end }) => {
+      render: (tok, view) => {
         const parts = LINK_PARTS.exec(tok);
         const label = parts?.[1] ?? "";
         const url = parts?.[2] ?? "";
-        const reveal =
-          revealOffset != null && revealOffset >= start && revealOffset <= end;
-        return reveal
+        return isRevealed(view)
           ? revealedLinkEl(label, url)
           : foldedLinkEl(label, url, tok);
       },
