@@ -1,5 +1,6 @@
 import type { Node } from './schema'
 import { childrenOf, type TreeIndex } from './tree'
+import { bibleRefsToMarkdownLinks } from '../plugins/route-bible/bible'
 
 /** Two spaces per depth level (CommonMark-friendly, readable). */
 const INDENT = '  '
@@ -14,10 +15,12 @@ function prefixFor(node: Node): string {
 function emit(index: TreeIndex, id: string, depth: number, lines: string[]): void {
   const node = index.byId.get(id)
   if (!node) return
-  // `node.text` is already the markdown source (links `[label](url)`, `#tags`,
-  // inline `code`) -- emit it verbatim, no transform. Empty text yields a bare
-  // `- ` bullet, preserving structure. See ADR 0017.
-  lines.push(INDENT.repeat(depth) + prefixFor(node) + node.text)
+  // `node.text` is mostly already the markdown source (links `[label](url)`,
+  // `#tags`, inline `code`). Route-bible chips are the exception: they store
+  // plain reference text and derive the URL at render time, so export projects
+  // them to portable markdown links. Empty text yields a bare `- ` bullet,
+  // preserving structure. See ADR 0017.
+  lines.push(INDENT.repeat(depth) + prefixFor(node) + bibleRefsToMarkdownLinks(node.text))
   // Full subtree, regardless of collapsed/completed/filter: childrenOf returns
   // the raw ordered children (view state never reaches here).
   for (const child of childrenOf(index, id)) {
