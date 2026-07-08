@@ -6,6 +6,7 @@
   "description": "A local-first outline editor built with TanStack Start and TanStack DB.",
   "license": "O'Saasy",
   "scripts": {
+    "setup": "bun scripts/setup.ts",
     "dev": "bun scripts/dev.ts",
     "dev:web": "vite dev",
     "dev:api": "wrangler dev --port 8787",
