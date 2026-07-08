@@ -8,7 +8,17 @@
 // `toResolverUrl` builds the route.bible link. We only detect candidates and
 // gate them.
 
-import { toResolverUrl, tryParsePassage } from "grab-bcv";
+import {
+  autocompletePassage,
+  OSIS_BOOK_NAMES,
+  toDisplayRef,
+  toResolverUrl,
+  tryParsePassage,
+  type AutocompletePassageSuggestion,
+  type OsisBookCode,
+} from "grab-bcv";
+import { LINK_PATTERN, encodeUrlForMarkdown } from "../../data/links";
+import { spliceToken } from "../token-splice";
 
 // The Seam-A token fragment: detection PROPOSES, the parser DISPOSES. Mirrors
 // grab-bcv's own (internal, unexported) natural-text reference pattern, plus a
@@ -50,4 +60,108 @@ export function resolveBibleRef(token: string): { url: string } | null {
   } catch {
     return null;
   }
+}
+
+export function normalizeBibleRef(
+  token: string,
+): { label: string; url: string } | null {
+  const parsed = tryParsePassage(token);
+  if (!parsed.ok) return null;
+  try {
+    return {
+      label: toDisplayRef(parsed.value),
+      url: toResolverUrl(ROUTE_BIBLE_BASE, parsed.value, {
+        query: { src: "dotflowy" },
+      }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function suggestBibleRefs(
+  input: string,
+  limit = 5,
+): AutocompletePassageSuggestion[] {
+  const trimmed = input.trim();
+  if (!trimmed) return [];
+  return autocompletePassage(trimmed, { limit }).filter(
+    (suggestion) => suggestion.insertText !== trimmed,
+  );
+}
+
+export function formatStructuredBibleRef(args: {
+  book: OsisBookCode;
+  chapter: number;
+  startVerse: number | null;
+  endVerse: number | null;
+}): string {
+  const base = `${OSIS_BOOK_NAMES[args.book]} ${args.chapter}`;
+  if (args.startVerse == null) return base;
+  if (args.endVerse != null && args.endVerse > args.startVerse) {
+    return `${base}:${args.startVerse}-${args.endVerse}`;
+  }
+  return `${base}:${args.startVerse}`;
+}
+
+export function replaceBibleRefToken(
+  text: string,
+  oldToken: string,
+  newToken: string,
+): string | null {
+  // Delegates to the shared spliceToken (src/plugins/token-splice.ts).
+  return spliceToken(text, oldToken, newToken);
+}
+
+const CODE_RUN_PATTERN = "`[^`\\n]+`";
+const MARKDOWN_LINK_OR_CODE_RE = () =>
+  new RegExp(`${LINK_PATTERN}|${CODE_RUN_PATTERN}`, "g");
+
+function protectedRanges(text: string): Array<{ start: number; end: number }> {
+  return Array.from(text.matchAll(MARKDOWN_LINK_OR_CODE_RE()), (m) => {
+    const start = m.index ?? 0;
+    return { start, end: start + m[0].length };
+  });
+}
+
+function isProtected(
+  start: number,
+  end: number,
+  ranges: Array<{ start: number; end: number }>,
+): boolean {
+  return ranges.some((r) => start < r.end && end > r.start);
+}
+
+/**
+ * Convert valid route-bible chip sources into ordinary markdown links for
+ * export. Stored text stays plain ("John 3:16"); copied markdown becomes
+ * readable and portable ("[John 3:16](https://route.bible/...)").
+ */
+export function bibleRefsToMarkdownLinks(text: string): string {
+  const ranges = protectedRanges(text);
+  return text.replace(new RegExp(BIBLE_REF_PATTERN, "g"), (token, offset: number) => {
+    const start = offset;
+    const end = start + token.length;
+    if (isProtected(start, end, ranges)) return token;
+    const ref = resolveBibleRef(token);
+    return ref ? `[${token}](${encodeUrlForMarkdown(ref.url)})` : token;
+  });
+}
+
+/** Return the route.bible URL whose source reference contains or touches
+ *  `offset`, in contentEditable SOURCE space. Atomic chips can only place the
+ *  caret before or after themselves, so the end boundary is intentionally
+ *  openable. A ref inside a link or code token never chips (those tokens win
+ *  precedence in the registry), so it must not open here either. */
+export function bibleRefUrlAtOffset(text: string, offset: number): string | null {
+  const ranges = protectedRanges(text);
+  for (const m of text.matchAll(new RegExp(BIBLE_REF_PATTERN, "g"))) {
+    const start = m.index ?? 0;
+    const token = m[0] ?? "";
+    const end = start + token.length;
+    if (offset < start || offset > end) continue;
+    if (isProtected(start, end, ranges)) continue;
+    return resolveBibleRef(token)?.url ?? null;
+  }
+  return null;
 }

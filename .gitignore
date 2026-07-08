@@ -12,9 +12,7 @@ dist
 # Local Worker secrets (wrangler dev)
 .dev.vars
 
-# CodeGraph indexes — per-machine, never committed. Covers the app index
-# (repo root) and the dedicated Effect index at repos/effect-smol/.codegraph/,
-# so a vendored-subtree index never dirties the tree or fights a subtree pull.
+# CodeGraph index — per-machine, never committed.
 .codegraph/
 
 .impeccable/

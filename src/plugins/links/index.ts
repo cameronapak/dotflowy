@@ -6,7 +6,8 @@
 // The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
 // just the decoration half expressed as El descriptors.
 
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
+import { LinkIcon } from "lucide-react";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
@@ -15,11 +16,16 @@ import {
   sanitizeLinkLabel,
   swapLinkLabel,
 } from "../../data/links";
-import { appRuntime } from "../../data/runtime";
+import {
+  getSelectionRange,
+  mdPunct,
+  readSource,
+} from "../../components/inline-code";
+import { openUrlInFocusedTab } from "../../components/open-url";
 import { getTreeIndex } from "../../data/tree-store";
-import { getViewRootId } from "../../data/view-state";
+import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
-import { openLinkEditPopover } from "./link-edit-popover";
+import { openLinkCreatePopover, openLinkEditPopover } from "./link-edit-popover";
 
 // Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so
 // it always matches what the tokenizer fed us.
@@ -106,19 +112,14 @@ function foldedLinkEl(label: string, url: string, tok: string): El {
 // text. Clicking the chip opens the Edit Link popover. Everything except the
 // chip stays 1:1 with its slice of the source.
 function revealedLinkEl(label: string, url: string): El {
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   return {
     tag: "span",
     attrs: { class: "link-reveal", "data-link-reveal": true },
     children: [
-      punct("["),
+      mdPunct("["),
       { tag: "span", attrs: { class: "link-label" }, children: [label] },
-      punct("]"),
-      punct("("),
+      mdPunct("]"),
+      mdPunct("("),
       {
         tag: "span",
         attrs: {
@@ -130,7 +131,7 @@ function revealedLinkEl(label: string, url: string): El {
         },
         children: [editIconEl()],
       },
-      punct(")"),
+      mdPunct(")"),
     ],
   };
 }
@@ -159,10 +160,9 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
   }
   const parts = LINK_PARTS.exec(token);
   if (!parts) return;
-  const nodeId =
-    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-    getViewRootId();
+  const nodeId = resolveNodeId(el);
   if (!nodeId) return;
+  const textEl = el.closest<HTMLElement>(".node-text");
   const rect = rectEl.getBoundingClientRect();
   openLinkEditPopover(
     {
@@ -172,6 +172,7 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
       url: parts[2] ?? "",
       x: rect.left,
       y: rect.bottom + 6,
+      restoreFocus: () => textEl?.focus({ preventScroll: true }),
     },
     ctx,
   );
@@ -200,7 +201,13 @@ function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
       return typeof data.title === "string" && data.title ? data.title : null;
     },
     catch: (cause) => cause,
-  }).pipe(Effect.orElseSucceed(() => null));
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(8),
+      orElse: () => Effect.succeed<string | null>(null),
+    }),
+    Effect.orElseSucceed(() => null),
+  );
 }
 
 // The just-folded <a> for `token` inside `el` (matched on its `data-src`, which
@@ -230,6 +237,42 @@ function singleAnchor(html: string): { text: string; href: string } | null {
   return { text, href };
 }
 
+// Seam C `/link` + the desktop toolbar's link button (ADR 0036): wrap the
+// current selection in a link and open the edit popover to fill the url. Reads
+// the focused contentEditable directly (the same seam wrap.ts uses); resolves a
+// mirror row to its source node so the write lands where the text lives. With no
+// selection it opens the popover with an empty label (type both). Positioned at
+// the selection rect, falling back to the span.
+function createLinkFromSelection(nodeId: string, ctx: PluginContext): void {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || !el.isContentEditable) return;
+
+  const contentId = getTreeIndex().byId.get(nodeId)?.mirrorOf ?? nodeId;
+  const source = readSource(el);
+  const range = getSelectionRange(el) ?? {
+    start: source.length,
+    end: source.length,
+  };
+  const selText = source.slice(range.start, range.end);
+
+  let x = window.innerWidth / 2;
+  let y = window.innerHeight / 2;
+  const sel = window.getSelection();
+  const rect =
+    sel && sel.rangeCount > 0
+      ? sel.getRangeAt(0).getBoundingClientRect()
+      : el.getBoundingClientRect();
+  if (rect.width || rect.height) {
+    x = rect.left;
+    y = rect.bottom + 6;
+  }
+
+  openLinkCreatePopover(
+    { nodeId: contentId, source, start: range.start, end: range.end, selText, x, y },
+    ctx,
+  );
+}
+
 export default definePlugin({
   id: "links",
   tokens: [
@@ -240,16 +283,32 @@ export default definePlugin({
       // `#tag` or `code` run inside a label/url never becomes its own chip.
       precedence: 0,
       folds: true,
-      render: (tok, { revealOffset, start, end }) => {
+      render: (tok, view) => {
         const parts = LINK_PARTS.exec(tok);
         const label = parts?.[1] ?? "";
         const url = parts?.[2] ?? "";
-        const reveal =
-          revealOffset != null && revealOffset >= start && revealOffset <= end;
-        return reveal
+        return isRevealed(view)
           ? revealedLinkEl(label, url)
           : foldedLinkEl(label, url, tok);
       },
+    },
+  ],
+
+  // Seam C: `/link` wraps the selection in a link and opens the edit popover.
+  // caretScoped -- it needs the live selection the overlay-based Cmd+K can't hold
+  // (ADR 0034), so it's a slash-palette + toolbar action, not a command-center
+  // row. The desktop selection toolbar (ADR 0036) runs this same command.
+  commands: [
+    {
+      id: "link",
+      label: "Link",
+      description: "Wrap the selection in a link",
+      icon: LinkIcon,
+      keywords: ["link", "url", "hyperlink", "anchor", "href"],
+      available: () => true,
+      caretScoped: true,
+      run: (nodeId: string, ctx: PluginContext) =>
+        createLinkFromSelection(nodeId, ctx),
     },
   ],
 
@@ -276,7 +335,10 @@ export default definePlugin({
         e.preventDefault();
         e.stopPropagation();
         const href = (el as HTMLAnchorElement).href;
-        window.open(href, "_blank", "noopener,noreferrer");
+        const textEl = el.closest<HTMLElement>(".node-text");
+        openUrlInFocusedTab(href, {
+          restoreFocus: () => textEl?.focus({ preventScroll: true }),
+        });
       },
     },
   ],
@@ -318,12 +380,13 @@ export default definePlugin({
       const anchor = findFoldedAnchor(el, token);
       anchor?.classList.add(UNFURLING_CLASS);
 
-      // Fork the unfurl on the app runtime (a tracked fiber, not a floating
-      // `void promise.then`). NOTE: it's app-scoped, not node-scoped -- nothing
-      // interrupts it when the bullet is deleted, so the continuation's own
-      // guards (current == null, verbatim swapLinkLabel match) are what keep a
-      // late title from writing into a deleted or since-edited bullet.
-      appRuntime.runFork(
+      // Run the unfurl through the plugin async seam (ctx.run, ADR 0039): a
+      // tracked fiber on the shared runtime, interrupted on editor unmount. It's
+      // editor-scoped, not node-scoped -- nothing interrupts it when just the
+      // bullet is deleted, so the continuation's own guards (current == null,
+      // verbatim swapLinkLabel match) are what keep a late title from writing
+      // into a deleted or since-edited bullet.
+      ctx.run(
         fetchLinkTitleE(label).pipe(
           Effect.flatMap((title) =>
             Effect.sync(() => {

@@ -1,0 +1,14 @@
+# The date token
+
+Status: accepted (2026-07-07)
+
+`[[2026-07-08]]` (optional 24h time: `[[2026-07-08 14:00]]`) is a first-class inline token parsed from `node.text` — a clickable chip pointing at that day's daily note. Adopted because Workflowy's `<time>` spans are ~16% of a real export (2,683 of 16,882 nodes): degrading them to plain text would fail the OPML fidelity bar (ADR 0037), and a date-you-can-travel-to is a good outliner feature in its own right. Designed on [#120](https://github.com/cameronapak/dotflowy/issues/120).
+
+- **Syntax**: the bracket family with a **date-shaped interior** — disjoint from `NODE_LINK_PATTERN`'s id-shaped interiors, so no collision, and hand-typed near-misses (`[[July 8]]`, `[[2026-7-8]]`) stay literal (the node-links strictness discipline). The interior IS the daily-index key (`localDateKey` format; key = first 10 chars). **Time is display + round-trip only, never identity.** No range grammar in v1 — `end*` attrs were never observed in real data; a ranged import degrades to the start date, counted.
+- **Ownership**: the **daily plugin** owns the UX (Seam A widget + Seam B click) so `goToDate`/get-or-create stay module-private; the pure grammar/parse/format/suggestions live in **`src/data/date-links.ts`** (the tags / node-links core-known-format split), consumed by the OPML core, search flatten, and the `[[` picker without any cross-plugin import. Rejected: a new `date-links` plugin — it would force the codebase's first cross-plugin dependency to reach daily's private get-or-create.
+- **Chip**: a BibleChip-class TSX widget speaking the badge language (Today with sun icon / Yesterday / Tomorrow / Jun 23; absolute date on hover; time after the label). An **atom, not folding**: no caret reveal; backspace deletes the whole token.
+- **Click**: lazy `goToDate` get-or-create + zoom (the Today-button semantics). **No import-time minting** — 2,683 imported chips create zero day notes until clicked; an absent day is normal, so there is no ghost state. Rejected: navigate-only-if-exists (breaks the pointer-you-travel-through promise).
+- **Creation**: hand-typed, plus date entries **folded into the node-links `[[` picker** via a pure `dateSuggestions(query)` (today / tomorrow / yesterday + a typed ISO date; no natural-language parsing). A separate second `[[` menu was rejected: menu-engine dispatch is first-match-wins, so it would hide date entries behind any node match.
+- **OPML**: import keys on `<time>`'s canonical attrs (never display text); export rebuilds `<time start*>` with regenerated display text — a true Workflowy round-trip. Fallback if this token ships after import: verbatim display text, disclosed.
+
+Rejected syntaxes: `@[display text]` (locale soup; violates the canonical-attrs rule) and bare `@2026-07-08` (prose auto-tokenizes).

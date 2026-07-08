@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildTagFilter,
   collectAllTags,
+  collectTagCorpus,
   normalizeTag,
   parseQuery,
+  parseTags,
   serializeQuery,
   validateOutlineSearch,
 } from './tags'
@@ -61,6 +63,41 @@ describe('collectAllTags', () => {
   test('excludeId drops one node’s contribution', () => {
     // dropping node 1 leaves only node 2's #Alpha (its own casing wins now)
     expect(collectAllTags(tree, '1')).toEqual(['#Alpha'])
+  })
+})
+
+describe('parseTags', () => {
+  test('bails without a #, matches the regex path for tagged text', () => {
+    expect(parseTags('plain text, no tags')).toEqual([])
+    expect(parseTags('')).toEqual([])
+    expect(parseTags('#alpha #beta #alpha')).toEqual(['#alpha', '#beta'])
+  })
+})
+
+describe('tagCorpus (buildTreeIndex)', () => {
+  test('matches collectAllTags for the same fixture (Plan 004 parity gate)', () => {
+    const tree = index([
+      makeNode({ id: '1', text: '#alpha #beta' }),
+      makeNode({ id: '2', text: '#Alpha' }), // case variant of #alpha
+      makeNode({ id: '3', text: 'plain text, no tags' }),
+      makeNode({ id: '4', text: '#gamma #gamma' }), // repeated tag, one node
+    ])
+    expect(collectTagCorpus(tree.tagCorpus)).toEqual(collectAllTags(tree))
+    expect(collectTagCorpus(tree.tagCorpus)).toEqual(['#alpha', '#beta', '#gamma'])
+  })
+
+  test('an empty tree has an empty corpus', () => {
+    const tree = index([])
+    expect(collectTagCorpus(tree.tagCorpus)).toEqual([])
+  })
+
+  test('counts occurrences, not just presence', () => {
+    const tree = index([
+      makeNode({ id: '1', text: '#work' }),
+      makeNode({ id: '2', text: '#work #home' }),
+    ])
+    expect(tree.tagCorpus.get('#work')?.count).toBe(2)
+    expect(tree.tagCorpus.get('#home')?.count).toBe(1)
   })
 })
 

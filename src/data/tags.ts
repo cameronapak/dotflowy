@@ -16,8 +16,16 @@ export const TAG_PATTERN = '(?<=^|\\s)#[\\p{L}\\p{N}_-]+'
 
 const TAG_RE = new RegExp(TAG_PATTERN, 'gu')
 
-/** The distinct tags in a string, with their leading `#`, in first-seen order. */
-function parseTags(text: string): string[] {
+const EMPTY_TAGS: string[] = []
+
+/**
+ * The distinct tags in a string, with their leading `#`, in first-seen order.
+ * Bails before any regex work when `text` can't contain a `#` (the tree-store's
+ * incremental corpus maintenance runs this on every text-changing keystroke, not
+ * just tag-bearing ones -- same early-out discipline as `parseNodeLinks`).
+ */
+export function parseTags(text: string): string[] {
+  if (!text.includes('#')) return EMPTY_TAGS
   const out: string[] = []
   const seen = new Set<string>()
   for (const m of text.matchAll(TAG_RE)) {
@@ -76,6 +84,28 @@ export function collectAllTags(index: TreeIndex, excludeId?: string): string[] {
     }
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * One entry in `TreeIndex.tagCorpus` (tree.ts): `tag` is the display casing
+ * (first registered, same first-seen-wins rule `collectAllTags` uses within a
+ * single build), `count` is how many nodes currently carry it -- so removing a
+ * node's occurrence is a decrement, not a rescan. Built once in `buildTreeIndex`
+ * and maintained incrementally in tree-store.ts's `applyChanges`, so the `#`
+ * picker's `entries` call is O(distinct tags) instead of O(all nodes) per
+ * keystroke while the menu is open.
+ */
+export interface TagEntry {
+  tag: string
+  count: number
+}
+
+/** The maintained corpus's sorted distinct tag list -- the `#` picker's
+ *  autocomplete source. O(distinct tags), never O(all nodes). */
+export function collectTagCorpus(corpus: Map<string, TagEntry>): string[] {
+  const out: string[] = []
+  for (const entry of corpus.values()) out.push(entry.tag)
+  return out.sort((a, b) => a.localeCompare(b))
 }
 
 /** True iff `text` carries every one of `activeTags` (per-node AND). */

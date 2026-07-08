@@ -25,18 +25,12 @@ change" guide. Two companion docs go deeper:
 
 ```sh
 bun install
-
-# Local Worker secrets (gitignored). Generate a signing secret:
-cp .dev.vars.example .dev.vars
-# then set BETTER_AUTH_SECRET in .dev.vars, e.g.:
-#   openssl rand -base64 32
-# The Worker fails closed without it.
-# Signup is invite-gated (alpha): the example file ships INVITE_CODES=dev-invite,
-# which is the code to use when creating a local account. No codes = signup closed.
-
-# Apply the local D1 schema (auth tables + the legacy import source). Once.
-bun run db:migrate:local
+bun run setup    # copies .dev.vars, generates BETTER_AUTH_SECRET, applies local D1 schema
 ```
+
+`setup` is idempotent — safe to re-run any time. Signup is invite-gated (alpha):
+the local invite code is **`dev-invite`**, the code to use when creating a
+local account by hand. No codes = signup closed.
 
 ## Running locally
 
@@ -44,15 +38,22 @@ Dotflowy is a static SPA that talks to a Cloudflare Worker over `/api/*`, so the
 real local setup runs both: Vite for the UI and Wrangler for the Worker + the
 per-user Durable Object it routes to.
 
-### Fast loop (two terminals) — the default
+### Fast loop — the default
 
 ```sh
-bun run dev:api   # terminal 1: wrangler dev (Worker + DO + local D1) on :8787
-bun run dev       # terminal 2: vite dev on :3000 (proxies /api -> :8787)
+bun run dev      # vite (:3000) + wrangler (:8787) together; HMR for the UI
 ```
 
 Open http://localhost:3000. Vite gives you HMR; the Worker reloads on its own
-edits. This is the loop for almost all work.
+edits. This is the loop for almost all work. `bun run dev:api` + `bun run dev:web`
+still exist if you want the two servers in separate terminals with isolated logs.
+
+### Sign in
+
+`bun run seed:user` creates a ready-to-use dev account
+(`dev@dotflowy.local` / `dotflowy-dev`) through the real sign-up endpoint —
+run it once the Worker is up and sign in with those credentials. Prefer your
+own account? Sign up by hand with invite code `dev-invite`.
 
 ### Production-like loop (one server)
 
@@ -114,9 +115,10 @@ Rules of thumb, expanded in `AGENTS.md`:
 
 - **Skills first.** Before substantial work, run `bunx @tanstack/intent@latest list`
   and load a matching skill if one fits (see the top of `AGENTS.md`).
-- **Effect v4 is vendored** at `repos/effect-smol/` for reference. Read from it,
-  never import from it; app/worker code imports `effect` from npm. Read
-  `repos/effect-smol/AGENTS.md` before writing Effect.
+- **Effect v4 source comes via opensrc** — `bunx opensrc path Effect-TS/effect-smol`
+  prints a machine-global cached copy (`bun run setup` pre-warms it). Read from it,
+  never import from it; app/worker code imports `effect` from npm. Read the fetched
+  repo's `AGENTS.md` before writing Effect.
 - **Plugins** live in `src/plugins/<name>/`; adding a feature is a folder plus one
   line in `src/plugins/index.ts` ([ADR 0001](./docs/adr/0001-plugin-architecture.md)).
 - **Structural edits are atomic; field edits are direct.** Any tree-shape

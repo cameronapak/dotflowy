@@ -8,15 +8,13 @@
 // a late unfurl), Done drops the edit instead of corrupting the line -- the
 // same contract as the unfurl label swap (ADR 0016).
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDismissable } from "../../components/use-dismissable";
 import { Button, Input } from "@/plugins/kit";
-import {
-  encodeUrlForMarkdown,
-  replaceLinkToken,
-  sanitizeLinkLabel,
-} from "../../data/links";
+import { encodeUrlForMarkdown, sanitizeLinkLabel } from "../../data/links";
 import { getTreeIndex } from "../../data/tree-store";
+import { replaceTokenInNode } from "../token-kit";
 import type { NodeCommands } from "../../components/OutlineNode";
 import type { PluginContext } from "../types";
 
@@ -36,15 +34,7 @@ export function submitLinkEdit(
   if (!trimmedUrl) return;
   const safeLabel = sanitizeLinkLabel(label) || trimmedUrl;
   const newToken = `[${safeLabel}](${encodeUrlForMarkdown(trimmedUrl)})`;
-  if (newToken === oldToken) return;
-  const index = getTreeIndex();
-  const clicked = index.byId.get(nodeId);
-  if (!clicked) return;
-  const targetId = clicked.mirrorOf ?? nodeId;
-  const current = index.byId.get(targetId)?.text;
-  if (current == null) return;
-  const next = replaceLinkToken(current, oldToken, newToken);
-  if (next != null && next !== current) mutations.onTextChange(targetId, next);
+  replaceTokenInNode(nodeId, oldToken, newToken, mutations);
 }
 
 /** Mount the popover through the overlay host (the same thin `ctx.openOverlay`
@@ -57,9 +47,19 @@ export function openLinkEditPopover(
     url: string;
     x: number;
     y: number;
+    restoreFocus?: () => void;
   },
   ctx: PluginContext,
 ): void {
+  const close = () => {
+    ctx.openOverlay(null);
+    requestAnimationFrame(() => {
+      // An outside-pointerdown dismiss may have already focused another
+      // bullet; restoring would steal the caret from where the user clicked.
+      if (document.activeElement?.closest(".node-text")) return;
+      args.restoreFocus?.();
+    });
+  };
   ctx.openOverlay(
     <LinkEditPopover
       label={args.label}
@@ -68,6 +68,72 @@ export function openLinkEditPopover(
       y={args.y}
       onSubmit={(label, url) =>
         submitLinkEdit(args.nodeId, args.token, label, url, ctx.mutations)
+      }
+      onClose={close}
+    />,
+  );
+}
+
+/** CREATE a link over a selection (ADR 0036): build `[label](url)` and splice it
+ *  into the node's LIVE text at the captured range. Verbatim-safe like
+ *  submitLinkEdit -- if the line is unchanged since the popover opened we splice
+ *  by offset, otherwise we fall back to the first occurrence of the selected
+ *  text; if neither matches (the line was edited out from under us) the create
+ *  is dropped rather than corrupting the line. No url = no link (Cancel-like). */
+export function submitLinkCreate(
+  args: {
+    nodeId: string;
+    source: string;
+    start: number;
+    end: number;
+    selText: string;
+  },
+  label: string,
+  url: string,
+  mutations: NodeCommands,
+): void {
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return;
+  const safeLabel = sanitizeLinkLabel(label) || trimmedUrl;
+  const token = `[${safeLabel}](${encodeUrlForMarkdown(trimmedUrl)})`;
+  const current = getTreeIndex().byId.get(args.nodeId)?.text;
+  if (current == null) return;
+
+  let next: string | null = null;
+  if (current === args.source) {
+    next = current.slice(0, args.start) + token + current.slice(args.end);
+  } else if (args.selText) {
+    const at = current.indexOf(args.selText);
+    if (at >= 0)
+      next =
+        current.slice(0, at) + token + current.slice(at + args.selText.length);
+  }
+  if (next != null && next !== current) mutations.onTextChange(args.nodeId, next);
+}
+
+/** Open the create-link popover prefilled with the selected text as the label
+ *  and an empty url, positioned at the selection. Reuses LinkEditPopover so
+ *  create + edit share one UI. */
+export function openLinkCreatePopover(
+  args: {
+    nodeId: string;
+    source: string;
+    start: number;
+    end: number;
+    selText: string;
+    x: number;
+    y: number;
+  },
+  ctx: PluginContext,
+): void {
+  ctx.openOverlay(
+    <LinkEditPopover
+      label={args.selText}
+      url=""
+      x={args.x}
+      y={args.y}
+      onSubmit={(label, url) =>
+        submitLinkCreate(args, label, url, ctx.mutations)
       }
       onClose={() => ctx.openOverlay(null)}
     />,
@@ -99,24 +165,7 @@ export function LinkEditPopover({
   const [label, setLabel] = useState(initialLabel);
   const [url, setUrl] = useState(initialUrl);
 
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    // Defer so the opening click doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKey);
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+  useDismissable(ref, onClose);
 
   // Keep the popover on screen (~320px wide, ~150px tall).
   const left = Math.max(8, Math.min(x, window.innerWidth - 336));

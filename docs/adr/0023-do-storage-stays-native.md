@@ -21,7 +21,7 @@ closed are closed natively instead:
 argument is symmetry: the Worker is a full Effect pipeline ([ADR 0012](./0012-effect-replaces-errore.md)),
 the client is Effect-first ([ADR 0021](./0021-effect-first-one-schema-language.md)), so why is the DO the
 one non-Effect island? And the vendor ships a blessed adapter, so it must fit. Reading its source
-(`repos/effect-smol/packages/sql/sqlite-do/src/SqliteClient.ts`) settles it: the adapter's
+(`packages/sql/sqlite-do/src/SqliteClient.ts` in the opensrc-fetched effect-smol repo) settles it: the adapter's
 `withTransaction` wraps the **async** `DurableObjectStorage.transaction(...)`, bridged through
 `Effect.callback`, and its own docstring warns to *"keep transactions short, avoid suspending them across
 unrelated work"*; nested transactions throw. Our node-write loop (`applyBatch`/`patchNodes`/`upsertNodes`/

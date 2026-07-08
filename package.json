@@ -6,12 +6,15 @@
   "description": "A local-first outline editor built with TanStack Start and TanStack DB.",
   "license": "O'Saasy",
   "scripts": {
-    "dev": "vite dev",
+    "setup": "bun scripts/setup.ts",
+    "dev": "bun scripts/dev.ts",
+    "dev:web": "vite dev",
     "dev:api": "wrangler dev --port 8787",
     "build": "vite build",
     "build:cf": "vite build && cp dist/client/_shell.html dist/client/index.html",
     "preview": "vite preview",
     "cf:dev": "bun scripts/cf-dev.ts",
+    "seed:user": "bun scripts/seed-user.ts",
     "deploy": "bun run build:cf && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply dotflowy-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply dotflowy-db --remote",
@@ -23,7 +26,7 @@
     "test": "bun test src worker/",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "repos:update-effect": "git subtree pull --prefix=repos/effect-smol https://github.com/Effect-TS/effect-smol.git main --squash"
+    "effect:src": "opensrc path Effect-TS/effect-smol"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -31,6 +34,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@icons-pack/react-simple-icons": "^13.13.0",
+    "@rgrove/parse-xml": "^4",
     "@tanstack/query-core": "^5.101.1",
     "@tanstack/query-db-collection": "^1.0.42",
     "@tanstack/react-db": "^0.1.87",
@@ -68,6 +72,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
     "babel-plugin-react-compiler": "1.0.0",
+    "opensrc": "^0.7.3",
     "oxlint": "^1.71.0",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.6.0",

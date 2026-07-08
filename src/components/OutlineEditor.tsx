@@ -8,9 +8,11 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from "react";
+import { Cause, Effect, Fiber } from "effect";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Link,
@@ -50,9 +52,14 @@ import {
 import {
   buildTreeIndex,
   childrenOf,
+  countSubtreeNodes,
   type Node,
   type TreeIndex,
 } from "../data/tree";
+import {
+  DELETE_CONFIRM_THRESHOLD,
+  openDeleteConfirm,
+} from "./delete-confirm-opener";
 import {
   buildVisibleRows,
   findVisibleNeighbor,
@@ -84,12 +91,15 @@ import {
 } from "../data/mutations";
 import { bootstrapOutline } from "../data/seed";
 import { runStructural } from "../data/structural";
+import { appRuntime } from "../data/runtime";
 import { setNodeActionBridge } from "../data/command-bridge";
-import { capture, drop, redo, undo } from "../data/history";
+import { capture, drop } from "../data/history";
+import { runHistoryRestore } from "./history-restore";
 import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import {
   decorate,
   getCaretOffset,
+  getSelectedAtom,
   readSource,
   revealLinkAtCaret,
   watchCaretReveal,
@@ -102,9 +112,13 @@ import {
 } from "./paste";
 import {
   blocksCaret,
+  commandSpecs,
   composeHidden,
   dispatchClick,
   dispatchContextMenu,
+  dispatchPointerCancel,
+  dispatchPointerDown,
+  dispatchPointerUp,
   keymapSpecs,
   pluginPreloads,
   slotsAt,
@@ -134,12 +148,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { openLinkAtCaret } from "./link-keymap";
+import { openInlineTargetAtCaret } from "./link-keymap";
 import { useIsMobile } from "../hooks/use-mobile";
 import {
   MobileActionsBar,
   type MobileBarActions,
 } from "./MobileActionsBar";
+import {
+  SelectionFormatToolbar,
+  type SelectionFormatActions,
+} from "./SelectionFormatToolbar";
+import {
+  toggleHighlightSelection,
+  toggleWrapSelection,
+  type MarkerPair,
+} from "./wrap";
 
 // Carry the zoom "pivot" (the node morphing between title and list-item) in
 // history state, so the incoming view knows which element to name -- and so it
@@ -281,16 +304,40 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // a right-click picks a color, all decided by the plugins. See ADR 0001.
   // (onContentMouseDown is pure and lives at module scope above.)
   const onContentClick = (e: ReactMouseEvent) => {
+    if (e.metaKey || e.ctrlKey) {
+      const textEl = (e.target as HTMLElement).closest<HTMLElement>(".node-text");
+      if (textEl && openInlineTargetAtCaret(textEl)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
     dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
   const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    dispatchClick(e.target as HTMLElement, pluginCtx(), {
+    // A hovered chip is an activation target only when it lives inside the
+    // node currently being edited -- otherwise an ordinary Space keystroke,
+    // with the mouse merely resting over some other row's chip, would open
+    // that chip's editor and swallow the space.
+    const hovered = e.currentTarget.querySelector<HTMLElement>(
+      "[data-bible-ref]:hover",
+    );
+    const active = document.activeElement;
+    const hoveredChip =
+      hovered && active instanceof HTMLElement && active.contains(hovered)
+        ? hovered
+        : null;
+    const target =
+      getSelectedAtom(e.currentTarget) ?? hoveredChip ?? (e.target as HTMLElement);
+    const rect = target.getBoundingClientRect();
+    dispatchClick(target, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
       stopPropagation: () => e.stopPropagation(),
       clientX: rect.left + rect.width / 2,
       clientY: rect.top + rect.height / 2,
+      source: "keyboard",
+      key: e.key,
     });
   };
   // A plugin-owned overlay (the tag color picker), mounted once below. The core
@@ -301,6 +348,36 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const [panelNode, setPanelNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
+  };
+  const onContentPointerDown = (e: ReactPointerEvent) => {
+    dispatchPointerDown(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType,
+      source: "pointer",
+    });
+  };
+  const onContentPointerUp = (e: ReactPointerEvent) => {
+    dispatchPointerUp(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType,
+      source: "pointer",
+    });
+  };
+  const onContentPointerCancel = (e: ReactPointerEvent) => {
+    dispatchPointerCancel(e.target as HTMLElement, pluginCtx(), {
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: e.pointerType,
+      source: "pointer",
+    });
   };
 
   // Pointer/touch drag to reorder + reparent, hung off each bullet dot. Reads
@@ -359,6 +436,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     consumeClick,
   });
 
+  // Live plugin async fibers (ctx.run), interrupted on editor unmount (ADR 0039).
+  const runningFibers = useRef(new Set<Fiber.Fiber<void, never>>());
+
   // PluginContext factory (ADR 0001 D8): the promoted command set + tree reads +
   // a small nav surface, handed to plugin interaction handlers (Seam B). Reads
   // the live tree via getTreeIndex() at call time; stable identity.
@@ -371,9 +451,33 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       },
       openOverlay: (node) => setOverlayNode(node),
       openPanel: (node) => setPanelNode(node),
+      run: (effect) => {
+        const guarded = effect.pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() =>
+              console.error("[plugin] async task failed:", Cause.pretty(cause)),
+            ),
+          ),
+          Effect.asVoid,
+        );
+        const set = runningFibers.current;
+        let fiber: Fiber.Fiber<void, never>;
+        fiber = appRuntime.runFork(
+          guarded.pipe(Effect.ensuring(Effect.sync(() => set.delete(fiber)))),
+        );
+        set.add(fiber);
+      },
     }),
     [commands, navigateZoom],
   );
+
+  // Interrupt any still-running plugin fibers when the editor unmounts (ADR 0039).
+  useEffect(() => {
+    const fibers = runningFibers.current;
+    return () => {
+      for (const f of fibers) appRuntime.runFork(Fiber.interrupt(f));
+    };
+  }, []);
 
   // Publish the node-action surface for the Cmd+K command center (ADR 0034). The
   // switcher is mounted in `__root`, OUTSIDE this editor, so it reads these live
@@ -402,6 +506,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     findFocusedId,
     pendingFocus,
     commands,
+  });
+
+  // Desktop (fine-pointer) selection formatting toolbar (ADR 0036). Same facade
+  // shape as the mobile bar, routed into the emphasis/highlight/link paths.
+  const selectionFormatActions = useSelectionFormatActions({
+    findFocusedId,
+    commands,
+    getCtx: pluginCtx,
   });
 
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
@@ -574,6 +686,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         aria-label="Outline"
         className="mx-auto max-w-[720px] p-6 max-sm:p-4 mb-[50vh]"
         onMouseDown={onContentMouseDown}
+        onPointerDown={onContentPointerDown}
+        onPointerUp={onContentPointerUp}
+        onPointerCancel={onContentPointerCancel}
         onClick={onContentClick}
         onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}
@@ -587,6 +702,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             findFocusedId={findFocusedId}
           />
         )}
+
+        {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
+            Gates itself on a fine pointer + a single-span selection, so it
+            renders nothing on touch or when nothing is selected. */}
+        <SelectionFormatToolbar actions={selectionFormatActions} />
 
         {overlayNode}
 
@@ -839,24 +959,25 @@ function useOutlineFocus(): OutlineFocus {
   // native contentEditable undo (preventDefault). The focused id is handed in so
   // redo can return focus where the action left it; the restored id becomes the
   // next pending focus.
-  // undo/redo replay a snapshot as a mix of insert/update/delete -- the same
-  // multi-node relink a structural mutation does, so they ride the same atomic
-  // batch (one frame, held until echo). See runStructural / PLAN.md.
+  // undo/redo replay a snapshot diff as a mix of insert/update/delete -- the
+  // same multi-node relink a structural mutation does, so they ride the same
+  // atomic batch (one frame, held until echo). runHistoryRestore picks the
+  // apply path by diff size: small diffs stay synchronous (this must not regress
+  // the keystroke-adjacent path); huge ones (undoing a 17k-node import/delete)
+  // stream through runStructuralSliced behind a modal progress dialog.
   useHotkey(
     "Mod+Z",
     () =>
-      runStructural(() => {
-        const focusId = undo(getTreeIndex(), findFocusedId());
-        if (focusId) pendingFocus.current = focusId;
+      runHistoryRestore("undo", findFocusedId(), (id) => {
+        pendingFocus.current = id;
       }),
     { preventDefault: true },
   );
   useHotkey(
     "Mod+Shift+Z",
     () =>
-      runStructural(() => {
-        const focusId = redo(getTreeIndex(), findFocusedId());
-        if (focusId) pendingFocus.current = focusId;
+      runHistoryRestore("redo", findFocusedId(), (id) => {
+        pendingFocus.current = id;
       }),
     { preventDefault: true },
   );
@@ -1178,14 +1299,12 @@ function useMobileBarActions({
       },
       // Verbatim twins of the Mod+Z / Mod+Shift+Z hotkeys in useOutlineFocus.
       undo: () =>
-        runStructural(() => {
-          const focusId = undo(getTreeIndex(), findFocusedId());
-          if (focusId) pendingFocus.current = focusId;
+        runHistoryRestore("undo", findFocusedId(), (id) => {
+          pendingFocus.current = id;
         }),
       redo: () =>
-        runStructural(() => {
-          const focusId = redo(getTreeIndex(), findFocusedId());
-          if (focusId) pendingFocus.current = focusId;
+        runHistoryRestore("redo", findFocusedId(), (id) => {
+          pendingFocus.current = id;
         }),
       // Flip completion relative to the CONTENT node's current state (mirror-aware,
       // like onDeleteNode); onToggleCompleted enforces the protected-node guard.
@@ -1210,6 +1329,56 @@ function useMobileBarActions({
       },
     };
   }, [refs, findFocusedId, pendingFocus, commands]);
+}
+
+/**
+ * Zero-arg command surface for the desktop selection formatting toolbar (ADR
+ * 0036), the fine-pointer twin of useMobileBarActions. Resolves the focused
+ * (mirror-aware) content node internally and routes into the SAME
+ * emphasis/highlight/link paths the keyboard uses — no new mutation path. The
+ * link action reuses the links plugin's `/link` CommandSpec, so it's absent when
+ * that plugin isn't loaded. Stable identity.
+ */
+function useSelectionFormatActions({
+  findFocusedId,
+  commands,
+  getCtx,
+}: {
+  findFocusedId: () => string | null;
+  commands: NodeCommands;
+  getCtx: () => PluginContext;
+}): SelectionFormatActions {
+  return useMemo<SelectionFormatActions>(() => {
+    // The focused span's CONTENT node id (mirror row -> its source), the id the
+    // source text lives under — same resolution as the mobile bar's toggleComplete.
+    const contentId = (): string | null => {
+      const key = findFocusedId();
+      if (!key) return null;
+      const instanceId = instanceIdForKey(key);
+      return isMirrorsEnabled()
+        ? (getTreeIndex().byId.get(instanceId)?.mirrorOf ?? instanceId)
+        : instanceId;
+    };
+    const linkSpec = commandSpecs.find((c) => c.id === "link") ?? null;
+    return {
+      toggleMarker: (marker: MarkerPair) => {
+        const id = contentId();
+        // reselect = true: keep the interior selected so the button stays lit and
+        // a re-press toggles off (the toolbar's whole point).
+        if (id) toggleWrapSelection(id, marker, commands.onTextChange, true);
+      },
+      toggleHighlight: () => {
+        const id = contentId();
+        if (id) toggleHighlightSelection(id, commands.onTextChange);
+      },
+      createLink: linkSpec
+        ? () => {
+            const id = contentId();
+            if (id) linkSpec.run(id, getCtx());
+          }
+        : null,
+    };
+  }, [findFocusedId, commands, getCtx]);
 }
 
 interface NodeCommandsArgs {
@@ -1342,7 +1511,7 @@ function useNodeCommands({
               const instanceId = instanceIdForKey(activeKey);
               // Moving the node reparents it, which drops focus. Re-focus after render.
               capture(getTreeIndex(), activeKey);
-              if (indent(getTreeIndex(), instanceId))
+              if (indent(getTreeIndex(), instanceId, isMirrorsEnabled()))
                 return { instanceId, activeKey };
               drop(); // no move happened; discard the redundant undo point
               return null;
@@ -1391,6 +1560,7 @@ function useNodeCommands({
               const moved = moveUp(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
+                resolveMirror: isMirrorsEnabled(),
               });
               if (moved) return { instanceId, activeKey };
               drop();
@@ -1413,6 +1583,7 @@ function useNodeCommands({
               const moved = moveDown(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
+                resolveMirror: isMirrorsEnabled(),
               });
               if (moved) return { instanceId, activeKey };
               drop();
@@ -1426,36 +1597,48 @@ function useNodeCommands({
           }
         },
 
-        onDeleteNode: (id) =>
+        onDeleteNode: (id) => {
+          // Delete the INSTANCE (position is local, ADR 0022): backspacing a
+          // mirror's own row removes that mirror, never its source (which would
+          // strand the other instances -- promote-on-source-delete is Stage 3).
+          // Address by the focused key; the keymap passes the content id in a
+          // mirror.
+          const activeKey = findFocusedId() ?? id;
+          const instanceId = instanceIdForKey(activeKey);
+          const idx = getTreeIndex();
+          const mirrorsOn = isMirrorsEnabled();
+          const contentId = mirrorsOn
+            ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
+            : instanceId;
+          // A protected node can't be deleted. This is the single funnel every
+          // delete path flows through, so the core enforces it here: shake the
+          // row + toast why (guardProtected), and bail before removing anything.
+          // Protection follows CONTENT (the source); the shake lands on the row
+          // the user acted on (the active key). The node isn't removed, so its
+          // row still exists.
+          if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
+          // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
+          // v1 blocks). A mirror's own row is never a source, so this no-ops
+          // there -- backspacing a mirror still works. Flag-gated: off-flag a
+          // mirrorOf node is just a normal node, so the guard never runs.
+          if (
+            mirrorsOn &&
+            guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey))
+          )
+            return;
+          // Big-subtree gate: deleting a threshold-plus subtree asks first, then
+          // runs as the dialog's sliced progress flow (capture + plan + one
+          // sliced batch happen there) -- the import-freeze lesson, inverted.
+          const count = countSubtreeNodes(idx, [instanceId]);
+          if (count >= DELETE_CONFIRM_THRESHOLD) {
+            openDeleteConfirm({
+              rootIds: [instanceId],
+              count,
+              captureKey: activeKey,
+            });
+            return;
+          }
           runStructural(() => {
-            // Delete the INSTANCE (position is local, ADR 0022): backspacing a
-            // mirror's own row removes that mirror, never its source (which would
-            // strand the other instances -- promote-on-source-delete is Stage 3).
-            // Address by the focused key; the keymap passes the content id in a
-            // mirror.
-            const activeKey = findFocusedId() ?? id;
-            const instanceId = instanceIdForKey(activeKey);
-            const idx = getTreeIndex();
-            const mirrorsOn = isMirrorsEnabled();
-            const contentId = mirrorsOn
-              ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
-              : instanceId;
-            // A protected node can't be deleted. This is the single funnel every
-            // delete path flows through, so the core enforces it here: shake the
-            // row + toast why (guardProtected), and bail before removing anything.
-            // Protection follows CONTENT (the source); the shake lands on the row
-            // the user acted on (the active key). The node isn't removed, so its
-            // row still exists.
-            if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
-            // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
-            // v1 blocks). A mirror's own row is never a source, so this no-ops
-            // there -- backspacing a mirror still works. Flag-gated: off-flag a
-            // mirrorOf node is just a normal node, so the guard never runs.
-            if (
-              mirrorsOn &&
-              guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey))
-            )
-              return;
             capture(idx, activeKey);
             // Focus the row directly ABOVE the deleted one (Workflowy backspace
             // behavior), computed before the mutation so the neighbor still
@@ -1473,7 +1656,8 @@ function useNodeCommands({
             const target = above ?? focusId;
             if (target) pendingFocus.current = target;
             else drop(); // node didn't exist; nothing was deleted
-          }),
+          });
+        },
 
         onToggleCompleted: (id, completed) => {
           // A protected node can't be marked done (completing it would strike
@@ -1650,7 +1834,13 @@ function ZoomedTitle({
         hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
         callback: () => {
           const el = ref.current;
-          if (k.hotkey === "Mod+Enter" && el && openLinkAtCaret(el)) return;
+          if (
+            k.hotkey === "Mod+Enter" &&
+            el &&
+            openInlineTargetAtCaret(el, getCtx(), { linkParens: "edit" })
+          ) {
+            return;
+          }
           k.run(node.id, getCtx());
         },
       })),

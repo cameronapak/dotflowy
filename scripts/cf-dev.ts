@@ -22,7 +22,7 @@
  *
  * Tradeoff: a full build runs per save (~1-2s), slower than `bun run dev`'s HMR.
  * That is the cost of exercising the real Worker + per-user DO path. For pure UI
- * work, `bun run dev` (+ `bun run dev:api`) is still the faster loop.
+ * work, `bun run dev` (both servers, HMR) is still the faster loop.
  */
 import { watch as fsWatch, copyFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";

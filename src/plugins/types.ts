@@ -7,6 +7,7 @@
 // token + decorator), B (delegated interaction), I (input/paste); later slices
 // add commands, keymap, slots, transforms, menus, and side-collections.
 
+import type { Effect } from "effect";
 import type { ComponentType, ReactNode } from "react";
 import type { Node, TreeIndex } from "../data/tree";
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
@@ -166,6 +167,16 @@ export interface PluginContext {
    *  Lane-B (untrusted MCP App) may render into. The node must supply its own
    *  `SheetHeader`/`SheetTitle`. */
   openPanel: (node: ReactNode | null) => void;
+  /** Run a fire-and-forget async task on the app's shared Effect runtime. The
+   *  fiber is tracked and INTERRUPTED when the editor unmounts; any failure or
+   *  defect is logged (never silently swallowed, never a floating unhandled
+   *  rejection). The effect must be fully provided (R = never) and self-handle
+   *  the domain result it cares about — the seam owns the runtime + lifecycle +
+   *  failure sink, not error semantics (compose timeout/retry inside the effect,
+   *  see kv-client-effect.ts). Editor-lifetime scoped, not node-scoped: deleting
+   *  one node does not interrupt an in-flight run (continuation guards cover
+   *  that). See ADR 0039. */
+  run(effect: Effect.Effect<unknown, unknown>): void;
 }
 
 // --- Seam B: delegated interaction ------------------------------------------
@@ -182,6 +193,12 @@ export interface InteractionEvent {
   stopPropagation(): void;
   clientX: number;
   clientY: number;
+  source?: "pointer" | "keyboard";
+  key?: string;
+}
+
+export interface PointerInteractionEvent extends InteractionEvent {
+  pointerType: string;
 }
 
 export interface InteractionSpec {
@@ -193,6 +210,22 @@ export interface InteractionSpec {
   blockCaretOnMouseDown?: boolean;
   /** Handle a click on the matched element (the element, not the raw target). */
   onClick?: (el: HTMLElement, ctx: PluginContext, e: InteractionEvent) => void;
+  /** Handle pointer press/release on the matched element. */
+  onPointerDown?: (
+    el: HTMLElement,
+    ctx: PluginContext,
+    e: PointerInteractionEvent,
+  ) => void;
+  onPointerUp?: (
+    el: HTMLElement,
+    ctx: PluginContext,
+    e: PointerInteractionEvent,
+  ) => void;
+  onPointerCancel?: (
+    el: HTMLElement,
+    ctx: PluginContext,
+    e: PointerInteractionEvent,
+  ) => void;
   /** Handle a right-click / context menu on the matched element. */
   onContextMenu?: (
     el: HTMLElement,

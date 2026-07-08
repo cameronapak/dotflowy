@@ -34,11 +34,32 @@ import { chainDisagreements } from './sibling-chain'
  * one atomic frame, and the per-keystroke text path must not await an echo.
  */
 export function runStructural<T>(body: () => T): T {
+  const { result, persisted } = runStructuralTracked(body)
+  // Nobody consumes the outcome here — a failed batch already rolls the
+  // transaction back — so mark the derived promise handled to avoid an
+  // unhandled-rejection report for every offline structural write.
+  persisted.catch(() => {})
+  return result
+}
+
+/**
+ * `runStructural`, plus a `persisted` promise that settles when the batch's
+ * echo has landed (resolves) or the send failed and the optimistic overlay
+ * rolled back (rejects). For flows that must REPORT the outcome — the OPML
+ * import dialog awaits it to flip from "importing" to success/failure (ADR
+ * 0037: any fault means "nothing was imported"). Same single-batch guarantees
+ * as `runStructural`; this only exposes the transaction's own completion.
+ */
+export function runStructuralTracked<T>(body: () => T): {
+  result: T
+  persisted: Promise<void>
+} {
   // Nesting guard: a compound flow (e.g. the daily get-or-create, which creates
   // a container then a day) may call runStructural while already inside one.
   // Join the outer transaction so the whole flow is ONE frame; never open a
-  // second (which would re-tear the very thing we're fixing).
-  if (getActiveTransaction()) return body()
+  // second (which would re-tear the very thing we're fixing). The outer
+  // transaction owns persistence, so there is nothing separate to track.
+  if (getActiveTransaction()) return { result: body(), persisted: Promise.resolve() }
 
   let result!: T
   const tx = createTransaction({
@@ -50,7 +71,9 @@ export function runStructural<T>(body: () => T): T {
       // P1 (atomic, writeSem-serialized send) → P2 (hold optimistic until the
       // echo) as ONE Effect program, bridged once here at the async mutationFn
       // seam (ADR 0021). waitForSeqE never fails, so the only rejection — which
-      // rolls the transaction back — comes from the batch send.
+      // rolls the transaction back — comes from the batch send. A chunked
+      // >500-op batch replies with its FINAL seq (worker/outline-do.ts), so
+      // waiting on it spans the whole multi-frame echo.
       await runPromise(
         persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
       )
@@ -60,7 +83,59 @@ export function runStructural<T>(body: () => T): T {
     result = body()
   })
   if (import.meta.env.DEV) assertTouchedChainsClean(tx.mutations)
-  return result
+  return { result, persisted: tx.isPersisted.promise.then(() => undefined) }
+}
+
+/**
+ * `runStructuralTracked` for a batch too large to apply in one synchronous
+ * burst — the OPML import, where ~18k optimistic inserts lock the main thread
+ * for seconds and the modal progress dialog freezes mid-paint (a "hang" to the
+ * user, ADR 0037). Applies `slices` as multiple `mutate` calls on ONE
+ * manually-committed transaction, yielding to the event loop between slices so
+ * the browser paints the progress the caller's `onProgress` just rendered,
+ * then commits once. The wire guarantees are UNCHANGED from `runStructural`:
+ * still one batch POST → one DO `applyBatch` → one echo-hold → one undo point.
+ * Slicing is purely a main-thread scheduling concern, never a wire one.
+ *
+ * The returned promise settles like `runStructuralTracked`'s `persisted`:
+ * resolves once the batch's echo has landed, rejects when anything failed —
+ * a slice that throws (schema validation) rolls the whole transaction back
+ * first, so failure always means "nothing was imported".
+ */
+export async function runStructuralSliced(
+  slices: ReadonlyArray<() => void>,
+  onProgress?: () => void,
+): Promise<void> {
+  // Nesting guard (same as runStructuralTracked): inside an ambient
+  // transaction, apply synchronously — the outer transaction owns persistence,
+  // and yielding mid-ambient-transaction would detach the later slices.
+  if (getActiveTransaction()) {
+    for (const slice of slices) slice()
+    return
+  }
+  const tx = createTransaction({
+    autoCommit: false,
+    mutationFn: async ({ transaction }) => {
+      const ops = transaction.mutations.map(toChangeOp)
+      if (ops.length === 0) return
+      await runPromise(
+        persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
+      )
+    },
+  })
+  try {
+    for (const slice of slices) {
+      tx.mutate(slice)
+      onProgress?.()
+      // Yield so the progress update paints before the next slice's burst.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  } catch (error) {
+    tx.rollback()
+    throw error
+  }
+  if (import.meta.env.DEV) assertTouchedChainsClean(tx.mutations)
+  await tx.commit()
 }
 
 /** A PendingMutation, narrowed to the fields the batch wire format needs. */

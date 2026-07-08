@@ -43,7 +43,11 @@ import {
   useSelectionRootIds,
 } from "../data/selection-state";
 import { isProtected, selectionCommandSpecs } from "../plugins/registry";
-import { orphanedMirrorsBy } from "../data/tree";
+import { countSubtreeNodes, orphanedMirrorsBy } from "../data/tree";
+import {
+  DELETE_CONFIRM_THRESHOLD,
+  openDeleteConfirm,
+} from "./delete-confirm-opener";
 import { isMirrorsEnabled } from "../data/flags";
 import type { PluginContext } from "../plugins/types";
 import { rejectRow } from "./flash-node";
@@ -143,6 +147,20 @@ function makeSelectionOps({
       );
       return;
     }
+    // Big-subtree gate: a threshold-plus selection asks first, then runs as
+    // the dialog's sliced progress flow (capture + plan + one sliced batch
+    // happen there). The dialog owns the ids now, so leave selection mode —
+    // the Move/Mirror precedent.
+    const count = countSubtreeNodes(index, deletable);
+    if (count >= DELETE_CONFIRM_THRESHOLD) {
+      openDeleteConfirm({
+        rootIds: [...deletable],
+        count,
+        captureKey: deletable[0]!,
+      });
+      clearSelection();
+      return;
+    }
     const isHidden = getViewIsHidden();
     const rootId = getViewRootId();
     // Focus relative to the rows actually being DELETED, not the full selection:
@@ -206,7 +224,7 @@ function makeSelectionOps({
     if (ids.length === 0) return;
     runStructural(() => {
       capture(getTreeIndex(), ids[0]!);
-      if (indentManyNodes(ids)) refreshSelection();
+      if (indentManyNodes(ids, isMirrorsEnabled())) refreshSelection();
       else drop();
     });
   };

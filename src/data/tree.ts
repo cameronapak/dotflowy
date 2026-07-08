@@ -1,6 +1,7 @@
 import type { Node } from './schema'
 import { parseNodeLinks } from './node-links'
 import { orderSiblings } from './sibling-chain'
+import { parseTags, type TagEntry } from './tags'
 
 export type { Node } from './schema'
 
@@ -37,6 +38,14 @@ export interface TreeIndex {
    * "{n} backlinks" chrome. Empty for a link-free outline.
    */
   linksByTarget: Map<string, string[]>
+  /**
+   * Maintained `#tag` corpus (the `src/data/tags.ts` split): a case-folded key
+   * -> {@link TagEntry}, built here and maintained incrementally in
+   * tree-store.ts alongside `linksByTarget`. Powers the `#` autocomplete picker
+   * via `collectTagCorpus` (tags.ts) so it reads O(distinct tags) instead of
+   * re-scanning every node's text per keystroke while the menu is open.
+   */
+  tagCorpus: Map<string, TagEntry>
 }
 
 /** Synthetic parent id for top-level nodes (those with parentId === null). */
@@ -90,7 +99,21 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     }
   }
 
-  return { childrenByParent, byId, mirrorsBySource, linksByTarget }
+  // Tag corpus (the tags.ts split): bucket each distinct tag under its
+  // case-folded key, first-seen casing wins -- the same dedupe rule
+  // `collectAllTags` applies in one pass, kept live instead of rebuilt.
+  // parseTags bails before any regex work on tag-free text.
+  const tagCorpus = new Map<string, TagEntry>()
+  for (const node of nodes) {
+    for (const tag of parseTags(node.text)) {
+      const key = tag.toLowerCase()
+      const entry = tagCorpus.get(key)
+      if (entry) entry.count++
+      else tagCorpus.set(key, { tag, count: 1 })
+    }
+  }
+
+  return { childrenByParent, byId, mirrorsBySource, linksByTarget, tagCorpus }
 }
 
 export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
@@ -132,6 +155,77 @@ export function orphanedMirrorsBy(index: TreeIndex, ids: string[]): string[] {
     for (const m of mirrors) if (!deleting.has(m)) orphans.push(m)
   }
   return orphans
+}
+
+/**
+ * Total node count of the subtrees rooted at `ids` (each root included),
+ * deduped when one id sits inside another root's subtree. The cheap gate for
+ * the big-delete confirmation — the full {@link planRemoveSubtrees} is built
+ * only after the user confirms.
+ */
+export function countSubtreeNodes(index: TreeIndex, ids: string[]): number {
+  const seen = new Set<string>()
+  const stack = [...ids]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (seen.has(id) || !index.byId.has(id)) continue
+    seen.add(id)
+    for (const k of childrenOf(index, id)) stack.push(k.id)
+  }
+  return seen.size
+}
+
+export interface RemovePlan {
+  /** Every doomed id, children-before-parents and tail-siblings-first (reverse
+   *  depth-first pre-order) — so when the DO chunks the batch into ≤500-op
+   *  frames, no frame prefix ever orphans a surviving child under a deleted
+   *  parent. */
+  deleteIds: string[]
+  /** Survivors whose `prevSiblingId` pointed into the doomed set, repointed to
+   *  their nearest surviving predecessor — `removeNode`'s follower relink,
+   *  generalized to arbitrary root sets in one pass. Applied BEFORE the
+   *  deletes (the transient two-nodes-share-a-prev "fan" a frame prefix can
+   *  show is tolerated by `orderChildIds` and healed on snapshot load, same as
+   *  every structural batch). */
+  repoints: Array<{ id: string; prevSiblingId: string | null }>
+}
+
+/**
+ * Plan the deletion of whole subtrees as an explicit op list — the sliced
+ * big-delete twin of {@link countSubtreeNodes}. `removeNode` deletes a subtree
+ * in one synchronous burst, which locks the main thread for seconds at import
+ * scale (17k nodes); this planner front-loads the same decisions into plain
+ * data so the caller can apply it in yielding slices (`runStructuralSliced`)
+ * while the wire shape stays ONE batch. Unknown ids are skipped.
+ */
+export function planRemoveSubtrees(index: TreeIndex, rootIds: string[]): RemovePlan {
+  // Depth-first pre-order over each root, deduped (a root inside another
+  // root's subtree contributes nothing new).
+  const doomed = new Set<string>()
+  const preOrder: string[] = []
+  const stack = [...rootIds].reverse()
+  while (stack.length) {
+    const id = stack.pop()!
+    if (doomed.has(id) || !index.byId.has(id)) continue
+    doomed.add(id)
+    preOrder.push(id)
+    const kids = childrenOf(index, id)
+    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]!.id)
+  }
+
+  // Any survivor pointing into the doomed set walks its prev chain to the
+  // nearest surviving predecessor (or the chain head). One O(n) scan handles
+  // single roots, contiguous runs, and disjoint sets alike.
+  const repoints: RemovePlan['repoints'] = []
+  for (const node of index.byId.values()) {
+    if (doomed.has(node.id) || !node.prevSiblingId || !doomed.has(node.prevSiblingId)) {
+      continue
+    }
+    let prev: string | null = node.prevSiblingId
+    while (prev && doomed.has(prev)) prev = index.byId.get(prev)?.prevSiblingId ?? null
+    repoints.push({ id: node.id, prevSiblingId: prev })
+  }
+  return { deleteIds: preOrder.reverse(), repoints }
 }
 
 /**

@@ -21,6 +21,14 @@ import { instanceIdForKey } from './visible-order'
  * the timeline, so the old forward history is gone. `drop` restores it, since a
  * captured-then-dropped no-op never actually changed anything.
  *
+ * `undo`/`redo` return a `RestorePlan` -- the snapshot diff pre-chunked into
+ * apply slices -- instead of writing to the collection themselves, so the
+ * caller can pick the apply path by size: a small diff (the common,
+ * keystroke-adjacent case) runs synchronously through `runStructural`, while a
+ * huge one (undoing a 17k-node OPML import or big delete) streams through
+ * `runStructuralSliced` with progress UI instead of freezing the main thread.
+ * See `components/history-restore.tsx`, the single funnel both paths share.
+ *
  * Like mutations.ts, this operates on the singleton collection directly.
  */
 
@@ -86,64 +94,143 @@ export function drop(): void {
 }
 
 /**
- * Reconcile the live collection to `entry`'s snapshot. Returns the id to focus
- * afterwards, or null if that node no longer exists in the restored state.
+ * At or above this many collection writes a restore should stream through
+ * `runStructuralSliced` (yielding slices + progress UI) instead of one
+ * synchronous burst; it doubles as the per-slice write count. Matches the OPML
+ * import / big-delete slice size (ADR 0037).
  */
-function restore(index: TreeIndex, entry: Entry): string | null {
+export const RESTORE_SLICE_OPS = 500
+
+/**
+ * A snapshot restore, planned but not yet applied. The caller must run EVERY
+ * slice, in order, inside ONE transaction -- a `runStructural` body for the
+ * small case, one `runStructuralSliced` call for the big one -- or call
+ * `revert` if the apply failed and rolled back.
+ */
+export interface RestorePlan {
+  /** Total collection writes the restore will make. */
+  opCount: number
+  /** Apply closures in order; each makes at most RESTORE_SLICE_OPS writes. */
+  slices: ReadonlyArray<() => void>
+  /** Writes applied so far -- the sliced path's progress read. */
+  applied: () => number
+  /** Row key to focus after the restore, or null if that node is gone. */
+  focusId: string | null
+  /** Roll the stack bookkeeping back after a failed (rolled-back) apply. */
+  revert: () => void
+}
+
+/**
+ * Two snapshots of a node are equal when every field matches; nodes are flat
+ * records, so a shallow field compare is a full compare.
+ */
+function sameNode(a: Node, b: Node): boolean {
+  const ra = a as Record<string, unknown>
+  const rb = b as Record<string, unknown>
+  const keys = Object.keys(ra)
+  if (keys.length !== Object.keys(rb).length) return false
+  for (const key of keys) if (ra[key] !== rb[key]) return false
+  return true
+}
+
+/**
+ * Diff the live collection against `entry`'s snapshot into chunked apply
+ * slices: delete rows added since, re-insert removed ones, overwrite changed
+ * ones. Unchanged nodes are skipped -- the diff size is also what picks the
+ * sync-vs-sliced apply path, so it must reflect real writes, not outline size.
+ */
+function planRestore(index: TreeIndex, entry: Entry, revert: () => void): RestorePlan {
   const target = new Map(entry.nodes.map((n) => [n.id, n]))
   const current = index.byId
 
   // Anything that exists now but not in the snapshot was added since: remove it.
+  const deletes: string[] = []
   for (const id of current.keys()) {
-    if (!target.has(id)) nodesCollection.delete(id)
+    if (!target.has(id)) deletes.push(id)
   }
-  // Re-insert removed nodes and overwrite changed ones to match the snapshot.
+  // Re-insert removed nodes; overwrite only the ones that actually changed.
+  const upserts: Node[] = []
   for (const [id, node] of target) {
-    if (!current.has(id)) {
-      nodesCollection.insert({ ...node })
-    } else {
-      nodesCollection.update(id, (draft) => Object.assign(draft, node))
-    }
+    const live = current.get(id)
+    if (!live || !sameNode(live, node)) upserts.push(node)
   }
 
-  // Only focus if the focused node still exists in the restored state. The focus
-  // identity may be a row KEY (a path address inside a mirror, ADR 0022); gate on
-  // the node it points at (the key's last segment) but return the full key, so
-  // focus lands back in the same instance the user was editing. For a mirror-free
-  // row key === id, so this is identical to a bare-id check.
-  return entry.focusId && target.has(instanceIdForKey(entry.focusId))
-    ? entry.focusId
-    : null
+  let applied = 0
+  const slices: Array<() => void> = []
+  for (let i = 0; i < deletes.length; i += RESTORE_SLICE_OPS) {
+    const chunk = deletes.slice(i, i + RESTORE_SLICE_OPS)
+    slices.push(() => {
+      for (const id of chunk) nodesCollection.delete(id)
+      applied += chunk.length
+    })
+  }
+  for (let i = 0; i < upserts.length; i += RESTORE_SLICE_OPS) {
+    const chunk = upserts.slice(i, i + RESTORE_SLICE_OPS)
+    slices.push(() => {
+      // Insert-vs-update is decided at apply time: an earlier slice (or the
+      // surrounding transaction) may already have written the row.
+      for (const node of chunk) {
+        if (nodesCollection.has(node.id)) {
+          nodesCollection.update(node.id, (draft) => Object.assign(draft, node))
+        } else {
+          nodesCollection.insert({ ...node })
+        }
+      }
+      applied += chunk.length
+    })
+  }
+
+  return {
+    opCount: deletes.length + upserts.length,
+    slices,
+    applied: () => applied,
+    // Only focus if the focused node still exists in the restored state. The focus
+    // identity may be a row KEY (a path address inside a mirror, ADR 0022); gate on
+    // the node it points at (the key's last segment) but return the full key, so
+    // focus lands back in the same instance the user was editing. For a mirror-free
+    // row key === id, so this is identical to a bare-id check.
+    focusId:
+      entry.focusId && target.has(instanceIdForKey(entry.focusId))
+        ? entry.focusId
+        : null,
+    revert,
+  }
 }
 
 /**
- * Restore the most recent undo point. Before overwriting the live state we push
- * it onto the redo stack (tagged with the currently-focused node) so redo can
- * return to it. Returns the id to focus afterwards, or null if there was
- * nothing to undo.
+ * Plan a restore of the most recent undo point. Before handing out the plan we
+ * push the live state onto the redo stack (tagged with the currently-focused
+ * node) so redo can return to it. Returns null if there was nothing to undo.
  */
-export function undo(index: TreeIndex, focusId: string | null = null): string | null {
+export function undo(index: TreeIndex, focusId: string | null = null): RestorePlan | null {
   const entry = undoStack.pop()
   if (!entry) return null
 
   redoStack.push({ nodes: snapshot(index), focusId, tag: null })
-  if (redoStack.length > MAX_ENTRIES) redoStack.shift()
+  const overflow = redoStack.length > MAX_ENTRIES ? redoStack.shift() : undefined
 
-  return restore(index, entry)
+  return planRestore(index, entry, () => {
+    redoStack.pop()
+    if (overflow) redoStack.unshift(overflow)
+    undoStack.push(entry)
+  })
 }
 
 /**
- * Re-apply the most recently undone action. The mirror of `undo`: push the
- * current (pre-redo) state back onto the undo stack, then restore the redo
- * snapshot. Returns the id to focus afterwards, or null if there was nothing to
- * redo.
+ * Plan a re-apply of the most recently undone action. The mirror of `undo`:
+ * push the current (pre-redo) state back onto the undo stack, then plan the
+ * restore of the redo snapshot. Returns null if there was nothing to redo.
  */
-export function redo(index: TreeIndex, focusId: string | null = null): string | null {
+export function redo(index: TreeIndex, focusId: string | null = null): RestorePlan | null {
   const entry = redoStack.pop()
   if (!entry) return null
 
   undoStack.push({ nodes: snapshot(index), focusId, tag: null })
-  if (undoStack.length > MAX_ENTRIES) undoStack.shift()
+  const overflow = undoStack.length > MAX_ENTRIES ? undoStack.shift() : undefined
 
-  return restore(index, entry)
+  return planRestore(index, entry, () => {
+    undoStack.pop()
+    if (overflow) undoStack.unshift(overflow)
+    redoStack.push(entry)
+  })
 }

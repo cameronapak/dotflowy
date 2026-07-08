@@ -715,10 +715,10 @@ h2 span.protected-lock {
    * ADR 0029). On coarse the chevron flips to `right:0` and is `position:
    * absolute` (out of the flex flow), so `.node-deco` -- which hugs the row's
    * trailing edge via `margin-inline-start:auto` -- would otherwise extend the
-   * full content width and render a decoration directly UNDER the chevron. The
-   * first consumer proves it: a child-count badge only shows on a COLLAPSED row,
-   * which always has children, so it always co-occurs with the chevron. Push the
-   * zone in by the 16px chevron box + a gap so the badge sits just left of it.
+   * full content width and render a decoration directly UNDER the chevron. Any
+   * trailing decoration on a COLLAPSED row always co-occurs with the chevron
+   * (a collapsed row has children), so push the zone in by the 16px chevron box
+   * + a gap so the decoration sits just left of it.
    * Desktop keeps the chevron in the left gutter, so no reservation is needed
    * there.
    */
@@ -1399,6 +1399,51 @@ body.dragging-active * {
   margin-left: 0;
 }
 
+dotflowy-widget[data-bible-ref][data-atom-selected] > span {
+  border-color: oklch(0.62 0.15 250);
+  background: oklch(0.94 0.05 250);
+  color: oklch(0.33 0.14 255);
+  box-shadow:
+    0 0 0 1px oklch(0.62 0.15 250),
+    0 0 0 4px oklch(0.62 0.15 250 / 0.18);
+}
+
+.dark dotflowy-widget[data-bible-ref][data-atom-selected] > span {
+  border-color: oklch(0.74 0.13 245);
+  background: oklch(0.3 0.08 250);
+  color: oklch(0.9 0.05 245);
+  box-shadow:
+    0 0 0 1px oklch(0.74 0.13 245),
+    0 0 0 4px oklch(0.74 0.13 245 / 0.24);
+}
+
 :root {
   --link-edit-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>');
+}
+
+/* The highlight color affordance (ADR 0035, Bear-style): a small highlighter
+   pen painted with the current text color via an SVG mask (lucide
+   `highlighter`), leading a REVEALED run right after the opening `==`. A
+   text-free span like the link pencil, so source/caret math is unaffected.
+   Clicking it opens the highlight color menu (Seam B). */
+.highlight-pen-icon {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.15em;
+  vertical-align: -0.05em;
+  background-color: currentColor;
+  opacity: 0.55;
+  cursor: pointer;
+  user-select: none;
+  -webkit-mask: var(--highlight-pen-icon) no-repeat center / contain;
+  mask: var(--highlight-pen-icon) no-repeat center / contain;
+}
+
+[data-highlight-reveal]:hover .highlight-pen-icon {
+  opacity: 1;
+}
+
+:root {
+  --highlight-pen-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>');
 }

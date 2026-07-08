@@ -7,9 +7,12 @@ import {
   ChevronsUpDownIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
+  FileUpIcon,
   FocusIcon,
   LogOutIcon,
+  MessageSquareWarningIcon,
   MonitorIcon,
   MoonIcon,
   PlugZapIcon,
@@ -26,8 +29,11 @@ import { useTheme } from "./theme-provider";
 import { useTextSize, type TextSize } from "./text-size-provider";
 import {
   copyOutlineAsMarkdown,
+  exportOutlineAsOpml,
   setViewCollapsed,
 } from "./header-more-menu";
+import { openOpmlImport } from "./opml-import-opener";
+import { openFeedbackReport } from "../data/feedback";
 
 /**
  * The GLOBAL-scope half of the Cmd+K command center (ADR 0034): the header +
@@ -67,6 +73,24 @@ export function useGlobalActions(opts: {
         run: () => {
           void copyOutlineAsMarkdown();
         },
+      },
+      {
+        id: "g:import-opml",
+        label: "Import OPML…",
+        description: "Import a Workflowy OPML export",
+        icon: FileUpIcon,
+        scope: "global",
+        keywords: ["import", "opml", "workflowy", "migrate", "file"],
+        run: () => openOpmlImport(),
+      },
+      {
+        id: "g:export-opml",
+        label: "Export OPML",
+        description: "Download the current view as an OPML file",
+        icon: DownloadIcon,
+        scope: "global",
+        keywords: ["export", "opml", "download", "file", "workflowy", "backup"],
+        run: exportOutlineAsOpml,
       },
       {
         id: "g:collapse-all",
@@ -164,6 +188,15 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["mcp", "connect", "apps", "agent", "ai", "claude"],
         run: openConnect,
+      },
+      {
+        id: "g:feedback",
+        label: "Report a bug",
+        description: "Open a pre-filled GitHub issue",
+        icon: MessageSquareWarningIcon,
+        scope: "global",
+        keywords: ["feedback", "bug", "report", "issue", "problem", "github"],
+        run: () => openFeedbackReport(),
       },
       {
         id: "g:github",

@@ -57,6 +57,12 @@ describe('linkUrlAtOffset', () => {
     )
   })
 
+  test('returns the url when the caret is behind the closing paren', () => {
+    expect(linkUrlAtOffset(text, text.indexOf(')') + 1)).toBe(
+      'https://example.com',
+    )
+  })
+
   test('returns null outside a complete link token', () => {
     expect(linkUrlAtOffset(text, 0)).toBeNull()
     expect(linkUrlAtOffset('[partial]', 3)).toBeNull()

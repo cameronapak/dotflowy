@@ -8,6 +8,8 @@
 // caret remap on reveal) lives in inline-code.ts; the link-aware paste cases in
 // the links plugin, over the core paste handler in paste.ts.
 
+import { spliceToken } from "../plugins/token-splice";
+
 // A link token: `[label](url)`. The label is "anything but `]`", the url is
 // "anything but `)`". Kept deliberately simple -- URLs that would break it (a
 // literal `)`, `(`, or space) are percent-encoded by encodeUrlForMarkdown when
@@ -30,12 +32,16 @@ export function hasLink(text: string): boolean {
 }
 
 /** Flatten links to their label text -- the projection used for fuzzy search
- *  and for clean display in result rows (ADR 0005). */
+ *  and for clean display in result rows (ADR 0005). Bails before building the
+ *  regex when `text` can't contain a link (no `[`) -- `flattenInline` chains
+ *  this on every node text in the `[[` node-link picker's scan while it's
+ *  open, so a link-free node should cost one `includes` check. */
 export function stripLinks(text: string): string {
+  if (!text.includes("[")) return text;
   return text.replace(LINK_RE(), (_full, label: string) => label);
 }
 
-/** Return the markdown link whose editable label/url contains `offset`.
+/** Return the markdown link whose source token contains or touches `offset`.
  *  The offset is in SOURCE space, matching contentEditable caret helpers. */
 export function linkAtOffset(text: string, offset: number): LinkAtOffset | null {
   for (const m of text.matchAll(LINK_RE())) {
@@ -43,15 +49,8 @@ export function linkAtOffset(text: string, offset: number): LinkAtOffset | null 
     const token = m[0] ?? "";
     const label = m[1] ?? "";
     const url = m[2] ?? "";
-    const labelStart = start + 1;
-    const labelEnd = labelStart + label.length;
-    const urlStart = labelEnd + 2; // `](`
-    const urlEnd = urlStart + url.length;
-    const inLabel = offset >= labelStart && offset <= labelEnd;
-    const inUrl = offset >= urlStart && offset <= urlEnd;
-    if (inLabel || inUrl) {
-      return { label, url, start, end: start + token.length };
-    }
+    const end = start + token.length;
+    if (offset >= start && offset <= end) return { label, url, start, end };
   }
   return null;
 }
@@ -110,9 +109,8 @@ export function replaceLinkToken(
   oldToken: string,
   newToken: string,
 ): string | null {
-  const at = text.indexOf(oldToken);
-  if (at < 0) return null;
-  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
+  // Delegates to the shared spliceToken (src/plugins/token-splice.ts).
+  return spliceToken(text, oldToken, newToken);
 }
 
 /** Verbatim-match-or-drop label swap (ADR 0016): replace the FIRST occurrence

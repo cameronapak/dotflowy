@@ -10,7 +10,8 @@
 // no logic with a node link (no fold/reveal, no unfurl, no bracket editing --
 // the chip is a BibleChip-class atom, backspace deletes it whole).
 
-import { Link2 } from "lucide-react";
+import { CalendarDaysIcon, Link2 } from "lucide-react";
+import { dateSuggestions } from "../../data/date-links";
 import {
   linkTargetId,
   linkedNodeLabel,
@@ -103,7 +104,28 @@ export default definePlugin({
       trigger: "[",
       match: linkMenuMatch,
       entries: (trigger, node, ctx) => {
-        const q = trigger.query.slice(1).trim().toLowerCase();
+        const raw = trigger.query.slice(1).trim();
+        const q = raw.toLowerCase();
+        // Date entries fold INTO this picker (ADR 0038) -- the menu engine's
+        // dispatch is first-match-wins on the trigger, so a second `[[` menu
+        // would shadow. `dateSuggestions` is the pure core layer
+        // (src/data/date-links.ts), so no cross-plugin import into daily.
+        // Non-empty only on a date-ish query, pinned above node matches.
+        const dates = dateSuggestions(raw).map((s) => ({
+          key: `date:${s.key}`,
+          render: () => (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <CalendarDaysIcon
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span className="truncate">{s.label}</span>
+              <span className="shrink-0 text-muted-foreground">{s.key}</span>
+            </span>
+          ),
+          // Trailing space so the caret lands past the atom (same as below).
+          replacement: `[[${s.key}]] `,
+        }));
         const matches: Node[] = [];
         for (const n of ctx.tree.byId.values()) {
           if (n.id === node.id) continue;
@@ -114,7 +136,7 @@ export default definePlugin({
           matches.push(n);
         }
         matches.sort((a, b) => b.updatedAt - a.updatedAt);
-        return matches.slice(0, PICKER_LIMIT).map((n) => ({
+        const nodeEntries = matches.slice(0, PICKER_LIMIT).map((n) => ({
           key: n.id,
           render: () => (
             <span className="flex min-w-0 items-center gap-1.5">
@@ -129,6 +151,7 @@ export default definePlugin({
           // continues naturally (the tags-menu convention).
           replacement: `[[${n.id}]] `,
         }));
+        return [...dates, ...nodeEntries];
       },
     },
   ],
