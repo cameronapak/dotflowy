@@ -99,11 +99,10 @@ bun run test:e2e   # Playwright end-to-end tests (chromium)
 The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, behind **Better Auth** accounts ([the auth gate](docs/adr/0011-the-auth-gate.md)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
 ```sh
-# local dev (two terminals): Vite HMR + a local Worker (DO + D1) it proxies /api to
-cp .dev.vars.example .dev.vars   # once: add a BETTER_AUTH_SECRET (openssl rand -base64 32)
-bun run db:migrate:local   # once: apply the local D1 schema (auth tables + the DO import source)
-bun run dev:api            # wrangler dev (Worker + DO + local D1) on :8787
-bun run dev                # vite dev (proxies /api -> :8787)
+bun install
+bun run setup        # generates BETTER_AUTH_SECRET + applies the local D1 schema
+bun run dev          # starts the app (vite :3000 + worker :8787) in one command
+bun run seed:user    # (optional) creates dev@dotflowy.local / dotflowy-dev to sign in with
 
 # or a production-like single-server preview
 bun run cf:dev             # build + wrangler dev
@@ -114,6 +113,8 @@ wrangler secret put INVITE_CODES         # comma-separated invite codes (unset =
 bun run db:migrate:remote  # before the first deploy
 bun run deploy             # build + wrangler deploy
 ```
+
+The local invite code is **`dev-invite`** if you'd rather sign up your own account; `bun run seed:user` skips that by creating a ready-to-use account.
 
 `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
 
