@@ -597,8 +597,10 @@ export interface MenuSpec {
 export interface SearchActionContext {
   /** The live tree index (for get-or-create reads). */
   index: TreeIndex;
-  /** Plain navigation to a node's zoom view (no morph -- a result isn't a pivot). */
-  goTo(nodeId: string): void;
+  /** Plain navigation to a node's zoom view (no morph -- a result isn't a pivot).
+   *  `focus: 'last'` lands the caret on the day's last child on load -- the
+   *  write-intent affordance the daily "Go to Today" action needs (ADR 0041). */
+  goTo(nodeId: string, opts?: { focus?: "last" }): void;
 }
 
 /** A virtual (non-node) row in a search picker -- runs `run` when picked. */

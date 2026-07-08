@@ -17,6 +17,7 @@
 // navigates away doesn't want.
 
 import { Effect } from "effect";
+import { useNavigate } from "@tanstack/react-router";
 import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
@@ -137,15 +138,20 @@ async function ensureDay(
   key: string,
   containerId: string,
   index: TreeIndex,
+  seedEntryLine: boolean,
 ): Promise<string | null> {
   const existing = getDayId(key);
   if (existing && index.byId.has(existing)) {
     if (!index.byId.get(existing)!.text.trim()) {
       setText(existing, formatDayText(key));
     }
-    // Backfill a first bullet if the note exists but has no children (e.g.
-    // created before this seeding landed). Same atomic batch as the heal.
-    if (childrenOf(index, existing).length === 0) {
+    // Seeding is opt-in at the OPEN boundary (ADR 0041): only a write-intent
+    // surface (/today, Today button, Cmd+K "Go to Today") asks for an empty
+    // line to type into -- reference surfaces (Send/Mirror-to-Today, MCP) never
+    // do. A reopened-but-emptied day re-seeds in its own isolated batch. Check
+    // the LIVE collection, not the passed `index`, which can predate a
+    // just-fired seed. No capture() -- stays out of undo like day creation.
+    if (seedEntryLine && !hasChildInLiveCollection(existing)) {
       runStructural(() => appendChild(existing, null, ''));
     }
     return existing;
@@ -163,14 +169,21 @@ async function ensureDay(
           formatDayText(key),
           winner,
         );
-        // Seed a first empty bullet so the note is ready to type into,
-        // not a bare title. Same atomic batch as the day node itself.
-        appendChild(winner, null, '');
+        // Fresh day: when a write-intent surface asked, seed the entry line in
+        // the SAME batch as the day node (correct-by-construction, no sibling
+        // fan). Otherwise the day is a bare title-only note.
+        if (seedEntryLine) appendChild(winner, null, '');
       }),
     !won,
   );
   setMapping(key, winner);
   return ok ? winner : null;
+}
+
+/** Does `parentId` have any child in the LIVE nodes collection? Used for the
+ *  reopen-seed check, which must not trust a possibly-stale tree index. */
+function hasChildInLiveCollection(parentId: string): boolean {
+  return nodesCollection.toArray.some((n) => n.parentId === parentId);
 }
 
 /** Ensure the container + the day exist and return the day's node id (no nav).
@@ -181,17 +194,19 @@ async function ensureDay(
 async function getOrCreateDay(
   key: string,
   index: TreeIndex,
+  opts?: { seedEntryLine?: boolean },
 ): Promise<string | null> {
   return withDailyNavigation(async () => {
     const containerId = await ensureContainer(index);
     if (!containerId) return null;
-    return ensureDay(key, containerId, index);
+    return ensureDay(key, containerId, index, opts?.seedEntryLine ?? false);
   });
 }
 
 export { getOrCreateDay };
 
-/** get-or-create the day, then zoom to it (the Today button + date chips). */
+/** get-or-create the day, then zoom to it -- a date-chip click (a reference,
+ *  seed-free; the Today button navigates the route with focus=last instead). */
 async function goToDate(key: string, ctx: PluginContext): Promise<void> {
   const dayId = await getOrCreateDay(key, ctx.tree);
   if (!dayId) {
@@ -220,6 +235,7 @@ function dateWidget(tok: string, key: string): WidgetEl {
 
 function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
   const pending = useDailyNavigationPending();
+  const navigate = useNavigate();
   return (
     <Button
       variant="ghost"
@@ -229,7 +245,26 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
       data-daily-nav-pending={pending ? "" : undefined}
       onClick={() => {
         const ctx = getCtx();
-        ctx.run(Effect.promise(() => goToDate(localDateKey(), ctx)));
+        // The Today button is a write-intent surface (ADR 0041): seed an entry
+        // line and route to the day with focus=last so the caret lands on it.
+        // Unlike a date chip (which zooms via goToDate), this navigates the
+        // route -- the on-load focus mechanism needs a pivotless navigation.
+        ctx.run(
+          Effect.promise(async () => {
+            const dayId = await getOrCreateDay(localDateKey(), ctx.tree, {
+              seedEntryLine: true,
+            });
+            if (!dayId) {
+              toast.error("Couldn't open today's daily note");
+              return;
+            }
+            navigate({
+              to: "/$nodeId",
+              params: { nodeId: dayId },
+              search: { focus: "last" },
+            });
+          }),
+        );
       }}
     >
       {pending ? (
@@ -531,10 +566,12 @@ export default definePlugin({
         label: "Go to Today",
         hint: "Creates today's daily note",
         icon: CalendarDaysIcon,
+        // "Go to Today" is a write-intent surface (ADR 0041): seed an entry
+        // line and land the caret on it via focus=last.
         run: () =>
-          void getOrCreateDay(key, ctx.index)
+          void getOrCreateDay(key, ctx.index, { seedEntryLine: true })
             .then((id) => {
-              if (id) ctx.goTo(id);
+              if (id) ctx.goTo(id, { focus: "last" });
               else toast.error("Couldn't open today's daily note");
             })
             .catch(() => toast.error("Couldn't open today's daily note")),

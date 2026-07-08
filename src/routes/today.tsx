@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { nodesCollection } from "../data/collection";
 import { subscribeTree } from "../data/tree-store";
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/today")({
 });
 
 function TodayRedirect() {
+  const navigate = useNavigate();
   const redirectStarted = useRef(false);
 
   useEffect(() => {
@@ -28,20 +29,37 @@ function TodayRedirect() {
       try {
         await nodesCollection.toArrayWhenReady();
         const index = buildTreeIndex(nodesCollection.toArray);
-        const dayId = await getOrCreateDay(localDateKey(), index);
+        // /today is a write-intent surface (ADR 0041): seed an empty entry line
+        // so the caret has somewhere to land, and focus=last puts it there.
+        const dayId = await getOrCreateDay(localDateKey(), index, {
+          seedEntryLine: true,
+        });
         if (dayId) {
-          window.location.replace(`/${dayId}?focus=last`);
+          // Client-side (SPA) navigate, NOT window.location.replace: a hard
+          // reload tears down the Effect runtime + sync socket and aborts the
+          // structural write that just created the day -- runStructural resolves
+          // on the optimistic insert, not the durable commit, so getOrCreateDay
+          // returns while `POST /api/nodes {ops}` is still in flight. Staying in
+          // the SPA lets that write finish and lands in the live editor with the
+          // day already present, so ?focus=last takes effect. `replace` keeps
+          // /today out of history (no redirect trap on Back).
+          navigate({
+            to: "/$nodeId",
+            params: { nodeId: dayId },
+            search: { focus: "last" },
+            replace: true,
+          });
         } else {
           toast.error("Couldn't open today's daily note");
-          window.location.replace("/");
+          navigate({ to: "/", replace: true });
         }
       } catch {
-        window.location.replace("/");
+        navigate({ to: "/", replace: true });
       } finally {
         unsub();
       }
     })();
-  }, []);
+  }, [navigate]);
 
   return null;
 }

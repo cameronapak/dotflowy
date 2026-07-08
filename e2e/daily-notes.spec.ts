@@ -44,7 +44,7 @@ async function clientNavigate(page: Page, path: string) {
 // Click the input to deterministically own focus, confirm it stuck, then type.
 async function openSwitcherAndType(page: Page, text: string) {
   await page.keyboard.press(`${modifier()}+k`);
-  const input = page.getByPlaceholder("Search nodes...");
+  const input = page.getByPlaceholder("Search nodes and actions...");
   await expect(input).toBeVisible();
   await input.click();
   await expect(input).toBeFocused();
@@ -75,6 +75,30 @@ test.describe("daily notes", () => {
     // Today's badge wears the distinct (primary) treatment -- the data hook the
     // variant swap sets only when the key is today.
     await expect(badge).toHaveAttribute("data-daily-today", "");
+  });
+
+  test("/today seeds an entry line and lands the caret on it (write-intent, ADR 0041)", async ({
+    page,
+  }) => {
+    await load(page);
+    // Client-nav to /today so the seedOutline mock survives (a full reload
+    // re-runs the init script). The route creates today's note, seeds ONE empty
+    // entry line, and redirects to /$nodeId?focus=last.
+    await clientNavigate(page, "/today");
+
+    // Redirected off /today, into today's note (title = the full date).
+    await expect(page).not.toHaveURL(/today/);
+    const year = String(new Date().getFullYear());
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+    // A single empty entry line was seeded under the day, and the caret landed
+    // ON it (focus=last) -- the day opens ready to append, not on the title.
+    // (The old tests only checked the redirect + badge, which is why the dead
+    // focus=last shipped green.)
+    const entry = page.locator("li[data-node-id] > .outline-row .node-text");
+    await expect(entry).toHaveCount(1);
+    await expect(entry).toBeFocused();
+    await expect(entry).toHaveText("");
   });
 
   test("only today's note gets the distinct badge; other days stay plain", async ({
@@ -512,8 +536,10 @@ test.describe("daily notes", () => {
 
     await todayButton(page).click();
 
-    // Adopted the winner -> zoomed to race-today, never a freshly minted id.
-    await expect(page).toHaveURL(/race-today$/);
+    // Adopted the winner -> navigated to race-today, never a freshly minted id.
+    // The Today button is a write-intent surface (ADR 0041), so it lands with
+    // ?focus=last -- match race-today whether or not the query trails.
+    await expect(page).toHaveURL(/race-today(\?|$)/);
 
     await goHome(page);
     // Exactly one day badge and one "Daily" container: no duplicate was created
@@ -597,7 +623,8 @@ test.describe("daily notes", () => {
 
     await todayButton(page).click();
 
-    await expect(page).toHaveURL(/ghost-today$/);
+    // Write-intent nav (ADR 0041) lands with ?focus=last; match either way.
+    await expect(page).toHaveURL(/ghost-today(\?|$)/);
     await expect(page.getByText("That bullet doesn't exist")).toHaveCount(0);
     const year = String(d.getFullYear());
     await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
