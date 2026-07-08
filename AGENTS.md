@@ -84,10 +84,9 @@ The short version, to get a working local instance:
 
 ```sh
 bun install
-cp .dev.vars.example .dev.vars   # then set BETTER_AUTH_SECRET (openssl rand -base64 32)
-bun run db:migrate:local         # once: local D1 schema
-bun run dev:api                  # terminal 1: wrangler dev (Worker + DO + local D1) on :8787
-bun run dev                      # terminal 2: vite dev on :3000 (proxies /api -> :8787)
+bun run setup      # once: writes .dev.vars + BETTER_AUTH_SECRET, applies the local D1 schema
+bun run dev        # vite (:3000) + wrangler (Worker + DO + local D1, :8787) in one command
+bun run seed:user  # optional: creates dev@dotflowy.local / dotflowy-dev to sign in with
 ```
 
 The app is a static SPA that talks to the Worker over `/api/*`, so both servers must run. Testing the OAuth-gated `/mcp` endpoint locally needs `BETTER_AUTH_URL` + `BETTER_AUTH_TRUSTED_ORIGINS` in `.dev.vars` (the `wrangler dev` custom-domain simulation rewrites both the issuer and the request `Origin` to the prod domain) — see `.dev.vars.example` and [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
@@ -126,7 +125,11 @@ Substantial plans or design decisions go through `/grill-with-docs` — a relent
 ## Commands
 
 ```sh
-bun run dev        # vite dev on :3000 (or next free port)
+bun run setup      # once per clone: .dev.vars + BETTER_AUTH_SECRET + local D1 schema
+bun run dev        # vite (:3000) + wrangler (:8787) together (scripts/dev.ts)
+bun run dev:web    # vite only (:3000)
+bun run dev:api    # wrangler only (:8787)
+bun run seed:user  # create a local dev account (dev@dotflowy.local / dotflowy-dev)
 bun run build      # production build (also prerenders /)
 bun run lint       # oxlint over src + worker (correctness = error)
 bun run lint:fix   # oxlint --fix (autofixable rules only)
@@ -195,7 +198,7 @@ Don't run code that touches `nodesCollection` during a server/render pass. Why: 
 - **`GET /api/unfurl?url=` fetches a pasted URL's title** ([ADR 0016](./docs/adr/0016-link-title-unfurl.md)), session-gated like the rest and DO-independent (it runs before the stub resolves). The fetch is an authenticated SSRF surface, so it's hardened in `worker/unfurl.ts` (scheme + hostname guard, manual redirects with per-hop revalidation, no credential forwarding, 5s timeout, 64KB cap, content-type gate) with the pure guards in `worker/unfurl-core.ts`; successful titles are cached cross-user (Cache API, 24h) and the route is per-user rate-limited (the `UNFURL_LIMIT` binding in `wrangler.jsonc`). Returns `{title: string|null}` — 400 only for a missing/non-http(s) `url`, else 200 (`null` = "no title"). **Don't relax the SSRF guard or follow redirects without re-validating each hop.**
 - **The DO routing key is the session's `user.id`.** `resolveUserId(sessionUserId, env)` (in `worker/index.ts`) picks the caller's Durable Object. **Never key the DO off the email:** a DO name is permanent, so that would orphan a user's whole outline on any email change. The one exception is the **owner-continuity bridge** — set `OWNER_USER_ID` to the owner's `user.id` and that single account maps to the constant `'default'` DO (where the pre-auth outline lives), zero copy. `ensureSeeded` (legacy D1 import) runs **only** for the `'default'` DO; new users start empty.
 - **The Worker is typechecked separately** (`bun run typecheck:worker`, `worker/tsconfig.json` with `@cloudflare/workers-types`); it lives in `worker/` so its runtime types don't clash with the app's DOM lib. Don't move it under `src/`.
-- **Dev loop:** copy `.dev.vars.example` → `.dev.vars` and set `BETTER_AUTH_SECRET` (the Worker fails closed without it); run `bun run dev` (Vite) *and* `bun run dev:api` (`wrangler dev` on :8787, Worker + the DO + local D1); first time `bun run db:migrate:local`. `bun run cf:dev` is a production-like single-server preview. In prod set the secret with `wrangler secret put BETTER_AUTH_SECRET`.
+- **Dev loop:** `bun run setup` once (writes `.dev.vars`, generates `BETTER_AUTH_SECRET` — the Worker fails closed without it — and applies the local D1 schema), then `bun run dev` to start vite (:3000) and `wrangler dev` (:8787, Worker + the DO + local D1) together; `bun run dev:web` + `bun run dev:api` still run them separately. `bun run seed:user` seeds a dev account. `bun run cf:dev` is a production-like single-server preview. In prod set the secret with `wrangler secret put BETTER_AUTH_SECRET`.
 - **Migrations:** the SQL files in `migrations/` (`bun run db:migrate:local` / `:remote`, run `:remote` **before** the first `bun run deploy`) are **D1** migrations — `0001`/`0002` (legacy nodes/kv = DO import source), `0003` (Better Auth tables, generated verbatim from `better-auth` `getMigrations()`; re-generate if auth options change), and `0004` (the `mcp` plugin's OAuth tables, written from its oidc-provider schema in `0003`'s conventions). The DO's own schema is created in its constructor (no SQL file); it's registered via the `new_sqlite_classes` tag in `wrangler.jsonc`.
 - **The SPA/no-SSR rule still holds:** the React app stays a pure static SPA; the per-user DO holds the data and the Worker routes `/api/*` to it, never the render pass.
 
