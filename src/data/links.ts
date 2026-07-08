@@ -8,7 +8,7 @@
 // caret remap on reveal) lives in inline-code.ts; the link-aware paste cases in
 // the links plugin, over the core paste handler in paste.ts.
 
-import { spliceToken } from "../plugins/token-kit";
+import { spliceToken } from "../plugins/token-splice";
 
 // A link token: `[label](url)`. The label is "anything but `]`", the url is
 // "anything but `)`". Kept deliberately simple -- URLs that would break it (a
@@ -109,7 +109,7 @@ export function replaceLinkToken(
   oldToken: string,
   newToken: string,
 ): string | null {
-  // Delegates to the shared spliceToken (src/plugins/token-kit.ts).
+  // Delegates to the shared spliceToken (src/plugins/token-splice.ts).
   return spliceToken(text, oldToken, newToken);
 }
 
