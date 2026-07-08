@@ -171,6 +171,20 @@ The outline is also reachable by AI agents over the [Model Context Protocol](htt
 
 The OPML pair speaks the Workflowy dialect through the same shared core as the app's own import/export ([ADR 0037](docs/adr/0037-opml-import-export.md)): `import_opml` takes an OPML string (targeted like `add_subtree` — `parentId`, `date`, or the top level), lands it as one atomic batch with the agent's provenance stamp, and answers with a compact receipt (root ids, counts, the fidelity-degradation tally) — `dryRun: true` previews that receipt without writing; `export_opml` mirrors `get_outline` scoping and returns the raw OPML string. Both are capped at 5,000 nodes and reject rather than truncate — a full Workflowy migration belongs in the app UI.
 
+## Quick capture
+
+Two light paths for ingesting a single bullet from outside the editor (Shortcuts, Raycast, curl, bookmarks):
+
+1. **Deeplink (interactive):** open `/add?text=Buy%20milk` while signed in. Creates the bullet under **today's daily note** and lands you there with the caret on it. Pass `parentId=<nodeId>` to append under any node instead.
+2. **Headless:** `POST /api/quick-add` with body `{"text":"Buy milk"}` (optional `parentId`, optional `date` as `YYYY-MM-DD` for the daily default — defaults to UTC today). Auth is either the session cookie or a personal API key (`x-api-key` header). Create/revoke keys from **More → API keys…**. Keys unlock **only** this endpoint — not `/api/nodes` or MCP (MCP stays OAuth).
+
+```sh
+curl -X POST https://<your-deployment>/api/quick-add \
+  -H "content-type: application/json" \
+  -H "x-api-key: df_…" \
+  -d '{"text":"Buy milk"}'
+```
+
 ## Project layout
 
 ```
@@ -179,8 +193,10 @@ src/
     __root.tsx        # HTML shell, global CSS, app-wide providers
     index.tsx         # the outline at the top level (Home)
     $nodeId.tsx       # the same outline zoomed into one bullet
+    add.tsx           # /add?text=… quick-capture deeplink
+    today.tsx         # /today → today's daily note
   lib/
-    auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOut)
+    auth-client.ts    # Better Auth browser client (session + apiKey client)
     utils.ts          # cn() and small helpers
   components/
     auth-screen.tsx     # login / signup screen (shown by the root AuthGate when signed out)
@@ -217,12 +233,13 @@ src/
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + /api/kv to per-user DOs
   index.ts            #   session gate + resolveUserId + routes /api to the user's DO (own tsconfig)
-  auth.ts             #   createAuth(env): Better Auth (email + password + the MCP OAuth provider), sessions in D1
+  auth.ts             #   createAuth(env): Better Auth (email + password + MCP OAuth + api keys), sessions in D1
   outline-do.ts       #   UserOutlineDO: per-user SQLite (nodes + kv), the outline store
   mcp.ts              #   the MCP endpoint: stateless JSON-RPC over /mcp (Effect pipeline)
   mcp-tools.ts        #   the MCP tool registry (Effect Schema inputs + handlers over the user's DO)
+  quick-add.ts        #   POST /api/quick-add planner (session or x-api-key)
   outline-ops.ts      #   pure server-side outline planners (snapshot -> atomic ChangeOp batch)
-migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP)
+migrations/           # D1 SQL (0001–0002 legacy; 0003 auth; 0004 OAuth/MCP; 0005 waitlist; 0006 apikey)
 wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
 docs/adr/             # one ADR per load-bearing decision (history in git log)
 vite.config.ts        # SPA mode + /api dev proxy

@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@better-auth/api-key": "^1.6.23",
     "@floating-ui/react-dom": "^2.1.8",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",

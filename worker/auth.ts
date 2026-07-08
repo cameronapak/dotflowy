@@ -14,6 +14,7 @@
 
 import { betterAuth } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { apiKey } from '@better-auth/api-key'
 import { mcp } from 'better-auth/plugins'
 
 /** The slice of the Worker env Better Auth needs. */
@@ -80,7 +81,18 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // signed-out user to `/`, and resumes the flow after sign-in (the plugin's
     // after-hook plus AuthScreen's explicit authorize-redirect fallback).
     // See docs/adr/0026-agent-native-mcp-server.md.
-    plugins: [mcp({ loginPage: '/' })],
+    //
+    // Personal API keys (migration 0006) for headless quick-capture only
+    // (`POST /api/quick-add` verifies `x-api-key` itself). enableSessionForAPIKeys
+    // stays false so a leaked key cannot unlock /api/nodes etc. MCP stays OAuth.
+    plugins: [
+      mcp({ loginPage: '/' }),
+      apiKey({
+        defaultPrefix: 'df_',
+        enableSessionForAPIKeys: false,
+        requireName: true,
+      }),
+    ],
   })
 }
 

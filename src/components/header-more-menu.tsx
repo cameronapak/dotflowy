@@ -13,12 +13,14 @@ import {
   MessageSquareWarningIcon,
   MoonIcon,
   MoreHorizontalIcon,
+  KeyRoundIcon,
   PlugZapIcon,
   SunIcon,
   SunMoonIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
+import { ApiKeysDialog } from "./api-keys-dialog";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import {
   DropdownMenu,
@@ -200,9 +202,10 @@ export function HeaderMoreMenu() {
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
-  // The connect dialog is a sibling of the menu (not nested in its content) so
-  // it survives the menu closing on item select.
+  // Dialogs are siblings of the menu (not nested in its content) so they
+  // survive the menu closing on item select.
   const [connectOpen, setConnectOpen] = useState(false);
+  const [apiKeysOpen, setApiKeysOpen] = useState(false);
 
   return (
     <>
@@ -234,6 +237,11 @@ export function HeaderMoreMenu() {
           <DropdownMenuItem onClick={() => setConnectOpen(true)}>
             <PlugZapIcon />
             Connect apps (MCP)
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={() => setApiKeysOpen(true)}>
+            <KeyRoundIcon />
+            API keys…
           </DropdownMenuItem>
 
           <DropdownMenuItem onClick={() => openFeedbackReport()}>
@@ -344,6 +352,7 @@ export function HeaderMoreMenu() {
         </DropdownMenuContent>
       </DropdownMenu>
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <ApiKeysDialog open={apiKeysOpen} onOpenChange={setApiKeysOpen} />
     </>
   );
 }
