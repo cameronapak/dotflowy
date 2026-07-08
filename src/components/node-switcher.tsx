@@ -305,9 +305,13 @@ function SwitcherDialog({
   const actions: SearchAction[] = q
     ? searchActions(q, {
         index,
-        goTo: (id) => {
+        goTo: (id, opts) => {
           close();
-          navigate({ to: "/$nodeId", params: { nodeId: id } });
+          navigate({
+            to: "/$nodeId",
+            params: { nodeId: id },
+            search: opts?.focus ? { focus: opts.focus } : {},
+          });
         },
       })
     : [];

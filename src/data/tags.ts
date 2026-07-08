@@ -165,14 +165,22 @@ export function buildTagFilter(
   return { visibleIds, matchIds }
 }
 
-/** Typed `q` search param, shared by the home and zoom routes. */
+/** Typed search params, shared by the home and zoom routes. `focus=last` lands
+ *  the caret on the last visible child on load (the daily `/today` redirect). */
 export interface OutlineSearch {
   q?: string
+  focus?: 'last'
 }
 
 export function validateOutlineSearch(
   search: Record<string, unknown>,
 ): OutlineSearch {
   const q = typeof search.q === 'string' ? search.q.trim() : ''
-  return q ? { q } : {}
+  const out: OutlineSearch = {}
+  if (q) out.q = q
+  // Pass `focus=last` through: the router validates the DESTINATION route's
+  // search, so any key not returned here is dropped before it reaches the
+  // editor (which is why the redirect's ?focus=last was silently a no-op).
+  if (search.focus === 'last') out.focus = 'last'
+  return out
 }
