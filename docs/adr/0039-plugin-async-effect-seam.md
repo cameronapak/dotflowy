@@ -72,7 +72,7 @@ be fully provided (`R = never`, satisfied by `appRuntime`'s layer) and should be
 
 ## Implementation note (Effect v4)
 
-Effect v4 (vendored at `repos/effect-smol/`) renamed `Effect.catchAllCause` to
+Effect v4 (source via `bunx opensrc path Effect-TS/effect-smol`) renamed `Effect.catchAllCause` to
 `Effect.catchCause`; `Fiber.RuntimeFiber` no longer exists as a separate type —
 `ManagedRuntime.runFork` returns `Fiber.Fiber<A, E>`. The implementation follows
-the vendored source, not the v3-era names.
+the fetched source, not the v3-era names.

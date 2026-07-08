@@ -115,9 +115,10 @@ Rules of thumb, expanded in `AGENTS.md`:
 
 - **Skills first.** Before substantial work, run `bunx @tanstack/intent@latest list`
   and load a matching skill if one fits (see the top of `AGENTS.md`).
-- **Effect v4 is vendored** at `repos/effect-smol/` for reference. Read from it,
-  never import from it; app/worker code imports `effect` from npm. Read
-  `repos/effect-smol/AGENTS.md` before writing Effect.
+- **Effect v4 source comes via opensrc** — `bunx opensrc path Effect-TS/effect-smol`
+  prints a machine-global cached copy (`bun run setup` pre-warms it). Read from it,
+  never import from it; app/worker code imports `effect` from npm. Read the fetched
+  repo's `AGENTS.md` before writing Effect.
 - **Plugins** live in `src/plugins/<name>/`; adding a feature is a folder plus one
   line in `src/plugins/index.ts` ([ADR 0001](./docs/adr/0001-plugin-architecture.md)).
 - **Structural edits are atomic; field edits are direct.** Any tree-shape
