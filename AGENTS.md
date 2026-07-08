@@ -46,15 +46,19 @@ The MCP server returns "not initialized." Ask the user: *"I notice this project 
 For any file search or grep in the current git-indexed directory, use fff tools.
 <!-- fff:end -->
 
-## Vendored Effect v4 source
+## Effect v4 source via opensrc
 
-The project vendors the Effect v4 source at `repos/effect-smol/` (via `git subtree`).
+The Effect v4 source is fetched on demand with [opensrc](https://github.com/vercel-labs/opensrc) (a devDependency) into a machine-global cache (`~/.opensrc/`) — nothing is committed ([ADR 0040](./docs/adr/0040-effect-source-via-opensrc.md)):
 
-- **Read-only reference.** Treat it as the source of truth for Effect v4 APIs, patterns, tests, and module structure. Never `node_modules/effect/` — always `repos/effect-smol/packages/effect/src/`.
-- **Do NOT import from `repos/`.** Application and worker code continue to `import { Effect } from "effect"` from the normal npm dependency. The vendored copy is for agent reference only, not bundling.
-- **Do NOT edit files under `repos/`.**
-- Before writing Effect code, read `repos/effect-smol/AGENTS.md` and `repos/effect-smol/packages/effect/src/.patterns/effect.md` for v4 idioms (e.g. `Effect.fnUntraced`, `Effect.callback` not `Effect.async`, `Data.TaggedError("Tag")<{}>`, no `async/await`, use `Effect.gen`).
-- Update with: `bun run repos:update-effect` (pulls from `Effect-TS/effect-smol.git main`).
+```sh
+bunx opensrc path Effect-TS/effect-smol            # fetches on first use, prints the cached path
+rg "fnUntraced" $(bunx opensrc path Effect-TS/effect-smol)/packages/effect/src
+```
+
+- **Read-only reference.** Treat the fetched repo as the source of truth for Effect v4 APIs, patterns, tests, and module structure. Never `node_modules/effect/` — always the opensrc copy's `packages/effect/src/`.
+- **Never import from it.** Application and worker code continue to `import { Effect } from "effect"` from the normal npm dependency. The fetched copy is for agent reference only, not bundling.
+- Before writing Effect code, read its `AGENTS.md` and `.patterns/effect.md` (repo root of the fetched copy) for v4 idioms (e.g. `Effect.fnUntraced`, `Effect.callback` not `Effect.async`, `Data.TaggedError("Tag")<{}>`, no `async/await`, use `Effect.gen`).
+- `bun run effect:src` prints the same path; `bun run setup` pre-warms the cache so the source is available offline.
 
 ## Agent skills
 
@@ -141,32 +145,20 @@ bun run test:e2e:ui  # same, in Playwright's interactive UI
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # watch loop (scripts/cf-dev.ts): build:cf + wrangler dev, rebuilds on src/ changes
 bun run deploy     # build:cf, then `wrangler deploy`
-bun run repos:update-effect  # pull latest Effect v4 source into repos/effect-smol (git subtree)
+bun run effect:src  # print (fetch on first use) the Effect v4 source path via opensrc
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
-## Vendored Repositories
+## Exploring the Effect v4 source
 
-This project vendors external repositories under `repos/` to give agents direct source access.
+Effect v4 is **post-training-cutoff** for most models. Always consult the opensrc-fetched source (see *Effect v4 source via opensrc* above) when writing Effect code — prefer its examples and patterns over guesses or web search. Inside `$(bunx opensrc path Effect-TS/effect-smol)`:
 
-**Rules:**
-- Treat `repos/` as **read-only reference material** — never edit files there unless explicitly asked.
-- **Do not import from `repos/`** — application code imports from normal package dependencies (`effect`, etc.).
-- Prefer examples and patterns from vendored source over guesses or web search.
-- Do not add `repos/` paths to `tsconfig.json` includes — they are excluded intentionally.
+1. **Read `AGENTS.md` and `LLMS.md` first** — the Effect team's agent instructions for the repo.
+2. **Explore `packages/effect/src/`** for idiomatic patterns, module structure, and API signatures, and `.patterns/` for the team's pattern docs.
+3. **Check tests** in `packages/effect/test/` to see how APIs are exercised in practice.
+4. Treat it as the source of truth for Effect v4 — supersedes any pre-training knowledge of Effect v3.
 
-### `repos/effect-smol` — Effect v4 source
-
-Effect v4 is **post-training-cutoff** for most models. Always consult this subtree when writing Effect code.
-
-1. **Read `repos/effect-smol/AGENTS.md` and `repos/effect-smol/LLMS.md` first** — the Effect team's agent instructions for the repo.
-2. **Explore `repos/effect-smol/packages/effect/src/`** for idiomatic patterns, module structure, and API signatures.
-3. **Check tests** in `repos/effect-smol/packages/effect/test/` to see how APIs are exercised in practice.
-4. Treat `repos/effect-smol` as the source of truth for Effect v4 — supersedes any pre-training knowledge of Effect v3.
-
-To update: `bun run repos:update-effect`
-
-**Unit tests run on `bun test`** (`bun run test` = `bun test src worker/`, scoped so it never grabs the Playwright `e2e/*.spec.ts` — and the trailing slash on `worker/` keeps it from matching the vendored `repos/.../workers/` tests), co-located as `src/**/*.test.ts` and `worker/**/*.test.ts`. They cover **pure logic only** (`tags.ts`, `links.ts`, `tree.ts`, and other side-effect-free modules) — **behavior/integration stays Playwright** (don't unit-test the contentEditable/caret/collection/DO path; you'd only end up mocking the world). Two principled exceptions: (1) the **sync socket's reconnect/handshake policy** (`realtime.test.ts`), because Effect's `WebSocketConstructor` is an injectable service — a fake socket is one clean seam, not mocking the world ([ADR 0013](./docs/adr/0013-sync-socket-as-an-effect-resource.md)); and (2) the **Worker trust-boundary schemas** (`worker/wire.test.ts`), because request-body decode is pure (valid bodies decode, malformed reject) and e2e can't reach it — `seedOutline` mocks the Worker, so the real `worker/index.ts` decode path never runs ([ADR 0014](./docs/adr/0014-validate-the-worker-do-trust-boundary.md)). For `Node`/`TreeIndex` fixtures use `makeNode()` from `tree.ts`, the canonical partial-node builder — not ad-hoc casts. Test files are **excluded from the app `tsconfig.json`** (and from `worker/tsconfig.json`) so `bun:test` and Bun globals never leak into the browser/Worker typecheck, and are checked on their own via **`typecheck:test`** (`tsconfig.test.json`, `types: ["bun"]`, now also covering `worker/**/*.test.ts`), mirroring `typecheck:worker`. Plus the two static gates: **`oxlint`** (`.oxlintrc.json`, VoidZero's Oxc linter — `correctness` category as errors, `react` plugin on; scoped to `src` + `worker`, mirroring `typecheck`'s boundary, with `src/routeTree.gen.ts` ignored) and **`typecheck`** — run them all after any change. `oxlint` is lint-only by choice (no formatter); `jsx-a11y` is off for now because the contentEditable/click-handler-heavy editor would false-positive on day one (easy opt-in later). End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert `{nodes}` **or** atomic batch `{ops}`→`{seq}` / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) **and is realtime-faithful**: every write bumps a `seq` and echoes a `{type:'change',seq,ops}` frame over the `/api/sync` WebSocket mock — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. `seedOutline(page, nodes, { echoDelayMs, postDelayMs })` can delay the echo (`echoDelayMs`, to reproduce the optimistic-overlay/echo gap — the structural batch path holds its overlay across it) or the batch POST *response* (`postDelayMs`, to prove rapid batches serialize on the wire and can't reach the DO out of order) — both in `atomic-structural-writes.spec.ts`. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
+**Unit tests run on `bun test`** (`bun run test` = `bun test src worker/`, scoped so it never grabs the Playwright `e2e/*.spec.ts`), co-located as `src/**/*.test.ts` and `worker/**/*.test.ts`. They cover **pure logic only** (`tags.ts`, `links.ts`, `tree.ts`, and other side-effect-free modules) — **behavior/integration stays Playwright** (don't unit-test the contentEditable/caret/collection/DO path; you'd only end up mocking the world). Two principled exceptions: (1) the **sync socket's reconnect/handshake policy** (`realtime.test.ts`), because Effect's `WebSocketConstructor` is an injectable service — a fake socket is one clean seam, not mocking the world ([ADR 0013](./docs/adr/0013-sync-socket-as-an-effect-resource.md)); and (2) the **Worker trust-boundary schemas** (`worker/wire.test.ts`), because request-body decode is pure (valid bodies decode, malformed reject) and e2e can't reach it — `seedOutline` mocks the Worker, so the real `worker/index.ts` decode path never runs ([ADR 0014](./docs/adr/0014-validate-the-worker-do-trust-boundary.md)). For `Node`/`TreeIndex` fixtures use `makeNode()` from `tree.ts`, the canonical partial-node builder — not ad-hoc casts. Test files are **excluded from the app `tsconfig.json`** (and from `worker/tsconfig.json`) so `bun:test` and Bun globals never leak into the browser/Worker typecheck, and are checked on their own via **`typecheck:test`** (`tsconfig.test.json`, `types: ["bun"]`, now also covering `worker/**/*.test.ts`), mirroring `typecheck:worker`. Plus the two static gates: **`oxlint`** (`.oxlintrc.json`, VoidZero's Oxc linter — `correctness` category as errors, `react` plugin on; scoped to `src` + `worker`, mirroring `typecheck`'s boundary, with `src/routeTree.gen.ts` ignored) and **`typecheck`** — run them all after any change. `oxlint` is lint-only by choice (no formatter); `jsx-a11y` is off for now because the contentEditable/click-handler-heavy editor would false-positive on day one (easy opt-in later). End-to-end behavior is **Playwright** (`e2e/`, chromium-only, dev server on port 3210, reuses a running one). Specs seed via `seedOutline` (`e2e/fixtures.ts`), which **`page.route`-intercepts `/api/nodes`** (and `/api/kv`) with an in-memory `Map` mock of the Worker (GET all / POST upsert `{nodes}` **or** atomic batch `{ops}`→`{seq}` / PATCH `{updates}` / DELETE `{ids}`/`{keys}`) **and is realtime-faithful**: every write bumps a `seq` and echoes a `{type:'change',seq,ops}` frame over the `/api/sync` WebSocket mock — so the real `collection.ts`/`api.ts`/`kv-api.ts` path runs against a Map, no `wrangler dev` needed. `seedOutline(page, nodes, { echoDelayMs, postDelayMs })` can delay the echo (`echoDelayMs`, to reproduce the optimistic-overlay/echo gap — the structural batch path holds its overlay across it) or the batch POST *response* (`postDelayMs`, to prove rapid batches serialize on the wire and can't reach the DO out of order) — both in `atomic-structural-writes.spec.ts`. The store is per-`page`, so `fullyParallel` tests never share state. `e2e/` is outside `tsconfig.json`'s `include`, so it doesn't affect `typecheck`.
 
 **Caret in a contentEditable test:** don't use `Home`/`End`/arrow keys (unreliable in macOS Chromium contentEditable) and don't rely on `.click()` (lands *past* the bullet text — the `.node-text` span is wider than its text). Set the Selection range directly via `evaluate` (see the `caretAt` helper in `e2e/enter-split.spec.ts`). `toHaveText` normalizes whitespace — prefer space-free fixture text (`"alphabravo"`) or `allTextContents()` for exact comparison.
 

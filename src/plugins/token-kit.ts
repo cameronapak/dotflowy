@@ -6,25 +6,19 @@ import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import type { NodeCommands } from "../components/OutlineNode";
 import type { TokenView } from "./types";
+import { spliceToken } from "./token-splice";
+
+// `spliceToken` moved to the dependency-free `token-splice.ts` so worker-reachable
+// data modules can import it without dragging this file's DOM helpers into the
+// Workers-types compilation. Re-exported here so token-plugin consumers are
+// undisturbed.
+export { spliceToken };
 
 /** True iff the caret sits within or adjacent to a token's source span — the
  *  fold/reveal rule every folding token shares (inclusive boundaries, so the
  *  caret can arrive from either edge). Replaces the copy-pasted predicate. */
 export function isRevealed({ revealOffset, start, end }: TokenView): boolean {
   return revealOffset != null && revealOffset >= start && revealOffset <= end;
-}
-
-/** Splice a verbatim token replacement into `text` at its first occurrence, or
- *  null if the token is no longer present (it was edited/deleted since). The
- *  pure core of every token write-back. */
-export function spliceToken(
-  text: string,
-  oldToken: string,
-  newToken: string,
-): string | null {
-  const at = text.indexOf(oldToken);
-  if (at < 0) return null;
-  return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
 }
 
 /** Verbatim-match-or-drop write-back against a node's LIVE text: resolve a

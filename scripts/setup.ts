@@ -8,6 +8,9 @@
  *   3. Apply the local D1 schema via the existing `db:migrate:local` script
  *      (wrangler's migration apply is itself idempotent - re-running is a
  *      no-op).
+ *   4. Warm the opensrc cache with the Effect v4 source (ADR 0040) so agents
+ *      can read it offline. Failure-tolerant: setup must not die because
+ *      GitHub was unreachable.
  *
  * Safe to re-run any time; never prints the generated secret.
  */
@@ -63,6 +66,16 @@ const code = await migrate.exited;
 if (code !== 0) {
   log(`db:migrate:local failed (exit ${code})`);
   process.exit(1);
+}
+
+// 4. Warm the opensrc cache with the Effect v4 source (non-fatal).
+log("warming the Effect v4 source cache (opensrc)...");
+const warm = Bun.spawn(["bunx", "opensrc", "fetch", "Effect-TS/effect-smol"], {
+  cwd: ROOT,
+  stdio: ["inherit", "inherit", "inherit"],
+});
+if ((await warm.exited) !== 0) {
+  log("opensrc fetch failed (offline?) - continuing; it fetches on first use");
 }
 
 log("Setup complete. Next:");

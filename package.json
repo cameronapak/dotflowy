@@ -26,7 +26,7 @@
     "test": "bun test src worker/",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "repos:update-effect": "git subtree pull --prefix=repos/effect-smol https://github.com/Effect-TS/effect-smol.git main --squash"
+    "effect:src": "opensrc path Effect-TS/effect-smol"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -72,6 +72,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
     "babel-plugin-react-compiler": "1.0.0",
+    "opensrc": "^0.7.3",
     "oxlint": "^1.71.0",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.6.0",

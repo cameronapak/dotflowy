@@ -59,7 +59,7 @@ callback resolves; `appliedSeq → SubscriptionRef` remains a later slice. The e
   `atomic-structural-writes.spec.ts` (echo timing) is the gate that proves it harmless.
 - **New dependency surface: `effect/unstable/socket`.** The `unstable/` namespace can churn across
   betas (we pin `effect@4.0.0-beta.90`). It's a single import behind the `Stream` producer, mirrored in
-  the vendored `repos/effect-smol` source; if it churns, the blast radius is one module.
+  the effect-smol source (fetched via `bunx opensrc path Effect-TS/effect-smol`); if it churns, the blast radius is one module.
 - **One shared `ManagedRuntime` (`appRuntime`) now exists** as the home for long-lived Effect fibers.
   It's the backbone every subsequent Effect slice forks onto, provisioned by one growing service layer.
 - **Frame decoding is now Schema-validated (later pass, done).** `decodeFrame` originally did
