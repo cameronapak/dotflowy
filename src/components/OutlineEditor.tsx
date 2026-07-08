@@ -827,7 +827,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   <Button
                     type="button"
                     size="icon-sm"
-                    variant="outline"
+                    variant="ghost"
                     onClick={() =>
                       runStructural(() => {
                         const siblings = childrenOf(getTreeIndex(), rootId);
@@ -2021,7 +2021,7 @@ function BreadcrumbTrail({
       <Button
         type="button"
         size="icon"
-        variant="outline"
+        variant="ghost"
         onClick={() => {
           if (rootId === null) return;
           onNavigate(null, rootId);
