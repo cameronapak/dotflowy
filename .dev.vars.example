@@ -8,6 +8,13 @@ BETTER_AUTH_SECRET=replace-me
 # empty = signup closed. In prod: `wrangler secret put INVITE_CODES`.
 INVITE_CODES=dev-invite
 
+# Optional: Stripe billing (issue #172). Unset = the app runs fine and only the
+# billing endpoints fail. Test-mode key from the Stripe dashboard; the webhook
+# secret is printed by `stripe listen` (see "Testing Stripe billing locally" in
+# CONTRIBUTING.md). In prod: `wrangler secret put` both.
+# STRIPE_SECRET_KEY=sk_test_replace-me
+# STRIPE_WEBHOOK_SECRET=whsec_replace-me
+
 # Optional: pin the OAuth issuer the MCP discovery metadata advertises (ADR
 # 0026). Needed to test the MCP OAuth flow against `wrangler dev` — without it
 # the dev proxy's custom-domain simulation makes the inferred origin the prod

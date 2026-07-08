@@ -107,6 +107,23 @@ second, Better Auth's CSRF check rejects local sign-in with `403 Invalid origin`
 Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
 [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
+### Testing Stripe billing locally
+
+Billing is optional in dev — with no Stripe vars set, everything except the
+billing endpoints works. To exercise checkout/webhooks locally you need the
+[Stripe CLI](https://docs.stripe.com/stripe-cli) and a test-mode API key:
+
+```sh
+stripe listen --forward-to localhost:8787/api/auth/stripe/webhook
+```
+
+Put the test key and the `whsec_…` secret that `stripe listen` prints into
+`.dev.vars` as `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` (see
+`.dev.vars.example`), then restart `bun run dev:api`. Test-mode Prices must
+carry the lookup keys in `worker/auth.ts` (`STRIPE_LOOKUP_KEYS`) — the code
+references prices by lookup key, never by id, so test and live mode need no
+config difference.
+
 ## Before you open a PR
 
 Run the full gate. These mirror CI — except `bun run test:e2e`, which is

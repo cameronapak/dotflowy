@@ -12,11 +12,14 @@
  * Durable Object.
  */
 
+import { stripe } from "@better-auth/stripe";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
+import Stripe from "stripe";
 
 import { sendEmail } from "./email";
+import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
@@ -39,7 +42,29 @@ export interface AuthEnv {
    *  local dev works fine without them). Set via `wrangler secret put`. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** Stripe API key (`sk_test_…` locally, `sk_live_…` in prod via
+   *  `wrangler secret put STRIPE_SECRET_KEY`). Unset = billing endpoints exist
+   *  but every Stripe call fails; sign-in/sync/MCP are untouched. */
+  STRIPE_SECRET_KEY?: string;
+  /** Webhook signing secret for /api/auth/stripe/webhook (`whsec_…`). From the
+   *  dashboard endpoint in prod, `stripe listen` locally. Unset = webhook
+   *  signature verification fails closed. */
+  STRIPE_WEBHOOK_SECRET?: string;
 }
+
+/**
+ * Stripe Price lookup keys — the stable, environment-independent handle the
+ * plugin resolves to a live price id at checkout time. The Prices created in
+ * the Stripe dashboard (test AND live mode) MUST carry these lookup keys;
+ * that's the whole coupling, no price-id env vars. Pricing per #152:
+ * unlimited $5/mo · $48/yr; founding $99 · 3-year interval (Stripe's max —
+ * the price itself is `recurring: { interval: 'year', interval_count: 3 }`).
+ */
+export const STRIPE_LOOKUP_KEYS = {
+  unlimitedMonthly: "dotflowy_unlimited_monthly",
+  unlimitedAnnual: "dotflowy_unlimited_annual",
+  founding: "dotflowy_founding",
+} as const;
 
 /** The password-reset email, as an HTML + plain-text pair (both always sent —
  *  spam score + client compatibility). Two templates is below the bar for a
@@ -171,6 +196,22 @@ export function createAuth(
         }
       }),
     },
+    // Billing (issue #162): the @better-auth/stripe plugin owns the whole
+    // Stripe surface — checkout via `subscription.upgrade()`, the webhook at
+    // /api/auth/stripe/webhook (inside the /api/auth/* prefix index.ts already
+    // routes BEFORE the session gate — zero new routing), and the D1
+    // `subscription` table (migration 0006) that worker/plan.ts reads for
+    // entitlements. Nothing calls Stripe on the request path.
+    //
+    // The plugin is unconditional so `Auth`'s inferred type (and the D1
+    // schema) never depends on which secrets are set; a missing key only
+    // breaks the billing endpoints themselves (stripe-node throws at call
+    // time, not construction — the placeholder key is never sent anywhere
+    // except a failing Stripe call on a box without .dev.vars keys).
+    //
+    // stripe-node v22 ships workerd export conditions, so `new Stripe(key)`
+    // auto-selects the fetch HTTP client + SubtleCrypto webhook verification.
+    //
     // OAuth 2.1 authorization server for the MCP endpoint (/mcp): PKCE
     // authorization-code flow with dynamic client registration, tokens in D1
     // (migration 0004). The SPA's AuthScreen doubles as the login page — the
@@ -178,7 +219,56 @@ export function createAuth(
     // signed-out user to `/`, and resumes the flow after sign-in (the plugin's
     // after-hook plus AuthScreen's explicit authorize-redirect fallback).
     // See docs/adr/0026-agent-native-mcp-server.md.
-    plugins: [mcp({ loginPage: "/" })],
+    plugins: [
+      mcp({ loginPage: "/" }),
+      stripe({
+        stripeClient: new Stripe(
+          env.STRIPE_SECRET_KEY ?? "sk_test_placeholder",
+        ),
+        stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET ?? "",
+        // No Stripe customer until first checkout: alpha users need no
+        // backfill, and the free tier is the absence of a subscription row.
+        // The plugin creates the customer lazily at first `upgrade()`.
+        createCustomerOnSignUp: false,
+        subscription: {
+          enabled: true,
+          // Both plans are ALWAYS listed. Don't gate the founding cap by
+          // withholding it from an async `plans` fn: webhooks and
+          // `subscription.list()` resolve a subscription's plan from this
+          // same list, so a withheld plan would break state updates for the
+          // 50 people who already bought it. The cap gates checkout below.
+          plans: [
+            {
+              name: "unlimited",
+              lookupKey: STRIPE_LOOKUP_KEYS.unlimitedMonthly,
+              annualDiscountLookupKey: STRIPE_LOOKUP_KEYS.unlimitedAnnual,
+            },
+            {
+              name: "founding",
+              lookupKey: STRIPE_LOOKUP_KEYS.founding,
+            },
+          ],
+          // The founding 50-seat cap, enforced server-side at the moment a
+          // checkout session would be created (hiding the pricing card is
+          // #171's UX; this is the wall a direct POST hits). Runs only on
+          // /subscription/upgrade, never on the request path. At the boundary
+          // a race can oversell by a seat — that's a refund-one-customer
+          // problem, per #162.
+          getCheckoutSessionParams: async ({ plan }) => {
+            if (
+              plan.name === "founding" &&
+              (await countFoundingSeats(env.DB)) >= FOUNDING_SEAT_LIMIT
+            ) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "All founding seats are taken. The unlimited plan is available.",
+              });
+            }
+            return {};
+          },
+        },
+      }),
+    ],
   });
 }
 
