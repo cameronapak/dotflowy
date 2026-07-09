@@ -30,8 +30,13 @@ function toggleCompletion(nodeId: string, ctx: PluginContext) {
   ctx.mutations.onToggleCompleted(nodeId, !node.completed);
 }
 
-// Seam F: the checkbox, before the text on a task. Rendered in two homes -- the
-// list bullet (`placement="row"`) and the zoomed page title (`placement="title"`).
+// Seam F: the checkbox on a task. Two homes with different layout jobs:
+//  - list row (`placement="row"`): REPLACES the bullet-dot (`row:bullet`) so a
+//    task is not "dot + checkbox" side by side. Drag stays on the bullet control;
+//    the checkbox owns click (toggle), so click-to-zoom only applies to plain
+//    bullets (double-click the task control still zooms -- see OutlineRow).
+//  - zoomed title (`placement="title"`): leads the page title (`title:before-text`);
+//    there is no bullet column on the title path.
 // Unlike the daily badge, the checkbox is NOT size-constant across the two: the
 // title text is a 24px h2, so a compact 16px control reads as undersized next to
 // it; the title checkbox scales up to sit with the larger text (the row keeps the
@@ -59,6 +64,22 @@ function TaskCheckbox({
       onCheckedChange={(checked) =>
         getCtx().mutations.onToggleCompleted(node.id, checked)
       }
+      // Backspace on the focused checkbox demotes to a plain bullet (same as
+      // caret-at-start Backspace on the text). Inverse of the checkbox
+      // replacing the bullet. After demote the control unmounts -- hand focus
+      // back to the row/title text so typing continues.
+      onKeyDown={(e) => {
+        if (e.key !== "Backspace") return;
+        e.preventDefault();
+        e.stopPropagation();
+        const host = (e.currentTarget as HTMLElement).closest(
+          "li, h2.zoomed-title",
+        );
+        getCtx().mutations.onSetTask(node.id, false);
+        requestAnimationFrame(() => {
+          (host?.querySelector(".node-text") as HTMLElement | null)?.focus();
+        });
+      }}
     />
   );
 }
@@ -66,13 +87,13 @@ function TaskCheckbox({
 export default definePlugin({
   id: "todos",
 
-  // Seam F: the checkbox, before the text on a task -- between the dot and the
-  // text on a list bullet, and leading the page title when zoomed in. See
-  // TaskCheckbox for the per-placement sizing.
+  // Seam F: the checkbox replaces the bullet-dot on list rows (`row:bullet`)
+  // and leads the page title when zoomed in (`title:before-text`). See
+  // TaskCheckbox for the per-placement sizing + interaction rationale.
   slots: [
     {
       id: "todo-checkbox",
-      position: "row:before-text",
+      position: "row:bullet",
       render: (node, getCtx) => (
         <TaskCheckbox node={node} getCtx={getCtx} placement="row" />
       ),

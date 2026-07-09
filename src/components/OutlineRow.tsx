@@ -256,6 +256,10 @@ function RowChrome({
   const mirrorsOn = isMirrorsEnabled();
   const mirrorCount = useMirrorCount(content.id, mirrorsOn);
   const isSource = !isMirror && mirrorCount > 0;
+  // Seam F: `row:bullet` replaces the default bullet-dot (todos checkbox on a
+  // task). Stable array from the registry -- same referential discipline as
+  // before-text slots so a keystroke never rebuilds it.
+  const bulletSlots = slotsAt("row:bullet");
   // The plugin row slots (Seam F) plus the two core decorations (protected lock,
   // mirror badge) in ONE list, so the row renders them uniformly instead of a
   // standalone conditional per decoration -- core decorations aren't plugins
@@ -405,27 +409,53 @@ function RowChrome({
         >
           {hasChildren && <ChevronRight size={14} strokeWidth={2.5} />}
         </button>
-        <button
-          type="button"
-          className="bullet touch-hitbox"
-          aria-label="Zoom in"
-          // Drag arms with the row KEY so a windowed copy inside a mirror is the
-          // exact instance grabbed, never its source copy (ADR 0022). key === id
-          // off the flag / outside a mirror.
-          onPointerDown={(e) => commands.onBulletPointerDown(rowKey, e)}
-          // A mirror's bullet zooms to the SOURCE (content.id) -- you land on the
-          // real node to work its subtree. For a normal row content.id ===
-          // instance.id, so this is today's behavior.
-          onClick={() => commands.onBulletClick(content.id)}
-          title="Zoom in"
-        >
-          <span
-            className="bullet-dot"
-            data-completed={content.completed}
-            data-has-children={hasChildren}
-            data-collapsed={effectiveCollapsed}
-          />
-        </button>
+        {/* Bullet column: plain rows get the zoom/drag button + dot. Tasks
+            replace the dot with the Seam-F `row:bullet` slot (checkbox) so the
+            row is not "dot + checkbox". A div (not a button) avoids nesting the
+            checkbox button inside a button. Drag still arms here; single-click
+            is the checkbox's toggle; double-click zooms (plain rows keep
+            single-click zoom). */}
+        {content.isTask ? (
+          <div
+            className="bullet touch-hitbox"
+            // Drag arms with the row KEY so a windowed copy inside a mirror is
+            // the exact instance grabbed, never its source copy (ADR 0022).
+            onPointerDown={(e) => commands.onBulletPointerDown(rowKey, e)}
+            // Double-click zooms: single-click is owned by the checkbox toggle.
+            // A mirror zooms to the SOURCE (content.id) -- same as the plain
+            // bullet path below.
+            onDoubleClick={() => commands.onBulletClick(content.id)}
+            title="Double-click to zoom in"
+          >
+            {bulletSlots.map((slot) => (
+              <Fragment key={slot.id}>
+                {slot.render(content, pluginCtx)}
+              </Fragment>
+            ))}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="bullet touch-hitbox"
+            aria-label="Zoom in"
+            // Drag arms with the row KEY so a windowed copy inside a mirror is
+            // the exact instance grabbed, never its source copy (ADR 0022).
+            // key === id off the flag / outside a mirror.
+            onPointerDown={(e) => commands.onBulletPointerDown(rowKey, e)}
+            // A mirror's bullet zooms to the SOURCE (content.id) -- you land on
+            // the real node to work its subtree. For a normal row content.id
+            // === instance.id, so this is today's behavior.
+            onClick={() => commands.onBulletClick(content.id)}
+            title="Zoom in"
+          >
+            <span
+              className="bullet-dot"
+              data-completed={content.completed}
+              data-has-children={hasChildren}
+              data-collapsed={effectiveCollapsed}
+            />
+          </button>
+        )}
         {/* Block cell so wrapped text flows UNDER the slot icons: the icons
             float left inside it (a flex item can't float, hence the wrapper),
             shortening only the first line box. Menus stay outside -- they

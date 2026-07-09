@@ -629,11 +629,30 @@ h2 span.protected-lock {
  * The margin scales with half the line box (tracks the reading size); the
  * subtracted K folds in each glyph's half-height AND that 2.5px optical nudge.
  * Fixed-height glyphs (bullet/checkbox/provenance = 16px) share K=4.25px.
+ * The todos checkbox REPLACES the bullet-dot (`row:bullet`), so it lives INSIDE
+ * `.bullet` and inherits that box's optical margin -- do not also nudge it
+ * (that would double-offset). A title-path checkbox still sits in before-text
+ * and uses the bare `.checkbox` rule below only when not nested in `.bullet`.
  */
 .outline-row .bullet,
 .outline-row .checkbox,
 .outline-row [data-origin] {
   margin-top: calc(var(--reading-line-box) / 2 - 4.25px);
+}
+
+/* Checkbox inside the bullet column already rides `.bullet`'s optical margin. */
+.outline-row .bullet .checkbox {
+  margin-top: 0;
+}
+
+/*
+ * A task's bullet control holds a checkbox (not a dot). The Workflowy hover ring
+ * still marks the hit target, but don't recolor a non-existent `.bullet-dot`.
+ * Collapsed-with-children ring stays -- hidden children still need a signifier.
+ */
+.bullet:has(.checkbox) {
+  /* Keep the hover/collapse ring; the checkbox is the primary glyph. */
+  border-radius: 4px;
 }
 
 /*
@@ -854,18 +873,21 @@ h2.zoomed-title {
 
 /*
  * Empty-bullet caret placement. `.node-text` is a block, and any before-text
- * decoration (the todo checkbox, daily/provenance badges) floats left ahead of
- * it inside `.row-body`. For a NON-empty node the first line is shortened by the
- * float, so text sits after the decoration; but an EMPTY editable's caret is
- * drawn at the element's own content origin (x=0), which lands BEFORE the float
- * -- a pseudo-element can't move it, since the caret only tracks editable
- * content. Giving the empty span its own block formatting context (`flow-root`)
- * places its border box BESIDE the float (a BFC can't overlap a float's margin
- * box), so its content origin -- and the caret -- sits after the checkbox while
- * the span still fills the remaining row width (click target intact). Reverts to
- * a plain block the instant a character is typed, leaving the multiline
- * wrap-under-icons behavior on real text untouched. The ::before keeps the empty
- * line's box height so the caret renders at full height.
+ * decoration (daily/provenance badges -- the todos checkbox lives in the bullet
+ * column now, not here) floats left ahead of it inside `.row-body`. For a
+ * NON-empty node the first line is shortened by the float, so text sits after
+ * the decoration; but an EMPTY editable's caret is drawn at the element's own
+ * content origin (x=0), which lands BEFORE the float -- a pseudo-element can't
+ * move it, since the caret only tracks editable content. Giving the empty span
+ * its own block formatting context (`flow-root`) places its border box BESIDE
+ * the float (a BFC can't overlap a float's margin box), so its content origin
+ * -- and the caret -- sits after the decoration while the span still fills the
+ * remaining row width (click target intact). Reverts to a plain block the
+ * instant a character is typed, leaving the multiline wrap-under-icons behavior
+ * on real text untouched. The ::before keeps the empty line's box height so the
+ * caret renders at full height. Pure tasks (checkbox only, no before-text float)
+ * don't need this for the checkbox, but the rule is still load-bearing for
+ * empty rows with a daily/provenance badge.
  */
 .node-text:empty {
   display: flow-root;

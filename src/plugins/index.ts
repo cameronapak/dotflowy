@@ -17,10 +17,11 @@ import tags from "./tags";
 import todos from "./todos";
 import type { PluginDef } from "./types";
 
-// `provenance` leads: it only contributes a Seam F slot, and
-// as the first entry its origin mark renders leftmost — right after the bullet
-// dot, ahead of the todos checkbox / daily badge. No tokens/keymap/commands, so
-// its array position has no precedence side effects.
+// `provenance` leads among before-text slots: it only contributes a Seam F
+// slot, and as the first entry its origin mark renders leftmost in the text
+// cell — right after the bullet column (dot, or the todos checkbox that
+// replaces it via `row:bullet`), ahead of the daily badge. No tokens/keymap/
+// commands, so its array position has no precedence side effects.
 export const plugins: PluginDef[] = [
   todos,
   provenance,

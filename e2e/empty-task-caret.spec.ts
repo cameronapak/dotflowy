@@ -1,8 +1,8 @@
 // Regression: an empty task's caret must sit AFTER the checkbox, not before it.
-// The checkbox floats left inside the block `.row-body`; an empty editable's
-// caret is drawn at its own content origin (x=0), which lands before the float.
-// The `.node-text:empty { display: flow-root }` rule places the empty span's box
-// beside the float so the caret renders after the checkbox (see styles.css).
+// The checkbox lives in the bullet column (`row:bullet`, replacing the dot) and
+// the text sits in the flex `.row-body` sibling -- so the caret is after the
+// checkbox by layout (no float). This locks that the checkbox stays in the
+// bullet column and the empty text still begins to its right.
 import { expect, test, type Page } from "@playwright/test";
 import { seedOutline, type SeedNode } from "./fixtures";
 
@@ -33,15 +33,22 @@ test("empty task caret sits to the right of the checkbox", async ({ page }) => {
   // The caret for an empty editable is drawn at the element's content-box
   // origin, so the .node-text left edge is where the caret renders. It must be
   // to the RIGHT of the checkbox, not before it.
-  const { textLeft, checkboxRight } = await page.evaluate(() => {
-    const row = document.querySelector('li[data-node-id="t1"] .outline-row')!;
-    const checkbox = row.querySelector(".checkbox")!;
-    const nodeText = row.querySelector(".node-text")!;
-    return {
-      textLeft: nodeText.getBoundingClientRect().left,
-      checkboxRight: checkbox.getBoundingClientRect().right,
-    };
-  });
+  const { textLeft, checkboxRight, checkboxInBullet } = await page.evaluate(
+    () => {
+      const row = document.querySelector(
+        'li[data-node-id="t1"] .outline-row',
+      )!;
+      const checkbox = row.querySelector(".checkbox")!;
+      const nodeText = row.querySelector(".node-text")!;
+      return {
+        textLeft: nodeText.getBoundingClientRect().left,
+        checkboxRight: checkbox.getBoundingClientRect().right,
+        // Checkbox replaces the bullet-dot -- must live inside `.bullet`.
+        checkboxInBullet: !!checkbox.closest(".bullet"),
+      };
+    },
+  );
 
+  expect(checkboxInBullet).toBe(true);
   expect(textLeft).toBeGreaterThanOrEqual(checkboxRight);
 });

@@ -365,7 +365,8 @@ export default definePlugin({
     },
   ],
 
-  // Seam F (row): the relative date pill, between the bullet dot and the text.
+  // Seam F (row): the relative date pill, between the bullet column (dot or
+  // task checkbox) and the text.
   // Renders only on a day note (useDailyDate returns null otherwise).
   slots: [
     {

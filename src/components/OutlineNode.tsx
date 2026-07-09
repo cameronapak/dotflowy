@@ -181,8 +181,11 @@ function OutlineNodeBody({
     onTextChange: (text) => commands.onTextChange(node.id, text),
   });
 
-  // Plugin row slots for this bullet (Seam F): the todos checkbox renders here
-  // when the node is a task. Stable array (precomputed in the registry), so it
+  // Seam F: `row:bullet` replaces the default bullet-dot (todos checkbox on a
+  // task). Stable array (precomputed in the registry).
+  const bulletSlots = slotsAt("row:bullet");
+  // Plugin row slots for this bullet (Seam F): leading decorations (daily
+  // badge, provenance). Stable array (precomputed in the registry), so it
   // never perturbs this memoized node's render.
   const beforeTextSlots = slotsAt("row:before-text");
 
@@ -307,21 +310,37 @@ function OutlineNodeBody({
         >
           {hasChildren && <ChevronRight size={14} strokeWidth={2.5} />}
         </button>
-        <button
-          type="button"
-          className="bullet touch-hitbox"
-          aria-label="Zoom in"
-          onPointerDown={(e) => commands.onBulletPointerDown(node.id, e)}
-          onClick={() => commands.onBulletClick(node.id)}
-          title="Zoom in"
-        >
-          <span
-            className="bullet-dot"
-            data-completed={node.completed}
-            data-has-children={hasChildren}
-            data-collapsed={effectiveCollapsed}
-          />
-        </button>
+        {/* Bullet column: plain rows get the zoom/drag button + dot. Tasks
+            replace the dot with the Seam-F `row:bullet` slot (checkbox). Mirrors
+            OutlineRow -- keep the two paths in lockstep (ADR 0019). */}
+        {node.isTask ? (
+          <div
+            className="bullet touch-hitbox"
+            onPointerDown={(e) => commands.onBulletPointerDown(node.id, e)}
+            onDoubleClick={() => commands.onBulletClick(node.id)}
+            title="Double-click to zoom in"
+          >
+            {bulletSlots.map((slot) => (
+              <Fragment key={slot.id}>{slot.render(node, pluginCtx)}</Fragment>
+            ))}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="bullet touch-hitbox"
+            aria-label="Zoom in"
+            onPointerDown={(e) => commands.onBulletPointerDown(node.id, e)}
+            onClick={() => commands.onBulletClick(node.id)}
+            title="Zoom in"
+          >
+            <span
+              className="bullet-dot"
+              data-completed={node.completed}
+              data-has-children={hasChildren}
+              data-collapsed={effectiveCollapsed}
+            />
+          </button>
+        )}
         {/* Block cell so wrapped text flows UNDER the slot icons: the icons
             float left inside it (a flex item can't float, hence the wrapper),
             shortening only the first line box. Menus stay outside -- they

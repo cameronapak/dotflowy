@@ -209,14 +209,20 @@ export function useBulletKeymap({
           {
             // Backspace at the start of a bullet. On a task, the first backspace
             // "deletes the checkbox" -- demoting it to a plain bullet while keeping
-            // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
-            // deletes the node and focuses the previous one. Otherwise it falls
-            // through to normal character deletion.
+            // the text (mirrors the "[ ]" autoformat; inverse of checkbox
+            // replacing the bullet). Live-read isTask so a just-converted task
+            // demotes correctly even if this render's `node` is one keystroke
+            // stale. On an empty plain bullet, it deletes the node and focuses
+            // the previous one. Otherwise it falls through to normal character
+            // deletion.
             hotkey: "Backspace",
             callback: (e) => {
               const el = textRef.current;
               if (!el || !isCaretAtStart(el)) return;
-              if (node.isTask) {
+              // Live tree: the closed-over `node` can lag a just-fired /todo or
+              // `[]` autoformat until the next render re-registers the keymap.
+              const live = pluginCtx().tree.byId.get(node.id);
+              if (live?.isTask) {
                 e.preventDefault();
                 e.stopPropagation();
                 commands.onSetTask(node.id, false);

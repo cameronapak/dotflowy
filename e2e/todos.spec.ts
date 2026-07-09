@@ -76,9 +76,12 @@ test.describe("todos plugin", () => {
     await load(page);
 
     // Zoom into the task so it becomes the page title (h2), not a list bullet.
-    // The checkbox is a title slot (`title:before-text`), so it must render here
-    // too -- and stay interactive.
-    await page.locator('li[data-node-id="c"] > .outline-row .bullet').click();
+    // On a task the checkbox REPLACES the bullet-dot (`row:bullet`), so
+    // single-click is toggle -- double-click zooms (plain bullets still
+    // single-click zoom). The title checkbox is `title:before-text`.
+    await page
+      .locator('li[data-node-id="c"] > .outline-row .bullet')
+      .dblclick();
     const title = page.locator("h2.zoomed-title");
     await expect(title.locator(".node-text")).toContainText("buy milk");
 
@@ -111,5 +114,36 @@ test.describe("todos plugin", () => {
     await page.keyboard.type("/bullet");
     await page.keyboard.press("Enter");
     await expect(checkbox(page, "b")).toHaveCount(0);
+  });
+
+  test("Backspace at the start of a task demotes it to a plain bullet", async ({
+    page,
+  }) => {
+    await load(page);
+
+    // Inverse of checkbox-replaces-bullet: caret at the start of a task +
+    // Backspace "deletes the checkbox" and restores the bullet-dot, keeping
+    // the text. Mirrors the `[]` autoformat / `/bullet` command path.
+    await text(page, "c").click();
+    await page.evaluate(() => {
+      const el = document.querySelector(
+        'li[data-node-id="c"] > .outline-row .node-text',
+      ) as HTMLElement;
+      el.focus();
+      const sel = window.getSelection()!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(true); // caret at start
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    await expect(checkbox(page, "c")).toBeVisible();
+    await page.keyboard.press("Backspace");
+    await expect(checkbox(page, "c")).toHaveCount(0);
+    // Text is preserved; the bullet-dot is back in the bullet column.
+    await expect(text(page, "c")).toContainText("buy milk");
+    await expect(
+      page.locator('li[data-node-id="c"] > .outline-row .bullet-dot'),
+    ).toBeVisible();
   });
 });

@@ -1826,10 +1826,27 @@ function ZoomedTitle({
   // first child under the title; ArrowDown drops focus into the first child.
   // The plugin keymap (Seam D) is registered here too, so todos' Mod+Enter /
   // Mod+D toggle completion of the zoomed node just like on a list-item bullet.
+  // Backspace at the start demotes a task to a plain bullet (mirrors the list
+  // path in use-bullet-keymap -- both render paths must stay in lockstep).
   useHotkeys(
     [
       { hotkey: "Enter", callback: () => onAddChild() },
       { hotkey: "ArrowDown", callback: () => onArrowDown() },
+      {
+        hotkey: "Backspace",
+        callback: (e) => {
+          const el = ref.current;
+          if (!el || getCaretOffset(el) !== 0) return;
+          // Live tree so a just-converted task demotes even if this render's
+          // `node` lags one keystroke (same discipline as the list keymap).
+          const live = getCtx().tree.byId.get(node.id);
+          if (!live?.isTask) return;
+          e.preventDefault();
+          e.stopPropagation();
+          getCtx().mutations.onSetTask(node.id, false);
+        },
+        options: { preventDefault: false, stopPropagation: false },
+      },
       ...keymapSpecs.map((k) => ({
         hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
         callback: () => {

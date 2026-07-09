@@ -77,7 +77,8 @@ function ProvenanceMark({
 export default definePlugin({
   id: "provenance",
 
-  // Seam F (row + title): the origin marker, between the bullet dot and the text
+  // Seam F (row + title): the origin marker, between the bullet column (dot or
+  // task checkbox) and the text
   // in both render paths. Absent on user-authored nodes (ProvenanceMark returns
   // null), so it costs a null check per non-agent row and nothing else.
   slots: [
