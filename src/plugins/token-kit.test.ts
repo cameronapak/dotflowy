@@ -40,10 +40,17 @@ describe("spliceToken", () => {
     expect(spliceToken("aa bb aa", "aa", "cc")).toBe("cc bb aa");
   });
 
-  test("searchFrom targets the occurrence at-or-after the given offset", () => {
+  test("searchFrom targets the occurrence starting exactly at the offset", () => {
     // Two identical tokens; the second one starts at index 6. Editing the
     // clicked (second) chip must not mutate the first.
     expect(spliceToken("aa bb aa", "aa", "cc", 6)).toBe("aa bb cc");
+  });
+
+  test("a stale searchFrom drops instead of retargeting a later occurrence", () => {
+    // The clicked chip's offset was captured at popover open; a concurrent
+    // edit shifted the text since. indexOf-from-offset would silently rewrite
+    // the NEXT identical chip — exact-match-or-drop refuses instead.
+    expect(spliceToken("aa bb aa", "aa", "cc", 4)).toBeNull();
   });
 
   test("searchFrom lands on the exact clicked occurrence (John 3 twice)", () => {

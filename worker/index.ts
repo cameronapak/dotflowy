@@ -66,6 +66,9 @@ interface Env extends AuthEnv {
   APP_OWNER?: string
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
   UNFURL_LIMIT: RateLimit
+  /** Per-user rate limiter for the BSB chapter proxy — same upstream-fetch
+   *  shape as unfurl, so it gets the same per-user cap. */
+  BSB_LIMIT: RateLimit
   /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
   WAITLIST_LIMIT: RateLimit
   /** Comma-separated emails allowed on admin surfaces (the waitlist view).
@@ -579,9 +582,19 @@ function handleApiRequest(
           new BadRequest({ reason: 'missing or invalid book/chapter' }),
         )
       }
+      // Same per-user cap as unfurl: an authenticated upstream fetch, and
+      // misses (valid-but-nonexistent chapters upstream 404) are never cached,
+      // so without a limit one session can hammer helloao through our Worker.
+      const { success } = yield* Effect.promise(() => env.BSB_LIMIT.limit({ key: userId }))
+      if (!success) return json({ error: 'rate limited' }, 429)
       const payload = yield* Effect.promise(() => fetchBsbChapter(book, chapter))
-      if (!payload) return json({ book, chapter, verses: [] })
-      return json(payload)
+      // Success is immutable scripture — let the browser cache it too (30d,
+      // matching the Worker-side Cache API TTL). Failures must not be cached
+      // (heuristic caching would freeze a transient outage), hence no-store.
+      if (!payload) {
+        return json({ book, chapter, verses: [] }, 200, { 'cache-control': 'no-store' })
+      }
+      return json(payload, 200, { 'cache-control': 'public, max-age=2592000' })
     }
 
     const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))

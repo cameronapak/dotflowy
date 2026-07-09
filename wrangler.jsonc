@@ -68,6 +68,14 @@
       "namespace_id": "1002",
       "simple": { "limit": 10, "period": 60 },
     },
+    // Per-user cap for the BSB chapter proxy (route-bible mini-reader) — the
+    // same authenticated-upstream-fetch shape as unfurl. Generous: normal use
+    // is one fetch per popover open (client-cached per session).
+    {
+      "name": "BSB_LIMIT",
+      "namespace_id": "1003",
+      "simple": { "limit": 60, "period": 60 },
+    },
   ],
   "observability": {
     "logs": {

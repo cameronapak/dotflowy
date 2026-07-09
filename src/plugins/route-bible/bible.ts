@@ -16,6 +16,7 @@ import {
   tryParsePassage,
   type AutocompletePassageSuggestion,
   type OsisBookCode,
+  type ParsedPassage,
 } from "grab-bcv";
 import { LINK_PATTERN, encodeUrlForMarkdown } from "../../data/links";
 import { spliceToken } from "../token-splice";
@@ -73,28 +74,36 @@ export function coercePassageDraft(input: string): string {
   return input.replace(/:\s*$/, "");
 }
 
+/**
+ * The one "does this draft resolve to a passage" policy: parse the raw input,
+ * then the coerced form (trailing-colon strip). Shared by the commit path
+ * (`normalizeBibleRef`) and the popover's reader/structured state so the two
+ * can never disagree on whether a draft resolves.
+ */
+export function parsePassageDraft(input: string): ParsedPassage | null {
+  for (const candidate of [input, coercePassageDraft(input)]) {
+    if (!candidate.trim()) continue;
+    const parsed = tryParsePassage(candidate);
+    if (parsed.ok) return parsed.value;
+  }
+  return null;
+}
+
 export function normalizeBibleRef(
   token: string,
 ): { label: string; url: string } | null {
-  // Prefer the raw token; fall back to the coerced form so Done on "Luke 8:"
-  // still commits as "Luke 8".
-  const candidates = [token, coercePassageDraft(token)];
-  for (const candidate of candidates) {
-    if (!candidate.trim()) continue;
-    const parsed = tryParsePassage(candidate);
-    if (!parsed.ok) continue;
-    try {
-      return {
-        label: toDisplayRef(parsed.value),
-        url: toResolverUrl(ROUTE_BIBLE_BASE, parsed.value, {
-          query: { src: "dotflowy" },
-        }),
-      };
-    } catch {
-      // try next candidate
-    }
+  const parsed = parsePassageDraft(token);
+  if (!parsed) return null;
+  try {
+    return {
+      label: toDisplayRef(parsed),
+      url: toResolverUrl(ROUTE_BIBLE_BASE, parsed, {
+        query: { src: "dotflowy" },
+      }),
+    };
+  } catch {
+    return null;
   }
-  return null;
 }
 
 export function suggestBibleRefs(
@@ -105,7 +114,7 @@ export function suggestBibleRefs(
   if (!trimmed) return [];
   // Once a chapter is known (even via "Luke 8:"), the mini-reader owns verse
   // pick — never offer a flat list of verse numbers.
-  if (tryParsePassage(coercePassageDraft(trimmed)).ok) return [];
+  if (parsePassageDraft(trimmed)) return [];
   return autocompletePassage(trimmed, { limit }).filter(
     (suggestion) => suggestion.insertText !== trimmed,
   );

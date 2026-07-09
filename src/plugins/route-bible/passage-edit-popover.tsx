@@ -1,7 +1,6 @@
 import {
   getMaxChapter,
   getMaxVerse,
-  tryParsePassage,
   type OsisBookCode,
 } from "grab-bcv";
 import { ExternalLink } from "lucide-react";
@@ -22,9 +21,9 @@ import { Button, Input } from "../kit";
 import { replaceTokenInNode } from "../token-kit";
 import type { PluginContext } from "../types";
 import {
-  coercePassageDraft,
   formatStructuredBibleRef,
   normalizeBibleRef,
+  parsePassageDraft,
   suggestBibleRefs,
 } from "./bible";
 import { fetchBsbChapter, type BsbVerse } from "./bsb";
@@ -41,26 +40,23 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 function structuredFromInput(input: string): StructuredPassage | null {
-  // Strict first, then coerce trailing ":" so "Luke 8:" is chapter Luke 8
-  // and the BSB reader (not verse-number autocomplete) stays up.
-  for (const candidate of [input, coercePassageDraft(input)]) {
-    if (!candidate.trim()) continue;
-    const parsed = tryParsePassage(candidate);
-    if (!parsed.ok) continue;
-    const { start, end } = parsed.value;
-    return {
-      book: start.book,
-      chapter: start.chapter,
-      startVerse: start.verse ?? null,
-      endVerse:
-        start.verse != null &&
-        end.book === start.book &&
-        end.chapter === start.chapter
-          ? (end.verse ?? start.verse)
-          : null,
-    };
-  }
-  return null;
+  // Raw-then-coerced ("Luke 8:" is chapter Luke 8) via the shared draft policy
+  // in bible.ts, so the reader and the Done commit can't disagree on what
+  // resolves.
+  const parsed = parsePassageDraft(input);
+  if (!parsed) return null;
+  const { start, end } = parsed;
+  return {
+    book: start.book,
+    chapter: start.chapter,
+    startVerse: start.verse ?? null,
+    endVerse:
+      start.verse != null &&
+      end.book === start.book &&
+      end.chapter === start.chapter
+        ? (end.verse ?? start.verse)
+        : null,
+  };
 }
 
 function isInRange(
@@ -139,16 +135,16 @@ export function BiblePassageEditPopover({
   const ref = useRef<HTMLFormElement | null>(null);
   const readerRef = useRef<HTMLDivElement | null>(null);
   const suggestionsId = useId();
-  const initialStructured = structuredFromInput(token);
   const [draft, setDraft] = useState(token);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [structured, setStructured] = useState<StructuredPassage>(
-    initialStructured ?? {
-      book: "JHN",
-      chapter: 3,
-      startVerse: 16,
-      endVerse: 16,
-    },
+    () =>
+      structuredFromInput(token) ?? {
+        book: "JHN",
+        chapter: 3,
+        startVerse: 16,
+        endVerse: 16,
+      },
   );
   const [verses, setVerses] = useState<BsbVerse[] | null>(null);
   const [bsbStatus, setBsbStatus] = useState<
@@ -156,14 +152,23 @@ export function BiblePassageEditPopover({
   >("idle");
   // Drag-to-select: anchor verse on pointerdown, extend through pointermove.
   // Kept in a ref so window listeners don't rebind every render; `dragging`
-  // state only toggles CSS (`select-none` + cursor) on the reader shell.
+  // state only toggles the cursor on the reader shell.
   const dragAnchorRef = useRef<number | null>(null);
   /** Last pointer position while dragging — drives edge auto-scroll. */
   const dragPointRef = useRef<{ x: number; y: number } | null>(null);
   const autoScrollRafRef = useRef<number | null>(null);
+  /** Tears down the active drag session (window listeners + rAF). Installed by
+   *  onVersePointerDown so unmount mid-drag (Escape closes the popover) can't
+   *  leak the listeners until the next pointerup. */
+  const dragTeardownRef = useRef<(() => void) | null>(null);
+  /** Set when a selection change originates in the reader itself (click, drag,
+   *  keyboard) — those must not trigger the centering scroll below. */
+  const readerSelectRef = useRef(false);
   const structuredRef = useRef(structured);
   structuredRef.current = structured;
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => () => dragTeardownRef.current?.(), []);
 
   const normalized = useMemo(() => normalizeBibleRef(draft), [draft]);
   // Structure suggestions only until a book+chapter resolves — then the
@@ -182,14 +187,17 @@ export function BiblePassageEditPopover({
   }, [suggestions]);
 
   useEffect(() => {
-    const next = structuredFromInput(draft);
-    if (next) setStructured(next);
-  }, [draft]);
+    if (parsedDraft) setStructured(parsedDraft);
+  }, [parsedDraft]);
 
   const chapterBook = parsedDraft?.book ?? null;
   const chapterNum = parsedDraft?.chapter ?? null;
 
-  // Load BSB for the current book+chapter whenever the chapter identity changes.
+  // Load BSB for the current book+chapter whenever the chapter identity
+  // changes. The first load fires immediately (popover open); later changes
+  // are debounced so typing a multi-digit chapter ("Psalm 119") doesn't fetch
+  // every intermediate chapter (1, 11, 119).
+  const chapterLoadedOnceRef = useRef(false);
   useEffect(() => {
     if (chapterBook == null || chapterNum == null) {
       setVerses(null);
@@ -199,34 +207,49 @@ export function BiblePassageEditPopover({
     let cancelled = false;
     setBsbStatus("loading");
     setVerses(null);
-    void fetchBsbChapter(chapterBook, chapterNum).then((ch) => {
-      if (cancelled) return;
-      if (!ch) {
-        setVerses(null);
-        setBsbStatus("empty");
-        return;
-      }
-      setVerses(ch.verses);
-      setBsbStatus("ready");
-    });
+    const run = () => {
+      void fetchBsbChapter(chapterBook, chapterNum).then((ch) => {
+        if (cancelled) return;
+        if (!ch) {
+          setVerses(null);
+          setBsbStatus("empty");
+          return;
+        }
+        setVerses(ch.verses);
+        setBsbStatus("ready");
+      });
+    };
+    if (!chapterLoadedOnceRef.current) {
+      chapterLoadedOnceRef.current = true;
+      run();
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = window.setTimeout(run, 250);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [chapterBook, chapterNum]);
 
   // On open / chapter load / typed start verse: center the first selected
-  // verse in the reader. Skip while drag-selecting (edge auto-scroll owns
-  // scroll then), and ignore endVerse so extending a range doesn't re-center.
+  // verse in the reader. Reader-made selections (click, drag, keyboard) set
+  // readerSelectRef and skip — the user is already looking there, and
+  // re-centering after a drag would yank the view back to the range start.
   useLayoutEffect(() => {
-    if (dragging) return;
     if (!verses || !readerRef.current) return;
     const start = structured.startVerse;
     if (start == null) return;
+    if (readerSelectRef.current) {
+      readerSelectRef.current = false;
+      return;
+    }
     const el = readerRef.current.querySelector<HTMLElement>(
       `[data-verse="${start}"]`,
     );
     el?.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [verses, structured.startVerse, dragging]);
+  }, [verses, structured.startVerse]);
 
   const closeAndRefocus = useCallback(() => {
     onClose();
@@ -300,6 +323,9 @@ export function BiblePassageEditPopover({
       const hi = Math.max(anchor, n);
       // Skip no-op updates — auto-scroll hits this every frame.
       if (cur.startVerse === lo && cur.endVerse === hi) return;
+      // Flag only when startVerse changes — that's exactly when the centering
+      // effect would run and must be suppressed for a reader-made selection.
+      if (cur.startVerse !== lo) readerSelectRef.current = true;
       applyStructured({
         ...cur,
         startVerse: lo,
@@ -419,10 +445,13 @@ export function BiblePassageEditPopover({
     }
 
     if (dy !== 0) {
-      // Direct scrollTop write — no smooth-scroll, no scrollIntoView.
+      // Direct scrollTop write — no smooth-scroll, no scrollIntoView. Only a
+      // scrolling frame needs the re-hit-test (new rows entered view); a
+      // stationary mid-list pointer is covered by pointermove/pointerenter,
+      // so skipping it avoids per-frame layout reads over every row.
       reader.scrollTop += dy;
+      extendDragToPoint(pt.x, pt.y);
     }
-    extendDragToPoint(pt.x, pt.y);
 
     // Keep looping for the whole drag (not only while scrolling). Holding
     // still in the edge band must keep advancing without further pointermove.
@@ -470,7 +499,10 @@ export function BiblePassageEditPopover({
       if (!pt || dragAnchorRef.current == null) return;
       extendDragToPoint(pt.x, pt.y);
     };
-    const onUp = () => {
+    // Capture the element the scroll listener is attached to, so teardown
+    // removes it from the same element even if the reader remounts mid-drag.
+    const readerEl = readerRef.current;
+    const teardown = () => {
       dragAnchorRef.current = null;
       dragPointRef.current = null;
       stopAutoScroll();
@@ -478,12 +510,15 @@ export function BiblePassageEditPopover({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      readerRef.current?.removeEventListener("scroll", onScroll);
+      readerEl?.removeEventListener("scroll", onScroll);
+      dragTeardownRef.current = null;
     };
+    const onUp = () => teardown();
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
-    readerRef.current?.addEventListener("scroll", onScroll, { passive: true });
+    readerEl?.addEventListener("scroll", onScroll, { passive: true });
+    dragTeardownRef.current = teardown;
     // Continuous loop for the whole drag — edge hold scrolls without
     // needing further pointer motion.
     startAutoScroll();
@@ -494,6 +529,20 @@ export function BiblePassageEditPopover({
 
   const startVerse = structured.startVerse;
   const endVerse = structured.endVerse;
+
+  // grab-bcv and the BSB text can disagree on versification (e.g. 3 John has
+  // 15 BSB verses but grab-bcv caps it at 14, and grab-bcv REJECTS refs past
+  // its cap). A row past the cap could never commit — clicking it would clamp
+  // to a different verse than the one clicked — so don't render it.
+  const verseCap =
+    chapterBook != null && chapterNum != null
+      ? (getMaxVerse(chapterBook, chapterNum) ?? 0)
+      : 0;
+  const displayVerses = useMemo(() => {
+    if (!verses) return null;
+    if (verseCap <= 0) return verses;
+    return verses.filter((v) => v.n >= 1 && v.n <= verseCap);
+  }, [verses, verseCap]);
 
   return createPortal(
     <form
@@ -603,22 +652,25 @@ export function BiblePassageEditPopover({
           data-bible-passage-reader
           data-dragging={dragging ? "true" : undefined}
           className={
-            dragging
-              ? "border-border/70 bg-background max-h-48 cursor-text select-none overflow-y-auto rounded-md border px-1.5 py-1.5"
-              : "border-border/70 bg-background max-h-48 select-none overflow-y-auto rounded-md border px-1.5 py-1.5"
+            "border-border/70 bg-background max-h-48 select-none overflow-y-auto rounded-md border px-1.5 py-1.5" +
+            (dragging ? " cursor-text" : "")
           }
         >
-          {bsbStatus === "loading" ? (
-            <p className="text-muted-foreground py-3 text-center text-xs">
-              Loading BSB…
-            </p>
-          ) : bsbStatus === "empty" || !verses ? (
+          {bsbStatus === "empty" ||
+          (displayVerses != null && displayVerses.length === 0) ? (
             <p className="text-muted-foreground py-3 text-center text-xs">
               BSB text unavailable
             </p>
+          ) : displayVerses == null ? (
+            // Covers both "loading" and the pre-effect "idle" first paint, so
+            // opening the popover never flashes "unavailable" before the load
+            // effect has run.
+            <p className="text-muted-foreground py-3 text-center text-xs">
+              Loading BSB…
+            </p>
           ) : (
             <div className="flex flex-col gap-1">
-              {verses.map((v) => {
+              {displayVerses.map((v) => {
                 const selected = isInRange(v.n, startVerse, endVerse);
                 return (
                   <button
@@ -644,10 +696,21 @@ export function BiblePassageEditPopover({
                       if (anchor == null) return;
                       selectRangeFrom(anchor, v.n);
                     }}
-                    // Click is handled by pointerdown (avoids double-fire after
-                    // a drag). Keep a no-op preventDefault so form doesn't
-                    // treat Enter-activate oddly.
-                    onClick={(e) => e.preventDefault()}
+                    // Pointer selection happens on pointerdown (so a click
+                    // after a drag can't re-fire). Keyboard activation
+                    // (Enter/Space on a focused row) arrives as a click with
+                    // NO preceding pointerdown — detail 0 — and selects here,
+                    // mirroring pointerdown's shift-extend.
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (e.detail !== 0) return;
+                      const cur = structuredRef.current;
+                      if (e.shiftKey && cur.startVerse != null) {
+                        selectRangeFrom(cur.startVerse, v.n);
+                      } else {
+                        selectRangeFrom(v.n, v.n);
+                      }
+                    }}
                   >
                     <span
                       className={

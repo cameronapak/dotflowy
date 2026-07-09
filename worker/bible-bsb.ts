@@ -26,6 +26,9 @@ export { parseBsbBook, parseBsbChapter } from './bible-bsb-core'
 const TIMEOUT_MS = 5_000
 const CACHE_TTL_S = 60 * 60 * 24 * 30 // 30 days — BSB text doesn't change
 const USER_AGENT = 'dotflowy-bot/1.0 (+https://app.dotflowy.com)'
+// Generous for a chapter JSON (Psalm 119 with helloao formatting is well under
+// this) while bounding what an off-course upstream can make us buffer.
+const MAX_BYTES = 1024 * 1024
 
 function upstreamUrl(book: BsbBookCode, chapter: number): string {
   return `https://bible.helloao.org/api/BSB/${book}/${chapter}.json`
@@ -64,19 +67,23 @@ export async function fetchBsbChapter(
     // Cache API unavailable (local tests / misconfig) — fall through to fetch.
   }
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
     const res = await fetch(upstreamUrl(book, chapter), {
       method: 'GET',
-      signal: controller.signal,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      // The host is fixed and shouldn't redirect; if it starts to, fail closed
+      // rather than fetch (and cache cross-user) whatever it points at —
+      // the unfurl hardening posture (ADR 0016).
+      redirect: 'error',
       headers: {
         accept: 'application/json',
         'user-agent': USER_AGENT,
       },
     })
     if (!res.ok) return null
-    const raw: unknown = await res.json()
+    const contentType = res.headers.get('content-type') ?? ''
+    if (!contentType.includes('json')) return null
+    const raw = await readJsonCapped(res, MAX_BYTES)
     const verses = extractBsbVerses(raw)
     if (verses.length === 0) return null
     const payload: BsbChapterPayload = { book, chapter, verses }
@@ -98,7 +105,39 @@ export async function fetchBsbChapter(
     return payload
   } catch {
     return null
-  } finally {
-    clearTimeout(timer)
+  }
+}
+
+/** Read at most `maxBytes` of the body and JSON-parse it; null when the body
+ *  is missing, over the cap, or malformed. Bounds what a misbehaving upstream
+ *  can make us buffer (res.json() reads without limit). */
+async function readJsonCapped(
+  res: Response,
+  maxBytes: number,
+): Promise<unknown> {
+  const reader = res.body?.getReader()
+  if (!reader) return null
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const buf = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    buf.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(buf))
+  } catch {
+    return null
   }
 }

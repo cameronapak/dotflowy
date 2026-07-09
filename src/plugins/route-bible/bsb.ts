@@ -10,24 +10,30 @@ export type BsbChapter = {
   verses: BsbVerse[];
 };
 
-const cache = new Map<string, BsbChapter | null>();
+// Successes only — scripture is immutable, but a failure (offline blip, 401
+// mid-refresh, upstream hiccup) is not, so it must stay retryable on the next
+// popover open instead of poisoning the chapter for the whole session.
+const cache = new Map<string, BsbChapter>();
 const inflight = new Map<string, Promise<BsbChapter | null>>();
+
+const FETCH_TIMEOUT_MS = 8_000;
 
 function cacheKey(book: string, chapter: number): string {
   return `${book.toUpperCase()}:${chapter}`;
 }
 
 /**
- * Load one BSB chapter. Dedupes concurrent requests and memoizes per session
- * (scripture is immutable for our purposes). Returns null when the Worker
- * can't supply text (offline, 401, empty, network).
+ * Load one BSB chapter. Dedupes concurrent requests and memoizes successes per
+ * session. Returns null when the Worker can't supply text (offline, 401,
+ * empty, network, hung response) — never cached, so the next open retries.
  */
 export function fetchBsbChapter(
   book: string,
   chapter: number,
 ): Promise<BsbChapter | null> {
   const key = cacheKey(book, chapter);
-  if (cache.has(key)) return Promise.resolve(cache.get(key) ?? null);
+  const hit = cache.get(key);
+  if (hit) return Promise.resolve(hit);
   const pending = inflight.get(key);
   if (pending) return pending;
 
@@ -35,20 +41,15 @@ export function fetchBsbChapter(
     try {
       const res = await fetch(
         `/api/bible/bsb?book=${encodeURIComponent(book)}&chapter=${chapter}`,
+        { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
       );
-      if (!res.ok) {
-        cache.set(key, null);
-        return null;
-      }
+      if (!res.ok) return null;
       const data = (await res.json()) as {
         book?: string;
         chapter?: number;
         verses?: BsbVerse[];
       };
-      if (!Array.isArray(data.verses) || data.verses.length === 0) {
-        cache.set(key, null);
-        return null;
-      }
+      if (!Array.isArray(data.verses) || data.verses.length === 0) return null;
       const chapterPayload: BsbChapter = {
         book: typeof data.book === "string" ? data.book : book,
         chapter: typeof data.chapter === "number" ? data.chapter : chapter,
@@ -62,14 +63,10 @@ export function fetchBsbChapter(
           )
           .map((v) => ({ n: v.n, t: v.t })),
       };
-      if (chapterPayload.verses.length === 0) {
-        cache.set(key, null);
-        return null;
-      }
+      if (chapterPayload.verses.length === 0) return null;
       cache.set(key, chapterPayload);
       return chapterPayload;
     } catch {
-      cache.set(key, null);
       return null;
     } finally {
       inflight.delete(key);
@@ -92,10 +89,4 @@ export function joinVerseRange(
     .filter((v) => v.n >= lo && v.n <= hi)
     .map((v) => v.t)
     .join(" ");
-}
-
-/** Test-only: drop the in-memory cache (and in-flight map). */
-export function clearBsbCacheForTests(): void {
-  cache.clear();
-  inflight.clear();
 }

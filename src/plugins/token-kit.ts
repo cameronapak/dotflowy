@@ -22,15 +22,16 @@ export function isRevealed({ revealOffset, start, end }: TokenView): boolean {
 }
 
 /** Verbatim-match-or-drop write-back against a node's LIVE text: resolve a
- *  mirror row to its source, read the current text, splice `oldToken`→`newToken`
- *  at the first occurrence at-or-after `sourceOffset`, and write back only if it
- *  still matches and actually changed. A no-op if the node is gone or the token
- *  was edited away — the guard that keeps a stale editor write from corrupting a
- *  since-changed bullet.
+ *  mirror row to its source, read the current text, splice `oldToken`→`newToken`,
+ *  and write back only if it still matches and actually changed. A no-op if the
+ *  node is gone or the token was edited away — the guard that keeps a stale
+ *  editor write from corrupting a since-changed bullet.
  *
  *  `sourceOffset` targets the clicked occurrence when a line repeats the same
- *  token (e.g. two identical chips); omit it to target the first (the default
- *  for tokens that can't repeat verbatim within one line). */
+ *  token (e.g. two identical chips): the token must still start exactly there,
+ *  else the write drops (a concurrent edit shifted the text — dropping beats
+ *  rewriting an occurrence the user never touched). Omit it to target the first
+ *  (the default for tokens that can't repeat verbatim within one line). */
 export function replaceTokenInNode(
   nodeId: string,
   oldToken: string,
