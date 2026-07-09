@@ -208,6 +208,20 @@ export function decorate(
   if (offset >= 0) setCaretOffset(el, offset);
 }
 
+/** Absolute SOURCE character offset of `atom`'s start within its host `el` (a
+ *  `.node-text` span) — the count of source characters before this atom. Lets a
+ *  Seam-B interaction target the exact occurrence of a repeated token when a line
+ *  holds two identical chips (same `data-src`): the clicked chip's offset splices
+ *  the right one instead of always the first. Returns 0 when `atom` isn't a
+ *  descendant of `el`. */
+export function atomSourceOffset(el: HTMLElement, atom: HTMLElement): number {
+  const parent = atom.parentNode;
+  if (!parent || !el.contains(atom)) return 0;
+  const childIndex = Array.prototype.indexOf.call(parent.childNodes, atom);
+  if (childIndex < 0) return 0;
+  return sourceOffsetUpTo(el, parent, childIndex);
+}
+
 // Absolute count of SOURCE characters before the collapsed caret within `el`. A
 // folded link contributes its full `data-src-len` (not its shorter label), so
 // the returned offset indexes into node.text -- which is what Enter-split,

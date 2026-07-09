@@ -296,6 +296,44 @@ test.describe("Scripture reference chips", () => {
     await expect(chip(page, "n")).toHaveText("Proverbs 4:13");
   });
 
+  test("editing the second of two identical refs rewrites that one, not the first", async ({
+    page,
+  }) => {
+    // The clip repro: a line holds two refs to the SAME book+chapter, so both
+    // chips share the verbatim source "John 3". Editing the second must target
+    // the clicked occurrence — not always the first indexOf match.
+    await mockBsbChapter(page, "JHN", 3, [
+      { n: 15, t: "that everyone who believes in Him may have eternal life." },
+      { n: 16, t: "For God so loved the world..." },
+      { n: 17, t: "For God did not send His Son to condemn the world." },
+    ]);
+    await load(page, [
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Compare John 3 and John 3",
+      },
+    ]);
+
+    const chips = chip(page, "n");
+    await expect(chips).toHaveCount(2);
+
+    // Right-click the SECOND chip and narrow it to verse 16.
+    await chips.nth(1).click({ button: "right" });
+    await expect(passageReader(page)).toBeVisible();
+    await passageReader(page).locator('[data-verse="16"]').click();
+    await expect(page.getByRole("combobox", { name: "Passage" })).toHaveValue(
+      "John 3:16",
+    );
+    await page.getByRole("button", { name: "Done" }).click();
+
+    // The first chip is untouched; only the clicked (second) one changed.
+    await expect(chip(page, "n").nth(0)).toHaveText("John 3");
+    await expect(chip(page, "n").nth(1)).toHaveText("John 3:16");
+    await expect(text(page, "n")).toContainText("Compare John 3 and John 3:16");
+  });
+
   test("closing the passage editor refocuses the node", async ({ page }) => {
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },

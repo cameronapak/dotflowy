@@ -14,6 +14,7 @@ import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
 import { BibleChip } from "./chip";
 import { openBiblePassageEditPopover } from "./passage-edit-popover";
 import { openUrlInFocusedTab } from "../../components/open-url";
+import { atomSourceOffset } from "../../components/inline-code";
 import { resolveNodeId } from "../token-kit";
 import { definePlugin, type WidgetEl } from "../types";
 
@@ -64,6 +65,9 @@ function openEditForChip(
   if (!token || !nodeId) return;
   const focusTarget = el.closest<HTMLElement>(".node-text");
   const rect = el.getBoundingClientRect();
+  // Where this exact chip sits in the node's source — so Done edits the ref you
+  // clicked, not the first matching one when a line repeats a book+chapter.
+  const sourceOffset = focusTarget ? atomSourceOffset(focusTarget, el) : 0;
   openBiblePassageEditPopover(
     {
       nodeId,
@@ -71,6 +75,7 @@ function openEditForChip(
       focusTarget,
       x: rect.left,
       y: rect.bottom + 6,
+      sourceOffset,
     },
     ctx,
   );

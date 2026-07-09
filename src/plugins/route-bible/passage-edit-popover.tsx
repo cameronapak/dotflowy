@@ -80,11 +80,12 @@ export function submitBiblePassageEdit(
   oldToken: string,
   input: string,
   mutations: NodeCommands,
+  sourceOffset = 0,
 ): void {
   const normalized = normalizeBibleRef(input);
   if (!normalized) return;
   const newToken = normalized.label;
-  replaceTokenInNode(nodeId, oldToken, newToken, mutations);
+  replaceTokenInNode(nodeId, oldToken, newToken, mutations, sourceOffset);
 }
 
 export function openBiblePassageEditPopover(
@@ -94,6 +95,9 @@ export function openBiblePassageEditPopover(
     focusTarget: HTMLElement | null;
     x: number;
     y: number;
+    // Source offset of the clicked chip within its node — targets the right
+    // occurrence when a line holds two identical refs (same book+chapter).
+    sourceOffset?: number;
   },
   ctx: PluginContext,
 ): void {
@@ -104,7 +108,13 @@ export function openBiblePassageEditPopover(
       y={args.y}
       focusTarget={args.focusTarget}
       onSubmit={(input) =>
-        submitBiblePassageEdit(args.nodeId, args.token, input, ctx.mutations)
+        submitBiblePassageEdit(
+          args.nodeId,
+          args.token,
+          input,
+          ctx.mutations,
+          args.sourceOffset ?? 0,
+        )
       }
       onClose={() => ctx.openOverlay(null)}
     />,

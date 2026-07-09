@@ -23,14 +23,20 @@ export function isRevealed({ revealOffset, start, end }: TokenView): boolean {
 
 /** Verbatim-match-or-drop write-back against a node's LIVE text: resolve a
  *  mirror row to its source, read the current text, splice `oldToken`→`newToken`
- *  at its first occurrence, and write back only if it still matches and actually
- *  changed. A no-op if the node is gone or the token was edited away — the guard
- *  that keeps a stale editor write from corrupting a since-changed bullet. */
+ *  at the first occurrence at-or-after `sourceOffset`, and write back only if it
+ *  still matches and actually changed. A no-op if the node is gone or the token
+ *  was edited away — the guard that keeps a stale editor write from corrupting a
+ *  since-changed bullet.
+ *
+ *  `sourceOffset` targets the clicked occurrence when a line repeats the same
+ *  token (e.g. two identical chips); omit it to target the first (the default
+ *  for tokens that can't repeat verbatim within one line). */
 export function replaceTokenInNode(
   nodeId: string,
   oldToken: string,
   newToken: string,
   mutations: NodeCommands,
+  sourceOffset = 0,
 ): void {
   if (newToken === oldToken) return;
   const index = getTreeIndex();
@@ -39,7 +45,7 @@ export function replaceTokenInNode(
   const targetId = clicked.mirrorOf ?? nodeId;
   const current = index.byId.get(targetId)?.text;
   if (current == null) return;
-  const next = spliceToken(current, oldToken, newToken);
+  const next = spliceToken(current, oldToken, newToken, sourceOffset);
   if (next != null && next !== current) mutations.onTextChange(targetId, next);
 }
 
