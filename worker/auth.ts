@@ -51,7 +51,13 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // a sign-in request's Origin is the Vite origin, not the Worker's. Trust
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
-    trustedOrigins: ['http://localhost:3000', 'http://localhost:3210'],
+    // :3001 is included because Vite falls through there when :3000 is already
+    // taken by another process on the machine.
+    trustedOrigins: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3210',
+    ],
     // Invite-only alpha: /sign-up/email is the ONLY account-creation path (the
     // mcp plugin's dynamic registration creates OAuth clients, not users), so
     // gating it here closes signup entirely. Server-side on purpose — hiding

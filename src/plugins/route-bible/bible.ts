@@ -62,21 +62,39 @@ export function resolveBibleRef(token: string): { url: string } | null {
   }
 }
 
+/**
+ * Mid-type drafts often end with a bare colon while the user is about to
+ * enter a verse (`Luke 8:`). grab-bcv rejects that, which used to dump the
+ * popover into a verse-number autocomplete list. Strip a trailing `:` (and
+ * following space) so the draft resolves as the chapter and the BSB reader
+ * stays up. A real verse (`Luke 8:22`) is unchanged — it doesn't end in `:`.
+ */
+export function coercePassageDraft(input: string): string {
+  return input.replace(/:\s*$/, "");
+}
+
 export function normalizeBibleRef(
   token: string,
 ): { label: string; url: string } | null {
-  const parsed = tryParsePassage(token);
-  if (!parsed.ok) return null;
-  try {
-    return {
-      label: toDisplayRef(parsed.value),
-      url: toResolverUrl(ROUTE_BIBLE_BASE, parsed.value, {
-        query: { src: "dotflowy" },
-      }),
-    };
-  } catch {
-    return null;
+  // Prefer the raw token; fall back to the coerced form so Done on "Luke 8:"
+  // still commits as "Luke 8".
+  const candidates = [token, coercePassageDraft(token)];
+  for (const candidate of candidates) {
+    if (!candidate.trim()) continue;
+    const parsed = tryParsePassage(candidate);
+    if (!parsed.ok) continue;
+    try {
+      return {
+        label: toDisplayRef(parsed.value),
+        url: toResolverUrl(ROUTE_BIBLE_BASE, parsed.value, {
+          query: { src: "dotflowy" },
+        }),
+      };
+    } catch {
+      // try next candidate
+    }
   }
+  return null;
 }
 
 export function suggestBibleRefs(
@@ -85,6 +103,9 @@ export function suggestBibleRefs(
 ): AutocompletePassageSuggestion[] {
   const trimmed = input.trim();
   if (!trimmed) return [];
+  // Once a chapter is known (even via "Luke 8:"), the mini-reader owns verse
+  // pick — never offer a flat list of verse numbers.
+  if (tryParsePassage(coercePassageDraft(trimmed)).ok) return [];
   return autocompletePassage(trimmed, { limit }).filter(
     (suggestion) => suggestion.insertText !== trimmed,
   );

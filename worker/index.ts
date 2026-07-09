@@ -42,6 +42,11 @@ import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
 import { handleMcp, mcpCorsPreflight } from './mcp'
 import { isHttpUrlString, unfurlTitle } from './unfurl'
+import {
+  fetchBsbChapter,
+  parseBsbBook,
+  parseBsbChapter,
+} from './bible-bsb'
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
 // wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
@@ -557,6 +562,26 @@ function handleApiRequest(
       const { success } = yield* Effect.promise(() => env.UNFURL_LIMIT.limit({ key: userId }))
       if (!success) return json({ error: 'rate limited' }, 429)
       return json({ title: yield* Effect.promise(() => unfurlTitle(target)) })
+    }
+
+    // BSB chapter text for the route-bible passage popover mini-reader.
+    // Fixed-host proxy to helloao (public-domain BSB) — not an open SSRF
+    // surface (book/chapter are allowlisted). DO-independent. 400 only for a
+    // missing/invalid book or chapter; upstream failures are 200 `{verses:[]}`.
+    if (url.pathname === '/api/bible/bsb') {
+      if (request.method !== 'GET') {
+        return yield* Effect.fail(new BadRequest({ reason: 'GET only' }))
+      }
+      const book = parseBsbBook(url.searchParams.get('book'))
+      const chapter = parseBsbChapter(url.searchParams.get('chapter'))
+      if (!book || chapter == null) {
+        return yield* Effect.fail(
+          new BadRequest({ reason: 'missing or invalid book/chapter' }),
+        )
+      }
+      const payload = yield* Effect.promise(() => fetchBsbChapter(book, chapter))
+      if (!payload) return json({ book, chapter, verses: [] })
+      return json(payload)
     }
 
     const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
