@@ -7,15 +7,22 @@
 // tsconfig has no DOM lib — so `spliceToken` must live where nothing DOM-shaped
 // can ride in. Keep this file dependency-free.
 
-/** Splice a verbatim token replacement into `text` at its first occurrence, or
- *  null if the token is no longer present (it was edited/deleted since). The
- *  pure core of every token write-back. */
+/** Splice a verbatim token replacement into `text` at the first occurrence
+ *  at-or-after `searchFrom`, or null if the token is no longer present there (it
+ *  was edited/deleted since). The pure core of every token write-back.
+ *
+ *  `searchFrom` disambiguates repeated tokens: when one line holds two identical
+ *  sources (e.g. two `John 3` chips), the caller passes the clicked token's
+ *  source offset so the edit lands on the chip that was actually clicked, not
+ *  always the first. Defaults to 0 (first occurrence) for callers that can't
+ *  repeat within a line or don't track which one was hit. */
 export function spliceToken(
   text: string,
   oldToken: string,
   newToken: string,
+  searchFrom = 0,
 ): string | null {
-  const at = text.indexOf(oldToken);
+  const at = text.indexOf(oldToken, Math.max(0, searchFrom));
   if (at < 0) return null;
   return text.slice(0, at) + newToken + text.slice(at + oldToken.length);
 }

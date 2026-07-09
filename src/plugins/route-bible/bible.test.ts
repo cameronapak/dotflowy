@@ -34,8 +34,19 @@ describe('resolveBibleRef', () => {
     })
   })
 
-  test('suggests passages for partial input', () => {
-    expect(suggestBibleRefs('rom 8').map((s) => s.label)).toContain('Romans 8')
+  test('normalizes a trailing-colon draft as the chapter', () => {
+    // Mid-type "Luke 8:" must still commit / open the BSB reader.
+    expect(normalizeBibleRef('Luke 8:')).toEqual({
+      label: 'Luke 8',
+      url: 'https://route.bible/luk.8?src=dotflowy',
+    })
+  })
+
+  test('suggests books for partial input, but not verse numbers once a chapter is known', () => {
+    expect(suggestBibleRefs('rom').map((s) => s.label)).toContain('Romans')
+    // Chapter-resolved (including trailing ":") → empty; the mini-reader owns verse pick.
+    expect(suggestBibleRefs('rom 8')).toEqual([])
+    expect(suggestBibleRefs('Luke 8:')).toEqual([])
   })
 
   test('formats structured passage selections', () => {

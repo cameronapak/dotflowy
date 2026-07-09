@@ -107,6 +107,31 @@ async function caretAtSource(page: Page, id: string, target: number) {
 const passagePopover = (page: Page) =>
   page.locator("[data-bible-passage-popover]");
 
+const passageReader = (page: Page) =>
+  page.locator("[data-bible-passage-reader]");
+
+/** Mock the BSB chapter proxy so e2e never depends on helloao/wrangler. */
+async function mockBsbChapter(
+  page: Page,
+  book: string,
+  chapter: number,
+  verses: Array<{ n: number; t: string }>,
+) {
+  await page.route(
+    (url) =>
+      url.pathname === "/api/bible/bsb" &&
+      url.searchParams.get("book")?.toUpperCase() === book.toUpperCase() &&
+      url.searchParams.get("chapter") === String(chapter),
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ book: book.toUpperCase(), chapter, verses }),
+      });
+    },
+  );
+}
+
 const selectedBibleRef = (page: Page) =>
   page.evaluate(() => {
     const sel = window.getSelection();
@@ -221,14 +246,19 @@ test.describe("Scripture reference chips", () => {
   test("the passage editor rewrites a chip through parsed input", async ({
     page,
   }) => {
+    await mockBsbChapter(page, "ROM", 8, [
+      { n: 28, t: "And we know that God works all things together for good." },
+    ]);
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
     ]);
 
     await chip(page, "n").click({ button: "right" });
     await page.getByRole("combobox", { name: "Passage" }).fill("rom 8:28");
-    await expect(page.locator("[data-bible-passage-suggestions]")).toContainText(
-      "Romans 8:28",
+    // Chapter-resolved drafts use the mini-reader, not a verse-number list.
+    await expect(passageReader(page)).toBeVisible();
+    await expect(passageReader(page)).toContainText(
+      "And we know that God works all things together for good.",
     );
     await page.getByRole("button", { name: "Done" }).click();
 
@@ -240,20 +270,68 @@ test.describe("Scripture reference chips", () => {
     );
   });
 
-  test("the passage editor hides end verse until a start verse exists", async ({
+  test("clicking a verse in the mini-reader rewrites the reference", async ({
     page,
   }) => {
+    await mockBsbChapter(page, "PRO", 4, [
+      { n: 12, t: "When you walk, your steps will not be impeded." },
+      { n: 13, t: "Hold on to instruction; do not let go." },
+      { n: 14, t: "Do not set foot on the path of the wicked." },
+    ]);
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "Read Proverbs 4" },
     ]);
 
     await chip(page, "n").click({ button: "right" });
-    await passagePopover(page).locator("summary").click();
-    await expect(page.getByRole("combobox", { name: "End verse" })).toHaveCount(0);
+    await expect(passageReader(page)).toBeVisible();
+    await passageReader(page).locator('[data-verse="13"]').click();
+    await expect(page.getByRole("combobox", { name: "Passage" })).toHaveValue(
+      "Proverbs 4:13",
+    );
+    await expect(passageReader(page).locator('[data-verse="13"]')).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    await page.getByRole("button", { name: "Done" }).click();
+    await expect(chip(page, "n")).toHaveText("Proverbs 4:13");
+  });
 
-    await page.getByRole("combobox", { name: "Start verse" }).selectOption("13");
+  test("editing the second of two identical refs rewrites that one, not the first", async ({
+    page,
+  }) => {
+    // The clip repro: a line holds two refs to the SAME book+chapter, so both
+    // chips share the verbatim source "John 3". Editing the second must target
+    // the clicked occurrence — not always the first indexOf match.
+    await mockBsbChapter(page, "JHN", 3, [
+      { n: 15, t: "that everyone who believes in Him may have eternal life." },
+      { n: 16, t: "For God so loved the world..." },
+      { n: 17, t: "For God did not send His Son to condemn the world." },
+    ]);
+    await load(page, [
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Compare John 3 and John 3",
+      },
+    ]);
 
-    await expect(page.getByRole("combobox", { name: "End verse" })).toBeVisible();
+    const chips = chip(page, "n");
+    await expect(chips).toHaveCount(2);
+
+    // Right-click the SECOND chip and narrow it to verse 16.
+    await chips.nth(1).click({ button: "right" });
+    await expect(passageReader(page)).toBeVisible();
+    await passageReader(page).locator('[data-verse="16"]').click();
+    await expect(page.getByRole("combobox", { name: "Passage" })).toHaveValue(
+      "John 3:16",
+    );
+    await page.getByRole("button", { name: "Done" }).click();
+
+    // The first chip is untouched; only the clicked (second) one changed.
+    await expect(chip(page, "n").nth(0)).toHaveText("John 3");
+    await expect(chip(page, "n").nth(1)).toHaveText("John 3:16");
+    await expect(text(page, "n")).toContainText("Compare John 3 and John 3:16");
   });
 
   test("closing the passage editor refocuses the node", async ({ page }) => {
@@ -267,7 +345,7 @@ test.describe("Scripture reference chips", () => {
     await expect.poll(() => activeNodeId(page)).toBe("n");
   });
 
-  test("the passage autocomplete supports keyboard selection", async ({
+  test("the passage autocomplete supports keyboard selection before a chapter resolves", async ({
     page,
   }) => {
     await load(page, [
@@ -276,10 +354,11 @@ test.describe("Scripture reference chips", () => {
 
     await chip(page, "n").click({ button: "right" });
     const input = page.getByRole("combobox", { name: "Passage" });
-    await input.fill("rom 8");
-    await expect(page.getByRole("option", { name: /Romans 8/ })).toBeVisible();
+    // Book-only input: structure suggestions (no chapter yet → no reader).
+    await input.fill("rom");
+    await expect(page.getByRole("option", { name: /Romans/ })).toBeVisible();
     await input.press("Enter");
-    await expect(input).toHaveValue("Romans 8");
+    await expect(input).toHaveValue("Romans");
   });
 
   test("Space on a hovered chip opens the passage editor", async ({ page }) => {

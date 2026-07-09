@@ -39,4 +39,25 @@ describe("spliceToken", () => {
   test("only the first occurrence is replaced when the token appears twice", () => {
     expect(spliceToken("aa bb aa", "aa", "cc")).toBe("cc bb aa");
   });
+
+  test("searchFrom targets the occurrence at-or-after the given offset", () => {
+    // Two identical tokens; the second one starts at index 6. Editing the
+    // clicked (second) chip must not mutate the first.
+    expect(spliceToken("aa bb aa", "aa", "cc", 6)).toBe("aa bb cc");
+  });
+
+  test("searchFrom lands on the exact clicked occurrence (John 3 twice)", () => {
+    const text = "John 3 and John 3";
+    // First chip at 0, second at 11.
+    expect(spliceToken(text, "John 3", "John 3:16", 11)).toBe(
+      "John 3 and John 3:16",
+    );
+    expect(spliceToken(text, "John 3", "John 3:16", 0)).toBe(
+      "John 3:16 and John 3",
+    );
+  });
+
+  test("searchFrom past the last occurrence drops (returns null)", () => {
+    expect(spliceToken("aa bb aa", "aa", "cc", 7)).toBeNull();
+  });
 });
