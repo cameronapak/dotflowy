@@ -120,7 +120,10 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 
 ## Planning and design
 
-Substantial plans or design decisions go through `/grill-with-docs` — a relentless interview that *sharpens* the decision, recording docs (ADRs, and a glossary if one is warranted) via `/domain-modeling` as they crystallise.
+**New feature or design decision? Stop and grill it first — this is a MUST, not a nicety.** Before writing code for any of these — a new plugin (`src/plugins/<name>/`), a new route, a new plugin **seam**, a new `Node` field or wire-schema change, a new side-collection, or any behavior whose *why* an ADR would carry — you MUST do both, in order:
+
+1. **Read the ADRs that already constrain the area, before designing.** Grep [`docs/adr/`](./docs/adr/) for the surfaces you're touching and read the matching ADRs *first*. The rules that PRs keep breaking live there — this file cites them by number (ADR 0009 atomic structural writes, ADR 0014 the trust boundary, and so on) but the *content* is in `docs/adr/`, and an agent that never opens the file designs blind against invariants it can't see. Designing against `docs/adr/` is not optional.
+2. **Run `/grill-with-docs`** — a relentless interview that *sharpens* the decision and records new docs (ADRs, and a glossary if warranted) via `/domain-modeling` as they crystallise. If that skill can't be invoked in your harness, run the behavior by hand: hold the design against each constraining ADR from step 1 and stress-test it before committing to an approach.
 
 - A decision earns an **ADR** in [`docs/adr/`](./docs/adr/) when it is hard to reverse, surprising without context, and the result of a real trade-off — the bar and the file shape are in the `domain-modeling` skill's `ADR-FORMAT.md`. ADRs are numbered sequentially (`0001-slug.md`); the dotflowy set captures the calls an agent would get wrong from the code alone (the per-node tree store, atomic structural writes, the per-user DO, and so on).
 - If the code already makes the call obvious, the code is the doc — don't write it down.
