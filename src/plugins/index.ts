@@ -13,6 +13,7 @@ import links from "./links";
 import nodeLinks from "./node-links";
 import provenance from "./provenance";
 import routeBible from "./route-bible";
+import spoiler from "./spoiler";
 import tags from "./tags";
 import todos from "./todos";
 import type { PluginDef } from "./types";
@@ -31,5 +32,6 @@ export const plugins: PluginDef[] = [
   tags,
   emphasis,
   highlight,
+  spoiler,
   daily,
 ];

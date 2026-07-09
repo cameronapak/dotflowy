@@ -5,18 +5,24 @@
 // A single funnel so the two consumers (node-switcher, mirror-places) can't
 // drift: a link folds to its label (`stripLinks`), then highlight runs drop
 // their fences + color emoji (`stripHighlights`), then emphasis runs drop
-// their markers (`stripEmphasis`). All halves are pure and side-effect-free.
+// their markers (`stripEmphasis`), then spoiler runs drop their fences but KEEP
+// their interior (`stripSpoilers` -- your own search must see inside your own
+// spoilers, ADR 0043; the MCP boundary REDACTS instead, in the Worker). All
+// halves are pure and side-effect-free.
 
 import { flattenDateLinks } from "./date-links";
 import { stripEmphasis } from "./emphasis";
 import { stripHighlights } from "./highlight";
 import { stripLinks } from "./links";
+import { stripSpoilers } from "./spoiler";
 
 /** Plain reading text of `text`: `[[2026-07-08]]` -> its display label
  *  ("Today"/"Jul 8" -- ADR 0038), `[label](url)` -> `label`, `==🔴x==` -> `x`,
- *  `*x*`/`**x**`/`~~x~~`/`~x~` -> `x`. Markup-free text passes through
- *  untouched. Dates and links flatten first so an emphasized or highlighted
- *  label still reduces cleanly. */
+ *  `*x*`/`**x**`/`~~x~~`/`~x~` -> `x`, `||x||` -> `x` (in-app: interior kept).
+ *  Markup-free text passes through untouched. Dates and links flatten first so
+ *  an emphasized or highlighted label still reduces cleanly. */
 export function flattenInline(text: string): string {
-  return stripEmphasis(stripHighlights(stripLinks(flattenDateLinks(text))));
+  return stripSpoilers(
+    stripEmphasis(stripHighlights(stripLinks(flattenDateLinks(text)))),
+  );
 }

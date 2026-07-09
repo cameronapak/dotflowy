@@ -347,6 +347,18 @@ export function McpConnectDialog({
             Server URL
           </span>
           <CopyField value={MCP_URL} />
+          {/* ADR 0043: state the spoiler boundary plainly. It's a context-
+              hygiene default, not access control -- the agent signs in as you
+              and can drop the fences itself -- so we don't let a user mistake a
+              spoiler for a security guarantee. */}
+          <p className="text-xs text-muted-foreground">
+            Spoilers (
+            <span className="font-mono">||hidden||</span>) are redacted from
+            connected apps by default, to keep flagged text out of an AI's
+            context. This is a convenience, not a security guarantee — an app
+            signed in as you can still be shown that text if you choose to
+            reveal it.
+          </p>
         </div>
 
         <Separator />

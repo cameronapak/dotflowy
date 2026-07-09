@@ -24,6 +24,7 @@ import {
   planOpmlImport,
 } from '../src/data/opml-import'
 import { exportOpml } from '../src/data/opml-export'
+import { redactSpoilers } from '../src/data/spoiler'
 import {
   DAILY_CONTAINER_TEXT,
   type TreeIndex,
@@ -44,6 +45,7 @@ import {
   planMirrorToDaily,
   planReparent,
   planUpdateNode,
+  redactSpoilerIndex,
   searchNodes,
   trueSourceOf,
 } from './outline-ops'
@@ -610,7 +612,7 @@ export const tools: ReadonlyArray<ToolDef> = [
   {
     name: 'update_node',
     description:
-      "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears.",
+      "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears. WARNING: spoiler runs (||...||) are redacted to `[spoiler]` when you read a node, so passing that read-back text as the new `text` DESTROYS the hidden spoiler content. When editing a node that shows `[spoiler]`, ask the user for the intended full text instead of writing back what you were given.",
     input: UpdateNodeInput,
     readOnly: false,
     handle: (input: typeof UpdateNodeInput.Type, store) =>
@@ -918,8 +920,11 @@ export const tools: ReadonlyArray<ToolDef> = [
           )
         }
         const rootNode = rootId !== null ? index.byId.get(trueSourceOf(index, rootId)) : null
-        const title = rootNode?.text.trim() ? rootNode.text : 'dotflowy'
-        return exportOpml(index, rootId, { title })
+        // MCP egress: redact spoilers before serializing (ADR 0043). Redact the
+        // title too -- a spoiler-bearing root node's text becomes the <title>.
+        // The shared exportOpml walk stays verbatim; it's fed a redacted index.
+        const title = rootNode?.text.trim() ? redactSpoilers(rootNode.text) : 'dotflowy'
+        return exportOpml(redactSpoilerIndex(index), rootId, { title })
       }),
   },
 ]
