@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   BoldIcon,
+  EyeOffIcon,
   HighlighterIcon,
   ItalicIcon,
   LinkIcon,
@@ -43,15 +44,19 @@ const ITALIC: MarkerPair = { pre: "*", post: "*" };
 const STRIKE: MarkerPair = { pre: "~~", post: "~~" };
 const UNDER: MarkerPair = { pre: "~", post: "~" };
 const HIGHLIGHT: MarkerPair = { pre: "==", post: "==" };
+const SPOILER: MarkerPair = { pre: "||", post: "||" };
 
-/** The five togglable markers, in button order, for the active-state read. Link
- *  is create-only (no lit state), so it isn't here. */
+/** The six togglable markers, in button order, for the active-state read. Link
+ *  is create-only (no lit state), so it isn't here. Spoiler is a plain marker
+ *  (ADR 0043), so it rides the same `toggleMarker`/`detectMarkerWrap` path as
+ *  emphasis — no special-casing like highlight/link. */
 const MARKERS: ReadonlyArray<[key: string, marker: MarkerPair]> = [
   ["bold", BOLD],
   ["italic", ITALIC],
   ["strike", STRIKE],
   ["underline", UNDER],
   ["highlight", HIGHLIGHT],
+  ["spoiler", SPOILER],
 ];
 
 /** A coarse pointer never gets this toolbar — that's the mobile actions bar's
@@ -297,6 +302,13 @@ export function SelectionFormatToolbar({
         onRun={actions.toggleHighlight}
       >
         <HighlighterIcon className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Spoiler"
+        active={info.active.has("spoiler")}
+        onRun={() => actions.toggleMarker(SPOILER)}
+      >
+        <EyeOffIcon className="size-4" />
       </ToolbarButton>
       {actions.createLink && (
         <ToolbarButton label="Link" onRun={actions.createLink}>

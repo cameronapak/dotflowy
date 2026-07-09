@@ -33,8 +33,10 @@ import {
   planMirrorToDaily,
   planReparent,
   planUpdateNode,
+  redactSpoilerIndex,
   searchNodes,
 } from './outline-ops'
+import { exportOpml } from '../src/data/opml-export'
 
 const T = 1_700_000_000_000
 
@@ -793,5 +795,55 @@ describe('reads', () => {
 
   test('searchNodes caps at the limit', () => {
     expect(searchNodes(index(fixture()), 'alpha', 2)).toHaveLength(2)
+  })
+})
+
+// The MCP egress redaction (ADR 0043). Client-side stripping is covered by
+// src/data/spoiler.test.ts; e2e can't reach the Worker serialization (seedOutline
+// mocks it), so these unit tests are the redaction's only guard — the same
+// carve-out as worker/wire.test.ts / worker/mcp.test.ts.
+describe('spoiler redaction at the MCP boundary', () => {
+  test('flattenSubtree redacts a spoiler run to the [spoiler] sentinel', () => {
+    const nodes = [makeNode({ id: 'a', text: 'the killer is ||Bob||' })]
+    const result = flattenSubtree(index(nodes), null, { maxDepth: 99, maxNodes: 100 })
+    if (result instanceof Error) throw result
+    expect(result.lines[0]!.text).toBe('the killer is [spoiler]')
+    expect(result.lines[0]!.text.includes('Bob')).toBe(false)
+  })
+
+  test('searchNodes cannot match a term that lives only inside a spoiler', () => {
+    const nodes = [makeNode({ id: 'a', text: 'the killer is ||Bob||' })]
+    // "Bob" exists in the source but only inside the spoiler -> zero hits, not a
+    // masked hit (an agent must not be able to confirm the term is in there).
+    expect(searchNodes(index(nodes), 'Bob', 10)).toHaveLength(0)
+    // A term OUTSIDE the spoiler still matches, and the returned text is redacted.
+    const hits = searchNodes(index(nodes), 'killer', 10)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.text).toBe('the killer is [spoiler]')
+  })
+
+  test('searchNodes redacts spoilers in the ancestor breadcrumb path', () => {
+    // An ancestor bullet can hold a spoiler; its crumb must be redacted too.
+    const nodes = [
+      makeNode({ id: 'p', text: 'chapter ||twist||' }),
+      makeNode({ id: 'c', text: 'a clue', parentId: 'p' }),
+    ]
+    const hits = searchNodes(index(nodes), 'clue', 10)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.path).toEqual(['chapter [spoiler]'])
+  })
+
+  test('redactSpoilerIndex rebuilds an index over redacted text (export_opml path)', () => {
+    const nodes = [
+      makeNode({ id: 'a', text: 'secret is ||42||' }),
+      makeNode({ id: 'a1', text: 'plain child', parentId: 'a' }),
+    ]
+    const redacted = redactSpoilerIndex(index(nodes))
+    expect(redacted.byId.get('a')!.text).toBe('secret is [spoiler]')
+    expect(redacted.byId.get('a1')!.text).toBe('plain child')
+    // And the OPML the tool serializes from it carries no spoiler interior.
+    const opml = exportOpml(redacted, null, { title: 'dotflowy' })
+    expect(opml.includes('42')).toBe(false)
+    expect(opml.includes('[spoiler]')).toBe(true)
   })
 })

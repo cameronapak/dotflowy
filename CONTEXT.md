@@ -31,3 +31,7 @@ _Avoid_: reference (too generic), citation
 **Render path**:
 The chain of node ids from the current view root down to a rendered row. A row's identity (its key, its focus/caret/drag address) — distinct from the node id, because the same node can render at more than one path once mirrors exist.
 _Avoid_: trail (that's the ancestor breadcrumb, a different walk)
+
+**Spoiler**:
+A run of a node's text the author marks as sensitive — `||hidden||` in the source. To a human (in the editor, in a copy, in an export) it is merely *hidden until revealed*: shown as an opaque bar until the caret enters it. To an AI agent over MCP it is **redacted** — the interior never crosses the boundary; the agent sees `[spoiler]` and cannot search inside it. The same mark, treated differently by audience. Not access control (the agent holds the user's own credentials) — a context-hygiene default that keeps flagged text out of an LLM's window.
+_Avoid_: secret, redaction (that's what MCP does to it, not what it is), hidden block

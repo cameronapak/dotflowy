@@ -28,6 +28,7 @@ import {
   wouldMirrorCycle,
 } from '../src/data/tree'
 import type { ChangeOp, Node } from '../src/data/wire-schema'
+import { redactSpoilers } from '../src/data/spoiler'
 
 export { buildTreeIndex, trueSourceOf }
 export type { TreeIndex }
@@ -883,7 +884,10 @@ export function flattenSubtree(
     lines.push({
       id,
       depth,
-      text: content.text,
+      // MCP egress: redact spoiler runs to `[spoiler]` so the interior never
+      // enters the agent's context window (ADR 0043). In-app copy/export read
+      // the raw node text, not this path.
+      text: redactSpoilers(content.text),
       isTask: content.isTask,
       completed: content.completed,
       mirrorOf: node.mirrorOf,
@@ -900,6 +904,20 @@ export function flattenSubtree(
   const roots = rootId === null ? childrenOf(index, null).map((n) => n.id) : [rootId]
   for (const id of roots) visit(id, 0, new Set())
   return { lines, truncated }
+}
+
+/**
+ * A clone of `index` with every node's `text` spoiler-redacted, rebuilt so all
+ * derived structure (children, links, mirrors) is consistent with the redacted
+ * text. For the `export_opml` MCP tool, which serializes node text INSIDE the
+ * shared `exportOpml` walk (ADR 0037) -- that walk must stay verbatim for the
+ * in-app export (the user's own backup), so the redaction happens by feeding it
+ * a redacted index rather than by touching the serializer. See ADR 0043.
+ */
+export function redactSpoilerIndex(index: TreeIndex): TreeIndex {
+  return buildTreeIndex(
+    [...index.byId.values()].map((n) => ({ ...n, text: redactSpoilers(n.text) })),
+  )
 }
 
 /** Render flattened lines as the agent-facing text outline. */
@@ -931,13 +949,18 @@ export function searchNodes(index: TreeIndex, query: string, limit: number): Sea
   const hits: SearchHit[] = []
   if (!q) return hits
   for (const node of index.byId.values()) {
-    if (!node.text.toLowerCase().includes(q)) continue
+    // MCP egress: match against the REDACTED text, so a term that lives only
+    // inside a spoiler yields ZERO hits -- the interior is invisible to agent
+    // search, not merely masked in the result (ADR 0043). Redact the output
+    // text AND every ancestor `path` crumb (an ancestor bullet can hold a
+    // spoiler too).
+    if (!redactSpoilers(node.text).toLowerCase().includes(q)) continue
     hits.push({
       id: node.id,
-      text: node.text,
+      text: redactSpoilers(node.text),
       path: buildTrail(index, node.id)
         .slice(0, -1)
-        .map((n) => n.text),
+        .map((n) => redactSpoilers(n.text)),
     })
     if (hits.length >= limit) break
   }

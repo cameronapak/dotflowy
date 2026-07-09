@@ -475,6 +475,19 @@ h2 span.protected-lock {
 }
 
 /*
+ * Revealed-spoiler tint (ADR 0043). A spoiler run under the caret unfolds to
+ * `||interior||`; the container wears the SAME theme-aware 10%-primary fill as
+ * the multi-selection slab above, so an open spoiler reads clearly in both
+ * themes (a near-white `bg-muted` washed out on the light page). The rest of the
+ * revealed skin (muted text, radius, box-decoration) rides Tailwind on the token
+ * `El`; only this exact from-color + alpha lives here, beside the rule it
+ * mirrors. The folded bar is a solid grey (`bg-muted-foreground`), not this tint.
+ */
+.md-spoiler-reveal {
+  background-color: oklch(from var(--primary) l c h / 0.1);
+}
+
+/*
  * Node mirrors (ADR 0022, slice 1d). A mirror INSTANCE and its SOURCE each wear a
  * thin colored left edge, revealed only on row hover or while the caret is within
  * (:focus-within) -- so a mirror-free outline, and an idle mirror, look exactly as
