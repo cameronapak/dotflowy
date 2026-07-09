@@ -17,18 +17,8 @@ export default defineConfig({
     // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
     // UI while the real /api/nodes path is served by the Worker against a local
     // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
-    //
-    // `ws: true` is load-bearing: the outline sync socket is
-    // `ws://…/api/sync` (realtime.ts). The string-target shorthand does not
-    // reliably upgrade WebSockets under Vite 8, so the browser sees
-    // "WebSocket is closed before the connection is established" and bootstrap
-    // skips with "sync socket closed before initial data".
     proxy: {
-      "/api": {
-        target: "http://localhost:8787",
-        changeOrigin: true,
-        ws: true,
-      },
+      "/api": "http://localhost:8787",
     },
   },
   plugins: [
