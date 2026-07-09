@@ -822,11 +822,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   </ul>
                 )}
                 {/* Click in the whitespace below the list adds a new top-level
-                bullet. Hidden while filtering -- there's no "add here" then. */}
+                bullet. Hidden while filtering -- there's no "add here" then.
+                `size="icon"` (32px) is what puts the glyph on the same vertical
+                axis as the bullets above and the breadcrumb Home button. */}
                 {!filter && (
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon"
                     variant="ghost"
                     onClick={() =>
                       runStructural(() => {

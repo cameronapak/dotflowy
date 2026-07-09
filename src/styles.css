@@ -207,12 +207,19 @@
   margin: 0;
 }
 
+/*
+ * The leading padding centers the 16px bullet on the breadcrumb Home button's
+ * axis (a 32px icon button flush with the same content column, so its icon
+ * centers 16px in): 8px padding + half the bullet = 16px. Coarse re-declares
+ * `padding` below and reaches 16px with a 4px pad + a 24px bullet, so it needs
+ * no change -- keep the two in step if either box size moves.
+ */
 .outline-row {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: 2px 4px;
+  padding: 2px 4px 2px 8px;
   border-radius: 4px;
 }
 
@@ -1175,8 +1182,11 @@ body.dragging-active * {
    positioned panel would be clipped by the breadcrumb's horizontal overflow. */
 
 .zoomed-title {
-  /* This inline start padding on mobile is meant to compensate for visual alignment*/
-  @apply max-sm:ps-1;
+  /* Start the title on the same axis as the icon column below and above it: the
+     bullet box, the new-bullet `+`, and the breadcrumb Home glyph all have their
+     left edge 8px into the content column (a 32px icon button, or `.outline-row`'s
+     8px lead padding, around a 16px glyph). Keep in step with that padding. */
+  padding-inline-start: 8px;
   font-weight: 600;
   /* Still flex, but the single item is now the .row-body cell (mirroring
      .outline-row): the leading decorations float inside it, so a long wrapped
