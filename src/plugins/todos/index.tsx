@@ -48,7 +48,10 @@ function TaskCheckbox({
   getCtx: () => PluginContext;
   placement: "row" | "title";
 }) {
-  if (!node.isTask) return null;
+  // `kind` outranks `isTask` (ADR 0045): if a stale client or a raw PATCH ever
+  // writes the illegal pair, the node renders as a paragraph with no checkbox,
+  // and the next kind-touching edit normalizes it.
+  if (node.kind === "paragraph" || !node.isTask) return null;
   return (
     <Checkbox
       className={cn(
@@ -146,7 +149,10 @@ export default definePlugin({
       description: "Turn into a plain bullet",
       icon: ListIcon,
       keywords: ["bullet", "plain", "text", "list", "into"],
-      available: (node) => node.isTask,
+      // The single "back to a plain bullet, whatever you were" command: it
+      // offers itself to a task AND to a paragraph, and `onSetTask` clears both
+      // fields on the way through (ADR 0045). There is no `/paragraph`-off.
+      available: (node) => node.isTask || node.kind === "paragraph",
       run: (id, ctx) => ctx.mutations.onSetTask(id, false),
     },
   ],

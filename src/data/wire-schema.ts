@@ -45,6 +45,11 @@ export const NodeSchema = Schema.Struct({
   // without it is malformed (→ 400). Backfilled to null on any legacy/e2e row
   // that omits it (collection.ts withNodeDefaults, DO ADD COLUMN default NULL).
   origin: Schema.NullOr(Schema.String),
+  // Node kind (ADR 0045): null = bullet-or-task (per `isTask`), "paragraph" =
+  // prose. Additive + nullable so `isTask` never had to migrate; the literal
+  // union widens if more kinds arrive. Same required-and-nullable boundary shape
+  // as `mirrorOf`/`origin`, backfilled the same three ways.
+  kind: Schema.NullOr(Schema.Literal("paragraph")),
 });
 export type Node = Schema.Schema.Type<typeof NodeSchema>;
 

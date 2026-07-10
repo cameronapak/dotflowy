@@ -155,6 +155,9 @@ function rowToNode(r: NodeRow): Node {
     // Legacy D1 rows predate provenance and were all authored by the owner in
     // the editor, so they import as human (null) — never agent-stamped.
     origin: null,
+    // Legacy D1 data predates paragraphs (ADR 0045): every imported node is a
+    // bullet or a task, which is exactly what a null `kind` means.
+    kind: null,
   };
 }
 

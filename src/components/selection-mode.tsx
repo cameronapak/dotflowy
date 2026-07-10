@@ -23,6 +23,7 @@ import { toast } from "sonner";
 
 import type { PluginContext } from "../plugins/types";
 
+import { paragraphCommand } from "../data/core-commands";
 import { isMirrorsEnabled } from "../data/flags";
 import { capture, drop } from "../data/history";
 import { outlineToMarkdown } from "../data/markdown";
@@ -561,9 +562,10 @@ function buildItems(
       run: ops.mirror,
     });
   }
-  // Plugin commands that opted in (To-do, Send to Today), kept only when they
-  // apply to at least one selected node (To-do hides when all are already tasks).
-  const pluginItems: SelItem[] = selectionCommandSpecs
+  // Commands that opted in via `runMany` -- the plugins' (To-do, Send to Today)
+  // plus core's `/paragraph` (ADR 0045) -- kept only when they apply to at least
+  // one selected node (To-do hides when all are already tasks).
+  const pluginItems: SelItem[] = [...selectionCommandSpecs, paragraphCommand]
     .filter((c) =>
       rootIds.some((id) => {
         const n = index.byId.get(id);

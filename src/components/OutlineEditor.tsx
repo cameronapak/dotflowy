@@ -44,6 +44,7 @@ import {
   outdent,
   removeNode,
   setIsTask,
+  setKind,
   setText,
   toggleCollapsed,
   toggleCompleted,
@@ -96,6 +97,7 @@ import {
   useViewFilter,
 } from "../plugins/registry";
 import { Backlinks } from "./backlinks";
+import { TitlePilcrow } from "./bullet-glyph";
 import {
   caretFromPoint,
   placeCaretAtEnd,
@@ -1467,7 +1469,14 @@ function useNodeCommands({
               if (caretAtEnd && isOpen) {
                 // Dive in: a child of the CONTENT (source), so the new node windows
                 // into every instance, not just the one being edited.
-                newId = insertChildAtStart(idx, contentId, content.isTask);
+                newId = insertChildAtStart(
+                  idx,
+                  contentId,
+                  content.isTask,
+                  "",
+                  undefined,
+                  content.kind,
+                );
               } else {
                 // New sibling beside the INSTANCE (position is local to where the row
                 // sits). Off-flag / mirror-free, instance === content === id, so this
@@ -1478,6 +1487,7 @@ function useNodeCommands({
                   instanceId,
                   content.isTask,
                   isMirrorRow ? "" : after,
+                  content.kind,
                 );
                 if (!caretAtEnd) {
                   setText(contentId, before);
@@ -1673,6 +1683,15 @@ function useNodeCommands({
           setIsTask(id, isTask);
         },
 
+        // `/paragraph`, and `/bullet`'s kind half (ADR 0045). A FIELD edit, like
+        // onSetTask: one PATCH, no `runStructural`, no echo wait. No protection
+        // gate -- a paragraph is still a plain text node, so none of the four
+        // protected-node rules (delete/blank/to-do/complete) are in play.
+        onSetKind: (id, kind) => {
+          capture(getTreeIndex(), id);
+          setKind(id, kind);
+        },
+
         // Open the move picker; the dialog runs the mutation + navigation itself.
         onRequestMove: (id) => openMoveDialog(id),
 
@@ -1801,6 +1820,13 @@ function ZoomedTitle({
   // then the lock, then the badge.
   const beforeTextSlots: SlotSpec[] = [
     ...slotsAt("title:before-text"),
+    {
+      // A zoomed paragraph keeps its signifier -- muted and non-interactive,
+      // since the title has nothing to zoom into (ADR 0045).
+      id: "core:paragraph-mark",
+      position: "title:before-text",
+      render: () => <TitlePilcrow kind={node.kind} />,
+    },
     {
       id: "core:protected-lock",
       position: "title:before-text",

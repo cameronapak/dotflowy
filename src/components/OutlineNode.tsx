@@ -8,7 +8,7 @@ import {
   type PointerEvent,
 } from "react";
 
-import type { Node } from "../data/schema";
+import type { Node, NodeKind } from "../data/schema";
 import type { TagFilter } from "../data/tags";
 import type { PluginContext } from "../plugins/types";
 
@@ -17,6 +17,7 @@ import { clearSelection, useSelectionEdge } from "../data/selection-state";
 import { useNode, useVisibleChildIds } from "../data/tree-store";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
 import { hasFoldingToken } from "../plugins/registry";
+import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
 import {
   decorate,
@@ -87,8 +88,11 @@ export interface NodeCommands {
   // Delete a bullet and its entire subtree, then focus a neighbor.
   onDeleteNode: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
-  // Set whether a bullet is a task (checkbox shown/hidden).
+  // Set whether a bullet is a task (checkbox shown/hidden). Clears `kind`.
   onSetTask: (id: string, isTask: boolean) => void;
+  // Set the node's kind: "paragraph" (pilcrow, prose) or null (plain bullet).
+  // Clears `isTask` -- the kinds are mutually exclusive (ADR 0045).
+  onSetKind: (id: string, kind: NodeKind) => void;
   // Open the `/move` destination picker for this bullet.
   onRequestMove: (id: string) => void;
   // Open the `/mirror` destination picker for this bullet (ADR 0022): same
@@ -322,11 +326,12 @@ function OutlineNodeBody({
           onClick={() => commands.onBulletClick(node.id)}
           title="Zoom in"
         >
-          <span
-            className="bullet-dot"
-            data-completed={node.completed}
-            data-has-children={hasChildren}
-            data-collapsed={effectiveCollapsed}
+          {/* Dot or pilcrow, per the node's kind (ADR 0045). Mirrors OutlineRow. */}
+          <BulletGlyph
+            kind={node.kind}
+            completed={node.completed}
+            hasChildren={hasChildren}
+            collapsed={effectiveCollapsed}
           />
         </button>
         {/* Block cell so wrapped text flows UNDER the slot icons: the icons

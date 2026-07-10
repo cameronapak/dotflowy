@@ -17,6 +17,8 @@ export interface SeedNode {
   mirrorOf?: string | null;
   /** Provenance: agent harness name if created via MCP; omit/null for human. */
   origin?: string | null;
+  /** Node kind (ADR 0045); omit/null for a bullet-or-task. */
+  kind?: "paragraph" | null;
 }
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
@@ -34,6 +36,7 @@ interface ApiNode {
   createdAt: number;
   updatedAt: number;
   origin: string | null;
+  kind: "paragraph" | null;
 }
 
 /** One op in a change frame, as the DO broadcasts and the batch POST carries.
@@ -60,6 +63,10 @@ function toNode(n: SeedNode): ApiNode {
     // MCP-created nodes, which the e2e mock never produces. Required by the wire
     // schema the client decodes inbound frames against, so it must be present.
     origin: n.origin ?? null,
+    // A seeded node is a bullet-or-task unless the spec says otherwise. Required
+    // by the wire schema the client decodes inbound frames against (ADR 0045),
+    // so it must be present on every row the mock emits.
+    kind: n.kind ?? null,
   };
 }
 

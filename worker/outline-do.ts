@@ -32,6 +32,7 @@ interface NodeRow {
   createdAt: number;
   updatedAt: number;
   origin: string | null;
+  kind: string | null;
 }
 
 /** A side-collection row, as carried during the one-time D1 import. */
@@ -58,6 +59,8 @@ const WRITABLE_COLUMNS = new Set([
   "mirrorOf",
   "createdAt",
   "updatedAt",
+  // `setKind` is a field edit (a PATCH), so the column must be writable here.
+  "kind",
 ]);
 
 // --- Realtime sync protocol -------------------------------------------------
@@ -92,6 +95,10 @@ function rowToNode(r: NodeRow): Node {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     origin: r.origin,
+    // The column is a plain TEXT, so narrow it back to the literal union: an
+    // unrecognized value reads as a bullet rather than escaping into a frame the
+    // client's `ServerMessageSchema` would then reject (ADR 0045 / ADR 0014).
+    kind: r.kind === "paragraph" ? "paragraph" : null,
   };
 }
 
@@ -207,6 +214,15 @@ export class UserOutlineDO extends DurableObject<Env> {
         sql.exec(`ALTER TABLE nodes ADD COLUMN origin TEXT`);
       },
     },
+    {
+      // Node kind (ADR 0045): NULL = a bullet or a task (per `isTask`), which is
+      // exactly what every pre-existing row is, so ADD COLUMN's NULL default is
+      // the correct backfill. Exactly-once tail step, no existence guard.
+      version: 3,
+      up: (sql) => {
+        sql.exec(`ALTER TABLE nodes ADD COLUMN kind TEXT`);
+      },
+    },
   ];
 
   /** Run every migration newer than the recorded schema version, each atomically
@@ -255,7 +271,7 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   getNodes(): Node[] {
     return this.readRows<NodeRow>(
-      "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes",
+      "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes",
     ).map(rowToNode);
   }
 
@@ -273,12 +289,13 @@ export class UserOutlineDO extends DurableObject<Env> {
     // re-puts the full node) can never flip a node's provenance. Existing rows
     // keep whatever they were born with; legacy rows stay NULL (human).
     this.sql.exec(
-      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
          isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
-         bookmarkedAt=excluded.bookmarkedAt, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt`,
+         bookmarkedAt=excluded.bookmarkedAt, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt,
+         kind=excluded.kind`,
       n.id,
       n.parentId,
       n.prevSiblingId,
@@ -291,6 +308,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       n.createdAt,
       n.updatedAt,
       n.origin,
+      n.kind,
     );
     return { op: existed ? "update" : "insert", value: n };
   }
@@ -369,7 +387,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           // Broadcast the full post-patch row (canonical booleans, every field) so
           // a remote client applies an unambiguous update regardless of rowUpdateMode.
           const row = this.readRows<NodeRow>(
-            "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes WHERE id = ?",
+            "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes WHERE id = ?",
             u.id,
           )[0] as NodeRow | undefined;
           if (row) ops.push({ op: "update", value: rowToNode(row) });
