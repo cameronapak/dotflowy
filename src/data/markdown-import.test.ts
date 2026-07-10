@@ -7,16 +7,17 @@ import {
   planMarkdownPaste,
   type MdNode,
 } from "./markdown-import";
-import { buildTreeIndex, makeNode, type Node } from "./tree";
+import { buildTreeIndex, makeNode, type Node, type NodeKind } from "./tree";
 
 // --- helpers ------------------------------------------------------------------
 
 /** The shape the round-trip compares: `outlineToMarkdown` carries text, task
- *  state, and structure -- nothing else. */
+ *  state, kind, and structure -- nothing else. */
 interface Shape {
   text: string;
   isTask: boolean;
   completed: boolean;
+  kind: NodeKind;
   children: Shape[];
 }
 
@@ -25,13 +26,19 @@ const shape = (
   children: Shape[] = [],
   isTask = false,
   completed = false,
-): Shape => ({ text, isTask, completed, children });
+  kind: NodeKind = null,
+): Shape => ({ text, isTask, completed, kind, children });
+
+/** A paragraph node, the reason this file grew a `kind` column (ADR 0045). */
+const para = (text: string, children: Shape[] = []): Shape =>
+  shape(text, children, false, false, "paragraph");
 
 const forestShape = (forest: readonly MdNode[]): Shape[] =>
   forest.map((n) => ({
     text: n.text,
     isTask: n.isTask,
     completed: n.completed,
+    kind: n.kind,
     children: forestShape(n.children),
   }));
 
@@ -52,6 +59,7 @@ function buildIndex(forest: Shape[], mirrorOf: Record<string, string> = {}) {
           text: node.text,
           isTask: node.isTask,
           completed: node.completed,
+          kind: node.kind,
           mirrorOf: mirrorOf[id] ?? null,
         }),
       );
@@ -112,30 +120,93 @@ const TEXTS = [
   "\tif x:",
 ];
 
+// The subset of TEXTS a PARAGRAPH may carry and still export as a bare line
+// (ADR 0045). Everything else in TEXTS is a lookalike -- empty, indented, a
+// fence, or something the block grammar would eat -- and degrades to a bullet.
+const PARAGRAPH_SAFE_TEXTS = [
+  "plain",
+  "#urgent",
+  "**bold** and *it*",
+  "`code`",
+  "[label](https://example.com)",
+  "==highlight==",
+  "||spoiler||",
+  "[[2026-07-09]]",
+  "trailing space ",
+  "a  b",
+];
+
 function randomForest(next: () => number, depth = 0): Shape[] {
   const count = Math.floor(next() * (depth === 0 ? 5 : 3));
   const out: Shape[] = [];
   for (let i = 0; i < count; i++) {
-    const isTask = next() < 0.25;
+    // Kinds are mutually exclusive, so one roll picks all three buckets:
+    // task < 0.25 <= paragraph < 0.55 <= plain bullet.
+    const roll = next();
+    const isTask = roll < 0.25;
     out.push({
       text: TEXTS[Math.floor(next() * TEXTS.length)]!,
       isTask,
       completed: isTask && next() < 0.5,
+      kind: !isTask && roll < 0.55 ? "paragraph" : null,
       children: depth < 3 ? randomForest(next, depth + 1) : [],
     });
   }
   return out;
 }
 
+/** A forest of paragraphs whose text is guaranteed to survive as a bare line. */
+function safeParagraphForest(next: () => number, depth = 0): Shape[] {
+  const count = Math.floor(next() * (depth === 0 ? 5 : 3));
+  const out: Shape[] = [];
+  for (let i = 0; i < count; i++) {
+    const text =
+      PARAGRAPH_SAFE_TEXTS[Math.floor(next() * PARAGRAPH_SAFE_TEXTS.length)]!;
+    out.push(para(text, depth < 3 ? safeParagraphForest(next, depth + 1) : []));
+  }
+  return out;
+}
+
+/** Everything the round-trip must preserve UNCONDITIONALLY: text, task state,
+ *  done state, structure. Kind is the one field allowed to degrade. */
+const contentOnly = (forest: readonly Shape[]): unknown[] =>
+  forest.map((n) => ({
+    text: n.text,
+    isTask: n.isTask,
+    completed: n.completed,
+    children: contentOnly(n.children),
+  }));
+
 // --- the invariant ------------------------------------------------------------
 
 describe("parse(outlineToMarkdown(t)) === t", () => {
-  test("holds over generated trees", () => {
+  test("content and structure hold over generated trees", () => {
     const next = rng(0xd07f10);
     for (let i = 0; i < 300; i++) {
       const forest = randomForest(next);
       if (forest.length === 0) continue;
+      expect(contentOnly(roundTrip(forest))).toEqual(contentOnly(forest));
+    }
+  });
+
+  test("kind holds for paragraphs whose text survives as a bare line", () => {
+    const next = rng(0x9a12c3);
+    for (let i = 0; i < 300; i++) {
+      const forest = safeParagraphForest(next);
+      if (forest.length === 0) continue;
       expect(roundTrip(forest)).toEqual(forest);
+    }
+  });
+
+  test("a degraded paragraph is a FIXED POINT, never a slide", () => {
+    // The exporter's guard buys idempotence, not perfection: a lookalike
+    // paragraph degrades to a bullet ONCE, and every copy after that is stable.
+    const next = rng(0x5eed42);
+    for (let i = 0; i < 300; i++) {
+      const forest = randomForest(next);
+      if (forest.length === 0) continue;
+      const once = roundTrip(forest);
+      expect(roundTrip(once)).toEqual(once);
     }
   });
 
@@ -206,6 +277,40 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
     expect(roundTrip([shape("    if x:", [], true, false)])).toEqual([
       shape("    if x:", [], true, false),
     ]);
+  });
+
+  test("a paragraph exports as a bare line, at every depth", () => {
+    const { index } = buildIndex([
+      para("prose", [para("nested"), shape("kid")]),
+    ]);
+    expect(outlineToMarkdown(index, ["n0"])).toBe(
+      ["prose", "  nested", "  - kid"].join("\n"),
+    );
+    expect(roundTrip([para("prose", [para("nested"), shape("kid")])])).toEqual([
+      para("prose", [para("nested"), shape("kid")]),
+    ]);
+  });
+
+  test("a lookalike paragraph falls back to `- `, keeping every character", () => {
+    // Each of these, emitted bare, would come back as something else. The `- `
+    // prefix keeps the text intact and degrades the kind to bullet.
+    for (const text of ["- foo", "# foo", "> quoted", "```", "-", "1. x"]) {
+      expect(roundTrip([para(text)])).toEqual([shape(text)]);
+    }
+  });
+
+  test("an empty paragraph falls back to `- ` (a blank line is a separator)", () => {
+    expect(roundTrip([para("")])).toEqual([shape("")]);
+  });
+
+  test("an indented paragraph falls back to `- ` (trimStart would eat it)", () => {
+    expect(roundTrip([para("  x")])).toEqual([shape("  x")]);
+    expect(roundTrip([para("\tif x:")])).toEqual([shape("\tif x:")]);
+  });
+
+  test("a paragraph is never a task, even under a task parent", () => {
+    const forest = [shape("job", [para("why it matters")], true, false)];
+    expect(roundTrip(forest)).toEqual(forest);
   });
 
   test("a pasted code fence survives being copied back out", () => {
@@ -289,14 +394,14 @@ describe("parseMarkdownForest", () => {
   test("headings drive nesting, and the shallowest normalizes to depth 0", () => {
     const forest = parseMarkdownForest("### Section\nbody\n#### Sub\nmore");
     expect(forestShape(forest)).toEqual([
-      shape("Section", [shape("body"), shape("Sub", [shape("more")])]),
+      shape("Section", [para("body"), shape("Sub", [para("more")])]),
     ]);
   });
 
   test("a skipped heading level clamps instead of jumping", () => {
     const forest = parseMarkdownForest("# A\n##### E\ntext");
     expect(forestShape(forest)).toEqual([
-      shape("A", [shape("E", [shape("text")])]),
+      shape("A", [shape("E", [para("text")])]),
     ]);
   });
 
@@ -343,8 +448,8 @@ describe("parseMarkdownForest", () => {
 
   test("a task marker needs its list marker (GFM), so bare `[ ] x` is text", () => {
     expect(forestShape(parseMarkdownForest("[ ] x\ny"))).toEqual([
-      shape("[ ] x"),
-      shape("y"),
+      para("[ ] x"),
+      para("y"),
     ]);
   });
 
@@ -364,9 +469,11 @@ describe("parseMarkdownForest", () => {
     // ADR 0044 rule 2: the heading grammar only fires at the start of a line's
     // content, before any marker, once. `>` is a marker, so `# A` survives as
     // literal text -- and re-exporting it (`- # A`) is a fixed point.
+    // A stripped blockquote line is marker-less, so it lands as a paragraph
+    // (ADR 0045); `- # A` on the way back out is still the fixed point.
     expect(forestShape(parseMarkdownForest("> # A\n> body"))).toEqual([
-      shape("# A"),
-      shape("body"),
+      para("# A"),
+      para("body"),
     ]);
   });
 
@@ -380,7 +487,8 @@ describe("parseMarkdownForest", () => {
       shape("  indented"),
       shape(""), // a blank line inside a fence is content
       shape("```"),
-      shape("after"),
+      // Raw mode infers no kind, so only the line AFTER the fence is a paragraph.
+      para("after"),
     ]);
   });
 
@@ -391,7 +499,7 @@ describe("parseMarkdownForest", () => {
       shape("~~~"),
       shape("```js"),
       shape("```"),
-      shape("out"),
+      para("out"),
     ]);
   });
 
@@ -471,6 +579,7 @@ describe("planMarkdownPaste", () => {
         text: "two",
         isTask: false,
         completed: false,
+        kind: "paragraph",
       },
       {
         id: "p1",
@@ -479,6 +588,7 @@ describe("planMarkdownPaste", () => {
         text: "three",
         isTask: false,
         completed: false,
+        kind: "paragraph",
       },
     ]);
     // The anchor's existing child follows the pasted one; the anchor's existing
@@ -510,20 +620,54 @@ describe("planMarkdownPaste", () => {
       text: "done",
       isTask: true,
       completed: true,
+      kind: null,
     });
     expect(plan("- [x] done\nb", "mid-sentence ")!.anchor).toEqual({
       text: "mid-sentence done",
       isTask: null,
       completed: null,
+      kind: null,
     });
   });
 
   test("a plain first line never un-tasks the anchor", () => {
+    expect(plan("- plain\nb")!.anchor).toEqual({
+      text: "plain",
+      isTask: null,
+      completed: null,
+      kind: null,
+    });
+  });
+
+  test("a marker-less line 1 makes the anchor a paragraph, only when head is empty", () => {
+    // The accepted consequence of ADR 0044's amendment: multi-line prose pastes
+    // land as paragraphs. Mid-sentence, the anchor stays whatever it was.
     expect(plan("plain\nb")!.anchor).toEqual({
       text: "plain",
       isTask: null,
       completed: null,
+      kind: "paragraph",
     });
+    expect(plan("plain\nb", "mid-sentence ")!.anchor).toEqual({
+      text: "mid-sentence plain",
+      isTask: null,
+      completed: null,
+      kind: null,
+    });
+  });
+
+  test("literal paste infers no kind at all", () => {
+    const p = planMarkdownPaste({
+      index: fixture(),
+      anchorId: "A",
+      placement: "sibling",
+      forest: parseMarkdownForest("plain\nb", { literal: true }),
+      head: "",
+      tail: "",
+      newId: () => "p0",
+    })!;
+    expect(p.anchor.kind).toBeNull();
+    expect(p.inserts[0]!.kind).toBeNull();
   });
 
   test("the zoomed title takes remaining roots as prepended children", () => {

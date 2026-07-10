@@ -132,6 +132,15 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       if (plan.anchor.isTask !== null) draft.isTask = plan.anchor.isTask;
       if (plan.anchor.completed !== null)
         draft.completed = plan.anchor.completed;
+      // Kind exclusivity, the funnels' invariant applied here (ADR 0045): the
+      // absorbed line converts the anchor to exactly one of the three kinds, so
+      // whichever converts clears the other field.
+      if (plan.anchor.kind !== null) {
+        draft.kind = plan.anchor.kind;
+        draft.isTask = false;
+      } else if (plan.anchor.isTask) {
+        draft.kind = null;
+      }
       draft.updatedAt = timestamp;
     });
   };
