@@ -98,7 +98,15 @@ bun run dev        # vite (:3000) + wrangler (Worker + DO + local D1, :8787) in 
 bun run seed:user  # optional: creates dev@dotflowy.local / dotflowy-dev to sign in with
 ```
 
-In a **Claude Code worktree** you can skip `bun install` + `bun run setup`: the `WorktreeCreate` hook (`.claude/hooks/create-worktree.ts`) already ran both and copied the entries listed in `.worktreeinclude` (`.dev.vars`, `.codegraph`) from the base repo, so `typecheck`/`lint`/`test` work immediately. `bun run seed:user` still doesn't — it signs up through a live Worker.
+In an **agent worktree** you can skip `bun install` + `bun run setup`: both harnesses run `scripts/bootstrap.ts` on worktree creation — Claude Code via the `WorktreeCreate` hook (`.claude/hooks/create-worktree.ts`), the Codex app via the `[setup] script` in `.codex/environments/environment.toml` — which copies the entries listed in `.worktreeinclude` (`.dev.vars`, `.codegraph`) from the base repo and runs both commands, so `typecheck`/`lint`/`test` work immediately. `bun run seed:user` still doesn't — it signs up through a live Worker. Anywhere else (a plain clone, or Codex CLI after your own `git worktree add`), `bun run bootstrap` does the same three steps.
+
+**`bun run bootstrap` is the single bootstrap entry point; keep harness-specific code out of it.** Three non-obvious constraints hold it together:
+
+- It resolves the checkout from its **cwd** (`git rev-parse --show-toplevel`), never `import.meta.dir`, so the Claude hook can run the **base repo's** copy against a brand-new worktree. A worktree branched off a commit that predates the script would otherwise abort creation (a non-zero `WorktreeCreate` exit kills the worktree).
+- It derives the base repo via `git rev-parse --git-common-dir` because **neither harness injects a path to it** ([openai/codex#13576](https://github.com/openai/codex/issues/13576)).
+- The `.worktreeinclude` copy is `cpSync(..., { force: false })`, load-bearing in **both** directions: a re-run must not clobber a secret the worktree already generated (`.dev.vars`), and `.codegraph/` is gitignored except for one tracked `.gitignore`, so a fresh worktree starts with that directory **already present** — an `existsSync(dest)` skip would silently drop the entire 164MB cache.
+
+**Codex has no teardown seam.** Its hook events (`SessionStart`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, …) contain nothing worktree-related, and the app deletes worktrees on its own retention policy. `WorktreeRemove` (`.claude/hooks/remove-worktree.ts`) stays Claude-only. The Codex app **rewrites** `environment.toml` whenever the environment is edited through its settings pane, dropping the comments in it.
 
 The app is a static SPA that talks to the Worker over `/api/*`, so both servers must run. Testing the OAuth-gated `/mcp` endpoint locally needs `BETTER_AUTH_URL` + `BETTER_AUTH_TRUSTED_ORIGINS` in `.dev.vars` (the `wrangler dev` custom-domain simulation rewrites both the issuer and the request `Origin` to the prod domain) — see `.dev.vars.example` and [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
@@ -144,6 +152,7 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 
 ```sh
 bun run setup      # once per clone: .dev.vars + BETTER_AUTH_SECRET + local D1 schema
+bun run bootstrap  # setup + bun install + copy .worktreeinclude from the base repo (what worktree hooks call)
 bun run dev        # vite (:3000) + wrangler (:8787) together (scripts/dev.ts)
 bun run dev:web    # vite only (:3000)
 bun run dev:api    # wrangler only (:8787)

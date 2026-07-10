@@ -34,11 +34,23 @@ local account by hand. No codes = signup closed.
 
 ### Worktrees provision themselves
 
-Worktrees created by Claude Code (`claude --worktree`, or an agent running with
-`isolation: "worktree"`) skip the two commands above — a `WorktreeCreate` hook
-(`.claude/hooks/create-worktree.ts`, wired up in `.claude/settings.json`) runs
-them for you, plus copies the entries listed in `.worktreeinclude` (e.g. `.dev.vars`, `.codegraph`) from the base repo. A
-fresh worktree can run `typecheck`, `lint`, and `test` immediately.
+Worktrees skip the two commands above. Both supported agent harnesses run
+`scripts/bootstrap.ts` when they create one, which copies the entries listed in
+`.worktreeinclude` (e.g. `.dev.vars`, `.codegraph`) from the base repo, then
+runs `bun install` and `bun run setup`. A fresh worktree can run `typecheck`,
+`lint`, and `test` immediately.
+
+- **Claude Code** (`claude --worktree`, or an agent running with
+  `isolation: "worktree"`) — the `WorktreeCreate` hook
+  (`.claude/hooks/create-worktree.ts`, wired up in `.claude/settings.json`).
+- **Codex app** — the `[setup] script` in `.codex/environments/environment.toml`,
+  which the app runs when it creates a worktree for a task. Committed, so it
+  applies to every clone. Codex CLI has no worktree lifecycle at all; run
+  `bun run bootstrap` yourself after `git worktree add`.
+
+Anywhere else — a plain clone included — `bun run bootstrap` does the same
+three steps by hand. It's idempotent, and it never overwrites a file the
+checkout already has.
 
 The one thing it can't do is `bun run seed:user`, which signs up through the
 live Worker and so needs `bun run dev` already running. Seed the worktree's D1
