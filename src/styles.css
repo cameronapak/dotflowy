@@ -847,8 +847,11 @@ h2.zoomed-title {
    `.row-body >` child selector to out-specify the latter. */
 h2.zoomed-title:has(.title-pilcrow) {
   position: relative;
-  /* 6px gutter offset + the 20px box + a 8px gap to the text. */
-  padding-inline-start: 34px;
+  /* Lands the title's text on the same left edge as the rows beneath it (their
+     8px lead + a 16px glyph + a 6px float gap), so the outline keeps ONE text
+     column from the title down. The mark is centered on the bullet column
+     inside the gutter this opens, rather than sized to fill it. */
+  padding-inline-start: 30px;
 }
 
 h2.zoomed-title .row-body > .title-pilcrow {
