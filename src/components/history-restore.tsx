@@ -73,7 +73,7 @@ async function runSliced(kind: "undo" | "redo", plan: RestorePlan) {
   }
 }
 
-type Stage =
+export type Stage =
   | { kind: "closed" }
   | { kind: "restoring"; label: string; total: number; applied: number };
 
@@ -81,6 +81,13 @@ type Stage =
 // restore still proceeds if the dialog is somehow unmounted — it only loses
 // the progress display.
 let openRestoreProgress: ((stage: Stage) => void) | null = null;
+
+/** Drive the modal progress from any sliced structural apply. Undo/redo is the
+ *  original tenant; the big markdown paste (ADR 0044) is the second, which is
+ *  why `label` exists. */
+export function setRestoreProgress(stage: Stage): void {
+  openRestoreProgress?.(stage);
+}
 
 /**
  * The sliced restore's modal progress — undo has no natural dialog, so this

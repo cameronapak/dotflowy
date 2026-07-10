@@ -103,6 +103,11 @@ export interface NodeCommands {
   // zooms only when no drag happened. See ADR 0010.
   onBulletPointerDown: (id: string, e: PointerEvent) => void;
   onBulletClick: (id: string) => void;
+  // Queue focus (and a caret offset within it) for a row that hasn't rendered
+  // yet -- the seam bullet a multi-line markdown paste just created (ADR 0044).
+  // The editor owns the pendingFocus refs; this is the one command that lets a
+  // row hand a caret to a node it doesn't render.
+  setPendingFocus: (key: string, offset: number) => void;
 }
 
 /**
@@ -396,8 +401,28 @@ function OutlineNodeBody({
             }}
             onPaste={(e) => {
               const el = e.currentTarget;
-              const next = pasteIntoBullet(e, el, node.id, pluginCtx, (t) =>
-                commands.onTextChange(node.id, t),
+              const next = pasteIntoBullet(
+                e,
+                el,
+                node.id,
+                pluginCtx,
+                (t) => commands.onTextChange(node.id, t),
+                // Multi-line paste builds a tree (ADR 0044). Kept in lockstep
+                // with OutlineRow's copy while the recursive path is the
+                // flag-off rollback baseline.
+                {
+                  placement: "sibling",
+                  activeKey: node.id,
+                  rowEl: el.closest(".outline-row"),
+                  focus: {
+                    setPendingFocus: commands.setPendingFocus,
+                    placeCaretHere: (text, offset) => {
+                      decorate(el, text, offset, true);
+                      setCaretOffset(el, offset);
+                      syncedRef.current = text;
+                    },
+                  },
+                },
               );
               if (next !== null) syncedRef.current = next;
             }}
