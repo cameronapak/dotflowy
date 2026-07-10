@@ -5,6 +5,7 @@ import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
 import type { Node } from "./schema";
 
 import { createNodes, deleteNodes, updateNodes } from "./api";
+import { noteServerVersion } from "./app-version";
 import { isMirrorsEnabled } from "./flags";
 import { runPromise } from "./nodes-client-effect";
 import { makeSyncStream } from "./realtime";
@@ -438,6 +439,10 @@ export const nodesCollection = createCollection({
       // Apply one decoded server frame. Unchanged from the old onMessage body —
       // it just runs on the sync fiber now (driven by Stream.runForEach below).
       const applyMessage = (msg: ServerMessage): void => {
+        // Both handshake frames carry the Worker's version; a mismatch means this
+        // tab's bundle is stale and offers a reload (ADR 0046). Live `change`
+        // frames don't carry it -- a reconnect is when the deploy gap appears.
+        if (msg.type !== "change") noteServerVersion(msg.serverVersion);
         if (msg.type === "snapshot") {
           // Replace the whole collection: truncate, then write the full set.
           // Idempotent on first connect (empty) and on a resync past the
