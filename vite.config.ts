@@ -4,6 +4,9 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import pkg from "./package.json";
+import { changelogPlugin } from "./scripts/vite-plugin-changelog";
+
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
 // which matters because TanStack DB's localStorage collection reads
 // globalThis.localStorage. With SPA mode there's no server render pass
@@ -22,6 +25,12 @@ export default defineConfig({
     },
   },
   plugins: [
+    // Fails the build when `changelog/<package.json version>/` is missing, and
+    // serves the validated release array as `virtual:dotflowy-changelog`.
+    changelogPlugin({
+      dir: new URL("./changelog", import.meta.url).pathname,
+      packageVersion: pkg.version,
+    }),
     tanstackStart({
       spa: { enabled: true },
     }),

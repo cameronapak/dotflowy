@@ -101,15 +101,25 @@ Run the full gate. These mirror CI and are the same checks the review process
 expects to pass:
 
 ```sh
+bun run fmt:check       # oxfmt
 bun run lint            # oxlint (correctness = error) over src + worker
 bun run typecheck       # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run test            # bun test — pure-logic unit tests (src + worker/)
 bun run test:e2e        # playwright (chromium) — behavior/integration
+bunx changeset          # describe your change for the changelog (see below)
 ```
 
 Rules of thumb, expanded in `AGENTS.md`:
+
+- **Every PR carries a changeset.** `bunx changeset` writes a fragment saying what
+  changed and how loudly — `major` when a reader has to _do_ something, `minor` for
+  a new capability, `patch` for a fix. If the PR isn't news (a `chore:`, a refactor),
+  say so with `bunx changeset --empty`. CI checks that you decided; it does not ask
+  you to invent an entry. Releases are cut with `bun run release` — **never
+  `changeset version` directly**, which would delete the fragments before they're
+  archived. See [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md).
 
 - **Unit tests (`bun test`) cover pure logic only** — `tree.ts`, `tags.ts`,
   `links.ts`, the Worker planners/schemas. Editor behavior (caret, contentEditable,

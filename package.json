@@ -16,6 +16,8 @@
     "cf:dev": "bun scripts/cf-dev.ts",
     "seed:user": "bun scripts/seed-user.ts",
     "deploy": "bun run build:cf && wrangler deploy",
+    "release": "bun scripts/release.ts",
+    "release:publish": "bun scripts/release.ts --publish",
     "db:migrate:local": "wrangler d1 migrations apply dotflowy-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply dotflowy-db --remote",
     "lint": "oxlint src worker",
@@ -65,6 +67,7 @@
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",
+    "@changesets/cli": "^2.31.0",
     "@cloudflare/workers-types": "^4.20260624.1",
     "@playwright/test": "^1.61.0",
     "@rolldown/plugin-babel": "0.2.3",

@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 
 import { AuthScreen } from "../components/auth-screen";
+import { ChangelogDialog } from "../components/changelog-dialog";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
 import { HistoryRestoreDialog } from "../components/history-restore";
 import { MirrorPlaces } from "../components/mirror-places";
@@ -19,6 +20,7 @@ import { SpotlightController } from "../components/spotlight-mode";
 import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
+import { UpdateAvailableToast } from "../components/update-available";
 import { useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -91,9 +93,13 @@ function RootComponent() {
               <OpmlImportDialog />
               <DeleteConfirmDialog />
               <HistoryRestoreDialog />
+              <ChangelogDialog />
               <MirrorPlaces />
               <TagColorStyles />
               <SpotlightController />
+              {/* A distinct mechanism from the changelog (ADR 0046): the
+                  changelog says WHAT changed; this says THIS TAB is stale. */}
+              <UpdateAvailableToast />
             </ShowCompletedProvider>
           </AuthGate>
         </TextSizeProvider>

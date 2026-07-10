@@ -9,6 +9,13 @@
     "types": ["bun"],
     "noEmit": true
   },
-  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "worker/**/*.test.ts"],
+  // vite-env.d.ts carries the `virtual:dotflowy-changelog` module declaration
+  // (ADR 0046) that this config's `include` override would otherwise drop.
+  "include": [
+    "src/vite-env.d.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "worker/**/*.test.ts"
+  ],
   "exclude": []
 }
