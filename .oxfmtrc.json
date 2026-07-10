@@ -1,5 +1,6 @@
 {
   "printWidth": 80,
+  "ignorePatterns": [".agents/**", ".scratch/**", ".vscode/**"],
   "sortTailwindcss": {
     "stylesheet": "./src/styles.css",
     "functions": ["cn", "cva", "clsx", "cx"]
