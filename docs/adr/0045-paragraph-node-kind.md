@@ -75,9 +75,16 @@ exception to silently drop node state rather than shift presentation.
 
 ## Agent + OPML boundary: exposed from day one
 
-- **MCP:** optional `kind` on `add_node`/`add_subtree`/`update_node` (Effect Schema
-  `Literal("paragraph")`), surfaced in `get_outline`/`search_nodes`. `outline-ops.ts` enforces the
-  same normalization as the client funnels, so exclusivity holds at the trust boundary. (Tool
-  schema changes mean updating the ordered tool-name list in `worker/mcp.test.ts`.)
+- **MCP:** optional `kind` on `add_node`/`add_subtree`/`add_to_today`, and `"paragraph" | "bullet"`
+  on `update_node` — two explicit words, because an omitted key and an explicit null both decode as
+  "no change" everywhere else in those schemas, so null cannot also mean "make it a bullet".
+  Surfaced in `get_outline`/`search_nodes`. `outline-ops.ts` enforces the same normalization as the
+  client funnels (`newNode`, `planUpdateNode`), so exclusivity holds at the trust boundary — and
+  `flattenSubtree` applies the render tie-break on the way out, so an agent never reads a `- [ ]`
+  the app doesn't draw. (Tool schema changes mean updating the ordered tool-name list in
+  `worker/mcp.test.ts`.)
 - **OPML:** a `_kind="paragraph"` attribute in the `_task`/`_complete` convention — absent means
-  bullet, so foreign OPML and old exports import unchanged.
+  bullet, so foreign OPML and old exports import unchanged. **Import is its own trust boundary:**
+  `planOpmlImport` emits through the client's `makeNode`, not through `outline-ops.ts`, so a
+  document carrying both `_task="true"` and `_kind="paragraph"` would otherwise persist the illegal
+  pair. `convertOutline` normalizes it (kind wins) before the plan is built.
