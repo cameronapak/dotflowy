@@ -130,10 +130,15 @@ Every bullet is one row in a single TanStack DB collection. The outline tree is 
 Node {
   id, parentId, prevSiblingId,        // tree shape + sibling order
   text, isTask, completed, collapsed, // content + UI state
+  kind,                               // null (a bullet, or a task per isTask) or "paragraph"
   bookmarkedAt,                       // null, or the ms it was pinned (also the bookmark sort key)
+  mirrorOf,                           // null, or the id of the node this one windows
+  origin,                             // null if you wrote it; the agent's name if MCP created it
   createdAt, updatedAt
 }
 ```
+
+A bullet, a to-do, and a paragraph are the three **kinds** of node — mutually exclusive presentations of the same thing, converted between but never combined. `completed` is orthogonal: any node can be done. See [paragraph nodes](docs/adr/0045-paragraph-node-kind.md).
 
 Sibling order is a linked list via `prevSiblingId` (the Workflowy/Notion approach). Inserting between two bullets is O(1) and never requires renumbering. Reordering is relinking pointers.
 
