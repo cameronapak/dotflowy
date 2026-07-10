@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `changeset status --since` diffs against the base branch, so the
+          # shallow default clone isn't enough.
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
@@ -20,3 +24,11 @@ jobs:
         run: bun run lint
       - name: Typecheck
         run: bun run typecheck
+      # Every PR discloses what it changed, or says out loud that it changed
+      # nothing worth telling anyone (`bunx changeset --empty`). A version bump
+      # nobody trusts is worse than no version at all -- ADR 0046.
+      - name: Changeset present
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          bunx changeset status --since="origin/$GITHUB_BASE_REF"

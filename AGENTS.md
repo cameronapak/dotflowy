@@ -98,7 +98,15 @@ bun run dev        # vite (:3000) + wrangler (Worker + DO + local D1, :8787) in 
 bun run seed:user  # optional: creates dev@dotflowy.local / dotflowy-dev to sign in with
 ```
 
-In a **Claude Code worktree** you can skip `bun install` + `bun run setup`: the `WorktreeCreate` hook (`.claude/hooks/create-worktree.ts`) already ran both and copied the entries listed in `.worktreeinclude` (`.dev.vars`, `.codegraph`) from the base repo, so `typecheck`/`lint`/`test` work immediately. `bun run seed:user` still doesn't — it signs up through a live Worker.
+In an **agent worktree** you can skip `bun install` + `bun run setup`: both harnesses run `scripts/bootstrap.ts` on worktree creation — Claude Code via the `WorktreeCreate` hook (`.claude/hooks/create-worktree.ts`), the Codex app via the `[setup] script` in `.codex/environments/environment.toml` — which copies the entries listed in `.worktreeinclude` (`.dev.vars`, `.codegraph`) from the base repo and runs both commands, so `typecheck`/`lint`/`test` work immediately. `bun run seed:user` still doesn't — it signs up through a live Worker. Anywhere else (a plain clone, or Codex CLI after your own `git worktree add`), `bun run bootstrap` does the same three steps.
+
+**`bun run bootstrap` is the single bootstrap entry point; keep harness-specific code out of it.** Three non-obvious constraints hold it together:
+
+- It resolves the checkout from its **cwd** (`git rev-parse --show-toplevel`), never `import.meta.dir`, so the Claude hook can run the **base repo's** copy against a brand-new worktree. A worktree branched off a commit that predates the script would otherwise abort creation (a non-zero `WorktreeCreate` exit kills the worktree).
+- It derives the base repo via `git rev-parse --git-common-dir` because **neither harness injects a path to it** ([openai/codex#13576](https://github.com/openai/codex/issues/13576)).
+- The `.worktreeinclude` copy is `cpSync(..., { force: false })`, load-bearing in **both** directions: a re-run must not clobber a secret the worktree already generated (`.dev.vars`), and `.codegraph/` is gitignored except for one tracked `.gitignore`, so a fresh worktree starts with that directory **already present** — an `existsSync(dest)` skip would silently drop the entire 164MB cache.
+
+**Codex has no teardown seam.** Its hook events (`SessionStart`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, …) contain nothing worktree-related, and the app deletes worktrees on its own retention policy. `WorktreeRemove` (`.claude/hooks/remove-worktree.ts`) stays Claude-only. The Codex app **rewrites** `environment.toml` whenever the environment is edited through its settings pane, dropping the comments in it.
 
 The app is a static SPA that talks to the Worker over `/api/*`, so both servers must run. Testing the OAuth-gated `/mcp` endpoint locally needs `BETTER_AUTH_URL` + `BETTER_AUTH_TRUSTED_ORIGINS` in `.dev.vars` (the `wrangler dev` custom-domain simulation rewrites both the issuer and the request `Origin` to the prod domain) — see `.dev.vars.example` and [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
@@ -140,10 +148,23 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 
 **Opening or updating a PR? Run `/ft-create-concise-pr` — always, not just when asked.** Every PR description in this repo follows that skill's snapshot template (Summary / Changes / Flow / Breaking / Test plan), so reviewers get one consistent, skimmable shape regardless of who — human or agent — wrote the change. Don't hand-write a PR body in your own format, and don't let a description drift after review changes — re-run the skill's Update pass instead. If the skill can't be invoked in your harness, follow `.agents/skills/ft-create-concise-pr/SKILL.md` by hand.
 
+## Changelog + releases
+
+**Every PR adds a changeset fragment. CI fails without one.** Run `bunx changeset` and pick the bump — or `bunx changeset --empty` when the PR genuinely isn't news (a `chore:`, a refactor, a lockfile bump). The gate wants a _decision_, not an invented changelog entry. Full decision set: [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md).
+
+- **Semver here is COMMUNICATIVE, not contractual.** Nobody can pin Dotflowy — humans get whatever the last `bun run deploy` pushed, and MCP clients negotiate `protocolVersion` (the spec date), never `serverInfo.version`. So the bump levels are defined by _disclosure_: **major** = a reader has to do something (relearn a gesture, fix an agent prompt, re-export a file); **minor** = a new capability; **patch** = it just got better. Don't reach for compatibility-flavored rules ("major = the wire schema changed"); they promise a stable version to stay on, and none exists.
+- **A fragment is `{bump, summary}`. There is no `category` field** — the bump type already says Changed/Added/Fixed, with a CI gate behind it.
+- **`bun run release` is the ONLY way to bump the version. Never run `changeset version` directly** — it deletes the fragments before `changelog/<version>/` archives them, and `bun run build` then fails (the invariant in `scripts/vite-plugin-changelog.ts`). That failure IS the process; don't work around it.
+- **The fragments are the source.** `changelog/**` (archived fragments + `manifest.json`) is the **app's data**, parsed + Effect-Schema-validated at build time and compiled in as `virtual:dotflowy-changelog`. `CHANGELOG.md` is generated by changesets purely as the **GitHub Release body** and is never parsed back into app data. Neither is derived from the other.
+- **The cursor is `lastSeenVersion`, not a `seq`** (`src/data/changelog-cursor.ts`, a `/api/kv` side-collection so it syncs across devices). Array order is release order; `findIndex` answers "how many did I miss". Read it with `subscribeChanges` + `useSyncExternalStore` — **never `useLiveQuery`**, which hard-fails the `/` prerender, and the badge lives in the header. A `null` cursor means BOTH "not loaded" and "no row": readiness rides `toArrayWhenReady()` (a zero-row load emits no change event), and a ready-with-no-row user is **seeded silently**. Never badge someone for a release they already lived through.
+- **The version reaches running tabs over the sync handshake.** The DO stamps `serverVersion` (from `worker/version.ts` → `package.json`) onto the `snapshot`/`resume` frames; `src/data/app-version.ts` compares it to the bundle's own and `UpdateAvailableToast` offers a non-blocking reload. **This is a distinct mechanism from the changelog** — a changelog can't inform a stale client, and stale clients are exactly who a major bump is for. The field is `Schema.optional` on purpose (an old DO and the e2e mock both omit it); Effect ignores excess properties, so adding it can't break a tab mid-session.
+- The public changelog is **GitHub Releases** (crawlable, permanent URLs, git tags, and a free Atom feed at `/releases.atom`). The in-app dialog is the primary surface.
+
 ## Commands
 
 ```sh
 bun run setup      # once per clone: .dev.vars + BETTER_AUTH_SECRET + local D1 schema
+bun run bootstrap  # setup + bun install + copy .worktreeinclude from the base repo (what worktree hooks call)
 bun run dev        # vite (:3000) + wrangler (:8787) together (scripts/dev.ts)
 bun run dev:web    # vite only (:3000)
 bun run dev:api    # wrangler only (:8787)
@@ -159,6 +180,8 @@ bun run test:e2e:ui  # same, in Playwright's interactive UI
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # watch loop (scripts/cf-dev.ts): build:cf + wrangler dev, rebuilds on src/ changes
 bun run deploy     # build:cf, then `wrangler deploy`
+bun run release    # cut a release: archive fragments -> changeset version -> manifest -> commit + tag
+bun run release:publish  # push done separately; then `gh release create` from CHANGELOG.md
 bun run effect:src  # print (fetch on first use) the Effect v4 source path via opensrc
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```

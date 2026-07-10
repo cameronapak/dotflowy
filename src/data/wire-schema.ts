@@ -81,15 +81,31 @@ export type ChangeFrame = Schema.Schema.Type<typeof ChangeFrameSchema>;
 // `snapshot` = full state (initial connect or resync past the changelog window);
 // `resume` = the gap since the client's cursor; `change` = a live mutation.
 
+/** The Worker's `package.json` version (`worker/version.ts`), stamped onto every
+ *  handshake frame so a long-lived tab can notice its bundle has gone stale
+ *  (ADR 0046, compared against `src/data/app-version.ts`). A changelog
+ *  cannot inform a stale client, and stale clients are exactly who a MAJOR bump
+ *  is for.
+ *
+ *  OPTIONAL, and it must stay that way: a `resume` from a DO that predates this
+ *  field, and the e2e Worker mock, both omit it. Effect Schema ignores excess
+ *  properties, so an OLD client decodes a new frame and drops it -- adding this
+ *  cannot break a tab mid-session. (ADR 0003's no-optionals rule governs `Node`,
+ *  where a default would make the field optional in the encoded type; a frame is
+ *  not a persisted row.) */
+const serverVersion = Schema.optional(Schema.String);
+
 const SnapshotMessage = Schema.Struct({
   type: Schema.Literal("snapshot"),
   seq: Schema.Number,
   nodes: Schema.Array(NodeSchema),
+  serverVersion,
 });
 const ResumeMessage = Schema.Struct({
   type: Schema.Literal("resume"),
   seq: Schema.Number,
   changes: Schema.Array(ChangeFrameSchema),
+  serverVersion,
 });
 const ChangeMessage = Schema.Struct({
   type: Schema.Literal("change"),

@@ -34,11 +34,23 @@ local account by hand. No codes = signup closed.
 
 ### Worktrees provision themselves
 
-Worktrees created by Claude Code (`claude --worktree`, or an agent running with
-`isolation: "worktree"`) skip the two commands above — a `WorktreeCreate` hook
-(`.claude/hooks/create-worktree.ts`, wired up in `.claude/settings.json`) runs
-them for you, plus copies the entries listed in `.worktreeinclude` (e.g. `.dev.vars`, `.codegraph`) from the base repo. A
-fresh worktree can run `typecheck`, `lint`, and `test` immediately.
+Worktrees skip the two commands above. Both supported agent harnesses run
+`scripts/bootstrap.ts` when they create one, which copies the entries listed in
+`.worktreeinclude` (e.g. `.dev.vars`, `.codegraph`) from the base repo, then
+runs `bun install` and `bun run setup`. A fresh worktree can run `typecheck`,
+`lint`, and `test` immediately.
+
+- **Claude Code** (`claude --worktree`, or an agent running with
+  `isolation: "worktree"`) — the `WorktreeCreate` hook
+  (`.claude/hooks/create-worktree.ts`, wired up in `.claude/settings.json`).
+- **Codex app** — the `[setup] script` in `.codex/environments/environment.toml`,
+  which the app runs when it creates a worktree for a task. Committed, so it
+  applies to every clone. Codex CLI has no worktree lifecycle at all; run
+  `bun run bootstrap` yourself after `git worktree add`.
+
+Anywhere else — a plain clone included — `bun run bootstrap` does the same
+three steps by hand. It's idempotent, and it never overwrites a file the
+checkout already has.
 
 The one thing it can't do is `bun run seed:user`, which signs up through the
 live Worker and so needs `bun run dev` already running. Seed the worktree's D1
@@ -101,15 +113,25 @@ Run the full gate. These mirror CI and are the same checks the review process
 expects to pass:
 
 ```sh
+bun run fmt:check       # oxfmt
 bun run lint            # oxlint (correctness = error) over src + worker
 bun run typecheck       # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run test            # bun test — pure-logic unit tests (src + worker/)
 bun run test:e2e        # playwright (chromium) — behavior/integration
+bunx changeset          # describe your change for the changelog (see below)
 ```
 
 Rules of thumb, expanded in `AGENTS.md`:
+
+- **Every PR carries a changeset.** `bunx changeset` writes a fragment saying what
+  changed and how loudly — `major` when a reader has to _do_ something, `minor` for
+  a new capability, `patch` for a fix. If the PR isn't news (a `chore:`, a refactor),
+  say so with `bunx changeset --empty`. CI checks that you decided; it does not ask
+  you to invent an entry. Releases are cut with `bun run release` — **never
+  `changeset version` directly**, which would delete the fragments before they're
+  archived. See [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md).
 
 - **Unit tests (`bun test`) cover pure logic only** — `tree.ts`, `tags.ts`,
   `links.ts`, the Worker planners/schemas. Editor behavior (caret, contentEditable,

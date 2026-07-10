@@ -15,6 +15,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PlugZapIcon,
+  SparklesIcon,
   SunIcon,
 } from "lucide-react";
 import { useMemo } from "react";
@@ -26,6 +27,7 @@ import { capture } from "../data/history";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { signOut } from "../lib/auth-client";
+import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
   exportOutlineAsOpml,
@@ -204,6 +206,15 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["mcp", "connect", "apps", "agent", "ai", "claude"],
         run: openConnect,
+      },
+      {
+        id: "g:changelog",
+        label: "What's new",
+        description: "Every change to Dotflowy, newest first",
+        icon: SparklesIcon,
+        scope: "global",
+        keywords: ["changelog", "release", "version", "news", "updates"],
+        run: () => openChangelog(),
       },
       {
         id: "g:feedback",

@@ -10,6 +10,7 @@ import type {
 } from "../src/data/wire-schema";
 
 import { planChangeFrames } from "./changelog";
+import { APP_VERSION } from "./version";
 
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
 // the shared wire module — the one leaf the client and the Worker both derive
@@ -552,6 +553,10 @@ export class UserOutlineDO extends DurableObject<Env> {
    * still inside the retained changelog window, send just the gap (`resume`);
    * otherwise send the whole outline (`snapshot`). A null cursor always takes
    * the snapshot path.
+   *
+   * Both handshake frames carry `serverVersion` — the deploy the client is now
+   * talking to. It rides here rather than on `change` frames because a reconnect
+   * is exactly when a days-old tab meets a newer Worker (ADR 0046).
    */
   private initialFrame(since: number | null): ServerMessage {
     const seq = this.currentSeq();
@@ -578,10 +583,16 @@ export class UserOutlineDO extends DurableObject<Env> {
             seq: r.seq,
             ops: JSON.parse(r.ops) as ChangeOp[],
           })),
+          serverVersion: APP_VERSION,
         };
       }
     }
-    return { type: "snapshot", seq, nodes: this.getNodes() };
+    return {
+      type: "snapshot",
+      seq,
+      nodes: this.getNodes(),
+      serverVersion: APP_VERSION,
+    };
   }
 
   // --- kv side-collections ---------------------------------------------------

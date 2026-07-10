@@ -22,6 +22,7 @@
 import { Effect, Schema } from "effect";
 
 import { type OutlineStore, tools } from "./mcp-tools";
+import { APP_VERSION } from "./version";
 
 // --- Protocol constants -------------------------------------------------------
 
@@ -30,7 +31,14 @@ import { type OutlineStore, tools } from "./mcp-tools";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_PROTOCOL_VERSION = "2025-06-18";
 
-const SERVER_INFO = { name: "dotflowy", title: "Dotflowy", version: "0.1.0" };
+/** `version` is informational: MCP clients negotiate `protocolVersion` (the spec
+ *  date, above) and never pin a server version. It still has to be TRUE — read
+ *  from package.json, not typed here (ADR 0046). */
+const SERVER_INFO = {
+  name: "dotflowy",
+  title: "Dotflowy",
+  version: APP_VERSION,
+};
 
 const SERVER_INSTRUCTIONS =
   'Dotflowy is the user\'s personal outline (nested bullets; some are to-dos; daily notes live under a "Daily" container). ' +

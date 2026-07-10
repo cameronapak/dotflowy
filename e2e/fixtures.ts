@@ -106,6 +106,11 @@ export async function seedOutline(
      *  side-collection already populated (e.g. an existing Daily container) to
      *  exercise the async-load path that a fresh, navigation-free load hits. */
     kv?: Record<string, { key: string; value: unknown }[]>;
+    /** Stamp `serverVersion` onto the `snapshot` frame, as the real DO does
+     *  (ADR 0046). Omitted by default, which is faithful to a DO that predates
+     *  the field AND keeps every other spec free of an update toast; pass a
+     *  version different from package.json's to exercise the stale-tab path. */
+    serverVersion?: string;
   } = {},
 ): Promise<void> {
   const echoDelayMs = opts.echoDelayMs ?? 0;
@@ -317,6 +322,9 @@ export async function seedOutline(
             type: "snapshot",
             seq,
             nodes: [...store.values()],
+            ...(opts.serverVersion === undefined
+              ? {}
+              : { serverVersion: opts.serverVersion }),
           }),
         ),
       );

@@ -13,6 +13,7 @@ import {
   MoonIcon,
   MoreHorizontalIcon,
   PlugZapIcon,
+  SparklesIcon,
   SunIcon,
   SunMoonIcon,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { signOut } from "../lib/auth-client";
+import { openChangelog } from "./changelog-opener";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import { openOpmlImport } from "./opml-import-opener";
 import { useShowCompleted } from "./show-completed-provider";
@@ -238,6 +240,13 @@ export function HeaderMoreMenu() {
           <DropdownMenuItem onClick={() => openFeedbackReport()}>
             <MessageSquareWarningIcon />
             Report a bug
+          </DropdownMenuItem>
+
+          {/* The permanent home for the changelog. The header badge (ADR 0046)
+              is the same dialog, but it exists only while something is unread. */}
+          <DropdownMenuItem onClick={() => openChangelog()}>
+            <SparklesIcon />
+            What's new
           </DropdownMenuItem>
 
           <DropdownMenuItem
