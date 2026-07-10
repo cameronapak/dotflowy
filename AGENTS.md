@@ -93,6 +93,8 @@ bun run dev        # vite (:3000) + wrangler (Worker + DO + local D1, :8787) in 
 bun run seed:user  # optional: creates dev@dotflowy.local / dotflowy-dev to sign in with
 ```
 
+In a **Claude Code worktree** you can skip `bun install` + `bun run setup`: the `WorktreeCreate` hook (`.claude/hooks/create-worktree.sh`) already ran both and copied `.dev.vars` from the base repo, so `typecheck`/`lint`/`test` work immediately. `bun run seed:user` still doesn't — it signs up through a live Worker.
+
 The app is a static SPA that talks to the Worker over `/api/*`, so both servers must run. Testing the OAuth-gated `/mcp` endpoint locally needs `BETTER_AUTH_URL` + `BETTER_AUTH_TRUSTED_ORIGINS` in `.dev.vars` (the `wrangler dev` custom-domain simulation rewrites both the issuer and the request `Origin` to the prod domain) — see `.dev.vars.example` and [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
 ## Error Handling
