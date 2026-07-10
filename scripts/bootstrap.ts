@@ -27,8 +27,14 @@
  *   - Neither harness injects a path to the base repo (see openai/codex#13576),
  *     so `git rev-parse --git-common-dir` is the only portable way to find it.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+} from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 
 const log = (msg: string) => console.log(`\x1b[36m[bootstrap]\x1b[0m ${msg}`);
 
@@ -70,6 +76,28 @@ async function run(
   return proc.exited;
 }
 
+/**
+ * A live CodeGraph daemon keeps its runtime state inside the `.codegraph`
+ * cache it serves. That state is bound to ONE checkout and must never be
+ * copied into another: `daemon.pid` names the base repo's pid and socket path,
+ * so a worktree that inherits it points its client at the base repo's daemon
+ * and reads the wrong tree. `daemon.sock` can't be copied at all.
+ */
+const DAEMON_STATE = new Set(["daemon.sock", "daemon.pid", "daemon.log"]);
+
+/**
+ * `cpSync` copies only regular files, directories, and symlinks; every other
+ * inode type aborts the whole walk (node throws `ERR_FS_CP_SOCKET`, bun the
+ * raw `ENOTSUP` from `copyfile(2)`). Filtering runs before that check, so
+ * rejecting them here keeps a running daemon's socket from failing bootstrap.
+ */
+function isCopyable(src: string): boolean {
+  if (DAEMON_STATE.has(basename(src))) return false;
+  const stat = lstatSync(src, { throwIfNoEntry: false });
+  if (!stat) return false;
+  return stat.isFile() || stat.isDirectory() || stat.isSymbolicLink();
+}
+
 log(`bootstrapping ${ROOT}`);
 
 // 1. Carry gitignored files the base repo has and a fresh worktree can't.
@@ -103,7 +131,12 @@ if (BASE === ROOT) {
     // is gitignored except for one tracked `.gitignore`, so a fresh worktree
     // starts with the directory present but the 164MB cache absent. An
     // exists-check on the directory would silently skip the whole cache.
-    cpSync(src, dest, { recursive: true, force: false, errorOnExist: false });
+    cpSync(src, dest, {
+      recursive: true,
+      force: false,
+      errorOnExist: false,
+      filter: isCopyable,
+    });
     log(
       existed
         ? `${entry}: already here - filled in anything missing`
