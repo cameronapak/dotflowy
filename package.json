@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "setup": "bun scripts/setup.ts",
+    "bootstrap": "bun scripts/bootstrap.ts",
     "dev": "bun scripts/dev.ts",
     "dev:web": "vite dev",
     "dev:api": "wrangler dev --port 8787",
