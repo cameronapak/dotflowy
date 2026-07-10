@@ -24,7 +24,7 @@ import {
   type MdPastePlan,
 } from "../data/markdown-import";
 import { runStructural, runStructuralSliced } from "../data/structural";
-import { makeNode, now } from "../data/tree";
+import { buildTreeIndex, makeNode, now, type Node } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewFilter, getViewIsHidden, getViewRootId } from "../data/view-state";
 import { buildVisibleRows } from "../data/visible-order";
@@ -186,9 +186,14 @@ function resolveSeam(
 ): { id: string; offset: number } {
   if (plan.focusId === anchorId) return { id: anchorId, offset: plan.focusOffset };
 
+  // Build the visible set from a FRESH index off `nodesCollection.toArray` --
+  // synchronously current after `runStructural` -- not `getTreeIndex()`, whose
+  // change-notify can lag the optimistic apply and drop the just-inserted seam
+  // node from the walk (the exact reason `focusKeyFor`, called right after this,
+  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c).
   const visible = new Set(
     buildVisibleRows(
-      getTreeIndex(),
+      buildTreeIndex(nodesCollection.toArray as Node[]),
       getViewRootId(),
       getViewIsHidden(),
       getViewFilter(),
