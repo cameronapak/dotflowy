@@ -27,9 +27,11 @@ try {
 // Prefer the documented `worktree_path` (still on disk at hook time, so
 // `git -C` resolves its base repo); fall back to the common `cwd`.
 const dir =
-  typeof input.worktree_path === "string" ? input.worktree_path
-  : typeof input.cwd === "string" ? input.cwd
-  : undefined;
+  typeof input.worktree_path === "string"
+    ? input.worktree_path
+    : typeof input.cwd === "string"
+      ? input.cwd
+      : undefined;
 
 if (!dir) {
   console.error(
@@ -43,10 +45,15 @@ if (!dir) {
 // entries for already-deleted worktrees (from interrupted past removals) are
 // dropped. stdout+stderr go to stderr so nothing pollutes a potential stdout
 // contract, and a failure is swallowed (this hook can't block removal).
-const proc = Bun.spawn(
-  ["git", "-C", dir, "worktree", "prune"],
-  { stdin: "ignore", stdout: Bun.file(2), stderr: "inherit" },
-);
+const proc = Bun.spawn(["git", "-C", dir, "worktree", "prune"], {
+  stdin: "ignore",
+  stdout: Bun.file(2),
+  stderr: "inherit",
+});
 await proc.exited;
 
 process.exit(0);
+
+// Empty export needed to avoid "export not found" errors
+// as well as top-level await errors
+export {};
