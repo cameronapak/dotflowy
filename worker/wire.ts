@@ -66,3 +66,12 @@ export const WaitlistPostBody = Schema.Struct({
   email: Schema.String,
   source: Schema.optional(Schema.String),
 })
+
+/** POST /api/quick-add — headless single-bullet capture (issue #96).
+ *  Omit parentId to append under today's daily note (pass `date` for local day;
+ *  default is UTC today). Auth: session cookie OR `x-api-key` (not both required). */
+export const QuickAddBody = Schema.Struct({
+  text: Schema.String,
+  parentId: Schema.optional(Schema.String),
+  date: Schema.optional(Schema.String),
+})

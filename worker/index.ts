@@ -35,12 +35,14 @@ import {
   NodesDeleteBody,
   NodesPatchBody,
   NodesPostBody,
+  QuickAddBody,
   WaitlistPostBody,
 } from './wire'
 import { oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from 'better-auth/plugins'
 import { createAuth } from './auth'
 import type { AuthEnv } from './auth'
 import { handleMcp, mcpCorsPreflight } from './mcp'
+import { runQuickAdd, QuickAddError } from './quick-add'
 import { isHttpUrlString, unfurlTitle } from './unfurl'
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
@@ -533,6 +535,74 @@ function handleApiRequest(
       const clientId = (token as { clientId?: string }).clientId ?? null
       const origin = yield* Effect.promise(() => resolveMcpOrigin(env, clientId))
       return yield* handleMcp(request, mcpStub, origin)
+    }
+
+    // Headless quick-capture (issue #96): session cookie OR personal API key
+    // (`x-api-key`). Keys are verified ONLY here — enableSessionForAPIKeys is
+    // false so they never satisfy the cookie gate on /api/nodes etc. MCP stays
+    // OAuth-only (ADR 0026).
+    if (url.pathname === '/api/quick-add') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-allow-methods': 'POST, OPTIONS',
+            'access-control-allow-headers': 'content-type, x-api-key, authorization',
+          },
+        })
+      }
+      if (request.method !== 'POST') {
+        return json({ error: 'method not allowed' }, 405, {
+          'access-control-allow-origin': '*',
+        })
+      }
+      const cors = { 'access-control-allow-origin': '*' as const }
+
+      // 1) Session cookie (same-origin SPA / signed-in browser).
+      let callerUserId: string | null = null
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      )
+      if (session?.user?.id) {
+        callerUserId = session.user.id
+      } else {
+        // 2) Personal API key — never elevates into a full session.
+        const apiKeyHeader = request.headers.get('x-api-key')?.trim()
+        if (apiKeyHeader) {
+          const verified = yield* Effect.promise(() =>
+            auth.api.verifyApiKey({ body: { key: apiKeyHeader } }),
+          )
+          // Plugin returns { valid, key?: { referenceId, ... } } (shape may vary
+          // slightly by version; tolerate both referenceId and userId).
+          const key = (verified as { valid?: boolean; key?: { referenceId?: string; userId?: string } | null })
+            ?.valid
+            ? (verified as { key?: { referenceId?: string; userId?: string } | null }).key
+            : null
+          callerUserId = key?.referenceId ?? key?.userId ?? null
+        }
+      }
+      if (!callerUserId) return json({ error: 'unauthorized' }, 401, cors)
+
+      const body = yield* decodeBody(request, QuickAddBody)
+      const doUserId = resolveUserId(callerUserId, env)
+      const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(doUserId))
+      // Owner continuity: import legacy rows once if this is the default DO.
+      if (doUserId === OWNER_DO_ID) yield* ensureSeededE(stub, env)
+
+      const result = yield* runQuickAdd(stub, {
+        text: body.text,
+        parentId: body.parentId,
+        date: body.date,
+      }).pipe(
+        Effect.catchTag('QuickAddError', (err: QuickAddError) =>
+          Effect.succeed({ __error: err as QuickAddError }),
+        ),
+      )
+      if ('__error' in result) {
+        return json({ error: result.__error.reason }, result.__error.status, cors)
+      }
+      return json(result, 200, cors)
     }
 
     // Identity = the validated session's stable user id. No session → 401.
