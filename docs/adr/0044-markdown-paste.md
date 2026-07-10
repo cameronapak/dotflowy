@@ -59,7 +59,7 @@ Four rules the obvious implementation gets wrong:
 
 1. **Heading detection MUST require the space.** `#urgent` is a tag; `# urgent` is a heading. `TAG_PATTERN` is `(?<=^|\s)#[\p{L}\p{N}_-]+` — `#` immediately followed by a word char — and CommonMark requires `#{1,6}` + space. The two are **exactly disjoint, by luck**. "Trim the leading `#`s" silently eats the tags feature.
 2. **Strip exactly one marker, never recurse.** A node whose text is literally `- foo` exports as `- - foo`; one strip yields `- foo`, correct. Recurse and the content is gone. Likewise `- # foo` → text `# foo` (the heading grammar only fires at the start of a line's content, before any marker, once).
-3. **Marker stripping consumes all whitespace after the marker** (`-   item` → `item`), as every real markdown tool does.
+3. **Marker stripping consumes exactly ONE space, not all whitespace** (`-   item` → `  item`) — the deliberate divergence from every real markdown tool, argued in *One space, not `\s+`* below.
 4. **Empty-bullet handling is load-bearing.** `outlineToMarkdown` emits a bare `- ` (trailing space) for an empty node, which editors and `.trim()` eat. `-`, `- `, `*` must all yield an empty node. Dylan's example input ends with a bare `-`, which is how he found it.
 
 ### Headings drive nesting
@@ -121,9 +121,23 @@ Rule 5 is the surprising one: paste a 40-line document mid-sentence and the rest
 >
 > All three are stable under further round-trips.
 
-**A fourth exception, found while building, not yet ruled on: leading whitespace in `node.text` is dropped.** `outlineToMarkdown` emits `- ` + text, so a node whose text is `  const x` serializes to `-   const x`, and rule 3 above (marker stripping consumes *all* whitespace after the marker, as every markdown tool does) eats the two spaces on re-import. It is a fixed point after one pass, but it *drops characters*, which the fidelity bar forbids. The only text that reaches this state is a fence interior (whose leading whitespace this ADR promises to preserve) or a hand-typed leading space. The three ways out — preserve exactly one space after the marker (breaks rule 3 and mangles hand-written markdown), stop preserving fence indentation (breaks the fence rule), or accept and document it — are all real; **v1 ships the third**, pinned by a named test in `markdown-import.test.ts` so it can never regress silently.
+### One space, not `\s+`
 
-Property-test the identity over generated trees with the three exceptions carved out — and generate trees **with** mirrors, asserting the round-trip equals the mirror-resolved flattening. Everything else round-trips clean: emphasis, links, highlights, spoilers (raw `||x||` per ADR 0043), inline code, `#tags`, date tokens, node links.
+There is no fourth exception. There nearly was.
+
+`outlineToMarkdown` emits `- ` + text, so a node whose text is `  const x` serializes to `-   const x`. Consume `\s+` after the marker — the rule every lenient markdown reader follows — and those two spaces are gone on re-import. It reaches a fixed point after one pass, so it hides well. It also **drops characters**, which the fidelity bar forbids outright.
+
+This is not the corner it looks like. Paste a Python block, copy the outline as markdown, paste it back: **every level of indentation is gone.** That is the round-trip this ADR is named for, run against the fence rule three sections up, which promises to preserve exactly that whitespace. The promise held for exactly one paste.
+
+So `LIST_MARKER_RE` and `TASK_RE` consume **exactly one** space or tab — the one the exporter wrote. Everything after it is content.
+
+The parser has two jobs that collide on this character: be `outlineToMarkdown`'s inverse, and be a lenient importer of other people's markdown. This ADR already said which wins — *the inverse of our own export, not "import anything"*. The cost is paid there: foreign markdown that pads its marker (`-   item`, or `1.  item` aligned against `10.`) imports with the padding as leading text, visible under `pre-wrap`.
+
+That trade is decided by which harm is recoverable. A kept leading space is on screen and one keystroke from gone. Dropped indentation is silent, and the characters are not in the store to get back.
+
+Rejected: **stop preserving fence indentation** (breaks the fence rule, and code without indentation is not code); **an escape syntax for leading whitespace** (ADR 0037 settled that dotflowy has none); **accept and document it** (a documented character-dropping gap is not an invariant, it is a footnote pretending to be one).
+
+Property-test the identity over generated trees with the three exceptions carved out — the corpus carries leading-whitespace texts, so a regression here fails the property test, not just a named case — and generate trees **with** mirrors, asserting the round-trip equals the mirror-resolved flattening. Everything else round-trips clean: emphasis, links, highlights, spoilers (raw `||x||` per ADR 0043), inline code, `#tags`, date tokens, node links.
 
 ## Markdown is the interchange format for node state, never its storage
 

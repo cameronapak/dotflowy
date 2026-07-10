@@ -52,19 +52,30 @@ export interface MdNode {
 const HEADING_RE = /^(#{1,6}) +(.*)$/
 
 /** One list marker: `-` `*` `+` or an ordinal `1.` / `1)`. The trailing
- *  `\s+|$` is what keeps `*bold*` from looking like a bullet, and what lets a
+ *  `[ \t]|$` is what keeps `*bold*` from looking like a bullet, and what lets a
  *  bare `-` (an empty node -- `outlineToMarkdown` emits `- ` for empty text,
- *  which editors and `.trim()` eat) be recognized. Whitespace after the marker
- *  is consumed whole, as every real markdown tool does. */
-const LIST_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)])(?:\s+|$)/
+ *  which editors and `.trim()` eat) be recognized.
+ *
+ *  EXACTLY ONE separator character is consumed, not the `\s+` a lenient markdown
+ *  reader takes. `outlineToMarkdown` emits one space after the marker, so a
+ *  second space is CONTENT -- and eating it flattens the indentation of every
+ *  fence interior on re-import, which the fidelity bar forbids and the fence rule
+ *  promises to keep. The price is that foreign markdown which pads its marker
+ *  (`-   item`) imports with the padding as leading text: visible, and one
+ *  keystroke to delete, where dropped indentation is silent and unrecoverable.
+ *  This parser is `outlineToMarkdown`'s inverse before it is anyone's importer.
+ *  See ADR 0044. */
+const LIST_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/
 
 /** A run of blockquote markers at the very start of the content. Stripping the
  *  whole run keeps every character and is a fixed point (no `>` survives). */
 const BLOCKQUOTE_RE = /^(?:>[ \t]*)+/
 
 /** A GFM task checkbox, only ever matched AFTER a list marker was consumed
- *  (GFM requires the list item). `- [ ]` with no text is an empty task. */
-const TASK_RE = /^\[([ xX])\](?:[ \t]+|$)/
+ *  (GFM requires the list item). `- [ ]` with no text is an empty task. One
+ *  separator character, for `LIST_MARKER_RE`'s reason: `outlineToMarkdown` emits
+ *  `- [x] `, so `- [x]   x` carries the text `  x`. */
+const TASK_RE = /^\[([ xX])\](?:[ \t]|$)/
 
 /** An opening or closing code fence: three or more backticks or tildes at the
  *  start of the content, capturing the info string after them. Checked BEFORE

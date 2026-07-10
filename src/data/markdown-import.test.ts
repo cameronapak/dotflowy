@@ -104,6 +104,8 @@ const TEXTS = [
   '[[2026-07-09]]',
   'trailing space ',
   'a  b', // interior runs survive
+  '    if x:', // a fence interior's indent; the marker eats exactly one space
+  '\tif x:',
 ]
 
 function randomForest(next: () => number, depth = 0): Shape[] {
@@ -179,12 +181,31 @@ describe('parse(outlineToMarkdown(t)) === t', () => {
     ])
   })
 
-  test('known gap: leading whitespace in text is eaten by marker stripping', () => {
-    // `- ` + `  x` exports as `-   x`, and stripping consumes all whitespace
-    // after the marker (the grammar rule every markdown tool follows). Reachable
-    // only from a fence interior or a hand-typed leading space. Documented here
-    // so it can never regress silently.
-    expect(roundTrip([shape('  x')])).toEqual([shape('x')])
+  test('leading whitespace survives -- the marker eats exactly one space', () => {
+    // `- ` + `  x` exports as `-   x`. Consuming `\s+` there would drop the two
+    // spaces, flattening the indentation of every fence interior the fence rule
+    // promises to keep (a pasted code block, copied back out, came back at
+    // column zero). See ADR 0044.
+    expect(roundTrip([shape('  x')])).toEqual([shape('  x')])
+    expect(roundTrip([shape('\tx')])).toEqual([shape('\tx')])
+    expect(roundTrip([shape('    if x:', [], true, false)])).toEqual([
+      shape('    if x:', [], true, false),
+    ])
+  })
+
+  test('a pasted code fence survives being copied back out', () => {
+    // The end-to-end shape of the bug above: paste Python, copy as markdown,
+    // paste it back. Every level of indentation must still be there.
+    const src = ['```py', 'def f():', '    if x:', '        return 1', '```'].join('\n')
+    const once = forestShape(parseMarkdownForest(src))
+    expect(once.map((n) => n.text)).toEqual([
+      '```py',
+      'def f():',
+      '    if x:',
+      '        return 1',
+      '```',
+    ])
+    expect(roundTrip(once)).toEqual(once)
   })
 })
 
@@ -211,8 +232,14 @@ describe('parseMarkdownForest', () => {
     expect(texts('1. one\n2) two\n* star\n+ plus')).toEqual(['one', 'two', 'star', 'plus'])
   })
 
-  test('consumes all whitespace after the marker', () => {
-    expect(texts('-   item')).toEqual(['item'])
+  test('consumes exactly one space after the marker, so padding is content', () => {
+    expect(texts('- item')).toEqual(['item'])
+    expect(texts('-\titem')).toEqual(['item'])
+    // The deliberate divergence from lenient markdown readers: `outlineToMarkdown`
+    // emits one space, so the rest is text. Foreign padding survives as leading
+    // whitespace rather than silently eating a fence interior's indent.
+    expect(texts('-   item')).toEqual(['  item'])
+    expect(texts('- [ ]   item')).toEqual(['  item'])
   })
 
   test('a bare marker is an empty node, never a dropped line', () => {
