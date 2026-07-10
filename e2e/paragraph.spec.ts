@@ -129,6 +129,15 @@ test.describe("paragraph nodes", () => {
     await expect(mark).toBeVisible();
     await expect(mark).toHaveCSS("pointer-events", "none");
 
+    // It hangs in a gutter LEFT of the text rather than floating into it: a
+    // paragraph is prose, so every wrapped line shares the first line's left
+    // edge. A float would shorten only line one and let the rest slide under.
+    const box = (await mark.boundingBox())!;
+    const body = (await page
+      .locator("h2.zoomed-title .node-text")
+      .boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(body.x);
+
     // A zoomed BULLET shows nothing -- without the mark, the two would be
     // indistinguishable and `/paragraph` would have no visible state.
     await page.goto("/a");

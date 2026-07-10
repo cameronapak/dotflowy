@@ -838,6 +838,28 @@ h2.zoomed-title {
   }
 }
 
+/* Unlike every other before-text decoration, the title pilcrow does NOT float:
+   a paragraph is prose, so all of its lines must share one left edge rather
+   than the first one alone being shortened. It hangs in a gutter opened by the
+   title's padding instead -- the wrapped-title-flows-under-its-icons behavior
+   that float buys (see `.row-body > :not(.node-text)`) is exactly wrong here.
+   Overrides the float and the `position: relative` further down; needs the
+   `.row-body >` child selector to out-specify the latter. */
+h2.zoomed-title:has(.title-pilcrow) {
+  position: relative;
+  /* 6px gutter offset + the 20px box + a 8px gap to the text. */
+  padding-inline-start: 34px;
+}
+
+h2.zoomed-title .row-body > .title-pilcrow {
+  position: absolute;
+  /* Centers the 20px box on the bullet dot's column (8px lead + an 8px
+     half-glyph), matching where the row's pilcrow sits one level down. */
+  inset-inline-start: 6px;
+  float: none;
+  margin-right: 0;
+}
+
 /*
  * The row's text cell. A block (not flex) on purpose: the slot icons before the
  * text FLOAT left inside it, so only the first line box is shortened and a
