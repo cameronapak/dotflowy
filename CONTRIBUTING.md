@@ -36,8 +36,8 @@ local account by hand. No codes = signup closed.
 
 Worktrees created by Claude Code (`claude --worktree`, or an agent running with
 `isolation: "worktree"`) skip the two commands above — a `WorktreeCreate` hook
-(`.claude/hooks/create-worktree.sh`, wired up in `.claude/settings.json`) runs
-them for you, plus copies the gitignored `.dev.vars` over from the base repo. A
+(`.claude/hooks/create-worktree.ts`, wired up in `.claude/settings.json`) runs
+them for you, plus copies the entries listed in `.worktreeinclude` (e.g. `.dev.vars`, `.codegraph`) from the base repo. A
 fresh worktree can run `typecheck`, `lint`, and `test` immediately.
 
 The one thing it can't do is `bun run seed:user`, which signs up through the
