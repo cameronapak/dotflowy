@@ -136,6 +136,10 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 - If the code already makes the call obvious, the code is the doc — don't write it down.
 - When a decision changes, edit its ADR in place (or mark it superseded). History — including superseded decisions and their rejected alternatives — is in `git log`.
 
+## Pull requests
+
+**Opening or updating a PR? Run `/ft-create-concise-pr` — always, not just when asked.** Every PR description in this repo follows that skill's snapshot template (Summary / Changes / Flow / Breaking / Test plan), so reviewers get one consistent, skimmable shape regardless of who — human or agent — wrote the change. Don't hand-write a PR body in your own format, and don't let a description drift after review changes — re-run the skill's Update pass instead. If the skill can't be invoked in your harness, follow `.agents/skills/ft-create-concise-pr/SKILL.md` by hand.
+
 ## Commands
 
 ```sh

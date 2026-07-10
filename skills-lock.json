@@ -49,6 +49,12 @@
       "skillPath": "skills/errore/SKILL.md",
       "computedHash": "c8c58707dfee91f71d479431d3ab3d64d63f824c22760444e7ae08b6397fd378"
     },
+    "ft-create-concise-pr": {
+      "source": "cameronapak/jstack",
+      "sourceType": "github",
+      "skillPath": "skills/ft-create-concise-pr/SKILL.md",
+      "computedHash": "122e980e1374016860ad585caf3215662460f87d2f3320dd4bdf179822677832"
+    },
     "grill-with-docs": {
       "source": "mattpocock/skills",
       "sourceType": "github",
