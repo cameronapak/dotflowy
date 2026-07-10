@@ -129,22 +129,34 @@ test.describe("paragraph nodes", () => {
     await expect(mark).toBeVisible();
     await expect(mark).toHaveCSS("pointer-events", "none");
 
-    // It hangs in a gutter LEFT of the text rather than floating into it: a
-    // paragraph is prose, so every wrapped line shares the first line's left
-    // edge. A float would shorten only line one and let the rest slide under.
+    // It sits LEFT of the text rather than floating into it: a paragraph is
+    // prose, so every wrapped line shares the first line's left edge. A float
+    // would shorten only line one and let the rest slide under.
+    const titleText = page.locator("h2.zoomed-title .node-text");
     const box = (await mark.boundingBox())!;
-    const body = (await page
-      .locator("h2.zoomed-title .node-text")
-      .boundingBox())!;
-    expect(box.x + box.width).toBeLessThanOrEqual(body.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(
+      (await titleText.boundingBox())!.x,
+    );
+
+    // Wide: the mark OUTDENTS into the margin, so the title's text keeps the
+    // bullet column -- a zoomed bullet and a zoomed paragraph start their text
+    // at the same x, and changing kind never shifts the title sideways.
+    await page.setViewportSize({ width: 900, height: 700 });
+    const proseX = (await titleText.boundingBox())!.x;
+
+    // Narrow: the content padding (16px) is thinner than the 20px mark, so it
+    // falls back INTO a gutter instead of clipping off the viewport's edge.
+    await page.setViewportSize({ width: 375, height: 700 });
+    expect((await mark.boundingBox())!.x).toBeGreaterThan(0);
 
     // A zoomed BULLET shows nothing -- without the mark, the two would be
-    // indistinguishable and `/paragraph` would have no visible state.
+    // indistinguishable and `/paragraph` would have no visible state -- and its
+    // title text starts exactly where the paragraph's did.
+    await page.setViewportSize({ width: 900, height: 700 });
     await page.goto("/a");
-    await expect(page.locator("h2.zoomed-title .node-text")).toHaveText(
-      "alpha",
-    );
+    await expect(titleText).toHaveText("alpha");
     await expect(page.locator("h2.zoomed-title .title-pilcrow")).toHaveCount(0);
+    expect((await titleText.boundingBox())!.x).toBe(proseX);
   });
 
   test("`/paragraph` converts a bullet; `/bullet` converts it back", async ({
