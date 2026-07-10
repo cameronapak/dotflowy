@@ -10,14 +10,16 @@ import {
   Ref,
   Schema,
   Stream,
-} from 'effect'
-import { Socket } from 'effect/unstable/socket'
-import { ServerMessageSchema } from './wire-schema'
-import type { ServerMessage } from './wire-schema'
+} from "effect";
+import { Socket } from "effect/unstable/socket";
+
+import type { ServerMessage } from "./wire-schema";
+
+import { ServerMessageSchema } from "./wire-schema";
 
 // Re-export the wire types so this module stays the client's import surface for
 // them (collection.ts, api.ts, structural.ts, ... all import from './realtime').
-export type { ChangeOp, ServerMessage } from './wire-schema'
+export type { ChangeOp, ServerMessage } from "./wire-schema";
 
 /**
  * The realtime sync transport: one WebSocket per tab to the per-user Durable
@@ -57,40 +59,40 @@ export type { ChangeOp, ServerMessage } from './wire-schema'
  * folds every signal over one stream.
  */
 export type SyncEvent =
-  | { _tag: 'Message'; message: ServerMessage }
-  | { _tag: 'InitialError'; error: Error }
+  | { _tag: "Message"; message: ServerMessage }
+  | { _tag: "InitialError"; error: Error };
 
 /** The producer surface: a stream of events + a control effect to force resync. */
 export interface SyncStream {
   /** Server frames + `InitialError`, in connection order. */
-  events: Stream.Stream<SyncEvent, never, Socket.WebSocketConstructor>
+  events: Stream.Stream<SyncEvent, never, Socket.WebSocketConstructor>;
   /** Force a full resync: the current connection drops and the next one ignores
    *  the cursor, so the server replies with a fresh snapshot the collection
    *  truncates onto. */
-  resync: Effect.Effect<void>
+  resync: Effect.Effect<void>;
 }
 
 /** Exponential backoff floor. */
-const BASE_BACKOFF = Duration.millis(500)
+const BASE_BACKOFF = Duration.millis(500);
 /** Cap the exponential backoff between reconnect attempts. */
-const MAX_BACKOFF = Duration.seconds(30)
+const MAX_BACKOFF = Duration.seconds(30);
 /** If the `hello` reply never arrives, treat the socket as dead and retry. */
-const HELLO_TIMEOUT = Duration.seconds(8)
+const HELLO_TIMEOUT = Duration.seconds(8);
 /** A connection alive at least this long has proven itself healthy, so its next
  *  drop reconnects fast (backoff resets) instead of continuing the exponential
  *  climb. Reusing the hello window: a connection past it has delivered. */
-const STABLE_AFTER = HELLO_TIMEOUT
+const STABLE_AFTER = HELLO_TIMEOUT;
 
 /** Raised when a socket opens but the server never replies to `hello`. */
-class HelloTimeoutError extends Data.TaggedError('HelloTimeoutError')<{}> {}
+class HelloTimeoutError extends Data.TaggedError("HelloTimeoutError")<{}> {}
 
 function syncUrl(): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}/api/sync`
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/api/sync`;
 }
 
 /** Decode inbound `ServerMessage`s (schema-derived exit, no throw). */
-const decodeServerMessage = Schema.decodeUnknownExit(ServerMessageSchema)
+const decodeServerMessage = Schema.decodeUnknownExit(ServerMessageSchema);
 
 /** Decode one inbound frame against the shared `ServerMessageSchema` (ADR 0013):
  *  the last unchecked cast on inbound data is now a real validation. Two failure
@@ -107,17 +109,17 @@ const decodeServerMessage = Schema.decodeUnknownExit(ServerMessageSchema)
  *  are NOT NULL, so a real DO frame can't fail decode; this is the guard's edge,
  *  not a live path. */
 function decodeFrame(data: string): ServerMessage | null {
-  let raw: unknown
+  let raw: unknown;
   try {
-    raw = JSON.parse(data)
+    raw = JSON.parse(data);
   } catch (e) {
-    console.warn('realtime: malformed sync frame (bad JSON)', e)
-    return null
+    console.warn("realtime: malformed sync frame (bad JSON)", e);
+    return null;
   }
-  const exit = decodeServerMessage(raw)
-  if (Exit.isSuccess(exit)) return exit.value
-  console.warn('realtime: sync frame failed schema validation', exit.cause)
-  return null
+  const exit = decodeServerMessage(raw);
+  if (Exit.isSuccess(exit)) return exit.value;
+  console.warn("realtime: sync frame failed schema validation", exit.cause);
+  return null;
 }
 
 /**
@@ -126,15 +128,15 @@ function decodeFrame(data: string): ServerMessage | null {
  * (a uniform [0,1)). Pure so the policy is unit-testable without a clock.
  */
 export function backoffMillis(n: number, rand: number): number {
-  const ceil = Duration.toMillis(MAX_BACKOFF)
-  const floor = Math.min(ceil, Duration.toMillis(BASE_BACKOFF) * 2 ** n)
-  return floor * (0.8 + 0.4 * rand)
+  const ceil = Duration.toMillis(MAX_BACKOFF);
+  const floor = Math.min(ceil, Duration.toMillis(BASE_BACKOFF) * 2 ** n);
+  return floor * (0.8 + 0.4 * rand);
 }
 
 /** `backoffMillis` as a jittered Effect delay (Effect `Random`, so tests that
  *  need the live loop can still pin it via a seeded Random). */
 const backoffDelay = (n: number): Effect.Effect<Duration.Duration> =>
-  Effect.map(Random.next, (r) => Duration.millis(backoffMillis(n, r)))
+  Effect.map(Random.next, (r) => Duration.millis(backoffMillis(n, r)));
 
 /**
  * Build the sync stream. Allocates the per-session state (backoff counter, the
@@ -150,51 +152,57 @@ export const makeSyncStream = (
   Effect.gen(function* () {
     // Consecutive-failure count driving the backoff. Reset to 0 once a connection
     // proves stable (STABLE_AFTER), so a healthy drop reconnects fast.
-    const attempt = yield* Ref.make(0)
+    const attempt = yield* Ref.make(0);
     // Has ANY frame ever arrived this session? Gates InitialError.
-    const everDelivered = yield* Ref.make(false)
+    const everDelivered = yield* Ref.make(false);
     // The next connect should ignore the cursor (a pending resync).
-    const forceSnapshot = yield* Ref.make(false)
+    const forceSnapshot = yield* Ref.make(false);
     // Opened by `resync` to drop the current connection; closed at each connect
     // so a resync requested while disconnected doesn't interrupt the fresh
     // connection it asked for (forceSnapshot already carries the intent).
-    const resyncLatch = yield* Latch.make(false)
+    const resyncLatch = yield* Latch.make(false);
 
-    const events = Stream.callback<SyncEvent, never, Socket.WebSocketConstructor>((out) => {
+    const events = Stream.callback<
+      SyncEvent,
+      never,
+      Socket.WebSocketConstructor
+    >((out) => {
       // One connection attempt. Fails on drop or hello-timeout (-> backoff and
       // reconnect); succeeds when `resync` opens the latch (-> reconnect now).
       const connectOnce = Effect.scoped(
         Effect.gen(function* () {
-          yield* resyncLatch.close
-          const force = yield* Ref.getAndSet(forceSnapshot, false)
-          const since = force ? null : yield* cursor
+          yield* resyncLatch.close;
+          const force = yield* Ref.getAndSet(forceSnapshot, false);
+          const since = force ? null : yield* cursor;
 
-          const socket = yield* Socket.makeWebSocket(syncUrl())
-          const write = yield* socket.writer
-          const firstFrame = yield* Deferred.make<void>()
+          const socket = yield* Socket.makeWebSocket(syncUrl());
+          const write = yield* socket.writer;
+          const firstFrame = yield* Deferred.make<void>();
 
           const handler = (raw: string) =>
             Effect.gen(function* () {
-              const msg = decodeFrame(raw)
-              if (!msg) return
-              yield* Ref.set(everDelivered, true)
-              yield* Deferred.succeed(firstFrame, undefined)
-              yield* Queue.offer(out, { _tag: 'Message', message: msg })
-            })
+              const msg = decodeFrame(raw);
+              if (!msg) return;
+              yield* Ref.set(everDelivered, true);
+              yield* Deferred.succeed(firstFrame, undefined);
+              yield* Queue.offer(out, { _tag: "Message", message: msg });
+            });
 
           // Send `hello` the moment the socket opens. A failed send means the
           // socket is already dead; the watchdog/run will surface that.
-          const onOpen = write(
-            JSON.stringify({ type: 'hello', since }),
-          ).pipe(Effect.ignore)
-          const run = socket.runString(handler, { onOpen })
+          const onOpen = write(JSON.stringify({ type: "hello", since })).pipe(
+            Effect.ignore,
+          );
+          const run = socket.runString(handler, { onOpen });
 
           // Reset-after-stable: if this connection survives STABLE_AFTER, clear
           // the backoff counter. Forked into the connection scope, so a drop
           // before then interrupts it and the backoff keeps climbing.
           yield* Effect.forkScoped(
-            Effect.sleep(STABLE_AFTER).pipe(Effect.andThen(Ref.set(attempt, 0))),
-          )
+            Effect.sleep(STABLE_AFTER).pipe(
+              Effect.andThen(Ref.set(attempt, 0)),
+            ),
+          );
 
           // Hello-reply watchdog: the first frame must arrive within
           // HELLO_TIMEOUT, else fail (reconnect). Once it has arrived, step aside
@@ -204,7 +212,7 @@ export const makeSyncStream = (
             Effect.flatMap((delivered) =>
               delivered ? Effect.never : Effect.fail(new HelloTimeoutError()),
             ),
-          )
+          );
 
           // First to settle wins: `run` failing (drop) or `watchdog` failing
           // (hello-timeout) ends the connection as a failure; the latch opening
@@ -212,31 +220,31 @@ export const makeSyncStream = (
           yield* Effect.raceFirst(
             Effect.raceFirst(run, watchdog),
             resyncLatch.await,
-          )
+          );
         }),
-      )
+      );
 
       // The forever loop. On a failed connection, surface InitialError (if no
       // data ever arrived) then back off; on a resync success, reconnect at once.
       const loop: Effect.Effect<void, never, Socket.WebSocketConstructor> =
         Effect.gen(function* () {
-          const exit = yield* Effect.exit(connectOnce)
+          const exit = yield* Effect.exit(connectOnce);
           if (Exit.isFailure(exit)) {
-            const delivered = yield* Ref.get(everDelivered)
+            const delivered = yield* Ref.get(everDelivered);
             if (!delivered) {
               yield* Queue.offer(out, {
-                _tag: 'InitialError',
-                error: new Error('sync socket closed before initial data'),
-              })
+                _tag: "InitialError",
+                error: new Error("sync socket closed before initial data"),
+              });
             }
-            const n = yield* Ref.getAndUpdate(attempt, (x) => x + 1)
-            yield* Effect.sleep(yield* backoffDelay(n))
+            const n = yield* Ref.getAndUpdate(attempt, (x) => x + 1);
+            yield* Effect.sleep(yield* backoffDelay(n));
           }
-          return yield* Effect.suspend(() => loop)
-        })
+          return yield* Effect.suspend(() => loop);
+        });
 
-      return loop
-    })
+      return loop;
+    });
 
     // Set the intent BEFORE opening the latch, so by the time the loop wakes and
     // reconnects, `forceSnapshot` is already true (the next connect ignores the
@@ -244,7 +252,7 @@ export const makeSyncStream = (
     const resync = Ref.set(forceSnapshot, true).pipe(
       Effect.andThen(resyncLatch.open),
       Effect.asVoid,
-    )
+    );
 
-    return { events, resync }
-  })
+    return { events, resync };
+  });

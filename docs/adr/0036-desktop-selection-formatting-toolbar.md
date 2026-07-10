@@ -14,12 +14,13 @@ inside `OutlineEditor`. It is the fine-pointer twin of the mobile actions bar
 **Why a new bar, not the mobile bar on desktop.** The mobile bar's six buttons
 are **node-scoped** (indent/outdent/undo/redo/complete/slash) — they act on the
 focused bullet, not on a selected range, and every one already has a desktop
-keyboard shortcut. "Show a bar when I have text selected" means *format the
-selected text*, which is a different, selection-scoped action set (bold, link,
+keyboard shortcut. "Show a bar when I have text selected" means _format the
+selected text_, which is a different, selection-scoped action set (bold, link,
 highlight). So the honest response is a formatting toolbar over the selection,
 not the structural bar in a new place.
 
 **Three orthogonal gates (mirrors ADR 0030's discipline).**
+
 - **Presence = `(pointer: fine)`** — the exact inverse of the mobile bar's coarse
   seam, so the two never coexist. On touch, selecting text fires the OS
   copy/paste callout, which the bar would fight; that world stays on the mobile
@@ -49,8 +50,8 @@ wrapped and re-pressing removes the markers. The math is a DOM-free, unit-tested
 planner — `detectMarkerWrap` + `planMarkerToggle` (`src/data/inline-wrap.ts`) —
 and `components/wrap.ts` is the thin `document.activeElement` shell around it
 (`toggleWrapSelection`). Detection handles the two ways a selection can already
-be wrapped (the markers *inside* the selection — a folded atom picked up whole —
-or *flanking* it) and **guards a single-char marker against a doubled one**
+be wrapped (the markers _inside_ the selection — a folded atom picked up whole —
+or _flanking_ it) and **guards a single-char marker against a doubled one**
 (`*` must not match `**`, `~` not `~~`), which is the only real subtlety now that
 v1 emphasis is flat (no nesting).
 
@@ -60,13 +61,14 @@ straight back off. The emphasis **keymap/slash** path passes `reselect: false` �
 it collapses the caret just past the interior, **byte-identical to the old
 add-only behavior for a fresh selection**, so the keyboard path is unchanged (and
 crucially leaves no lingering range, which otherwise destabilized the e2e page
-reloads). The keymap toggle still *unwraps* a selected formatted run — a genuine
+reloads). The keymap toggle still _unwraps_ a selected formatted run — a genuine
 improvement over the old blind double-wrap — it just doesn't keep the selection.
 
 **Highlight and link are the two special cases.**
+
 - **Highlight** can't ride the clean marker toggle because its color lives IN the
   source as a leading emoji (ADR 0035). `toggleHighlightSelection` strips the
-  whole run via `parseHighlight` (fences *and* emoji) on toggle-off, and wraps in
+  whole run via `parseHighlight` (fences _and_ emoji) on toggle-off, and wraps in
   the bare **default-blue** `==` fence on toggle-on; recoloring stays the
   right-click menu.
 - **Link** is **create-only** (no lit state): it wraps the selection as
@@ -77,6 +79,7 @@ improvement over the old blind double-wrap — it just doesn't keep the selectio
   drop like the edit popover (`submitLinkCreate`).
 
 **Rejected alternatives.**
+
 - **Reuse the mobile bar's buttons on desktop.** Node-scoped and already on the
   keyboard; not what "text selected" asks for.
 - **Add-only buttons (no toggle/active state).** A visible bar that double-wraps

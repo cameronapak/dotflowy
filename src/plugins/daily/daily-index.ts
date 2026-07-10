@@ -1,17 +1,18 @@
-import { useCallback, useSyncExternalStore } from 'react'
-import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
-import { queryClient } from '../../data/query-client'
+import { queryCollectionOptions } from "@tanstack/query-db-collection";
+import { createCollection } from "@tanstack/react-db";
+import { Effect, Schema } from "effect";
+import { useCallback, useSyncExternalStore } from "react";
+
+import { localDateKey } from "../../data/date-links";
 import {
   kvDelete,
   kvFetch,
   kvPut,
   toKvKeys,
   toKvRows,
-} from '../../data/kv-api'
-import { Effect, Schema } from 'effect'
-import { kvGetOrCreateE } from '../../data/kv-client-effect'
-import { localDateKey } from '../../data/date-links'
+} from "../../data/kv-api";
+import { kvGetOrCreateE } from "../../data/kv-client-effect";
+import { queryClient } from "../../data/query-client";
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0001). A row maps a
@@ -32,47 +33,47 @@ import { localDateKey } from '../../data/date-links'
  */
 
 /** Sentinel key for the container row (not a valid `YYYY-MM-DD`, so no clash). */
-export const CONTAINER_KEY = 'container'
+export const CONTAINER_KEY = "container";
 
 /** Canonical display name of the "Daily" container. Used both when seeding it
  *  and to restore it if a user blanks the row (it's protected, so it can't be
  *  left nameless). Cosmetic -- identity is the side-collection, never the text. */
-export const DAILY_CONTAINER_TEXT = 'Daily'
+export const DAILY_CONTAINER_TEXT = "Daily";
 
 const dailyRowSchema = Schema.Struct({
   /** `YYYY-MM-DD` (local) for a day, or {@link CONTAINER_KEY}. */
   key: Schema.String,
   /** The node this key points at. */
   nodeId: Schema.String,
-})
+});
 
-export type DailyRow = Schema.Schema.Type<typeof dailyRowSchema>
+export type DailyRow = Schema.Schema.Type<typeof dailyRowSchema>;
 
-const KV = 'daily-index'
+const KV = "daily-index";
 
 export const dailyIndexCollection = createCollection(
   queryCollectionOptions({
-    id: 'daily-index',
-    queryKey: ['kv', KV],
+    id: "daily-index",
+    queryKey: ["kv", KV],
     queryClient,
     queryFn: () => kvFetch<DailyRow>(KV),
     getKey: (row: DailyRow) => row.key,
     schema: Schema.toStandardSchemaV1(dailyRowSchema),
     // Insert and update both upsert the whole row (tiny key->value items).
     onInsert: async ({ transaction }) => {
-      await kvPut(KV, toKvRows(transaction))
-      return { refetch: false }
+      await kvPut(KV, toKvRows(transaction));
+      return { refetch: false };
     },
     onUpdate: async ({ transaction }) => {
-      await kvPut(KV, toKvRows(transaction))
-      return { refetch: false }
+      await kvPut(KV, toKvRows(transaction));
+      return { refetch: false };
     },
     onDelete: async ({ transaction }) => {
-      await kvDelete(KV, toKvKeys(transaction))
-      return { refetch: false }
+      await kvDelete(KV, toKvKeys(transaction));
+      return { refetch: false };
     },
   }),
-)
+);
 
 // --- Date helpers -----------------------------------------------------------
 
@@ -83,27 +84,27 @@ export const dailyIndexCollection = createCollection(
  * the `[[YYYY-MM-DD]]` token's interior IS this key), re-exported here so the
  * key format can't fork.
  */
-export { localDateKey } from '../../data/date-links'
+export { localDateKey } from "../../data/date-links";
 
 /** Parse a `YYYY-MM-DD` key to a *local* Date at noon (a TZ-safe midpoint that
  *  never slips a day under DST). Null on a malformed key. */
 function parseDateKey(key: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key)
-  if (!m) return null
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);
 }
 
 /** The full, human date used to seed a day node's text + feed Cmd+K search,
  *  e.g. "Tuesday, June 23, 2026". */
 export function formatDayText(key: string): string {
-  const d = parseDateKey(key)
-  if (!d) return key
+  const d = parseDateKey(key);
+  if (!d) return key;
   return d.toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 }
 
 /** The *relative* label for a day key -- Today / Yesterday / Tomorrow -- or null
@@ -114,14 +115,14 @@ export function formatDayRelative(
   key: string,
   today = localDateKey(),
 ): string | null {
-  const d = parseDateKey(key)
-  const t = parseDateKey(today)
-  if (!d || !t) return null
-  const diff = Math.round((d.getTime() - t.getTime()) / 86_400_000)
-  if (diff === 0) return 'Today'
-  if (diff === -1) return 'Yesterday'
-  if (diff === 1) return 'Tomorrow'
-  return null
+  const d = parseDateKey(key);
+  const t = parseDateKey(today);
+  if (!d || !t) return null;
+  const diff = Math.round((d.getTime() - t.getTime()) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === -1) return "Yesterday";
+  if (diff === 1) return "Tomorrow";
+  return null;
 }
 
 /** The compact *relative* label for the badge: Today / Yesterday / Tomorrow,
@@ -129,11 +130,11 @@ export function formatDayRelative(
  *  a duplicate of it -- it's the "this is a daily note" signifier + quick
  *  orientation. Computed from the key vs today (ADR 0001). */
 export function formatDayBadge(key: string, today = localDateKey()): string {
-  const rel = formatDayRelative(key, today)
-  if (rel) return rel
-  const d = parseDateKey(key)
-  if (!d) return key
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const rel = formatDayRelative(key, today);
+  if (rel) return rel;
+  const d = parseDateKey(key);
+  if (!d) return key;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 // --- Non-reactive lookups (click handlers + the protection predicate) -------
@@ -144,25 +145,25 @@ export function formatDayBadge(key: string, today = localDateKey()): string {
 // used. The cache is rebuilt synchronously on every collection change
 // (includeInitialState), so event-time callers read the same freshness.
 function findRow(pred: (r: DailyRow) => boolean): DailyRow | undefined {
-  return getRows().find(pred)
+  return getRows().find(pred);
 }
 
 /** The container node id, or null if it hasn't been created yet. */
 export function getContainerId(): string | null {
-  return findRow((r) => r.key === CONTAINER_KEY)?.nodeId ?? null
+  return findRow((r) => r.key === CONTAINER_KEY)?.nodeId ?? null;
 }
 
 /** The node id mapped to a given date key, or null. */
 export function getDayId(key: string): string | null {
-  return findRow((r) => r.key === key)?.nodeId ?? null
+  return findRow((r) => r.key === key)?.nodeId ?? null;
 }
 
 /** Upsert a `key -> nodeId` mapping (used when (re)creating a container/day). */
 export function setMapping(key: string, nodeId: string): void {
   if (dailyIndexCollection.toArray.some((r) => r.key === key)) {
-    dailyIndexCollection.update(key, (draft) => void (draft.nodeId = nodeId))
+    dailyIndexCollection.update(key, (draft) => void (draft.nodeId = nodeId));
   } else {
-    dailyIndexCollection.insert({ key, nodeId })
+    dailyIndexCollection.insert({ key, nodeId });
   }
 }
 
@@ -201,47 +202,52 @@ export async function claimMapping(
     kvGetOrCreateE<DailyRow>(KV, key, { key, nodeId: candidate }).pipe(
       Effect.match({
         onFailure: (e) => {
-          console.warn(`daily: claim "${key}" failed, creating locally:`, e.message)
-          return { key, nodeId: candidate } satisfies DailyRow
+          console.warn(
+            `daily: claim "${key}" failed, creating locally:`,
+            e.message,
+          );
+          return { key, nodeId: candidate } satisfies DailyRow;
         },
         onSuccess: (r) => r,
       }),
     ),
-  )
-  return { winner: row.nodeId, won: row.nodeId === candidate }
+  );
+  return { winner: row.nodeId, won: row.nodeId === candidate };
 }
 
 /** True iff `nodeId` is the daily container -- the protection predicate (Seam:
  *  protected nodes). A synchronous read; only ever called on the delete path. */
 export function isContainerNode(nodeId: string): boolean {
-  return getContainerId() === nodeId
+  return getContainerId() === nodeId;
 }
 
 /** The date key a node maps to if it's a *day* note (not the container), else
  *  null. The synchronous reverse of {@link getDayId} -- used by the search-alias
  *  seam (Seam J), which runs outside any hook context. */
 export function getDayKey(nodeId: string): string | null {
-  return findRow((r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY)?.key ?? null
+  return (
+    findRow((r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY)?.key ?? null
+  );
 }
 
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
 
-const EMPTY: DailyRow[] = []
-let rows: DailyRow[] = EMPTY
-const listeners = new Set<() => void>()
-let started = false
+const EMPTY: DailyRow[] = [];
+let rows: DailyRow[] = EMPTY;
+const listeners = new Set<() => void>();
+let started = false;
 
 function rebuild() {
-  rows = dailyIndexCollection.toArray
-  for (const l of listeners) l()
+  rows = dailyIndexCollection.toArray;
+  for (const l of listeners) l();
 }
 
 function ensureStarted() {
-  if (started || typeof window === 'undefined') return
-  started = true
+  if (started || typeof window === "undefined") return;
+  started = true;
   dailyIndexCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,
-  })
+  });
 }
 
 /** Subscribe to any change in the daily index (rebuilt on every collection
@@ -250,11 +256,11 @@ function ensureStarted() {
  *  lock must re-render when the `container -> nodeId` mapping arrives, not only
  *  after an unrelated re-render. Returns an unsubscribe. */
 export function subscribeDailyIndex(cb: () => void): () => void {
-  ensureStarted()
-  listeners.add(cb)
+  ensureStarted();
+  listeners.add(cb);
   return () => {
-    listeners.delete(cb)
-  }
+    listeners.delete(cb);
+  };
 }
 
 /** Start the index's kv fetch eagerly (the plugin `preload` seam, called once
@@ -264,12 +270,12 @@ export function subscribeDailyIndex(cb: () => void): () => void {
  *  shift). Preloading lets the kv fetch race the nodes snapshot instead of
  *  queuing behind it. */
 export function preloadDailyIndex(): void {
-  ensureStarted()
+  ensureStarted();
 }
 
 function getRows(): DailyRow[] {
-  ensureStarted()
-  return rows
+  ensureStarted();
+  return rows;
 }
 
 /**
@@ -281,8 +287,8 @@ export function useDailyDate(nodeId: string): string | null {
   const getSnapshot = useCallback(() => {
     const row = getRows().find(
       (r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY,
-    )
-    return row ? row.key : null
-  }, [nodeId])
-  return useSyncExternalStore(subscribeDailyIndex, getSnapshot, () => null)
+    );
+    return row ? row.key : null;
+  }, [nodeId]);
+  return useSyncExternalStore(subscribeDailyIndex, getSnapshot, () => null);
 }

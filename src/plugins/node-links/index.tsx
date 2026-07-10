@@ -11,15 +11,17 @@
 // the chip is a BibleChip-class atom, backspace deletes it whole).
 
 import { CalendarDaysIcon, Link2 } from "lucide-react";
+
+import type { Node } from "../../data/tree";
+
 import { dateSuggestions } from "../../data/date-links";
 import {
   linkTargetId,
   linkedNodeLabel,
   NODE_LINK_PATTERN,
 } from "../../data/node-links";
-import type { Node } from "../../data/tree";
-import { NodeLinkChip } from "./chip";
 import { definePlugin, type MenuTrigger, type WidgetEl } from "../types";
+import { NodeLinkChip } from "./chip";
 
 // The atom: `source` is the verbatim `[[id]]` token (what the caret math counts
 // and copy reads back); `data-node-link` carries the target id for the Seam-B

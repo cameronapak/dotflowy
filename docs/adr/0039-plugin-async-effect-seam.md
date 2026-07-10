@@ -18,7 +18,7 @@ story. Two consumers exist today and they diverge:
 
 The Effect runtime, typed errors, retry, and timeout are already the house model
 for I/O (ADR 0012, `kv-client-effect.ts`). What is missing is a way for a plugin
-to run async work *through* that model without re-implementing forking, fiber
+to run async work _through_ that model without re-implementing forking, fiber
 tracking, interruption, and a failure sink each time.
 
 ## Decision
@@ -33,8 +33,8 @@ still-running fiber when the editor unmounts. Before forking it wraps the effect
 with a failure sink (`catchCause` → log) so a defect or unhandled failure is
 logged, never silently swallowed and never a floating unhandled rejection.
 
-The seam owns the *runtime, lifecycle, and failure logging* — not error
-*semantics*. A plugin still composes its own timeout/retry/typed-error recovery
+The seam owns the _runtime, lifecycle, and failure logging_ — not error
+_semantics_. A plugin still composes its own timeout/retry/typed-error recovery
 inside the effect it hands to `run` (the kv core is the pattern). The effect must
 be fully provided (`R = never`, satisfied by `appRuntime`'s layer) and should be
 `Effect<void>` at the point of `run` (self-handle the domain result).

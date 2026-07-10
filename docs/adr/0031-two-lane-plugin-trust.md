@@ -5,14 +5,14 @@ Status: accepted
 Plugins split into **two lanes by trust gate, not by author identity.** **Lane A** is
 code that passed review and is **compiled into the bundle** (today's only model —
 [ADR 0001](./0001-plugin-architecture.md)); it earns **full node privileges**. **Lane B**
-is untrusted runtime code no one reviewed; it enters *only* as an iframe-sandboxed
+is untrusted runtime code no one reviewed; it enters _only_ as an iframe-sandboxed
 **MCP App** (extending the MCP server — [ADR 0026](./0026-agent-native-mcp-server.md)) and
 renders **only in summoned panels/overlays, never on the outline surface.** This answers
 the runtime-extension question ADR 0001 deferred: we **adopt** a sandbox (the MCP Apps
 iframe) instead of **building** the "module loader + sandbox + capability model this
 project doesn't need."
 
-**The keystone: nodes render trusted-compiled-in code only.** The outline *is* the
+**The keystone: nodes render trusted-compiled-in code only.** The outline _is_ the
 product; it must be impossible for unreviewed code to draw a bullet. Lane B is quarantined
 to panels precisely so this holds. This single rule is what lets us promise the main
 experience can never be uglified or made unsafe by a third party — the surface is 100%
@@ -27,8 +27,8 @@ server is Lane B. **The gate is the PR, not the logo.**
 - **Node decorations stop being free `ReactNode`.** Seam-F row/title slots (`SlotSpec`,
   `registry.ts`) plus a new trailing decoration zone gain a **core-enforced, CSS-only space
   budget**; anything past it collapses to an overflow affordance that opens a panel. **Any
-  shadcn component is allowed (tokens-only)** — freedom is capped by *space*, not
-  *vocabulary*. The budget MUST be CSS-only (`max-width`/`overflow`, no per-render
+  shadcn component is allowed (tokens-only)** — freedom is capped by _space_, not
+  _vocabulary_. The budget MUST be CSS-only (`max-width`/`overflow`, no per-render
   measurement) because the row is on the virtualized hot path
   ([ADR 0019](./0019-virtualized-outline-rendering.md),
   [ADR 0014](./0014-validate-the-worker-do-trust-boundary.md)).
@@ -51,15 +51,15 @@ server is Lane B. **The gate is the PR, not the logo.**
 ## Considered and rejected
 
 - **A first-party module loader + JS sandbox for untrusted plugins** (ADR 0001's deferral,
-  taken literally). Rejected: MCP Apps gives us an iframe sandbox *and* a
+  taken literally). Rejected: MCP Apps gives us an iframe sandbox _and_ a
   distribution/transport model for free; hand-rolling a capability system re-invents a spec
   at a quarter's cost.
 - **Let (vetted) third parties decorate nodes directly.** Rejected as the default — it puts
   the anti-ugly/anti-unsafe guarantee at the mercy of a per-node sandbox. A partner who
   needs node decorations takes Lane A (review + compile-in), which already grants them.
 - **Restrict the node component vocabulary (Raycast-style fixed primitives).** Rejected: it
-  limits authors we trust, and "trust shadcn" is a *per-component* guarantee, not
-  *per-composition*. Capping *space* prevents the busy-row failure without shrinking the
+  limits authors we trust, and "trust shadcn" is a _per-component_ guarantee, not
+  _per-composition_. Capping _space_ prevents the busy-row failure without shrinking the
   palette.
 
 ## Consequences

@@ -10,13 +10,16 @@
 
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDismissable } from "../../components/use-dismissable";
+
 import { Button, Input } from "@/plugins/kit";
+
+import type { NodeCommands } from "../../components/OutlineNode";
+import type { PluginContext } from "../types";
+
+import { useDismissable } from "../../components/use-dismissable";
 import { encodeUrlForMarkdown, sanitizeLinkLabel } from "../../data/links";
 import { getTreeIndex } from "../../data/tree-store";
 import { replaceTokenInNode } from "../token-kit";
-import type { NodeCommands } from "../../components/OutlineNode";
-import type { PluginContext } from "../types";
 
 /** Build the edited token and splice it over the old one in the node's LIVE
  *  text (read at submit time, not open time -- the user may have typed since).
@@ -108,7 +111,8 @@ export function submitLinkCreate(
       next =
         current.slice(0, at) + token + current.slice(at + args.selText.length);
   }
-  if (next != null && next !== current) mutations.onTextChange(args.nodeId, next);
+  if (next != null && next !== current)
+    mutations.onTextChange(args.nodeId, next);
 }
 
 /** Open the create-link popover prefilled with the selected text as the label
@@ -177,7 +181,7 @@ export function LinkEditPopover({
       role="dialog"
       aria-label="Edit link"
       data-link-edit-popover
-      className="bg-popover fixed z-50 flex w-80 flex-col gap-2 rounded-lg border p-3 shadow-md"
+      className="fixed z-50 flex w-80 flex-col gap-2 rounded-lg border bg-popover p-3 shadow-md"
       style={{ left, top }}
       onSubmit={(e) => {
         e.preventDefault();

@@ -4,6 +4,7 @@
 // The `.node-text:empty { display: flow-root }` rule places the empty span's box
 // beside the float so the caret renders after the checkbox (see styles.css).
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 const text = (page: Page, id: string) =>

@@ -17,6 +17,7 @@ import {
   type AutocompletePassageSuggestion,
   type OsisBookCode,
 } from "grab-bcv";
+
 import { LINK_PATTERN, encodeUrlForMarkdown } from "../../data/links";
 import { spliceToken } from "../token-splice";
 
@@ -139,13 +140,16 @@ function isProtected(
  */
 export function bibleRefsToMarkdownLinks(text: string): string {
   const ranges = protectedRanges(text);
-  return text.replace(new RegExp(BIBLE_REF_PATTERN, "g"), (token, offset: number) => {
-    const start = offset;
-    const end = start + token.length;
-    if (isProtected(start, end, ranges)) return token;
-    const ref = resolveBibleRef(token);
-    return ref ? `[${token}](${encodeUrlForMarkdown(ref.url)})` : token;
-  });
+  return text.replace(
+    new RegExp(BIBLE_REF_PATTERN, "g"),
+    (token, offset: number) => {
+      const start = offset;
+      const end = start + token.length;
+      if (isProtected(start, end, ranges)) return token;
+      const ref = resolveBibleRef(token);
+      return ref ? `[${token}](${encodeUrlForMarkdown(ref.url)})` : token;
+    },
+  );
 }
 
 /** Return the route.bible URL whose source reference contains or touches
@@ -153,7 +157,10 @@ export function bibleRefsToMarkdownLinks(text: string): string {
  *  caret before or after themselves, so the end boundary is intentionally
  *  openable. A ref inside a link or code token never chips (those tokens win
  *  precedence in the registry), so it must not open here either. */
-export function bibleRefUrlAtOffset(text: string, offset: number): string | null {
+export function bibleRefUrlAtOffset(
+  text: string,
+  offset: number,
+): string | null {
   const ranges = protectedRanges(text);
   for (const m of text.matchAll(new RegExp(BIBLE_REF_PATTERN, "g"))) {
     const start = m.index ?? 0;

@@ -7,6 +7,7 @@
 // reproduces the shape with the fixture's echoChunks option and asserts no
 // partial revert at any point.
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 const FLAT: SeedNode[] = [
@@ -40,23 +41,31 @@ test("optimistic overlay holds across a multi-frame batch echo", async ({
   await page.keyboard.press("Tab");
 
   // t~0 (no frame yet): the optimistic overlay shows the full indent.
-  for (const id of ["b", "c", "d"]) await expect(indented(page, id)).toBeVisible();
+  for (const id of ["b", "c", "d"])
+    await expect(indented(page, id)).toBeVisible();
 
   // Mid-echo (~frame 1 applied, frames 2-3 pending): the overlay must hold the
   // COMPLETE post-batch shape -- no partial revert while synced state updates
   // beneath it.
   await page.waitForTimeout(400);
-  for (const id of ["b", "c", "d"]) await expect(indented(page, id)).toBeVisible();
-  await expect(page.locator("li[data-node-id]:not([data-parent-id])")).toHaveCount(1);
+  for (const id of ["b", "c", "d"])
+    await expect(indented(page, id)).toBeVisible();
+  await expect(
+    page.locator("li[data-node-id]:not([data-parent-id])"),
+  ).toHaveCount(1);
 
   // Past the final frame: overlay released onto identical synced state.
   await page.waitForTimeout(600);
-  for (const id of ["b", "c", "d"]) await expect(indented(page, id)).toBeVisible();
-  await expect(page.locator("li[data-node-id]:not([data-parent-id])")).toHaveCount(1);
+  for (const id of ["b", "c", "d"])
+    await expect(indented(page, id)).toBeVisible();
+  await expect(
+    page.locator("li[data-node-id]:not([data-parent-id])"),
+  ).toHaveCount(1);
 
   // Hard proof the SYNCED layer (not a lingering overlay) holds the final
   // shape: reload -- the snapshot GET returns the mock store.
   await page.reload();
   await expect(text(page, "a")).toBeVisible();
-  for (const id of ["b", "c", "d"]) await expect(indented(page, id)).toBeVisible();
+  for (const id of ["b", "c", "d"])
+    await expect(indented(page, id)).toBeVisible();
 });

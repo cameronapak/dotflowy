@@ -25,9 +25,7 @@ async function main(): Promise<void> {
   try {
     await fetch(`${API}/api/auth/ok`);
   } catch {
-    console.error(
-      `Worker not reachable at ${API}. Run \`bun run dev\` first.`,
-    );
+    console.error(`Worker not reachable at ${API}. Run \`bun run dev\` first.`);
     process.exit(1);
   }
 
@@ -48,7 +46,9 @@ async function main(): Promise<void> {
     const text = await res.text();
 
     if (res.status >= 400 && res.status < 500 && /exist/i.test(text)) {
-      console.log(`${EMAIL} already exists - sign in with password: ${PASSWORD}`);
+      console.log(
+        `${EMAIL} already exists - sign in with password: ${PASSWORD}`,
+      );
     } else if (res.status === 403 || /FORBIDDEN/i.test(text)) {
       console.error(`sign-up rejected (status ${res.status}): ${text}`);
       process.exit(1);

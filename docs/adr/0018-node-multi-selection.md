@@ -4,7 +4,7 @@ status: accepted
 
 # Node multi-selection
 
-**What.** A second editing mode where whole **nodes** are selected (distinct from selecting *text*
+**What.** A second editing mode where whole **nodes** are selected (distinct from selecting _text_
 inside one bullet), so an action can act on several subtrees at once — copy-as-markdown today,
 delete today, and indent/move/cut/paste later. Designed in full here; build plan in
 `.scratch/node-multi-selection/PRD.md`. The first consumer is selection-copy, which reuses the
@@ -12,7 +12,7 @@ delete today, and indent/move/cut/paste later. Designed in full here; build plan
 
 **Model — sibling-scoped, subtree-implied.** A selection is a **contiguous run of siblings under
 one parent**, and selecting a node **implies its whole subtree** (you select roots; descendants come
-along). *Why not a free visual range across levels/parents?* Because every operation on the list —
+along). _Why not a free visual range across levels/parents?_ Because every operation on the list —
 delete, indent, move, copy — only has an unambiguous meaning on a single-parent run. A visual range
 makes "indent these into what?" and "move this run where?" undefined, and creates the paradox of
 selecting a node together with its own descendant. Sibling-scoping is the deliberate simplification
@@ -34,7 +34,7 @@ while you have a caret you're editing one bullet. The transitions are the whole 
   selection instead **walks by depth** there: Shift+↑ selects the **parent**, Shift+↓ dives into the
   **first visible child** (climbing stops at the zoom root — the view root isn't a selectable node —
   and a collapsed/childless node can't dive). That keeps the selection one unambiguous subtree, so it
-  is *not* the rejected multi-parent visual range.
+  is _not_ the rejected multi-parent visual range.
 - **Enter via `Cmd+A` — a bounded 3-rung ladder:** (1) all text in the bullet (native), (2) this
   node + its subtree, (3) the whole current view (the zoom root's subtree). The rung is **derived
   from the current selection state, not a press counter** (counters desync the instant the user does
@@ -42,8 +42,8 @@ while you have a caret you're editing one bullet. The transitions are the whole 
   **deliberately no per-level climb** — `Cmd+A` is the big-jump scope tool, `Shift+arrow` is the
   surgical sibling tool, and overlapping them (both doing sibling-level work) was the rejected
   design.
-- **While selected:** plain `↑/↓` drops the caret onto the visible row just *above the top* / *below
-  the bottom* of the selection (the existing visual neighbor walk — caret motion is visual even
+- **While selected:** plain `↑/↓` drops the caret onto the visible row just _above the top_ / _below
+  the bottom_ of the selection (the existing visual neighbor walk — caret motion is visual even
   though selection is sibling-scoped). `Tab`/`Shift+Tab` **indent/outdent the whole run** (see
   Operations); the selection **persists** so you can keep nudging. A printable `[a-zA-Z]` key is a
   **no-op; the selection persists** — it must **never** replace-on-type the way a text editor does,
@@ -83,6 +83,7 @@ todos' To-do → batch `setIsTask`; daily's Send to Today → one batch + one na
 the **selected root ids only** (subtrees implied).
 
 **Implementation invariants (don't regress these):**
+
 - Selection state is a **module singleton mirrored like `view-state.ts`**; each row reads a per-node
   **`useIsSelected(id)`** (the shape `useIsProtected` already uses), so a selection change
   re-renders only the rows entering/leaving it — preserving the per-node-render guarantee of

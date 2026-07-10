@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Spoiler plugin (ADR 0043). `||text||` renders as the sixth FOLDING token:
@@ -47,7 +48,10 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+      if (
+        node.nodeType === 1 &&
+        (node as HTMLElement).hasAttribute("data-src")
+      ) {
         const e = node as HTMLElement;
         const len =
           Number(e.getAttribute("data-src-len")) ||
@@ -96,7 +100,12 @@ test.describe("Spoiler: fold to a bar when blurred (ADR 0043)", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "the answer is ||42||" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "the answer is ||42||",
+      },
     ]);
     // The bar's glyphs are the FULL source `||42||` (rendered transparent) so
     // the bar reserves the same width the revealed `||42||` occupies — entering
@@ -138,7 +147,9 @@ test.describe("Spoiler: reveal + re-fold via caret", () => {
     // Source length: 2 fences + 6 interior + 2 fences = 10.
     await caretAtSource(page, "n", 10);
     await expect.poll(() => text(page, "n").textContent()).toBe("||secret||");
-    await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveCount(1);
+    await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveCount(
+      1,
+    );
     // Fences render as dimmed walk-through punctuation inside the container.
     await expect(
       text(page, "n").locator("[data-spoiler-reveal] .md-punct"),
@@ -147,7 +158,9 @@ test.describe("Spoiler: reveal + re-fold via caret", () => {
     await expect(bar(page, "n")).toHaveCount(0);
   });
 
-  test("moving the caret away re-folds the run to the bar", async ({ page }) => {
+  test("moving the caret away re-folds the run to the bar", async ({
+    page,
+  }) => {
     await load(page, [
       { id: "a", parentId: null, prevSiblingId: null, text: "||hi||" },
       { id: "b", parentId: null, prevSiblingId: "a", text: "plain" },
@@ -207,7 +220,9 @@ test.describe("Spoiler: creation", () => {
     await expect(btn(page, "Spoiler")).toHaveAttribute("aria-pressed", "true");
     // Toggle OFF: back to plain text.
     await btn(page, "Spoiler").click();
-    await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveCount(0);
+    await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveCount(
+      0,
+    );
     await expect(text(page, "n")).toHaveText("alphabravo");
   });
 });
@@ -217,7 +232,12 @@ test.describe("Spoiler: in-app search sees INSIDE (your own spoilers)", () => {
     page,
   }) => {
     await load(page, [
-      { id: "a", parentId: null, prevSiblingId: null, text: "plot: ||Bob did it||" },
+      {
+        id: "a",
+        parentId: null,
+        prevSiblingId: null,
+        text: "plot: ||Bob did it||",
+      },
       { id: "b", parentId: null, prevSiblingId: "a", text: "unrelated" },
     ]);
     await page.keyboard.press("Meta+k");

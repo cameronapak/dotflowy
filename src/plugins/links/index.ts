@@ -8,6 +8,13 @@
 
 import { Duration, Effect } from "effect";
 import { LinkIcon } from "lucide-react";
+
+import {
+  getSelectionRange,
+  mdPunct,
+  readSource,
+} from "../../components/inline-code";
+import { openUrlInFocusedTab } from "../../components/open-url";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
@@ -16,16 +23,13 @@ import {
   sanitizeLinkLabel,
   swapLinkLabel,
 } from "../../data/links";
-import {
-  getSelectionRange,
-  mdPunct,
-  readSource,
-} from "../../components/inline-code";
-import { openUrlInFocusedTab } from "../../components/open-url";
 import { getTreeIndex } from "../../data/tree-store";
 import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
-import { openLinkCreatePopover, openLinkEditPopover } from "./link-edit-popover";
+import {
+  openLinkCreatePopover,
+  openLinkEditPopover,
+} from "./link-edit-popover";
 
 // Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so
 // it always matches what the tokenizer fed us.
@@ -268,7 +272,15 @@ function createLinkFromSelection(nodeId: string, ctx: PluginContext): void {
   }
 
   openLinkCreatePopover(
-    { nodeId: contentId, source, start: range.start, end: range.end, selText, x, y },
+    {
+      nodeId: contentId,
+      source,
+      start: range.start,
+      end: range.end,
+      selText,
+      x,
+      y,
+    },
     ctx,
   );
 }

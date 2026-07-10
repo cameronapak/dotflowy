@@ -17,21 +17,21 @@
  * AGENTS.md "Error Handling" for the errore -> Effect direction.
  */
 
-import { kvDeleteE, kvFetchE, kvPutE, runPromise } from './kv-client-effect'
+import { kvDeleteE, kvFetchE, kvPutE, runPromise } from "./kv-client-effect";
 
 /** Complete state for one collection (the query collection treats it as
  *  authoritative, so the Worker returns every owned row). */
 export const kvFetch = <T>(collection: string): Promise<T[]> =>
-  runPromise(kvFetchE<T>(collection))
+  runPromise(kvFetchE<T>(collection));
 
 /** Upsert rows (insert + update both map here — the items are tiny). */
 export const kvPut = (
   collection: string,
   rows: { key: string; value: unknown }[],
-): Promise<void> => runPromise(kvPutE(collection, rows))
+): Promise<void> => runPromise(kvPutE(collection, rows));
 
 export const kvDelete = (collection: string, keys: string[]): Promise<void> =>
-  runPromise(kvDeleteE(collection, keys))
+  runPromise(kvDeleteE(collection, keys));
 
 // --- Mutation-transaction shaping --------------------------------------------
 // A side-collection's onInsert/onUpdate both upsert the WHOLE value (the items
@@ -40,12 +40,14 @@ export const kvDelete = (collection: string, keys: string[]): Promise<void> =>
 // (just the fields read), so the concrete transaction type satisfies it without
 // importing TanStack's mutation generics. Used by tag-colors.ts / daily-index.ts.
 
-type KvMutations = { mutations: readonly { key: unknown; modified?: unknown }[] }
+type KvMutations = {
+  mutations: readonly { key: unknown; modified?: unknown }[];
+};
 
 /** Upsert rows from a transaction: `{ key, value }` per mutation. */
 export const toKvRows = (t: KvMutations): { key: string; value: unknown }[] =>
-  t.mutations.map((m) => ({ key: String(m.key), value: m.modified }))
+  t.mutations.map((m) => ({ key: String(m.key), value: m.modified }));
 
 /** The keys to delete from a transaction. */
 export const toKvKeys = (t: KvMutations): string[] =>
-  t.mutations.map((m) => String(m.key))
+  t.mutations.map((m) => String(m.key));

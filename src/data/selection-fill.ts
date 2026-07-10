@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+
+import type { VisibleRow } from "./visible-order";
+
 import {
   getSelectionState,
   subscribeSelection,
   type SelectionData,
   type SelectionEdge,
 } from "./selection-state";
-import type { VisibleRow } from "./visible-order";
 
 /**
  * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The

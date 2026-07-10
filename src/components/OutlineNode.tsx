@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -6,18 +7,17 @@ import {
   useRef,
   type PointerEvent,
 } from "react";
-import { ChevronRight } from "lucide-react";
+
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
-import { useNode, useVisibleChildIds } from "../data/tree-store";
-import { echoedTextFor } from "../data/collection";
 import type { PluginContext } from "../plugins/types";
-import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
-import { NodeDecorations } from "./NodeDecorations";
+
+import { echoedTextFor } from "../data/collection";
 import { clearSelection, useSelectionEdge } from "../data/selection-state";
-import { useSlashMenu } from "./slash-menu";
-import { useMenus } from "./menu-engine";
-import { useBulletKeymap } from "./use-bullet-keymap";
+import { useNode, useVisibleChildIds } from "../data/tree-store";
+import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
+import { hasFoldingToken } from "../plugins/registry";
+import { focusTextFromRowTap } from "./caret-place";
 import {
   decorate,
   getCaretOffset,
@@ -26,7 +26,8 @@ import {
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
-import { hasFoldingToken } from "../plugins/registry";
+import { useMenus } from "./menu-engine";
+import { NodeDecorations } from "./NodeDecorations";
 import {
   copySourceSelection,
   cutSourceSelection,
@@ -34,7 +35,8 @@ import {
 } from "./paste";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
-import { focusTextFromRowTap } from "./caret-place";
+import { useSlashMenu } from "./slash-menu";
+import { useBulletKeymap } from "./use-bullet-keymap";
 
 interface OutlineNodeProps {
   // The node id. The node itself and its visible children are read reactively

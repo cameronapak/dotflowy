@@ -7,10 +7,10 @@ of the whole visible tree.
 
 **Why it's not in the code:** `React.memo` on `OutlineNode` looks like it should already prevent
 this. It was inert — `useTree` rebuilt a fresh `index` object every edit and passed it as a prop,
-busting the shallow compare. The fix isn't "memoize harder"; the node must be read *reactively per
-component*, because completion/collapse/task toggles change a node's own object without changing
+busting the shallow compare. The fix isn't "memoize harder"; the node must be read _reactively per
+component_, because completion/collapse/task toggles change a node's own object without changing
 structure, so a parent threading the node down as a prop wouldn't re-render to pass the new one.
-Why per-node `memo` works at all: Immer keeps the object reference of every *unchanged* row stable
+Why per-node `memo` works at all: Immer keeps the object reference of every _unchanged_ row stable
 across an edit, so each `useNode` snapshot is referentially stable for all but the edited node.
 
 **Two read paths for the live tree and view state.** The `commands`/drag/zoom closures must keep a
@@ -23,12 +23,13 @@ prune. The mirrors are written in effects (`useSyncViewState`), never during ren
 stays React-Compiler-eligible (a ref written during render bails the compiler on the whole function).
 
 **Don't:**
+
 - Pass `node`/`index` as props to `OutlineNode` (reintroduces the storm).
 - Pass a fresh `commands`/callback object per render — the memo only pays off while those stay
   referentially stable.
 - "Fix" it with a custom memo comparator that ignores `index` — a parent can't tell a deep
   descendant changed without recursing, so it freezes the subtree below it.
-- Read `getTreeIndex()`/`getViewRootId()`/`getViewIsHidden()` *during render*, or re-add a mirror ref
+- Read `getTreeIndex()`/`getViewRootId()`/`getViewIsHidden()` _during render_, or re-add a mirror ref
   written during render — render must use the reactive React value; the getters are event-time only.
 
 **The editor keeps its manual memos even though React Compiler is on.** react-doctor flags

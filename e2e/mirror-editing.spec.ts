@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Node mirrors (ADR 0022), slice 2c: full editing parity INSIDE a mirror. Stage 1
@@ -22,7 +23,13 @@ const MIRROR_TREE: SeedNode[] = [
   { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
   { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
   { id: "a2", parentId: "A", prevSiblingId: "a1", text: "childtwo" },
-  { id: "M", parentId: "P", prevSiblingId: null, text: "placeholder", mirrorOf: "A" },
+  {
+    id: "M",
+    parentId: "P",
+    prevSiblingId: null,
+    text: "placeholder",
+    mirrorOf: "A",
+  },
 ];
 
 // All copies of a node's editable span (a windowed source child has two).
@@ -45,7 +52,6 @@ const nodeOrder = (page: Page) =>
       li.getAttribute("data-node-id"),
     ),
   );
-
 
 async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
   await page.addInitScript(() => {
@@ -210,7 +216,13 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
       { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
       { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
-      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      {
+        id: "M",
+        parentId: "P",
+        prevSiblingId: null,
+        text: "ph",
+        mirrorOf: "A",
+      },
       { id: "X", parentId: "P", prevSiblingId: "M", text: "extranode" },
     ];
     await load(page, tree, true);
@@ -248,7 +260,13 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
       { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
       { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
-      { id: "M", parentId: "P", prevSiblingId: null, text: "placeholder", mirrorOf: "A" },
+      {
+        id: "M",
+        parentId: "P",
+        prevSiblingId: null,
+        text: "placeholder",
+        mirrorOf: "A",
+      },
       { id: "X", parentId: "P", prevSiblingId: "M", text: "extranode" },
     ];
     await load(page, tree, false);
@@ -288,7 +306,13 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
       { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
       { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
-      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      {
+        id: "M",
+        parentId: "P",
+        prevSiblingId: null,
+        text: "ph",
+        mirrorOf: "A",
+      },
       { id: "Q", parentId: "P", prevSiblingId: "M", text: "queue" },
       { id: "X", parentId: "Q", prevSiblingId: null, text: "extranode" },
     ];
@@ -334,7 +358,13 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
       { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
       { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
-      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      {
+        id: "M",
+        parentId: "P",
+        prevSiblingId: null,
+        text: "ph",
+        mirrorOf: "A",
+      },
       { id: "X", parentId: "P", prevSiblingId: "M", text: "extraone" },
       { id: "Y", parentId: "P", prevSiblingId: "X", text: "extratwo" },
     ];
@@ -402,7 +432,13 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     const tree: SeedNode[] = [
       { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
       { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
-      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "X" },
+      {
+        id: "M",
+        parentId: "P",
+        prevSiblingId: null,
+        text: "ph",
+        mirrorOf: "X",
+      },
       { id: "X", parentId: "P", prevSiblingId: "M", text: "targetnode" },
     ];
     await load(page, tree, true);
@@ -463,12 +499,14 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       "top",
     );
     await expect(spans(page, "a1").nth(1)).toBeVisible(); // sanity: nth(1) is the windowed copy
-    await expect(
-      page.locator('li[data-node-id="a1"]').nth(1),
-    ).toHaveAttribute("data-selected", "middle");
-    await expect(
-      page.locator('li[data-node-id="a2"]').nth(1),
-    ).toHaveAttribute("data-selected", "bottom");
+    await expect(page.locator('li[data-node-id="a1"]').nth(1)).toHaveAttribute(
+      "data-selected",
+      "middle",
+    );
+    await expect(page.locator('li[data-node-id="a2"]').nth(1)).toHaveAttribute(
+      "data-selected",
+      "bottom",
+    );
     // No cross-instance bleed: the real source A and its OWN (canonical) a1/a2
     // rows are a totally different branch of the walk, never covered.
     await expect(page.locator('li[data-node-id="A"]')).not.toHaveAttribute(
@@ -527,7 +565,11 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
         morphErrors.push(msg.text());
     });
     page.on("pageerror", (err) => {
-      if (/Transition was aborted|duplicate view-transition-name/.test(err.message))
+      if (
+        /Transition was aborted|duplicate view-transition-name/.test(
+          err.message,
+        )
+      )
         morphErrors.push(err.message);
     });
 
@@ -584,7 +626,13 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
       { id: "a2", parentId: "A", prevSiblingId: "a1", text: "childtwo" },
       { id: "a3", parentId: "A", prevSiblingId: "a2", text: "childthree" },
-      { id: "M", parentId: "P", prevSiblingId: null, text: "ph", mirrorOf: "A" },
+      {
+        id: "M",
+        parentId: "P",
+        prevSiblingId: null,
+        text: "ph",
+        mirrorOf: "A",
+      },
     ];
     await load(page, tree, true);
     await expect(spans(page, "a1")).toHaveCount(2);

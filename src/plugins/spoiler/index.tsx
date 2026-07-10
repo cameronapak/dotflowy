@@ -23,9 +23,10 @@
 // SelectionFormatToolbar.tsx via the shared plain-marker toggle.
 
 import { EyeOffIcon } from "lucide-react";
-import { SPOILER_PATTERN, spoilerInterior } from "../../data/spoiler";
+
 import { mdPunct } from "../../components/inline-code";
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
+import { SPOILER_PATTERN, spoilerInterior } from "../../data/spoiler";
 import { isRevealed } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 

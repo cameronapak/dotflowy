@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+
 import { nodesCollection } from "../data/collection";
-import { subscribeTree } from "../data/tree-store";
 import { buildTreeIndex } from "../data/tree";
-import { localDateKey } from "../plugins/daily/daily-index";
+import { subscribeTree } from "../data/tree-store";
 import { getOrCreateDay } from "../plugins/daily";
+import { localDateKey } from "../plugins/daily/daily-index";
 
 export const Route = createFileRoute("/today")({
   component: TodayRedirect,

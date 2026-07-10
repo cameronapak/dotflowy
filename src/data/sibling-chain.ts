@@ -1,4 +1,4 @@
-import type { Node } from './schema'
+import type { Node } from "./schema";
 
 /**
  * The sibling chain. Within a parent, children form a singly linked list via
@@ -24,37 +24,37 @@ import type { Node } from './schema'
  * single parent; a list of 0 or 1 is returned unchanged.
  */
 export function orderSiblings(unordered: Node[]): Node[] {
-  if (unordered.length <= 1) return unordered
+  if (unordered.length <= 1) return unordered;
 
-  const byPrev = new Map<string | null, Node>()
-  for (const n of unordered) byPrev.set(n.prevSiblingId, n)
+  const byPrev = new Map<string | null, Node>();
+  for (const n of unordered) byPrev.set(n.prevSiblingId, n);
 
-  const ordered: Node[] = []
-  const idsInChain = new Set<string>()
-  let cursor: string | null = null
+  const ordered: Node[] = [];
+  const idsInChain = new Set<string>();
+  let cursor: string | null = null;
   // Guard against cycles / corruption with an iteration cap.
-  let guard = unordered.length + 1
+  let guard = unordered.length + 1;
   while (guard-- > 0) {
-    const next = byPrev.get(cursor)
-    if (!next) break
-    ordered.push(next)
-    idsInChain.add(next.id)
-    cursor = next.id
+    const next = byPrev.get(cursor);
+    if (!next) break;
+    ordered.push(next);
+    idsInChain.add(next.id);
+    cursor = next.id;
   }
 
   for (const n of unordered) {
-    if (!idsInChain.has(n.id)) ordered.push(n)
+    if (!idsInChain.has(n.id)) ordered.push(n);
   }
 
-  return ordered
+  return ordered;
 }
 
 /** One node whose stored `prevSiblingId` disagrees with its canonical position:
  *  `expectedPrev` is the node it should point at, `actualPrev` what it stores. */
 export interface ChainDisagreement {
-  id: string
-  expectedPrev: string | null
-  actualPrev: string | null
+  id: string;
+  expectedPrev: string | null;
+  actualPrev: string | null;
 }
 
 /**
@@ -64,14 +64,14 @@ export interface ChainDisagreement {
  * validate path treats the first as a broken-invariant tripwire.
  */
 export function chainDisagreements(ordered: Node[]): ChainDisagreement[] {
-  const out: ChainDisagreement[] = []
-  let prev: string | null = null
+  const out: ChainDisagreement[] = [];
+  let prev: string | null = null;
   for (const child of ordered) {
-    const actualPrev = child.prevSiblingId ?? null
+    const actualPrev = child.prevSiblingId ?? null;
     if (actualPrev !== prev) {
-      out.push({ id: child.id, expectedPrev: prev, actualPrev })
+      out.push({ id: child.id, expectedPrev: prev, actualPrev });
     }
-    prev = child.id
+    prev = child.id;
   }
-  return out
+  return out;
 }

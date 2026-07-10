@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // Cmd on macOS, Control elsewhere.
@@ -64,7 +65,9 @@ test.describe("daily notes", () => {
     await expect(page).toHaveURL(/\/[^/]+$/);
     await expect(page).not.toHaveURL(/\/$/);
     const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      year,
+    );
 
     // Home: the protected "Daily" container holds today's note, badged "Today".
     await goHome(page);
@@ -89,7 +92,9 @@ test.describe("daily notes", () => {
     // Redirected off /today, into today's note (title = the full date).
     await expect(page).not.toHaveURL(/today/);
     const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      year,
+    );
 
     // A single empty entry line was seeded under the day, and the caret landed
     // ON it (focus=last) -- the day opens ready to append, not on the title.
@@ -117,7 +122,12 @@ test.describe("daily notes", () => {
     await seedOutline(
       page,
       [
-        { id: "daily-container", parentId: null, prevSiblingId: null, text: "Daily" },
+        {
+          id: "daily-container",
+          parentId: null,
+          prevSiblingId: null,
+          text: "Daily",
+        },
         {
           id: "past-day",
           parentId: "daily-container",
@@ -213,7 +223,14 @@ test.describe("daily notes", () => {
     // late.) The other protection specs always navigate first, masking it.
     await seedOutline(
       page,
-      [{ id: "daily-container", parentId: null, prevSiblingId: null, text: "Daily" }],
+      [
+        {
+          id: "daily-container",
+          parentId: null,
+          prevSiblingId: null,
+          text: "Daily",
+        },
+      ],
       {
         kv: {
           "daily-index": [
@@ -244,7 +261,8 @@ test.describe("daily notes", () => {
     // The container's id is a UUID; capture it so we can target the row even
     // while its text is momentarily empty.
     const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+      (el) =>
+        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
     );
     expect(containerId).not.toBe("");
     const containerText = page.locator(
@@ -286,7 +304,8 @@ test.describe("daily notes", () => {
     await goHome(page);
 
     const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+      (el) =>
+        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
     );
     expect(containerId).not.toBe("");
     const containerRow = page.locator(
@@ -314,7 +333,8 @@ test.describe("daily notes", () => {
     await goHome(page);
 
     const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+      (el) =>
+        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
     );
     expect(containerId).not.toBe("");
     const containerRow = page.locator(
@@ -432,7 +452,9 @@ test.describe("daily notes", () => {
     await expect(page).toHaveURL(/\/[^/]+$/);
     await expect(page).not.toHaveURL(/\/$/);
     const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      year,
+    );
     await goHome(page);
     await expect(page.locator("[data-daily-date]")).toHaveText("Today");
   });
@@ -451,9 +473,9 @@ test.describe("daily notes", () => {
     await openSwitcherAndType(page, "today");
 
     // The create-action is suppressed (the note exists)...
-    await expect(
-      page.getByRole("option", { name: /Go to Today/ }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("option", { name: /Go to Today/ })).toHaveCount(
+      0,
+    );
 
     // ...and the real day note is found via its "Today" alias even though its
     // text is the full date (the row displays that date, hence the year). The
@@ -461,12 +483,12 @@ test.describe("daily notes", () => {
     const year = String(new Date().getFullYear());
     const hit = page.getByRole("option", { name: new RegExp(year) });
     await expect(hit).toBeVisible();
-    await expect(
-      page.getByRole("option", { name: /\(Today\)/ }),
-    ).toBeVisible();
+    await expect(page.getByRole("option", { name: /\(Today\)/ })).toBeVisible();
     await hit.click();
     await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      year,
+    );
   });
 
   test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
@@ -627,12 +649,14 @@ test.describe("daily notes", () => {
     await expect(page).toHaveURL(/ghost-today(\?|$)/);
     await expect(page.getByText("That bullet doesn't exist")).toHaveCount(0);
     const year = String(d.getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      year,
+    );
 
     await goHome(page);
-    await expect(page.locator('li[data-node-id="ghost-container"]')).toHaveCount(
-      1,
-    );
+    await expect(
+      page.locator('li[data-node-id="ghost-container"]'),
+    ).toHaveCount(1);
     await expect(page.locator('li[data-node-id="ghost-today"]')).toHaveCount(1);
     await expect(page.locator("[data-daily-date]")).toHaveText("Today");
   });
@@ -670,7 +694,9 @@ test.describe("daily notes", () => {
     await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
     await expect(page).not.toHaveURL(/\/$/, { timeout: 10000 });
     const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      year,
+    );
 
     const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
     await expect(titleBadge).toBeVisible();

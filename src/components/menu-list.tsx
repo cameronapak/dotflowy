@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+
 import type { MenuEntry } from "../plugins/types";
 
 export function MenuList({
@@ -21,11 +22,11 @@ export function MenuList({
   return (
     <div
       role="listbox"
-      className="bg-popover text-popover-foreground fixed z-50 max-h-72 w-64 overflow-y-auto rounded-md border p-1 shadow-md"
+      className="fixed z-50 max-h-72 w-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
       style={{ left: x, top: y + 6 }}
     >
       {entries.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-1.5 text-sm">
+        <div className="px-2 py-1.5 text-sm text-muted-foreground">
           {emptyLabel ?? "No results"}
         </div>
       ) : (

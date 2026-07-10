@@ -5,8 +5,8 @@ status: proposed
 # HttpApi/HttpApiClient as the one transport contract (deferred direction)
 
 **Decision.** Modelling the whole `/api/*` surface as an Effect `HttpApi` — one schema-defined contract
-that derives *both* a typed `HttpApiClient` (replacing the hand-written `src/data/kv-client-effect.ts` +
-`src/data/nodes-client-effect.ts`) *and* the Worker's server handlers (replacing the hand-routing in
+that derives _both_ a typed `HttpApiClient` (replacing the hand-written `src/data/kv-client-effect.ts` +
+`src/data/nodes-client-effect.ts`) _and_ the Worker's server handlers (replacing the hand-routing in
 `worker/index.ts`) — is a **direction we endorse but are NOT building yet**. This ADR captures the intent,
 the payoff, the unproven blocker, and the gate that would let us commit, so the idea isn't lost.
 
@@ -18,7 +18,7 @@ session gate; and **`HttpApiTest`** exercises handlers with no running server �
 `seedOutline` mock (which fakes the Worker in-memory and never runs `worker/index.ts`) can't reach.
 
 **Why it's deferred, not done.** Two reasons, and the bar is higher than for the work shipped alongside it
-(the shared wire schema and the native DO hardening are *documented debt*; this is a speculative "better"):
+(the shared wire schema and the native DO hardening are _documented debt_; this is a speculative "better"):
 
 - **`HttpApiClient` replaces the transport verb, not the value-add.** The client's hard parts are
   `Semaphore`-coalesced field edits (`src/data/api.ts`), the echo-hold via `waitForSeqE`
@@ -42,7 +42,7 @@ earns its risk; if it fights the runtime, this ADR stays `proposed` and we keep 
   unproven adapter.
 - **Adopt `HttpApiClient` on the client only, keep the Worker hand-rolled.** Rejected as the worst of
   both: you take on the client rewrite and lose the single-source-of-truth payoff that only exists when
-  *both* sides derive from the one `HttpApi`.
+  _both_ sides derive from the one `HttpApi`.
 
 ## Consequences
 

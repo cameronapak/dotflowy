@@ -1,3 +1,6 @@
+import { useNavigate } from "@tanstack/react-router";
+import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
+import { Search, BookmarkIcon, ChevronRightIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -7,31 +10,33 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { Search, BookmarkIcon, ChevronRightIcon } from "lucide-react";
-import { useTree } from "../data/useTree";
-import { buildTrail, type Node, type TreeIndex } from "../data/tree";
-import { flattenNodeText } from "../data/node-links";
-import { isMirrorsEnabled } from "../data/flags";
-import {
-  searchAliases,
-  searchActions,
-  searchAnnotation,
-} from "../plugins/registry";
+
+import { cn } from "@/lib/utils";
+
 import type { SearchAction } from "../plugins/types";
+
+import { getNodeActionBridge } from "../data/command-bridge";
 import {
   buildNodeActions,
   resolveAmbientTargetId,
   type CommandCenterAction,
 } from "../data/command-center";
-import { getNodeActionBridge } from "../data/command-bridge";
-import { cn } from "@/lib/utils";
-import { setNodeSwitcherOpener, openNodeSwitcher } from "./node-switcher-opener";
+import { isMirrorsEnabled } from "../data/flags";
+import { flattenNodeText } from "../data/node-links";
+import { buildTrail, type Node, type TreeIndex } from "../data/tree";
+import { useTree } from "../data/useTree";
+import {
+  searchAliases,
+  searchActions,
+  searchAnnotation,
+} from "../plugins/registry";
 import { useGlobalActions } from "./command-actions";
 import { McpConnectDialog } from "./mcp-connect-dialog";
+import {
+  setNodeSwitcherOpener,
+  openNodeSwitcher,
+} from "./node-switcher-opener";
 import { Button } from "./ui/button";
-import { Kbd, KbdGroup } from "./ui/kbd";
 import {
   Command,
   CommandDialog,
@@ -40,6 +45,7 @@ import {
   CommandItem,
   CommandList,
 } from "./ui/command";
+import { Kbd, KbdGroup } from "./ui/kbd";
 
 /**
  * Cmd+K command center (ADR 0034): a keyboard-first door to BOTH nodes and
@@ -100,7 +106,8 @@ function buildFuse(index: TreeIndex, nodes: Node[]): Fuse<Searchable> {
  *  the row's label or keywords. Fuse drives the (larger) node corpus; the action
  *  set is tiny, so a substring/token match is enough and dependency-free. */
 function matchAction(q: string, action: CommandCenterAction): boolean {
-  const hay = `${action.label} ${(action.keywords ?? []).join(" ")}`.toLowerCase();
+  const hay =
+    `${action.label} ${(action.keywords ?? []).join(" ")}`.toLowerCase();
   return q
     .toLowerCase()
     .split(/\s+/)
@@ -249,12 +256,15 @@ function SwitcherDialog({
     [open, targetFocusedId],
   );
   const ambientActions = useMemo(
-    () => (ambientTargetId ? buildNodeActions(ambientTargetId, index, bridge) : []),
+    () =>
+      ambientTargetId ? buildNodeActions(ambientTargetId, index, bridge) : [],
     [ambientTargetId, index, bridge],
   );
   const ambientLabel = ambientTargetId
-    ? flattenNodeText(index, index.byId.get(ambientTargetId)?.text ?? "").trim() ||
-      "Untitled"
+    ? flattenNodeText(
+        index,
+        index.byId.get(ambientTargetId)?.text ?? "",
+      ).trim() || "Untitled"
     : "";
 
   const globalActions = useGlobalActions({ openConnect: onOpenConnect });
@@ -367,109 +377,111 @@ function SwitcherDialog({
           dropped. The keys we intercept (Left/Right/Tab/Backspace) are ones cmdk
           ignores, so bubble-phase interception never fights its arrow nav. */}
       <div className="contents" onKeyDown={onKeyDown}>
-      <Command shouldFilter={false}>
-        {actionNodeId && (
-          <button
-            type="button"
-            onClick={backToList}
-            className="flex w-full items-center gap-1.5 border-b px-3 py-2 text-left text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ChevronRightIcon className="size-3 rotate-180" />
-            Actions on:{" "}
-            <span className="truncate font-medium">{subLabel}</span>
-          </button>
-        )}
-        <CommandInput
-          value={query}
-          onValueChange={setQuery}
-          placeholder={
-            actionNodeId ? "Filter actions..." : "Search nodes and actions..."
-          }
-        />
-        {actionNodeId ? (
-          <CommandList>
-            {shownSub.length === 0 ? (
-              <Hint>No matching actions.</Hint>
-            ) : (
-              <CommandGroup heading="Actions">
-                {shownSub.map((a) => (
-                  <ActionCommandRow
-                    key={a.id}
-                    action={a}
-                    onRun={() => runAction(a)}
-                  />
-                ))}
-              </CommandGroup>
-            )}
-          </CommandList>
-        ) : (
-          <>
+        <Command shouldFilter={false}>
+          {actionNodeId && (
+            <button
+              type="button"
+              onClick={backToList}
+              className="flex w-full items-center gap-1.5 border-b px-3 py-2 text-left text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ChevronRightIcon className="size-3 rotate-180" />
+              Actions on:{" "}
+              <span className="truncate font-medium">{subLabel}</span>
+            </button>
+          )}
+          <CommandInput
+            value={query}
+            onValueChange={setQuery}
+            placeholder={
+              actionNodeId ? "Filter actions..." : "Search nodes and actions..."
+            }
+          />
+          {actionNodeId ? (
             <CommandList>
-              {shownAmbient.length > 0 && (
-                <CommandGroup heading={`Acting on: ${ambientLabel}`}>
-                  {shownAmbient.map((a) => (
-                    <ActionCommandRow
-                      key={a.id}
-                      action={a}
-                      onRun={() => runAction(a)}
-                    />
-                  ))}
-                </CommandGroup>
-              )}
-
-              {(actions.length > 0 || shownGlobals.length > 0) && (
-                <CommandGroup heading={q ? "Actions" : "Commands"}>
-                  {actions.map((a) => (
-                    <SearchActionRow key={a.key} action={a} />
-                  ))}
-                  {shownGlobals.map((a) => (
-                    <ActionCommandRow
-                      key={a.id}
-                      action={a}
-                      onRun={() => runAction(a)}
-                    />
-                  ))}
-                </CommandGroup>
-              )}
-
-              {results === null ? (
-                bookmarks.length === 0 ? (
-                  <Hint>No bookmarks yet. Type to search nodes and actions.</Hint>
-                ) : (
-                  <CommandGroup heading={BOOKMARKS_HEADING}>
-                    {bookmarks.map((node) => (
-                      <ResultRow
-                        key={node.id}
-                        index={index}
-                        node={node}
-                        onSelect={go}
-                        onOpenActions={setActionNodeId}
-                      />
-                    ))}
-                  </CommandGroup>
-                )
-              ) : results.length === 0 ? (
-                actions.length === 0 && shownGlobals.length === 0 ? (
-                  <Hint>No matches.</Hint>
-                ) : null
+              {shownSub.length === 0 ? (
+                <Hint>No matching actions.</Hint>
               ) : (
-                <CommandGroup heading="Nodes">
-                  {results.map(({ item, matches }) => (
-                    <ResultRow
-                      key={item.node.id}
-                      index={index}
-                      node={item.node}
-                      matches={matches}
-                      onSelect={go}
-                      onOpenActions={setActionNodeId}
+                <CommandGroup heading="Actions">
+                  {shownSub.map((a) => (
+                    <ActionCommandRow
+                      key={a.id}
+                      action={a}
+                      onRun={() => runAction(a)}
                     />
                   ))}
                 </CommandGroup>
               )}
             </CommandList>
-          </>
-        )}
-      </Command>
+          ) : (
+            <>
+              <CommandList>
+                {shownAmbient.length > 0 && (
+                  <CommandGroup heading={`Acting on: ${ambientLabel}`}>
+                    {shownAmbient.map((a) => (
+                      <ActionCommandRow
+                        key={a.id}
+                        action={a}
+                        onRun={() => runAction(a)}
+                      />
+                    ))}
+                  </CommandGroup>
+                )}
+
+                {(actions.length > 0 || shownGlobals.length > 0) && (
+                  <CommandGroup heading={q ? "Actions" : "Commands"}>
+                    {actions.map((a) => (
+                      <SearchActionRow key={a.key} action={a} />
+                    ))}
+                    {shownGlobals.map((a) => (
+                      <ActionCommandRow
+                        key={a.id}
+                        action={a}
+                        onRun={() => runAction(a)}
+                      />
+                    ))}
+                  </CommandGroup>
+                )}
+
+                {results === null ? (
+                  bookmarks.length === 0 ? (
+                    <Hint>
+                      No bookmarks yet. Type to search nodes and actions.
+                    </Hint>
+                  ) : (
+                    <CommandGroup heading={BOOKMARKS_HEADING}>
+                      {bookmarks.map((node) => (
+                        <ResultRow
+                          key={node.id}
+                          index={index}
+                          node={node}
+                          onSelect={go}
+                          onOpenActions={setActionNodeId}
+                        />
+                      ))}
+                    </CommandGroup>
+                  )
+                ) : results.length === 0 ? (
+                  actions.length === 0 && shownGlobals.length === 0 ? (
+                    <Hint>No matches.</Hint>
+                  ) : null
+                ) : (
+                  <CommandGroup heading="Nodes">
+                    {results.map(({ item, matches }) => (
+                      <ResultRow
+                        key={item.node.id}
+                        index={index}
+                        node={item.node}
+                        matches={matches}
+                        onSelect={go}
+                        onOpenActions={setActionNodeId}
+                      />
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </>
+          )}
+        </Command>
       </div>
     </CommandDialog>
   );
@@ -504,17 +516,18 @@ function ActionCommandRow({
           {action.description}
         </span>
       </div>
-      {action.hotkey && action.hotkey.length > 0 && (
-        // data-slot="command-shortcut" hides CommandItem's trailing check so the
-        // shortcut sits flush at the row's right edge (ml-auto).
-        <span data-slot="command-shortcut" className="ml-auto shrink-0">
-          <KbdGroup>
-            {action.hotkey.map((k, i) => (
-              <Kbd key={i}>{k}</Kbd>
-            ))}
-          </KbdGroup>
-        </span>
-      )}
+      {action.hotkey &&
+        action.hotkey.length > 0 && (
+          // data-slot="command-shortcut" hides CommandItem's trailing check so the
+          // shortcut sits flush at the row's right edge (ml-auto).
+          <span data-slot="command-shortcut" className="ml-auto shrink-0">
+            <KbdGroup>
+              {action.hotkey.map((k, i) => (
+                <Kbd key={i}>{k}</Kbd>
+              ))}
+            </KbdGroup>
+          </span>
+        )}
     </CommandItem>
   );
 }
@@ -596,7 +609,7 @@ function ResultRow({
         type="button"
         aria-label="Node actions"
         title="Actions (→)"
-        className="ml-auto hidden shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted group-data-[selected=true]:flex"
+        className="ml-auto hidden shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground group-data-[selected=true]:flex hover:bg-muted"
         onClick={(e) => {
           e.stopPropagation();
           onOpenActions(node.id);

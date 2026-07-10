@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Node mirrors (ADR 0022), slice 1b: render + field split. A node carrying
@@ -20,7 +21,13 @@ const MIRROR_TREE: SeedNode[] = [
   { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
   { id: "a1", parentId: "A", prevSiblingId: null, text: "alpha child one" },
   { id: "a2", parentId: "A", prevSiblingId: "a1", text: "alpha child two" },
-  { id: "M", parentId: "P", prevSiblingId: null, text: "mirror placeholder", mirrorOf: "A" },
+  {
+    id: "M",
+    parentId: "P",
+    prevSiblingId: null,
+    text: "mirror placeholder",
+    mirrorOf: "A",
+  },
 ];
 
 const text = (page: Page, nodeId: string) =>
@@ -239,7 +246,9 @@ test.describe("node mirrors -- create via the picker (ADR 0022)", () => {
 
     const dialog = page.getByRole("dialog");
     // D is offered; the source's own child a1 is not (it would cycle).
-    await expect(dialog.getByRole("option", { name: "dest box" })).toBeVisible();
+    await expect(
+      dialog.getByRole("option", { name: "dest box" }),
+    ).toBeVisible();
     await expect(
       dialog.getByRole("option", { name: "alpha child one" }),
     ).toHaveCount(0);

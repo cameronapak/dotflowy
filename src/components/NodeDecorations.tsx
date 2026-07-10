@@ -1,11 +1,13 @@
-import { Fragment, useEffect, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
-import { slotsAt } from "../plugins/registry";
-import { flattenNodeText } from "../data/node-links";
-import { getTreeIndex } from "../data/tree-store";
-import { SheetHeader, SheetTitle } from "./ui/sheet";
+import { Fragment, useEffect, useRef, useState } from "react";
+
 import type { Node } from "../data/tree";
 import type { PluginContext, SlotPosition } from "../plugins/types";
+
+import { flattenNodeText } from "../data/node-links";
+import { getTreeIndex } from "../data/tree-store";
+import { slotsAt } from "../plugins/registry";
+import { SheetHeader, SheetTitle } from "./ui/sheet";
 
 type AfterTextPosition = Extract<
   SlotPosition,

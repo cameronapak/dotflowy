@@ -12,23 +12,23 @@
  * Durable Object.
  */
 
-import { betterAuth } from 'better-auth'
-import { APIError, createAuthMiddleware } from 'better-auth/api'
-import { mcp } from 'better-auth/plugins'
+import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { mcp } from "better-auth/plugins";
 
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
-  DB: D1Database
+  DB: D1Database;
   /** Signing secret. Set in prod via `wrangler secret put BETTER_AUTH_SECRET`,
    *  locally via `.dev.vars`. Better Auth fails closed without it in prod. */
-  BETTER_AUTH_SECRET?: string
+  BETTER_AUTH_SECRET?: string;
   /** The deployment's public origin (e.g. https://dotflowy.example.com), used
    *  for cookie/redirect URLs and as a trusted origin. Unset in local dev. */
-  BETTER_AUTH_URL?: string
+  BETTER_AUTH_URL?: string;
   /** Comma-separated invite codes gating signup (alpha is invite-only). Unset
    *  or empty = signup CLOSED — nobody can create an account. Rotate the
    *  secret to revoke every outstanding code at once. */
-  INVITE_CODES?: string
+  INVITE_CODES?: string;
 }
 
 export function createAuth(env: AuthEnv, requestOrigin?: string) {
@@ -51,7 +51,7 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // a sign-in request's Origin is the Vite origin, not the Worker's. Trust
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
-    trustedOrigins: ['http://localhost:3000', 'http://localhost:3210'],
+    trustedOrigins: ["http://localhost:3000", "http://localhost:3210"],
     // Invite-only alpha: /sign-up/email is the ONLY account-creation path (the
     // mcp plugin's dynamic registration creates OAuth clients, not users), so
     // gating it here closes signup entirely. Server-side on purpose — hiding
@@ -59,17 +59,20 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // INVITE_CODES fails CLOSED: no codes, no signups; sign-in is untouched.
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== '/sign-up/email') return
-        const codes = (env.INVITE_CODES ?? '')
-          .split(',')
+        if (ctx.path !== "/sign-up/email") return;
+        const codes = (env.INVITE_CODES ?? "")
+          .split(",")
           .map((c) => c.trim())
-          .filter(Boolean)
+          .filter(Boolean);
         const supplied =
-          typeof ctx.body?.inviteCode === 'string' ? ctx.body.inviteCode.trim() : ''
+          typeof ctx.body?.inviteCode === "string"
+            ? ctx.body.inviteCode.trim()
+            : "";
         if (!supplied || !codes.includes(supplied)) {
-          throw new APIError('FORBIDDEN', {
-            message: 'Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.',
-          })
+          throw new APIError("FORBIDDEN", {
+            message:
+              "Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.",
+          });
         }
       }),
     },
@@ -80,8 +83,8 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     // signed-out user to `/`, and resumes the flow after sign-in (the plugin's
     // after-hook plus AuthScreen's explicit authorize-redirect fallback).
     // See docs/adr/0026-agent-native-mcp-server.md.
-    plugins: [mcp({ loginPage: '/' })],
-  })
+    plugins: [mcp({ loginPage: "/" })],
+  });
 }
 
-export type Auth = ReturnType<typeof createAuth>
+export type Auth = ReturnType<typeof createAuth>;

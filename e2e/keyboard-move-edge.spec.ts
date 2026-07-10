@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 function modifier() {
@@ -13,9 +14,7 @@ const text = (page: Page, id: string) =>
 // nested <li>s (ADR 0019). nestedUnder(parent, x).toHaveCount(0) still reads as
 // "x is no longer a direct child of parent".
 const nestedUnder = (page: Page, ancestorId: string, nodeId: string) =>
-  page.locator(
-    `li[data-node-id="${nodeId}"][data-parent-id="${ancestorId}"]`,
-  );
+  page.locator(`li[data-node-id="${nodeId}"][data-parent-id="${ancestorId}"]`);
 
 /**
  *   - Uncle

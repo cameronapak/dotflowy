@@ -1,21 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Effect } from "effect";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  CircleCheckIcon,
-  Loader2Icon,
-  TriangleAlertIcon,
-} from "lucide-react";
-import { Button } from "./ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
-import { setOpmlImportOpener } from "./opml-import-opener";
+import { Effect } from "effect";
+import { CircleCheckIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+
+import { nodesCollection } from "../data/collection";
+import { capture, drop } from "../data/history";
 import {
   OPML_APP_MAX_NODES,
   OpmlEmpty,
@@ -25,11 +14,19 @@ import {
   type OpmlImportResult,
   type OpmlImportReport,
 } from "../data/opml-import";
-import { nodesCollection } from "../data/collection";
-import { capture, drop } from "../data/history";
 import { runStructuralSliced } from "../data/structural";
-import { getTreeIndex } from "../data/tree-store";
 import { childrenOf, makeNode, now } from "../data/tree";
+import { getTreeIndex } from "../data/tree-store";
+import { setOpmlImportOpener } from "./opml-import-opener";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 
 /**
  * OPML import (ADR 0037, app surface): "Import OPML…" opens the hidden file
@@ -89,7 +86,9 @@ function disclosureLines(report: OpmlImportReport): string[] {
     );
   }
   if (report.noteBlanksDropped > 0) {
-    lines.push(`${plural(report.noteBlanksDropped, "blank note line")} dropped`);
+    lines.push(
+      `${plural(report.noteBlanksDropped, "blank note line")} dropped`,
+    );
   }
   if (report.textNewlineSplits > 0) {
     lines.push(

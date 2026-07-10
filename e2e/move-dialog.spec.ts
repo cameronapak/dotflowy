@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // A node's OWN editable text span (see keyboard-nav.spec.ts for the `>` chain).
@@ -29,11 +30,28 @@ async function openMove(page: Page, id: string) {
 // inbox + projects are bookmarked; archive + loose are not. proj-a is a child of
 // projects so we can exercise subtree exclusion.
 const BOOKMARKED_TREE: SeedNode[] = [
-  { id: "inbox", parentId: null, prevSiblingId: null, text: "Inbox", bookmarkedAt: 100 },
-  { id: "projects", parentId: null, prevSiblingId: "inbox", text: "Projects", bookmarkedAt: 200 },
+  {
+    id: "inbox",
+    parentId: null,
+    prevSiblingId: null,
+    text: "Inbox",
+    bookmarkedAt: 100,
+  },
+  {
+    id: "projects",
+    parentId: null,
+    prevSiblingId: "inbox",
+    text: "Projects",
+    bookmarkedAt: 200,
+  },
   { id: "archive", parentId: null, prevSiblingId: "projects", text: "Archive" },
   { id: "loose", parentId: null, prevSiblingId: "archive", text: "Loose note" },
-  { id: "proj-a", parentId: "projects", prevSiblingId: null, text: "Project A" },
+  {
+    id: "proj-a",
+    parentId: "projects",
+    prevSiblingId: null,
+    text: "Project A",
+  },
 ];
 
 test.describe("move dialog: bookmark empty state", () => {
@@ -53,13 +71,15 @@ test.describe("move dialog: bookmark empty state", () => {
     ).toBeVisible();
 
     // ...the un-bookmarked ones (incl. the node being moved) are not.
-    await expect(dialog.getByRole("option", { name: "Archive" })).toHaveCount(0);
+    await expect(dialog.getByRole("option", { name: "Archive" })).toHaveCount(
+      0,
+    );
     await expect(
       dialog.getByRole("option", { name: "Loose note" }),
     ).toHaveCount(0);
-    await expect(
-      dialog.getByRole("option", { name: "Project A" }),
-    ).toHaveCount(0);
+    await expect(dialog.getByRole("option", { name: "Project A" })).toHaveCount(
+      0,
+    );
 
     // Home is always available as a top-level destination.
     await expect(dialog.getByRole("option", { name: "Home" })).toBeVisible();
@@ -69,7 +89,10 @@ test.describe("move dialog: bookmark empty state", () => {
     await load(page, BOOKMARKED_TREE);
     await openMove(page, "loose");
 
-    await page.getByRole("dialog").getByRole("option", { name: "Inbox" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("option", { name: "Inbox" })
+      .click();
 
     // Confirming toast names the destination.
     await expect(page.getByText("Moved to Inbox")).toBeVisible();
@@ -87,22 +110,45 @@ test.describe("move dialog: bookmark empty state", () => {
     // nor its descendant may be offered (you can't move a branch into itself),
     // but a sibling bookmark still can.
     const tree: SeedNode[] = [
-      { id: "inbox", parentId: null, prevSiblingId: null, text: "Inbox", bookmarkedAt: 100 },
-      { id: "projects", parentId: null, prevSiblingId: "inbox", text: "Projects", bookmarkedAt: 200 },
-      { id: "loose", parentId: null, prevSiblingId: "projects", text: "Loose note" },
-      { id: "proj-a", parentId: "projects", prevSiblingId: null, text: "Project A", bookmarkedAt: 300 },
+      {
+        id: "inbox",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Inbox",
+        bookmarkedAt: 100,
+      },
+      {
+        id: "projects",
+        parentId: null,
+        prevSiblingId: "inbox",
+        text: "Projects",
+        bookmarkedAt: 200,
+      },
+      {
+        id: "loose",
+        parentId: null,
+        prevSiblingId: "projects",
+        text: "Loose note",
+      },
+      {
+        id: "proj-a",
+        parentId: "projects",
+        prevSiblingId: null,
+        text: "Project A",
+        bookmarkedAt: 300,
+      },
     ];
     await load(page, tree);
     await openMove(page, "projects");
 
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("option", { name: "Inbox" })).toBeVisible();
-    await expect(
-      dialog.getByRole("option", { name: "Projects" }),
-    ).toHaveCount(0);
-    await expect(
-      dialog.getByRole("option", { name: "Project A" }),
-    ).toHaveCount(0);
+    await expect(dialog.getByRole("option", { name: "Projects" })).toHaveCount(
+      0,
+    );
+    await expect(dialog.getByRole("option", { name: "Project A" })).toHaveCount(
+      0,
+    );
   });
 
   test("with no bookmarks: a hint shows and typing falls back to search", async ({
@@ -117,9 +163,9 @@ test.describe("move dialog: bookmark empty state", () => {
 
     // Typing runs the full fuzzy search over every node.
     await page.keyboard.type("alpha");
-    await expect(dialog.getByRole("option", { name: "Alpha", exact: true })).toBeVisible();
     await expect(
-      dialog.getByText("Type to search your nodes"),
-    ).toHaveCount(0);
+      dialog.getByRole("option", { name: "Alpha", exact: true }),
+    ).toBeVisible();
+    await expect(dialog.getByText("Type to search your nodes")).toHaveCount(0);
   });
 });

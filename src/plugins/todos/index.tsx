@@ -13,14 +13,16 @@
 // they await a row-decoration / reserved-key seam.
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";
-import { Checkbox } from "@/plugins/kit";
+
 import { cn } from "@/lib/utils";
-import { definePlugin, type PluginContext } from "../types";
-import { type Node } from "../../data/tree";
+import { Checkbox } from "@/plugins/kit";
+
+import { capture } from "../../data/history";
 import { setIsTask } from "../../data/mutations";
 import { runStructural } from "../../data/structural";
-import { capture } from "../../data/history";
+import { type Node } from "../../data/tree";
 import { isProtected } from "../registry";
+import { definePlugin, type PluginContext } from "../types";
 
 // Toggle completion on a node, shared by Mod+Enter and Mod+D. Reads the live
 // node off the tree so it flips relative to the current state.
@@ -53,7 +55,7 @@ function TaskCheckbox({
         "checkbox touch-hitbox border-muted-foreground",
         // Larger control + a little more breathing room next to the 24px title
         // (the title's flex gap alone reads tight at that text size).
-        placement === "title" && "size-5 me-1",
+        placement === "title" && "me-1 size-5",
       )}
       checked={node.completed}
       onCheckedChange={(checked) =>

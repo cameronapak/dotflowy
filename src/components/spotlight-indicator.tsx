@@ -1,6 +1,7 @@
 import { FocusIcon } from "lucide-react";
-import { Button } from "./ui/button";
+
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
+import { Button } from "./ui/button";
 
 /**
  * Header indicator for spotlight focus mode (ADR 0033). Appears in the header's

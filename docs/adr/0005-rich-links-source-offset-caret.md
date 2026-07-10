@@ -13,9 +13,10 @@ revealed chip; the write-back is verbatim-match-or-drop (`replaceLinkToken`), li
 swap. Rationale: a raw URL is long and unreadable; expanding it mid-line shoves the rest of the text
 around for an edit you almost never do inline. (Supersedes the original full-raw reveal.)
 
-**Why it's not in the code, and the landmine:** because a *focused* bullet can hold *folded* links,
+**Why it's not in the code, and the landmine:** because a _focused_ bullet can hold _folded_ links,
 `el.textContent` is **no longer the source** — the folded `<a>` shows `label`, and even the revealed
 link keeps its `(url)` half folded. So:
+
 - **`readSource(el)`** (`inline-code.ts`) reconstructs the markdown (`data-src` for atoms,
   `textContent` otherwise). It must replace `el.textContent` in `onInput`, paste, **and the
   slash/tag menus** — a `/cmd` or `#tag` on a folded-link line would otherwise flatten the url

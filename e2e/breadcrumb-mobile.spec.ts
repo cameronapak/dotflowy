@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // An 8-deep chain of long-titled nodes: on any viewport the trail is deep enough

@@ -18,7 +18,7 @@
  * See docs/adr/0013 (sync socket) and docs/adr/0014 (trust boundary).
  */
 
-import { Schema } from 'effect'
+import { Schema } from "effect";
 
 /** A node as it travels the wire — booleans are real booleans. Mirrors the
  *  client's `nodeSchema` (src/data/schema.ts) field-for-field; the DO stores the
@@ -45,43 +45,52 @@ export const NodeSchema = Schema.Struct({
   // without it is malformed (→ 400). Backfilled to null on any legacy/e2e row
   // that omits it (collection.ts withNodeDefaults, DO ADD COLUMN default NULL).
   origin: Schema.NullOr(Schema.String),
-})
-export type Node = Schema.Schema.Type<typeof NodeSchema>
+});
+export type Node = Schema.Schema.Type<typeof NodeSchema>;
 
 /** One node mutation in a change frame, discriminated on `op`. Upserts carry the
  *  full node; deletes carry just the key. */
-const InsertOp = Schema.Struct({ op: Schema.Literal('insert'), value: NodeSchema })
-const UpdateOp = Schema.Struct({ op: Schema.Literal('update'), value: NodeSchema })
-const DeleteOp = Schema.Struct({ op: Schema.Literal('delete'), key: Schema.String })
-export const ChangeOpSchema = Schema.Union([InsertOp, UpdateOp, DeleteOp])
-export type ChangeOp = Schema.Schema.Type<typeof ChangeOpSchema>
+const InsertOp = Schema.Struct({
+  op: Schema.Literal("insert"),
+  value: NodeSchema,
+});
+const UpdateOp = Schema.Struct({
+  op: Schema.Literal("update"),
+  value: NodeSchema,
+});
+const DeleteOp = Schema.Struct({
+  op: Schema.Literal("delete"),
+  key: Schema.String,
+});
+export const ChangeOpSchema = Schema.Union([InsertOp, UpdateOp, DeleteOp]);
+export type ChangeOp = Schema.Schema.Type<typeof ChangeOpSchema>;
 
 /** A committed batch of ops at a monotonic sequence number. */
 export const ChangeFrameSchema = Schema.Struct({
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
-})
-export type ChangeFrame = Schema.Schema.Type<typeof ChangeFrameSchema>
+});
+export type ChangeFrame = Schema.Schema.Type<typeof ChangeFrameSchema>;
 
 // --- DO → client frames -----------------------------------------------------
 // `snapshot` = full state (initial connect or resync past the changelog window);
 // `resume` = the gap since the client's cursor; `change` = a live mutation.
 
 const SnapshotMessage = Schema.Struct({
-  type: Schema.Literal('snapshot'),
+  type: Schema.Literal("snapshot"),
   seq: Schema.Number,
   nodes: Schema.Array(NodeSchema),
-})
+});
 const ResumeMessage = Schema.Struct({
-  type: Schema.Literal('resume'),
+  type: Schema.Literal("resume"),
   seq: Schema.Number,
   changes: Schema.Array(ChangeFrameSchema),
-})
+});
 const ChangeMessage = Schema.Struct({
-  type: Schema.Literal('change'),
+  type: Schema.Literal("change"),
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
-})
+});
 
 /** The union of every DO→client frame. `realtime.ts` decodes inbound frames
  *  against this (closing the last unchecked `as ServerMessage` cast); the DO
@@ -90,5 +99,5 @@ export const ServerMessageSchema = Schema.Union([
   SnapshotMessage,
   ResumeMessage,
   ChangeMessage,
-])
-export type ServerMessage = Schema.Schema.Type<typeof ServerMessageSchema>
+]);
+export type ServerMessage = Schema.Schema.Type<typeof ServerMessageSchema>;

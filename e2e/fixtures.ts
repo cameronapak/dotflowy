@@ -260,7 +260,8 @@ export async function seedOutline(
     (url) => url.pathname === "/api/kv",
     async (route) => {
       const req = route.request();
-      const collection = new URL(req.url()).searchParams.get("collection") ?? "";
+      const collection =
+        new URL(req.url()).searchParams.get("collection") ?? "";
       const m = ns(collection);
       switch (req.method()) {
         case "GET":
@@ -333,5 +334,10 @@ export const STANDARD_TREE: SeedNode[] = [
   { id: "bravo", parentId: null, prevSiblingId: "alpha", text: "Bravo" },
   { id: "charlie", parentId: null, prevSiblingId: "bravo", text: "Charlie" },
   { id: "alpha-1", parentId: "alpha", prevSiblingId: null, text: "Alpha one" },
-  { id: "alpha-2", parentId: "alpha", prevSiblingId: "alpha-1", text: "Alpha two" },
+  {
+    id: "alpha-2",
+    parentId: "alpha",
+    prevSiblingId: "alpha-1",
+    text: "Alpha two",
+  },
 ];

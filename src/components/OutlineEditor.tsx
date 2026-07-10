@@ -1,4 +1,18 @@
 import {
+  useHotkey,
+  useHotkeys,
+  type UseHotkeyDefinition,
+} from "@tanstack/react-hotkeys";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearch,
+} from "@tanstack/react-router";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { Cause, Effect, Fiber } from "effect";
+import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
+import {
   Fragment,
   useCallback,
   useEffect,
@@ -12,67 +26,14 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Cause, Effect, Fiber } from "effect";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
-import {
-  Link,
-  useLocation,
-  useNavigate,
-  useSearch,
-} from "@tanstack/react-router";
-import {
-  useHotkey,
-  useHotkeys,
-  type UseHotkeyDefinition,
-} from "@tanstack/react-hotkeys";
-import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
-import {
-  getTreeIndex,
-  useHasNodes,
-  useMirrorCount,
-  useNode,
-  useSyncReady,
-  useTrail,
-  useTreeIndex,
-  useVisibleChildIds,
-  useVisibleRows,
-} from "../data/tree-store";
+
+import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
+
+import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled, isMobileBar, isVirtualized } from "../data/flags";
-import { Backlinks } from "./backlinks";
-import { MirrorBadge } from "./mirror-chrome";
-import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { focusKeyFor } from "../data/focus-key";
-import { OutlineRow } from "./OutlineRow";
-import { OutlineLoading } from "./OutlineLoading";
-import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
-import {
-  getViewIsHidden,
-  getViewRootId,
-  useSyncViewFilter,
-  useSyncViewState,
-} from "../data/view-state";
-import {
-  childrenOf,
-  countSubtreeNodes,
-  type Node,
-  type TreeIndex,
-} from "../data/tree";
-import {
-  DELETE_CONFIRM_THRESHOLD,
-  openDeleteConfirm,
-} from "./delete-confirm-opener";
-import {
-  findVisibleNeighbor,
-  instanceIdForKey,
-} from "../data/visible-order";
-import { clearSelection } from "../data/selection-state";
-import { useSyncSelectionFillRows } from "../data/selection-fill";
-import {
-  caretFromPoint,
-  placeCaretAtEnd,
-  placeCaretAtStart,
-} from "./caret-place";
-import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
+import { capture, drop } from "../data/history";
+import { hasLink } from "../data/links";
 import {
   indent,
   insertChildAtStart,
@@ -87,34 +48,38 @@ import {
   toggleCollapsed,
   toggleCompleted,
 } from "../data/mutations";
-import { bootstrapOutline } from "../data/seed";
-import { runStructural } from "../data/structural";
 import { appRuntime } from "../data/runtime";
-import { setNodeActionBridge } from "../data/command-bridge";
-import { capture, drop } from "../data/history";
-import { runHistoryRestore } from "./history-restore";
-import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { bootstrapOutline } from "../data/seed";
+import { useSyncSelectionFillRows } from "../data/selection-fill";
+import { clearSelection } from "../data/selection-state";
+import { runStructural } from "../data/structural";
 import {
-  decorate,
-  getCaretOffset,
-  getSelectedAtom,
-  readSource,
-  revealLinkAtCaret,
-  setCaretOffset,
-  watchCaretReveal,
-} from "./inline-code";
-import { hasLink } from "../data/links";
+  childrenOf,
+  countSubtreeNodes,
+  type Node,
+  type TreeIndex,
+} from "../data/tree";
 import {
-  copySourceSelection,
-  cutSourceSelection,
-  installLiteralPasteArm,
-  pasteIntoBullet,
-} from "./paste";
+  getTreeIndex,
+  useHasNodes,
+  useMirrorCount,
+  useNode,
+  useSyncReady,
+  useTrail,
+  useTreeIndex,
+  useVisibleChildIds,
+  useVisibleRows,
+} from "../data/tree-store";
 import {
-  applyPendingCaret,
-  clearPendingCaretOffset,
-  setPendingCaretOffset,
-} from "./pending-caret";
+  getViewIsHidden,
+  getViewRootId,
+  useSyncViewFilter,
+  useSyncViewState,
+} from "../data/view-state";
+import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
+import { findVisibleNeighbor, instanceIdForKey } from "../data/visible-order";
+import { useIsMobile } from "../hooks/use-mobile";
+import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import {
   blocksCaret,
   commandSpecs,
@@ -130,22 +95,61 @@ import {
   useIsProtected,
   useViewFilter,
 } from "../plugins/registry";
-import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
-import { useDragReorder } from "./use-drag-reorder";
-import { NodeDecorations } from "./NodeDecorations";
-import { Sheet, SheetContent } from "./ui/sheet";
+import { Backlinks } from "./backlinks";
+import {
+  caretFromPoint,
+  placeCaretAtEnd,
+  placeCaretAtStart,
+} from "./caret-place";
+import {
+  DELETE_CONFIRM_THRESHOLD,
+  openDeleteConfirm,
+} from "./delete-confirm-opener";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
+import { Header } from "./Header";
+import { runHistoryRestore } from "./history-restore";
+import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
+import {
+  decorate,
+  getCaretOffset,
+  getSelectedAtom,
+  readSource,
+  revealLinkAtCaret,
+  setCaretOffset,
+  watchCaretReveal,
+} from "./inline-code";
+import { openInlineTargetAtCaret } from "./link-keymap";
+import { MirrorBadge } from "./mirror-chrome";
+import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
+import { openMoveDialog } from "./move-dialog-opener";
+import { NodeDecorations } from "./NodeDecorations";
+import { OutlineLoading } from "./OutlineLoading";
+import { OutlineNode, type NodeCommands } from "./OutlineNode";
+import { OutlineRow } from "./OutlineRow";
+import {
+  copySourceSelection,
+  cutSourceSelection,
+  installLiteralPasteArm,
+  pasteIntoBullet,
+} from "./paste";
+import {
+  applyPendingCaret,
+  clearPendingCaretOffset,
+  setPendingCaretOffset,
+} from "./pending-caret";
 import { healProtectedText } from "./protected-text";
 import {
   guardMirrorSourceDelete,
   guardProtected,
   ProtectedLock,
 } from "./protection";
-import { Header } from "./Header";
-import { Subheader } from "./Subheader";
-import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
+import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
+import {
+  SelectionFormatToolbar,
+  type SelectionFormatActions,
+} from "./SelectionFormatToolbar";
 import { useShowCompleted } from "./show-completed-provider";
-import { openMoveDialog } from "./move-dialog-opener";
+import { Subheader } from "./Subheader";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -153,16 +157,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { openInlineTargetAtCaret } from "./link-keymap";
-import { useIsMobile } from "../hooks/use-mobile";
-import {
-  MobileActionsBar,
-  type MobileBarActions,
-} from "./MobileActionsBar";
-import {
-  SelectionFormatToolbar,
-  type SelectionFormatActions,
-} from "./SelectionFormatToolbar";
+import { Sheet, SheetContent } from "./ui/sheet";
+import { useDragReorder } from "./use-drag-reorder";
 import {
   toggleHighlightSelection,
   toggleWrapSelection,
@@ -240,7 +236,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     exposeHotkeyManagerForDev();
   }, []);
 
-  const routeSearch = useSearch({ strict: false }) as { q?: string; focus?: string };
+  const routeSearch = useSearch({ strict: false }) as {
+    q?: string;
+    focus?: string;
+  };
   const focusLast = routeSearch.focus === "last";
 
   // Seam G (ADR 0001): the composed per-node visibility predicate. The core no
@@ -315,7 +314,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // (onContentMouseDown is pure and lives at module scope above.)
   const onContentClick = (e: ReactMouseEvent) => {
     if (e.metaKey || e.ctrlKey) {
-      const textEl = (e.target as HTMLElement).closest<HTMLElement>(".node-text");
+      const textEl = (e.target as HTMLElement).closest<HTMLElement>(
+        ".node-text",
+      );
       if (textEl && openInlineTargetAtCaret(textEl)) {
         e.preventDefault();
         e.stopPropagation();
@@ -339,7 +340,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         ? hovered
         : null;
     const target =
-      getSelectedAtom(e.currentTarget) ?? hoveredChip ?? (e.target as HTMLElement);
+      getSelectedAtom(e.currentTarget) ??
+      hoveredChip ??
+      (e.target as HTMLElement);
     const rect = target.getBoundingClientRect();
     dispatchClick(target, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
@@ -681,7 +684,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFlash={pendingFlash}
       />
       <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
-      <div className="sticky top-0 z-10 relative" ref={headerRef}>
+      <div className="relative sticky top-0 z-10" ref={headerRef}>
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}
@@ -697,7 +700,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       <div
         role="region"
         aria-label="Outline"
-        className="mx-auto max-w-[720px] p-6 max-sm:p-4 mb-[50vh]"
+        className="mx-auto mb-[50vh] max-w-[720px] p-6 max-sm:p-4"
         onMouseDown={onContentMouseDown}
         onPointerDown={onContentPointerDown}
         onPointerUp={onContentPointerUp}
@@ -1186,12 +1189,15 @@ function useZoomNavigation({
     // land on the last visible child so a journal-style note opens ready to
     // append, not the title. No pivotId on a fresh page load.
     if (!pivotId && focusLast && rootId) {
-      const children = childrenOf(getTreeIndex(), rootId).filter((n) => !isHidden(n));
+      const children = childrenOf(getTreeIndex(), rootId).filter(
+        (n) => !isHidden(n),
+      );
       const lastChild = children[children.length - 1];
       if (!lastChild) return;
       const el = refs.get(lastChild.id);
       if (!el) {
-        if (scrollRowIntoView(lastChild.id)) pendingFocus.current = lastChild.id;
+        if (scrollRowIntoView(lastChild.id))
+          pendingFocus.current = lastChild.id;
         return;
       }
       el.focus({ preventScroll: true });
@@ -1248,7 +1254,6 @@ function useZoomNavigation({
 
   return { navigateZoom, pivotId };
 }
-
 
 /**
  * Facade for the mobile actions bar (ADR 0030): the existing per-bullet commands

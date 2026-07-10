@@ -1,15 +1,17 @@
-import { createCollection } from '@tanstack/react-db'
-import { type Cause, Duration, Effect, Fiber, Schema, Stream } from 'effect'
-import { nodeSchema } from './schema'
-import type { Node } from './schema'
-import { createNodes, deleteNodes, updateNodes } from './api'
-import { runPromise } from './nodes-client-effect'
-import { makeSyncStream } from './realtime'
-import type { ChangeOp, ServerMessage, SyncEvent } from './realtime'
-import { appRuntime } from './runtime'
-import { buildTreeIndex, childrenOf, now } from './tree'
-import { chainDisagreements } from './sibling-chain'
-import { isMirrorsEnabled } from './flags'
+import { createCollection } from "@tanstack/react-db";
+import { type Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
+
+import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
+import type { Node } from "./schema";
+
+import { createNodes, deleteNodes, updateNodes } from "./api";
+import { isMirrorsEnabled } from "./flags";
+import { runPromise } from "./nodes-client-effect";
+import { makeSyncStream } from "./realtime";
+import { appRuntime } from "./runtime";
+import { nodeSchema } from "./schema";
+import { chainDisagreements } from "./sibling-chain";
+import { buildTreeIndex, childrenOf, now } from "./tree";
 
 /**
  * Single source of truth for all outline nodes.
@@ -47,9 +49,9 @@ import { isMirrorsEnabled } from './flags'
  *  from a genuinely empty new account. First-run bootstrap reads this to avoid
  *  seeding welcome bullets over a real-but-unreachable outline (see seed.ts).
  *  Cleared the moment a real snapshot arrives (a recovered socket). */
-let initialError: Error | null = null
+let initialError: Error | null = null;
 export function nodesLoadError(): Error | null {
-  return initialError
+  return initialError;
 }
 
 /**
@@ -62,29 +64,29 @@ export function nodesLoadError(): Error | null {
  * spinner until then. Session-lived on purpose: a mid-session reconnect keeps it true, so
  * we never flash the loading state again once the outline has been shown.
  */
-let syncReady = false
-const syncReadyListeners = new Set<() => void>()
+let syncReady = false;
+const syncReadyListeners = new Set<() => void>();
 export function isSyncReady(): boolean {
-  return syncReady
+  return syncReady;
 }
 export function subscribeSyncReady(listener: () => void): () => void {
-  syncReadyListeners.add(listener)
+  syncReadyListeners.add(listener);
   return () => {
-    syncReadyListeners.delete(listener)
-  }
+    syncReadyListeners.delete(listener);
+  };
 }
 function markSyncReady(): void {
-  if (syncReady) return
-  syncReady = true
-  for (const listener of syncReadyListeners) listener()
+  if (syncReady) return;
+  syncReady = true;
+  for (const listener of syncReadyListeners) listener();
 }
 
 /** Force the outline to reconcile against server truth now (a fresh snapshot).
  *  Used by the daily plugin's claim loser-path; a no-op before the socket
  *  connects (or during the `/` prerender). */
-let resyncFn: (() => void) | null = null
+let resyncFn: (() => void) | null = null;
 export function resyncNodes(): void {
-  resyncFn?.()
+  resyncFn?.();
 }
 
 /**
@@ -92,9 +94,9 @@ export function resyncNodes(): void {
  * live change). A module-level mirror of the sync cursor so `waitForSeq` can be
  * awaited from outside the sync closure. Starts at 0 (nothing applied).
  */
-let appliedSeq = 0
-type SeqWaiter = { seq: number; resolve: () => void }
-const seqWaiters = new Set<SeqWaiter>()
+let appliedSeq = 0;
+type SeqWaiter = { seq: number; resolve: () => void };
+const seqWaiters = new Set<SeqWaiter>();
 
 /**
  * The last `text` value the SYNC channel applied for each node id (a live change
@@ -107,22 +109,22 @@ const seqWaiters = new Set<SeqWaiter>()
  * slash insert) carries a value that does NOT match the latest echo, so it still
  * repaints. See OutlineNode's store-sync effect.
  */
-const echoedText = new Map<string, string>()
+const echoedText = new Map<string, string>();
 export function echoedTextFor(id: string): string | undefined {
-  return echoedText.get(id)
+  return echoedText.get(id);
 }
 
 /** Advance the applied cursor and release any waiters it satisfies. Monotonic:
  *  a lower/equal seq (a redundant frame) is ignored. Called wherever a LIVE
  *  frame is applied (live change, resume). Snapshots use `resetAppliedSeq`. */
 function advanceAppliedSeq(seq: number): void {
-  if (seq <= appliedSeq) return
-  appliedSeq = seq
+  if (seq <= appliedSeq) return;
+  appliedSeq = seq;
   // Deleting the current entry mid-iteration is safe for a Set.
   for (const w of seqWaiters) {
     if (appliedSeq >= w.seq) {
-      seqWaiters.delete(w)
-      w.resolve()
+      seqWaiters.delete(w);
+      w.resolve();
     }
   }
 }
@@ -138,10 +140,10 @@ function advanceAppliedSeq(seq: number): void {
  *  structural tx trust the snapshot — the same fallback `waitForSeq`'s timeout
  *  already takes. */
 function resetAppliedSeq(seq: number): void {
-  appliedSeq = seq
+  appliedSeq = seq;
   for (const w of seqWaiters) {
-    seqWaiters.delete(w)
-    w.resolve()
+    seqWaiters.delete(w);
+    w.resolve();
   }
 }
 
@@ -159,23 +161,26 @@ function resetAppliedSeq(seq: number): void {
  * wedged; either way trust the synced snapshot rather than hang the transaction.
  * The interrupt finalizer drops the waiter, so a timed-out wait can't leak.
  */
-export function waitForSeqE(seq: number, timeoutMs = 8000): Effect.Effect<void> {
+export function waitForSeqE(
+  seq: number,
+  timeoutMs = 8000,
+): Effect.Effect<void> {
   return Effect.callback<void>((resume) => {
     if (appliedSeq >= seq) {
-      resume(Effect.void)
-      return
+      resume(Effect.void);
+      return;
     }
-    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) }
-    seqWaiters.add(waiter)
+    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) };
+    seqWaiters.add(waiter);
     return Effect.sync(() => {
-      seqWaiters.delete(waiter)
-    })
+      seqWaiters.delete(waiter);
+    });
   }).pipe(
     Effect.timeoutOrElse({
       duration: Duration.millis(timeoutMs),
       orElse: () => Effect.void,
     }),
-  )
+  );
 }
 
 /**
@@ -189,10 +194,10 @@ export function waitForNodeE(
   timeoutMs = 8000,
 ): Effect.Effect<void, Cause.TimeoutError> {
   return Effect.callback<void>((resume) => {
-    const present = () => nodesCollection.toArray.some((n) => n.id === id)
+    const present = () => nodesCollection.toArray.some((n) => n.id === id);
     if (present()) {
-      resume(Effect.void)
-      return
+      resume(Effect.void);
+      return;
     }
     // `Effect.callback`'s returned finalizer runs ONLY on interruption (the
     // timeout path), NOT on a successful `resume` — so the success paths must
@@ -201,25 +206,25 @@ export function waitForNodeE(
     // idempotent, so a later finalizer call after success is harmless.
     const sub = nodesCollection.subscribeChanges(() => {
       if (present()) {
-        sub.unsubscribe()
-        resume(Effect.void)
+        sub.unsubscribe();
+        resume(Effect.void);
       }
-    })
+    });
     // Guard the registration gap (a delta applied between the check and subscribe).
     if (present()) {
-      sub.unsubscribe()
-      resume(Effect.void)
+      sub.unsubscribe();
+      resume(Effect.void);
     }
     return Effect.sync(() => {
-      sub.unsubscribe()
-    })
-  }).pipe(Effect.timeout(Duration.millis(timeoutMs)))
+      sub.unsubscribe();
+    });
+  }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
 }
 
 /** Promise form of {@link waitForNodeE} for the daily claim loser-path (rejects
  *  on timeout; the caller `.catch`es it and materializes locally). */
 export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
-  return runPromise(waitForNodeE(id, timeoutMs))
+  return runPromise(waitForNodeE(id, timeoutMs));
 }
 
 /**
@@ -247,19 +252,19 @@ export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
 export function siblingChainRepairs(
   nodes: Node[],
 ): Array<{ id: string; prevSiblingId: string | null }> {
-  const index = buildTreeIndex(nodes)
-  const fixes: Array<{ id: string; prevSiblingId: string | null }> = []
+  const index = buildTreeIndex(nodes);
+  const fixes: Array<{ id: string; prevSiblingId: string | null }> = [];
   // childrenByParent holds ordered child *ids* now; map them back to the rows
   // chainDisagreements compares (the ids are canonical-order by construction).
   for (const ids of index.childrenByParent.values()) {
     const ordered = ids
       .map((id) => index.byId.get(id))
-      .filter((n): n is Node => n != null)
+      .filter((n): n is Node => n != null);
     for (const d of chainDisagreements(ordered)) {
-      fixes.push({ id: d.id, prevSiblingId: d.expectedPrev })
+      fixes.push({ id: d.id, prevSiblingId: d.expectedPrev });
     }
   }
-  return fixes
+  return fixes;
 }
 
 /** Apply sibling-chain repairs as one optimistic transaction (so the Worker
@@ -267,26 +272,26 @@ export function siblingChainRepairs(
  *  in a microtask, after the snapshot commit has settled, and never throws into
  *  the sync path. */
 function healSiblingChains(nodes: Node[]): void {
-  let fixes: ReturnType<typeof siblingChainRepairs>
+  let fixes: ReturnType<typeof siblingChainRepairs>;
   try {
-    fixes = siblingChainRepairs(nodes)
+    fixes = siblingChainRepairs(nodes);
   } catch {
-    return
+    return;
   }
-  if (fixes.length === 0) return
+  if (fixes.length === 0) return;
   queueMicrotask(() => {
     try {
       for (const fix of fixes) {
         nodesCollection.update(fix.id, (draft) => {
-          draft.prevSiblingId = fix.prevSiblingId
-          draft.updatedAt = now()
-        })
+          draft.prevSiblingId = fix.prevSiblingId;
+          draft.updatedAt = now();
+        });
       }
     } catch {
       // A node may have been deleted between snapshot and microtask; a failed
       // heal is harmless -- the next snapshot retries.
     }
-  })
+  });
 }
 
 /**
@@ -305,41 +310,45 @@ function healSiblingChains(nodes: Node[]): void {
  * flag-off / mirror-free / orphan-free outline (the mirrorOf lookups all miss).
  */
 function healMirrorOrphans(nodes: Node[]): void {
-  if (!isMirrorsEnabled()) return
-  const byId = new Map<string, Node>()
-  for (const n of nodes) byId.set(n.id, n)
+  if (!isMirrorsEnabled()) return;
+  const byId = new Map<string, Node>();
+  for (const n of nodes) byId.set(n.id, n);
 
   // Group orphans by their true source. `parent.mirrorOf` is already the true
   // source (mirror-of-mirror is flattened at creation -- ADR 0022), so there's
   // no chain to resolve here.
-  const orphansBySource = new Map<string, string[]>()
+  const orphansBySource = new Map<string, string[]>();
   for (const n of nodes) {
-    if (n.parentId == null) continue
-    const source = byId.get(n.parentId)?.mirrorOf
+    if (n.parentId == null) continue;
+    const source = byId.get(n.parentId)?.mirrorOf;
     // A broken mirror (source deleted) renders as a leaf, not a window -- repointing
     // the child at a missing id would persist a dangling parentId AND stop the node
     // matching this heal on the next snapshot. Leave it and heal once the source
     // (if ever) returns.
-    if (!source || !byId.has(source)) continue
-    const list = orphansBySource.get(source)
-    if (list) list.push(n.id)
-    else orphansBySource.set(source, [n.id])
+    if (!source || !byId.has(source)) continue;
+    const list = orphansBySource.get(source);
+    if (list) list.push(n.id);
+    else orphansBySource.set(source, [n.id]);
   }
-  if (orphansBySource.size === 0) return
+  if (orphansBySource.size === 0) return;
 
   // Thread each rescued run after the source's current LAST real child (its own
   // children hang off the source id, so the orphans -- bucketed under the mirror
   // instance id -- are excluded from this read). Keeps the orphans' snapshot
   // order among themselves.
-  const index = buildTreeIndex(nodes)
-  const fixes: { id: string; parentId: string; prevSiblingId: string | null }[] = []
+  const index = buildTreeIndex(nodes);
+  const fixes: {
+    id: string;
+    parentId: string;
+    prevSiblingId: string | null;
+  }[] = [];
   for (const [source, orphanIds] of orphansBySource) {
-    const existing = childrenOf(index, source)
+    const existing = childrenOf(index, source);
     let prev: string | null =
-      existing.length > 0 ? existing[existing.length - 1]!.id : null
+      existing.length > 0 ? existing[existing.length - 1]!.id : null;
     for (const id of orphanIds) {
-      fixes.push({ id, parentId: source, prevSiblingId: prev })
-      prev = id
+      fixes.push({ id, parentId: source, prevSiblingId: prev });
+      prev = id;
     }
   }
 
@@ -347,16 +356,16 @@ function healMirrorOrphans(nodes: Node[]): void {
     for (const fix of fixes) {
       try {
         nodesCollection.update(fix.id, (draft) => {
-          draft.parentId = fix.parentId
-          draft.prevSiblingId = fix.prevSiblingId
-          draft.updatedAt = now()
-        })
+          draft.parentId = fix.parentId;
+          draft.prevSiblingId = fix.prevSiblingId;
+          draft.updatedAt = now();
+        });
       } catch {
         // A node may have been deleted between snapshot and microtask; harmless --
         // isolate per fix so one stale id doesn't abort the rest. Next snapshot retries.
       }
     }
-  })
+  });
 }
 
 /**
@@ -373,97 +382,98 @@ function withNodeDefaults(n: Node): Node {
   // The wire/DO type says these are always present, so read them through a loose
   // cast: a row persisted before a field existed (or the e2e mock) may omit it
   // at runtime even though the type can't express that.
-  const loose = n as { mirrorOf?: unknown; origin?: unknown }
-  if (loose.mirrorOf !== undefined && loose.origin !== undefined) return n
+  const loose = n as { mirrorOf?: unknown; origin?: unknown };
+  if (loose.mirrorOf !== undefined && loose.origin !== undefined) return n;
   return {
     ...n,
     mirrorOf: loose.mirrorOf === undefined ? null : n.mirrorOf,
     origin: loose.origin === undefined ? null : n.origin,
-  }
+  };
 }
 
 export const nodesCollection = createCollection({
-  id: 'nodes',
+  id: "nodes",
   getKey: (node: Node) => node.id,
   schema: Schema.toStandardSchemaV1(nodeSchema),
   sync: {
     // Updates carry only changed fields (a PATCH) OR a full row (an upsert);
     // partial merges both correctly.
-    rowUpdateMode: 'partial',
+    rowUpdateMode: "partial",
     sync: ({ begin, write, commit, markReady, truncate, metadata }) => {
       // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
       // any defensive server-side read resolves empty instead of hanging.
-      if (typeof window === 'undefined') {
-        markReady()
-        return () => {}
+      if (typeof window === "undefined") {
+        markReady();
+        return () => {};
       }
 
-      let ready = false
+      let ready = false;
       const ensureReady = () => {
-        if (ready) return
-        ready = true
-        markReady()
+        if (ready) return;
+        ready = true;
+        markReady();
         // Release the shell's loading spinner (module signal, see markSyncReady).
-        markSyncReady()
-      }
+        markSyncReady();
+      };
       const getCursor = (): number | null =>
-        (metadata?.collection.get('cursor') as number | undefined) ?? null
+        (metadata?.collection.get("cursor") as number | undefined) ?? null;
 
       const applyOps = (ops: readonly ChangeOp[], seq: number): void => {
-        begin()
+        begin();
         for (const op of ops) {
-          if (op.op === 'delete') {
-            write({ type: 'delete', key: op.key })
-            echoedText.delete(op.key)
+          if (op.op === "delete") {
+            write({ type: "delete", key: op.key });
+            echoedText.delete(op.key);
           } else {
-            write({ type: op.op, value: withNodeDefaults(op.value) })
-            echoedText.set(op.value.id, op.value.text)
+            write({ type: op.op, value: withNodeDefaults(op.value) });
+            echoedText.set(op.value.id, op.value.text);
           }
         }
-        metadata?.collection.set('cursor', seq)
-        commit()
+        metadata?.collection.set("cursor", seq);
+        commit();
         // Release any runStructural transaction awaiting its own echo (P2).
-        advanceAppliedSeq(seq)
-      }
+        advanceAppliedSeq(seq);
+      };
 
       // Apply one decoded server frame. Unchanged from the old onMessage body —
       // it just runs on the sync fiber now (driven by Stream.runForEach below).
       const applyMessage = (msg: ServerMessage): void => {
-        if (msg.type === 'snapshot') {
+        if (msg.type === "snapshot") {
           // Replace the whole collection: truncate, then write the full set.
           // Idempotent on first connect (empty) and on a resync past the
           // changelog window. The cursor survives truncate (separate store).
-          begin()
-          truncate()
-          for (const n of msg.nodes) write({ type: 'insert', value: withNodeDefaults(n) })
-          metadata?.collection.set('cursor', msg.seq)
-          commit()
+          begin();
+          truncate();
+          for (const n of msg.nodes)
+            write({ type: "insert", value: withNodeDefaults(n) });
+          metadata?.collection.set("cursor", msg.seq);
+          commit();
           // A fresh snapshot supersedes every earlier seq (and may be the
           // resolution a runStructural transaction is waiting on after a
           // reconnect or a same-page account switch), so reset the cursor to
           // it — even if it's LOWER than what a prior outline left behind.
-          resetAppliedSeq(msg.seq)
-          initialError = null
-          ensureReady()
+          resetAppliedSeq(msg.seq);
+          initialError = null;
+          ensureReady();
           // Self-heal any persisted sibling-chain corruption now that the full
           // outline is in hand (deferred so it writes outside this commit).
           // Copy: msg.nodes is a readonly wire array; the heal path wants Node[].
-          healSiblingChains(msg.nodes.slice())
+          healSiblingChains(msg.nodes.slice());
           // Rescue any node stranded under a mirror instance (ADR 0022 boundary
           // gap). Queued AFTER the chain heal so its parentId+prevSiblingId write
           // wins on the rescued node if both touch it.
-          healMirrorOrphans(msg.nodes.slice())
-        } else if (msg.type === 'resume') {
+          healMirrorOrphans(msg.nodes.slice());
+        } else if (msg.type === "resume") {
           // The gap since our cursor. Empty = already current; the cursor is
           // unchanged so there's nothing to write.
-          for (const frame of msg.changes) applyOps(frame.ops, frame.seq)
-          initialError = null
-          ensureReady()
+          for (const frame of msg.changes) applyOps(frame.ops, frame.seq);
+          initialError = null;
+          ensureReady();
         } else {
           // A live change broadcast from this or another device.
-          applyOps(msg.ops, msg.seq)
+          applyOps(msg.ops, msg.seq);
         }
-      }
+      };
 
       // Allocate the producer synchronously (state only, no services), so the
       // resync bridge is wired before sync() returns; then fork the consuming
@@ -472,33 +482,33 @@ export const nodesCollection = createCollection({
       // socket's scope finalizer.
       const { events, resync } = Effect.runSync(
         makeSyncStream(Effect.sync(getCursor)),
-      )
+      );
       resyncFn = () => {
-        appRuntime.runFork(resync)
-      }
+        appRuntime.runFork(resync);
+      };
 
       const fiber = appRuntime.runFork(
         Stream.runForEach(events, (event: SyncEvent) =>
           Effect.sync(() => {
-            if (event._tag === 'InitialError') {
-              initialError = event.error
-              ensureReady()
+            if (event._tag === "InitialError") {
+              initialError = event.error;
+              ensureReady();
             } else {
-              applyMessage(event.message)
+              applyMessage(event.message);
             }
           }),
         ),
-      )
+      );
 
       return () => {
-        resyncFn = null
-        appRuntime.runFork(Fiber.interrupt(fiber))
-      }
+        resyncFn = null;
+        appRuntime.runFork(Fiber.interrupt(fiber));
+      };
     },
   },
   onInsert: async ({ transaction }) => {
-    await createNodes(transaction.mutations.map((m) => m.modified as Node))
-    return { refetch: false }
+    await createNodes(transaction.mutations.map((m) => m.modified as Node));
+    return { refetch: false };
   },
   onUpdate: async ({ transaction }) => {
     await updateNodes(
@@ -506,11 +516,11 @@ export const nodesCollection = createCollection({
         id: m.key as string,
         changes: m.changes as Partial<Node>,
       })),
-    )
-    return { refetch: false }
+    );
+    return { refetch: false };
   },
   onDelete: async ({ transaction }) => {
-    await deleteNodes(transaction.mutations.map((m) => m.key as string))
-    return { refetch: false }
+    await deleteNodes(transaction.mutations.map((m) => m.key as string));
+    return { refetch: false };
   },
-})
+});

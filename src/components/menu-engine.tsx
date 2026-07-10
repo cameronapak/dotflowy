@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+
 import type { Node } from "../data/schema";
 import type {
   MenuEntry,
@@ -7,6 +8,7 @@ import type {
   MenuTrigger,
   PluginContext,
 } from "../plugins/types";
+
 import { menuSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
@@ -138,13 +140,17 @@ export function useMenus({
       case "ArrowDown":
         e.preventDefault();
         setOpen((s) =>
-          s ? { ...s, activeIndex: wrap(s.activeIndex + 1, entries.length) } : s,
+          s
+            ? { ...s, activeIndex: wrap(s.activeIndex + 1, entries.length) }
+            : s,
         );
         return true;
       case "ArrowUp":
         e.preventDefault();
         setOpen((s) =>
-          s ? { ...s, activeIndex: wrap(s.activeIndex - 1, entries.length) } : s,
+          s
+            ? { ...s, activeIndex: wrap(s.activeIndex - 1, entries.length) }
+            : s,
         );
         return true;
       case "Enter":
@@ -170,9 +176,7 @@ export function useMenus({
             emptyLabel={spec?.emptyLabel}
             x={open.x}
             y={open.y}
-            onHover={(i) =>
-              setOpen((s) => (s ? { ...s, activeIndex: i } : s))
-            }
+            onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
             onSelect={pick}
           />,
           document.body,

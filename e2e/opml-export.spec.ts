@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // App OPML export (ADR 0037, issue #127): the "Export OPML" More-menu item /
@@ -19,12 +20,45 @@ import { seedOutline, type SeedNode } from "./fixtures";
 //   Other top level (other)       <- must NOT appear in a zoomed export
 const TREE: SeedNode[] = [
   { id: "root", parentId: null, prevSiblingId: null, text: "Project alpha" },
-  { id: "other", parentId: null, prevSiblingId: "root", text: "Other top level" },
-  { id: "done", parentId: "root", prevSiblingId: null, text: "Done item", completed: true },
-  { id: "task", parentId: "root", prevSiblingId: "done", text: "Task item", isTask: true },
-  { id: "source", parentId: "root", prevSiblingId: "task", text: "Source item" },
-  { id: "source-kid", parentId: "source", prevSiblingId: null, text: "Source child" },
-  { id: "mir", parentId: "root", prevSiblingId: "source", text: "mirror placeholder", mirrorOf: "source" },
+  {
+    id: "other",
+    parentId: null,
+    prevSiblingId: "root",
+    text: "Other top level",
+  },
+  {
+    id: "done",
+    parentId: "root",
+    prevSiblingId: null,
+    text: "Done item",
+    completed: true,
+  },
+  {
+    id: "task",
+    parentId: "root",
+    prevSiblingId: "done",
+    text: "Task item",
+    isTask: true,
+  },
+  {
+    id: "source",
+    parentId: "root",
+    prevSiblingId: "task",
+    text: "Source item",
+  },
+  {
+    id: "source-kid",
+    parentId: "source",
+    prevSiblingId: null,
+    text: "Source child",
+  },
+  {
+    id: "mir",
+    parentId: "root",
+    prevSiblingId: "source",
+    text: "mirror placeholder",
+    mirrorOf: "source",
+  },
 ];
 
 interface CapturedDownload {
@@ -55,7 +89,9 @@ async function interceptDownloads(page: Page) {
       const blob = blobs.get(this.href);
       if (!blob) return HTMLElement.prototype.click.call(this);
       const filename = this.download;
-      window.__downloads!.push(blob.text().then((text) => ({ filename, text })));
+      window.__downloads!.push(
+        blob.text().then((text) => ({ filename, text })),
+      );
     };
   });
 }
@@ -64,7 +100,9 @@ async function capturedDownload(page: Page): Promise<CapturedDownload> {
   await expect
     .poll(() => page.evaluate(() => window.__downloads!.length))
     .toBeGreaterThan(0);
-  return page.evaluate(() => Promise.all(window.__downloads!).then((d) => d[0]!));
+  return page.evaluate(() =>
+    Promise.all(window.__downloads!).then((d) => d[0]!),
+  );
 }
 
 const nodeText = (page: Page, id: string) =>
@@ -88,7 +126,9 @@ test.describe("OPML export (More menu + Cmd+K)", () => {
     const { filename, text } = await capturedDownload(page);
 
     // Filename: dotflowy-<slug>-<local date>.opml.
-    expect(filename).toMatch(/^dotflowy-project-alpha-\d{4}-\d{2}-\d{2}\.opml$/);
+    expect(filename).toMatch(
+      /^dotflowy-project-alpha-\d{4}-\d{2}-\d{2}\.opml$/,
+    );
 
     // OPML shell, title-only head -- never ownerEmail (privacy, ADR 0037).
     expect(text).toContain('<opml version="2.0">');

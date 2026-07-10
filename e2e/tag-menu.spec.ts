@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // The `#` autocomplete is now a plugin menu (ADR 0018 Seam H): the tags plugin
@@ -44,7 +45,9 @@ test.describe("tag autocomplete (plugin Seam H)", () => {
     await expect(page.locator('[role="listbox"]')).toHaveCount(0);
 
     // The bullet now carries the completed tag, rendered as its inline chip.
-    await expect(text(page, "b").locator('.tag[data-tag="urgent"]')).toBeVisible();
+    await expect(
+      text(page, "b").locator('.tag[data-tag="urgent"]'),
+    ).toBeVisible();
   });
 
   test("adding a second tag to a node that already has one still lists it", async ({

@@ -33,11 +33,11 @@ This doc is the reference for the mapping tickets (#113 notes, #114 inline rich 
 
 The full 16,882-node export contains **exactly three** attribute names:
 
-| Attribute | Count | Semantics |
-| --- | --- | --- |
-| `text` | 16,882 (every node) | The bullet's rich text: escaped inline HTML (below). May be `""` (183 empty bullets). May — rarely — contain a literal newline as `&#10;` (1 occurrence). |
-| `_complete` | 1,166 | Present with value `"true"` iff completed; absent otherwise. When present it precedes `text` in attribute order. |
-| `_note` | 657 | The bullet's note, as one attribute string. Newlines are `&#10;` (a trailing `&#10;` is included). May contain the same inline HTML as `text` — 62 of 657 real notes carry links/formatting. |
+| Attribute   | Count               | Semantics                                                                                                                                                                                    |
+| ----------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text`      | 16,882 (every node) | The bullet's rich text: escaped inline HTML (below). May be `""` (183 empty bullets). May — rarely — contain a literal newline as `&#10;` (1 occurrence).                                    |
+| `_complete` | 1,166               | Present with value `"true"` iff completed; absent otherwise. When present it precedes `text` in attribute order.                                                                             |
+| `_note`     | 657                 | The bullet's note, as one attribute string. Newlines are `&#10;` (a trailing `&#10;` is included). May contain the same inline HTML as `text` — 62 of 657 real notes carry links/formatting. |
 
 **No identity, no timestamps**: zero occurrences of `_uuid`, `created`, `lm`, or any other attribute. Re-import cannot key on node identity — this is why re-import always duplicates and why the import-UX decision (#111) is always-append.
 
@@ -47,17 +47,17 @@ Aside: Dynalist also uses `_note` (deliberate interop — [Dynalist forum](https
 
 Formatting lives as **HTML markup XML-escaped inside the attribute value** (`&lt;b&gt;bold&lt;/b&gt;`). Tag census over the real export:
 
-| Tag | Count | Shape |
-| --- | --- | --- |
-| `<time>` | 2,683 | Date span (below). ~16% of nodes carry one. |
-| `<a>` | 2,349 | `<a href="url">label</a>`. Bare URLs are auto-linked on entry, exporting as `<a href="u">u</a>`. |
-| `<mark>` | 214 | Color/highlight (below). |
-| `<i>` | 177 | Italic. |
-| `<b>` | 137 | Bold. |
-| `<code>` | 18 | Inline code. |
-| `<u>` | 11 | Underline. |
-| `<s>` | 3 | Strikethrough. |
-| `<mention>` | 2 | Person mention (below). |
+| Tag         | Count | Shape                                                                                            |
+| ----------- | ----- | ------------------------------------------------------------------------------------------------ |
+| `<time>`    | 2,683 | Date span (below). ~16% of nodes carry one.                                                      |
+| `<a>`       | 2,349 | `<a href="url">label</a>`. Bare URLs are auto-linked on entry, exporting as `<a href="u">u</a>`. |
+| `<mark>`    | 214   | Color/highlight (below).                                                                         |
+| `<i>`       | 177   | Italic.                                                                                          |
+| `<b>`       | 137   | Bold.                                                                                            |
+| `<code>`    | 18    | Inline code.                                                                                     |
+| `<u>`       | 11    | Underline.                                                                                       |
+| `<s>`       | 3     | Strikethrough.                                                                                   |
+| `<mention>` | 2     | Person mention (below).                                                                          |
 
 **Nesting is real**: observed shapes include `<b><i>`, `<b><a>`, `<i><mark>`, `<i><a>`, and `<a><mark>…</mark></a>` inside notes. Relevant for #114: dotflowy emphasis is flat (ADR 0025), so nested imports need a defined degradation.
 
@@ -82,7 +82,7 @@ Formatting lives as **HTML markup XML-escaped inside the attribute value** (`&lt
 <mention id="2544228" by="2544228" ts="130585935"> </mention>
 ```
 
-Content is a single space; **the display name is not exported**. On import into the *same* workspace, Workflowy re-resolves the id to the name pill (verified live: the pill came back as "@Cameron Pak"). Outside that workspace the id is unresolvable — for dotflowy import there is no recoverable name; degrade explicitly (#114), never silently drop.
+Content is a single space; **the display name is not exported**. On import into the _same_ workspace, Workflowy re-resolves the id to the name pill (verified live: the pill came back as "@Cameron Pak"). Outside that workspace the id is unresolvable — for dotflowy import there is no recoverable name; degrade explicitly (#114), never silently drop.
 
 ### Tags and mirrors
 
@@ -92,12 +92,12 @@ Content is a single space; **the display name is not exported**. On import into 
 ## Escaping rules
 
 - Standard XML escaping, applied once: `<` → `&lt;`, `&` → `&amp;`, `"` → `&quot;` inside attribute values. `'` stays raw.
-- A **user-typed literal `<`** therefore appears double-escaped: `&amp;lt;` (10 occurrences in the real export). After XML-decoding the attribute once, the string still contains `&lt;` entities that are *content*, plus real HTML tags — i.e. **the attribute value is HTML, so it needs an HTML-entity decode after the XML decode**, and the two layers must not be conflated.
+- A **user-typed literal `<`** therefore appears double-escaped: `&amp;lt;` (10 occurrences in the real export). After XML-decoding the attribute once, the string still contains `&lt;` entities that are _content_, plus real HTML tags — i.e. **the attribute value is HTML, so it needs an HTML-entity decode after the XML decode**, and the two layers must not be conflated.
 - Newline = `&#10;` — the **only** numeric character reference in the entire export (no `&#9;`, no `&#13;`). `@rgrove/parse-xml` decodes these in attribute values correctly (the fast-xml-parser corruption noted on #110).
 
 ## Import behavior (what Workflowy accepts)
 
-- **Import = paste.** Pasting an OPML document as text into any bullet parses it into a nested list (the documented path since 2013; verified live). There is no OPML *file*-upload import in the classic flow (the node menu's "Upload file" is attachments).
+- **Import = paste.** Pasting an OPML document as text into any bullet parses it into a nested list (the documented path since 2013; verified live). There is no OPML _file_-upload import in the classic flow (the node menu's "Upload file" is attachments).
 - The paste handler requires a **trusted clipboard event** — a synthetic `ClipboardEvent('paste')` with `DataTransfer` is ignored (relevant to any future automated e2e against real Workflowy).
 - **Everything it exports, it honors on import** — proven by the byte-identical round-trip: `text` inline HTML (all tags above), `_note` incl. `&#10;` newlines and embedded links, `_complete="true"`, deep nesting, emoji/Unicode, `<time>` attrs → live date pill, `<mention>` id → re-resolved pill.
 - Constraint on dotflowy's **export** (the destination requires Workflowy-importable output): emit this dialect — escaped inline-HTML `text`, `_note`, `_complete="true"`, `&#10;` newlines. Exact serializer cosmetics (indent, attribute order) are not load-bearing for import.

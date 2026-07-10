@@ -1,9 +1,10 @@
-import { nodesCollection } from './collection'
-import { isMirrorsEnabled } from './flags'
-import type { Node } from './schema'
-import { buildTreeIndex } from './tree'
-import { getViewIsHidden, getViewRootId } from './view-state'
-import { buildVisibleRows, focusKeyAfterEdit } from './visible-order'
+import type { Node } from "./schema";
+
+import { nodesCollection } from "./collection";
+import { isMirrorsEnabled } from "./flags";
+import { buildTreeIndex } from "./tree";
+import { getViewIsHidden, getViewRootId } from "./view-state";
+import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
 
 /**
  * The render key to focus after a structural edit, re-derived from the LIVE post-
@@ -23,8 +24,14 @@ import { buildVisibleRows, focusKeyAfterEdit } from './visible-order'
  * (ADR 0044) needs it too, from a module the editor imports.
  */
 export function focusKeyFor(instanceId: string, activeKey: string): string {
-  if (!isMirrorsEnabled()) return instanceId
-  const index = buildTreeIndex(nodesCollection.toArray as Node[])
-  const rows = buildVisibleRows(index, getViewRootId(), getViewIsHidden(), null, true)
-  return focusKeyAfterEdit(rows, instanceId, activeKey) ?? instanceId
+  if (!isMirrorsEnabled()) return instanceId;
+  const index = buildTreeIndex(nodesCollection.toArray as Node[]);
+  const rows = buildVisibleRows(
+    index,
+    getViewRootId(),
+    getViewIsHidden(),
+    null,
+    true,
+  );
+  return focusKeyAfterEdit(rows, instanceId, activeKey) ?? instanceId;
 }

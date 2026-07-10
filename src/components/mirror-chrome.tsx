@@ -1,4 +1,5 @@
 import { CopyPlus } from "lucide-react";
+
 import { openMirrorPlaces } from "./mirror-places-opener";
 
 /**
@@ -25,7 +26,7 @@ export function MirrorBadge({
   return (
     <button
       type="button"
-      className="mirror-badge inline-flex shrink-0 select-none items-center gap-0.5 rounded-full border border-border/60 bg-muted/60 px-1.5 text-[10px] font-medium leading-4 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="mirror-badge inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border/60 bg-muted/60 px-1.5 text-[10px] leading-4 font-medium text-muted-foreground transition-colors select-none hover:bg-muted hover:text-foreground"
       title={label}
       aria-label={label}
       // Don't let a click bubble to the bullet (which would zoom) or place a

@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+
+import { isMirrorsEnabled } from "../data/flags";
 import { type Node, type TreeIndex } from "../data/tree";
+import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
 import {
   buildVisibleRows,
   instanceIdForKey,
   parentKeyOf,
 } from "../data/visible-order";
-import { isMirrorsEnabled } from "../data/flags";
-import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
 import { INDENT_PX } from "./OutlineRow";
 
 /**
@@ -174,7 +180,10 @@ export function useDragReorder(deps: DragDeps) {
     if (gi !== -1) {
       const grabbedDepth = visible[gi]!.depth;
       skipEnd = gi + 1;
-      while (skipEnd < visible.length && visible[skipEnd]!.depth > grabbedDepth) {
+      while (
+        skipEnd < visible.length &&
+        visible[skipEnd]!.depth > grabbedDepth
+      ) {
         skipEnd++;
       }
     }

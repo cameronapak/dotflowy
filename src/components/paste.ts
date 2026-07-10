@@ -15,9 +15,11 @@
 // splice into source space directly, then re-decorate.
 
 import type { ClipboardEvent } from "react";
-import { afterPaste, pasteReplacement } from "../plugins/registry";
-import type { PluginContext } from "../plugins/types";
+
 import type { MdPastePlacement } from "../data/markdown-import";
+import type { PluginContext } from "../plugins/types";
+
+import { afterPaste, pasteReplacement } from "../plugins/registry";
 import {
   decorate,
   getSelectionRange,
@@ -51,7 +53,11 @@ function consumeLiteralArm(): boolean {
  */
 export function installLiteralPasteArm(): () => void {
   const down = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "v" || e.key === "V")) {
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      (e.key === "v" || e.key === "V")
+    ) {
       literalArmed = true;
     }
   };
@@ -104,7 +110,10 @@ export function pasteIntoBullet(
   // A single trailing newline terminates the last line; it does not add an empty
   // one. So a URL copied out of a terminal ("https://x.com\n") stays a SINGLE-
   // line paste and keeps the links plugin's wrap + unfurl (Seam I).
-  const plain = cd.getData("text/plain").replace(/\r\n?/g, "\n").replace(/\n$/, "");
+  const plain = cd
+    .getData("text/plain")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n$/, "");
   const html = cd.getData("text/html");
 
   // readSource reconstructs the raw markdown from the DOM (a focused bullet can

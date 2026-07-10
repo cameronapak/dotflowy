@@ -16,8 +16,8 @@
 // capture/pending-focus semantics are editor-edit concerns a get-or-create that
 // navigates away doesn't want.
 
-import { Effect } from "effect";
 import { useNavigate } from "@tanstack/react-router";
+import { Effect } from "effect";
 import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
@@ -26,10 +26,20 @@ import {
   SunIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import { cn } from "@/lib/utils";
 import { Badge, Button } from "@/plugins/kit";
-import { definePlugin, type PluginContext } from "../types";
-import { capture, drop } from "../../data/history";
+
+import type { WidgetEl } from "../types";
+
+import {
+  nodesCollection,
+  resyncNodes,
+  waitForNode,
+} from "../../data/collection";
+import { DATE_LINK_PATTERN, parseDateLink } from "../../data/date-links";
 import { isMirrorsEnabled } from "../../data/flags";
+import { capture, drop } from "../../data/history";
 import {
   appendChild,
   insertChildAtStart,
@@ -41,16 +51,12 @@ import {
 } from "../../data/mutations";
 import { runStructural } from "../../data/structural";
 import {
-  nodesCollection,
-  resyncNodes,
-  waitForNode,
-} from "../../data/collection";
-import {
   buildTreeIndex,
   childrenOf,
   createId,
   type TreeIndex,
 } from "../../data/tree";
+import { definePlugin, type PluginContext } from "../types";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
@@ -68,11 +74,8 @@ import {
   subscribeDailyIndex,
   useDailyDate,
 } from "./daily-index";
-import { useDailyNavigationPending, withDailyNavigation } from "./pending";
-import { DATE_LINK_PATTERN, parseDateLink } from "../../data/date-links";
 import { DateLinkChip } from "./date-chip";
-import type { WidgetEl } from "../types";
-import { cn } from "@/lib/utils";
+import { useDailyNavigationPending, withDailyNavigation } from "./pending";
 
 // --- get-or-create ----------------------------------------------------------
 
@@ -152,7 +155,7 @@ async function ensureDay(
     // the LIVE collection, not the passed `index`, which can predate a
     // just-fired seed. No capture() -- stays out of undo like day creation.
     if (seedEntryLine && !hasChildInLiveCollection(existing)) {
-      runStructural(() => appendChild(existing, null, ''));
+      runStructural(() => appendChild(existing, null, ""));
     }
     return existing;
   }
@@ -172,7 +175,7 @@ async function ensureDay(
         // Fresh day: when a write-intent surface asked, seed the entry line in
         // the SAME batch as the day node (correct-by-construction, no sibling
         // fan). Otherwise the day is a bare title-only note.
-        if (seedEntryLine) appendChild(winner, null, '');
+        if (seedEntryLine) appendChild(winner, null, "");
       }),
     !won,
   );

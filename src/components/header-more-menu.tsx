@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   ALargeSmallIcon,
   ChevronsDownUpIcon,
@@ -17,9 +16,29 @@ import {
   SunIcon,
   SunMoonIcon,
 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { Button } from "./ui/button";
+
+import { localDateKey } from "../data/date-links";
+import { downloadTextFile } from "../data/download";
+import { openFeedbackReport } from "../data/feedback";
+import { capture } from "../data/history";
+import { flattenInline } from "../data/inline-text";
+import { outlineToMarkdown } from "../data/markdown";
+import { toggleCollapsed } from "../data/mutations";
+import { exportOpml } from "../data/opml-export";
+import { runStructural } from "../data/structural";
+import { childrenOf } from "../data/tree";
+import { getTreeIndex } from "../data/tree-store";
+import { getViewRootId } from "../data/view-state";
+import { signOut } from "../lib/auth-client";
 import { McpConnectDialog } from "./mcp-connect-dialog";
+import { openOpmlImport } from "./opml-import-opener";
+import { useShowCompleted } from "./show-completed-provider";
+import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
+import { useTextSize, type TextSize } from "./text-size-provider";
+import { useTheme } from "./theme-provider";
+import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -33,27 +52,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { signOut } from "../lib/auth-client";
-import { useShowCompleted } from "./show-completed-provider";
-import {
-  setSpotlightEnabled,
-  useSpotlightEnabled,
-} from "./spotlight-mode";
-import { useTheme } from "./theme-provider";
-import { useTextSize, type TextSize } from "./text-size-provider";
-import { outlineToMarkdown } from "../data/markdown";
-import { exportOpml } from "../data/opml-export";
-import { downloadTextFile } from "../data/download";
-import { localDateKey } from "../data/date-links";
-import { flattenInline } from "../data/inline-text";
-import { getTreeIndex } from "../data/tree-store";
-import { getViewRootId } from "../data/view-state";
-import { childrenOf } from "../data/tree";
-import { toggleCollapsed } from "../data/mutations";
-import { runStructural } from "../data/structural";
-import { capture } from "../data/history";
-import { openOpmlImport } from "./opml-import-opener";
-import { openFeedbackReport } from "../data/feedback";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -154,7 +152,8 @@ function collapsibleTargets(collapsed: boolean): {
     seen.add(id);
     const kids = childrenOf(index, id);
     if (kids.length === 0) continue;
-    if ((index.byId.get(id)?.collapsed ?? false) !== collapsed) targets.push(id);
+    if ((index.byId.get(id)?.collapsed ?? false) !== collapsed)
+      targets.push(id);
     for (const k of kids) stack.push(k.id);
   }
   return { ids: targets, rootId };

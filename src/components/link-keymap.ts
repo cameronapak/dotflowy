@@ -1,8 +1,9 @@
+import type { PluginContext } from "../plugins/types";
+
 import { linkAtOffset, linkUrlAtOffset } from "../data/links";
 import { getViewRootId } from "../data/view-state";
 import { openLinkEditPopover } from "../plugins/links/link-edit-popover";
 import { bibleRefUrlAtOffset } from "../plugins/route-bible/bible";
-import type { PluginContext } from "../plugins/types";
 import { getCaretOffset, readSource, setCaretOffset } from "./inline-code";
 import { openUrlInFocusedTab } from "./open-url";
 
@@ -24,7 +25,11 @@ export function openInlineTargetAtCaret(
   }
   const text = readSource(el);
   const caret = getCaretOffset(el);
-  if (options.linkParens === "edit" && ctx && openLinkEditAtCaret(el, text, caret, ctx)) {
+  if (
+    options.linkParens === "edit" &&
+    ctx &&
+    openLinkEditAtCaret(el, text, caret, ctx)
+  ) {
     return true;
   }
   const url = linkUrlAtOffset(text, caret) ?? bibleRefUrlAtOffset(text, caret);

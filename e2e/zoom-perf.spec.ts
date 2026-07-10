@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Zoom performance guard.
@@ -37,11 +38,21 @@ function perfTree(): SeedNode[] {
 
   // "many": a top-level node with hundreds of children -- far more than any
   // viewport holds, so zooming in renders a full window of bullets.
-  nodes.push({ id: "many", parentId: null, prevSiblingId: "few", text: "Many" });
+  nodes.push({
+    id: "many",
+    parentId: null,
+    prevSiblingId: "few",
+    text: "Many",
+  });
   prev = null;
   for (let c = 0; c < 300; c++) {
     const id = `many-c${c}`;
-    nodes.push({ id, parentId: "many", prevSiblingId: prev, text: `Many ${c}` });
+    nodes.push({
+      id,
+      parentId: "many",
+      prevSiblingId: prev,
+      text: `Many ${c}`,
+    });
     prev = id;
   }
 
@@ -93,7 +104,9 @@ test.describe("zoom performance (focus-gated bullet keymaps)", () => {
     await load(page);
 
     // Zoom into the big node the way a user does: click its bullet handle.
-    await page.locator('li[data-node-id="many"] [aria-label="Zoom in"]').click();
+    await page
+      .locator('li[data-node-id="many"] [aria-label="Zoom in"]')
+      .click();
     await expect(page).toHaveURL(/\/many$/);
     await expect(page.locator('li[data-node-id="many-c0"]')).toBeVisible();
 

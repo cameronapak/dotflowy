@@ -15,12 +15,7 @@
  * Safe to re-run any time; never prints the generated secret.
  */
 import { randomBytes } from "node:crypto";
-import {
-  copyFileSync,
-  existsSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");

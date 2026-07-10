@@ -1,6 +1,8 @@
-import { Effect, Semaphore } from 'effect'
-import type { Node } from './schema'
-import type { ChangeOp } from './realtime'
+import { Effect, Semaphore } from "effect";
+
+import type { ChangeOp } from "./realtime";
+import type { Node } from "./schema";
+
 import {
   createNodesE,
   deleteNodesE,
@@ -8,7 +10,7 @@ import {
   runPromise,
   sendBatchE,
   updateNodesE,
-} from './nodes-client-effect'
+} from "./nodes-client-effect";
 
 /**
  * Throw-based client for the /api/nodes Worker (which routes to the user's
@@ -53,7 +55,7 @@ import {
 // the added latency is invisible. `withPermits` releases on success, failure,
 // AND interruption, so one rejected batch can't wedge the queue (its caller's
 // promise still rejects → that transaction rolls back).
-const writeSem = Semaphore.makeUnsafe(1)
+const writeSem = Semaphore.makeUnsafe(1);
 
 /**
  * Persist a structural mutation as one atomic batch — the Effect core. The DO
@@ -67,7 +69,7 @@ const writeSem = Semaphore.makeUnsafe(1)
 export const persistBatchE = (
   ops: ChangeOp[],
 ): Effect.Effect<{ seq: number }, NodesError> =>
-  writeSem.withPermits(1)(sendBatchE(ops))
+  writeSem.withPermits(1)(sendBatchE(ops));
 
 /**
  * Throw-shell over `persistBatchE` for the non-composing callers (and the unit
@@ -75,11 +77,11 @@ export const persistBatchE = (
  * before dropping its optimistic overlay; all-or-nothing on failure.
  */
 export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
-  return runPromise(persistBatchE(ops))
+  return runPromise(persistBatchE(ops));
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>
-  runPromise(createNodesE(nodes))
+  runPromise(createNodesE(nodes));
 
 // --- Field-edit PATCH: serialize + coalesce ---------------------------------
 //
@@ -122,13 +124,13 @@ export const createNodes = (nodes: Node[]): Promise<void> =>
 
 interface FieldGen {
   /** Field-wise last-write-wins merge accumulated for this generation. */
-  pending: Map<string, Partial<Node>>
+  pending: Map<string, Partial<Node>>;
   /** The one promise every caller of this generation shares (shared-fate). */
-  promise: Promise<void>
+  promise: Promise<void>;
 }
 
-const fieldSem = Semaphore.makeUnsafe(1)
-let currentGen: FieldGen | null = null
+const fieldSem = Semaphore.makeUnsafe(1);
+let currentGen: FieldGen | null = null;
 
 /**
  * Arm a generation's flush: wait our turn on the permit, then drain everything
@@ -143,14 +145,17 @@ function startFieldFlush(gen: FieldGen): Promise<void> {
       Effect.suspend(() => {
         // Holding the permit => the prior generation's PATCH has settled. Detach
         // so new callers open a fresh generation, and snapshot the merge.
-        if (currentGen === gen) currentGen = null
-        if (gen.pending.size === 0) return Effect.void
-        const updates = [...gen.pending].map(([id, changes]) => ({ id, changes }))
-        return updateNodesE(updates)
+        if (currentGen === gen) currentGen = null;
+        if (gen.pending.size === 0) return Effect.void;
+        const updates = [...gen.pending].map(([id, changes]) => ({
+          id,
+          changes,
+        }));
+        return updateNodesE(updates);
       }),
     ),
-  )
-  return runPromise(flush)
+  );
+  return runPromise(flush);
 }
 
 export function updateNodes(
@@ -159,19 +164,19 @@ export function updateNodes(
   // Join the open generation, or open one. Assign `currentGen` and merge BEFORE
   // arming the flush -- a free-permit flush can drain synchronously, so the merge
   // must already be in the map (else this caller's edit sends as an empty batch).
-  let gen = currentGen
-  const fresh = !gen
+  let gen = currentGen;
+  const fresh = !gen;
   if (!gen) {
-    gen = { pending: new Map(), promise: Promise.resolve() }
-    currentGen = gen
+    gen = { pending: new Map(), promise: Promise.resolve() };
+    currentGen = gen;
   }
   for (const u of updates) {
-    const prev = gen.pending.get(u.id)
-    gen.pending.set(u.id, prev ? { ...prev, ...u.changes } : { ...u.changes })
+    const prev = gen.pending.get(u.id);
+    gen.pending.set(u.id, prev ? { ...prev, ...u.changes } : { ...u.changes });
   }
-  if (fresh) gen.promise = startFieldFlush(gen)
-  return gen.promise
+  if (fresh) gen.promise = startFieldFlush(gen);
+  return gen.promise;
 }
 
 export const deleteNodes = (ids: string[]): Promise<void> =>
-  runPromise(deleteNodesE(ids))
+  runPromise(deleteNodesE(ids));

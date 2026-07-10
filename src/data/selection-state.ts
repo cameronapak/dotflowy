@@ -1,10 +1,11 @@
-import { createActor, setup } from "xstate";
 import { useSelector } from "@xstate/react";
 import { Schema } from "effect";
+import { createActor, setup } from "xstate";
+
 import { nodesCollection } from "./collection";
+import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 import { getTreeIndex } from "./tree-store";
 import { getViewIsHidden, getViewRootId } from "./view-state";
-import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 
 /**
  * Node multi-selection state (ADR 0018), modelled as an XState v6 machine whose
@@ -139,7 +140,8 @@ function computeExtend(
   if (direction === "up") {
     // Climb to the parent. Stop at the zoom root (parentId === the view root, or
     // null at the top level) -- the view root isn't a selectable node.
-    if (data.parentId === null || data.parentId === getViewRootId()) return data;
+    if (data.parentId === null || data.parentId === getViewRootId())
+      return data;
     return computeRange(data.parentId, data.parentId, index) ?? data;
   }
   // Dive into the first visible child. Collapsed nodes render no children.
@@ -241,7 +243,9 @@ const selectionMachine = setup({
         },
         extend: ({ context, event }) => {
           if (!context.data) return undefined;
-          return { context: { data: computeExtend(context.data, event.direction) } };
+          return {
+            context: { data: computeExtend(context.data, event.direction) },
+          };
         },
         // Re-derive (parentId + rootIds) from the LIVE collection, same
         // anchor/focus, after a structural mutation relocates the run
@@ -367,7 +371,8 @@ export function useSelectionEdge(id: string): SelectionEdge | null {
 export function useSelectionRootIds(): string[] {
   return useSelector(
     selectionActor,
-    (snap) => (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
+    (snap) =>
+      (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
     Object.is,
   );
 }

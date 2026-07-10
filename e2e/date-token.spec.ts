@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Date token (ADR 0038): a `[[YYYY-MM-DD]]` in node.text renders as a

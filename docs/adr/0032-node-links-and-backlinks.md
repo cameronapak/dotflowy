@@ -14,13 +14,13 @@ when that node is zoomed. Designed via `/grill-with-docs`, modeled on Notion's m
 deliberately kept distinct: a **link** is "go there" (text-level, no content sharing), a **mirror**
 ([ADR 0022](./0022-node-mirrors.md)) is "lives here too" (node-level, fully synced instance). A link
 must never grow mirror-like behavior (hover-expand of children, edit-in-place at the link site) —
-that is exactly the A1/A2 fork ADR 0022 already resolved; links are the *feature* version of the A2
-shape 0022 rejected as a *mirror implementation*.
+that is exactly the A1/A2 fork ADR 0022 already resolved; links are the _feature_ version of the A2
+shape 0022 rejected as a _mirror implementation_.
 
 ## Decisions
 
 **The token stores the node id; display is the target's live text.** Source text carries `[[<nodeId>]]`;
-the renderer looks up the target and shows its *current* text. Rename-proof by construction — retitle
+the renderer looks up the target and shows its _current_ text. Rename-proof by construction — retitle
 the target and every link updates everywhere (Notion stores page ids for the same reason). Rejected:
 store the target's text, Obsidian-style (node text isn't unique, renames break every link, needs a
 title→id resolution pass); store a snapshot label in a `[label](dotflowy://id)` markdown shape (the
@@ -32,7 +32,7 @@ flattens a link to the target's text at export time; copying a bullet yields the
 **The chip is a BibleChip-class atom, not a revealing token.** Rendered as a Seam A **widget** token
 ([ADR 0006](./0006-react-token-widgets.md)): the mounted component subscribes via `useNode(targetId)`,
 which is what makes the live label possible at all — a plain `El` token can't, because the decorate
-cache is keyed on the source string, which never changes when the *target* is renamed. No caret reveal
+cache is keyed on the source string, which never changes when the _target_ is renamed. No caret reveal
 (revealing exposes a raw id — noise, not editing power); arrows step over the whole chip; **backspace
 deletes the entire token**, which is also v1's unlink story. Display clamps at ~40 chars with an
 ellipsis; a hover `title` shows the target's breadcrumb (the only way to see where a link points
@@ -63,7 +63,7 @@ needed mid-list).
 **Deleting a linked-to node degrades; it never blocks and never rewrites referrers.** The delete
 proceeds; orphaned tokens render as a generic "missing link" chip (the target is gone, so there is no
 text to subscribe to); undo restores the target and every chip heals automatically — the id-pointer
-model paying off. This diverges from mirrors on purpose (mirrors *protect* because deleting a source
+model paying off. This diverges from mirrors on purpose (mirrors _protect_ because deleting a source
 destroys content that visibly lives elsewhere; a link is a pointer — nothing is lost but the
 destination). Rejected: block the delete (punishes the best-connected outlines) and cascade-clean the
 referrers' text (silently mutates nodes the user didn't act on, and makes delete-undo restore N
@@ -83,7 +83,7 @@ a second consumer proves it.
 
 - **No new MCP tools.** Agents already see node ids in `get_outline` and can write `[[id]]` through
   `update_node`/`add_node`; backlinks derive automatically.
-- Cmd+K search indexes the *flattened* label (the target's text), not the raw `[[id]]` — the
+- Cmd+K search indexes the _flattened_ label (the target's text), not the raw `[[id]]` — the
   `flattenInline` chain grows an index-aware step.
 - The picker's empty state says "no matching node"; Escape leaves the typed literal untouched, like
   an unmatched `#tag`.

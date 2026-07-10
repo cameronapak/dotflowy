@@ -1,12 +1,4 @@
 import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  type RefObject,
-} from "react";
-import { createPortal } from "react-dom";
-import {
   autoUpdate,
   flip,
   offset,
@@ -19,18 +11,26 @@ import {
   CornerUpRightIcon,
   Trash2Icon,
 } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { getTreeIndex } from "../data/tree-store";
-import { getViewIsHidden, getViewRootId } from "../data/view-state";
-import { findVisibleNeighbor, lastVisibleDescendant } from "../data/visible-order";
+
+import type { PluginContext } from "../plugins/types";
+
+import { isMirrorsEnabled } from "../data/flags";
+import { capture, drop } from "../data/history";
+import { outlineToMarkdown } from "../data/markdown";
 import {
   indentManyNodes,
   outdentManyNodes,
   removeManyNodes,
 } from "../data/mutations";
-import { runStructural } from "../data/structural";
-import { capture, drop } from "../data/history";
-import { outlineToMarkdown } from "../data/markdown";
 import {
   clearSelection,
   extendSelection,
@@ -42,16 +42,21 @@ import {
   useIsSelectionActive,
   useSelectionRootIds,
 } from "../data/selection-state";
-import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { runStructural } from "../data/structural";
 import { countSubtreeNodes, orphanedMirrorsBy } from "../data/tree";
+import { getTreeIndex } from "../data/tree-store";
+import { getViewIsHidden, getViewRootId } from "../data/view-state";
+import {
+  findVisibleNeighbor,
+  lastVisibleDescendant,
+} from "../data/visible-order";
+import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { placeCaretAtEnd } from "./caret-place";
 import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
-import { isMirrorsEnabled } from "../data/flags";
-import type { PluginContext } from "../plugins/types";
 import { rejectRow } from "./flash-node";
-import { placeCaretAtEnd } from "./caret-place";
 import { openMoveDialog } from "./move-dialog-opener";
 import { SlashMenuList, type MenuListItem } from "./slash-menu-list";
 
@@ -296,7 +301,17 @@ function makeSelectionOps({
     focusNode(id);
   };
 
-  return { copy, remove, move, mirror, indent, outdent, caretAbove, caretBelow, exitToCaret };
+  return {
+    copy,
+    remove,
+    move,
+    mirror,
+    indent,
+    outdent,
+    caretAbove,
+    caretBelow,
+    exitToCaret,
+  };
 }
 
 /**
@@ -305,10 +320,7 @@ function makeSelectionOps({
  * state, so the only effect dep is `active` (toggles the listeners) plus the
  * stable `ops`.
  */
-export function useSelectionMode({
-  refs,
-  pendingFocus,
-}: SelectionModeArgs): {
+export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs): {
   active: boolean;
   ops: SelectionOps;
 } {
@@ -451,7 +463,9 @@ export function SelectionActionsMenu({
   const state = active ? getSelectionState() : null;
   const focusId = state?.focusId;
   const side =
-    focusId && focusId === rootIds[rootIds.length - 1] ? "bottom-start" : "top-start";
+    focusId && focusId === rootIds[rootIds.length - 1]
+      ? "bottom-start"
+      : "top-start";
 
   const { refs, floatingStyles, update } = useFloating({
     placement: side,
@@ -488,7 +502,8 @@ export function SelectionActionsMenu({
     setHover(0);
   }, [active, focusId, rootIds, refs, update]);
 
-  const items = active && rootIds.length ? buildItems(rootIds, ops, getCtx) : null;
+  const items =
+    active && rootIds.length ? buildItems(rootIds, ops, getCtx) : null;
   if (!active || !focusId || !items) return null;
 
   const onSelect = (i: number) => {

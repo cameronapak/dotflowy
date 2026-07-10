@@ -1,14 +1,15 @@
-import { Effect } from 'effect'
-import { appendChild } from './mutations'
-import { createId, makeNode, now } from './tree'
-import { nodesCollection, nodesLoadError } from './collection'
-import { BootstrapError } from './errors'
+import { Effect } from "effect";
+
+import { nodesCollection, nodesLoadError } from "./collection";
+import { BootstrapError } from "./errors";
+import { appendChild } from "./mutations";
+import { createId, makeNode, now } from "./tree";
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
 // double-mounted effect can't run two competing seed chains on the same empty
 // collection.
-let bootstrapped = false
+let bootstrapped = false;
 
 /**
  * First-run bootstrap: seed the welcome bullets when the outline is genuinely
@@ -28,8 +29,8 @@ let bootstrapped = false
  * failure as a value (not a throw); the caller logs it.
  */
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
-  if (bootstrapped) return
-  bootstrapped = true
+  if (bootstrapped) return;
+  bootstrapped = true;
   // One Effect program. Wait for the first load (tryPromise covers the rare
   // synchronous sync-init throw); then the typed-failure gate — if the sync
   // failed (the common 500/offline case settles ready-but-empty with the error
@@ -40,16 +41,16 @@ export async function bootstrapOutline(): Promise<BootstrapError | void> {
     catch: (cause) => new BootstrapError({ cause }),
   }).pipe(
     Effect.flatMap(() => {
-      const loadError = nodesLoadError()
+      const loadError = nodesLoadError();
       return loadError
         ? Effect.fail(new BootstrapError({ cause: loadError }))
         : Effect.tryPromise({
             try: () => seedIfEmpty(),
             catch: (cause) => new BootstrapError({ cause }),
-          })
+          });
     }),
     Effect.asVoid,
-  )
+  );
   // Fold the typed failure back to a VALUE at this mount-time boundary
   // (BootstrapError | void, which the caller checks) — not a throw, since this
   // isn't a TanStack handler. The Effect runs underneath; only the seam differs.
@@ -59,7 +60,7 @@ export async function bootstrapOutline(): Promise<BootstrapError | void> {
       onFailure: (error) => error,
       onSuccess: () => undefined,
     }),
-  )
+  );
 }
 
 // One-shot guard, set synchronously before the first await. The old
@@ -68,7 +69,7 @@ export async function bootstrapOutline(): Promise<BootstrapError | void> {
 // (StrictMode / Start's dev client re-mount) would both await an empty
 // collection and both seed. This flag closes that race — the second caller
 // bails before inserting. Module-scoped, so it survives a component remount.
-let seedStarted = false
+let seedStarted = false;
 
 /**
  * Seed the outline on first run. Idempotent and async-safe: it awaits the
@@ -85,46 +86,50 @@ let seedStarted = false
  * collection's normal mutation path. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
  */
 async function seedIfEmpty(): Promise<boolean> {
-  if (seedStarted) return false
-  seedStarted = true
+  if (seedStarted) return false;
+  seedStarted = true;
 
-  const existing = await nodesCollection.toArrayWhenReady()
-  if (existing.length > 0) return false
+  const existing = await nodesCollection.toArrayWhenReady();
+  if (existing.length > 0) return false;
 
   // Three sibling top-level bullets, one with a child, so the user lands
   // on something that demonstrates the structure immediately.
-  const aId = createId()
-  const bId = createId()
-  const cId = createId()
+  const aId = createId();
+  const bId = createId();
+  const cId = createId();
 
   nodesCollection.insert(
     makeNode({
       id: aId,
       parentId: null,
       prevSiblingId: null,
-      text: 'Welcome to Dotflowy',
+      text: "Welcome to Dotflowy",
       createdAt: now(),
     }),
-  )
+  );
   nodesCollection.insert(
     makeNode({
       id: bId,
       parentId: null,
       prevSiblingId: aId,
-      text: 'Press Enter to add a bullet',
+      text: "Press Enter to add a bullet",
     }),
-  )
+  );
   nodesCollection.insert(
     makeNode({
       id: cId,
       parentId: null,
       prevSiblingId: bId,
-      text: 'Tab indents, Shift+Tab outdents, Backspace on empty deletes',
+      text: "Tab indents, Shift+Tab outdents, Backspace on empty deletes",
     }),
-  )
+  );
 
   // A child under the welcome bullet to show nesting.
-  appendChild(aId, null, 'This is a sub-bullet. Collapse its parent with the dot.')
+  appendChild(
+    aId,
+    null,
+    "This is a sub-bullet. Collapse its parent with the dot.",
+  );
 
-  return true
+  return true;
 }

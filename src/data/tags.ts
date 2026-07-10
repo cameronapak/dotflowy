@@ -1,4 +1,4 @@
-import { childrenOf, type Node, type TreeIndex } from './tree'
+import { childrenOf, type Node, type TreeIndex } from "./tree";
 
 /**
  * Tags are parsed out of `node.text` at read time -- never a stored field.
@@ -12,11 +12,11 @@ import { childrenOf, type Node, type TreeIndex } from './tree'
  * punctuation. So `#work-q3` and `#важно` match; `foo#bar` and a bare `#` do
  * not. `@`-mentions are deferred (v1 is `#` only).
  */
-export const TAG_PATTERN = '(?<=^|\\s)#[\\p{L}\\p{N}_-]+'
+export const TAG_PATTERN = "(?<=^|\\s)#[\\p{L}\\p{N}_-]+";
 
-const TAG_RE = new RegExp(TAG_PATTERN, 'gu')
+const TAG_RE = new RegExp(TAG_PATTERN, "gu");
 
-const EMPTY_TAGS: string[] = []
+const EMPTY_TAGS: string[] = [];
 
 /**
  * The distinct tags in a string, with their leading `#`, in first-seen order.
@@ -25,16 +25,16 @@ const EMPTY_TAGS: string[] = []
  * just tag-bearing ones -- same early-out discipline as `parseNodeLinks`).
  */
 export function parseTags(text: string): string[] {
-  if (!text.includes('#')) return EMPTY_TAGS
-  const out: string[] = []
-  const seen = new Set<string>()
+  if (!text.includes("#")) return EMPTY_TAGS;
+  const out: string[] = [];
+  const seen = new Set<string>();
   for (const m of text.matchAll(TAG_RE)) {
     if (!seen.has(m[0])) {
-      seen.add(m[0])
-      out.push(m[0])
+      seen.add(m[0]);
+      out.push(m[0]);
     }
   }
-  return out
+  return out;
 }
 
 /**
@@ -43,27 +43,27 @@ export function parseTags(text: string): string[] {
  * tags-only -- any free text in `q` is ignored).
  */
 export function parseQuery(q: string | undefined): string[] {
-  if (!q) return []
-  const out: string[] = []
-  const seen = new Set<string>()
+  if (!q) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
   for (const tok of q.trim().split(/\s+/)) {
-    if (tok.length > 1 && tok.startsWith('#') && !seen.has(tok)) {
-      seen.add(tok)
-      out.push(tok)
+    if (tok.length > 1 && tok.startsWith("#") && !seen.has(tok)) {
+      seen.add(tok);
+      out.push(tok);
     }
   }
-  return out
+  return out;
 }
 
 /** Serialize active tags back into the `q` param value. */
 export function serializeQuery(tags: string[]): string {
-  return tags.join(' ')
+  return tags.join(" ");
 }
 
 /** The bare tag name (no leading `#`, lowercased) -- the key tag colors and
  *  case-folded comparisons use. See [[tag-colors]] (src/data/tag-colors.ts). */
 export function normalizeTag(tag: string): string {
-  return tag.replace(/^#/, '').toLowerCase()
+  return tag.replace(/^#/, "").toLowerCase();
 }
 
 /** Every distinct tag used anywhere in the outline, sorted -- the autocomplete
@@ -75,15 +75,15 @@ export function normalizeTag(tag: string): string {
  * already in the live tree). Without this the menu would match a tag to itself.
  */
 export function collectAllTags(index: TreeIndex, excludeId?: string): string[] {
-  const seen = new Map<string, string>()
+  const seen = new Map<string, string>();
   for (const node of index.byId.values()) {
-    if (node.id === excludeId) continue
+    if (node.id === excludeId) continue;
     for (const tag of parseTags(node.text)) {
-      const key = tag.toLowerCase()
-      if (!seen.has(key)) seen.set(key, tag)
+      const key = tag.toLowerCase();
+      if (!seen.has(key)) seen.set(key, tag);
     }
   }
-  return [...seen.values()].sort((a, b) => a.localeCompare(b))
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -96,23 +96,23 @@ export function collectAllTags(index: TreeIndex, excludeId?: string): string[] {
  * keystroke while the menu is open.
  */
 export interface TagEntry {
-  tag: string
-  count: number
+  tag: string;
+  count: number;
 }
 
 /** The maintained corpus's sorted distinct tag list -- the `#` picker's
  *  autocomplete source. O(distinct tags), never O(all nodes). */
 export function collectTagCorpus(corpus: Map<string, TagEntry>): string[] {
-  const out: string[] = []
-  for (const entry of corpus.values()) out.push(entry.tag)
-  return out.sort((a, b) => a.localeCompare(b))
+  const out: string[] = [];
+  for (const entry of corpus.values()) out.push(entry.tag);
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
 /** True iff `text` carries every one of `activeTags` (per-node AND). */
 function matchesAllTags(text: string, activeTags: string[]): boolean {
-  if (activeTags.length === 0) return false
-  const tags = new Set(parseTags(text))
-  return activeTags.every((t) => tags.has(t))
+  if (activeTags.length === 0) return false;
+  const tags = new Set(parseTags(text));
+  return activeTags.every((t) => tags.has(t));
 }
 
 /**
@@ -131,8 +131,8 @@ function matchesAllTags(text: string, activeTags: string[]): boolean {
  * `completed`; the composed Seam-G predicate carries that (ADR 0001 D9).
  */
 export interface TagFilter {
-  visibleIds: Set<string>
-  matchIds: Set<string>
+  visibleIds: Set<string>;
+  matchIds: Set<string>;
 }
 
 export function buildTagFilter(
@@ -141,46 +141,46 @@ export function buildTagFilter(
   activeTags: string[],
   isHidden: (node: Node) => boolean,
 ): TagFilter {
-  const visibleIds = new Set<string>()
-  const matchIds = new Set<string>()
+  const visibleIds = new Set<string>();
+  const matchIds = new Set<string>();
 
   const walk = (parentId: string | null) => {
     for (const child of childrenOf(index, parentId)) {
       // A hidden node takes its whole subtree with it, same as the normal
       // render (useVisibleChildIds applies the same composed predicate).
-      if (isHidden(child)) continue
+      if (isHidden(child)) continue;
       if (matchesAllTags(child.text, activeTags)) {
-        matchIds.add(child.id)
-        let cur: Node | undefined = child
+        matchIds.add(child.id);
+        let cur: Node | undefined = child;
         while (cur && cur.id !== rootId) {
-          visibleIds.add(cur.id)
-          cur = cur.parentId ? index.byId.get(cur.parentId) : undefined
+          visibleIds.add(cur.id);
+          cur = cur.parentId ? index.byId.get(cur.parentId) : undefined;
         }
       }
-      walk(child.id)
+      walk(child.id);
     }
-  }
-  walk(rootId)
+  };
+  walk(rootId);
 
-  return { visibleIds, matchIds }
+  return { visibleIds, matchIds };
 }
 
 /** Typed search params, shared by the home and zoom routes. `focus=last` lands
  *  the caret on the last visible child on load (the daily `/today` redirect). */
 export interface OutlineSearch {
-  q?: string
-  focus?: 'last'
+  q?: string;
+  focus?: "last";
 }
 
 export function validateOutlineSearch(
   search: Record<string, unknown>,
 ): OutlineSearch {
-  const q = typeof search.q === 'string' ? search.q.trim() : ''
-  const out: OutlineSearch = {}
-  if (q) out.q = q
+  const q = typeof search.q === "string" ? search.q.trim() : "";
+  const out: OutlineSearch = {};
+  if (q) out.q = q;
   // Pass `focus=last` through: the router validates the DESTINATION route's
   // search, so any key not returned here is dropped before it reaches the
   // editor (which is why the redirect's ?focus=last was silently a no-op).
-  if (search.focus === 'last') out.focus = 'last'
-  return out
+  if (search.focus === "last") out.focus = "last";
+  return out;
 }

@@ -19,11 +19,12 @@
  * (worker/index.ts, worker/wire.test.ts) keep resolving `Node`/`ChangeOp` here.
  */
 
-import { Schema } from 'effect'
-import { ChangeOpSchema, NodeSchema } from '../src/data/wire-schema'
+import { Schema } from "effect";
 
-export { NodeSchema } from '../src/data/wire-schema'
-export type { ChangeOp, Node } from '../src/data/wire-schema'
+import { ChangeOpSchema, NodeSchema } from "../src/data/wire-schema";
+
+export { NodeSchema } from "../src/data/wire-schema";
+export type { ChangeOp, Node } from "../src/data/wire-schema";
 
 // --- Request-body schemas (the /api/nodes + /api/kv trust boundary) ----------
 
@@ -32,7 +33,7 @@ export type { ChangeOp, Node } from '../src/data/wire-schema'
 export const NodesPostBody = Schema.Struct({
   ops: Schema.optional(Schema.Array(ChangeOpSchema)),
   nodes: Schema.optional(Schema.Array(NodeSchema)),
-})
+});
 
 /** PATCH /api/nodes — single-field edits. `changes` stays an open record; the DO
  *  filters it against its writable-column allowlist, so it can't be injected. */
@@ -43,21 +44,30 @@ export const NodesPatchBody = Schema.Struct({
       changes: Schema.Record(Schema.String, Schema.Unknown),
     }),
   ),
-})
+});
 
 /** DELETE /api/nodes. */
-export const NodesDeleteBody = Schema.Struct({ ids: Schema.Array(Schema.String) })
+export const NodesDeleteBody = Schema.Struct({
+  ids: Schema.Array(Schema.String),
+});
 
 /** POST /api/kv?op=claim — atomic get-or-create on one key. */
-export const KvClaimBody = Schema.Struct({ key: Schema.String, value: Schema.Unknown })
+export const KvClaimBody = Schema.Struct({
+  key: Schema.String,
+  value: Schema.Unknown,
+});
 
 /** POST /api/kv — batch upsert of side-collection rows. */
 export const KvUpsertBody = Schema.Struct({
-  rows: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.Unknown })),
-})
+  rows: Schema.Array(
+    Schema.Struct({ key: Schema.String, value: Schema.Unknown }),
+  ),
+});
 
 /** DELETE /api/kv. */
-export const KvDeleteBody = Schema.Struct({ keys: Schema.Array(Schema.String) })
+export const KvDeleteBody = Schema.Struct({
+  keys: Schema.Array(Schema.String),
+});
 
 /** POST /api/waitlist — public alpha-waitlist signup (invite-only signup gate,
  *  worker/auth.ts). Email plausibility is checked in the route handler; the
@@ -65,4 +75,4 @@ export const KvDeleteBody = Schema.Struct({ keys: Schema.Array(Schema.String) })
 export const WaitlistPostBody = Schema.Struct({
   email: Schema.String,
   source: Schema.optional(Schema.String),
-})
+});

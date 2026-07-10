@@ -15,7 +15,7 @@
 //   highlight src/data/highlight.ts  ==[emoji]?[^=\n]+==  (six colors, bare=blue)
 //   link      src/data/links.ts      \[[^\]]*\]\([^)]*\)  + sanitizeLinkLabel/encodeUrlForMarkdown
 
-import { parseXml, XmlElement, XmlText } from "@rgrove/parse-xml";
+import { parseXml, XmlElement } from "@rgrove/parse-xml";
 
 // ---------------------------------------------------------------------------
 // Counters
@@ -65,7 +65,12 @@ interface Report {
 
 type HNode =
   | { kind: "text"; value: string }
-  | { kind: "el"; tag: string; attrs: Record<string, string>; children: HNode[] };
+  | {
+      kind: "el";
+      tag: string;
+      attrs: Record<string, string>;
+      children: HNode[];
+    };
 
 const NAMED_ENTITIES: Record<string, string> = {
   lt: "<",
@@ -89,7 +94,8 @@ function decodeHtmlEntities(s: string): string {
   });
 }
 
-const TAG_RE = /<(\/)?([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/)?>/g;
+const TAG_RE =
+  /<(\/)?([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/)?>/g;
 const ATTR_RE = /([a-zA-Z_:][a-zA-Z0-9_:.-]*)\s*=\s*("([^"]*)"|'([^']*)')/g;
 
 function parseInlineHtml(src: string, anomalies: Tally): HNode[] {
@@ -100,7 +106,10 @@ function parseInlineHtml(src: string, anomalies: Tally): HNode[] {
   TAG_RE.lastIndex = 0;
   for (let m = TAG_RE.exec(src); m; m = TAG_RE.exec(src)) {
     if (m.index > last)
-      top().push({ kind: "text", value: decodeHtmlEntities(src.slice(last, m.index)) });
+      top().push({
+        kind: "text",
+        value: decodeHtmlEntities(src.slice(last, m.index)),
+      });
     last = TAG_RE.lastIndex;
     const [, close, rawTag, rawAttrs, selfClose] = m;
     const tag = rawTag.toLowerCase();
@@ -172,7 +181,10 @@ function containsTag(nodes: HNode[], tag: string): boolean {
 // ---------------------------------------------------------------------------
 
 // marker char forbidden in the interior, per the shipped token patterns
-const FORMAT_MARKERS: Record<string, { open: string; close: string; forbid: RegExp }> = {
+const FORMAT_MARKERS: Record<
+  string,
+  { open: string; close: string; forbid: RegExp }
+> = {
   b: { open: "**", close: "**", forbid: /[*\n]/ },
   i: { open: "*", close: "*", forbid: /[*\n]/ },
   u: { open: "~", close: "~", forbid: /[~\n]/ },
@@ -219,7 +231,10 @@ function convert(nodes: HNode[], ctx: ConvertCtx): string {
   return out;
 }
 
-function convertEl(el: Extract<HNode, { kind: "el" }>, ctx: ConvertCtx): string {
+function convertEl(
+  el: Extract<HNode, { kind: "el" }>,
+  ctx: ConvertCtx,
+): string {
   const { r } = ctx;
   switch (el.tag) {
     case "a": {
@@ -232,18 +247,26 @@ function convertEl(el: Extract<HNode, { kind: "el" }>, ctx: ConvertCtx): string 
       const url = encodeUrlForMarkdown(el.attrs["href"] ?? "");
       const label = sanitizeLinkLabel(rawLabel);
       if (label !== rawLabel.trim() || /]/.test(rawLabel))
-        r.degraded.bump("link label sanitized (`]` stripped / whitespace collapsed)");
-      if (url !== (el.attrs["href"] ?? "")) r.applied.bump("link url percent-encoded");
+        r.degraded.bump(
+          "link label sanitized (`]` stripped / whitespace collapsed)",
+        );
+      if (url !== (el.attrs["href"] ?? ""))
+        r.applied.bump("link url percent-encoded");
       r.applied.bump("<a> -> [label](url)");
       return `[${label}](${url})`;
     }
     case "time": {
       // ADOPTED (#114/#120): keyed on canonical attrs; probe validates the attrs
       // and emits the display text (the documented fallback rendering).
-      const y = el.attrs["startYear"], mo = el.attrs["startMonth"], d = el.attrs["startDay"];
-      if (y && mo && d) r.applied.bump("<time> -> date token (canonical attrs OK)");
+      const y = el.attrs["startYear"],
+        mo = el.attrs["startMonth"],
+        d = el.attrs["startDay"];
+      if (y && mo && d)
+        r.applied.bump("<time> -> date token (canonical attrs OK)");
       else {
-        r.degraded.bump("<time> missing canonical start attrs -> display text kept");
+        r.degraded.bump(
+          "<time> missing canonical start attrs -> display text kept",
+        );
       }
       if (el.attrs["startHour"]) r.applied.bump("<time> carries startHour");
       for (const k of Object.keys(el.attrs))
@@ -366,7 +389,10 @@ interface OutNode {
 
 const KNOWN_ATTRS = new Set(["text", "_note", "_complete"]);
 
-function convertValue(raw: string, r: Report): { text: string; extraLines: string[] } {
+function convertValue(
+  raw: string,
+  r: Report,
+): { text: string; extraLines: string[] } {
   // raw is the XML-decoded attribute value: an HTML string, possibly multi-line
   const tree = parseInlineHtml(raw, r.anomalies);
   censusTags(tree, r.htmlTags);
@@ -374,7 +400,8 @@ function convertValue(raw: string, r: Report): { text: string; extraLines: strin
   (function walkTime(nodes: HNode[]) {
     for (const n of nodes)
       if (n.kind === "el") {
-        if (n.tag === "time") for (const k of Object.keys(n.attrs)) r.timeAttrs.bump(k);
+        if (n.tag === "time")
+          for (const k of Object.keys(n.attrs)) r.timeAttrs.bump(k);
         walkTime(n.children);
       }
   })(tree);
@@ -384,7 +411,11 @@ function convertValue(raw: string, r: Report): { text: string; extraLines: strin
   // content-survival check: every text leaf (post entity-decode) must appear in
   // the converted output, except the two transforms that legitimately rewrite
   // text (mention's single-space interior; sanitized link labels).
-  (function checkLoss(nodes: HNode[], insideMention: boolean, insideLink: boolean) {
+  (function checkLoss(
+    nodes: HNode[],
+    insideMention: boolean,
+    insideLink: boolean,
+  ) {
     for (const n of nodes) {
       if (n.kind === "text") {
         if (insideMention) continue; // interior is a space; replaced by @mention(id)
@@ -420,7 +451,8 @@ function convertOutline(el: XmlElement, r: Report, depth: number): OutNode {
   r.depthPre = Math.max(r.depthPre, depth);
   for (const name of Object.keys(el.attributes)) {
     r.outlineAttrs.bump(name);
-    if (!KNOWN_ATTRS.has(name)) r.unknownAttrs.bump(`${name}="${el.attributes[name]}"`.slice(0, 60));
+    if (!KNOWN_ATTRS.has(name))
+      r.unknownAttrs.bump(`${name}="${el.attributes[name]}"`.slice(0, 60));
   }
 
   const rawText = el.attributes["text"] ?? "";
@@ -432,7 +464,10 @@ function convertOutline(el: XmlElement, r: Report, depth: number): OutNode {
   const contLines = extraLines.filter((l) => l.trim() !== "");
   if (extraLines.length) {
     r.textNewlineSplits++;
-    r.applied.bump("newline in text -> continuation child bullets", contLines.length);
+    r.applied.bump(
+      "newline in text -> continuation child bullets",
+      contLines.length,
+    );
     for (const l of contLines) prepend.push({ text: l });
   }
   // _note -> prepended child bullets, one per non-blank line (#113)
@@ -451,7 +486,9 @@ function convertOutline(el: XmlElement, r: Report, depth: number): OutNode {
   }
 
   const realChildren = el.children
-    .filter((c): c is XmlElement => c instanceof XmlElement && c.name === "outline")
+    .filter(
+      (c): c is XmlElement => c instanceof XmlElement && c.name === "outline",
+    )
     .map((c) => convertOutline(c, r, depth + 1));
 
   const node: OutNode = { text };
@@ -530,7 +567,16 @@ function probe(file: string): { r: Report; forest: OutNode[] } {
     const t = el.attributes["text"] ?? "";
     if (/[<&]/.test(t) || el.attributes["_note"] !== undefined) {
       const sub = new Tally();
-      const dummy: Report = { ...r, anomalies: sub, applied: new Tally(), degraded: new Tally(), htmlTags: new Tally(), timeAttrs: new Tally(), accidental: new Tally(), contentLoss: [] } as Report;
+      const dummy: Report = {
+        ...r,
+        anomalies: sub,
+        applied: new Tally(),
+        degraded: new Tally(),
+        htmlTags: new Tally(),
+        timeAttrs: new Tally(),
+        accidental: new Tally(),
+        contentLoss: [],
+      } as Report;
       const conv = convertValue(t, dummy);
       const note = el.attributes["_note"];
       const noteConv = note !== undefined ? convertValue(note, dummy) : null;
@@ -538,7 +584,9 @@ function probe(file: string): { r: Report; forest: OutNode[] } {
         from: t + (note !== undefined ? `  ⟨note⟩ ${note}` : ""),
         to:
           [conv.text, ...conv.extraLines].join(" ⏎ ") +
-          (noteConv ? `  ⟨note-bullets⟩ ${[noteConv.text, ...noteConv.extraLines].filter((l) => l.trim()).join(" ⏎ ")}` : ""),
+          (noteConv
+            ? `  ⟨note-bullets⟩ ${[noteConv.text, ...noteConv.extraLines].filter((l) => l.trim()).join(" ⏎ ")}`
+            : ""),
       });
     }
     for (const c of el.children)
@@ -551,9 +599,21 @@ function probe(file: string): { r: Report; forest: OutNode[] } {
       if (r.samples.length >= want) return;
       const t2 = el.attributes["text"] ?? "";
       if (/[<&]/.test(t2)) {
-        const dummy: Report = { ...r, anomalies: new Tally(), applied: new Tally(), degraded: new Tally(), htmlTags: new Tally(), timeAttrs: new Tally(), accidental: new Tally(), contentLoss: [] } as Report;
+        const dummy: Report = {
+          ...r,
+          anomalies: new Tally(),
+          applied: new Tally(),
+          degraded: new Tally(),
+          htmlTags: new Tally(),
+          timeAttrs: new Tally(),
+          accidental: new Tally(),
+          contentLoss: [],
+        } as Report;
         const conv = convertValue(t2, dummy);
-        r.samples.push({ from: t2, to: [conv.text, ...conv.extraLines].join(" ⏎ ") });
+        r.samples.push({
+          from: t2,
+          to: [conv.text, ...conv.extraLines].join(" ⏎ "),
+        });
       }
       for (const c of el.children)
         if (c instanceof XmlElement && c.name === "outline") sample2(c);
@@ -565,7 +625,12 @@ function probe(file: string): { r: Report; forest: OutNode[] } {
 
 function fmtTally(t: Tally, indent = ""): string {
   if (t.size === 0) return `${indent}(none)\n`;
-  return t.entries().map(([k, v]) => `${indent}${String(v).padStart(7)}  ${k}`).join("\n") + "\n";
+  return (
+    t
+      .entries()
+      .map(([k, v]) => `${indent}${String(v).padStart(7)}  ${k}`)
+      .join("\n") + "\n"
+  );
 }
 
 function reportMd(r: Report): string {

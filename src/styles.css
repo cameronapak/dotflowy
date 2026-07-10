@@ -47,7 +47,8 @@
   --radius-4xl: calc(var(--radius) * 2.6);
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono:
+    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
@@ -597,7 +598,7 @@ h2 span.protected-lock {
 }
 
 .bullet {
-  @apply size-4 flex items-center justify-center bg-transparent transition duration-150 p-0 border-none;
+  @apply flex size-4 items-center justify-center border-none bg-transparent p-0 transition duration-150;
   flex: 0 0 auto;
   cursor: pointer;
   display: flex;
@@ -944,7 +945,7 @@ body.dragging-active * {
 /* The drop line. Its left edge is indented to the target depth, so the indent
    itself is the depth feedback. A dot at the left marks the insertion point. */
 .drag-indicator {
-  @apply fixed h-1.5 rounded-full w-full;
+  @apply fixed h-1.5 w-full rounded-full;
   z-index: 50;
   pointer-events: none;
   margin-top: -2px;
@@ -1062,7 +1063,7 @@ body.dragging-active * {
 }
 
 .add-top:hover {
-  @apply text-accent border-accent;
+  @apply border-accent text-accent;
 }
 
 /* --- Zoom view --- */
@@ -1163,7 +1164,7 @@ body.dragging-active * {
 
 /* The "…" control: a small pill that reads as the collapsed middle. */
 .breadcrumb .crumb-ellipsis {
-  @apply inline-flex text-muted-foreground bg-secondary;
+  @apply inline-flex bg-secondary text-muted-foreground;
   align-items: center;
   justify-content: center;
   padding: 1px 5px;

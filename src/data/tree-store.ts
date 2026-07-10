@@ -1,6 +1,11 @@
-import { useCallback, useRef, useSyncExternalStore } from 'react'
-import type { ChangeMessage } from '@tanstack/react-db'
-import { isSyncReady, nodesCollection, subscribeSyncReady } from './collection'
+import type { ChangeMessage } from "@tanstack/react-db";
+
+import { useCallback, useRef, useSyncExternalStore } from "react";
+
+import { isSyncReady, nodesCollection, subscribeSyncReady } from "./collection";
+import { isMirrorsEnabled } from "./flags";
+import { parseNodeLinks } from "./node-links";
+import { parseTags, type TagFilter } from "./tags";
 import {
   buildTreeIndex,
   buildTrail,
@@ -9,11 +14,8 @@ import {
   parentKeyOf,
   type Node,
   type TreeIndex,
-} from './tree'
-import { parseNodeLinks } from './node-links'
-import { buildVisibleRows, type VisibleRow } from './visible-order'
-import { isMirrorsEnabled } from './flags'
-import { parseTags, type TagFilter } from './tags'
+} from "./tree";
+import { buildVisibleRows, type VisibleRow } from "./visible-order";
 
 /**
  * A single, app-wide subscription to the nodes collection that derives one
@@ -37,9 +39,9 @@ import { parseTags, type TagFilter } from './tags'
  * or order of visible children) changes, never when a child's text changes.
  */
 
-const EMPTY_INDEX: TreeIndex = buildTreeIndex([])
-const EMPTY_IDS: string[] = []
-const EMPTY_TRAIL: Node[] = []
+const EMPTY_INDEX: TreeIndex = buildTreeIndex([]);
+const EMPTY_IDS: string[] = [];
+const EMPTY_TRAIL: Node[] = [];
 
 // The store owns ONE mutable index, maintained in place by applyChanges. It must
 // be its own instance -- never the shared EMPTY_INDEX, which has to stay pristine
@@ -50,9 +52,9 @@ let index: TreeIndex = {
   mirrorsBySource: new Map(),
   linksByTarget: new Map(),
   tagCorpus: new Map(),
-}
-const listeners = new Set<() => void>()
-let started = false
+};
+const listeners = new Set<() => void>();
+let started = false;
 
 // Monotonic counter bumped only when the VISIBLE STRUCTURE changes -- an
 // insert/delete/reparent/reorder (dirty parents) OR a collapse/completed flip
@@ -61,10 +63,10 @@ let started = false
 // is an O(1) rev compare on the typing hot path and rebuilds the flat list only
 // on a real structural change -- the Phase B counterpart to the field-edit Map
 // identity discipline below (ADR 0019).
-let structureRev = 0
+let structureRev = 0;
 
 function notify() {
-  for (const l of listeners) l()
+  for (const l of listeners) l();
 }
 
 /**
@@ -99,117 +101,120 @@ function notify() {
  * -- that's what Phase B's windowing cuts, not this.
  */
 function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
-  const dirty = new Set<string>() // parents whose child order may have changed
+  const dirty = new Set<string>(); // parents whose child order may have changed
   // A collapse or completed flip is a field edit (no parent dirties) but it DOES
   // change the visible row set / fade inheritance, so it must bump structureRev
   // for useVisibleRows even though it keeps the Map refs (it's not a re-sort).
   // `completed`/`collapsed` are the only fields that affect visibility today
   // (hide-completed Seam-G + collapse). If a future Seam-G transform hides a node
   // by another field, add it here or useVisibleRows will show stale rows.
-  let visibilityChanged = false
+  let visibilityChanged = false;
   // mirrorOf transitions (create/promote — ADR 0022) are rare and ride structural
   // batches today, but tracked independently so the reverse index stays correct
   // (and its Map identity is refreshed) even on a bare field edit that flips it.
-  let mirrorsChanged = false
+  let mirrorsChanged = false;
   // Outbound-link transitions (ADR 0032): a text edit that completes or deletes
   // a `[[id]]` token. Tracked like mirrorsChanged so the backlink reverse index
   // refreshes on a bare field edit; parseNodeLinks bails on link-free text, so
   // the keystroke hot path pays two `includes` scans of the edited node's text.
-  let linksChanged = false
+  let linksChanged = false;
   // Tag-corpus transitions (the tags.ts split): a text edit that adds/removes a
   // `#tag`. Tracked the same way as linksChanged; parseTags bails on tag-free
   // text so a tag-free keystroke pays the same cheap `includes` scan.
-  let tagsChanged = false
+  let tagsChanged = false;
   for (const change of changes) {
-    if (change.type === 'delete') {
-      const prev = index.byId.get(change.key as string)
-      if (!prev) continue
-      index.byId.delete(prev.id)
-      const key = parentKeyOf(prev)
-      removeChildId(key, prev.id)
-      dirty.add(key)
+    if (change.type === "delete") {
+      const prev = index.byId.get(change.key as string);
+      if (!prev) continue;
+      index.byId.delete(prev.id);
+      const key = parentKeyOf(prev);
+      removeChildId(key, prev.id);
+      dirty.add(key);
       if (prev.mirrorOf) {
-        removeMirror(prev.mirrorOf, prev.id)
-        mirrorsChanged = true
+        removeMirror(prev.mirrorOf, prev.id);
+        mirrorsChanged = true;
       }
       for (const target of parseNodeLinks(prev.text)) {
-        removeLink(target, prev.id)
-        linksChanged = true
+        removeLink(target, prev.id);
+        linksChanged = true;
       }
       for (const tag of parseTags(prev.text)) {
-        removeTagOccurrence(tag)
-        tagsChanged = true
+        removeTagOccurrence(tag);
+        tagsChanged = true;
       }
-      continue
+      continue;
     }
-    const next = change.value
-    const prev = index.byId.get(next.id)
-    index.byId.set(next.id, next)
-    if ((prev?.text ?? '') !== next.text) {
-      const before = prev ? parseNodeLinks(prev.text) : []
-      const after = parseNodeLinks(next.text)
+    const next = change.value;
+    const prev = index.byId.get(next.id);
+    index.byId.set(next.id, next);
+    if ((prev?.text ?? "") !== next.text) {
+      const before = prev ? parseNodeLinks(prev.text) : [];
+      const after = parseNodeLinks(next.text);
       if (before.length > 0 || after.length > 0) {
         for (const t of before) {
           if (!after.includes(t)) {
-            removeLink(t, next.id)
-            linksChanged = true
+            removeLink(t, next.id);
+            linksChanged = true;
           }
         }
         for (const t of after) {
           if (!before.includes(t)) {
-            addLink(t, next.id)
-            linksChanged = true
+            addLink(t, next.id);
+            linksChanged = true;
           }
         }
       }
-      const tagsBefore = prev ? parseTags(prev.text) : []
-      const tagsAfter = parseTags(next.text)
+      const tagsBefore = prev ? parseTags(prev.text) : [];
+      const tagsAfter = parseTags(next.text);
       if (tagsBefore.length > 0 || tagsAfter.length > 0) {
         for (const t of tagsBefore) {
           if (!tagsAfter.includes(t)) {
-            removeTagOccurrence(t)
-            tagsChanged = true
+            removeTagOccurrence(t);
+            tagsChanged = true;
           }
         }
         for (const t of tagsAfter) {
           if (!tagsBefore.includes(t)) {
-            addTagOccurrence(t)
-            tagsChanged = true
+            addTagOccurrence(t);
+            tagsChanged = true;
           }
         }
       }
     }
-    if (prev && (prev.collapsed !== next.collapsed || prev.completed !== next.completed)) {
-      visibilityChanged = true
+    if (
+      prev &&
+      (prev.collapsed !== next.collapsed || prev.completed !== next.completed)
+    ) {
+      visibilityChanged = true;
     }
     if ((prev?.mirrorOf ?? null) !== (next.mirrorOf ?? null)) {
       // null<->id or id<->id: leave the old source's bucket, join the new one.
-      if (prev?.mirrorOf) removeMirror(prev.mirrorOf, next.id)
-      if (next.mirrorOf) addMirror(next.mirrorOf, next.id)
-      mirrorsChanged = true
+      if (prev?.mirrorOf) removeMirror(prev.mirrorOf, next.id);
+      if (next.mirrorOf) addMirror(next.mirrorOf, next.id);
+      mirrorsChanged = true;
     }
     if (!prev) {
       // Insert (also the safe fallback for an update to a row we haven't seen).
-      const key = parentKeyOf(next)
-      addChildId(key, next.id)
-      dirty.add(key)
+      const key = parentKeyOf(next);
+      addChildId(key, next.id);
+      dirty.add(key);
     } else if (prev.parentId !== next.parentId) {
       // Reparent: leaves the old parent, joins the new -- both need a re-sort.
-      const from = parentKeyOf(prev)
-      const to = parentKeyOf(next)
-      removeChildId(from, next.id)
-      addChildId(to, next.id)
-      dirty.add(from)
-      dirty.add(to)
+      const from = parentKeyOf(prev);
+      const to = parentKeyOf(next);
+      removeChildId(from, next.id);
+      addChildId(to, next.id);
+      dirty.add(from);
+      dirty.add(to);
     } else if (prev.prevSiblingId !== next.prevSiblingId) {
       // Reorder within the same parent.
-      dirty.add(parentKeyOf(next))
+      dirty.add(parentKeyOf(next));
     }
     // else: a field-only edit (text / completed / ...) -- byId.set above is all.
   }
   for (const key of dirty) {
-    const ids = index.childrenByParent.get(key)
-    if (ids) index.childrenByParent.set(key, orderChildIds(index.byId, ids))
+    const ids = index.childrenByParent.get(key);
+    if (ids) index.childrenByParent.set(key, orderChildIds(index.byId, ids));
   }
   // Identity discipline. Always bump the WRAPPER so `useTreeIndex` re-renders
   // (the focus/flash effect in OutlineEditor subscribes to it purely to re-run
@@ -229,39 +234,46 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // Field-only edits (the hot path) keep the SAME Map refs -- O(1). Per-node
   // reactivity flows through `useNode` (node-object identity), not Map identity,
   // and whole-collection readers are inert while a bullet is being edited.
-  const structural = dirty.size > 0
+  const structural = dirty.size > 0;
   index = {
     byId: structural ? new Map(index.byId) : index.byId,
-    childrenByParent: structural ? new Map(index.childrenByParent) : index.childrenByParent,
+    childrenByParent: structural
+      ? new Map(index.childrenByParent)
+      : index.childrenByParent,
     // Copy the reverse-index Map on a structural change (it rides the same fresh-
     // Maps discipline as the others) OR whenever a mirrorOf flipped, so readers
     // memoized on its reference can't go stale. Untouched on the keystroke path.
     mirrorsBySource:
-      structural || mirrorsChanged ? new Map(index.mirrorsBySource) : index.mirrorsBySource,
+      structural || mirrorsChanged
+        ? new Map(index.mirrorsBySource)
+        : index.mirrorsBySource,
     // Same discipline for the backlink reverse index (ADR 0032): fresh on a
     // structural change or when a text edit flipped an outbound link. A plain
     // (link-free) keystroke keeps the reference.
     linksByTarget:
-      structural || linksChanged ? new Map(index.linksByTarget) : index.linksByTarget,
+      structural || linksChanged
+        ? new Map(index.linksByTarget)
+        : index.linksByTarget,
     // Same discipline for the tag corpus: fresh on a structural change or when a
     // text edit added/removed a tag. A tag-free keystroke keeps the reference.
-    tagCorpus: structural || tagsChanged ? new Map(index.tagCorpus) : index.tagCorpus,
-  }
+    tagCorpus:
+      structural || tagsChanged ? new Map(index.tagCorpus) : index.tagCorpus,
+  };
   // Bump the flat-list signal on a structural change OR a visibility flip; a
   // pure text/isTask edit leaves it untouched (the typing hot path). See
   // useVisibleRows.
-  if (dirty.size > 0 || visibilityChanged) structureRev++
-  notify()
+  if (dirty.size > 0 || visibilityChanged) structureRev++;
+  notify();
 }
 
 /** Append an id to a parent's child list (the dirty re-sort fixes its position).
  *  Guards against a duplicate from a redelivered change. */
 function addChildId(key: string, id: string) {
-  const ids = index.childrenByParent.get(key)
+  const ids = index.childrenByParent.get(key);
   if (ids) {
-    if (!ids.includes(id)) ids.push(id)
+    if (!ids.includes(id)) ids.push(id);
   } else {
-    index.childrenByParent.set(key, [id])
+    index.childrenByParent.set(key, [id]);
   }
 }
 
@@ -269,71 +281,71 @@ function addChildId(key: string, id: string) {
  *  caller marks the parent dirty so it's re-sorted from the settled byId (a
  *  mid-batch removal can leave a transient fan -- see applyChanges). */
 function removeChildId(key: string, id: string) {
-  const ids = index.childrenByParent.get(key)
-  if (!ids) return
-  const i = ids.indexOf(id)
-  if (i !== -1) ids.splice(i, 1)
-  if (ids.length === 0) index.childrenByParent.delete(key)
+  const ids = index.childrenByParent.get(key);
+  if (!ids) return;
+  const i = ids.indexOf(id);
+  if (i !== -1) ids.splice(i, 1);
+  if (ids.length === 0) index.childrenByParent.delete(key);
 }
 
 /** Register a mirror id under its source in the reverse index (ADR 0022).
  *  Guards against a duplicate from a redelivered change. */
 function addMirror(sourceId: string, id: string) {
-  const ids = index.mirrorsBySource.get(sourceId)
+  const ids = index.mirrorsBySource.get(sourceId);
   if (ids) {
-    if (!ids.includes(id)) ids.push(id)
+    if (!ids.includes(id)) ids.push(id);
   } else {
-    index.mirrorsBySource.set(sourceId, [id])
+    index.mirrorsBySource.set(sourceId, [id]);
   }
 }
 
 /** Drop a mirror id from its source's bucket; prune the entry when it empties. */
 function removeMirror(sourceId: string, id: string) {
-  const ids = index.mirrorsBySource.get(sourceId)
-  if (!ids) return
-  const i = ids.indexOf(id)
-  if (i !== -1) ids.splice(i, 1)
-  if (ids.length === 0) index.mirrorsBySource.delete(sourceId)
+  const ids = index.mirrorsBySource.get(sourceId);
+  if (!ids) return;
+  const i = ids.indexOf(id);
+  if (i !== -1) ids.splice(i, 1);
+  if (ids.length === 0) index.mirrorsBySource.delete(sourceId);
 }
 
 /** Register a referring node under a link target in the backlink reverse index
  *  (ADR 0032). Guards against a duplicate from a redelivered change. */
 function addLink(targetId: string, referrerId: string) {
-  const ids = index.linksByTarget.get(targetId)
+  const ids = index.linksByTarget.get(targetId);
   if (ids) {
-    if (!ids.includes(referrerId)) ids.push(referrerId)
+    if (!ids.includes(referrerId)) ids.push(referrerId);
   } else {
-    index.linksByTarget.set(targetId, [referrerId])
+    index.linksByTarget.set(targetId, [referrerId]);
   }
 }
 
 /** Drop a referrer from a target's backlink bucket; prune when it empties. */
 function removeLink(targetId: string, referrerId: string) {
-  const ids = index.linksByTarget.get(targetId)
-  if (!ids) return
-  const i = ids.indexOf(referrerId)
-  if (i !== -1) ids.splice(i, 1)
-  if (ids.length === 0) index.linksByTarget.delete(targetId)
+  const ids = index.linksByTarget.get(targetId);
+  if (!ids) return;
+  const i = ids.indexOf(referrerId);
+  if (i !== -1) ids.splice(i, 1);
+  if (ids.length === 0) index.linksByTarget.delete(targetId);
 }
 
 /** Register one occurrence of `tag` in the maintained corpus (the tags.ts
  *  split): first-seen casing wins the entry's display `tag`, same rule
  *  `collectAllTags` applies in a full rebuild. */
 function addTagOccurrence(tag: string) {
-  const key = tag.toLowerCase()
-  const entry = index.tagCorpus.get(key)
-  if (entry) entry.count++
-  else index.tagCorpus.set(key, { tag, count: 1 })
+  const key = tag.toLowerCase();
+  const entry = index.tagCorpus.get(key);
+  if (entry) entry.count++;
+  else index.tagCorpus.set(key, { tag, count: 1 });
 }
 
 /** Drop one occurrence; prune the entry once its count reaches zero (the tag no
  *  longer appears anywhere in the outline). */
 function removeTagOccurrence(tag: string) {
-  const key = tag.toLowerCase()
-  const entry = index.tagCorpus.get(key)
-  if (!entry) return
-  entry.count--
-  if (entry.count <= 0) index.tagCorpus.delete(key)
+  const key = tag.toLowerCase();
+  const entry = index.tagCorpus.get(key);
+  if (!entry) return;
+  entry.count--;
+  if (entry.count <= 0) index.tagCorpus.delete(key);
 }
 
 /**
@@ -344,11 +356,11 @@ function removeTagOccurrence(tag: string) {
  * socket) -- see ADR 0004.
  */
 function ensureStarted() {
-  if (started || typeof window === 'undefined') return
-  started = true
+  if (started || typeof window === "undefined") return;
+  started = true;
   nodesCollection.subscribeChanges((changes) => applyChanges(changes), {
     includeInitialState: true,
-  })
+  });
 }
 
 /**
@@ -359,11 +371,11 @@ function ensureStarted() {
  * unrelated keystroke. See ADR 0014.
  */
 export function subscribeTree(cb: () => void): () => void {
-  ensureStarted()
-  listeners.add(cb)
+  ensureStarted();
+  listeners.add(cb);
   return () => {
-    listeners.delete(cb)
-  }
+    listeners.delete(cb);
+  };
 }
 
 /**
@@ -373,13 +385,13 @@ export function subscribeTree(cb: () => void): () => void {
  * subscription on first use.
  */
 export function getTreeIndex(): TreeIndex {
-  ensureStarted()
-  return index
+  ensureStarted();
+  return index;
 }
 
 /** Whole-index subscription. Re-renders on every change -- use sparingly. */
 export function useTreeIndex(): TreeIndex {
-  return useSyncExternalStore(subscribeTree, getTreeIndex, () => EMPTY_INDEX)
+  return useSyncExternalStore(subscribeTree, getTreeIndex, () => EMPTY_INDEX);
 }
 
 /**
@@ -388,14 +400,14 @@ export function useTreeIndex(): TreeIndex {
  * re-renders its siblings.
  */
 export function useNode(id: string): Node | undefined {
-  const getSnapshot = useCallback(() => getTreeIndex().byId.get(id), [id])
-  return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined)
+  const getSnapshot = useCallback(() => getTreeIndex().byId.get(id), [id]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined);
 }
 
 /** A no-op store subscription, for hooks switched off by a session-fixed flag:
  *  no listener is registered and it never notifies, so the snapshot stays at its
  *  disabled value for the session. */
-const NOOP_SUBSCRIBE = () => () => {}
+const NOOP_SUBSCRIBE = () => () => {};
 
 /**
  * Subscribe to how many mirror INSTANCES point at `id` as their source (ADR
@@ -414,12 +426,12 @@ export function useMirrorCount(id: string, enabled = true): number {
   const getSnapshot = useCallback(
     () => (enabled ? (getTreeIndex().mirrorsBySource.get(id)?.length ?? 0) : 0),
     [id, enabled],
-  )
+  );
   return useSyncExternalStore(
     enabled ? subscribeTree : NOOP_SUBSCRIBE,
     getSnapshot,
     () => 0,
-  )
+  );
 }
 
 /**
@@ -433,8 +445,8 @@ export function useBacklinkCount(id: string): number {
   const getSnapshot = useCallback(
     () => getTreeIndex().linksByTarget.get(id)?.length ?? 0,
     [id],
-  )
-  return useSyncExternalStore(subscribeTree, getSnapshot, () => 0)
+  );
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => 0);
 }
 
 /**
@@ -455,16 +467,17 @@ export function useVisibleChildIds(
   // Cache the last (key, ids) so getSnapshot returns a referentially stable
   // array while the structure is unchanged. Starts null -- the first call
   // always populates, so there is no sentinel key to collide with.
-  const cache = useRef<{ key: string; ids: string[] } | null>(null)
+  const cache = useRef<{ key: string; ids: string[] } | null>(null);
   const getSnapshot = useCallback(() => {
-    const kids = childrenOf(getTreeIndex(), parentId)
-    const ids: string[] = []
-    for (const n of kids) if (!isHidden(n)) ids.push(n.id)
-    const key = ids.join('\n')
-    if (!cache.current || cache.current.key !== key) cache.current = { key, ids }
-    return cache.current.ids
-  }, [parentId, isHidden])
-  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_IDS)
+    const kids = childrenOf(getTreeIndex(), parentId);
+    const ids: string[] = [];
+    for (const n of kids) if (!isHidden(n)) ids.push(n.id);
+    const key = ids.join("\n");
+    if (!cache.current || cache.current.key !== key)
+      cache.current = { key, ids };
+    return cache.current.ids;
+  }, [parentId, isHidden]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_IDS);
 }
 
 /**
@@ -476,15 +489,16 @@ export function useVisibleChildIds(
  * update the crumb. Same stable-snapshot trick as {@link useVisibleChildIds}.
  */
 export function useTrail(rootId: string | null): Node[] {
-  const cache = useRef<{ key: string; trail: Node[] } | null>(null)
+  const cache = useRef<{ key: string; trail: Node[] } | null>(null);
   const getSnapshot = useCallback(() => {
-    const trail = buildTrail(getTreeIndex(), rootId)
-    let key = ''
-    for (const n of trail) key += `${n.id}\0${n.text}\n`
-    if (!cache.current || cache.current.key !== key) cache.current = { key, trail }
-    return cache.current.trail
-  }, [rootId])
-  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_TRAIL)
+    const trail = buildTrail(getTreeIndex(), rootId);
+    let key = "";
+    for (const n of trail) key += `${n.id}\0${n.text}\n`;
+    if (!cache.current || cache.current.key !== key)
+      cache.current = { key, trail };
+    return cache.current.trail;
+  }, [rootId]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_TRAIL);
 }
 
 /**
@@ -498,7 +512,7 @@ export function useHasNodes(): boolean {
     subscribeTree,
     () => getTreeIndex().byId.size > 0,
     () => false,
-  )
+  );
 }
 
 /**
@@ -509,16 +523,16 @@ export function useHasNodes(): boolean {
  * apart from a genuinely empty new account.
  */
 export function useSyncReady(): boolean {
-  return useSyncExternalStore(subscribeSyncReady, isSyncReady, () => false)
+  return useSyncExternalStore(subscribeSyncReady, isSyncReady, () => false);
 }
 
 /** The current visible-structure revision (see {@link structureRev}). O(1). */
 export function getStructureRev(): number {
-  ensureStarted()
-  return structureRev
+  ensureStarted();
+  return structureRev;
 }
 
-const EMPTY_ROWS: VisibleRow[] = []
+const EMPTY_ROWS: VisibleRow[] = [];
 
 /**
  * The flat, depth-tagged list of visible rows under `rootId` -- the Phase B
@@ -547,15 +561,15 @@ export function useVisibleRows(
   filter: TagFilter | null,
 ): VisibleRow[] {
   const cache = useRef<{
-    rev: number
-    rootId: string | null
-    isHidden: (n: Node) => boolean
-    filter: TagFilter | null
-    rows: VisibleRow[]
-  } | null>(null)
+    rev: number;
+    rootId: string | null;
+    isHidden: (n: Node) => boolean;
+    filter: TagFilter | null;
+    rows: VisibleRow[];
+  } | null>(null);
   const getSnapshot = useCallback(() => {
-    const rev = getStructureRev()
-    const c = cache.current
+    const rev = getStructureRev();
+    const c = cache.current;
     // Reuse only when NOTHING that shapes the list changed: rev (structure) AND
     // the deps (the cache outlives a getSnapshot swap, so a dep change with an
     // unchanged rev would otherwise return rows built for the old deps).
@@ -566,11 +580,17 @@ export function useVisibleRows(
       c.isHidden === isHidden &&
       c.filter === filter
     ) {
-      return c.rows
+      return c.rows;
     }
-    const rows = buildVisibleRows(getTreeIndex(), rootId, isHidden, filter, isMirrorsEnabled())
-    cache.current = { rev, rootId, isHidden, filter, rows }
-    return rows
-  }, [rootId, isHidden, filter])
-  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_ROWS)
+    const rows = buildVisibleRows(
+      getTreeIndex(),
+      rootId,
+      isHidden,
+      filter,
+      isMirrorsEnabled(),
+    );
+    cache.current = { rev, rootId, isHidden, filter, rows };
+    return rows;
+  }, [rootId, isHidden, filter]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_ROWS);
 }

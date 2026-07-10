@@ -9,10 +9,11 @@
 
 import type { Effect } from "effect";
 import type { ComponentType, ReactNode } from "react";
-import type { Node, TreeIndex } from "../data/tree";
+
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
 import type { NodeCommands } from "../components/OutlineNode";
+import type { Node, TreeIndex } from "../data/tree";
 
 // --- Seam A: inline token + decorator (D6) ---------------------------------
 //

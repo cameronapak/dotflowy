@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Phase B (ADR 0019): the windowed render mounts only ~viewport rows, regardless
@@ -14,12 +15,22 @@ function bigTree(): SeedNode[] {
   let prevTop: string | null = null;
   for (let p = 0; p < 40; p++) {
     const pid = `p${p}`;
-    nodes.push({ id: pid, parentId: null, prevSiblingId: prevTop, text: `Parent ${p}` });
+    nodes.push({
+      id: pid,
+      parentId: null,
+      prevSiblingId: prevTop,
+      text: `Parent ${p}`,
+    });
     prevTop = pid;
     let prevChild: string | null = null;
     for (let c = 0; c < 50; c++) {
       const cid = `p${p}c${c}`;
-      nodes.push({ id: cid, parentId: pid, prevSiblingId: prevChild, text: `Item ${p}.${c}` });
+      nodes.push({
+        id: cid,
+        parentId: pid,
+        prevSiblingId: prevChild,
+        text: `Item ${p}.${c}`,
+      });
       prevChild = cid;
     }
   }

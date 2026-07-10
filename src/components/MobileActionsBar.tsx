@@ -1,11 +1,4 @@
 import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
-import {
   Indent,
   Outdent,
   Redo2,
@@ -13,7 +6,16 @@ import {
   SquareSlash,
   Undo2,
 } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+
 import { cn } from "@/lib/utils";
+
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 
 /**

@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from "effect";
 
 /**
  * Node: a single bullet in the outline.
@@ -54,6 +54,6 @@ export const nodeSchema = Schema.Struct({
   // makeNode. Required + nullable, no default (ADR 0003). Read only for display
   // (the provenance plugin's origin marker) -- never a semantic branch.
   origin: Schema.NullOr(Schema.String),
-})
+});
 
-export type Node = Schema.Schema.Type<typeof nodeSchema>
+export type Node = Schema.Schema.Type<typeof nodeSchema>;

@@ -21,7 +21,7 @@ candidate under [ADR 0021](./0021-effect-first-one-schema-language.md). Rejected
 same prove-don't-assume discipline as [ADR 0024](./0024-httpapi-transport-deferred.md): its HTTP layer
 (and the official SDK's stateful mode) keeps per-client session state in an in-memory `Map` keyed by
 `Mcp-Session-Id`, and Workers isolates are neither long-lived nor sticky — the follow-up POST that
-lands on a fresh isolate finds no session and dies. Running that layer *inside* the DO would pin state
+lands on a fresh isolate finds no session and dies. Running that layer _inside_ the DO would pin state
 but drags Effect's RPC runtime into the DO ([ADR 0023](./0023-do-storage-stays-native.md) posture) and
 still loses sessions on hibernation. The spec's **no-session stateless mode** fits Workers exactly:
 every POST is self-contained, `initialize` returns no session id, GET streams decline with 405. The
@@ -65,7 +65,7 @@ the cookie, and it would drag CSRF concerns onto an endpoint meant for non-brows
 **The SPA's AuthScreen doubles as the OAuth login page.** A signed-out authorize redirects to `/` with
 the OAuth query intact; after sign-in the AuthScreen resumes with a **top-level navigation** back to
 the authorize endpoint (the code must reach the client's `redirect_uri` as a real redirect — the
-plugin's after-hook fires on the sign-in *fetch*, whose cross-origin 302 a browser fetch can't
+plugin's after-hook fires on the sign-in _fetch_, whose cross-origin 302 a browser fetch can't
 reliably deliver). No consent page: the plugin auto-issues the code for a signed-in user, acceptable
 for a single-user-instance posture; a consent screen is an easy later add (`oidcConfig.consentPage`).
 

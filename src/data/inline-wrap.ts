@@ -112,7 +112,8 @@ export function planMarkerToggle(
   const interior = source.slice(start, end);
   const innerStart = start + m.pre.length;
   return {
-    next: source.slice(0, start) + m.pre + interior + m.post + source.slice(end),
+    next:
+      source.slice(0, start) + m.pre + interior + m.post + source.slice(end),
     range: { start: innerStart, end: innerStart + interior.length },
     removed: false,
   };

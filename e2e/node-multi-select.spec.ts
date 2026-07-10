@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // A flat top-level list -- the simplest shape to reason about sibling-scoped
@@ -285,7 +286,9 @@ test.describe("Node multi-selection", () => {
     ]);
   });
 
-  test("Escape clears the selection and returns the caret", async ({ page }) => {
+  test("Escape clears the selection and returns the caret", async ({
+    page,
+  }) => {
     await load(page);
     await focus(page, "a");
     await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 // Coarse-pointer row redesign (ADR 0029, Workflowy-mobile parity): on touch the
@@ -8,7 +9,11 @@ import { seedOutline, STANDARD_TREE } from "./fixtures";
 // query users hit, not a synthetic class. The first test asserts that emulation
 // actually flips the pointer type, so a silent env change fails loudly here
 // rather than making the layout assertions vacuous.
-test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 900 } });
+test.use({
+  hasTouch: true,
+  isMobile: true,
+  viewport: { width: 412, height: 900 },
+});
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
@@ -24,7 +29,9 @@ async function load(page: Page) {
 }
 
 test.describe("coarse-pointer rows: right chevron + tap-to-edit", () => {
-  test("mobile emulation actually reports a coarse pointer", async ({ page }) => {
+  test("mobile emulation actually reports a coarse pointer", async ({
+    page,
+  }) => {
     await load(page);
     const coarse = await page.evaluate(
       () => window.matchMedia("(pointer: coarse)").matches,
@@ -52,7 +59,9 @@ test.describe("coarse-pointer rows: right chevron + tap-to-edit", () => {
     );
   });
 
-  test("bullet, chevron, and text share a vertical center", async ({ page }) => {
+  test("bullet, chevron, and text share a vertical center", async ({
+    page,
+  }) => {
     // Regression guard: the coarse bullet's optical-align margin lives on
     // `.outline-row .bullet`, NOT a bare `.bullet` -- a media query adds no
     // specificity, so a bare selector silently loses to the base rule and the

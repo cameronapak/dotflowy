@@ -1,9 +1,12 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import { useLayoutEffect, useState, type RefObject } from "react";
+
 import type { Node } from "../data/schema";
-import { dispatchClick, keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
+import type { NodeCommands } from "./OutlineNode";
+
 import { selectSingle } from "../data/selection-state";
+import { dispatchClick, keymapSpecs } from "../plugins/registry";
 import {
   getCaretOffset,
   getSelectedAtom,
@@ -11,7 +14,6 @@ import {
   selectAdjacentAtom,
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
-import type { NodeCommands } from "./OutlineNode";
 
 interface BulletKeymapArgs {
   node: Node;
