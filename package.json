@@ -93,5 +93,8 @@
     "*.{css,json,jsonc,md,yaml,yml}": [
       "oxfmt"
     ]
+  },
+  "engines": {
+    "bun": "1.4.0"
   }
 }
