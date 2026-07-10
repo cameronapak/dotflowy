@@ -239,6 +239,9 @@ async function runSliced(
   }
   slices.push(() => {
     w.writeRepoints();
+    // The repoints land as one slice, so settle `applied` on the total rather
+    // than counting them — otherwise the last progress paint stalls short.
+    applied = opCount;
   });
 
   const show = () =>
