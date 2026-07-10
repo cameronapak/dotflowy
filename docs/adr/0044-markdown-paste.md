@@ -158,6 +158,27 @@ Also out, each a written decision rather than an omission:
 - **A touch literal paste.** `Mod+Shift+V` is keyboard-only; coarse pointers get no hatch in v1 and undo is the recourse. When demanded — or if the keydown spike fails (known risks) — the designated shape is a Cmd+K **"Paste as plain lines"** action over `navigator.clipboard.readText()` (user-gesture-gated, no paste event involved), which serves keyboard and touch alike. It is not built until then.
 - **A native clipboard flavor** (`application/x-dotflowy` written alongside `text/plain`, preferred on paste — it would make internal copy/paste exact and dissolve the round-trip exceptions for the internal case). Weighed and rejected for v1: the markdown lane must be bulletproof regardless (external paste exists), so a second serializer only adds the drift ADR 0037's shared core exists to prevent; custom-format clipboard support is uneven across browsers (Chromium wants `web `-prefixed formats, Safari lags); and the exceptions it would dissolve are presentation shifts, not data loss. Revisit when sharing lands — a native payload's id semantics across outlines (a pasted `mirrorOf` pointing into someone else's tree) belong to that ADR.
 
+## Amendment (2026-07-10, with ADR 0045): marker-less lines are paragraphs
+
+Paragraph nodes ([ADR 0045](./0045-paragraph-node-kind.md)) give the grammar a construct it lacked
+when "one line, one bullet" was written. The rule becomes: **one marker-less line, one _paragraph_**
+— a line with no list/task/heading marker parses to a node with `kind: 'paragraph'`; marker lines
+parse exactly as before. Depth still comes from indentation; heading lines still drive nesting and
+stay bullets; a stripped blockquote line (`> x` → `x`) is marker-less and so lands as a paragraph.
+Line 1 of a paste inherits kind into the anchor under the same head-is-empty rule as
+`isTask`/`completed`. Fenced raw mode and `Mod+Shift+V` literal paste are untouched — no
+interpretation means no kind inference; their lines stay bullets.
+
+The exporter emits a paragraph as its text with **no `- ` prefix**, with one guard: the bare line
+is emitted **only if it re-parses to the same paragraph**. A paragraph whose text would read as a
+block construct (`- foo`, `# foo`) — or an empty paragraph, since blank lines are dropped
+separators — falls back to the `- ` prefix: every character kept, kind degrades to bullet,
+idempotent (the "freely drop syntax, only if idempotent" bar, applied to kind). This keeps
+`parse(outlineToMarkdown(t)) === t` true for kind-carrying trees instead of adding a fourth
+exception; the property-test corpus must generate `kind: 'paragraph'` nodes, including the
+lookalike and empty cases. Known portability wart, accepted: nested paragraphs export as indented
+bare lines, which strict CommonMark readers at 4+ spaces render as code blocks.
+
 ## Known risks, and what measuring them showed
 
 - **~~The `Mod+Shift+V` hatch is unverified.~~ Verified.** The `paste` event exposes `clipboardData`, not modifier keys, so the chord is armed on the preceding capture-phase `keydown` and read by the paste that follows (ProseMirror's shipped technique). Chromium fires `keydown` (`shiftKey: true`) _then_ `paste` for the `pasteAndMatchStyle` editing command it maps that chord to — confirmed against the real clipboard and pinned by `e2e/markdown-paste.spec.ts`. The Cmd+K "Paste as plain lines" fallback is therefore **not built**; it remains the designated shape if touch demand appears. _Testing gotcha:_ Playwright's `keyboard.press("Meta+Shift+V")` attaches no editing command, so the keydown lands and no paste is ever generated. The spec drives the raw CDP `Input.dispatchKeyEvent` with `commands: ["pasteAndMatchStyle"]` instead.
