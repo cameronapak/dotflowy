@@ -4,63 +4,63 @@ Resolution of [#114](https://github.com/cameronapak/dotflowy/issues/114); the ta
 
 ## Guiding rules
 
-1. **Content survives byte-exact; formatting may degrade.** Every degradation is *counted* and disclosed in the import summary dialog (#111) — never silent.
+1. **Content survives byte-exact; formatting may degrade.** Every degradation is _counted_ and disclosed in the import summary dialog (#111) — never silent.
 2. **Imported text behaves exactly as if typed in dotflowy.** No escape layer exists or is invented: plain-text `*word*` arriving from Workflowy renders italic in dotflowy, exactly as it would if hand-typed. The stored source is byte-intact; only presentation shifts.
 3. **Two-layer decode, strictly ordered.** OPML attribute values are HTML inside XML. Import: XML-decode (the parser's job), then HTML-entity-decode. A user-typed literal `<` arrives as `&amp;lt;` and lands as `<` in `node.text`. Export mirrors in reverse: HTML-escape the content, then XML-escape the attribute. The two layers must never be conflated.
 
 ## Import: HTML tag → dotflowy token
 
-| Workflowy | dotflowy | Notes |
-| --- | --- | --- |
-| `<b>x</b>` | `**x**` | |
-| `<i>x</i>` | `*x*` | Star spelling on creation (ADR 0025); `_x_` is a render-only alias. |
-| `<u>x</u>` | `~x~` | Bear-style (ADR 0025). |
-| `<s>x</s>` | `~~x~~` | |
-| `<code>x</code>` | `` `x` `` | |
-| `<a href="u">l</a>` | `[l](u)` | Reuse `sanitizeLinkLabel` + `encodeUrlForMarkdown` (links plugin). Bare-URL autolinks (`<a href="u">u</a>`) become `[u](u)`, matching the paste path pre-unfurl. |
-| `<mark class="colored c-*">` / `bc-*` | `==<emoji> x==` | Both text color AND background highlight map to a dotflowy highlight with the nearest palette color (table below). **Dependency:** requires the highlights token (ADR 0035, unmerged). Fallback if unshipped: plain text + summary disclosure. |
-| `<time start…>display</time>` | date token | Keyed on the **canonical attributes** (`startYear/Month/Day[/Hour]`), never the display text; local-date key matches the daily index. Click = `goToDate` lazy get-or-create (no import-time minting). **Dependency:** the date-token design ticket. Fallback if unshipped: verbatim display text. |
-| `<mention id="n" …> </mention>` | `@mention(n)` | Display name is not in the export and unrecoverable; the id is the only breadcrumb. Counted in summary. |
-| unknown/future tag | inner text, tags stripped | The catch-all keeping "nothing silently lost" true as Workflowy evolves. Counted in summary. |
+| Workflowy                             | dotflowy                  | Notes                                                                                                                                                                                                                                                                                             |
+| ------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<b>x</b>`                            | `**x**`                   |                                                                                                                                                                                                                                                                                                   |
+| `<i>x</i>`                            | `*x*`                     | Star spelling on creation (ADR 0025); `_x_` is a render-only alias.                                                                                                                                                                                                                               |
+| `<u>x</u>`                            | `~x~`                     | Bear-style (ADR 0025).                                                                                                                                                                                                                                                                            |
+| `<s>x</s>`                            | `~~x~~`                   |                                                                                                                                                                                                                                                                                                   |
+| `<code>x</code>`                      | `` `x` ``                 |                                                                                                                                                                                                                                                                                                   |
+| `<a href="u">l</a>`                   | `[l](u)`                  | Reuse `sanitizeLinkLabel` + `encodeUrlForMarkdown` (links plugin). Bare-URL autolinks (`<a href="u">u</a>`) become `[u](u)`, matching the paste path pre-unfurl.                                                                                                                                  |
+| `<mark class="colored c-*">` / `bc-*` | `==<emoji> x==`           | Both text color AND background highlight map to a dotflowy highlight with the nearest palette color (table below). **Dependency:** requires the highlights token (ADR 0035, unmerged). Fallback if unshipped: plain text + summary disclosure.                                                    |
+| `<time start…>display</time>`         | date token                | Keyed on the **canonical attributes** (`startYear/Month/Day[/Hour]`), never the display text; local-date key matches the daily index. Click = `goToDate` lazy get-or-create (no import-time minting). **Dependency:** the date-token design ticket. Fallback if unshipped: verbatim display text. |
+| `<mention id="n" …> </mention>`       | `@mention(n)`             | Display name is not in the export and unrecoverable; the id is the only breadcrumb. Counted in summary.                                                                                                                                                                                           |
+| unknown/future tag                    | inner text, tags stripped | The catch-all keeping "nothing silently lost" true as Workflowy evolves. Counted in summary.                                                                                                                                                                                                      |
 
 ### Degradation rules (import)
 
-- **Marker char in interior** (`<b>a*b</b>`, `<u>~5</u>`, `` <code>a`b</code> ``): token patterns exclude their own marker char in the interior, so the token cannot form. Drop the formatting, keep the interior as plain text (`a*b`). Counted.
+- **Marker char in interior** (`<b>a*b</b>`, `<u>~5</u>`, ``<code>a`b</code>``): token patterns exclude their own marker char in the interior, so the token cannot form. Drop the formatting, keep the interior as plain text (`a*b`). Counted.
 - **Nesting** (`<b><i>`, `<i><mark>`, …) vs dotflowy's FLAT emphasis: **outermost tag wins**, inner markers dropped. Exception: **a link anywhere in the stack wins outright** — emit only `[label](url)` (in the combined token regex `**[l](u)**` tokenizes as bold and kills the link; a working link beats any styling). Counted.
 - **`&#10;` newline inside `text`** (1 occurrence in the real export): first line = node text; continuation lines become prepended child bullets, placed **before** any `_note`-derived lines — same convention as #113.
 
 ### Highlight color table
 
-Workflowy palette names (parse `c-`/`bc-` prefix liberally; observed set in *italics*):
+Workflowy palette names (parse `c-`/`bc-` prefix liberally; observed set in _italics_):
 
-| Workflowy color | dotflowy circle emoji |
-| --- | --- |
-| *red* | 🔴 |
-| orange | 🟠 |
-| *yellow* | 🟡 |
-| *green*, *teal* | 🟢 |
-| *sky*, blue | 🔵 |
-| *purple*, pink | 🟣 |
-| *gray*, brown | bare `==x==` (default blue) — the shipped ADR 0035 palette has no white emoji (probe finding, #118; 13 real `gray` marks) |
-| unrecognized name | bare `==x==` (default blue) |
+| Workflowy color   | dotflowy circle emoji                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| _red_             | 🔴                                                                                                                        |
+| orange            | 🟠                                                                                                                        |
+| _yellow_          | 🟡                                                                                                                        |
+| _green_, _teal_   | 🟢                                                                                                                        |
+| _sky_, blue       | 🔵                                                                                                                        |
+| _purple_, pink    | 🟣                                                                                                                        |
+| _gray_, brown     | bare `==x==` (default blue) — the shipped ADR 0035 palette has no white emoji (probe finding, #118; 13 real `gray` marks) |
+| unrecognized name | bare `==x==` (default blue)                                                                                               |
 
 ## Export: dotflowy token → HTML
 
 Exact inverse of import, plus dotflowy-only projections:
 
-| dotflowy | Workflowy `text` HTML | Notes |
-| --- | --- | --- |
-| `**x**` | `<b>x</b>` | |
-| `*x*`, `_x_` | `<i>x</i>` | Underscore alias exports identically. |
-| `~x~` | `<u>x</u>` | |
-| `~~x~~` | `<s>x</s>` | |
-| `` `x` `` | `<code>x</code>` | |
-| `[l](u)` | `<a href="u">l</a>` | |
-| `==<emoji> x==` | `<mark class="colored bc-*">x</mark>` | The leading circle emoji is **encoding, not content** — strip it from the emitted text; emit the nearest *observed* class (🔵/bare → `bc-sky`; ⚪ → `bc-gray`). Text-color provenance (`c-*`) is not reconstructed — everything exports as `bc-*`. |
-| date token | `<time startYear=… startMonth=… startDay=…>display</time>` | Display text regenerated from the canonical date. **True round-trip**: Workflowy rebuilds a live pill on import. |
-| `[[nodeId]]` | `<a href="https://app.dotflowy.com/<nodeId>">flattened target text</a>` | Label via `flattenNodeText` (one level deep, nested links → `…`). Origin should derive from config, not a literal. Auth-gated URL — resolves for the owner; degrades to labeled text elsewhere. |
-| Bible ref | `<a href="route.bible…">ref</a>` | Same projection as markdown export (#105, `bibleRefsToMarkdownLinks`). |
-| `#tag` / `@tag` | plain text | Workflowy tags are plain text — direct pass-through both directions. |
-| unparsed literal `*`/`~`/`` ` ``/`[` | plain text | Never invent markup for text that didn't tokenize. |
+| dotflowy                             | Workflowy `text` HTML                                                   | Notes                                                                                                                                                                                                                                              |
+| ------------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `**x**`                              | `<b>x</b>`                                                              |                                                                                                                                                                                                                                                    |
+| `*x*`, `_x_`                         | `<i>x</i>`                                                              | Underscore alias exports identically.                                                                                                                                                                                                              |
+| `~x~`                                | `<u>x</u>`                                                              |                                                                                                                                                                                                                                                    |
+| `~~x~~`                              | `<s>x</s>`                                                              |                                                                                                                                                                                                                                                    |
+| `` `x` ``                            | `<code>x</code>`                                                        |                                                                                                                                                                                                                                                    |
+| `[l](u)`                             | `<a href="u">l</a>`                                                     |                                                                                                                                                                                                                                                    |
+| `==<emoji> x==`                      | `<mark class="colored bc-*">x</mark>`                                   | The leading circle emoji is **encoding, not content** — strip it from the emitted text; emit the nearest _observed_ class (🔵/bare → `bc-sky`; ⚪ → `bc-gray`). Text-color provenance (`c-*`) is not reconstructed — everything exports as `bc-*`. |
+| date token                           | `<time startYear=… startMonth=… startDay=…>display</time>`              | Display text regenerated from the canonical date. **True round-trip**: Workflowy rebuilds a live pill on import.                                                                                                                                   |
+| `[[nodeId]]`                         | `<a href="https://app.dotflowy.com/<nodeId>">flattened target text</a>` | Label via `flattenNodeText` (one level deep, nested links → `…`). Origin should derive from config, not a literal. Auth-gated URL — resolves for the owner; degrades to labeled text elsewhere.                                                    |
+| Bible ref                            | `<a href="route.bible…">ref</a>`                                        | Same projection as markdown export (#105, `bibleRefsToMarkdownLinks`).                                                                                                                                                                             |
+| `#tag` / `@tag`                      | plain text                                                              | Workflowy tags are plain text — direct pass-through both directions.                                                                                                                                                                               |
+| unparsed literal `*`/`~`/`` ` ``/`[` | plain text                                                              | Never invent markup for text that didn't tokenize.                                                                                                                                                                                                 |
 
 Escaping on export: HTML-escape the composed string (`<` → `&lt;`, `&` → `&amp;`), then XML-escape the attribute value (`<` → `&lt;`, `&` → `&amp;`, `"` → `&quot;`) — so a literal `<` in `node.text` lands as `&amp;lt;`, byte-matching Workflowy's own output. Newlines in emitted `_note` values are `&#10;`.

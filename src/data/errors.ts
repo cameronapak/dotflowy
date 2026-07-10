@@ -1,4 +1,4 @@
-import { Data } from 'effect'
+import { Data } from "effect";
 
 /**
  * Domain errors for the data layer, as Effect tagged errors (`Data.TaggedError`;
@@ -17,10 +17,10 @@ import { Data } from 'effect'
  *  so it settles ready-but-empty and records the error (nodesLoadError) instead of
  *  rejecting — seeding then would have run over an unreachable outline. Carries the
  *  underlying failure as `cause`. */
-export class BootstrapError extends Data.TaggedError('BootstrapError')<{
-  cause: unknown
+export class BootstrapError extends Data.TaggedError("BootstrapError")<{
+  cause: unknown;
 }> {
   get message() {
-    return 'First-run outline bootstrap skipped: initial load failed'
+    return "First-run outline bootstrap skipped: initial load failed";
   }
 }

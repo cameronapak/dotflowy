@@ -14,10 +14,10 @@ bullet is focused and stays full only when the title itself holds the caret — 
 child spotlights the child, not the whole page header.
 
 **Why single-node, not the focused node + its ancestor chain (the UX call).** An earlier draft lit the
-active *branch* (focused bullet + every ancestor up to the zoom root). We dropped the ancestors. Dimmed
-context at 0.3 is still legible, so lighting the ancestors doesn't *add* context you'd otherwise lose — it
+active _branch_ (focused bullet + every ancestor up to the zoom root). We dropped the ancestors. Dimmed
+context at 0.3 is still legible, so lighting the ancestors doesn't _add_ context you'd otherwise lose — it
 only dilutes the focus and produces a "ladder" of full-opacity rows (node + each parent) interleaved with
-dimmed siblings, which reads busier than one crisp bright line against a uniform dim field. For a *focus*
+dimmed siblings, which reads busier than one crisp bright line against a uniform dim field. For a _focus_
 mode, the calmer single line is the point, and it matches the intent ("mainly focus on the current node").
 If deep trees ever feel unmoored, the graceful upgrade is a **three-tier gradient** (active 1.0, ancestors
 ~0.6, rest 0.3), NOT full-bright ancestors — recorded here so the next reach is the gradient, not a revert.
@@ -27,8 +27,12 @@ effect. Single-node lighting is exactly `:focus-within`, and "dim only while a c
 exactly `:has(.node-text:focus)`:
 
 ```css
-.spotlight-on:has(.node-text:focus) .outline-row { opacity: 0.3; }
-.spotlight-on li[data-node-id]:focus-within > .outline-row { opacity: 1; }
+.spotlight-on:has(.node-text:focus) .outline-row {
+  opacity: 0.3;
+}
+.spotlight-on li[data-node-id]:focus-within > .outline-row {
+  opacity: 1;
+}
 ```
 
 So there is **no JS in the dim path at all** — no focus listeners, no generated stylesheet, no tree walk.
@@ -51,7 +55,7 @@ synced settings collection is a clean later move. It is a real user toggle, **no
 flag — those are default-ON rollback hatches deleted after dogfooding; this is default-OFF and persists.
 
 **The on-state header indicator (awareness + off-switch).** At rest — no caret in the outline — the
-pure-CSS dim shows *nothing*, so there is no passive signal that the mode is even on, and turning it off
+pure-CSS dim shows _nothing_, so there is no passive signal that the mode is even on, and turning it off
 means digging into the More menu. Both are fixed by one control: `SpotlightIndicator`
 (`src/components/spotlight-indicator.tsx`), a chip in the header's right cluster (leading it) that is
 present **only while spotlight is on** and, clicked, turns it off. Three calls, each with its rejected
@@ -59,12 +63,12 @@ alternative:
 
 - **Header, not the subheader band.** A subheader banner ("Spotlight mode is on") would spell the state
   out loudest, but it costs a full extra row of vertical chrome and collides with the tag filter (the sole
-  subheader tenant) — and shouting is exactly what a *calm* focus mode shouldn't do. A header chip costs
+  subheader tenant) — and shouting is exactly what a _calm_ focus mode shouldn't do. A header chip costs
   zero vertical space and sidesteps the coexistence problem entirely.
-- **Present-only-when-on, not a permanent toggle.** The chip's mere presence *is* the awareness signal:
+- **Present-only-when-on, not a permanent toggle.** The chip's mere presence _is_ the awareness signal:
   present-vs-absent is a bigger perceptual delta than a permanent button's lit-vs-dim, and it keeps the
-  header uncluttered for everyone who never enables the mode. Turning spotlight *on* stays in the More menu
-  + Cmd+K; this surface is awareness + off only. Mirrors `BookmarkStar`'s "render nothing when N/A."
+  header uncluttered for everyone who never enables the mode. Turning spotlight _on_ stays in the More menu
+  - Cmd+K; this surface is awareness + off only. Mirrors `BookmarkStar`'s "render nothing when N/A."
 - **A solid fill carries the state on mobile.** The app is grayscale (`--primary` is chroma-0), so a
   low-opacity tint reads as an ordinary ghost-button hover — invisible. The active chip is a **solid**
   `--primary` pill (the grayscale system's "active" idiom, same emphasis as the daily "Today" badge),
@@ -73,13 +77,14 @@ alternative:
   the mode. No toast on click — the chip vanishing plus the outline no longer dimming is feedback enough.
 
 **Rejected alternatives.**
+
 - **A subheader "Spotlight mode is on" banner.** Loudest awareness, but a permanent extra row that fights
   the mode's calm intent and collides with the tag filter. See the header-indicator note above.
 - **Ancestor-chain (active + parents) lit.** Busier "ladder" look that dilutes focus; the dimmed parents
   are already legible at 0.3, so it buys little. The three-tier gradient is the fallback if context is ever
   needed, not this.
 - **Generated stylesheet keyed on `data-node-id` + `focusin`/`focusout` listeners (a la `TagColorStyles`).**
-  This was the right tool *while* the design lit ancestors — a flat, non-nested list (ADR 0019) can't reach
+  This was the right tool _while_ the design lit ancestors — a flat, non-nested list (ADR 0019) can't reach
   ancestors with a CSS descendant selector, so it needed a JS tree-walk emitting an explicit id list.
   Single-node removed that need entirely, and pure CSS is simpler, has no client/DO drift surface, and can't
   fall out of sync with the DOM. Kept in git history, not the code.

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Completion is now the todos plugin (ADR 0018 D9): the checkbox (Seam F), the
@@ -13,7 +14,13 @@ const TREE: SeedNode[] = [
   { id: "a", parentId: null, prevSiblingId: null, text: "" },
   { id: "b", parentId: null, prevSiblingId: "a", text: "" },
   // A pre-made task, for the checkbox-click path.
-  { id: "c", parentId: null, prevSiblingId: "b", text: "buy milk", isTask: true },
+  {
+    id: "c",
+    parentId: null,
+    prevSiblingId: "b",
+    text: "buy milk",
+    isTask: true,
+  },
 ];
 
 const text = (page: Page, id: string) =>

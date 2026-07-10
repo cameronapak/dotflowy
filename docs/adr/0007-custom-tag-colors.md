@@ -12,6 +12,6 @@ per-node store. Keying off `data-tag` in one stylesheet makes a recolor an **O(1
 browser applies to all instances for free, with zero React re-renders.
 
 **Don't:** derive colors by hashing the name (noise masquerading as meaning; pre-spends the
-palette); put color on `Node` or per-occurrence (it's global to the tag *name*); or use
+palette); put color on `Node` or per-occurrence (it's global to the tag _name_); or use
 per-instance classes. The generator skips unsafe tag names (`[\p{L}\p{N}_-]+` guard) — keep that,
 it's the CSS-injection guard.

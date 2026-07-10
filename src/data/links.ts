@@ -43,7 +43,10 @@ export function stripLinks(text: string): string {
 
 /** Return the markdown link whose source token contains or touches `offset`.
  *  The offset is in SOURCE space, matching contentEditable caret helpers. */
-export function linkAtOffset(text: string, offset: number): LinkAtOffset | null {
+export function linkAtOffset(
+  text: string,
+  offset: number,
+): LinkAtOffset | null {
   for (const m of text.matchAll(LINK_RE())) {
     const start = m.index ?? 0;
     const token = m[0] ?? "";
@@ -76,10 +79,7 @@ export function bareHttpUrl(s: string): string | null {
 /** Percent-encode the characters that would break the `(url)` half of the
  *  simple parser. The label keeps its pretty parens; only the url is encoded. */
 export function encodeUrlForMarkdown(url: string): string {
-  return url
-    .replace(/ /g, "%20")
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29");
+  return url.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
 }
 
 // --- Title unfurl (ADR 0016) -----------------------------------------------

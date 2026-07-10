@@ -1,11 +1,4 @@
 import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import {
   BoldIcon,
   EyeOffIcon,
   HighlighterIcon,
@@ -14,13 +7,22 @@ import {
   StrikethroughIcon,
   UnderlineIcon,
 } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+
 import { cn } from "@/lib/utils";
+
+import { getSelectedAtom } from "./inline-code";
 import {
   detectMarkerWrap,
   type MarkerPair,
   readActiveSelectionSource,
 } from "./wrap";
-import { getSelectedAtom } from "./inline-code";
 
 /**
  * The zero-arg command surface the desktop formatting toolbar drives (ADR 0036).

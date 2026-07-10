@@ -1,3 +1,6 @@
+import { useNavigate } from "@tanstack/react-router";
+import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
+import { BookmarkIcon, HomeIcon } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -5,11 +8,13 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { BookmarkIcon, HomeIcon } from "lucide-react";
 import { toast } from "sonner";
-import { useTree } from "../data/useTree";
+
+import { cn } from "@/lib/utils";
+
+import { capture, drop } from "../data/history";
+import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
+import { runStructural } from "../data/structural";
 import {
   buildTrail,
   childrenOf,
@@ -17,12 +22,9 @@ import {
   type Node,
   type TreeIndex,
 } from "../data/tree";
-import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
-import { runStructural } from "../data/structural";
+import { useTree } from "../data/useTree";
 import { searchAliases, searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
-import { capture, drop } from "../data/history";
-import { cn } from "@/lib/utils";
 import { setMoveDialogOpener, type MoveMode } from "./move-dialog-opener";
 import {
   Command,

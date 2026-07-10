@@ -18,9 +18,11 @@
  */
 import { Lock } from "lucide-react";
 import { toast } from "sonner";
-import { getProtection } from "../plugins/registry";
+
 import type { NodeProtection } from "../plugins/types";
+
 import { orphanedMirrorsBy, type TreeIndex } from "../data/tree";
+import { getProtection } from "../plugins/registry";
 import { rejectRow } from "./flash-node";
 
 /** The actions a protected node forbids. The string also keys the toast id (so

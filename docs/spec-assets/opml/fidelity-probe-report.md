@@ -7,8 +7,8 @@ Throwaway probe (`fidelity-probe.ts`, this directory — run from a scratch dir 
 1. **"Nothing silently lost" holds on real data.** The content-survival check (every HTML text leaf must appear in the converted output, modulo the two disclosed transforms: mention interiors and sanitized link labels) passes with **zero violations across all 16,882 nodes**.
 2. **Scale (feeds #115/#117):** 16,882 → **17,935 post-split nodes (+6.2%)**: 657 notes → 1,052 note bullets (412 blank lines dropped), 1 text-newline split. Depth 10 → 11 (note bullets nest one deeper). One import = ONE `runStructural` batch of ~18k ops → **36 changelog chunks** at ≤500 ops each. Parse: 52 ms. Comfortably inside the 50k app-UI ceiling; 3.6× the 5k MCP ceiling (correctly rejected there).
 3. **Degradations are rare and all counted** (~131 constructs, <1% of nodes): 45 styling-inside-link dropped (link wins), 44+11+2 nested formatting dropped (outermost wins), 9 link-wins-over-formatting, 4 empty `<b>`, 2 mentions, 13 gray marks (next item).
-4. **Spec divergence found — the #114 color table references ⚪ but the shipped ADR 0035 palette has no white emoji.** `HIGHLIGHT_EMOJI` (src/data/highlight.ts) is exactly 🔴🟠🟡🟢🔵🟣; `==⚪x==` would parse as a *blue* highlight whose text starts with ⚪. The real export has **13 `bc-gray`/`c-gray` marks** that hit this. Probe maps them to bare `==x==` (default blue) and counts. #114's table needs a one-line amendment: gray/brown → bare `==` (not ⚪).
-5. **Workflowy's own export contains malformed inline HTML.** 3 unclosed `<b>` + 3 stray `</b>` — bold runs *spanning across bullets* (opened in one node's `text`, closed in a later node's). The importer's HTML scanner must be tolerant by construction: stray close tags ignored, unclosed tags auto-closed at end of value, text always kept. A strict HTML parser would reject real exports.
+4. **Spec divergence found — the #114 color table references ⚪ but the shipped ADR 0035 palette has no white emoji.** `HIGHLIGHT_EMOJI` (src/data/highlight.ts) is exactly 🔴🟠🟡🟢🔵🟣; `==⚪x==` would parse as a _blue_ highlight whose text starts with ⚪. The real export has **13 `bc-gray`/`c-gray` marks** that hit this. Probe maps them to bare `==x==` (default blue) and counts. #114's table needs a one-line amendment: gray/brown → bare `==` (not ⚪).
+5. **Workflowy's own export contains malformed inline HTML.** 3 unclosed `<b>` + 3 stray `</b>` — bold runs _spanning across bullets_ (opened in one node's `text`, closed in a later node's). The importer's HTML scanner must be tolerant by construction: stray close tags ignored, unclosed tags auto-closed at end of value, text always kept. A strict HTML parser would reject real exports.
 6. **Accidental tokenization is real but small (rule 2's accepted presentation shift):** 23 nodes carry plain source text that will render as unintended dotflowy tokens on import — 9 italic `*x*`, 9 code `` `x` ``, 4 underline `~x~`, 1 underscore italic. Worth a number in the ADR; not worth an escape layer (as decided).
 7. **Dialect doc validated against real bytes:** attribute inventory is exactly `text`/`_complete`/`_note` (zero unknown attributes), tag census matches `workflowy-opml-dialect.md`, `<time>` census is startYear/Month/Day on all 2,683 + startHour on 2, zero `end*`.
 
@@ -251,8 +251,6 @@ note line two after a hard newline
 - `5. Debrief Time. 15 min. <i>Go for a walk together.</i>`
   → `5. Debrief Time. 15 min. *Go for a walk together.*`
 
-
-
 ## Rider results
 
 ### Multi-frame echo overlay (from #115)
@@ -261,4 +259,4 @@ note line two after a hard newline
 
 ### Workflowy unknown-attribute tolerance (from #116)
 
-**TOLERATED — no fallback encoding needed.** Pasted an OPML snippet carrying `id`, `_mirror`, and `_task` attributes into live Workflowy (2026-07-07): imported cleanly, content intact, `_complete` honored, unknown attributes silently ignored, no error and no visible artifacts. **But a re-export of the pasted node STRIPS all three custom attributes** (`_complete` survives). Consequence to disclose in the ADR: #116's mirror persistence round-trips dotflowy→dotflowy only; OPML that has passed *through* Workflowy loses mirror identity (and `_task`), so re-import from a Workflowy re-export yields detached duplicates — precisely #116's documented fallback, now verified rather than assumed.
+**TOLERATED — no fallback encoding needed.** Pasted an OPML snippet carrying `id`, `_mirror`, and `_task` attributes into live Workflowy (2026-07-07): imported cleanly, content intact, `_complete` honored, unknown attributes silently ignored, no error and no visible artifacts. **But a re-export of the pasted node STRIPS all three custom attributes** (`_complete` survives). Consequence to disclose in the ADR: #116's mirror persistence round-trips dotflowy→dotflowy only; OPML that has passed _through_ Workflowy loses mirror identity (and `_task`), so re-import from a Workflowy re-export yields detached duplicates — precisely #116's documented fallback, now verified rather than assumed.

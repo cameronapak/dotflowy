@@ -26,6 +26,9 @@ import {
   StrikethroughIcon,
   UnderlineIcon,
 } from "lucide-react";
+
+import { mdPunct } from "../../components/inline-code";
+import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 import {
   BOLD_PATTERN,
   emphasisMarkerLen,
@@ -34,15 +37,13 @@ import {
   STRIKETHROUGH_PATTERN,
   UNDERLINE_PATTERN,
 } from "../../data/emphasis";
+import { isRevealed } from "../token-kit";
 import {
   definePlugin,
   type El,
   type PluginContext,
   type TokenView,
 } from "../types";
-import { mdPunct } from "../../components/inline-code";
-import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
-import { isRevealed } from "../token-kit";
 
 /** The four marker pairs. Keys match the slash-command ids and the keymap
  *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
@@ -82,10 +83,58 @@ interface EmphasisKind {
 }
 
 const KINDS: readonly EmphasisKind[] = [
-  { kind: "bold", id: "emphasis-bold", pattern: BOLD_PATTERN, precedence: 30, tag: "strong", class: "md-bold", util: "font-bold", label: "Bold", description: "Wrap in **bold**", icon: BoldIcon, hotkey: "Mod+B" },
-  { kind: "strike", id: "emphasis-strike", pattern: STRIKETHROUGH_PATTERN, precedence: 31, tag: "del", class: "md-strike", util: "line-through", label: "Strikethrough", description: "Wrap in ~~strikethrough~~", icon: StrikethroughIcon, hotkey: "Mod+Shift+X" },
-  { kind: "italic", id: "emphasis-italic", pattern: ITALIC_PATTERN, precedence: 32, tag: "em", class: "md-italic", util: "italic", label: "Italic", description: "Wrap in *italic*", icon: ItalicIcon, hotkey: "Mod+I" },
-  { kind: "underline", id: "emphasis-underline", pattern: UNDERLINE_PATTERN, precedence: 33, tag: "u", class: "md-underline", util: "underline", label: "Underline", description: "Wrap in ~underline~ (Bear-style)", icon: UnderlineIcon, hotkey: "Mod+U" },
+  {
+    kind: "bold",
+    id: "emphasis-bold",
+    pattern: BOLD_PATTERN,
+    precedence: 30,
+    tag: "strong",
+    class: "md-bold",
+    util: "font-bold",
+    label: "Bold",
+    description: "Wrap in **bold**",
+    icon: BoldIcon,
+    hotkey: "Mod+B",
+  },
+  {
+    kind: "strike",
+    id: "emphasis-strike",
+    pattern: STRIKETHROUGH_PATTERN,
+    precedence: 31,
+    tag: "del",
+    class: "md-strike",
+    util: "line-through",
+    label: "Strikethrough",
+    description: "Wrap in ~~strikethrough~~",
+    icon: StrikethroughIcon,
+    hotkey: "Mod+Shift+X",
+  },
+  {
+    kind: "italic",
+    id: "emphasis-italic",
+    pattern: ITALIC_PATTERN,
+    precedence: 32,
+    tag: "em",
+    class: "md-italic",
+    util: "italic",
+    label: "Italic",
+    description: "Wrap in *italic*",
+    icon: ItalicIcon,
+    hotkey: "Mod+I",
+  },
+  {
+    kind: "underline",
+    id: "emphasis-underline",
+    pattern: UNDERLINE_PATTERN,
+    precedence: 33,
+    tag: "u",
+    class: "md-underline",
+    util: "underline",
+    label: "Underline",
+    description: "Wrap in ~underline~ (Bear-style)",
+    icon: UnderlineIcon,
+    hotkey: "Mod+U",
+  },
 ];
 
 // A folded emphasis run: one ATOMIC styled tag (`<em>`/`<strong>`/`<del>`/`<u>`).
@@ -147,7 +196,10 @@ function revealedEmphasisEl(
 // 2 for bold/strike), so the leading run of `tok[0]` IS the marker.
 function partsOf(tok: string): { marker: string; interior: string } {
   const len = emphasisMarkerLen(tok);
-  return { marker: tok.slice(0, len), interior: tok.slice(len, tok.length - len) };
+  return {
+    marker: tok.slice(0, len),
+    interior: tok.slice(len, tok.length - len),
+  };
 }
 
 // Render one emphasis run of `kind` to its folded or revealed El. Shared by the

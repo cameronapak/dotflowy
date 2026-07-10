@@ -1,59 +1,64 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import { DurableObject } from 'cloudflare:workers'
+import { DurableObject } from "cloudflare:workers";
 
-import type { ChangeFrame, ChangeOp, Node, ServerMessage } from '../src/data/wire-schema'
+import type {
+  ChangeFrame,
+  ChangeOp,
+  Node,
+  ServerMessage,
+} from "../src/data/wire-schema";
 
-import { planChangeFrames } from './changelog'
+import { planChangeFrames } from "./changelog";
 
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
 // the shared wire module — the one leaf the client and the Worker both derive
 // from, so the DO can't drift from what the client sends. Re-export the two the
 // existing importers (worker/index.ts) resolve from here.
-export type { ChangeOp, Node }
+export type { ChangeOp, Node };
 
 /** A row as stored in the DO's SQLite — booleans are 0/1 integers, and there is
  *  no `owner` column: the DO instance *is* the owner scope. */
 interface NodeRow {
-  id: string
-  parentId: string | null
-  prevSiblingId: string | null
-  text: string
-  isTask: number
-  completed: number
-  collapsed: number
-  bookmarkedAt: number | null
-  mirrorOf: string | null
-  createdAt: number
-  updatedAt: number
-  origin: string | null
+  id: string;
+  parentId: string | null;
+  prevSiblingId: string | null;
+  text: string;
+  isTask: number;
+  completed: number;
+  collapsed: number;
+  bookmarkedAt: number | null;
+  mirrorOf: string | null;
+  createdAt: number;
+  updatedAt: number;
+  origin: string | null;
 }
 
 /** A side-collection row, as carried during the one-time D1 import. */
 export interface KvRow {
-  collection: string
-  key: string
-  value: unknown
+  collection: string;
+  key: string;
+  value: unknown;
 }
 
-type SqlVal = string | number | null
+type SqlVal = string | number | null;
 
 /** Columns a client may write, and which of them are stored as 0/1 booleans.
  *  The dynamic PATCH builds its SQL only from this allowlist, so it can't be
  *  injected. */
-const BOOL_COLUMNS = new Set(['isTask', 'completed', 'collapsed'])
+const BOOL_COLUMNS = new Set(["isTask", "completed", "collapsed"]);
 const WRITABLE_COLUMNS = new Set([
-  'parentId',
-  'prevSiblingId',
-  'text',
-  'isTask',
-  'completed',
-  'collapsed',
-  'bookmarkedAt',
-  'mirrorOf',
-  'createdAt',
-  'updatedAt',
-])
+  "parentId",
+  "prevSiblingId",
+  "text",
+  "isTask",
+  "completed",
+  "collapsed",
+  "bookmarkedAt",
+  "mirrorOf",
+  "createdAt",
+  "updatedAt",
+]);
 
 // --- Realtime sync protocol -------------------------------------------------
 // `ChangeFrame` (the unit recordChange returns to broadcastChange — the SQL
@@ -65,13 +70,13 @@ const WRITABLE_COLUMNS = new Set([
 /** client -> DO. The only inbound message: the handshake, carrying the client's
  *  last-applied seq (null on a fresh/forced-resync connect). */
 interface HelloMessage {
-  type: 'hello'
-  since: number | null
+  type: "hello";
+  since: number | null;
 }
 
 /** How many recent change frames the DO retains for reconnect replay. A client
  *  offline past this many edits falls back to a full snapshot. */
-const CHANGELOG_KEEP = 1000
+const CHANGELOG_KEEP = 1000;
 
 function rowToNode(r: NodeRow): Node {
   return {
@@ -87,12 +92,12 @@ function rowToNode(r: NodeRow): Node {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     origin: r.origin,
-  }
+  };
 }
 
 function toSqlValue(key: string, value: unknown): SqlVal {
-  if (BOOL_COLUMNS.has(key)) return value ? 1 : 0
-  return (value ?? null) as SqlVal
+  if (BOOL_COLUMNS.has(key)) return value ? 1 : 0;
+  return (value ?? null) as SqlVal;
 }
 
 interface Env {
@@ -112,15 +117,15 @@ interface Env {
  * Worker translates each request into one RPC call below.
  */
 export class UserOutlineDO extends DurableObject<Env> {
-  private sql: SqlStorage
+  private sql: SqlStorage;
 
   constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env)
-    this.sql = ctx.storage.sql
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
     // Schema setup only — never hold blockConcurrencyWhile across external I/O.
     // Runs before any request is served, so no reader ever sees a half-built
     // schema (e.g. getNodes reading a missing `mirrorOf` column).
-    ctx.blockConcurrencyWhile(async () => this.migrate())
+    ctx.blockConcurrencyWhile(async () => this.migrate());
   }
 
   // --- schema migration ------------------------------------------------------
@@ -139,8 +144,8 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  (This idempotent-baseline / exactly-once-tail split is the load-bearing
    *  invariant — see ADR 0023.) */
   private static readonly MIGRATIONS: ReadonlyArray<{
-    version: number
-    up: (sql: SqlStorage) => void
+    version: number;
+    up: (sql: SqlStorage) => void;
   }> = [
     {
       version: 1,
@@ -175,7 +180,7 @@ export class UserOutlineDO extends DurableObject<Env> {
             seq INTEGER PRIMARY KEY,
             ops TEXT NOT NULL
           );
-        `)
+        `);
         // Pre-mirror `nodes` tables (a deployed DO) were created without
         // `mirrorOf`, and `CREATE TABLE IF NOT EXISTS` above no-ops for them.
         // Add the column once, guarded by a column-existence check since SQLite
@@ -183,9 +188,12 @@ export class UserOutlineDO extends DurableObject<Env> {
         // CREATE, so this skips. The guard lives here (not in a later step)
         // because v1 is the one migration that can meet an already-populated DB.
         const hasMirrorOf = (
-          sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{ name: string }>
-        ).some((c) => c.name === 'mirrorOf')
-        if (!hasMirrorOf) sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`)
+          sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{
+            name: string;
+          }>
+        ).some((c) => c.name === "mirrorOf");
+        if (!hasMirrorOf)
+          sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`);
       },
     },
     {
@@ -196,27 +204,29 @@ export class UserOutlineDO extends DurableObject<Env> {
       // to NULL, which is exactly the semantics we want.
       version: 2,
       up: (sql) => {
-        sql.exec(`ALTER TABLE nodes ADD COLUMN origin TEXT`)
+        sql.exec(`ALTER TABLE nodes ADD COLUMN origin TEXT`);
       },
     },
-  ]
+  ];
 
   /** Run every migration newer than the recorded schema version, each atomically
    *  (its DDL + the version bump commit together or roll back together). */
   private migrate(): void {
     // Bootstrap: `meta` must exist before we can read the version. Idempotent —
     // a fresh DO has no tables; a deployed DO already has `meta` populated.
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
-    const current = this.schemaVersion()
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+    );
+    const current = this.schemaVersion();
     for (const step of UserOutlineDO.MIGRATIONS) {
-      if (step.version <= current) continue
+      if (step.version <= current) continue;
       this.ctx.storage.transactionSync(() => {
-        step.up(this.sql)
+        step.up(this.sql);
         this.sql.exec(
           "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
           String(step.version),
-        )
-      })
+        );
+      });
     }
   }
 
@@ -224,9 +234,11 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  Same meta single-column read shape as `currentSeq`. */
   private schemaVersion(): number {
     const row = this.sql
-      .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'")
-      .toArray()[0]
-    return row ? Number(row.value) : 0
+      .exec<{ value: string }>(
+        "SELECT value FROM meta WHERE key = 'schema_version'",
+      )
+      .toArray()[0];
+    return row ? Number(row.value) : 0;
   }
 
   /** Run a read query and return its rows as `T[]`. The one seam for the
@@ -236,15 +248,15 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  (`currentSeq`, `getKv`, `initialFrame`, …) keep using the type-checked
    *  `exec<{…}>()` overload, which needs no cast. */
   private readRows<T>(query: string, ...params: SqlVal[]): T[] {
-    return this.sql.exec(query, ...params).toArray() as unknown as T[]
+    return this.sql.exec(query, ...params).toArray() as unknown as T[];
   }
 
   // --- nodes -----------------------------------------------------------------
 
   getNodes(): Node[] {
     return this.readRows<NodeRow>(
-      'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes',
-    ).map(rowToNode)
+      "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes",
+    ).map(rowToNode);
   }
 
   /** Upsert one node into SQLite and return the change op describing it (insert
@@ -254,7 +266,8 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  type (the client's sync layer distinguishes them). */
   private putNode(n: Node): ChangeOp {
     const existed =
-      this.sql.exec('SELECT 1 FROM nodes WHERE id = ?', n.id).toArray().length > 0
+      this.sql.exec("SELECT 1 FROM nodes WHERE id = ?", n.id).toArray().length >
+      0;
     // `origin` is WRITE-ONCE: it's in the INSERT column list but deliberately
     // absent from the ON CONFLICT SET, so a later upsert (a move/reparent that
     // re-puts the full node) can never flip a node's provenance. Existing rows
@@ -278,15 +291,15 @@ export class UserOutlineDO extends DurableObject<Env> {
       n.createdAt,
       n.updatedAt,
       n.origin,
-    )
-    return { op: existed ? 'update' : 'insert', value: n }
+    );
+    return { op: existed ? "update" : "insert", value: n };
   }
 
   /** Delete one node from SQLite and return its delete op. Shared by deleteNodes
    *  and applyBatch. */
   private deleteNodeRow(id: string): ChangeOp {
-    this.sql.exec('DELETE FROM nodes WHERE id = ?', id)
-    return { op: 'delete', key: id }
+    this.sql.exec("DELETE FROM nodes WHERE id = ?", id);
+    return { op: "delete", key: id };
   }
 
   upsertNodes(nodes: readonly Node[]): void {
@@ -294,7 +307,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() =>
         this.recordChange(nodes.map((n) => this.putNode(n))),
       ),
-    )
+    );
   }
 
   /**
@@ -320,41 +333,50 @@ export class UserOutlineDO extends DurableObject<Env> {
   applyBatch(ops: readonly ChangeOp[]): number {
     return this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
-        const out: ChangeOp[] = []
+        const out: ChangeOp[] = [];
         for (const op of ops) {
-          out.push(op.op === 'delete' ? this.deleteNodeRow(op.key) : this.putNode(op.value))
+          out.push(
+            op.op === "delete"
+              ? this.deleteNodeRow(op.key)
+              : this.putNode(op.value),
+          );
         }
-        return this.recordChange(out)
+        return this.recordChange(out);
       }),
-    )
+    );
   }
 
-  patchNodes(updates: readonly { id: string; changes: Record<string, unknown> }[]): void {
+  patchNodes(
+    updates: readonly { id: string; changes: Record<string, unknown> }[],
+  ): void {
     this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
-        const ops: ChangeOp[] = []
+        const ops: ChangeOp[] = [];
         for (const u of updates) {
-          const sets: string[] = []
-          const vals: SqlVal[] = []
+          const sets: string[] = [];
+          const vals: SqlVal[] = [];
           for (const [k, v] of Object.entries(u.changes)) {
-            if (!WRITABLE_COLUMNS.has(k)) continue
-            sets.push(`${k} = ?`)
-            vals.push(toSqlValue(k, v))
+            if (!WRITABLE_COLUMNS.has(k)) continue;
+            sets.push(`${k} = ?`);
+            vals.push(toSqlValue(k, v));
           }
-          if (!sets.length) continue
-          vals.push(u.id)
-          this.sql.exec(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`, ...vals)
+          if (!sets.length) continue;
+          vals.push(u.id);
+          this.sql.exec(
+            `UPDATE nodes SET ${sets.join(", ")} WHERE id = ?`,
+            ...vals,
+          );
           // Broadcast the full post-patch row (canonical booleans, every field) so
           // a remote client applies an unambiguous update regardless of rowUpdateMode.
           const row = this.readRows<NodeRow>(
-            'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes WHERE id = ?',
+            "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes WHERE id = ?",
             u.id,
-          )[0] as NodeRow | undefined
-          if (row) ops.push({ op: 'update', value: rowToNode(row) })
+          )[0] as NodeRow | undefined;
+          if (row) ops.push({ op: "update", value: rowToNode(row) });
         }
-        return this.recordChange(ops)
+        return this.recordChange(ops);
       }),
-    )
+    );
   }
 
   deleteNodes(ids: readonly string[]): void {
@@ -362,7 +384,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() =>
         this.recordChange(ids.map((id) => this.deleteNodeRow(id))),
       ),
-    )
+    );
   }
 
   // --- realtime sync (WebSocket Hibernation) ---------------------------------
@@ -371,8 +393,8 @@ export class UserOutlineDO extends DurableObject<Env> {
   private currentSeq(): number {
     const row = this.sql
       .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'seq'")
-      .toArray()[0]
-    return row ? Number(row.value) : 0
+      .toArray()[0];
+    return row ? Number(row.value) : 0;
   }
 
   /** Persist a committed sequence number (the meta cursor `currentSeq` reads). */
@@ -380,7 +402,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seq', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       String(seq),
-    )
+    );
   }
 
   /**
@@ -398,15 +420,22 @@ export class UserOutlineDO extends DurableObject<Env> {
    * transaction has committed.
    */
   private recordChange(ops: ChangeOp[]): ChangeFrame[] {
-    const frames = planChangeFrames(ops, this.currentSeq())
-    if (!frames.length) return frames
+    const frames = planChangeFrames(ops, this.currentSeq());
+    if (!frames.length) return frames;
     for (const f of frames) {
-      this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', f.seq, JSON.stringify(f.ops))
+      this.sql.exec(
+        "INSERT INTO changelog (seq, ops) VALUES (?, ?)",
+        f.seq,
+        JSON.stringify(f.ops),
+      );
     }
-    const finalSeq = frames[frames.length - 1].seq
-    this.setSeq(finalSeq)
-    this.sql.exec('DELETE FROM changelog WHERE seq <= ?', finalSeq - CHANGELOG_KEEP)
-    return frames
+    const finalSeq = frames[frames.length - 1].seq;
+    this.setSeq(finalSeq);
+    this.sql.exec(
+      "DELETE FROM changelog WHERE seq <= ?",
+      finalSeq - CHANGELOG_KEEP,
+    );
+    return frames;
   }
 
   /**
@@ -421,24 +450,24 @@ export class UserOutlineDO extends DurableObject<Env> {
    * triggering write already opened, so it adds negligible billed duration.
    */
   private broadcastChange(frames: readonly ChangeFrame[]): number {
-    if (!frames.length) return this.currentSeq()
-    const sockets = this.ctx.getWebSockets()
+    if (!frames.length) return this.currentSeq();
+    const sockets = this.ctx.getWebSockets();
     for (const frame of frames) {
       const data = JSON.stringify({
-        type: 'change',
+        type: "change",
         seq: frame.seq,
         ops: frame.ops,
-      } satisfies ServerMessage)
+      } satisfies ServerMessage);
       for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
         try {
-          ws.send(data)
+          ws.send(data);
         } catch {
           // already gone
         }
       }
     }
-    return frames[frames.length - 1].seq
+    return frames[frames.length - 1].seq;
   }
 
   /**
@@ -448,28 +477,35 @@ export class UserOutlineDO extends DurableObject<Env> {
    * handshake by sending a `hello` (see webSocketMessage); we just return 101.
    */
   async fetch(request: Request): Promise<Response> {
-    if (request.headers.get('Upgrade') !== 'websocket') {
-      return new Response('expected a WebSocket upgrade', { status: 426 })
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
     }
-    const pair = new WebSocketPair()
-    const client = pair[0]
-    const server = pair[1]
-    this.ctx.acceptWebSocket(server)
-    return new Response(null, { status: 101, webSocket: client })
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    this.ctx.acceptWebSocket(server);
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   /** The only inbound message is the `hello` handshake; reply with the snapshot
    *  or the gap since the client's cursor. Anything else is ignored. */
-  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
-    const hello = this.parseHello(raw)
-    if (!hello) return
-    ws.send(JSON.stringify(this.initialFrame(hello.since)))
+  async webSocketMessage(
+    ws: WebSocket,
+    raw: string | ArrayBuffer,
+  ): Promise<void> {
+    const hello = this.parseHello(raw);
+    if (!hello) return;
+    ws.send(JSON.stringify(this.initialFrame(hello.since)));
   }
 
   /** Complete the closing handshake (CF best practice for Hibernation). */
-  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
     try {
-      ws.close(code, reason)
+      ws.close(code, reason);
     } catch {
       // already closed
     }
@@ -477,19 +513,19 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   async webSocketError(ws: WebSocket): Promise<void> {
     try {
-      ws.close(1011, 'error')
+      ws.close(1011, "error");
     } catch {
       // already closed
     }
   }
 
   private parseHello(raw: string | ArrayBuffer): HelloMessage | null {
-    if (typeof raw !== 'string') return null
+    if (typeof raw !== "string") return null;
     try {
-      const m = JSON.parse(raw) as HelloMessage
-      return m && m.type === 'hello' ? m : null
+      const m = JSON.parse(raw) as HelloMessage;
+      return m && m.type === "hello" ? m : null;
     } catch {
-      return null
+      return null;
     }
   }
 
@@ -500,43 +536,53 @@ export class UserOutlineDO extends DurableObject<Env> {
    * the snapshot path.
    */
   private initialFrame(since: number | null): ServerMessage {
-    const seq = this.currentSeq()
+    const seq = this.currentSeq();
     if (since !== null && since <= seq) {
       const oldest =
         this.sql
-          .exec<{ m: number | null }>('SELECT MIN(seq) AS m FROM changelog')
-          .toArray()[0]?.m ?? null
+          .exec<{ m: number | null }>("SELECT MIN(seq) AS m FROM changelog")
+          .toArray()[0]?.m ?? null;
       // Resumable iff the client is already current (nothing to send) or the
       // next frame it needs (since + 1) is still retained.
-      const canResume = since === seq || (oldest !== null && since + 1 >= oldest)
+      const canResume =
+        since === seq || (oldest !== null && since + 1 >= oldest);
       if (canResume) {
         const rows = this.sql
           .exec<{ seq: number; ops: string }>(
-            'SELECT seq, ops FROM changelog WHERE seq > ? ORDER BY seq',
+            "SELECT seq, ops FROM changelog WHERE seq > ? ORDER BY seq",
             since,
           )
-          .toArray()
+          .toArray();
         return {
-          type: 'resume',
+          type: "resume",
           seq,
-          changes: rows.map((r) => ({ seq: r.seq, ops: JSON.parse(r.ops) as ChangeOp[] })),
-        }
+          changes: rows.map((r) => ({
+            seq: r.seq,
+            ops: JSON.parse(r.ops) as ChangeOp[],
+          })),
+        };
       }
     }
-    return { type: 'snapshot', seq, nodes: this.getNodes() }
+    return { type: "snapshot", seq, nodes: this.getNodes() };
   }
 
   // --- kv side-collections ---------------------------------------------------
 
   getKv(collection: string): unknown[] {
     return this.sql
-      .exec<{ value: string }>('SELECT value FROM kv WHERE collection = ?', collection)
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = ?",
+        collection,
+      )
       .toArray()
-      .map((r) => JSON.parse(r.value))
+      .map((r) => JSON.parse(r.value));
   }
 
-  upsertKv(collection: string, rows: readonly { key: string; value: unknown }[]): void {
-    const ts = Date.now()
+  upsertKv(
+    collection: string,
+    rows: readonly { key: string; value: unknown }[],
+  ): void {
+    const ts = Date.now();
     for (const r of rows) {
       this.sql.exec(
         `INSERT INTO kv (collection, key, value, updatedAt)
@@ -546,13 +592,17 @@ export class UserOutlineDO extends DurableObject<Env> {
         r.key,
         JSON.stringify(r.value),
         ts,
-      )
+      );
     }
   }
 
   deleteKv(collection: string, keys: readonly string[]): void {
     for (const k of keys)
-      this.sql.exec('DELETE FROM kv WHERE collection = ? AND key = ?', collection, k)
+      this.sql.exec(
+        "DELETE FROM kv WHERE collection = ? AND key = ?",
+        collection,
+        k,
+      );
   }
 
   /**
@@ -573,15 +623,15 @@ export class UserOutlineDO extends DurableObject<Env> {
       key,
       JSON.stringify(value),
       Date.now(),
-    )
+    );
     const row = this.sql
       .exec<{ value: string }>(
-        'SELECT value FROM kv WHERE collection = ? AND key = ?',
+        "SELECT value FROM kv WHERE collection = ? AND key = ?",
         collection,
         key,
       )
-      .toArray()[0]
-    return row ? JSON.parse(row.value) : value
+      .toArray()[0];
+    return row ? JSON.parse(row.value) : value;
   }
 
   // --- one-time import from the legacy D1 tables -----------------------------
@@ -589,26 +639,26 @@ export class UserOutlineDO extends DurableObject<Env> {
   isSeeded(): boolean {
     const row = this.sql
       .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'seeded'")
-      .toArray()[0]
-    return row?.value === '1'
+      .toArray()[0];
+    return row?.value === "1";
   }
 
   /** Idempotently load the user's existing rows (read from D1 by the Worker,
    *  which owns the D1 binding) into this DO, then mark it seeded so it never
    *  re-imports. Non-destructive: D1 is left intact. */
   seed(data: { nodes: Node[]; kv: KvRow[] }): void {
-    if (this.isSeeded()) return
-    this.upsertNodes(data.nodes)
+    if (this.isSeeded()) return;
+    this.upsertNodes(data.nodes);
     for (const collection of new Set(data.kv.map((r) => r.collection))) {
       this.upsertKv(
         collection,
         data.kv
           .filter((r) => r.collection === collection)
           .map((r) => ({ key: r.key, value: r.value })),
-      )
+      );
     }
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
-    )
+    );
   }
 }

@@ -1,12 +1,7 @@
-import { useEffect, useState } from "react";
 import { Loader2Icon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "./ui/dialog";
+
 import {
   RESTORE_SLICE_OPS,
   redo,
@@ -15,6 +10,12 @@ import {
 } from "../data/history";
 import { runStructural, runStructuralSliced } from "../data/structural";
 import { getTreeIndex } from "../data/tree-store";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./ui/dialog";
 
 /**
  * The single undo/redo funnel: plan the snapshot restore (`history.ts`), then
@@ -53,7 +54,12 @@ export function runHistoryRestore(
 async function runSliced(kind: "undo" | "redo", plan: RestorePlan) {
   const label = kind === "undo" ? "Undoing" : "Redoing";
   const show = (applied: number) =>
-    openRestoreProgress?.({ kind: "restoring", label, total: plan.opCount, applied });
+    openRestoreProgress?.({
+      kind: "restoring",
+      label,
+      total: plan.opCount,
+      applied,
+    });
   show(0);
   // Let the modal paint before the first slice's burst (the delete dialog's
   // pattern); slices then yield between themselves so progress keeps painting.

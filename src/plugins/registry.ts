@@ -5,9 +5,7 @@
 // exist; this file is the only place that knows the plugin set for tokens.
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { plugins } from "./index";
-import { registerWidget } from "../components/plugin-widget";
-import { getTreeIndex, subscribeTree } from "../data/tree-store";
+
 import type { Node, TreeIndex } from "../data/tree";
 import type {
   AfterPasteInput,
@@ -36,6 +34,10 @@ import type {
   WidgetEl,
 } from "./types";
 
+import { registerWidget } from "../components/plugin-widget";
+import { getTreeIndex, subscribeTree } from "../data/tree-store";
+import { plugins } from "./index";
+
 // No plugin styles seam: ADR 0031 retired raw plugin CSS (it could restyle the
 // whole app). Plugins style with Tailwind utilities on their own El/JSX; dynamic
 // sheets (tag colors) stay bespoke `<style>` components.
@@ -47,7 +49,7 @@ import type {
 // (D7's tiebreak).
 const withOrder: { spec: TokenSpec; order: number }[] = [];
 for (const p of plugins) {
-  for (const spec of (p.tokens ?? [])) {
+  for (const spec of p.tokens ?? []) {
     withOrder.push({ spec, order: withOrder.length });
   }
 }
@@ -70,8 +72,7 @@ for (const spec of tokenSpecs) {
 // preserving the per-node hot path (D6). Empty set => a regex that never
 // matches, so a plugin-less core simply renders escaped plain text.
 const combined =
-  tokenSpecs.map((spec, i) => `(?<_t${i}>${spec.pattern})`).join("|") ||
-  "(?!)";
+  tokenSpecs.map((spec, i) => `(?<_t${i}>${spec.pattern})`).join("|") || "(?!)";
 
 /** The one combined token regex (links | code | tags | ...). Global + unicode. */
 export const tokenRegex = new RegExp(combined, "gu");

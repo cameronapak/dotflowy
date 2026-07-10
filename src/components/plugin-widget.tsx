@@ -16,8 +16,10 @@
 // (`data-props`); `data-src` carries the source for the caret math and the
 // component's `source` prop.
 
-import { createRoot, type Root } from "react-dom/client";
 import type { ComponentType } from "react";
+
+import { createRoot, type Root } from "react-dom/client";
+
 import type { Json, WidgetProps } from "../plugins/types";
 
 /** The custom element tag the serializer emits and `customElements.define`s. */

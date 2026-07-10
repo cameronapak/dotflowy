@@ -1,9 +1,10 @@
-import type { Node } from './schema'
-import { parseNodeLinks } from './node-links'
-import { orderSiblings } from './sibling-chain'
-import { parseTags, type TagEntry } from './tags'
+import type { Node } from "./schema";
 
-export type { Node } from './schema'
+import { parseNodeLinks } from "./node-links";
+import { orderSiblings } from "./sibling-chain";
+import { parseTags, type TagEntry } from "./tags";
+
+export type { Node } from "./schema";
 
 /**
  * In-memory index over the flat node list.
@@ -19,8 +20,8 @@ export type { Node } from './schema'
  */
 export interface TreeIndex {
   /** parentId -> ordered child *ids*, plus the synthetic ROOT_PARENT for top-level */
-  childrenByParent: Map<string, string[]>
-  byId: Map<string, Node>
+  childrenByParent: Map<string, string[]>;
+  byId: Map<string, Node>;
   /**
    * Reverse mirror index (ADR 0022): a source node's id -> ids of the *mirror*
    * nodes pointing at it (`mirrorOf === sourceId`). Built here and maintained
@@ -29,7 +30,7 @@ export interface TreeIndex {
    * Stage 3 for promote-on-delete. Empty for any mirror-free outline (every
    * `mirrorOf` is null), so it costs nothing today.
    */
-  mirrorsBySource: Map<string, string[]>
+  mirrorsBySource: Map<string, string[]>;
   /**
    * Reverse LINK index (ADR 0032): a target node's id -> ids of the nodes whose
    * TEXT links to it (`[[targetId]]` tokens, parsed by node-links.ts). Derived,
@@ -37,7 +38,7 @@ export interface TreeIndex {
    * maintained incrementally in tree-store.ts. Powers the zoomed view's
    * "{n} backlinks" chrome. Empty for a link-free outline.
    */
-  linksByTarget: Map<string, string[]>
+  linksByTarget: Map<string, string[]>;
   /**
    * Maintained `#tag` corpus (the `src/data/tags.ts` split): a case-folded key
    * -> {@link TagEntry}, built here and maintained incrementally in
@@ -45,57 +46,60 @@ export interface TreeIndex {
    * via `collectTagCorpus` (tags.ts) so it reads O(distinct tags) instead of
    * re-scanning every node's text per keystroke while the menu is open.
    */
-  tagCorpus: Map<string, TagEntry>
+  tagCorpus: Map<string, TagEntry>;
 }
 
 /** Synthetic parent id for top-level nodes (those with parentId === null). */
-const ROOT_PARENT = '__root__'
+const ROOT_PARENT = "__root__";
 
 /** The `childrenByParent` key for a node: its parentId, or ROOT_PARENT for
  *  top-level. Exported for the incremental store maintenance in tree-store.ts. */
 export function parentKeyOf(node: Node): string {
-  return node.parentId ?? ROOT_PARENT
+  return node.parentId ?? ROOT_PARENT;
 }
 
 export function buildTreeIndex(nodes: Node[]): TreeIndex {
-  const byId = new Map<string, Node>()
-  const unsorted = new Map<string, Node[]>()
+  const byId = new Map<string, Node>();
+  const unsorted = new Map<string, Node[]>();
 
   for (const node of nodes) {
-    byId.set(node.id, node)
-    const key = parentKeyOf(node)
-    const list = unsorted.get(key)
-    if (list) list.push(node)
-    else unsorted.set(key, [node])
+    byId.set(node.id, node);
+    const key = parentKeyOf(node);
+    const list = unsorted.get(key);
+    if (list) list.push(node);
+    else unsorted.set(key, [node]);
   }
 
   // Each parent's child list is ordered by following the prevSiblingId chain;
   // orderSiblings (sibling-chain.ts) owns that walk and the orphan-append. We
   // store the ordered *ids* (node reads go through byId).
-  const childrenByParent = new Map<string, string[]>()
+  const childrenByParent = new Map<string, string[]>();
   for (const [parentKey, list] of unsorted) {
-    childrenByParent.set(parentKey, orderSiblings(list).map((n) => n.id))
+    childrenByParent.set(
+      parentKey,
+      orderSiblings(list).map((n) => n.id),
+    );
   }
 
   // Reverse mirror index (ADR 0022): bucket each mirror's id under its source.
   // Source order within a bucket is arbitrary (callers sort if they care).
-  const mirrorsBySource = new Map<string, string[]>()
+  const mirrorsBySource = new Map<string, string[]>();
   for (const node of nodes) {
-    if (!node.mirrorOf) continue
-    const list = mirrorsBySource.get(node.mirrorOf)
-    if (list) list.push(node.id)
-    else mirrorsBySource.set(node.mirrorOf, [node.id])
+    if (!node.mirrorOf) continue;
+    const list = mirrorsBySource.get(node.mirrorOf);
+    if (list) list.push(node.id);
+    else mirrorsBySource.set(node.mirrorOf, [node.id]);
   }
 
   // Reverse link index (ADR 0032): bucket each referrer under every node its
   // text links to. parseNodeLinks bails on link-free text, so this pass costs
   // one `includes` per node when no links exist.
-  const linksByTarget = new Map<string, string[]>()
+  const linksByTarget = new Map<string, string[]>();
   for (const node of nodes) {
     for (const target of parseNodeLinks(node.text)) {
-      const list = linksByTarget.get(target)
-      if (list) list.push(node.id)
-      else linksByTarget.set(target, [node.id])
+      const list = linksByTarget.get(target);
+      if (list) list.push(node.id);
+      else linksByTarget.set(target, [node.id]);
     }
   }
 
@@ -103,28 +107,28 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
   // case-folded key, first-seen casing wins -- the same dedupe rule
   // `collectAllTags` applies in one pass, kept live instead of rebuilt.
   // parseTags bails before any regex work on tag-free text.
-  const tagCorpus = new Map<string, TagEntry>()
+  const tagCorpus = new Map<string, TagEntry>();
   for (const node of nodes) {
     for (const tag of parseTags(node.text)) {
-      const key = tag.toLowerCase()
-      const entry = tagCorpus.get(key)
-      if (entry) entry.count++
-      else tagCorpus.set(key, { tag, count: 1 })
+      const key = tag.toLowerCase();
+      const entry = tagCorpus.get(key);
+      if (entry) entry.count++;
+      else tagCorpus.set(key, { tag, count: 1 });
     }
   }
 
-  return { childrenByParent, byId, mirrorsBySource, linksByTarget, tagCorpus }
+  return { childrenByParent, byId, mirrorsBySource, linksByTarget, tagCorpus };
 }
 
 export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
-  const ids = index.childrenByParent.get(parentId ?? ROOT_PARENT)
-  if (!ids) return []
-  const out: Node[] = []
+  const ids = index.childrenByParent.get(parentId ?? ROOT_PARENT);
+  if (!ids) return [];
+  const out: Node[] = [];
   for (const id of ids) {
-    const node = index.byId.get(id)
-    if (node) out.push(node)
+    const node = index.byId.get(id);
+    if (node) out.push(node);
   }
-  return out
+  return out;
 }
 
 /**
@@ -140,21 +144,21 @@ export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
  * `mirrorsBySource` lookups all miss, so this is O(subtree) and returns [].
  */
 export function orphanedMirrorsBy(index: TreeIndex, ids: string[]): string[] {
-  const deleting = new Set<string>()
-  const stack = [...ids]
+  const deleting = new Set<string>();
+  const stack = [...ids];
   while (stack.length) {
-    const id = stack.pop()!
-    if (deleting.has(id)) continue
-    deleting.add(id)
-    for (const k of childrenOf(index, id)) stack.push(k.id)
+    const id = stack.pop()!;
+    if (deleting.has(id)) continue;
+    deleting.add(id);
+    for (const k of childrenOf(index, id)) stack.push(k.id);
   }
-  const orphans: string[] = []
+  const orphans: string[] = [];
   for (const sourceId of deleting) {
-    const mirrors = index.mirrorsBySource.get(sourceId)
-    if (!mirrors) continue
-    for (const m of mirrors) if (!deleting.has(m)) orphans.push(m)
+    const mirrors = index.mirrorsBySource.get(sourceId);
+    if (!mirrors) continue;
+    for (const m of mirrors) if (!deleting.has(m)) orphans.push(m);
   }
-  return orphans
+  return orphans;
 }
 
 /**
@@ -164,15 +168,15 @@ export function orphanedMirrorsBy(index: TreeIndex, ids: string[]): string[] {
  * only after the user confirms.
  */
 export function countSubtreeNodes(index: TreeIndex, ids: string[]): number {
-  const seen = new Set<string>()
-  const stack = [...ids]
+  const seen = new Set<string>();
+  const stack = [...ids];
   while (stack.length) {
-    const id = stack.pop()!
-    if (seen.has(id) || !index.byId.has(id)) continue
-    seen.add(id)
-    for (const k of childrenOf(index, id)) stack.push(k.id)
+    const id = stack.pop()!;
+    if (seen.has(id) || !index.byId.has(id)) continue;
+    seen.add(id);
+    for (const k of childrenOf(index, id)) stack.push(k.id);
   }
-  return seen.size
+  return seen.size;
 }
 
 export interface RemovePlan {
@@ -180,14 +184,14 @@ export interface RemovePlan {
    *  depth-first pre-order) — so when the DO chunks the batch into ≤500-op
    *  frames, no frame prefix ever orphans a surviving child under a deleted
    *  parent. */
-  deleteIds: string[]
+  deleteIds: string[];
   /** Survivors whose `prevSiblingId` pointed into the doomed set, repointed to
    *  their nearest surviving predecessor — `removeNode`'s follower relink,
    *  generalized to arbitrary root sets in one pass. Applied BEFORE the
    *  deletes (the transient two-nodes-share-a-prev "fan" a frame prefix can
    *  show is tolerated by `orderChildIds` and healed on snapshot load, same as
    *  every structural batch). */
-  repoints: Array<{ id: string; prevSiblingId: string | null }>
+  repoints: Array<{ id: string; prevSiblingId: string | null }>;
 }
 
 /**
@@ -198,34 +202,42 @@ export interface RemovePlan {
  * data so the caller can apply it in yielding slices (`runStructuralSliced`)
  * while the wire shape stays ONE batch. Unknown ids are skipped.
  */
-export function planRemoveSubtrees(index: TreeIndex, rootIds: string[]): RemovePlan {
+export function planRemoveSubtrees(
+  index: TreeIndex,
+  rootIds: string[],
+): RemovePlan {
   // Depth-first pre-order over each root, deduped (a root inside another
   // root's subtree contributes nothing new).
-  const doomed = new Set<string>()
-  const preOrder: string[] = []
-  const stack = [...rootIds].reverse()
+  const doomed = new Set<string>();
+  const preOrder: string[] = [];
+  const stack = [...rootIds].reverse();
   while (stack.length) {
-    const id = stack.pop()!
-    if (doomed.has(id) || !index.byId.has(id)) continue
-    doomed.add(id)
-    preOrder.push(id)
-    const kids = childrenOf(index, id)
-    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]!.id)
+    const id = stack.pop()!;
+    if (doomed.has(id) || !index.byId.has(id)) continue;
+    doomed.add(id);
+    preOrder.push(id);
+    const kids = childrenOf(index, id);
+    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]!.id);
   }
 
   // Any survivor pointing into the doomed set walks its prev chain to the
   // nearest surviving predecessor (or the chain head). One O(n) scan handles
   // single roots, contiguous runs, and disjoint sets alike.
-  const repoints: RemovePlan['repoints'] = []
+  const repoints: RemovePlan["repoints"] = [];
   for (const node of index.byId.values()) {
-    if (doomed.has(node.id) || !node.prevSiblingId || !doomed.has(node.prevSiblingId)) {
-      continue
+    if (
+      doomed.has(node.id) ||
+      !node.prevSiblingId ||
+      !doomed.has(node.prevSiblingId)
+    ) {
+      continue;
     }
-    let prev: string | null = node.prevSiblingId
-    while (prev && doomed.has(prev)) prev = index.byId.get(prev)?.prevSiblingId ?? null
-    repoints.push({ id: node.id, prevSiblingId: prev })
+    let prev: string | null = node.prevSiblingId;
+    while (prev && doomed.has(prev))
+      prev = index.byId.get(prev)?.prevSiblingId ?? null;
+    repoints.push({ id: node.id, prevSiblingId: prev });
   }
-  return { deleteIds: preOrder.reverse(), repoints }
+  return { deleteIds: preOrder.reverse(), repoints };
 }
 
 /**
@@ -235,14 +247,17 @@ export function planRemoveSubtrees(index: TreeIndex, rootIds: string[]): RemoveP
  * changed (insert / reparent / reorder) — the only paths that touch the id
  * arrays. A 0/1-length list is already ordered.
  */
-export function orderChildIds(byId: Map<string, Node>, ids: string[]): string[] {
-  if (ids.length <= 1) return ids
-  const nodes: Node[] = []
+export function orderChildIds(
+  byId: Map<string, Node>,
+  ids: string[],
+): string[] {
+  if (ids.length <= 1) return ids;
+  const nodes: Node[] = [];
   for (const id of ids) {
-    const node = byId.get(id)
-    if (node) nodes.push(node)
+    const node = byId.get(id);
+    if (node) nodes.push(node);
   }
-  return orderSiblings(nodes).map((n) => n.id)
+  return orderSiblings(nodes).map((n) => n.id);
 }
 
 /**
@@ -251,18 +266,18 @@ export function orderChildIds(byId: Map<string, Node>, ids: string[]): string[] 
  * and the quick-switcher's per-result breadcrumb context (ADR 0012).
  */
 export function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
-  if (!rootId) return []
-  const trail: Node[] = []
-  let current = index.byId.get(rootId) ?? null
+  if (!rootId) return [];
+  const trail: Node[] = [];
+  let current = index.byId.get(rootId) ?? null;
   // Guard against corrupted parent chains.
-  let guard = index.byId.size + 1
+  let guard = index.byId.size + 1;
   while (current && guard-- > 0) {
-    trail.unshift(current)
+    trail.unshift(current);
     current = current.parentId
       ? (index.byId.get(current.parentId) ?? null)
-      : null
+      : null;
   }
-  return trail
+  return trail;
 }
 
 /**
@@ -272,7 +287,7 @@ export function buildTrail(index: TreeIndex, rootId: string | null): Node[] {
  * 0022). Pure -- reads `index` only.
  */
 export function trueSourceOf(index: TreeIndex, sourceId: string): string {
-  return index.byId.get(sourceId)?.mirrorOf ?? sourceId
+  return index.byId.get(sourceId)?.mirrorOf ?? sourceId;
 }
 
 /**
@@ -287,36 +302,36 @@ export function wouldMirrorCycle(
   trueSourceId: string,
   destParentId: string | null,
 ): boolean {
-  let cursor: string | null = destParentId
-  let guard = index.byId.size + 1
+  let cursor: string | null = destParentId;
+  let guard = index.byId.size + 1;
   while (cursor && guard-- > 0) {
-    if (cursor === trueSourceId) return true
-    cursor = index.byId.get(cursor)?.parentId ?? null
+    if (cursor === trueSourceId) return true;
+    cursor = index.byId.get(cursor)?.parentId ?? null;
   }
-  return false
+  return false;
 }
 
 /** Stable-ish id. crypto.randomUUID is ubiquitous in modern browsers. */
 export function createId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
   }
-  return `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+  return `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function now(): number {
-  return Date.now()
+  return Date.now();
 }
 
 /**
  * Create a node with sensible defaults. Caller decides wiring
  * (prevSiblingId, parentId) at insert site.
  */
-export function makeNode(partial: Partial<Node> & Pick<Node, 'id'>): Node {
+export function makeNode(partial: Partial<Node> & Pick<Node, "id">): Node {
   return {
     parentId: null,
     prevSiblingId: null,
-    text: '',
+    text: "",
     isTask: false,
     completed: false,
     collapsed: false,
@@ -328,5 +343,5 @@ export function makeNode(partial: Partial<Node> & Pick<Node, 'id'>): Node {
     // planners override it with the agent's harness name (outline-ops.ts).
     origin: null,
     ...partial,
-  }
+  };
 }

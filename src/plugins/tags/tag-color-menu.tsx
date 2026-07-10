@@ -1,8 +1,10 @@
+import { Ban } from "lucide-react";
 import { useRef } from "react";
 import { createPortal } from "react-dom";
-import { Ban } from "lucide-react";
-import { Button } from "@/plugins/kit";
+
 import { cn } from "@/lib/utils";
+import { Button } from "@/plugins/kit";
+
 import { useDismissable } from "../../components/use-dismissable";
 import {
   TAG_COLORS,
@@ -61,7 +63,7 @@ export function TagColorMenu({
       ref={ref}
       role="menu"
       aria-label={`Color for #${tag}`}
-      className="bg-popover fixed z-50 flex items-center gap-1 rounded-lg border p-1.5 shadow-md"
+      className="fixed z-50 flex items-center gap-1 rounded-lg border bg-popover p-1.5 shadow-md"
       style={{ left: Math.max(8, left), top: Math.max(8, top) }}
     >
       <Button

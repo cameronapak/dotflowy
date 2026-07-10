@@ -12,6 +12,12 @@
 // plugin contract unchanged. The PURE toggle math lives in data/inline-wrap.ts
 // (unit-tested); this module is the thin DOM shell around it.
 
+import { parseHighlight } from "../data/highlight";
+import {
+  detectMarkerWrap,
+  type MarkerPair,
+  planMarkerToggle,
+} from "../data/inline-wrap";
 import {
   decorate,
   getSelectionRange,
@@ -19,12 +25,6 @@ import {
   setCaretOffset,
   setSelectionOffsets,
 } from "./inline-code";
-import {
-  detectMarkerWrap,
-  type MarkerPair,
-  planMarkerToggle,
-} from "../data/inline-wrap";
-import { parseHighlight } from "../data/highlight";
 
 export { detectMarkerWrap };
 export type { MarkerPair };

@@ -1,10 +1,12 @@
 import { Fragment, type ReactNode } from "react";
+
+import type { PluginContext } from "../plugins/types";
+
+import { headerSlots } from "../plugins/registry";
 import { BookmarkStar } from "./bookmarks";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { NodeSearchButton } from "./node-switcher";
 import { SpotlightIndicator } from "./spotlight-indicator";
-import { headerSlots } from "../plugins/registry";
-import type { PluginContext } from "../plugins/types";
 
 /**
  * App header row: breadcrumb trail on the left (passed as children, since it's

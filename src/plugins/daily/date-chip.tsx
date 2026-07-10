@@ -13,14 +13,17 @@
 // whole token, copy reads back `data-src`.
 
 import { SunIcon } from "lucide-react";
+
 import { Badge } from "@/plugins/kit";
+
+import type { WidgetProps } from "../types";
+
 import {
   formatDateFull,
   formatDateLabel,
   localDateKey,
   parseDateLink,
 } from "../../data/date-links";
-import type { WidgetProps } from "../types";
 
 export function DateLinkChip({ source }: WidgetProps) {
   // The token render gates on parseDateLink, so this can't miss -- but a chip
@@ -33,7 +36,7 @@ export function DateLinkChip({ source }: WidgetProps) {
     <Badge
       variant={isToday ? "default" : "secondary"}
       className={
-        "cursor-pointer select-none border! align-baseline whitespace-nowrap transition-transform active:translate-y-px hover:brightness-[0.97] dark:hover:brightness-110 " +
+        "cursor-pointer border! align-baseline whitespace-nowrap transition-transform select-none hover:brightness-[0.97] active:translate-y-px dark:hover:brightness-110 " +
         (isToday ? "border-transparent" : "border-border")
       }
       title={formatDateFull(key)}

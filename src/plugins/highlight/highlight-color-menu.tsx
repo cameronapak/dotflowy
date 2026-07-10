@@ -13,10 +13,15 @@
 // instead of corrupting the line -- the Edit Link popover's contract. A mirror
 // row edits its SOURCE node (`mirrorOf`), matching where the text lives.
 
+import { Ban, Check } from "lucide-react";
 import { useRef } from "react";
 import { createPortal } from "react-dom";
-import { Ban, Check } from "lucide-react";
+
 import { cn } from "@/lib/utils";
+
+import type { NodeCommands } from "../../components/OutlineNode";
+import type { PluginContext } from "../types";
+
 import { useDismissable } from "../../components/use-dismissable";
 import {
   buildHighlightRun,
@@ -26,8 +31,6 @@ import {
   type HighlightColor,
 } from "../../data/highlight";
 import { replaceTokenInNode } from "../token-kit";
-import type { NodeCommands } from "../../components/OutlineNode";
-import type { PluginContext } from "../types";
 
 /** Splice the recolored (or un-highlighted, with `color: null`) run over the
  *  old one in the node's LIVE text. Exported for tests; pure except the one
@@ -112,7 +115,7 @@ export function HighlightColorMenu({
       role="menu"
       aria-label="Highlight color"
       data-highlight-menu
-      className="bg-popover text-popover-foreground fixed z-50 flex w-44 flex-col rounded-lg border p-1 shadow-md"
+      className="fixed z-50 flex w-44 flex-col rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
       style={{ left, top }}
     >
       {ROWS.map(({ color, label }) => (
@@ -143,7 +146,7 @@ export function HighlightColorMenu({
           {label}
         </button>
       ))}
-      <div role="separator" className="bg-border my-1 h-px" />
+      <div role="separator" className="my-1 h-px bg-border" />
       <button
         type="button"
         role="menuitem"

@@ -35,8 +35,8 @@ One system that covers both beats two half-systems, so the bar tracks the keyboa
 to hide or reorder the system keyboard accessory bar (the floating pill with the prev/next-field arrows + a
 "Done" check). That control belongs to WebKit; a native app suppresses it via `inputAccessoryView`, the web
 has no equivalent, and standalone/PWA mode does not change this. So our bar cannot own that space — a second
-full-width bar just *fights* the system one and reads as two competing strips. Instead the bar is styled as a
-**floating frosted-glass capsule** that adopts the accessory pill's shape *grammar* — inset from the edges,
+full-width bar just _fights_ the system one and reads as two competing strips. Instead the bar is styled as a
+**floating frosted-glass capsule** that adopts the accessory pill's shape _grammar_ — inset from the edges,
 large radius, translucent + blurred, soft shadow — so the two read as one two-tier system: our app-action tier
 above iOS's system tier. We deliberately match the **family, not iOS's exact tokens** (radius/blur/inset drift
 per OS version; chasing them would rot). Two de-duplications keep it from reading as redundant chrome:
@@ -77,6 +77,7 @@ documented future seam, not built here — a v1 with a stable button set ships w
 API first.
 
 **Rejected alternatives.**
+
 - **Remove iOS's keyboard accessory bar.** Not possible from web Safari (no API); blending is the honest
   response. A native shell (Capacitor `Keyboard.setAccessoryBarVisible(false)` / WKWebView) is the only way to
   truly remove it, and is out of scope.

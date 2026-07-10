@@ -16,7 +16,7 @@ of the collection.
 and `onclose`/`onerror` both funnelling through a `downHandled` latch. That's exactly the
 connect/backoff/timeout/cleanup machinery Effect ships as defaults: scoped `acquireRelease`
 (guaranteed WS close), backoff math, `Effect.timeout`, fiber interruption as teardown. The fiber's
-scope *is* the lifecycle — no flag bookkeeping. And the dependency it removes is the real prize:
+scope _is_ the lifecycle — no flag bookkeeping. And the dependency it removes is the real prize:
 `WebSocketConstructor` is an injectable service, so the reconnect/handshake policy is now
 **unit-testable** with a fake socket (`realtime.test.ts`) — the hand-rolled version couldn't be tested
 at all; only Playwright (which mocks the socket and never exercises drops) covered it.
@@ -27,7 +27,7 @@ including the "dropped before first data" lifecycle event, flows in-band through
 consumer folds over. This is the end-state shape for a codebase migrating to Effect; a callback
 interface (`onMessage`/`onInitialError`) would have been deleted on the next migration slice. The
 apply logic in `collection.ts` (snapshot/resume/change → `begin/write/commit` + the seq plumbing) is
-*unchanged* — it moved from `onMessage`'s body into `Stream.runForEach`, re-hosted under a fiber.
+_unchanged_ — it moved from `onMessage`'s body into `Stream.runForEach`, re-hosted under a fiber.
 
 **Scope boundary (since narrowed).** This ADR shipped with `waitForSeq`'s Promise/`setTimeout` waiters
 left unconverted. Under the Effect-first posture ([ADR 0021](./0021-effect-first-one-schema-language.md))
@@ -50,7 +50,7 @@ callback resolves; `appliedSeq → SubscriptionRef` remains a later slice. The e
 ## Consequences
 
 - **Reset-after-stable, not reset-on-every-frame (a deliberate behavior change).** The old code reset
-  backoff to 500ms on *any* received frame, which hot-loops a flapping server (open → one frame → drop,
+  backoff to 500ms on _any_ received frame, which hot-loops a flapping server (open → one frame → drop,
   repeatedly, reconnecting every ~500ms). v4 `Schedule` has no reset-on-event combinator, so the loop
   resets `attempt` only after a connection survives `STABLE_AFTER` (the hello window). Same fast
   reconnect after a genuinely healthy drop; proper backoff when the connection is actually unhealthy.

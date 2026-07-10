@@ -1,8 +1,9 @@
 import { useParams } from "@tanstack/react-router";
 import { BookmarkIcon } from "lucide-react";
-import { useTree } from "../data/useTree";
-import { toggleBookmark } from "../data/mutations";
+
 import { capture } from "../data/history";
+import { toggleBookmark } from "../data/mutations";
+import { useTree } from "../data/useTree";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 

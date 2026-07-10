@@ -1,4 +1,4 @@
-import { Data, Duration, Effect, Schedule } from 'effect'
+import { Data, Duration, Effect, Schedule } from "effect";
 
 /**
  * The Effect transport core for the /api/kv side-collections — a typed-error,
@@ -23,36 +23,36 @@ import { Data, Duration, Effect, Schedule } from 'effect'
  *    `runPromise` never rejects and the caller sees only plain success.
  */
 
-const ENDPOINT = '/api/kv'
+const ENDPOINT = "/api/kv";
 
 const url = (collection: string) =>
-  `${ENDPOINT}?collection=${encodeURIComponent(collection)}`
+  `${ENDPOINT}?collection=${encodeURIComponent(collection)}`;
 
 // --- Domain errors ----------------------------------------------------------
 
-export class KvTransportError extends Data.TaggedError('KvTransportError')<{
-  collection: string
-  cause: unknown
+export class KvTransportError extends Data.TaggedError("KvTransportError")<{
+  collection: string;
+  cause: unknown;
 }> {
   get message() {
-    return `kv '${this.collection}' request failed`
+    return `kv '${this.collection}' request failed`;
   }
 }
 
-export class KvResponseError extends Data.TaggedError('KvResponseError')<{
-  collection: string
-  status: number
+export class KvResponseError extends Data.TaggedError("KvResponseError")<{
+  collection: string;
+  status: number;
 }> {
   get message() {
-    return `kv '${this.collection}' -> HTTP ${this.status}`
+    return `kv '${this.collection}' -> HTTP ${this.status}`;
   }
 }
 
-export class KvTimeoutError extends Data.TaggedError('KvTimeoutError')<{
-  collection: string
+export class KvTimeoutError extends Data.TaggedError("KvTimeoutError")<{
+  collection: string;
 }> {
   get message() {
-    return `kv '${this.collection}' timed out`
+    return `kv '${this.collection}' timed out`;
   }
 }
 
@@ -60,16 +60,16 @@ export class KvTimeoutError extends Data.TaggedError('KvTimeoutError')<{
 
 /** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
 const retryPolicy = Schedule.both(
-  Schedule.exponential('100 millis'),
+  Schedule.exponential("100 millis"),
   Schedule.recurs(4),
-)
+);
 
 interface FetchArgs {
-  collection: string
-  method: string
-  body?: unknown
+  collection: string;
+  method: string;
+  body?: unknown;
   /** Query suffix appended after `?collection=...` (e.g. `&op=claim`). */
-  suffix?: string
+  suffix?: string;
 }
 
 /**
@@ -78,11 +78,16 @@ interface FetchArgs {
  * and retrying would only amplify a broken state. Failures land in the typed
  * error channel as KvTransportError | KvResponseError.
  */
-function request({ collection, method, body, suffix }: FetchArgs): Effect.Effect<
+function request({
+  collection,
+  method,
+  body,
+  suffix,
+}: FetchArgs): Effect.Effect<
   Response,
   KvTransportError | KvResponseError | KvTimeoutError
 > {
-  const u = suffix ? `${url(collection)}${suffix}` : url(collection)
+  const u = suffix ? `${url(collection)}${suffix}` : url(collection);
   return Effect.tryPromise({
     // The signal comes from Effect's runtime: `Effect.timeoutOrElse` aborts it
     // on timeout, and `Effect.retry` aborts the current attempt before the next
@@ -91,7 +96,7 @@ function request({ collection, method, body, suffix }: FetchArgs): Effect.Effect
     try: (signal) =>
       fetch(u, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal,
       }),
@@ -112,7 +117,7 @@ function request({ collection, method, body, suffix }: FetchArgs): Effect.Effect
         ? Effect.succeed(res)
         : Effect.fail(new KvResponseError({ collection, status: res.status })),
     ),
-  )
+  );
 }
 
 // --- Public API (Effect-shaped) ---------------------------------------------
@@ -121,7 +126,7 @@ function request({ collection, method, body, suffix }: FetchArgs): Effect.Effect
 export function kvFetchE<T>(
   collection: string,
 ): Effect.Effect<T[], KvTransportError | KvResponseError | KvTimeoutError> {
-  return request({ collection, method: 'GET' }).pipe(
+  return request({ collection, method: "GET" }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
         try: () => res.json() as Promise<unknown>,
@@ -140,7 +145,7 @@ export function kvFetchE<T>(
             }),
           ),
     ),
-  )
+  );
 }
 
 /** Upsert rows. */
@@ -148,9 +153,9 @@ export function kvPutE(
   collection: string,
   rows: { key: string; value: unknown }[],
 ): Effect.Effect<void, KvTransportError | KvResponseError | KvTimeoutError> {
-  return request({ collection, method: 'POST', body: { rows } }).pipe(
+  return request({ collection, method: "POST", body: { rows } }).pipe(
     Effect.asVoid,
-  )
+  );
 }
 
 /** Delete rows by key. */
@@ -160,9 +165,9 @@ export function kvDeleteE(
 ): Effect.Effect<void, KvTransportError | KvResponseError | KvTimeoutError> {
   return request({
     collection,
-    method: 'DELETE',
+    method: "DELETE",
     body: { keys },
-  }).pipe(Effect.asVoid)
+  }).pipe(Effect.asVoid);
 }
 
 /** Atomic get-or-create; returns the authoritative value. */
@@ -170,15 +175,12 @@ export function kvGetOrCreateE<T>(
   collection: string,
   key: string,
   value: T,
-): Effect.Effect<
-  T,
-  KvTransportError | KvResponseError | KvTimeoutError
-> {
+): Effect.Effect<T, KvTransportError | KvResponseError | KvTimeoutError> {
   return request({
     collection,
-    method: 'POST',
+    method: "POST",
     body: { key, value },
-    suffix: '&op=claim',
+    suffix: "&op=claim",
   }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
@@ -191,17 +193,17 @@ export function kvGetOrCreateE<T>(
     // the caller (claimMapping reads row.nodeId). Coerce to a transport error so
     // claimMapping's boundary degrades instead of returning garbage.
     Effect.flatMap((data) => {
-      if (typeof data !== 'object' || data === null || !('value' in data)) {
+      if (typeof data !== "object" || data === null || !("value" in data)) {
         return Effect.fail(
           new KvTransportError({
             collection,
             cause: new Error(`expected { value } envelope, got ${typeof data}`),
           }),
-        )
+        );
       }
-      return Effect.succeed((data as { value: T }).value)
+      return Effect.succeed((data as { value: T }).value);
     }),
-  )
+  );
 }
 
 // --- Unsafe escape hatch ----------------------------------------------------
@@ -209,4 +211,4 @@ export function kvGetOrCreateE<T>(
 // The throw bridge for the TanStack rollback contract lives in one place
 // (shared with nodes-client-effect.ts); re-exported here so kv-api.ts and
 // daily-index.ts keep importing it from the kv core.
-export { runPromise } from './effect-bridge'
+export { runPromise } from "./effect-bridge";

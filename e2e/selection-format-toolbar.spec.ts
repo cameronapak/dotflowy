@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Desktop selection formatting toolbar (ADR 0036). A fine-pointer-only floating
@@ -89,7 +90,12 @@ test.describe("selection format toolbar (fine pointer)", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "See John 3:16 now",
+      },
     ]);
     // Selecting the whole line -> toolbar (control: the surface works here).
     await selectAll(page, "n");
@@ -125,12 +131,19 @@ test.describe("selection format toolbar (fine pointer)", () => {
 
     // A folded <a> now carries the link; the visible label is the selection.
     const link = text(page, "n").locator("a[data-link]");
-    await expect(link).toHaveAttribute("data-src", "[alphabravo](https://example.com)");
+    await expect(link).toHaveAttribute(
+      "data-src",
+      "[alphabravo](https://example.com)",
+    );
   });
 });
 
 test.describe("selection format toolbar (coarse pointer)", () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 900 } });
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 412, height: 900 },
+  });
 
   test("never mounts on a coarse pointer (that's the mobile bar's job)", async ({
     page,

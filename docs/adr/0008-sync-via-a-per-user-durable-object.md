@@ -1,14 +1,14 @@
 # Sync via a per-user Durable Object
 
-One Cloudflare **Worker** (`worker/index.ts`) serves the static SPA *and* the sync API — `/api/nodes`
+One Cloudflare **Worker** (`worker/index.ts`) serves the static SPA _and_ the sync API — `/api/nodes`
 (the outline write path), `/api/kv` (plugin side-collections: tag colors, daily index), and
 `/api/sync` (real-time outline reads). Each `/api` request is routed to the caller's **Durable
 Object** (`UserOutlineDO`, `worker/outline-do.ts`), whose colocated **SQLite** holds that user's
 entire outline plus the side-collections. Inside a per-user DO the `owner` column is gone — the DO
-*is* the scope — and its single thread serializes a user's edits across devices, so there is no
+_is_ the scope — and its single thread serializes a user's edits across devices, so there is no
 last-write-wins reconciliation.
 
-**Nodes sync live over WebSocket.** `collection.ts` is a TanStack DB *custom sync* collection
+**Nodes sync live over WebSocket.** `collection.ts` is a TanStack DB _custom sync_ collection
 (`realtime.ts` → `/api/sync`): on connect the DO sends a `snapshot`, then every mutation on any
 device arrives as a `{type:'change', seq, ops}` delta — no window-focus refetch. **Field** writes
 PATCH `/api/nodes` optimistically and the socket echo reconciles idempotently; **structural** writes
@@ -18,7 +18,7 @@ The DO uses **WebSocket Hibernation** (`ctx.acceptWebSocket`, never legacy `ws.a
 connections bill $0 duration; outgoing broadcasts are free. **Side-collections** (tag colors,
 daily index) stay query collections over `/api/kv` and still reconcile on tab focus.
 
-**The DO routing key must never be an email.** A DO name is *permanent* (no rename), so keying it
+**The DO routing key must never be an email.** A DO name is _permanent_ (no rename), so keying it
 off a mutable value would orphan a user's whole outline on an email or auth-provider change.
 `resolveUserId()` returns the session's stable **`session.user.id`** (the lone exception is the
 owner-continuity bridge, which maps one configured account back to the `'default'` DO — see [ADR 0011: the
@@ -35,20 +35,20 @@ the realtime `changelog` table) is created in its constructor via `CREATE TABLE 
 it has **no SQL migration file** — its wrangler migration is the `new_sqlite_classes` tag.
 
 **Why a DO over D1-direct, or ElectricSQL/Postgres?** The browser can reach neither D1 nor a DO
-directly — both are Worker bindings, so any of them needs the server tier. A per-user DO *also*
+directly — both are Worker bindings, so any of them needs the server tier. A per-user DO _also_
 gives colocated storage (sub-ms reads next to compute), a single-writer thread that removes
 conflict reconciliation, WebSocket Hibernation for live fan-out, and the natural home for subtree
 sharing. Electric gives real-time out of the box but isn't Cloudflare-native (must be hosted
 elsewhere) — off-goal for an all-Cloudflare deploy.
 
 **Convergent public reference: Lunora (`lunora.sh`, alpha 2026).** An independent local-first
-engine that lands on this same design — "the DO *is* the log" (an append-only changelog written in
+engine that lands on this same design — "the DO _is_ the log" (an append-only changelog written in
 the write's own storage transaction), the DO is the WebSocket fan-out, hibernation makes idle
 sockets ~free, and the client runs the dataflow via TanStack DB while the DO ships row-ops rather
 than re-running queries. Useful outside validation of ADR 0008/0009; two deliberate divergences
 worth recording: (1) Lunora runs the write logic **authoritatively in the DO** (client keeps an
 optional optimistic twin); we ship pre-computed `{ops}` from the client's `tree.ts` and validate
-their *shape* at the trust boundary ([ADR 0014](./0014-validate-the-worker-do-trust-boundary.md))
+their _shape_ at the trust boundary ([ADR 0014](./0014-validate-the-worker-do-trust-boundary.md))
 instead. We keep client-planned ops on purpose — single-writer-per-DO removes the concurrent-writer
 conflicts that authoritative re-run buys, and the MCP path already re-plans server-side via the
 shared `tree.ts` (`worker/outline-ops.ts`). (2) Lunora's **"shape = read-as-permission"** (the
@@ -65,7 +65,7 @@ sync socket or touch `nodesCollection` during a server/render pass (`collection.
 **Don't:** key the DO off an email/owner (permanent-name orphaning); reach for ElectricSQL or a
 separate Postgres backend (off the all-Cloudflare goal); try to query D1 or a DO from the client
 (impossible — both are Worker bindings); use legacy `ws.accept()` on the DO (bills duration for the
-whole connection lifetime — the budget trap); have a snapshot return a *partial* node set (the
+whole connection lifetime — the budget trap); have a snapshot return a _partial_ node set (the
 collection truncates on snapshot); or extract a generic `createKvCollection<T>` factory for
 side-collections — each must pass its **concrete** Effect `Schema` inline (wrapped with
 `Schema.toStandardSchemaV1`), or schema inference falls through to `Record<string, unknown>`.

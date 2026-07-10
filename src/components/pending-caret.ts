@@ -27,7 +27,11 @@ export function clearPendingCaretOffset(): void {
  * if one was set for it, else the usual start/end. The single funnel for both
  * claim sites (the editor's `FocusPass` and a windowed row's mount effect).
  */
-export function applyPendingCaret(el: HTMLElement, key: string, atStart: boolean): void {
+export function applyPendingCaret(
+  el: HTMLElement,
+  key: string,
+  atStart: boolean,
+): void {
   if (pending && pending.key === key) {
     const { offset } = pending;
     pending = null;

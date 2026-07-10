@@ -1,16 +1,14 @@
+import { CopyPlusIcon, CornerUpRightIcon } from "lucide-react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { CopyPlusIcon, CornerUpRightIcon } from "lucide-react";
+
 import type { Node } from "../data/schema";
 import type { CommandSpec, PluginContext } from "../plugins/types";
-import { commandSpecs } from "../plugins/registry";
+
 import { isMirrorsEnabled } from "../data/flags";
+import { commandSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
-import {
-  decorate,
-  readSource,
-  setCaretOffset,
-} from "./inline-code";
+import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { SlashMenuList } from "./slash-menu-list";
 
 /**

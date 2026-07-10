@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -13,12 +14,14 @@ import {
   MoveIcon,
   Trash2Icon,
 } from "lucide-react";
-import type { Node, TreeIndex } from "./tree";
-import { childrenOf } from "./tree";
-import { isMirrorsEnabled } from "./flags";
-import { getViewRootId } from "./view-state";
-import { commandSpecs } from "../plugins/registry";
+
 import type { NodeActionBridge } from "./command-bridge";
+import type { Node, TreeIndex } from "./tree";
+
+import { commandSpecs } from "../plugins/registry";
+import { isMirrorsEnabled } from "./flags";
+import { childrenOf } from "./tree";
+import { getViewRootId } from "./view-state";
 
 /**
  * Command center (ADR 0034): the ONE unified row descriptor the Cmd+K palette

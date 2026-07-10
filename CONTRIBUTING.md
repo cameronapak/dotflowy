@@ -7,7 +7,7 @@ change" guide. Two companion docs go deeper:
   design, and the project layout. Read it first.
 - **[`AGENTS.md`](./AGENTS.md)** (symlinked as `CLAUDE.md`) — the per-feature
   rules and gotchas. It's written for coding agents but it's the canonical
-  reference for *why* the code is shaped the way it is. Read the section that
+  reference for _why_ the code is shaped the way it is. Read the section that
   covers whatever you're touching before you touch it.
 
 ## Prerequisites
@@ -17,7 +17,7 @@ change" guide. Two companion docs go deeper:
 - **Wrangler** — Cloudflare's CLI. It's a dev dependency (`bunx wrangler …`), so
   `bun install` gets it; nothing to install globally.
 - **A Cloudflare account** — only needed to deploy or run migrations against the
-  *remote* database. Local development runs fully offline (Wrangler's local
+  _remote_ database. Local development runs fully offline (Wrangler's local
   Worker + a local SQLite-backed D1 + Durable Objects). No account required.
 - macOS or Linux. Windows via WSL should work but is untested.
 
@@ -92,7 +92,7 @@ BETTER_AUTH_TRUSTED_ORIGINS=http://app.dotflowy.com,https://app.dotflowy.com
 
 Without the first, discovery points MCP clients at the prod domain; without the
 second, Better Auth's CSRF check rejects local sign-in with `403 Invalid origin`.
-Neither is needed in prod (there the origin genuinely *is* the prod domain). See
+Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
 [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
 ## Before you open a PR
@@ -119,7 +119,7 @@ Rules of thumb, expanded in `AGENTS.md`:
   renaming a file in `src/routes/`, run `bun run dev` once to regenerate it.
 - If you change a documented fact (a command, a path, repo structure), fix the
   affected doc (`AGENTS.md` and/or `README.md`) in the same change. See
-  *Documentation Freshness* in `AGENTS.md`.
+  _Documentation Freshness_ in `AGENTS.md`.
 
 ## Conventions worth knowing
 

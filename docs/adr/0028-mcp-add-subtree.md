@@ -28,25 +28,25 @@ clients tolerate recursive JSON Schema). Rejected: **flat `tempId` + `parentTemp
 (insurance against a stricter client we don't have), but uglier for the agent to author and it invents a
 new class of authoring error (dangling parent ref, temp-id cycles) plus a topological-sort/validation
 burden server-side. Rejected: **indented-markdown string** — one arg, trivial schema, but trades a schema
-problem for a *parser* problem (tab-vs-space, level width, task detection, escaping) whose failure mode is
-silent mis-nesting. Nested is also the only option where the sibling-chain trap below vanishes *by
-construction* instead of being *guarded*.
+problem for a _parser_ problem (tab-vs-space, level width, task detection, escaping) whose failure mode is
+silent mis-nesting. Nested is also the only option where the sibling-chain trap below vanishes _by
+construction_ instead of being _guarded_.
 
 **Sibling links are wired correct-by-construction, NOT by looping `planAddNode`.** The trap: `planAddNode`
-reads `childrenOf(index, parentId)` to find the last sibling, so looping it over the *same* snapshot makes
-every new top-level node compute the *same* `prevSiblingId` and tear the chain — the identical hazard
+reads `childrenOf(index, parentId)` to find the last sibling, so looping it over the _same_ snapshot makes
+every new top-level node compute the _same_ `prevSiblingId` and tear the chain — the identical hazard
 `planReparent`/`moveManyNodes` guard with "rebuild the index between moves." `planAddSubtree` sidesteps it:
 the agent handed us the whole tree, so we emit depth-first and set each node's `prevSiblingId` to the
-*previously-emitted sibling at its level* — never re-derived from the index. The only place existing tree
-state is read is the **top-level anchor**, where the forest attaches among the parent's *existing*
+_previously-emitted sibling at its level_ — never re-derived from the index. The only place existing tree
+state is read is the **top-level anchor**, where the forest attaches among the parent's _existing_
 children: that reuses `planAddNode`'s exact rule (`last` chains after the current last child, no repoint;
-`first` inserts at the head and repoints the old first child to the run's tail). A future dev *will* reach
+`first` inserts at the head and repoints the old first child to the run's tail). A future dev _will_ reach
 for "just loop the single-add planner" and reintroduce the tear; this is the single most important thing
 the ADR records. Asserted as a test (multiple roots → one unbroken chain).
 
 **Atomic all-or-nothing; no per-node recovery.** One `applyBatch` = one `transactionSync` = one sync frame
 ([ADR 0009](./0009-atomic-structural-writes.md)), so a bad `parentId`, an invalid `date`, an empty forest,
-or an over-cap payload fails the *whole* call and nothing half-lands — matching `planReparent`. Rejected:
+or an over-cap payload fails the _whole_ call and nothing half-lands — matching `planReparent`. Rejected:
 partial success ("added 8 of 12") — it leaves the agent reasoning about half-built state.
 
 **Bounded at `MAX_BATCH_NODES = 500`, counted during `emit`.** Same number as `MAX_OUTLINE_NODES`, one
@@ -75,9 +75,9 @@ create anyway), the same split `planAddToDaily` already uses.
 **`add_subtree` coexists with `add_node`; it does not replace it.** `add_subtree` is a strict superset (a
 single bullet is a one-element `nodes` array), but collapsing to one tool would tax the ~95% single-bullet
 capture case with array ceremony and break existing `add_node` callers. Two tools with a clean "one vs.
-many/nested" split is *less* agent confusion than one over-general tool. The name is `add_subtree` (not
+many/nested" split is _less_ agent confusion than one over-general tool. The name is `add_subtree` (not
 `add_nodes`) to avoid the one-character collision with `add_node` in a skimmed tool list and because
-"subtree" *describes the shape* — the cue for when to reach for it.
+"subtree" _describes the shape_ — the cue for when to reach for it.
 
 **Pure twin, not a shared implementation.** `planAddSubtree` is new pure code in `worker/outline-ops.ts`,
 anchored on `src/data/tree.ts` (`buildTreeIndex`/`childrenOf`/`trueSourceOf`/`makeNode`) like every other

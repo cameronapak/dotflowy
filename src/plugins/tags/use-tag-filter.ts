@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+
 import { parseQuery, serializeQuery } from "../../data/tags";
 
 type NavigateFn = ReturnType<typeof useNavigate>;
@@ -74,7 +75,10 @@ export function useTagFilter() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const active = document.activeElement;
-      if (active instanceof HTMLElement && active.classList.contains("node-text"))
+      if (
+        active instanceof HTMLElement &&
+        active.classList.contains("node-text")
+      )
         return;
       clearTags();
     };

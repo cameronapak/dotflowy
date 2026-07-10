@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // Cmd on macOS, Control elsewhere -- the e2e run is chromium on whatever host.
@@ -28,7 +29,13 @@ async function openMove(page: Page, id: string) {
 }
 
 const TREE: SeedNode[] = [
-  { id: "inbox", parentId: null, prevSiblingId: null, text: "Inbox", bookmarkedAt: 100 },
+  {
+    id: "inbox",
+    parentId: null,
+    prevSiblingId: null,
+    text: "Inbox",
+    bookmarkedAt: 100,
+  },
   { id: "loose", parentId: null, prevSiblingId: "inbox", text: "Loose note" },
 ];
 
@@ -38,7 +45,10 @@ test.describe("move flash: jump to the moved node", () => {
   }) => {
     await load(page, TREE);
     await openMove(page, "loose");
-    await page.getByRole("dialog").getByRole("option", { name: "Inbox" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("option", { name: "Inbox" })
+      .click();
 
     // The confirming toast offers a "Go" action; clicking it zooms into Inbox.
     await page.getByRole("button", { name: "Go" }).click();

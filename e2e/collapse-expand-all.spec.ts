@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // A deeper-than-STANDARD tree so "Collapse all" / "Expand all" have several
@@ -22,7 +23,12 @@ const TREE: SeedNode[] = [
     prevSiblingId: null,
     text: "Alpha one deep",
   },
-  { id: "alpha-2", parentId: "alpha", prevSiblingId: "alpha-1", text: "Alpha two" },
+  {
+    id: "alpha-2",
+    parentId: "alpha",
+    prevSiblingId: "alpha-1",
+    text: "Alpha two",
+  },
   { id: "bravo-1", parentId: "bravo", prevSiblingId: null, text: "Bravo one" },
 ];
 
@@ -66,7 +72,10 @@ test.describe("Collapse all / Expand all (header More menu)", () => {
     await expect(text(page, "alpha-1-a")).toBeHidden();
     await expect(text(page, "bravo-1")).toBeHidden();
     // The parents themselves now read as collapsed.
-    await expect(chevron(page, "alpha")).toHaveAttribute("data-collapsed", "true");
+    await expect(chevron(page, "alpha")).toHaveAttribute(
+      "data-collapsed",
+      "true",
+    );
 
     await runMenuAction(page, /Expand all/);
 

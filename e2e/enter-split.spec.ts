@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // A node's OWN editable text span -- same locator the nav spec uses. Child

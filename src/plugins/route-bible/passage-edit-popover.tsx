@@ -7,13 +7,22 @@ import {
   type OsisBookCode,
 } from "grab-bcv";
 import { ExternalLink } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
+
 import type { NodeCommands } from "../../components/OutlineNode";
+import type { PluginContext } from "../types";
+
 import { placeCaretAtEnd } from "../../components/caret-place";
 import { Button, Input } from "../kit";
 import { replaceTokenInNode } from "../token-kit";
-import type { PluginContext } from "../types";
 import {
   formatStructuredBibleRef,
   normalizeBibleRef,
@@ -44,7 +53,9 @@ function structuredFromInput(input: string): StructuredPassage | null {
     chapter: start.chapter,
     startVerse: start.verse ?? null,
     endVerse:
-      start.verse != null && end.book === start.book && end.chapter === start.chapter
+      start.verse != null &&
+      end.book === start.book &&
+      end.chapter === start.chapter
         ? (end.verse ?? start.verse)
         : null,
   };
@@ -204,7 +215,7 @@ export function BiblePassageEditPopover({
       role="dialog"
       aria-label="Edit Bible reference"
       data-bible-passage-popover
-      className="bg-popover fixed z-50 flex w-80 max-w-[calc(100vw-1rem)] flex-col gap-2.5 rounded-lg border p-2.5 shadow-md"
+      className="fixed z-50 flex w-80 max-w-[calc(100vw-1rem)] flex-col gap-2.5 rounded-lg border bg-popover p-2.5 shadow-md"
       style={{ left, top }}
       onSubmit={(e) => {
         e.preventDefault();
@@ -259,7 +270,7 @@ export function BiblePassageEditPopover({
         <div
           id={suggestionsId}
           role="listbox"
-          className="border-border/70 bg-muted/30 flex max-h-36 flex-col gap-0.5 overflow-auto rounded-md border p-1"
+          className="flex max-h-36 flex-col gap-0.5 overflow-auto rounded-md border border-border/70 bg-muted/30 p-1"
           data-bible-passage-suggestions
         >
           {suggestions.map((suggestion, index) => (
@@ -269,12 +280,12 @@ export function BiblePassageEditPopover({
               role="option"
               aria-selected={index === activeSuggestion}
               type="button"
-              className="hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground aria-selected:bg-accent aria-selected:text-accent-foreground flex h-8 items-center justify-between rounded-sm px-2 text-left text-sm outline-none"
+              className="flex h-8 items-center justify-between rounded-sm px-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground aria-selected:bg-accent aria-selected:text-accent-foreground"
               onMouseEnter={() => setActiveSuggestion(index)}
               onClick={() => setDraft(suggestion.insertText)}
             >
               <span>{suggestion.label}</span>
-              <span className="text-muted-foreground text-xs capitalize">
+              <span className="text-xs text-muted-foreground capitalize">
                 {suggestion.kind}
               </span>
             </button>
@@ -283,7 +294,7 @@ export function BiblePassageEditPopover({
       ) : null}
 
       <details className="group">
-        <summary className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex h-7 cursor-pointer list-none items-center justify-between rounded-md px-1.5 text-xs outline-none focus-visible:ring-3">
+        <summary className="flex h-7 cursor-pointer list-none items-center justify-between rounded-md px-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
           <span>Open selector</span>
           <span className="transition-transform group-open:rotate-90">›</span>
         </summary>
@@ -387,11 +398,16 @@ export function BiblePassageEditPopover({
       </details>
 
       <div className="flex items-center justify-between gap-2 pt-0.5">
-        <div className="text-muted-foreground min-w-0 truncate text-xs">
+        <div className="min-w-0 truncate text-xs text-muted-foreground">
           {normalized ? normalized.label : "No matching passage"}
         </div>
         <div className="flex shrink-0 justify-end gap-1.5">
-          <Button type="button" variant="ghost" size="sm" onClick={closeAndRefocus}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={closeAndRefocus}
+          >
             Cancel
           </Button>
           <Button type="submit" size="sm" disabled={!normalized}>

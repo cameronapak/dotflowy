@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 interface PatchUpdate {
@@ -56,7 +57,9 @@ test("heals a shattered sibling chain on load so every node is reorderable", asy
   const updates: PatchUpdate[] = [];
   page.on("request", (req) => {
     if (req.url().includes("/api/nodes") && req.method() === "PATCH") {
-      updates.push(...(req.postDataJSON() as { updates: PatchUpdate[] }).updates);
+      updates.push(
+        ...(req.postDataJSON() as { updates: PatchUpdate[] }).updates,
+      );
     }
   });
 

@@ -10,12 +10,14 @@
 // would fight the node-decoration budget for information rarely needed
 // mid-list).
 
-import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Link2 } from "lucide-react";
+import { useState } from "react";
+
+import type { Node } from "../data/tree";
+
 import { flattenNodeText } from "../data/node-links";
 import { useBacklinkCount, useTreeIndex } from "../data/tree-store";
-import type { Node } from "../data/tree";
 import { requestFlashAfterNav } from "./flash-node";
 import { Crumbs, crumbsFor } from "./mirror-places";
 import {

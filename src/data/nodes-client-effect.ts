@@ -1,6 +1,7 @@
-import { Data, Duration, Effect, Schedule } from 'effect'
-import type { Node } from './schema'
-import type { ChangeOp } from './realtime'
+import { Data, Duration, Effect, Schedule } from "effect";
+
+import type { ChangeOp } from "./realtime";
+import type { Node } from "./schema";
 
 /**
  * The Effect transport core for the /api/nodes Worker (which routes to the
@@ -29,44 +30,48 @@ import type { ChangeOp } from './realtime'
  *  - Timeout: `Effect.timeoutOrElse` turns a stall into a typed `NodesTimeoutError`.
  */
 
-const ENDPOINT = '/api/nodes'
+const ENDPOINT = "/api/nodes";
 
 // --- Domain errors ----------------------------------------------------------
 
-export class NodesTransportError extends Data.TaggedError('NodesTransportError')<{
-  cause: unknown
+export class NodesTransportError extends Data.TaggedError(
+  "NodesTransportError",
+)<{
+  cause: unknown;
 }> {
   get message() {
-    return 'nodes request failed'
+    return "nodes request failed";
   }
 }
 
-export class NodesResponseError extends Data.TaggedError('NodesResponseError')<{
-  status: number
+export class NodesResponseError extends Data.TaggedError("NodesResponseError")<{
+  status: number;
 }> {
   get message() {
-    return `nodes -> HTTP ${this.status}`
+    return `nodes -> HTTP ${this.status}`;
   }
 }
 
-export class NodesTimeoutError extends Data.TaggedError('NodesTimeoutError')<{}> {
+export class NodesTimeoutError extends Data.TaggedError(
+  "NodesTimeoutError",
+)<{}> {
   get message() {
-    return 'nodes request timed out'
+    return "nodes request timed out";
   }
 }
 
 export type NodesError =
   | NodesTransportError
   | NodesResponseError
-  | NodesTimeoutError
+  | NodesTimeoutError;
 
 // --- Core request effect ----------------------------------------------------
 
 /** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
 const retryPolicy = Schedule.both(
-  Schedule.exponential('100 millis'),
+  Schedule.exponential("100 millis"),
   Schedule.recurs(4),
-)
+);
 
 /**
  * One HTTP request to /api/nodes as an Effect. Retries transport failures only
@@ -84,7 +89,7 @@ function request(
     try: (signal) =>
       fetch(ENDPOINT, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal,
       }),
@@ -105,24 +110,24 @@ function request(
         ? Effect.succeed(res)
         : Effect.fail(new NodesResponseError({ status: res.status })),
     ),
-  )
+  );
 }
 
 // --- Public API (Effect-shaped) ---------------------------------------------
 
 /** Seed/create nodes (first-run + non-structural creates). */
 export const createNodesE = (nodes: Node[]): Effect.Effect<void, NodesError> =>
-  request('POST', { nodes }).pipe(Effect.asVoid)
+  request("POST", { nodes }).pipe(Effect.asVoid);
 
 /** Field-edit PATCH (text, completed, …) — one or more `{ id, changes }`. */
 export const updateNodesE = (
   updates: { id: string; changes: Partial<Node> }[],
 ): Effect.Effect<void, NodesError> =>
-  request('PATCH', { updates }).pipe(Effect.asVoid)
+  request("PATCH", { updates }).pipe(Effect.asVoid);
 
 /** Delete nodes by id. */
 export const deleteNodesE = (ids: string[]): Effect.Effect<void, NodesError> =>
-  request('DELETE', { ids }).pipe(Effect.asVoid)
+  request("DELETE", { ids }).pipe(Effect.asVoid);
 
 /**
  * Persist a structural batch and return the committed frame's seq. Validates
@@ -134,7 +139,7 @@ export const deleteNodesE = (ids: string[]): Effect.Effect<void, NodesError> =>
 export const sendBatchE = (
   ops: ChangeOp[],
 ): Effect.Effect<{ seq: number }, NodesError> =>
-  request('POST', { ops }).pipe(
+  request("POST", { ops }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
         try: () => res.json() as Promise<unknown>,
@@ -149,22 +154,24 @@ export const sendBatchE = (
       // it instantly). JSON can't even carry NaN/Infinity, so this only bites a
       // server bug, but the guard is free.
       const seq =
-        typeof data === 'object' && data !== null && 'seq' in data
+        typeof data === "object" && data !== null && "seq" in data
           ? (data as { seq: unknown }).seq
-          : undefined
-      return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0
+          : undefined;
+      return typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0
         ? Effect.succeed({ seq })
         : Effect.fail(
             new NodesTransportError({
-              cause: new Error(`expected { seq: non-negative int }, got ${typeof data}`),
+              cause: new Error(
+                `expected { seq: non-negative int }, got ${typeof data}`,
+              ),
             }),
-          )
+          );
     }),
-  )
+  );
 
 // --- Unsafe escape hatch ----------------------------------------------------
 
 // The throw bridge for the TanStack rollback contract lives in one place
 // (shared with kv-client-effect.ts); re-exported here so api.ts/structural.ts/
 // collection.ts keep importing it from the nodes core.
-export { runPromise } from './effect-bridge'
+export { runPromise } from "./effect-bridge";

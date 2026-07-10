@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Highlight plugin (ADR 0035). `==text==` renders as a FOLDING token (the
@@ -41,7 +42,10 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+      if (
+        node.nodeType === 1 &&
+        (node as HTMLElement).hasAttribute("data-src")
+      ) {
         const e = node as HTMLElement;
         const len =
           Number(e.getAttribute("data-src-len")) ||
@@ -123,7 +127,9 @@ test.describe("Highlight: reveal + re-fold", () => {
     // the pen affordance carries the emoji as its atom source, so readSource
     // (and copy/export) still reconstructs `==🔴urgent==`.
     await expect.poll(() => text(page, "n").textContent()).toBe("==urgent==");
-    await expect(text(page, "n").locator("[data-highlight-reveal]")).toHaveCount(1);
+    await expect(
+      text(page, "n").locator("[data-highlight-reveal]"),
+    ).toHaveCount(1);
     await expect(
       text(page, "n").locator(".highlight-pen-icon"),
     ).toHaveAttribute("data-src", "🔴");

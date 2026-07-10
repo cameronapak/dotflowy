@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // A node's OWN editable text span (not its descendants'): the .node-text that
@@ -135,8 +136,18 @@ test.describe("keyboard arrow navigation", () => {
     // first press -- the threshold must not eat a press near a chip.
     await load(page, [
       { id: "p", parentId: null, prevSiblingId: null, text: "Plain parent" },
-      { id: "code", parentId: null, prevSiblingId: "p", text: "Has `inline` code" },
-      { id: "tag", parentId: null, prevSiblingId: "code", text: "Has #urgent tag" },
+      {
+        id: "code",
+        parentId: null,
+        prevSiblingId: "p",
+        text: "Has `inline` code",
+      },
+      {
+        id: "tag",
+        parentId: null,
+        prevSiblingId: "code",
+        text: "Has #urgent tag",
+      },
     ]);
 
     const order = ["p", "code", "tag"];

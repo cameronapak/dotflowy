@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { createFileRoute, Link } from '@tanstack/react-router'
-import { Button } from '../components/ui/button'
-import { buttonVariants } from '../components/ui/button-variants'
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+
+import { Button } from "../components/ui/button";
+import { buttonVariants } from "../components/ui/button-variants";
 
 /**
  * Admin-only waitlist view. The REAL gate is server-side: GET /api/waitlist
@@ -12,57 +13,57 @@ import { buttonVariants } from '../components/ui/button-variants'
  */
 
 interface WaitlistEntry {
-  email: string
-  source: string
-  createdAt: number
+  email: string;
+  source: string;
+  createdAt: number;
 }
 
-export const Route = createFileRoute('/admin/waitlist')({
+export const Route = createFileRoute("/admin/waitlist")({
   component: AdminWaitlist,
-})
+});
 
 function AdminWaitlist() {
-  const [entries, setEntries] = useState<WaitlistEntry[]>([])
-  const [state, setState] = useState<'loading' | 'denied' | 'ready'>('loading')
-  const [copied, setCopied] = useState(false)
+  const [entries, setEntries] = useState<WaitlistEntry[]>([]);
+  const [state, setState] = useState<"loading" | "denied" | "ready">("loading");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    let cancelled = false
-    fetch('/api/waitlist').then(
+    let cancelled = false;
+    fetch("/api/waitlist").then(
       async (res) => {
-        if (cancelled) return
+        if (cancelled) return;
         if (!res.ok) {
-          setState('denied')
-          return
+          setState("denied");
+          return;
         }
-        const data = (await res.json()) as { entries: WaitlistEntry[] }
-        if (cancelled) return
-        setEntries(data.entries)
-        setState('ready')
+        const data = (await res.json()) as { entries: WaitlistEntry[] };
+        if (cancelled) return;
+        setEntries(data.entries);
+        setState("ready");
       },
       () => {
-        if (!cancelled) setState('denied')
+        if (!cancelled) setState("denied");
       },
-    )
+    );
     return () => {
-      cancelled = true
-    }
-  }, [])
+      cancelled = true;
+    };
+  }, []);
 
-  if (state === 'loading') return null
+  if (state === "loading") return null;
 
-  if (state === 'denied') {
+  if (state === "denied") {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         <p className="text-sm text-muted-foreground">Not found.</p>
       </main>
-    )
+    );
   }
 
   async function copyEmails() {
-    await navigator.clipboard.writeText(entries.map((e) => e.email).join('\n'))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    await navigator.clipboard.writeText(entries.map((e) => e.email).join("\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   return (
@@ -71,23 +72,29 @@ function AdminWaitlist() {
         <div>
           <h1 className="text-xl font-semibold">Waitlist</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {entries.length === 1 ? '1 person' : `${entries.length} people`} waiting for an invite
+            {entries.length === 1 ? "1 person" : `${entries.length} people`}{" "}
+            waiting for an invite
           </p>
         </div>
         <div className="flex items-center gap-2">
           {entries.length > 0 && (
             <Button variant="outline" size="sm" onClick={copyEmails}>
-              {copied ? 'Copied' : 'Copy emails'}
+              {copied ? "Copied" : "Copy emails"}
             </Button>
           )}
-          <Link to="/" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
+          <Link
+            to="/"
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+          >
             Back to outline
           </Link>
         </div>
       </div>
 
       {entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nobody yet. Share the waitlist link.</p>
+        <p className="text-sm text-muted-foreground">
+          Nobody yet. Share the waitlist link.
+        </p>
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -101,12 +108,14 @@ function AdminWaitlist() {
             {entries.map((entry) => (
               <tr key={entry.email} className="border-b border-border/50">
                 <td className="py-2 pr-4">{entry.email}</td>
-                <td className="py-2 pr-4 text-muted-foreground">{entry.source}</td>
+                <td className="py-2 pr-4 text-muted-foreground">
+                  {entry.source}
+                </td>
                 <td className="py-2 text-muted-foreground">
                   {new Date(entry.createdAt).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
                   })}
                 </td>
               </tr>
@@ -115,5 +124,5 @@ function AdminWaitlist() {
         </table>
       )}
     </main>
-  )
+  );
 }

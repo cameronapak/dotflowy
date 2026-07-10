@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+
 import { detectMarkerWrap, planMarkerToggle } from "./inline-wrap";
 
 const BOLD = { pre: "**", post: "**" };

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { isRevealed, spliceToken } from "./token-kit";
 
 describe("isRevealed", () => {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Pointer drag-to-reorder on the windowed path (ADR 0019 + ADR 0010). The drop
@@ -82,16 +83,9 @@ test.describe("drag reorder (windowed path)", () => {
     await page.mouse.up();
 
     // The drop committed at the hovered gap: a0 now sits between a3 and a4.
-    await expect.poll(() => visibleOrder(page)).toEqual([
-      "a1",
-      "a2",
-      "a3",
-      "a0",
-      "a4",
-      "a5",
-      "a6",
-      "a7",
-    ]);
+    await expect
+      .poll(() => visibleOrder(page))
+      .toEqual(["a1", "a2", "a3", "a0", "a4", "a5", "a6", "a7"]);
   });
 
   test("dragging right of a row nests the drop one level deeper", async ({

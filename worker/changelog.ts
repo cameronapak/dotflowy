@@ -18,14 +18,14 @@
  * stays in outline-do.ts.
  */
 
-import type { ChangeFrame, ChangeOp } from '../src/data/wire-schema'
+import type { ChangeFrame, ChangeOp } from "../src/data/wire-schema";
 
 /** Max ops per changelog row / broadcast frame. Sized well under the 2 MB
  *  SQLite row cap (500 full-node ops is roughly 150–250 KB of JSON). Distinct
  *  from `MAX_BATCH_NODES` (worker/mcp-tools.ts), which caps one MCP
  *  add_subtree *request* — this caps a committed batch's storage/broadcast
  *  granularity, whatever its source. */
-export const MAX_FRAME_OPS = 500
+export const MAX_FRAME_OPS = 500;
 
 /**
  * Split one committed batch into consecutive-seq frames of ≤ `maxOps` ops,
@@ -37,9 +37,12 @@ export function planChangeFrames(
   lastSeq: number,
   maxOps: number = MAX_FRAME_OPS,
 ): ChangeFrame[] {
-  const frames: ChangeFrame[] = []
+  const frames: ChangeFrame[] = [];
   for (let i = 0; i < ops.length; i += maxOps) {
-    frames.push({ seq: lastSeq + frames.length + 1, ops: ops.slice(i, i + maxOps) })
+    frames.push({
+      seq: lastSeq + frames.length + 1,
+      ops: ops.slice(i, i + maxOps),
+    });
   }
-  return frames
+  return frames;
 }

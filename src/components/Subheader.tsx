@@ -1,8 +1,17 @@
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { subheaderSlots } from "../plugins/registry";
-import type { PluginContext } from "../plugins/types";
+import {
+  Fragment,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { cn } from "@/lib/utils";
+
+import type { PluginContext } from "../plugins/types";
+
+import { subheaderSlots } from "../plugins/registry";
 
 /**
  * Contextual chrome band below the main header. Plugin subheader slots render
@@ -13,11 +22,7 @@ import { cn } from "@/lib/utils";
  * centered like Header); animated height measures the shell so the border
  * isn't clipped.
  */
-export function Subheader({
-  getCtx,
-}: {
-  getCtx?: () => PluginContext;
-}) {
+export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
   const reduceMotion = useReducedMotion();
   const contentRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);

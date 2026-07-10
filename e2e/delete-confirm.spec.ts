@@ -5,6 +5,7 @@
 // deletes in yielding slices) with modal progress. Small deletes are
 // unchanged. One Cmd+Z restores the whole subtree either way.
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 const text = (page: Page, id: string) =>
@@ -137,7 +138,9 @@ test.describe("big-delete confirmation", () => {
     // node), then Delete.
     await text(page, "big").click();
     await page.keyboard.press("Shift+ArrowDown");
-    await expect(page.locator('li[data-node-id="big"][data-selected]')).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="big"][data-selected]'),
+    ).toBeVisible();
     await page.keyboard.press("Backspace");
 
     await expect(page.getByTestId("delete-confirm-summary")).toContainText(

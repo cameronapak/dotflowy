@@ -5,7 +5,14 @@
 // stays in src/data/tags.ts and the color side-collection in
 // src/data/tag-colors.ts (Seam E); this folder wires them.
 
-import { buildTagFilter, collectTagCorpus, parseQuery, TAG_PATTERN } from "../../data/tags";
+import { Badge } from "@/plugins/kit";
+
+import {
+  buildTagFilter,
+  collectTagCorpus,
+  parseQuery,
+  TAG_PATTERN,
+} from "../../data/tags";
 import {
   definePlugin,
   type El,
@@ -13,11 +20,10 @@ import {
   type MenuTrigger,
   type PluginContext,
 } from "../types";
-import { Badge } from "@/plugins/kit";
-import { TAG_CHIP_CLASS } from "./tag-classes";
 import { TagFilterSubheader } from "./filter-bar";
-import { addTagToFilter } from "./use-tag-filter";
+import { TAG_CHIP_CLASS } from "./tag-classes";
 import { TagColorMenu } from "./tag-color-menu";
+import { addTagToFilter } from "./use-tag-filter";
 
 // Inline chips use badgeVariants via TAG_CHIP_CLASS (innerHTML, not <Badge>).
 // React surfaces (filter bar, `#` menu) use <Badge variant="outline"> directly.
@@ -164,9 +170,8 @@ export default definePlugin({
         // Read the maintained corpus (tree-store.ts) instead of rescanning
         // every node's text on each keystroke while the menu is open.
         const all = collectTagCorpus(ctx.tree.tagCorpus);
-        const matches = (q
-          ? all.filter((t) => t.slice(1).toLowerCase().includes(q))
-          : all
+        const matches = (
+          q ? all.filter((t) => t.slice(1).toLowerCase().includes(q)) : all
         ).filter((t) => t.toLowerCase() !== inProgress);
         return matches.slice(0, 8).map((tag) => ({
           key: tag,

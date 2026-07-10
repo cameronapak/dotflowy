@@ -1,3 +1,4 @@
+import { expect, test, type FileChooser, type Page } from "@playwright/test";
 // App OPML import (ADR 0037, issue #126): "Import OPML…" (More menu + Cmd+K)
 // opens a hidden file input; parse is client-side; ONE dialog carries
 // summary/confirm (with the core's degradation disclosures), modal progress,
@@ -6,7 +7,7 @@
 // malformed file errors cleanly at the summary step and writes NOTHING.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { expect, test, type FileChooser, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 const SAMPLE_PATH = fileURLToPath(
@@ -84,7 +85,9 @@ test.describe("OPML import", () => {
     ).toBeVisible();
     await expect(
       page
-        .locator(".node-text", { hasText: "note line two after a hard newline" })
+        .locator(".node-text", {
+          hasText: "note line two after a hard newline",
+        })
         .first(),
     ).toBeVisible();
     await expect(

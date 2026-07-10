@@ -1,5 +1,6 @@
-import { useTreeIndex } from './tree-store'
-import type { TreeIndex } from './tree'
+import type { TreeIndex } from "./tree";
+
+import { useTreeIndex } from "./tree-store";
 
 /**
  * Subscribe to the whole derived TreeIndex.
@@ -12,5 +13,5 @@ import type { TreeIndex } from './tree'
  * re-renders only the bullet that changed. See ADR 0014.
  */
 export function useTree(): { index: TreeIndex } {
-  return { index: useTreeIndex() }
+  return { index: useTreeIndex() };
 }

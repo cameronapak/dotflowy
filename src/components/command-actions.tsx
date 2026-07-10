@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useParams } from "@tanstack/react-router";
 import {
   ALargeSmallIcon,
@@ -18,22 +17,25 @@ import {
   PlugZapIcon,
   SunIcon,
 } from "lucide-react";
+import { useMemo } from "react";
+
 import type { CommandCenterAction } from "../data/command-center";
-import { useTree } from "../data/useTree";
-import { toggleBookmark } from "../data/mutations";
+
+import { openFeedbackReport } from "../data/feedback";
 import { capture } from "../data/history";
+import { toggleBookmark } from "../data/mutations";
+import { useTree } from "../data/useTree";
 import { signOut } from "../lib/auth-client";
-import { useShowCompleted } from "./show-completed-provider";
-import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
-import { useTheme } from "./theme-provider";
-import { useTextSize, type TextSize } from "./text-size-provider";
 import {
   copyOutlineAsMarkdown,
   exportOutlineAsOpml,
   setViewCollapsed,
 } from "./header-more-menu";
 import { openOpmlImport } from "./opml-import-opener";
-import { openFeedbackReport } from "../data/feedback";
+import { useShowCompleted } from "./show-completed-provider";
+import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
+import { useTextSize, type TextSize } from "./text-size-provider";
+import { useTheme } from "./theme-provider";
 
 /**
  * The GLOBAL-scope half of the Cmd+K command center (ADR 0034): the header +
@@ -146,7 +148,11 @@ export function useGlobalActions(opts: {
       });
     }
 
-    const themes: { value: "light" | "dark" | "system"; label: string; icon: typeof SunIcon }[] = [
+    const themes: {
+      value: "light" | "dark" | "system";
+      label: string;
+      icon: typeof SunIcon;
+    }[] = [
       { value: "light", label: "Light", icon: SunIcon },
       { value: "dark", label: "Dark", icon: MoonIcon },
       { value: "system", label: "System", icon: MonitorIcon },
@@ -156,10 +162,18 @@ export function useGlobalActions(opts: {
         id: `g:theme-${t.value}`,
         label: `Theme: ${t.label}`,
         description:
-          theme === t.value ? "Current theme" : `Switch to the ${t.label.toLowerCase()} theme`,
+          theme === t.value
+            ? "Current theme"
+            : `Switch to the ${t.label.toLowerCase()} theme`,
         icon: t.icon,
         scope: "global",
-        keywords: ["theme", "appearance", "dark", "light", t.label.toLowerCase()],
+        keywords: [
+          "theme",
+          "appearance",
+          "dark",
+          "light",
+          t.label.toLowerCase(),
+        ],
         run: () => setTheme(t.value),
       });
     }
@@ -171,7 +185,9 @@ export function useGlobalActions(opts: {
         id: `g:text-${s}`,
         label: `Text size: ${label}`,
         description:
-          textSize === s ? "Current text size" : `Use ${label.toLowerCase()} text`,
+          textSize === s
+            ? "Current text size"
+            : `Use ${label.toLowerCase()} text`,
         icon: ALargeSmallIcon,
         scope: "global",
         keywords: ["text", "size", "font", "zoom", s],
@@ -206,7 +222,11 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["github", "source", "code", "repo"],
         run: () =>
-          window.open("https://git.new/dotflowy", "_blank", "noopener,noreferrer"),
+          window.open(
+            "https://git.new/dotflowy",
+            "_blank",
+            "noopener,noreferrer",
+          ),
       },
       {
         id: "g:signout",

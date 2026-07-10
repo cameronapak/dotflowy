@@ -16,9 +16,7 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
   },
-  projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-  ],
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   // Boot the Vite dev server for the run; reuse one already running locally so
   // an open `bun run dev:web` (or `bun run dev`) makes the suite start instantly.
   webServer: {

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+
 import { OutlineEditor } from "../components/OutlineEditor";
 import { validateOutlineSearch } from "../data/tags";
 

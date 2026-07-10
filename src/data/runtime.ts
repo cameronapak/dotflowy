@@ -1,5 +1,5 @@
-import { ManagedRuntime } from 'effect'
-import { Socket } from 'effect/unstable/socket'
+import { ManagedRuntime } from "effect";
+import { Socket } from "effect/unstable/socket";
 
 /**
  * The app's single long-lived Effect runtime.
@@ -20,4 +20,6 @@ import { Socket } from 'effect/unstable/socket'
  * `globalThis.WebSocket`. collection.ts still guards the `/` prerender with a
  * `typeof window` check before it forks anything onto this runtime.
  */
-export const appRuntime = ManagedRuntime.make(Socket.layerWebSocketConstructorGlobal)
+export const appRuntime = ManagedRuntime.make(
+  Socket.layerWebSocketConstructorGlobal,
+);

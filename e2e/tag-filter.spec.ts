@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Tags are a plugin (ADR 0018): the chip render is a token, and the click ->
@@ -12,7 +13,8 @@ const TAGGED_TREE: SeedNode[] = [
   { id: "c", parentId: null, prevSiblingId: "b", text: "Ship it #work" },
 ];
 
-const row = (page: Page, id: string) => page.locator(`li[data-node-id="${id}"]`);
+const row = (page: Page, id: string) =>
+  page.locator(`li[data-node-id="${id}"]`);
 
 async function load(page: Page) {
   await seedOutline(page, TAGGED_TREE);

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 // A node's OWN editable text span and its content row (the element that dims).
@@ -112,8 +113,7 @@ test.describe("spotlight focus mode", () => {
 // caret is in the outline) AND the one-click off-switch. Its presence == the
 // mode is active; clicking it turns the mode off, so the chip disappears.
 test.describe("spotlight header indicator", () => {
-  const indicator = (page: Page) =>
-    page.locator("[data-spotlight-indicator]");
+  const indicator = (page: Page) => page.locator("[data-spotlight-indicator]");
 
   test("is absent when spotlight is off", async ({ page }) => {
     await loadWithSpotlight(page, false);

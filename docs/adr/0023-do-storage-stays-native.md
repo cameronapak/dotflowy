@@ -23,12 +23,12 @@ the client is Effect-first ([ADR 0021](./0021-effect-first-one-schema-language.m
 one non-Effect island? And the vendor ships a blessed adapter, so it must fit. Reading its source
 (`packages/sql/sqlite-do/src/SqliteClient.ts` in the opensrc-fetched effect-smol repo) settles it: the adapter's
 `withTransaction` wraps the **async** `DurableObjectStorage.transaction(...)`, bridged through
-`Effect.callback`, and its own docstring warns to *"keep transactions short, avoid suspending them across
-unrelated work"*; nested transactions throw. Our node-write loop (`applyBatch`/`patchNodes`/`upsertNodes`/
+`Effect.callback`, and its own docstring warns to _"keep transactions short, avoid suspending them across
+unrelated work"_; nested transactions throw. Our node-write loop (`applyBatch`/`patchNodes`/`upsertNodes`/
 `deleteNodes`) is **synchronous** — `transactionSync` fits it exactly, and CF documents that a throw in
 the sync callback rolls the whole batch back. Swapping that for an async, permit-serialized transaction
 with suspend points is an **atomicity regression** in the exact path ADR 0014 hardened against a torn
-sibling chain. The adapter is built for DOs that are *already* Effect programs doing repositories +
+sibling chain. The adapter is built for DOs that are _already_ Effect programs doing repositories +
 migrations + streaming; ours is a synchronous RPC class. Right tool per layer, same as ADR 0014 — not
 "Effect everywhere."
 
@@ -53,7 +53,7 @@ migrator.
   is worse for maintainability than either pure choice.
 - **Keep the constructor's `CREATE TABLE IF NOT EXISTS` as a belt-and-suspenders baseline alongside the
   migrator.** Rejected: two schema-definition paths is the exact drift risk that produced the `mirrorOf`
-  papercut. The v1 baseline migration *is* that block, moved — single source of truth.
+  papercut. The v1 baseline migration _is_ that block, moved — single source of truth.
 
 ## Consequences
 
@@ -64,5 +64,5 @@ migrator.
 - **The row-shape casts collapse to one `readRows<T>()` seam.** No behavioral change; the SQL and the
   `rowToNode` mapping are untouched.
 - **If the DO ever becomes an Effect program** (e.g. an Agents-SDK-style rewrite doing repositories +
-  reactivity), revisit: at that point the adapter's async transaction is the *native* shape and this ADR's
+  reactivity), revisit: at that point the adapter's async transaction is the _native_ shape and this ADR's
   premise no longer holds.

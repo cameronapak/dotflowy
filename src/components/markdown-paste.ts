@@ -10,6 +10,7 @@
 // pasted URL still becomes a chip (ADR 0044: "a transfer preserves").
 
 import { toast } from "sonner";
+
 import { nodesCollection } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
@@ -26,11 +27,15 @@ import {
 import { runStructural, runStructuralSliced } from "../data/structural";
 import { buildTreeIndex, makeNode, now, type Node } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
-import { getViewFilter, getViewIsHidden, getViewRootId } from "../data/view-state";
-import { buildVisibleRows } from "../data/visible-order";
+import {
+  getViewFilter,
+  getViewIsHidden,
+  getViewRootId,
+} from "../data/view-state";
 import { scrollRowIntoView } from "../data/virtual-nav";
-import { guardProtected } from "./protection";
+import { buildVisibleRows } from "../data/visible-order";
 import { setRestoreProgress } from "./history-restore";
+import { guardProtected } from "./protection";
 
 /** How the editor hands the caret back once the tree has landed. `offset` is a
  *  SOURCE offset inside the focused node's text (the seam where `tail` welded
@@ -67,7 +72,17 @@ export interface MarkdownPasteArgs {
  * was nothing structural to do and the caller should fall back to plain text.
  */
 export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
-  const { source, literal, anchorId, activeKey, placement, head, tail, rowEl, focus } = args;
+  const {
+    source,
+    literal,
+    anchorId,
+    activeKey,
+    placement,
+    head,
+    tail,
+    rowEl,
+    focus,
+  } = args;
 
   // Guard the raw input before the line scan, the OPML byte-ceiling's shape.
   if (source.length > PASTE_MAX_LENGTH) {
@@ -104,16 +119,19 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   // blanking its canonical text, or converting it to a task, is not. Same
   // chokepoint every other command funnel uses -- a rejection shakes and toasts.
   const anchor = index.byId.get(anchorId);
-  const wouldBlank = plan.anchor.text.trim() === "" && (anchor?.text.trim() ?? "") !== "";
+  const wouldBlank =
+    plan.anchor.text.trim() === "" && (anchor?.text.trim() ?? "") !== "";
   if (wouldBlank && guardProtected(anchorId, "blank", rowEl)) return true;
-  if (plan.anchor.isTask && guardProtected(anchorId, "task", rowEl)) return true;
+  if (plan.anchor.isTask && guardProtected(anchorId, "task", rowEl))
+    return true;
 
   const timestamp = now();
   const writeAnchor = () => {
     nodesCollection.update(anchorId, (draft) => {
       draft.text = plan.anchor.text;
       if (plan.anchor.isTask !== null) draft.isTask = plan.anchor.isTask;
-      if (plan.anchor.completed !== null) draft.completed = plan.anchor.completed;
+      if (plan.anchor.completed !== null)
+        draft.completed = plan.anchor.completed;
       draft.updatedAt = timestamp;
     });
   };
@@ -146,7 +164,8 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       writeRepoints();
     });
     const seam = resolveSeam(plan, anchorId, count);
-    if (seam.id === anchorId) focus.placeCaretHere(plan.anchor.text, seam.offset);
+    if (seam.id === anchorId)
+      focus.placeCaretHere(plan.anchor.text, seam.offset);
     else {
       // The seam row may not be mounted (a long paste in the windowed list), so
       // scroll it in and let it claim the pending focus on mount (ADR 0019).
@@ -184,7 +203,8 @@ function resolveSeam(
   anchorId: string,
   count: number,
 ): { id: string; offset: number } {
-  if (plan.focusId === anchorId) return { id: anchorId, offset: plan.focusOffset };
+  if (plan.focusId === anchorId)
+    return { id: anchorId, offset: plan.focusOffset };
 
   // Build the visible set from a FRESH index off `nodesCollection.toArray` --
   // synchronously current after `runStructural` -- not `getTreeIndex()`, whose
@@ -200,13 +220,16 @@ function resolveSeam(
       isMirrorsEnabled(),
     ).map((r) => r.id),
   );
-  if (visible.has(plan.focusId)) return { id: plan.focusId, offset: plan.focusOffset };
+  if (visible.has(plan.focusId))
+    return { id: plan.focusId, offset: plan.focusOffset };
 
   for (let i = plan.inserts.length - 1; i >= 0; i--) {
     const node = plan.inserts[i]!;
     if (visible.has(node.id)) return { id: node.id, offset: node.text.length };
   }
-  toast(`Pasted ${count.toLocaleString()} bullets — hidden by the current view.`);
+  toast(
+    `Pasted ${count.toLocaleString()} bullets — hidden by the current view.`,
+  );
   return { id: anchorId, offset: plan.anchor.text.length };
 }
 

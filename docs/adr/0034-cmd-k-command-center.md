@@ -15,7 +15,7 @@ still mounted once in `__root.tsx`.
 **Why a BRIDGE, not a spine (the load-bearing decision).** There are three unrelated action models today —
 `CommandSpec` (the `/` palette + selection menu, `src/plugins/types.ts`), `SearchAction` (Seam-J Cmd+K
 virtual rows), and the core `NodeCommands` verbs (re-wrapped as the mobile bar). Unifying them into one
-registry is a large, risky refactor with no payoff for *this* feature. Instead Cmd+K is an **additional
+registry is a large, risky refactor with no payoff for _this_ feature. Instead Cmd+K is an **additional
 door**: thin adapters translate each existing model into one `CommandCenterAction` row
 (`src/data/command-center.ts` for node actions, `src/components/command-actions.tsx` for globals), and the
 underlying models are untouched. An action may live in several surfaces (Cmd+K + More menu + mobile bar) —
@@ -37,7 +37,7 @@ action's `run()` to a target id. Node actions inherit `runStructural` atomicity 
 protected-node guards (ADR 0015) for free — the command center adds NO new mutation path.
 
 **Why emphasis is excluded but todos/daily aren't.** A plugin `CommandSpec` opts into the palette by NOT
-being `caretScoped`. Emphasis (`/bold`, `/italic`, …) wraps a *text selection inside* the bullet — but the
+being `caretScoped`. Emphasis (`/bold`, `/italic`, …) wraps a _text selection inside_ the bullet — but the
 overlay stole the caret, so there's nothing to wrap; it stays slash-menu + hotkey only, marked
 `caretScoped: true`. Whole-node commands (todos' To-do, daily's Send to Today) run fine and are surfaced.
 De-dup rule: a plugin `CommandSpec` wins over the raw core verb for the same concept (To-do comes from the

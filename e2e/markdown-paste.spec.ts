@@ -5,6 +5,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Markdown paste (ADR 0044): a multi-line paste builds a TREE of bullets, not
@@ -39,7 +40,11 @@ async function pasteInto(locator: Locator, plain: string) {
     const dt = new DataTransfer();
     dt.setData("text/plain", p);
     el.dispatchEvent(
-      new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }),
+      new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
     );
   }, plain);
 }
@@ -74,10 +79,14 @@ async function caretAt(page: Page, id: string, col: number) {
   }, col);
 }
 
-const one: SeedNode[] = [{ id: "n", parentId: null, prevSiblingId: null, text: "" }];
+const one: SeedNode[] = [
+  { id: "n", parentId: null, prevSiblingId: null, text: "" },
+];
 
 test.describe("Structural markdown paste", () => {
-  test("a multi-line paste becomes a tree, not one mashed line", async ({ page }) => {
+  test("a multi-line paste becomes a tree, not one mashed line", async ({
+    page,
+  }) => {
     await load(page, one);
     await caretAt(page, "n", 0);
     await pasteInto(text(page, "n"), "alpha\n  bravo\n    charlie\ndelta");
@@ -90,7 +99,9 @@ test.describe("Structural markdown paste", () => {
     ]);
   });
 
-  test("headings drive nesting; the shallowest normalizes to depth 0", async ({ page }) => {
+  test("headings drive nesting; the shallowest normalizes to depth 0", async ({
+    page,
+  }) => {
     await load(page, one);
     await caretAt(page, "n", 0);
     await pasteInto(text(page, "n"), "## Intro\nbody\n### Detail\nmore");
@@ -115,7 +126,9 @@ test.describe("Structural markdown paste", () => {
     expect(await rows(page)).toEqual(["0:open", "0:done"]);
   });
 
-  test("a bare `-` is an empty bullet, never a dropped line", async ({ page }) => {
+  test("a bare `-` is an empty bullet, never a dropped line", async ({
+    page,
+  }) => {
     await load(page, one);
     await caretAt(page, "n", 0);
     await pasteInto(text(page, "n"), "- alpha\n-\n- bravo");
@@ -123,10 +136,15 @@ test.describe("Structural markdown paste", () => {
     expect(await rows(page)).toEqual(["0:alpha", "0:", "0:bravo"]);
   });
 
-  test("fence delimiters survive as bullets and suppress the grammar", async ({ page }) => {
+  test("fence delimiters survive as bullets and suppress the grammar", async ({
+    page,
+  }) => {
     await load(page, one);
     await caretAt(page, "n", 0);
-    await pasteInto(page.locator('li[data-node-id="n"] .node-text'), "```ts\n- not a bullet\n```");
+    await pasteInto(
+      page.locator('li[data-node-id="n"] .node-text'),
+      "```ts\n- not a bullet\n```",
+    );
 
     expect(await rows(page)).toEqual(["0:```ts", "0:- not a bullet", "0:```"]);
   });
@@ -157,7 +175,9 @@ test.describe("Structural markdown paste", () => {
     await pasteInto(text(page, "n"), "- [x] done\nb");
 
     // Pasted mid-sentence: the anchor absorbs the text but stays a plain bullet.
-    await expect(page.locator('li[data-node-id] input[type="checkbox"]')).toHaveCount(0);
+    await expect(
+      page.locator('li[data-node-id] input[type="checkbox"]'),
+    ).toHaveCount(0);
     expect(await rows(page)).toEqual(["0:mid done", "0:b"]);
   });
 
@@ -200,7 +220,9 @@ test.describe("A paste never fights the view transforms", () => {
     );
   });
 
-  test("bullets hidden by hide-completed still land, and say so", async ({ page }) => {
+  test("bullets hidden by hide-completed still land, and say so", async ({
+    page,
+  }) => {
     await load(page, one);
     await caretAt(page, "n", 0);
     await pasteInto(text(page, "n"), "alpha\n- [x] done");
@@ -209,7 +231,9 @@ test.describe("A paste never fights the view transforms", () => {
     await expect(page.getByText("hidden by the current view")).toBeVisible();
   });
 
-  test("focus falls back to the last VISIBLE inserted bullet", async ({ page }) => {
+  test("focus falls back to the last VISIBLE inserted bullet", async ({
+    page,
+  }) => {
     await load(page, one);
     await caretAt(page, "n", 0);
     await pasteInto(text(page, "n"), "alpha\nbravo\n- [x] done");
@@ -222,7 +246,9 @@ test.describe("A paste never fights the view transforms", () => {
 });
 
 test.describe("The zoomed title (the two-render-paths exception)", () => {
-  test("remaining roots become the title's prepended children", async ({ page }) => {
+  test("remaining roots become the title's prepended children", async ({
+    page,
+  }) => {
     await load(page, [
       { id: "root", parentId: null, prevSiblingId: null, text: "Root" },
       { id: "kid", parentId: "root", prevSiblingId: null, text: "existing" },
@@ -304,7 +330,9 @@ test.describe("Mod+Shift+V pastes literal", () => {
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await load(page, one);
-    await page.evaluate(() => navigator.clipboard.writeText("https://example.com"));
+    await page.evaluate(() =>
+      navigator.clipboard.writeText("https://example.com"),
+    );
     await caretAt(page, "n", 0);
     await pressLiteralPaste(page, context);
 
@@ -319,7 +347,9 @@ test.describe("Mod+Shift+V pastes literal", () => {
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await load(page, one);
-    await page.evaluate(() => navigator.clipboard.writeText("https://example.com"));
+    await page.evaluate(() =>
+      navigator.clipboard.writeText("https://example.com"),
+    );
     await caretAt(page, "n", 0);
 
     await pressLiteralPaste(page, context);

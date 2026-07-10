@@ -10,12 +10,12 @@
 // `data-src`, so `readSource`/the caret math treat it as one opaque unit (the
 // caret jumps over it). The pure layer (pattern + parse + URL) lives in ./bible.ts.
 
-import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
-import { BibleChip } from "./chip";
-import { openBiblePassageEditPopover } from "./passage-edit-popover";
 import { openUrlInFocusedTab } from "../../components/open-url";
 import { resolveNodeId } from "../token-kit";
 import { definePlugin, type WidgetEl } from "../types";
+import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
+import { BibleChip } from "./chip";
+import { openBiblePassageEditPopover } from "./passage-edit-popover";
 
 const LONG_PRESS_MS = 550;
 // Cancel the press if the pointer travels past this (a scroll/drag that started
@@ -132,7 +132,10 @@ export default definePlugin({
         // on the chip -- must cancel the timer. The seam only dispatches
         // pointerup/cancel that land ON the chip, so watch the window directly.
         const onMove = (ev: PointerEvent) => {
-          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > LONG_PRESS_MOVE_PX) {
+          if (
+            Math.hypot(ev.clientX - startX, ev.clientY - startY) >
+            LONG_PRESS_MOVE_PX
+          ) {
             clearLongPress(el);
           }
         };

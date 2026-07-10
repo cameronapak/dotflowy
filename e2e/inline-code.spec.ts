@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Inline code (`` `code` ``) is a FOLDING token (ADR 0025's reveal-on-proximity,
@@ -38,7 +39,10 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+      if (
+        node.nodeType === 1 &&
+        (node as HTMLElement).hasAttribute("data-src")
+      ) {
         const e = node as HTMLElement;
         const len =
           Number(e.getAttribute("data-src-len")) ||
@@ -97,7 +101,9 @@ test.describe("Inline code: fold + reveal on proximity", () => {
     await expect.poll(() => text(page, "n").textContent()).toBe("`snip`");
     // The backticks are dimmed .md-punct text INSIDE the <code> box, and the
     // <code> is no longer an atom (no data-src).
-    await expect(text(page, "n").locator("code[data-code-reveal]")).toHaveCount(1);
+    await expect(text(page, "n").locator("code[data-code-reveal]")).toHaveCount(
+      1,
+    );
     await expect(codeEl(page, "n").locator(".md-punct")).toHaveCount(2);
     await expect(codeEl(page, "n")).not.toHaveAttribute("data-src", /.*/);
   });

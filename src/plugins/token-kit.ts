@@ -2,10 +2,11 @@
 // pieces the folding + editable tokens all need, so the rule lives in one place
 // instead of N copies. Pure/DOM helpers only — no UI barrel imports.
 
-import { getTreeIndex } from "../data/tree-store";
-import { getViewRootId } from "../data/view-state";
 import type { NodeCommands } from "../components/OutlineNode";
 import type { TokenView } from "./types";
+
+import { getTreeIndex } from "../data/tree-store";
+import { getViewRootId } from "../data/view-state";
 import { spliceToken } from "./token-splice";
 
 // `spliceToken` moved to the dependency-free `token-splice.ts` so worker-reachable

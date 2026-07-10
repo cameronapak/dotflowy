@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Route Bible plugin (ADR 0026): a Scripture reference in node.text renders as a
@@ -18,7 +19,10 @@ const chip = (page: Page, id: string) =>
 async function load(page: Page, tree: SeedNode[]) {
   // Capture window.open so we can assert click-to-open without a real popup.
   await page.addInitScript(() => {
-    const state = window as unknown as { __opened: string[]; __focusedTabs: number };
+    const state = window as unknown as {
+      __opened: string[];
+      __focusedTabs: number;
+    };
     state.__opened = [];
     state.__focusedTabs = 0;
     window.open = ((url?: string | URL) => {
@@ -43,10 +47,11 @@ const focusedTabs = (page: Page) =>
     () => (window as unknown as { __focusedTabs: number }).__focusedTabs,
   );
 const activeNodeId = (page: Page) =>
-  page.evaluate(() =>
-    document.activeElement
-      ?.closest<HTMLElement>("[data-node-id]")
-      ?.getAttribute("data-node-id") ?? null,
+  page.evaluate(
+    () =>
+      document.activeElement
+        ?.closest<HTMLElement>("[data-node-id]")
+        ?.getAttribute("data-node-id") ?? null,
   );
 
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
@@ -72,7 +77,10 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+      if (
+        node.nodeType === 1 &&
+        (node as HTMLElement).hasAttribute("data-src")
+      ) {
         const e = node as HTMLElement;
         const len =
           Number(e.getAttribute("data-src-len")) ||
@@ -112,7 +120,8 @@ const selectedBibleRef = (page: Page) =>
     const sel = window.getSelection();
     if (!sel || sel.rangeCount !== 1) return null;
     const range = sel.getRangeAt(0);
-    if (range.collapsed || range.startContainer !== range.endContainer) return null;
+    if (range.collapsed || range.startContainer !== range.endContainer)
+      return null;
     const node = range.startContainer.childNodes.item(range.startOffset);
     return node instanceof HTMLElement && node.hasAttribute("data-bible-ref")
       ? node.getAttribute("data-src")
@@ -124,8 +133,18 @@ test.describe("Scripture reference chips", () => {
     page,
   }) => {
     await load(page, [
-      { id: "ref", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
-      { id: "noref", parentId: null, prevSiblingId: "ref", text: "just some text 3" },
+      {
+        id: "ref",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Read John 3:16 today",
+      },
+      {
+        id: "noref",
+        parentId: null,
+        prevSiblingId: "ref",
+        text: "just some text 3",
+      },
     ]);
 
     // The reference is a single chip showing its verbatim source...
@@ -151,7 +170,12 @@ test.describe("Scripture reference chips", () => {
 
   test("a whole-chapter reference (no verse) also chips", async ({ page }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "See Genesis 1 for the start" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "See Genesis 1 for the start",
+      },
     ]);
 
     await expect(chip(page, "n")).toHaveText("Genesis 1");
@@ -222,14 +246,19 @@ test.describe("Scripture reference chips", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Read John 3:16 today",
+      },
     ]);
 
     await chip(page, "n").click({ button: "right" });
     await page.getByRole("combobox", { name: "Passage" }).fill("rom 8:28");
-    await expect(page.locator("[data-bible-passage-suggestions]")).toContainText(
-      "Romans 8:28",
-    );
+    await expect(
+      page.locator("[data-bible-passage-suggestions]"),
+    ).toContainText("Romans 8:28");
     await page.getByRole("button", { name: "Done" }).click();
 
     await expect(text(page, "n")).toContainText("Read Romans 8:28 today");
@@ -249,16 +278,27 @@ test.describe("Scripture reference chips", () => {
 
     await chip(page, "n").click({ button: "right" });
     await passagePopover(page).locator("summary").click();
-    await expect(page.getByRole("combobox", { name: "End verse" })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "End verse" })).toHaveCount(
+      0,
+    );
 
-    await page.getByRole("combobox", { name: "Start verse" }).selectOption("13");
+    await page
+      .getByRole("combobox", { name: "Start verse" })
+      .selectOption("13");
 
-    await expect(page.getByRole("combobox", { name: "End verse" })).toBeVisible();
+    await expect(
+      page.getByRole("combobox", { name: "End verse" }),
+    ).toBeVisible();
   });
 
   test("closing the passage editor refocuses the node", async ({ page }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Read John 3:16 today",
+      },
     ]);
 
     await chip(page, "n").click({ button: "right" });
@@ -271,7 +311,12 @@ test.describe("Scripture reference chips", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "Read John 3:16 today" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Read John 3:16 today",
+      },
     ]);
 
     await chip(page, "n").click({ button: "right" });
@@ -284,7 +329,12 @@ test.describe("Scripture reference chips", () => {
 
   test("Space on a hovered chip opens the passage editor", async ({ page }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "See John 3:16 now",
+      },
     ]);
 
     await caretAtSource(page, "n", 0);
@@ -302,7 +352,12 @@ test.describe("Scripture reference chips", () => {
 
   test("Left/Right can select a chip and Enter opens it", async ({ page }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "See John 3:16 now",
+      },
     ]);
 
     await caretAtSource(page, "n", "See ".length);
@@ -312,7 +367,10 @@ test.describe("Scripture reference chips", () => {
 
     await page.keyboard.press("ArrowRight");
     await expect.poll(() => selectedBibleRef(page)).toBeNull();
-    await expect(chip(page, "n")).not.toHaveAttribute("data-atom-selected", /.*/);
+    await expect(chip(page, "n")).not.toHaveAttribute(
+      "data-atom-selected",
+      /.*/,
+    );
     await page.keyboard.press("ArrowLeft");
     await expect.poll(() => selectedBibleRef(page)).toBe("John 3:16");
     await expect(chip(page, "n")).toHaveAttribute("data-atom-selected", "true");
@@ -327,7 +385,12 @@ test.describe("Scripture reference chips", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "See John 3:16 now",
+      },
     ]);
 
     await caretAtSource(page, "n", "See John 3:16".length);
@@ -343,7 +406,12 @@ test.describe("Scripture reference chips", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "See John 3:16 now" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "See John 3:16 now",
+      },
     ]);
 
     await text(page, "n").evaluate((el: HTMLElement) => {

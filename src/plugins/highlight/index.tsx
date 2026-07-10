@@ -19,13 +19,14 @@
 // C (slash command), D (keymap).
 
 import { HighlighterIcon } from "lucide-react";
+
+import { mdPunct, readSource } from "../../components/inline-code";
+import { wrapSelectionOrInsert } from "../../components/wrap";
 import {
   HIGHLIGHT_PATTERN,
   parseHighlight,
   type HighlightColor,
 } from "../../data/highlight";
-import { mdPunct, readSource } from "../../components/inline-code";
-import { wrapSelectionOrInsert } from "../../components/wrap";
 import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { openHighlightColorMenu } from "./highlight-color-menu";

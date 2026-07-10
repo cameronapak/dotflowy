@@ -6,8 +6,8 @@ The Effect v4 reference source used to be a committed `git subtree` at `repos/ef
 
 **Rejected:**
 
-- *Keep the subtree* — the search skew was the whole problem; a gitignored in-repo clone would still skew local tools.
-- *History rewrite to reclaim the 154 MB* — removal fixes every search surface on its own (search tools index the live tree); rewriting SHAs would break the commit links across the issue tracker. Clone size keeps the old blobs; `git clone --filter=blob:none` is the non-destructive mitigation if it ever hurts. Deliberate: the history shows the journey.
-- *A dedicated codegraph index over the fetched source* — the old per-machine index at `repos/effect-smol/.codegraph/` was never used; `rg` over the cache path covers the real access pattern (find an API, read a pattern file).
+- _Keep the subtree_ — the search skew was the whole problem; a gitignored in-repo clone would still skew local tools.
+- _History rewrite to reclaim the 154 MB_ — removal fixes every search surface on its own (search tools index the live tree); rewriting SHAs would break the commit links across the issue tracker. Clone size keeps the old blobs; `git clone --filter=blob:none` is the non-destructive mitigation if it ever hurts. Deliberate: the history shows the journey.
+- _A dedicated codegraph index over the fetched source_ — the old per-machine index at `repos/effect-smol/.codegraph/` was never used; `rg` over the cache path covers the real access pattern (find an API, read a pattern file).
 
 Do not re-vendor Effect source into the repo "so it's available offline" — the setup warm step already covers that.

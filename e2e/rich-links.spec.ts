@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Rich links (ADR 0005): markdown `[label](url)` in node.text that folds to a
@@ -14,7 +15,10 @@ async function load(page: Page, tree: SeedNode[]) {
   // Record window.open calls so we can assert click-to-open without juggling
   // real popups.
   await page.addInitScript(() => {
-    const state = window as unknown as { __opened: string[]; __focusedTabs: number };
+    const state = window as unknown as {
+      __opened: string[];
+      __focusedTabs: number;
+    };
     state.__opened = [];
     state.__focusedTabs = 0;
     window.open = ((url?: string | URL) => {
@@ -69,10 +73,11 @@ const focusedTabs = (page: Page) =>
     () => (window as unknown as { __focusedTabs: number }).__focusedTabs,
   );
 const activeNodeId = (page: Page) =>
-  page.evaluate(() =>
-    document.activeElement
-      ?.closest<HTMLElement>("[data-node-id]")
-      ?.getAttribute("data-node-id") ?? null,
+  page.evaluate(
+    () =>
+      document.activeElement
+        ?.closest<HTMLElement>("[data-node-id]")
+        ?.getAttribute("data-node-id") ?? null,
   );
 
 const LINK = "[Anthropic](https://anthropic.com)";
@@ -106,9 +111,9 @@ test.describe("Rich links fold and reveal", () => {
     // expands into the line (ADR 0005, bracket reveal). The parens around the
     // chip are REAL text (the caret walks through them). The <a> is gone.
     await focusBullet(page, "n");
-    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
-      "Anthropic",
-    );
+    await expect(
+      text(page, "n").locator(".link-reveal .link-label"),
+    ).toHaveText("Anthropic");
     await expect(text(page, "n")).toHaveText("[Anthropic]()");
     await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
       "data-src",
@@ -195,7 +200,9 @@ test.describe("Rich links fold and reveal", () => {
     await page.keyboard.press(`${MOD}+Enter`);
 
     await expect(page.locator("[data-link-edit-popover]")).toBeVisible();
-    await expect(page.getByLabel("Link URL")).toHaveValue("https://anthropic.com");
+    await expect(page.getByLabel("Link URL")).toHaveValue(
+      "https://anthropic.com",
+    );
     expect(await opened(page)).toEqual([]);
     expect(await focusedTabs(page)).toBe(0);
 
@@ -285,9 +292,9 @@ test.describe("Per-link reveal", () => {
     await focusBullet(page, "n");
     // First link bracket-revealed (label editable, url chip folded), second
     // still a folded <a>.
-    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
-      "A",
-    );
+    await expect(
+      text(page, "n").locator(".link-reveal .link-label"),
+    ).toHaveText("A");
     await expect(text(page, "n").locator(".link-url-chip")).toHaveAttribute(
       "data-src",
       "https://a.com",
@@ -305,9 +312,9 @@ test.describe("Per-link reveal", () => {
     ]);
 
     await focusBullet(page, "n");
-    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
-      "A",
-    );
+    await expect(
+      text(page, "n").locator(".link-reveal .link-label"),
+    ).toHaveText("A");
 
     // Move the caret to just before the still-folded second link. Setting the
     // selection fires selectionchange, which drives the per-link reflow (the
@@ -323,9 +330,9 @@ test.describe("Per-link reveal", () => {
     });
 
     // Now the SECOND link is bracket-revealed and the FIRST has folded back.
-    await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
-      "B",
-    );
+    await expect(
+      text(page, "n").locator(".link-reveal .link-label"),
+    ).toHaveText("B");
     const folded = text(page, "n").locator("a[data-link]");
     await expect(folded).toHaveCount(1);
     await expect(folded).toHaveText("A");
@@ -399,12 +406,15 @@ test.describe("Click caret near a folded link", () => {
   // Playwright click can't reproduce the browser's post-reveal re-placement, so
   // we assert the fix's guarantee directly: focus must not expand the link
   // synchronously.)
-  const LONG = "Go [docs](https://example.com/a/very/long/path/that/keeps/going)";
+  const LONG =
+    "Go [docs](https://example.com/a/very/long/path/that/keeps/going)";
 
   test("focusing does not synchronously expand a folded link", async ({
     page,
   }) => {
-    await load(page, [{ id: "n", parentId: null, prevSiblingId: null, text: LONG }]);
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: LONG },
+    ]);
     await expect(text(page, "n").locator("a[data-link]")).toHaveCount(1);
 
     // Put the caret on the trailing link (end) while still blurred, then focus,
@@ -594,7 +604,9 @@ test.describe("Creating links by paste", () => {
     const swapped = text(page, "n").locator("a[data-link]");
     await expect(swapped).toHaveText("Anthropic");
     await expect(swapped).not.toHaveClass(/link-unfurling/);
-    expect(await readSrc(page, "n")).toBe("[Anthropic](https://anthropic.com) ");
+    expect(await readSrc(page, "n")).toBe(
+      "[Anthropic](https://anthropic.com) ",
+    );
   });
 
   test("a failed title fetch keeps the url placeholder", async ({ page }) => {
@@ -651,14 +663,21 @@ test.describe("Edit Link popover", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: `before ${LINK} after` },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: `before ${LINK} after`,
+      },
     ]);
 
     await text(page, "n").locator("a[data-link] .link-edit-icon").click();
 
     // The popover opens prefilled -- and the pencil click did NOT open the url.
     await expect(popover(page)).toBeVisible();
-    await expect(popover(page).getByLabel("Link text")).toHaveValue("Anthropic");
+    await expect(popover(page).getByLabel("Link text")).toHaveValue(
+      "Anthropic",
+    );
     await expect(popover(page).getByLabel("Link URL")).toHaveValue(
       "https://anthropic.com",
     );
@@ -693,7 +712,9 @@ test.describe("Edit Link popover", () => {
     expect(await readSrc(page, "n")).toBe(LINK);
   });
 
-  test("the revealed link's (✎) chip opens the editor too", async ({ page }) => {
+  test("the revealed link's (✎) chip opens the editor too", async ({
+    page,
+  }) => {
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: LINK },
     ]);

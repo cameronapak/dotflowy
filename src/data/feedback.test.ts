@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { buildFeedbackUrl, type FeedbackEnv } from "./feedback";
 
 const env: FeedbackEnv = {

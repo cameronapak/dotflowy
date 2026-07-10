@@ -1,10 +1,8 @@
 import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ComponentType,
-  type ReactNode,
-} from "react";
+  SiAnthropic,
+  SiClaude,
+  SiCursor,
+} from "@icons-pack/react-simple-icons";
 import {
   BotIcon,
   CheckIcon,
@@ -14,13 +12,16 @@ import {
   SquareCodeIcon,
 } from "lucide-react";
 import {
-  SiAnthropic,
-  SiClaude,
-  SiCursor,
-} from "@icons-pack/react-simple-icons";
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
-import { cn } from "../lib/utils";
+
 import { useIsMobile } from "../hooks/use-mobile";
+import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -29,14 +30,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { Separator } from "./ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
 } from "./ui/input-group";
+import { Separator } from "./ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 /**
  * "Connect to your AI apps" dialog (opened from the header More menu).
@@ -352,12 +353,11 @@ export function McpConnectDialog({
               and can drop the fences itself -- so we don't let a user mistake a
               spoiler for a security guarantee. */}
           <p className="text-xs text-muted-foreground">
-            Spoilers (
-            <span className="font-mono">||hidden||</span>) are redacted from
-            connected apps by default, to keep flagged text out of an AI's
-            context. This is a convenience, not a security guarantee — an app
-            signed in as you can still be shown that text if you choose to
-            reveal it.
+            Spoilers (<span className="font-mono">||hidden||</span>) are
+            redacted from connected apps by default, to keep flagged text out of
+            an AI's context. This is a convenience, not a security guarantee —
+            an app signed in as you can still be shown that text if you choose
+            to reveal it.
           </p>
         </div>
 

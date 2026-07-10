@@ -1,4 +1,4 @@
-import { nodesCollection } from './collection'
+import { nodesCollection } from "./collection";
 import {
   type Node,
   type TreeIndex,
@@ -9,7 +9,7 @@ import {
   now,
   trueSourceOf,
   wouldMirrorCycle,
-} from './tree'
+} from "./tree";
 
 /**
  * All mutations operate on the nodesCollection directly (LocalStorage
@@ -22,8 +22,8 @@ import {
 
 function update(nodeId: string, patch: Partial<Node>) {
   nodesCollection.update(nodeId, (draft) => {
-    Object.assign(draft, patch, { updatedAt: now() })
-  })
+    Object.assign(draft, patch, { updatedAt: now() });
+  });
 }
 
 /**
@@ -43,31 +43,31 @@ export function insertSibling(
   parentId: string | null,
   afterId: string | null,
   isTask = false,
-  text = '',
+  text = "",
 ): string {
-  const id = createId()
-  const prevSiblingId = afterId
+  const id = createId();
+  const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.
-  let nextSiblingId: string | null = null
+  let nextSiblingId: string | null = null;
   if (afterId) {
-    const siblings = childrenOf(index, parentId)
-    const i = siblings.findIndex((n) => n.id === afterId)
+    const siblings = childrenOf(index, parentId);
+    const i = siblings.findIndex((n) => n.id === afterId);
     if (i !== -1 && i + 1 < siblings.length) {
-      nextSiblingId = siblings[i + 1]!.id
+      nextSiblingId = siblings[i + 1]!.id;
     }
   }
 
   nodesCollection.insert(
     makeNode({ id, parentId, prevSiblingId, text, isTask }),
-  )
+  );
 
   // Repoint the follower at the new node.
   if (nextSiblingId) {
-    update(nextSiblingId, { prevSiblingId: id })
+    update(nextSiblingId, { prevSiblingId: id });
   }
 
-  return id
+  return id;
 }
 
 /**
@@ -85,19 +85,19 @@ export function insertChildAtStart(
   index: TreeIndex,
   parentId: string | null,
   isTask = false,
-  text = '',
+  text = "",
   id = createId(),
 ): string {
-  const head = childrenOf(index, parentId)[0] ?? null
+  const head = childrenOf(index, parentId)[0] ?? null;
 
   nodesCollection.insert(
     makeNode({ id, parentId, prevSiblingId: null, text, isTask }),
-  )
+  );
 
   // The old head now follows the new node.
-  if (head) update(head.id, { prevSiblingId: id })
+  if (head) update(head.id, { prevSiblingId: id });
 
-  return id
+  return id;
 }
 
 /**
@@ -112,13 +112,11 @@ export function insertChildAtStart(
 export function appendChild(
   parentId: string | null,
   prevSiblingId: string | null = null,
-  text = '',
+  text = "",
   id = createId(),
 ): string {
-  nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text }),
-  )
-  return id
+  nodesCollection.insert(makeNode({ id, parentId, prevSiblingId, text }));
+  return id;
 }
 
 /**
@@ -143,23 +141,23 @@ export function mirrorNode(
   sourceId: string,
   targetId: string | null,
 ): string | null {
-  if (!index.byId.has(sourceId)) return null
-  const trueSourceId = trueSourceOf(index, sourceId)
-  if (wouldMirrorCycle(index, trueSourceId, targetId)) return null
+  if (!index.byId.has(sourceId)) return null;
+  const trueSourceId = trueSourceOf(index, sourceId);
+  if (wouldMirrorCycle(index, trueSourceId, targetId)) return null;
 
-  const siblings = childrenOf(index, targetId)
-  const after = siblings.length ? siblings[siblings.length - 1]!.id : null
-  const id = createId()
+  const siblings = childrenOf(index, targetId);
+  const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
+  const id = createId();
   nodesCollection.insert(
     makeNode({
       id,
       parentId: targetId,
       prevSiblingId: after,
-      text: index.byId.get(trueSourceId)?.text ?? '',
+      text: index.byId.get(trueSourceId)?.text ?? "",
       mirrorOf: trueSourceId,
     }),
-  )
-  return id
+  );
+  return id;
 }
 
 /**
@@ -173,12 +171,12 @@ export function mirrorManyNodes(
   targetId: string | null,
   ids: string[],
 ): number {
-  let made = 0
+  let made = 0;
   for (const id of ids) {
-    const index = buildTreeIndex(nodesCollection.toArray)
-    if (mirrorNode(index, id, targetId)) made++
+    const index = buildTreeIndex(nodesCollection.toArray);
+    if (mirrorNode(index, id, targetId)) made++;
   }
-  return made
+  return made;
 }
 
 /**
@@ -202,11 +200,11 @@ export function indent(
   nodeId: string,
   resolveMirror = false,
 ): boolean {
-  const node = index.byId.get(nodeId)
-  if (!node || !node.prevSiblingId) return false
+  const node = index.byId.get(nodeId);
+  if (!node || !node.prevSiblingId) return false;
 
-  const newParent = index.byId.get(node.prevSiblingId)
-  if (!newParent) return false
+  const newParent = index.byId.get(node.prevSiblingId);
+  if (!newParent) return false;
 
   // Resolve BEFORE the child read and parentId write below, or a mirror prev
   // sibling parents the node under the INSTANCE id, whose row renders the
@@ -215,7 +213,7 @@ export function indent(
   // -- collapse is a local field.
   const newParentContentId = resolveMirror
     ? trueSourceOf(index, newParent.id)
-    : newParent.id
+    : newParent.id;
 
   // Cycle guard (ADR 0022 + ADR 0010): mirror resolution can point
   // `newParentContentId` at `nodeId` itself (a mirror of `nodeId` sitting as its
@@ -224,20 +222,19 @@ export function indent(
   // must guard the way `moveNode` does. A no-op off-flag (the prev sibling can
   // never be `nodeId` or its descendant), so flag-OFF stays byte-identical.
   if (resolveMirror) {
-    let cursor: Node | undefined = index.byId.get(newParentContentId)
-    let guard = index.byId.size + 1
+    let cursor: Node | undefined = index.byId.get(newParentContentId);
+    let guard = index.byId.size + 1;
     while (cursor && guard-- > 0) {
-      if (cursor.id === nodeId) return false
-      cursor = cursor.parentId ? index.byId.get(cursor.parentId) : undefined
+      if (cursor.id === nodeId) return false;
+      cursor = cursor.parentId ? index.byId.get(cursor.parentId) : undefined;
     }
   }
 
-  const oldParent = node.parentId
-  const oldSiblings = childrenOf(index, oldParent)
-  const i = oldSiblings.findIndex((n) => n.id === nodeId)
-  const oldNext = i !== -1 && i + 1 < oldSiblings.length
-    ? oldSiblings[i + 1]!
-    : null
+  const oldParent = node.parentId;
+  const oldSiblings = childrenOf(index, oldParent);
+  const i = oldSiblings.findIndex((n) => n.id === nodeId);
+  const oldNext =
+    i !== -1 && i + 1 < oldSiblings.length ? oldSiblings[i + 1]! : null;
 
   // The node becomes the LAST child of newParent, so read newParent's current
   // last child BEFORE moving it. The shared tree index is maintained IN PLACE
@@ -245,25 +242,24 @@ export function indent(
   // AFTER the move can already include the node itself -- it would then point its
   // own prevSiblingId at itself (a self-referencing chain). node is a sibling of
   // newParent here, never already its child, so the pre-move read excludes it.
-  const newSiblings = childrenOf(index, newParentContentId)
-  const lastExisting = newSiblings.length > 0
-    ? newSiblings[newSiblings.length - 1]!
-    : null
+  const newSiblings = childrenOf(index, newParentContentId);
+  const lastExisting =
+    newSiblings.length > 0 ? newSiblings[newSiblings.length - 1]! : null;
 
   // Node becomes last child of newParent. If that parent was collapsed, the
   // node would be indented out of sight, so expand it to keep the node visible.
   update(nodeId, {
     parentId: newParentContentId,
     prevSiblingId: lastExisting ? lastExisting.id : null,
-  })
-  if (newParent.collapsed) update(newParent.id, { collapsed: false })
+  });
+  if (newParent.collapsed) update(newParent.id, { collapsed: false });
 
   // Old next sibling links back to node's old prev.
   if (oldNext) {
-    update(oldNext.id, { prevSiblingId: node.prevSiblingId })
+    update(oldNext.id, { prevSiblingId: node.prevSiblingId });
   }
 
-  return true
+  return true;
 }
 
 /**
@@ -279,46 +275,46 @@ export function indent(
  *  - the node that used to follow the old parent now repoints to node
  */
 export function outdent(index: TreeIndex, nodeId: string): boolean {
-  const node = index.byId.get(nodeId)
-  if (!node || node.parentId === null) return false
+  const node = index.byId.get(nodeId);
+  if (!node || node.parentId === null) return false;
 
-  const oldParent = index.byId.get(node.parentId)
-  if (!oldParent) return false
+  const oldParent = index.byId.get(node.parentId);
+  if (!oldParent) return false;
 
-  const newParentId = oldParent.parentId
+  const newParentId = oldParent.parentId;
 
   // Siblings under old parent.
-  const oldSiblings = childrenOf(index, oldParent.id)
-  const i = oldSiblings.findIndex((n) => n.id === nodeId)
-  const oldNext = i !== -1 && i + 1 < oldSiblings.length
-    ? oldSiblings[i + 1]!
-    : null
+  const oldSiblings = childrenOf(index, oldParent.id);
+  const i = oldSiblings.findIndex((n) => n.id === nodeId);
+  const oldNext =
+    i !== -1 && i + 1 < oldSiblings.length ? oldSiblings[i + 1]! : null;
 
   // Siblings under new parent (i.e. old parent's level), used to find the
   // node that currently follows oldParent so we can splice node in between.
-  const newSiblings = childrenOf(index, newParentId)
-  const parentIdx = newSiblings.findIndex((n) => n.id === oldParent.id)
-  const afterParent = parentIdx !== -1 && parentIdx + 1 < newSiblings.length
-    ? newSiblings[parentIdx + 1]!
-    : null
+  const newSiblings = childrenOf(index, newParentId);
+  const parentIdx = newSiblings.findIndex((n) => n.id === oldParent.id);
+  const afterParent =
+    parentIdx !== -1 && parentIdx + 1 < newSiblings.length
+      ? newSiblings[parentIdx + 1]!
+      : null;
 
   // Move node up.
   update(nodeId, {
     parentId: newParentId,
     prevSiblingId: oldParent.id,
-  })
+  });
 
   // Old next sibling (under old parent) relinks to node's old prev.
   if (oldNext) {
-    update(oldNext.id, { prevSiblingId: node.prevSiblingId })
+    update(oldNext.id, { prevSiblingId: node.prevSiblingId });
   }
 
   // The node that followed oldParent now follows node.
   if (afterParent) {
-    update(afterParent.id, { prevSiblingId: nodeId })
+    update(afterParent.id, { prevSiblingId: nodeId });
   }
 
-  return true
+  return true;
 }
 
 interface MoveOpts {
@@ -327,12 +323,12 @@ interface MoveOpts {
    * skipping hidden completed ones (they ride along, staying hidden), so a
    * press is never a dead no-visible-change move. Defaults to "all visible".
    */
-  isVisible?: (n: Node) => boolean
+  isVisible?: (n: Node) => boolean;
   /**
    * Boundary parent (the zoom root). A node directly under it must not escape
    * the visible subtree, so an edge move there is a no-op. See ADR 0009.
    */
-  rootId?: string | null
+  rootId?: string | null;
   /**
    * Resolve a mirror uncle/aunt to its SOURCE at an edge reparent (ADR 0022), so
    * the moved node windows into every instance instead of vanishing under the
@@ -340,7 +336,7 @@ interface MoveOpts {
    * today's exact behavior. Kept a param, not a `flags.ts` read, to keep this
    * module pure (matches the drag call site).
    */
-  resolveMirror?: boolean
+  resolveMirror?: boolean;
 }
 
 /**
@@ -353,23 +349,25 @@ function reparentIntoParentPrevSibling(
   rootId: string | null,
   resolveMirror: boolean,
 ): boolean {
-  if (node.parentId === null || node.parentId === rootId) return false
-  const parent = index.byId.get(node.parentId)
-  if (!parent?.prevSiblingId) return false
+  if (node.parentId === null || node.parentId === rootId) return false;
+  const parent = index.byId.get(node.parentId);
+  if (!parent?.prevSiblingId) return false;
 
-  const uncleId = parent.prevSiblingId
+  const uncleId = parent.prevSiblingId;
   // ADR 0022: a mirror uncle windows its SOURCE's children, so land there (both
   // the last-child read and the move target). Off-flag it's the id itself;
   // collapse-expand stays on the visible instance.
-  const uncleContentId = resolveMirror ? trueSourceOf(index, uncleId) : uncleId
-  const uncleChildren = childrenOf(index, uncleContentId)
+  const uncleContentId = resolveMirror ? trueSourceOf(index, uncleId) : uncleId;
+  const uncleChildren = childrenOf(index, uncleContentId);
   const afterSiblingId =
-    uncleChildren.length > 0 ? uncleChildren[uncleChildren.length - 1]!.id : null
+    uncleChildren.length > 0
+      ? uncleChildren[uncleChildren.length - 1]!.id
+      : null;
 
-  const uncle = index.byId.get(uncleId)
-  if (uncle?.collapsed) update(uncle.id, { collapsed: false })
+  const uncle = index.byId.get(uncleId);
+  if (uncle?.collapsed) update(uncle.id, { collapsed: false });
 
-  return moveNode(index, node.id, uncleContentId, afterSiblingId)
+  return moveNode(index, node.id, uncleContentId, afterSiblingId);
 }
 
 /**
@@ -382,22 +380,24 @@ function reparentIntoParentNextSibling(
   rootId: string | null,
   resolveMirror: boolean,
 ): boolean {
-  if (node.parentId === null || node.parentId === rootId) return false
-  const parent = index.byId.get(node.parentId)
-  if (!parent) return false
+  if (node.parentId === null || node.parentId === rootId) return false;
+  const parent = index.byId.get(node.parentId);
+  if (!parent) return false;
 
-  const parentSiblings = childrenOf(index, parent.parentId)
-  const pi = parentSiblings.findIndex((n) => n.id === parent.id)
+  const parentSiblings = childrenOf(index, parent.parentId);
+  const pi = parentSiblings.findIndex((n) => n.id === parent.id);
   const aunt =
-    pi !== -1 && pi + 1 < parentSiblings.length ? parentSiblings[pi + 1]! : null
-  if (!aunt) return false
+    pi !== -1 && pi + 1 < parentSiblings.length
+      ? parentSiblings[pi + 1]!
+      : null;
+  if (!aunt) return false;
 
-  if (aunt.collapsed) update(aunt.id, { collapsed: false })
+  if (aunt.collapsed) update(aunt.id, { collapsed: false });
 
   // ADR 0022: a mirror aunt windows its SOURCE's children; parent into the
   // source (off-flag it's the id itself). Collapse stays on the instance.
-  const auntContentId = resolveMirror ? trueSourceOf(index, aunt.id) : aunt.id
-  return moveNode(index, node.id, auntContentId, null)
+  const auntContentId = resolveMirror ? trueSourceOf(index, aunt.id) : aunt.id;
+  return moveNode(index, node.id, auntContentId, null);
 }
 
 /**
@@ -413,20 +413,20 @@ export function moveUp(
   nodeId: string,
   opts: MoveOpts = {},
 ): boolean {
-  const isVisible = opts.isVisible ?? (() => true)
-  const node = index.byId.get(nodeId)
-  if (!node) return false
+  const isVisible = opts.isVisible ?? (() => true);
+  const node = index.byId.get(nodeId);
+  if (!node) return false;
 
-  const siblings = childrenOf(index, node.parentId)
-  const i = siblings.findIndex((n) => n.id === nodeId)
-  if (i === -1) return false
+  const siblings = childrenOf(index, node.parentId);
+  const i = siblings.findIndex((n) => n.id === nodeId);
+  if (i === -1) return false;
 
   // Nearest visible sibling above, skipping hidden completed ones.
-  let vp: Node | null = null
+  let vp: Node | null = null;
   for (let j = i - 1; j >= 0; j--) {
     if (isVisible(siblings[j]!)) {
-      vp = siblings[j]!
-      break
+      vp = siblings[j]!;
+      break;
     }
   }
 
@@ -436,15 +436,15 @@ export function moveUp(
       node,
       opts.rootId ?? null,
       opts.resolveMirror ?? false,
-    )
+    );
 
   // Swap: detach node, then re-insert it immediately before vp. A hidden
   // sibling between them stays put (rides along below vp).
-  const rawNext = i + 1 < siblings.length ? siblings[i + 1]! : null
-  if (rawNext) update(rawNext.id, { prevSiblingId: node.prevSiblingId })
-  update(nodeId, { prevSiblingId: vp.prevSiblingId })
-  update(vp.id, { prevSiblingId: nodeId })
-  return true
+  const rawNext = i + 1 < siblings.length ? siblings[i + 1]! : null;
+  if (rawNext) update(rawNext.id, { prevSiblingId: node.prevSiblingId });
+  update(nodeId, { prevSiblingId: vp.prevSiblingId });
+  update(vp.id, { prevSiblingId: nodeId });
+  return true;
 }
 
 /**
@@ -459,20 +459,20 @@ export function moveDown(
   nodeId: string,
   opts: MoveOpts = {},
 ): boolean {
-  const isVisible = opts.isVisible ?? (() => true)
-  const node = index.byId.get(nodeId)
-  if (!node) return false
+  const isVisible = opts.isVisible ?? (() => true);
+  const node = index.byId.get(nodeId);
+  if (!node) return false;
 
-  const siblings = childrenOf(index, node.parentId)
-  const i = siblings.findIndex((n) => n.id === nodeId)
-  if (i === -1) return false
+  const siblings = childrenOf(index, node.parentId);
+  const i = siblings.findIndex((n) => n.id === nodeId);
+  if (i === -1) return false;
 
   // Nearest visible sibling below, skipping hidden completed ones.
-  let k = -1
+  let k = -1;
   for (let j = i + 1; j < siblings.length; j++) {
     if (isVisible(siblings[j]!)) {
-      k = j
-      break
+      k = j;
+      break;
     }
   }
 
@@ -482,17 +482,17 @@ export function moveDown(
       node,
       opts.rootId ?? null,
       opts.resolveMirror ?? false,
-    )
+    );
   }
 
   // Swap: detach node, then re-insert it immediately after vn.
-  const vn = siblings[k]!
-  const vnNext = k + 1 < siblings.length ? siblings[k + 1]! : null
-  const rawNext = siblings[i + 1]! // exists: there's a sibling at k > i
-  update(rawNext.id, { prevSiblingId: node.prevSiblingId })
-  update(nodeId, { prevSiblingId: vn.id })
-  if (vnNext) update(vnNext.id, { prevSiblingId: nodeId })
-  return true
+  const vn = siblings[k]!;
+  const vnNext = k + 1 < siblings.length ? siblings[k + 1]! : null;
+  const rawNext = siblings[i + 1]!; // exists: there's a sibling at k > i
+  update(rawNext.id, { prevSiblingId: node.prevSiblingId });
+  update(nodeId, { prevSiblingId: vn.id });
+  if (vnNext) update(vnNext.id, { prevSiblingId: nodeId });
+  return true;
 }
 
 /**
@@ -517,21 +517,19 @@ export function moveNode(
   newParentId: string | null,
   afterSiblingId: string | null,
 ): boolean {
-  const node = index.byId.get(nodeId)
-  if (!node) return false
+  const node = index.byId.get(nodeId);
+  if (!node) return false;
   // Can't land after yourself, and can't become your own parent.
-  if (afterSiblingId === nodeId || newParentId === nodeId) return false
+  if (afterSiblingId === nodeId || newParentId === nodeId) return false;
 
   // Cycle guard: walk up from the target parent; bail if we reach the node.
   // Dropping a branch inside itself would orphan it. See ADR 0010.
   if (newParentId !== null) {
-    let cursor: Node | undefined = index.byId.get(newParentId)
-    let guard = index.byId.size + 1
+    let cursor: Node | undefined = index.byId.get(newParentId);
+    let guard = index.byId.size + 1;
     while (cursor && guard-- > 0) {
-      if (cursor.id === nodeId) return false
-      cursor = cursor.parentId
-        ? index.byId.get(cursor.parentId)
-        : undefined
+      if (cursor.id === nodeId) return false;
+      cursor = cursor.parentId ? index.byId.get(cursor.parentId) : undefined;
     }
   }
 
@@ -540,34 +538,35 @@ export function moveNode(
     newParentId === node.parentId &&
     (afterSiblingId ?? null) === (node.prevSiblingId ?? null)
   ) {
-    return false
+    return false;
   }
 
   // The node currently following us under the OLD parent inherits our old prev.
-  const oldSiblings = childrenOf(index, node.parentId)
-  const oi = oldSiblings.findIndex((n) => n.id === nodeId)
+  const oldSiblings = childrenOf(index, node.parentId);
+  const oi = oldSiblings.findIndex((n) => n.id === nodeId);
   const oldNext =
-    oi !== -1 && oi + 1 < oldSiblings.length ? oldSiblings[oi + 1]! : null
+    oi !== -1 && oi + 1 < oldSiblings.length ? oldSiblings[oi + 1]! : null;
 
   // The node that will follow us under the NEW parent: the one after
   // `afterSiblingId`, or the current head when we're becoming the first child.
-  const newSiblings = childrenOf(index, newParentId)
-  let newNext: Node | null = null
+  const newSiblings = childrenOf(index, newParentId);
+  let newNext: Node | null = null;
   if (afterSiblingId === null) {
-    newNext = newSiblings[0] ?? null
+    newNext = newSiblings[0] ?? null;
   } else {
-    const ni = newSiblings.findIndex((n) => n.id === afterSiblingId)
-    newNext = ni !== -1 && ni + 1 < newSiblings.length ? newSiblings[ni + 1]! : null
+    const ni = newSiblings.findIndex((n) => n.id === afterSiblingId);
+    newNext =
+      ni !== -1 && ni + 1 < newSiblings.length ? newSiblings[ni + 1]! : null;
   }
 
   // Detach, then re-splice. Reads above are all from the pre-mutation index, so
   // ordering of the writes below doesn't matter.
-  if (oldNext) update(oldNext.id, { prevSiblingId: node.prevSiblingId })
-  update(nodeId, { parentId: newParentId, prevSiblingId: afterSiblingId })
+  if (oldNext) update(oldNext.id, { prevSiblingId: node.prevSiblingId });
+  update(nodeId, { parentId: newParentId, prevSiblingId: afterSiblingId });
   if (newNext && newNext.id !== nodeId) {
-    update(newNext.id, { prevSiblingId: nodeId })
+    update(newNext.id, { prevSiblingId: nodeId });
   }
-  return true
+  return true;
 }
 
 /**
@@ -583,28 +582,25 @@ export function moveNode(
  * were siblings of each other. Wrap the whole call in `runStructural` so the N
  * moves land as ONE atomic batch (ADR 0009).
  */
-export function moveManyNodes(
-  targetId: string | null,
-  ids: string[],
-): number {
-  let moved = 0
+export function moveManyNodes(targetId: string | null, ids: string[]): number {
+  let moved = 0;
   // `after` walks forward: start at the target's current last child, then each
   // successful move becomes the predecessor of the next.
   const firstSiblings = childrenOf(
     buildTreeIndex(nodesCollection.toArray),
     targetId,
-  )
+  );
   let after: string | null = firstSiblings.length
     ? firstSiblings[firstSiblings.length - 1]!.id
-    : null
+    : null;
   for (const id of ids) {
-    const index = buildTreeIndex(nodesCollection.toArray)
+    const index = buildTreeIndex(nodesCollection.toArray);
     if (moveNode(index, id, targetId, after)) {
-      moved++
-      after = id
+      moved++;
+      after = id;
     }
   }
-  return moved
+  return moved;
 }
 
 /**
@@ -620,31 +616,32 @@ export function indentManyNodes(
   rootIds: string[],
   resolveMirror = false,
 ): number {
-  if (rootIds.length === 0) return 0
-  const index = buildTreeIndex(nodesCollection.toArray)
+  if (rootIds.length === 0) return 0;
+  const index = buildTreeIndex(nodesCollection.toArray);
   // The run is contiguous, so the first root's prev sibling sits OUTSIDE it --
   // the node everything indents under. Absent => first child => can't indent.
-  const targetId = index.byId.get(rootIds[0]!)?.prevSiblingId
-  if (!targetId) return 0
-  if (index.byId.get(targetId)?.collapsed) update(targetId, { collapsed: false })
+  const targetId = index.byId.get(rootIds[0]!)?.prevSiblingId;
+  if (!targetId) return 0;
+  if (index.byId.get(targetId)?.collapsed)
+    update(targetId, { collapsed: false });
   // ADR 0022: a mirror target parents the run into its SOURCE (matches single
   // `indent`). Off-flag it's the id itself; the collapse-expand above still
   // targets the visible instance.
-  const target = resolveMirror ? trueSourceOf(index, targetId) : targetId
+  const target = resolveMirror ? trueSourceOf(index, targetId) : targetId;
   // If the mirror target resolves INTO the selected run (its prev sibling is a
   // mirror of a selected root or one of their descendants), `moveManyNodes` would
   // skip the cyclic node via `moveNode`'s guard and silently split the run. Abort
   // the whole indent instead (a no-op). Only reachable under mirror resolution.
   if (resolveMirror && target !== targetId) {
-    const selected = new Set(rootIds)
-    let cursor: string | null = target
-    let guard = index.byId.size + 1
+    const selected = new Set(rootIds);
+    let cursor: string | null = target;
+    let guard = index.byId.size + 1;
     while (cursor && guard-- > 0) {
-      if (selected.has(cursor)) return 0
-      cursor = index.byId.get(cursor)?.parentId ?? null
+      if (selected.has(cursor)) return 0;
+      cursor = index.byId.get(cursor)?.parentId ?? null;
     }
   }
-  return moveManyNodes(target, rootIds)
+  return moveManyNodes(target, rootIds);
 }
 
 /**
@@ -658,23 +655,23 @@ export function indentManyNodes(
  * displacing the prior). Wrap in `runStructural` (ADR 0009).
  */
 export function outdentManyNodes(rootIds: string[]): number {
-  if (rootIds.length === 0) return 0
-  const start = buildTreeIndex(nodesCollection.toArray)
-  const oldParentId = start.byId.get(rootIds[0]!)?.parentId
-  if (!oldParentId) return 0 // already top-level -> can't outdent
-  const newParentId = start.byId.get(oldParentId)?.parentId ?? null
-  let moved = 0
+  if (rootIds.length === 0) return 0;
+  const start = buildTreeIndex(nodesCollection.toArray);
+  const oldParentId = start.byId.get(rootIds[0]!)?.parentId;
+  if (!oldParentId) return 0; // already top-level -> can't outdent
+  const newParentId = start.byId.get(oldParentId)?.parentId ?? null;
+  let moved = 0;
   // `after` walks forward from the old parent: each root lands right after the
   // previously-moved one, so the run keeps its order at the new level.
-  let after: string = oldParentId
+  let after: string = oldParentId;
   for (const id of rootIds) {
-    const index = buildTreeIndex(nodesCollection.toArray)
+    const index = buildTreeIndex(nodesCollection.toArray);
     if (moveNode(index, id, newParentId, after)) {
-      moved++
-      after = id
+      moved++;
+      after = id;
     }
   }
-  return moved
+  return moved;
 }
 
 /**
@@ -683,47 +680,44 @@ export function outdentManyNodes(rootIds: string[]): number {
  * afterwards: the next sibling if any, else the previous sibling, else
  * the parent.
  */
-export function removeNode(
-  index: TreeIndex,
-  nodeId: string,
-): string | null {
-  const node = index.byId.get(nodeId)
-  if (!node) return null
+export function removeNode(index: TreeIndex, nodeId: string): string | null {
+  const node = index.byId.get(nodeId);
+  if (!node) return null;
 
   // Collect subtree ids (depth-first).
-  const toDelete: string[] = []
-  const stack = [nodeId]
+  const toDelete: string[] = [];
+  const stack = [nodeId];
   while (stack.length) {
-    const id = stack.pop()!
-    toDelete.push(id)
-    const kids = childrenOf(index, id)
-    for (const k of kids) stack.push(k.id)
+    const id = stack.pop()!;
+    toDelete.push(id);
+    const kids = childrenOf(index, id);
+    for (const k of kids) stack.push(k.id);
   }
 
   // Determine focus target before mutating.
-  const siblings = childrenOf(index, node.parentId)
-  const i = siblings.findIndex((n) => n.id === nodeId)
-  let focusId: string | null = null
+  const siblings = childrenOf(index, node.parentId);
+  const i = siblings.findIndex((n) => n.id === nodeId);
+  let focusId: string | null = null;
   if (i !== -1 && i + 1 < siblings.length) {
-    focusId = siblings[i + 1]!.id
+    focusId = siblings[i + 1]!.id;
   } else if (i > 0) {
-    focusId = siblings[i - 1]!.id
+    focusId = siblings[i - 1]!.id;
   } else {
-    focusId = node.parentId
+    focusId = node.parentId;
   }
 
   // Relink the follower of the last-deleted-in-chain. For the deleted node
   // itself, its old next sibling needs to point at node.prevSiblingId.
   if (i !== -1 && i + 1 < siblings.length) {
-    const nextSibling = siblings[i + 1]!
-    update(nextSibling.id, { prevSiblingId: node.prevSiblingId })
+    const nextSibling = siblings[i + 1]!;
+    update(nextSibling.id, { prevSiblingId: node.prevSiblingId });
   }
 
-  for (const id of toDelete) nodesCollection.delete(id)
+  for (const id of toDelete) nodesCollection.delete(id);
 
   // focusId may have been deleted if it was in the subtree (it isn't, by
   // construction: focus is a sibling or ancestor), so it's safe.
-  return focusId
+  return focusId;
 }
 
 /**
@@ -737,16 +731,16 @@ export function removeNode(
  */
 export function removeManyNodes(ids: string[]): void {
   for (const id of ids) {
-    removeNode(buildTreeIndex(nodesCollection.toArray), id)
+    removeNode(buildTreeIndex(nodesCollection.toArray), id);
   }
 }
 
 export function setText(nodeId: string, text: string) {
-  update(nodeId, { text })
+  update(nodeId, { text });
 }
 
 export function toggleCompleted(nodeId: string, completed: boolean) {
-  update(nodeId, { completed })
+  update(nodeId, { completed });
 }
 
 /**
@@ -755,11 +749,11 @@ export function toggleCompleted(nodeId: string, completed: boolean) {
  * keeps whatever done-status it had. See ADR 0001.
  */
 export function setIsTask(nodeId: string, isTask: boolean) {
-  update(nodeId, { isTask })
+  update(nodeId, { isTask });
 }
 
 export function toggleCollapsed(nodeId: string, collapsed: boolean) {
-  update(nodeId, { collapsed })
+  update(nodeId, { collapsed });
 }
 
 /**
@@ -767,5 +761,5 @@ export function toggleCollapsed(nodeId: string, collapsed: boolean) {
  * bookmarks list sorts by it) or `null` to unpin. See ADR 0011.
  */
 export function toggleBookmark(nodeId: string, bookmarked: boolean) {
-  update(nodeId, { bookmarkedAt: bookmarked ? now() : null })
+  update(nodeId, { bookmarkedAt: bookmarked ? now() : null });
 }

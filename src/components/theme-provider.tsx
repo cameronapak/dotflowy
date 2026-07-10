@@ -1,4 +1,5 @@
 import { createContext, use, useEffect, useSyncExternalStore } from "react";
+
 import { setFavicon } from "../lib/favicon";
 import {
   LEGACY_THEME_KEY,

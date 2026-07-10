@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Emphasis plugin (ADR 0025). Inline `*italic*`, `**bold**`, `~~strike~~`, and
@@ -49,7 +50,10 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src")) {
+      if (
+        node.nodeType === 1 &&
+        (node as HTMLElement).hasAttribute("data-src")
+      ) {
         const e = node as HTMLElement;
         const len =
           Number(e.getAttribute("data-src-len")) ||
@@ -117,7 +121,12 @@ test.describe("Inline emphasis: fold when blurred (ADR 0025)", () => {
     page,
   }) => {
     await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "call foo_bar_baz()" },
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "call foo_bar_baz()",
+      },
     ]);
     await expect(run(page, "n", "em")).toHaveCount(0);
     expect(await text(page, "n").textContent()).toBe("call foo_bar_baz()");
@@ -260,7 +269,9 @@ test.describe("Inline emphasis: creation", () => {
     }
   });
 
-  test("/bold inserts empty markers with the caret inside", async ({ page }) => {
+  test("/bold inserts empty markers with the caret inside", async ({
+    page,
+  }) => {
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "" },
     ]);

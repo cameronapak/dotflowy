@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
-import type { TagFilter } from './tags'
-import type { Node } from './tree'
+import { useEffect } from "react";
+
+import type { TagFilter } from "./tags";
+import type { Node } from "./tree";
 
 /**
  * The editor's ephemeral *view* state (the zoom root and the composed
@@ -24,21 +25,21 @@ import type { Node } from './tree'
  * bailout.
  */
 
-let rootId: string | null = null
-let isHidden: (node: Node) => boolean = () => false
-let filter: TagFilter | null = null
+let rootId: string | null = null;
+let isHidden: (node: Node) => boolean = () => false;
+let filter: TagFilter | null = null;
 
 /** The current zoom root, read live OUTSIDE render (event handlers, command
  *  closures, drag, hotkeys). Render reads must use the `rootId` prop instead so
  *  they stay reactive. */
 export function getViewRootId(): string | null {
-  return rootId
+  return rootId;
 }
 
 /** The current composed visibility prune (Seam-G; hide-completed today), read
  *  live OUTSIDE render. Render reads must use the `isHidden` memo instead. */
 export function getViewIsHidden(): (node: Node) => boolean {
-  return isHidden
+  return isHidden;
 }
 
 /** The tags plugin's active pruned set (`?q=`), read live OUTSIDE render. Null
@@ -46,7 +47,7 @@ export function getViewIsHidden(): (node: Node) => boolean {
  *  must know whether what it just inserted actually landed on screen (ADR 0044:
  *  a paste never mutates view state, so it discloses instead). */
 export function getViewFilter(): TagFilter | null {
-  return filter
+  return filter;
 }
 
 /**
@@ -61,15 +62,15 @@ export function useSyncViewState(
   nextIsHidden: (node: Node) => boolean,
 ): void {
   useEffect(() => {
-    rootId = nextRootId
-    isHidden = nextIsHidden
-  }, [nextRootId, nextIsHidden])
+    rootId = nextRootId;
+    isHidden = nextIsHidden;
+  }, [nextRootId, nextIsHidden]);
 }
 
 /** The filter is derived further down the editor than `useSyncViewState`'s
  *  inputs (it needs `isHidden` first), so it mirrors on its own. */
 export function useSyncViewFilter(nextFilter: TagFilter | null): void {
   useEffect(() => {
-    filter = nextFilter
-  }, [nextFilter])
+    filter = nextFilter;
+  }, [nextFilter]);
 }

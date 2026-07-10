@@ -6,8 +6,9 @@
 // core-known format, plugin-owned UX -- core chrome like the backlinks line may
 // depend on this file, never on the plugin).
 
-import { flattenInline } from './inline-text'
-import type { TreeIndex } from './tree'
+import type { TreeIndex } from "./tree";
+
+import { flattenInline } from "./inline-text";
 
 // The token matches ONLY id-shaped interiors (a UUID from crypto.randomUUID, or
 // tree.ts's `n_<t36>_<r36>` fallback). Deliberately strict: hand-typed junk like
@@ -15,22 +16,22 @@ import type { TreeIndex } from './tree'
 // picker), while a real token whose target was DELETED still matches and renders
 // as a "missing link" chip -- the strictness is what tells those two apart.
 const UUID_SRC =
-  '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-const FALLBACK_ID_SRC = 'n_[0-9a-z]+_[0-9a-z]+'
-const ID_SRC = `(?:${UUID_SRC}|${FALLBACK_ID_SRC})`
+  "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+const FALLBACK_ID_SRC = "n_[0-9a-z]+_[0-9a-z]+";
+const ID_SRC = `(?:${UUID_SRC}|${FALLBACK_ID_SRC})`;
 
 /** Seam A regex fragment (no outer capture group -- the registry wraps it). */
-export const NODE_LINK_PATTERN = `\\[\\[${ID_SRC}\\]\\]`
+export const NODE_LINK_PATTERN = `\\[\\[${ID_SRC}\\]\\]`;
 
 // Internal, with the id captured. Fresh-flagged `g` for matchAll/replace.
-const NODE_LINK_REGEX = new RegExp(`\\[\\[(${ID_SRC})\\]\\]`, 'g')
+const NODE_LINK_REGEX = new RegExp(`\\[\\[(${ID_SRC})\\]\\]`, "g");
 
 /** The target id inside one matched token: `[[abc]]` -> `abc`. */
 export function linkTargetId(tok: string): string {
-  return tok.slice(2, -2)
+  return tok.slice(2, -2);
 }
 
-const EMPTY: string[] = []
+const EMPTY: string[] = [];
 
 /**
  * The unique target ids `text` links to, in first-occurrence order. Runs on the
@@ -38,14 +39,14 @@ const EMPTY: string[] = []
  * can't contain a token (the 99.9% case).
  */
 export function parseNodeLinks(text: string): string[] {
-  if (!text.includes('[[')) return EMPTY
-  let out: string[] | null = null
+  if (!text.includes("[[")) return EMPTY;
+  let out: string[] | null = null;
   for (const m of text.matchAll(NODE_LINK_REGEX)) {
-    const id = m[1]!
-    if (!out) out = [id]
-    else if (!out.includes(id)) out.push(id)
+    const id = m[1]!;
+    if (!out) out = [id];
+    else if (!out.includes(id)) out.push(id);
   }
-  return out ?? EMPTY
+  return out ?? EMPTY;
 }
 
 /**
@@ -55,8 +56,8 @@ export function parseNodeLinks(text: string): string[] {
  */
 export function linkedNodeLabel(text: string): string {
   return flattenInline(
-    text.includes('[[') ? text.replace(NODE_LINK_REGEX, '…') : text,
-  )
+    text.includes("[[") ? text.replace(NODE_LINK_REGEX, "…") : text,
+  );
 }
 
 /**
@@ -67,10 +68,10 @@ export function linkedNodeLabel(text: string): string {
  * this so a linked node reads as its text, never as a raw `[[uuid]]`.
  */
 export function flattenNodeText(index: TreeIndex, text: string): string {
-  if (!text.includes('[[')) return flattenInline(text)
+  if (!text.includes("[[")) return flattenInline(text);
   const resolved = text.replace(NODE_LINK_REGEX, (_tok, id: string) => {
-    const target = index.byId.get(id)
-    return target ? linkedNodeLabel(target.text) : 'missing link'
-  })
-  return flattenInline(resolved)
+    const target = index.byId.get(id);
+    return target ? linkedNodeLabel(target.text) : "missing link";
+  });
+  return flattenInline(resolved);
 }

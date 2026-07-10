@@ -19,10 +19,13 @@
 // hover; the mark itself stays quiet.
 
 import { SparkleIcon } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
-import type { Node } from "../../data/tree";
-import { definePlugin } from "../types";
+
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
+
+import type { Node } from "../../data/tree";
+
+import { definePlugin } from "../types";
 
 /** A compact "when", for the hover attribution. Set-once at creation, so this is
  *  read at render time against the wall clock — good enough for a tooltip. */
@@ -61,7 +64,7 @@ function ProvenanceMark({
             // Row vertical alignment is the shared `.outline-row [data-origin]`
             // rule (scales with reading size, ADR 0029); only fix the icon size.
             placement === "row" && "size-4",
-            placement === "title" && "size-5 mt-2 mr-2",
+            placement === "title" && "mt-2 mr-2 size-5",
           ])}
           aria-label={label}
           data-origin={node.origin}

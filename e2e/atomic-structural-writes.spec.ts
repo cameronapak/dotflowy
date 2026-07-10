@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // Regression suite for the atomic-structural-writes cure (PLAN.md):
@@ -179,7 +180,11 @@ test.describe("atomic structural writes", () => {
     let inFlight = 0;
     let maxInFlight = 0;
     let batchCount = 0;
-    const isBatch = (req: { url(): string; method(): string; postDataJSON(): unknown }) =>
+    const isBatch = (req: {
+      url(): string;
+      method(): string;
+      postDataJSON(): unknown;
+    }) =>
       req.url().includes("/api/nodes") &&
       req.method() === "POST" &&
       Boolean((req.postDataJSON() as { ops?: unknown } | null)?.ops);

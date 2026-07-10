@@ -51,32 +51,32 @@ What works:
 
 ### Keyboard
 
-| Key | Action |
-|---|---|
-| `Enter` | Split at the caret into a new sibling below (at the end of an expanded bullet, adds a child at the top instead) |
-| `Tab` / `Shift+Tab` | Indent / outdent |
-| `Cmd/Ctrl+Shift+↑` / `↓` | Move the bullet among siblings; at the edge reparent into the parent's adjacent sibling |
-| `Cmd/Ctrl+↑` / `↓` | Collapse / expand |
-| `Cmd/Ctrl+Enter` or `Cmd/Ctrl+D` | Toggle complete |
-| `Cmd/Ctrl+.` / `Cmd/Ctrl+,` | Zoom in / out |
-| `Backspace` on an empty bullet | Delete it and focus the previous one |
-| `Arrow ↑` / `↓` at line edges | Move between bullets (preserves the caret column) |
-| `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo |
-| `Cmd/Ctrl+K` | Open the quick-switcher |
+| Key                               | Action                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `Enter`                           | Split at the caret into a new sibling below (at the end of an expanded bullet, adds a child at the top instead) |
+| `Tab` / `Shift+Tab`               | Indent / outdent                                                                                                |
+| `Cmd/Ctrl+Shift+↑` / `↓`          | Move the bullet among siblings; at the edge reparent into the parent's adjacent sibling                         |
+| `Cmd/Ctrl+↑` / `↓`                | Collapse / expand                                                                                               |
+| `Cmd/Ctrl+Enter` or `Cmd/Ctrl+D`  | Toggle complete                                                                                                 |
+| `Cmd/Ctrl+.` / `Cmd/Ctrl+,`       | Zoom in / out                                                                                                   |
+| `Backspace` on an empty bullet    | Delete it and focus the previous one                                                                            |
+| `Arrow ↑` / `↓` at line edges     | Move between bullets (preserves the caret column)                                                               |
+| `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo                                                                                                     |
+| `Cmd/Ctrl+K`                      | Open the quick-switcher                                                                                         |
 
 Not built yet: sharing, email verification.
 
 ## Stack
 
-| Layer | Choice | Why |
-|---|---|---|
-| Framework | TanStack Start (SPA mode) | File-based routing, no SSR needed for a local-first app |
-| Data | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
-| Backend | Cloudflare Worker + Durable Objects | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md)) |
-| Auth | Better Auth (email + password) | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1 |
-| Validation | Effect Schema | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker |
-| Build | Vite 8 | What Start uses |
-| Runtime | Bun (dev/install) | Fast; npm/pnpm/yarn work too |
+| Layer      | Choice                                                       | Why                                                                                                                                                                                                                                                                                   |
+| ---------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework  | TanStack Start (SPA mode)                                    | File-based routing, no SSR needed for a local-first app                                                                                                                                                                                                                               |
+| Data       | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
+| Backend    | Cloudflare Worker + Durable Objects                          | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md))                                                                                                                            |
+| Auth       | Better Auth (email + password)                               | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1                                                                                                                                                                 |
+| Validation | Effect Schema                                                | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker                                                                                                                                                  |
+| Build      | Vite 8                                                       | What Start uses                                                                                                                                                                                                                                                                       |
+| Runtime    | Bun (dev/install)                                            | Fast; npm/pnpm/yarn work too                                                                                                                                                                                                                                                          |
 
 ## Run it
 
@@ -96,7 +96,7 @@ bun run test:e2e   # Playwright end-to-end tests (chromium)
 
 ## Deploy
 
-The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA *and* routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, behind **Better Auth** accounts ([the auth gate](docs/adr/0011-the-auth-gate.md)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
+The repo deploys to **Cloudflare Workers**: one Worker (`worker/index.ts`) serves the static SPA _and_ routes the `/api/nodes` + `/api/kv` sync APIs to a **per-user Durable Object**, behind **Better Auth** accounts ([the auth gate](docs/adr/0011-the-auth-gate.md)). Config is in `wrangler.jsonc`. Full design: [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
 ```sh
 bun install
@@ -151,7 +151,7 @@ Plugin **side-collections** (tag colors, the daily index) sync the same way, ove
 
 ### Plugins
 
-The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of *seams* — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/adr/0001-plugin-architecture.md).
+The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of _seams_ — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/adr/0001-plugin-architecture.md).
 
 ## Sync: where it stands
 

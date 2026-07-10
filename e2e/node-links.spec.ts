@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Node links + backlinks (ADR 0032): a `[[nodeId]]` token renders as a chip
@@ -158,8 +159,6 @@ test.describe("backlinks (ADR 0032)", () => {
     await page.goto(`/${REF}`);
     await expect(page.locator(".zoomed-title")).toBeVisible();
 
-    await expect(
-      page.getByRole("button", { name: /backlink/ }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /backlink/ })).toHaveCount(0);
   });
 });

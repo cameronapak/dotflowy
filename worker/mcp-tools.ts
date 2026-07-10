@@ -14,17 +14,19 @@
  * container can't be deleted, blanked, made a task, or completed (ADR 0015).
  */
 
-import { Data, Effect, Schema } from 'effect'
-import { childrenOf, createId } from '../src/data/tree'
-import type { ChangeOp, Node } from '../src/data/wire-schema'
+import { Data, Effect, Schema } from "effect";
+
+import type { ChangeOp, Node } from "../src/data/wire-schema";
+
+import { exportOpml } from "../src/data/opml-export";
 import {
   OPML_MCP_MAX_NODES,
   type OpmlImportReport,
   parseOpml,
   planOpmlImport,
-} from '../src/data/opml-import'
-import { exportOpml } from '../src/data/opml-export'
-import { redactSpoilers } from '../src/data/spoiler'
+} from "../src/data/opml-import";
+import { redactSpoilers } from "../src/data/spoiler";
+import { childrenOf, createId } from "../src/data/tree";
 import {
   DAILY_CONTAINER_TEXT,
   type TreeIndex,
@@ -48,11 +50,11 @@ import {
   redactSpoilerIndex,
   searchNodes,
   trueSourceOf,
-} from './outline-ops'
+} from "./outline-ops";
 
 // Re-exported so worker/index.ts can hand the DO stub over without importing
 // the planner module directly.
-export type { ChangeOp, Node }
+export type { ChangeOp, Node };
 
 /**
  * The slice of the per-user DO a tool needs. `DurableObjectStub<UserOutlineDO>`
@@ -60,27 +62,33 @@ export type { ChangeOp, Node }
  * cover an in-process fake in tests).
  */
 export interface OutlineStore {
-  getNodes(): Node[] | Promise<Node[]>
-  applyBatch(ops: readonly ChangeOp[]): number | Promise<number>
-  getKv(collection: string): unknown[] | Promise<unknown[]>
-  getOrCreateKv(collection: string, key: string, value: unknown): unknown | Promise<unknown>
+  getNodes(): Node[] | Promise<Node[]>;
+  applyBatch(ops: readonly ChangeOp[]): number | Promise<number>;
+  getKv(collection: string): unknown[] | Promise<unknown[]>;
+  getOrCreateKv(
+    collection: string,
+    key: string,
+    value: unknown,
+  ): unknown | Promise<unknown>;
 }
 
 /** A tool execution failure — surfaces as an `isError` tool result (the MCP
  *  shape for "the tool ran and refused"), never a protocol-level error. */
-export class ToolError extends Data.TaggedError('ToolError')<{ reason: string }> {
+export class ToolError extends Data.TaggedError("ToolError")<{
+  reason: string;
+}> {
   get message() {
-    return this.reason
+    return this.reason;
   }
 }
 
 export interface ToolDef {
-  name: string
-  description: string
+  name: string;
+  description: string;
   /** Input contract; also the source of the published JSON Schema. */
-  input: Schema.Struct<any>
+  input: Schema.Struct<any>;
   /** MCP `readOnlyHint` — true for tools that never write. */
-  readOnly: boolean
+  readOnly: boolean;
   /** `origin` is the caller's provenance stamp — the OAuth client's harness name
    *  (worker/index.ts resolves it from the bearer token), written onto every node
    *  a write tool creates so the editor can tell agent edits from the user's own.
@@ -89,34 +97,40 @@ export interface ToolDef {
     input: any,
     store: OutlineStore,
     origin: string | null,
-  ) => Effect.Effect<string, ToolError>
+  ) => Effect.Effect<string, ToolError>;
 }
 
 // --- Shared plumbing ----------------------------------------------------------
 
 const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex> =>
-  Effect.promise(async () => buildTreeIndex(await store.getNodes()))
+  Effect.promise(async () => buildTreeIndex(await store.getNodes()));
 
-const commit = (store: OutlineStore, ops: ReadonlyArray<ChangeOp>): Effect.Effect<void> =>
+const commit = (
+  store: OutlineStore,
+  ops: ReadonlyArray<ChangeOp>,
+): Effect.Effect<void> =>
   Effect.promise(async () => {
-    if (ops.length) await store.applyBatch(ops)
-  })
+    if (ops.length) await store.applyBatch(ops);
+  });
 
 /** Lift a planner's value-shaped failure into the tool error channel,
  *  narrowing the success side (the planners' errors all extend `Error`). */
 const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
   result instanceof Error
     ? Effect.fail(new ToolError({ reason: result.message }))
-    : Effect.succeed(result as Exclude<A, Error>)
+    : Effect.succeed(result as Exclude<A, Error>);
 
-const clock = Effect.sync(() => Date.now())
+const clock = Effect.sync(() => Date.now());
 
 // --- Daily-index claims -------------------------------------------------------
 
-const KV_DAILY = 'daily-index'
-const CONTAINER_KEY = 'container'
+const KV_DAILY = "daily-index";
+const CONTAINER_KEY = "container";
 
-const DailyRowSchema = Schema.Struct({ key: Schema.String, nodeId: Schema.String })
+const DailyRowSchema = Schema.Struct({
+  key: Schema.String,
+  nodeId: Schema.String,
+});
 
 /** Atomically claim `key -> candidate` in the daily index and return the
  *  authoritative winner — the DO-side twin of the client's `claimMapping`. */
@@ -127,34 +141,50 @@ const claimDailyId = (
 ): Effect.Effect<string, ToolError> =>
   Effect.gen(function* () {
     const raw = yield* Effect.promise(() =>
-      Promise.resolve(store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate })),
-    )
+      Promise.resolve(
+        store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate }),
+      ),
+    );
     const row = yield* Schema.decodeUnknownEffect(DailyRowSchema)(raw).pipe(
-      Effect.mapError(() => new ToolError({ reason: `daily index row for "${key}" is malformed` })),
-    )
-    return row.nodeId
-  })
+      Effect.mapError(
+        () =>
+          new ToolError({
+            reason: `daily index row for "${key}" is malformed`,
+          }),
+      ),
+    );
+    return row.nodeId;
+  });
 
 /** The daily container's node id, if one has been claimed (no side effects). */
 const containerIdOf = (store: OutlineStore): Effect.Effect<string | null> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.promise(() => Promise.resolve(store.getKv(KV_DAILY)))
+    const rows = yield* Effect.promise(() =>
+      Promise.resolve(store.getKv(KV_DAILY)),
+    );
     for (const raw of rows) {
-      const row = Schema.decodeUnknownOption(DailyRowSchema)(raw)
-      if (row._tag === 'Some' && row.value.key === CONTAINER_KEY) return row.value.nodeId
+      const row = Schema.decodeUnknownOption(DailyRowSchema)(raw);
+      if (row._tag === "Some" && row.value.key === CONTAINER_KEY)
+        return row.value.nodeId;
     }
-    return null
-  })
+    return null;
+  });
 
 /** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. The
  *  default is the server's UTC today — tools advertise that callers should pass
  *  the user's local date, since the Worker can't know their timezone. */
-const resolveDateKey = (date: string | null | undefined): Effect.Effect<string, ToolError> =>
+const resolveDateKey = (
+  date: string | null | undefined,
+): Effect.Effect<string, ToolError> =>
   date == null
     ? Effect.sync(() => new Date().toISOString().slice(0, 10))
     : isValidDateKey(date)
       ? Effect.succeed(date)
-      : Effect.fail(new ToolError({ reason: `invalid date "${date}" — expected a real YYYY-MM-DD` }))
+      : Effect.fail(
+          new ToolError({
+            reason: `invalid date "${date}" — expected a real YYYY-MM-DD`,
+          }),
+        );
 
 // --- Protection (ADR 0015, server-enforced) -----------------------------------
 
@@ -168,7 +198,7 @@ const guardContainerDelete = (
           reason: `the "${DAILY_CONTAINER_TEXT}" container is protected and can't be deleted`,
         }),
       )
-    : Effect.void
+    : Effect.void;
 
 const guardContainerUpdate = (
   index: TreeIndex,
@@ -176,94 +206,103 @@ const guardContainerUpdate = (
   nodeId: string,
   changes: { text?: string; isTask?: boolean; completed?: boolean },
 ): Effect.Effect<void, ToolError> => {
-  if (!containerId) return Effect.void
-  if (!index.byId.has(nodeId)) return Effect.void
-  if (trueSourceOf(index, nodeId) !== containerId && nodeId !== containerId) return Effect.void
+  if (!containerId) return Effect.void;
+  if (!index.byId.has(nodeId)) return Effect.void;
+  if (trueSourceOf(index, nodeId) !== containerId && nodeId !== containerId)
+    return Effect.void;
   const violation =
     changes.text !== undefined && !changes.text.trim()
       ? "blanked (it's how daily notes are found)"
       : changes.isTask
-        ? 'made a to-do'
+        ? "made a to-do"
         : changes.completed
-          ? 'completed'
-          : null
+          ? "completed"
+          : null;
   return violation
     ? Effect.fail(
         new ToolError({
           reason: `the "${DAILY_CONTAINER_TEXT}" container is protected and can't be ${violation}`,
         }),
       )
-    : Effect.void
-}
+    : Effect.void;
+};
 
 // --- Input schemas ------------------------------------------------------------
 // `Schema.optional(Schema.NullOr(...))` throughout: the published JSON Schema
 // advertises `T | null`, and the decoder accepts BOTH an omitted key and an
 // explicit null — agents routinely send either.
 
-const optional = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.NullOr(schema))
+const optional = <S extends Schema.Top>(schema: S) =>
+  Schema.optional(Schema.NullOr(schema));
 
 const GetOutlineInput = Schema.Struct({
   nodeId: optional(
     Schema.String.annotate({
-      description: 'Root node to read from. Omit to read the whole outline from the top level.',
+      description:
+        "Root node to read from. Omit to read the whole outline from the top level.",
     }),
   ),
   maxDepth: optional(
     Schema.Int.annotate({
-      description: 'How many levels deep to read (default: unlimited).',
+      description: "How many levels deep to read (default: unlimited).",
     }),
   ),
-})
+});
 
 const SearchNodesInput = Schema.Struct({
   query: Schema.String.annotate({
-    description: 'Case-insensitive text to find in node text.',
+    description: "Case-insensitive text to find in node text.",
   }),
-})
+});
 
 const AddNodeInput = Schema.Struct({
-  text: Schema.String.annotate({ description: 'The bullet text.' }),
+  text: Schema.String.annotate({ description: "The bullet text." }),
   parentId: optional(
     Schema.String.annotate({
-      description: 'Parent node id. Omit to add at the top level.',
+      description: "Parent node id. Omit to add at the top level.",
     }),
   ),
   position: optional(
-    Schema.Literals(['first', 'last']).annotate({
-      description: 'Insert as the first or last child (default: last).',
+    Schema.Literals(["first", "last"]).annotate({
+      description: "Insert as the first or last child (default: last).",
     }),
   ),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
+    Schema.Boolean.annotate({
+      description: "Create as a to-do with a checkbox (default: false).",
+    }),
   ),
-})
+});
 
 /** One node in an `add_subtree` forest — recursive via `Schema.suspend`, which
  *  publishes as a named `$ref`/`$defs` in `tools/list` (ADR 0028). Fresh content
  *  only: text + optional to-do flag + optional nested children. The decoded type
  *  IS the planner's own `SubtreeInput` — one shape, one source. */
 const SubtreeNodeInput: Schema.Codec<SubtreeInput> = Schema.Struct({
-  text: Schema.String.annotate({ description: 'The bullet text.' }),
+  text: Schema.String.annotate({ description: "The bullet text." }),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
-  ),
-  children: optional(
-    Schema.Array(Schema.suspend((): Schema.Codec<SubtreeInput> => SubtreeNodeInput)).annotate({
-      description: 'Nested child bullets, each with this same shape.',
+    Schema.Boolean.annotate({
+      description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
-}).annotate({ identifier: 'SubtreeNode' })
+  children: optional(
+    Schema.Array(
+      Schema.suspend((): Schema.Codec<SubtreeInput> => SubtreeNodeInput),
+    ).annotate({
+      description: "Nested child bullets, each with this same shape.",
+    }),
+  ),
+}).annotate({ identifier: "SubtreeNode" });
 
 const AddSubtreeInput = Schema.Struct({
   nodes: Schema.Array(SubtreeNodeInput).annotate({
     description:
-      'The bullets to create, as a nested forest. Each node may carry its own `children`, so a whole outline lands in one call.',
+      "The bullets to create, as a nested forest. Each node may carry its own `children`, so a whole outline lands in one call.",
   }),
   parentId: optional(
     Schema.String.annotate({
       description:
-        'Parent node id to add under. Omit for the top level. Mutually exclusive with `date`.',
+        "Parent node id to add under. Omit for the top level. Mutually exclusive with `date`.",
     }),
   ),
   date: optional(
@@ -273,77 +312,93 @@ const AddSubtreeInput = Schema.Struct({
     }),
   ),
   position: optional(
-    Schema.Literals(['first', 'last']).annotate({
+    Schema.Literals(["first", "last"]).annotate({
       description:
-        'Insert the forest as the first or last children of the parent (default: last). Ignored for the `date` path, which always appends.',
+        "Insert the forest as the first or last children of the parent (default: last). Ignored for the `date` path, which always appends.",
     }),
   ),
-})
+});
 
 const UpdateNodeInput = Schema.Struct({
-  nodeId: Schema.String.annotate({ description: 'The node to update.' }),
-  text: optional(Schema.String.annotate({ description: 'New bullet text.' })),
+  nodeId: Schema.String.annotate({ description: "The node to update." }),
+  text: optional(Schema.String.annotate({ description: "New bullet text." })),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Turn the checkbox on (true) or off (false).' }),
+    Schema.Boolean.annotate({
+      description: "Turn the checkbox on (true) or off (false).",
+    }),
   ),
   completed: optional(
-    Schema.Boolean.annotate({ description: 'Mark done (true) or not done (false).' }),
+    Schema.Boolean.annotate({
+      description: "Mark done (true) or not done (false).",
+    }),
   ),
   collapsed: optional(
-    Schema.Boolean.annotate({ description: 'Collapse (true) or expand (false) the bullet.' }),
+    Schema.Boolean.annotate({
+      description: "Collapse (true) or expand (false) the bullet.",
+    }),
   ),
-})
+});
 
 const DeleteNodeInput = Schema.Struct({
   nodeId: Schema.String.annotate({
-    description: 'The node to delete. Its whole subtree is deleted with it.',
+    description: "The node to delete. Its whole subtree is deleted with it.",
   }),
-})
+});
 
 const MoveNodesInput = Schema.Struct({
   nodeIds: Schema.Array(Schema.String).annotate({
-    description: 'The nodes to move. Each moves with its whole subtree; the order you pass is kept.',
+    description:
+      "The nodes to move. Each moves with its whole subtree; the order you pass is kept.",
   }),
   newParentId: optional(
     Schema.String.annotate({
-      description: 'Where to move them. Omit or null for the top level.',
+      description: "Where to move them. Omit or null for the top level.",
     }),
   ),
   position: optional(
-    Schema.Literals(['first', 'last']).annotate({
-      description: 'Land as the first or last children of the parent (default: last).',
+    Schema.Literals(["first", "last"]).annotate({
+      description:
+        "Land as the first or last children of the parent (default: last).",
     }),
   ),
-})
+});
 
 const dateField = optional(
   Schema.String.annotate({
     description:
       "The day's date as YYYY-MM-DD. Pass the user's local date; defaults to today in UTC.",
   }),
-)
+);
 
 const AddToTodayInput = Schema.Struct({
-  text: Schema.String.annotate({ description: 'The bullet text to add to the daily note.' }),
+  text: Schema.String.annotate({
+    description: "The bullet text to add to the daily note.",
+  }),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
-  ),
-  date: dateField,
-})
-
-const MirrorNodeInput = Schema.Struct({
-  nodeId: Schema.String.annotate({ description: 'The node to mirror (its subtree comes with it).' }),
-  parentId: optional(
-    Schema.String.annotate({
-      description: 'Where to put the mirror. Omit to mirror to the top level.',
+    Schema.Boolean.annotate({
+      description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
-})
+  date: dateField,
+});
+
+const MirrorNodeInput = Schema.Struct({
+  nodeId: Schema.String.annotate({
+    description: "The node to mirror (its subtree comes with it).",
+  }),
+  parentId: optional(
+    Schema.String.annotate({
+      description: "Where to put the mirror. Omit to mirror to the top level.",
+    }),
+  ),
+});
 
 const MirrorToTodayInput = Schema.Struct({
-  nodeId: Schema.String.annotate({ description: 'The node to mirror onto the daily note.' }),
+  nodeId: Schema.String.annotate({
+    description: "The node to mirror onto the daily note.",
+  }),
   date: dateField,
-})
+});
 
 // The OPML pair (ADR 0037). The document travels as a plain string — a
 // non-recursive input, so no `identifier` annotation is needed (unlike
@@ -353,12 +408,13 @@ const MirrorToTodayInput = Schema.Struct({
 
 const ImportOpmlInput = Schema.Struct({
   opml: Schema.String.annotate({
-    description: 'The OPML document to import, as an XML string (e.g. a Workflowy export).',
+    description:
+      "The OPML document to import, as an XML string (e.g. a Workflowy export).",
   }),
   parentId: optional(
     Schema.String.annotate({
       description:
-        'Parent node id to import under. Omit for the top level. Mutually exclusive with `date`.',
+        "Parent node id to import under. Omit for the top level. Mutually exclusive with `date`.",
     }),
   ),
   date: optional(
@@ -370,41 +426,46 @@ const ImportOpmlInput = Schema.Struct({
   dryRun: optional(
     Schema.Boolean.annotate({
       description:
-        'Parse and plan without writing anything; returns the same receipt (default: false).',
+        "Parse and plan without writing anything; returns the same receipt (default: false).",
     }),
   ),
-})
+});
 
 const ExportOpmlInput = Schema.Struct({
   nodeId: optional(
     Schema.String.annotate({
       description:
-        'Root node to export (the node and its whole subtree). Omit to export the whole outline.',
+        "Root node to export (the node and its whole subtree). Omit to export the whole outline.",
     }),
   ),
-})
+});
 
 // --- The tools ----------------------------------------------------------------
 
-const MAX_OUTLINE_NODES = 500
-const MAX_SEARCH_HITS = 25
+const MAX_OUTLINE_NODES = 500;
+const MAX_SEARCH_HITS = 25;
 /** One `add_subtree` batch = one DO `transactionSync` = one sync frame; cap the
  *  forest at the same ceiling an agent hits reading back (ADR 0028). */
-const MAX_BATCH_NODES = 500
+const MAX_BATCH_NODES = 500;
 
 /** Render a freshly-planned forest as the agent-facing bullet list with ids —
  *  built from the plan's own insert ops, so no extra read of the store. */
-const renderCreatedForest = (ops: ReadonlyArray<ChangeOp>, rootIds: ReadonlyArray<string>): string => {
-  const created = buildTreeIndex(ops.flatMap((o) => (o.op === 'insert' ? [o.value] : [])))
+const renderCreatedForest = (
+  ops: ReadonlyArray<ChangeOp>,
+  rootIds: ReadonlyArray<string>,
+): string => {
+  const created = buildTreeIndex(
+    ops.flatMap((o) => (o.op === "insert" ? [o.value] : [])),
+  );
   const lines = rootIds.flatMap((id) => {
     const r = flattenSubtree(created, id, {
       maxDepth: Number.POSITIVE_INFINITY,
       maxNodes: MAX_BATCH_NODES,
-    })
-    return r instanceof Error ? [] : r.lines
-  })
-  return formatOutlineLines(lines)
-}
+    });
+    return r instanceof Error ? [] : r.lines;
+  });
+  return formatOutlineLines(lines);
+};
 
 // --- OPML receipt (ADR 0037) ----------------------------------------------------
 // import_opml never echoes the forest back (the caller already holds the
@@ -414,137 +475,149 @@ const renderCreatedForest = (ops: ReadonlyArray<ChangeOp>, rootIds: ReadonlyArra
 
 /** Cap the receipt's root listing — a wide document can carry thousands of
  *  top-level outlines, and the receipt must stay compact. */
-const MAX_RECEIPT_ROOTS = 20
+const MAX_RECEIPT_ROOTS = 20;
 
 const tallyLines = (record: Record<string, number>): string[] =>
-  Object.entries(record).map(([msg, n]) => `- ${msg}: ${n}`)
+  Object.entries(record).map(([msg, n]) => `- ${msg}: ${n}`);
 
 const renderImportReceipt = (args: {
-  report: OpmlImportReport
-  rootIds: ReadonlyArray<string>
-  rootTexts: ReadonlyArray<string>
-  landing: string
-  dryRun: boolean
+  report: OpmlImportReport;
+  rootIds: ReadonlyArray<string>;
+  rootTexts: ReadonlyArray<string>;
+  landing: string;
+  dryRun: boolean;
 }): string => {
-  const { report } = args
+  const { report } = args;
   const lines: string[] = [
     args.dryRun
       ? `Dry run — would import ${report.nodesPost} node(s) ${args.landing}. Nothing was written.`
       : `Imported ${report.nodesPost} node(s) ${args.landing}.`,
     `Root bullet(s) (${args.rootIds.length}):`,
-  ]
-  const shown = args.rootIds.slice(0, MAX_RECEIPT_ROOTS)
+  ];
+  const shown = args.rootIds.slice(0, MAX_RECEIPT_ROOTS);
   shown.forEach((id, i) => {
-    lines.push(`- "${args.rootTexts[i] || '(empty)'}" (id: ${id})`)
-  })
+    lines.push(`- "${args.rootTexts[i] || "(empty)"}" (id: ${id})`);
+  });
   if (args.rootIds.length > shown.length) {
-    lines.push(`- … and ${args.rootIds.length - shown.length} more`)
+    lines.push(`- … and ${args.rootIds.length - shown.length} more`);
   }
-  const counts: string[] = []
+  const counts: string[] = [];
   if (report.nodesPost !== report.nodesPre) {
     counts.push(
       `${report.nodesPre} OPML outline(s) became ${report.nodesPost} bullet(s) after note/newline splitting`,
-    )
+    );
   }
-  if (report.notes) counts.push(`${report.notes} _note attribute(s) -> ${report.noteLines} child bullet(s)`)
-  if (report.textNewlineSplits) counts.push(`${report.textNewlineSplits} bullet(s) split on embedded newlines`)
-  if (report.emptyText) counts.push(`${report.emptyText} empty-text bullet(s)`)
-  if (report.mirrorsLinked) counts.push(`${report.mirrorsLinked} mirror(s) re-linked`)
-  if (report.mirrorsDetached) counts.push(`${report.mirrorsDetached} mirror(s) imported as detached copies`)
+  if (report.notes)
+    counts.push(
+      `${report.notes} _note attribute(s) -> ${report.noteLines} child bullet(s)`,
+    );
+  if (report.textNewlineSplits)
+    counts.push(
+      `${report.textNewlineSplits} bullet(s) split on embedded newlines`,
+    );
+  if (report.emptyText) counts.push(`${report.emptyText} empty-text bullet(s)`);
+  if (report.mirrorsLinked)
+    counts.push(`${report.mirrorsLinked} mirror(s) re-linked`);
+  if (report.mirrorsDetached)
+    counts.push(
+      `${report.mirrorsDetached} mirror(s) imported as detached copies`,
+    );
   if (counts.length) {
-    lines.push('Counts:')
-    for (const c of counts) lines.push(`- ${c}`)
+    lines.push("Counts:");
+    for (const c of counts) lines.push(`- ${c}`);
   }
   if (report.degradedTotal === 0) {
-    lines.push('No fidelity degradations.')
+    lines.push("No fidelity degradations.");
   } else {
-    lines.push(`Fidelity degradations (${report.degradedTotal}):`)
-    lines.push(...tallyLines(report.degraded))
+    lines.push(`Fidelity degradations (${report.degradedTotal}):`);
+    lines.push(...tallyLines(report.degraded));
   }
   if (Object.keys(report.anomalies).length) {
-    lines.push('Tolerated HTML anomalies:')
-    lines.push(...tallyLines(report.anomalies))
+    lines.push("Tolerated HTML anomalies:");
+    lines.push(...tallyLines(report.anomalies));
   }
   if (Object.keys(report.unknownAttributes).length) {
-    lines.push('Unknown OPML attributes (ignored):')
-    lines.push(...tallyLines(report.unknownAttributes))
+    lines.push("Unknown OPML attributes (ignored):");
+    lines.push(...tallyLines(report.unknownAttributes));
   }
-  return lines.join('\n')
-}
+  return lines.join("\n");
+};
 
 export const tools: ReadonlyArray<ToolDef> = [
   {
-    name: 'get_outline',
+    name: "get_outline",
     description:
-      'Read the outline (or one node and its subtree) as an indented bullet list. Every line carries its node id — use those ids with the other tools.',
+      "Read the outline (or one node and its subtree) as an indented bullet list. Every line carries its node id — use those ids with the other tools.",
     input: GetOutlineInput,
     readOnly: true,
     handle: (input: typeof GetOutlineInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
+        const index = yield* loadIndex(store);
         const result = yield* unwrap(
           flattenSubtree(index, input.nodeId ?? null, {
             maxDepth: input.maxDepth ?? Number.POSITIVE_INFINITY,
             maxNodes: MAX_OUTLINE_NODES,
           }),
-        )
-        if (!result.lines.length) return 'The outline is empty.'
-        const body = formatOutlineLines(result.lines)
+        );
+        if (!result.lines.length) return "The outline is empty.";
+        const body = formatOutlineLines(result.lines);
         return result.truncated
           ? `${body}\n\n(truncated at ${MAX_OUTLINE_NODES} nodes — read a subtree via nodeId for more)`
-          : body
+          : body;
       }),
   },
   {
-    name: 'search_nodes',
+    name: "search_nodes",
     description:
-      'Find nodes by text (case-insensitive substring). Returns each match with its id and breadcrumb path.',
+      "Find nodes by text (case-insensitive substring). Returns each match with its id and breadcrumb path.",
     input: SearchNodesInput,
     readOnly: true,
     handle: (input: typeof SearchNodesInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const hits = searchNodes(index, input.query, MAX_SEARCH_HITS)
-        if (!hits.length) return `No nodes match "${input.query}".`
+        const index = yield* loadIndex(store);
+        const hits = searchNodes(index, input.query, MAX_SEARCH_HITS);
+        if (!hits.length) return `No nodes match "${input.query}".`;
         const body = hits
           .map((h) => {
-            const path = h.path.length ? ` — in: ${h.path.join(' > ')}` : ''
-            return `- "${h.text}" (id: ${h.id})${path}`
+            const path = h.path.length ? ` — in: ${h.path.join(" > ")}` : "";
+            return `- "${h.text}" (id: ${h.id})${path}`;
           })
-          .join('\n')
-        return hits.length >= MAX_SEARCH_HITS ? `${body}\n\n(first ${MAX_SEARCH_HITS} matches)` : body
+          .join("\n");
+        return hits.length >= MAX_SEARCH_HITS
+          ? `${body}\n\n(first ${MAX_SEARCH_HITS} matches)`
+          : body;
       }),
   },
   {
-    name: 'add_node',
+    name: "add_node",
     description:
-      'Add a new bullet to the outline — under a parent node or at the top level. Returns the new node id.',
+      "Add a new bullet to the outline — under a parent node or at the top level. Returns the new node id.",
     input: AddNodeInput,
     readOnly: false,
     handle: (input: typeof AddNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const index = yield* loadIndex(store);
+        const timestamp = yield* clock;
         const plan = yield* unwrap(
           planAddNode(index, {
             id: createId(),
             text: input.text,
             parentId: input.parentId ?? null,
-            position: input.position ?? 'last',
+            position: input.position ?? "last",
             isTask: input.isTask ?? false,
             origin,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commit(store, plan.ops);
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
-          : 'at the top level'
-        return `Added "${input.text}" ${where} (id: ${plan.nodeId}).`
+          : "at the top level";
+        return `Added "${input.text}" ${where} (id: ${plan.nodeId}).`;
       }),
   },
   {
-    name: 'add_subtree',
+    name: "add_subtree",
     description:
       "Add a whole nested outline — a forest of bullets, each with its own children — in ONE atomic call. Use this instead of many add_node calls when building structure. Target a parent (parentId), the top level (omit both), or the user's daily note (date). Returns the created bullets with their ids.",
     input: AddSubtreeInput,
@@ -553,25 +626,31 @@ export const tools: ReadonlyArray<ToolDef> = [
       Effect.gen(function* () {
         if (input.parentId != null && input.date != null) {
           return yield* Effect.fail(
-            new ToolError({ reason: 'pass either parentId or date, not both' }),
-          )
+            new ToolError({ reason: "pass either parentId or date, not both" }),
+          );
         }
-        const timestamp = yield* clock
+        const timestamp = yield* clock;
 
         // Daily path: claim the container + day ids atomically, then ensure-and-
         // append the forest under the day (position is ignored — always last).
         if (input.date != null) {
-          const dateKey = yield* resolveDateKey(input.date)
+          const dateKey = yield* resolveDateKey(input.date);
           // Validate the forest BEFORE claiming any daily-index ids, so an empty
           // or over-cap forest can't leave orphan container/day mappings pointing
           // at nodes we never insert (ADR 0028 all-or-nothing).
-          const sizeError = guardForestSize(input.nodes, MAX_BATCH_NODES)
+          const sizeError = guardForestSize(input.nodes, MAX_BATCH_NODES);
           if (sizeError != null) {
-            return yield* Effect.fail(new ToolError({ reason: sizeError.message }))
+            return yield* Effect.fail(
+              new ToolError({ reason: sizeError.message }),
+            );
           }
-          const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-          const dayId = yield* claimDailyId(store, dateKey, createId())
-          const index = yield* loadIndex(store)
+          const containerId = yield* claimDailyId(
+            store,
+            CONTAINER_KEY,
+            createId(),
+          );
+          const dayId = yield* claimDailyId(store, dateKey, createId());
+          const index = yield* loadIndex(store);
           const plan = yield* unwrap(
             planAddSubtreeToDaily(index, {
               nodes: input.nodes,
@@ -583,34 +662,34 @@ export const tools: ReadonlyArray<ToolDef> = [
               newId: createId,
               maxNodes: MAX_BATCH_NODES,
             }),
-          )
-          yield* commit(store, plan.ops)
-          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`
+          );
+          yield* commit(store, plan.ops);
+          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
         }
 
         // Parent (or top-level) path.
-        const index = yield* loadIndex(store)
+        const index = yield* loadIndex(store);
         const plan = yield* unwrap(
           planAddSubtree(index, {
             nodes: input.nodes,
             parentId: input.parentId ?? null,
-            position: input.position ?? 'last',
+            position: input.position ?? "last",
             origin,
             timestamp,
             newId: createId,
             maxNodes: MAX_BATCH_NODES,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commit(store, plan.ops);
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
-          : 'at the top level'
-        const kind = plan.parentId ? 'bullet(s)' : 'top-level bullet(s)'
-        return `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`
+          : "at the top level";
+        const kind = plan.parentId ? "bullet(s)" : "top-level bullet(s)";
+        return `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
       }),
   },
   {
-    name: 'update_node',
+    name: "update_node",
     description:
       "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears. WARNING: spoiler runs (||...||) are redacted to `[spoiler]` when you read a node, so passing that read-back text as the new `text` DESTROYS the hidden spoiler content. When editing a node that shows `[spoiler]`, ask the user for the intended full text instead of writing back what you were given.",
     input: UpdateNodeInput,
@@ -622,50 +701,56 @@ export const tools: ReadonlyArray<ToolDef> = [
           ...(input.isTask != null ? { isTask: input.isTask } : {}),
           ...(input.completed != null ? { completed: input.completed } : {}),
           ...(input.collapsed != null ? { collapsed: input.collapsed } : {}),
-        }
+        };
         if (!Object.keys(changes).length) {
           return yield* Effect.fail(
             new ToolError({
-              reason: 'nothing to change — pass at least one of text, isTask, completed, collapsed',
+              reason:
+                "nothing to change — pass at least one of text, isTask, completed, collapsed",
             }),
-          )
+          );
         }
-        const index = yield* loadIndex(store)
-        const containerId = yield* containerIdOf(store)
-        yield* guardContainerUpdate(index, containerId, input.nodeId, changes)
-        const timestamp = yield* clock
-        const plan = yield* unwrap(planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }))
-        yield* commit(store, plan.ops)
-        return `Updated ${Object.keys(changes).join(', ')} on node ${input.nodeId}.`
+        const index = yield* loadIndex(store);
+        const containerId = yield* containerIdOf(store);
+        yield* guardContainerUpdate(index, containerId, input.nodeId, changes);
+        const timestamp = yield* clock;
+        const plan = yield* unwrap(
+          planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }),
+        );
+        yield* commit(store, plan.ops);
+        return `Updated ${Object.keys(changes).join(", ")} on node ${input.nodeId}.`;
       }),
   },
   {
-    name: 'delete_node',
-    description: 'Delete a node and its whole subtree. This cannot be undone by the agent.',
+    name: "delete_node",
+    description:
+      "Delete a node and its whole subtree. This cannot be undone by the agent.",
     input: DeleteNodeInput,
     readOnly: false,
     handle: (input: typeof DeleteNodeInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const containerId = yield* containerIdOf(store)
-        const timestamp = yield* clock
-        const plan = yield* unwrap(planDeleteNode(index, input.nodeId, timestamp))
-        yield* guardContainerDelete(containerId, plan.deletedIds)
-        yield* commit(store, plan.ops)
-        return `Deleted ${plan.deletedIds.length} node(s) (node ${input.nodeId} and its subtree).`
+        const index = yield* loadIndex(store);
+        const containerId = yield* containerIdOf(store);
+        const timestamp = yield* clock;
+        const plan = yield* unwrap(
+          planDeleteNode(index, input.nodeId, timestamp),
+        );
+        yield* guardContainerDelete(containerId, plan.deletedIds);
+        yield* commit(store, plan.ops);
+        return `Deleted ${plan.deletedIds.length} node(s) (node ${input.nodeId} and its subtree).`;
       }),
   },
   {
-    name: 'move_nodes',
+    name: "move_nodes",
     description:
-      'Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.',
+      "Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.",
     input: MoveNodesInput,
     readOnly: false,
     handle: (input: typeof MoveNodesInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
-        const position = input.position ?? 'last'
+        const index = yield* loadIndex(store);
+        const timestamp = yield* clock;
+        const position = input.position ?? "last";
         const plan = yield* unwrap(
           planReparent(index, {
             nodeIds: input.nodeIds,
@@ -673,36 +758,41 @@ export const tools: ReadonlyArray<ToolDef> = [
             position,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commit(store, plan.ops);
         // An empty plan committed nothing (no nodes given, or every node was
         // already exactly where asked) — say so rather than claim a phantom move.
         if (plan.ops.length === 0) {
           return input.nodeIds.length === 0
-            ? 'No nodes to move.'
-            : 'No change — the node(s) are already in that position.'
+            ? "No nodes to move."
+            : "No change — the node(s) are already in that position.";
         }
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}" (id: ${plan.parentId})`
-          : 'to the top level'
-        const noun = plan.parentId ? 'children' : 'items'
-        const pos = position === 'first' ? `as the first ${noun}` : `as the last ${noun}`
-        return `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`
+          : "to the top level";
+        const noun = plan.parentId ? "children" : "items";
+        const pos =
+          position === "first" ? `as the first ${noun}` : `as the last ${noun}`;
+        return `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`;
       }),
   },
   {
-    name: 'add_to_today',
+    name: "add_to_today",
     description:
       "Add a new bullet to the user's daily note, creating today's note (and the Daily container) if needed. One of the fastest ways to capture something for the user.",
     input: AddToTodayInput,
     readOnly: false,
     handle: (input: typeof AddToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const dateKey = yield* resolveDateKey(input.date)
-        const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-        const dayId = yield* claimDailyId(store, dateKey, createId())
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const dateKey = yield* resolveDateKey(input.date);
+        const containerId = yield* claimDailyId(
+          store,
+          CONTAINER_KEY,
+          createId(),
+        );
+        const dayId = yield* claimDailyId(store, dateKey, createId());
+        const index = yield* loadIndex(store);
+        const timestamp = yield* clock;
         const plan = planAddToDaily(index, {
           dateKey,
           containerId,
@@ -712,21 +802,21 @@ export const tools: ReadonlyArray<ToolDef> = [
           isTask: input.isTask ?? false,
           origin,
           timestamp,
-        })
-        yield* commit(store, plan.ops)
-        return `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${dayId}).`
+        });
+        yield* commit(store, plan.ops);
+        return `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${dayId}).`;
       }),
   },
   {
-    name: 'mirror_node',
+    name: "mirror_node",
     description:
-      'Mirror a node (a live synced instance, like a Notion synced block) into another parent — the node appears in both places and edits sync. Omit parentId to mirror to the top level.',
+      "Mirror a node (a live synced instance, like a Notion synced block) into another parent — the node appears in both places and edits sync. Omit parentId to mirror to the top level.",
     input: MirrorNodeInput,
     readOnly: false,
     handle: (input: typeof MirrorNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const index = yield* loadIndex(store);
+        const timestamp = yield* clock;
         const plan = yield* unwrap(
           planMirrorNode(index, {
             sourceId: input.nodeId,
@@ -735,27 +825,31 @@ export const tools: ReadonlyArray<ToolDef> = [
             origin,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commit(store, plan.ops);
         const where = input.parentId
           ? `under "${index.byId.get(trueSourceOf(index, input.parentId))?.text ?? input.parentId}"`
-          : 'at the top level'
-        return `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`
+          : "at the top level";
+        return `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`;
       }),
   },
   {
-    name: 'mirror_to_today',
+    name: "mirror_to_today",
     description:
       "Mirror an existing node onto the user's daily note — it stays where it is AND appears under today, fully synced. Creates today's note if needed.",
     input: MirrorToTodayInput,
     readOnly: false,
     handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const dateKey = yield* resolveDateKey(input.date)
-        const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-        const dayId = yield* claimDailyId(store, dateKey, createId())
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const dateKey = yield* resolveDateKey(input.date);
+        const containerId = yield* claimDailyId(
+          store,
+          CONTAINER_KEY,
+          createId(),
+        );
+        const dayId = yield* claimDailyId(store, dateKey, createId());
+        const index = yield* loadIndex(store);
+        const timestamp = yield* clock;
         const plan = yield* unwrap(
           planMirrorToDaily(index, {
             dateKey,
@@ -766,13 +860,13 @@ export const tools: ReadonlyArray<ToolDef> = [
             origin,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
-        return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${dayId}).`
+        );
+        yield* commit(store, plan.ops);
+        return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${dayId}).`;
       }),
   },
   {
-    name: 'import_opml',
+    name: "import_opml",
     description:
       "Import an OPML document (e.g. a Workflowy export) as new bullets — under a parent (parentId), onto the user's daily note (date), or at the top level. Lands as ONE atomic batch and returns a compact receipt (root ids, counts, any fidelity degradations), never the echoed outline. Ceiling: 5,000 nodes — a full Workflowy migration belongs in the app's own OPML import. Pass dryRun to preview the receipt without writing.",
     input: ImportOpmlInput,
@@ -781,37 +875,39 @@ export const tools: ReadonlyArray<ToolDef> = [
       Effect.gen(function* () {
         if (input.parentId != null && input.date != null) {
           return yield* Effect.fail(
-            new ToolError({ reason: 'pass either parentId or date, not both' }),
-          )
+            new ToolError({ reason: "pass either parentId or date, not both" }),
+          );
         }
-        const dryRun = input.dryRun ?? false
+        const dryRun = input.dryRun ?? false;
         // The shared core (src/data/opml-import.ts) owns parse + mapping +
         // degradation counting — this handler is a thin shell over it, so the
         // MCP surface can't drift from the app importer (ADR 0037).
         const { forest, report } = yield* parseOpml(input.opml).pipe(
           Effect.mapError((e) => new ToolError({ reason: e.message })),
-        )
+        );
         // Ceiling + emptiness BEFORE any kv claim or plan (the add_subtree
         // guard-before-claim rule, ADR 0028) — counted post-split by the shared
         // core, so the two surfaces can't disagree on what "too big" means.
         if (report.nodesPost === 0) {
           return yield* Effect.fail(
-            new ToolError({ reason: 'the OPML document contains no outline nodes' }),
-          )
+            new ToolError({
+              reason: "the OPML document contains no outline nodes",
+            }),
+          );
         }
         if (report.nodesPost > OPML_MCP_MAX_NODES) {
           return yield* Effect.fail(
             new ToolError({
               reason: `too many nodes to import: ${report.nodesPost} exceeds the ${OPML_MCP_MAX_NODES}-node ceiling for import_opml — for a large or full migration, use the app's own OPML import instead`,
             }),
-          )
+          );
         }
-        const timestamp = yield* clock
-        const rootTexts = forest.map((n) => n.text)
+        const timestamp = yield* clock;
+        const rootTexts = forest.map((n) => n.text);
 
         // Daily path (mirrors add_subtree's date targeting: always appends).
         if (input.date != null) {
-          const dateKey = yield* resolveDateKey(input.date)
+          const dateKey = yield* resolveDateKey(input.date);
           if (dryRun) {
             // A dry run must not claim daily-index ids (a kv claim IS a write);
             // plan against a detached parent purely for the receipt's counts.
@@ -824,21 +920,34 @@ export const tools: ReadonlyArray<ToolDef> = [
                 newId: createId,
                 maxNodes: OPML_MCP_MAX_NODES,
               }),
-            )
+            );
             return renderImportReceipt({
               report,
               rootIds: plan.rootIds,
               rootTexts,
               landing: `onto ${formatDayText(dateKey)}`,
               dryRun: true,
-            })
+            });
           }
-          const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-          const dayId = yield* claimDailyId(store, dateKey, createId())
-          const index = yield* loadIndex(store)
-          const ensure = planEnsureDaily(index, { dateKey, containerId, dayId, timestamp })
-          const siblings = index.byId.has(dayId) ? childrenOf(index, dayId) : []
-          const firstPrev = siblings.length ? siblings[siblings.length - 1]!.id : null
+          const containerId = yield* claimDailyId(
+            store,
+            CONTAINER_KEY,
+            createId(),
+          );
+          const dayId = yield* claimDailyId(store, dateKey, createId());
+          const index = yield* loadIndex(store);
+          const ensure = planEnsureDaily(index, {
+            dateKey,
+            containerId,
+            dayId,
+            timestamp,
+          });
+          const siblings = index.byId.has(dayId)
+            ? childrenOf(index, dayId)
+            : [];
+          const firstPrev = siblings.length
+            ? siblings[siblings.length - 1]!.id
+            : null;
           const plan = yield* unwrap(
             planOpmlImport(forest, {
               parentId: dayId,
@@ -848,31 +957,33 @@ export const tools: ReadonlyArray<ToolDef> = [
               newId: createId,
               maxNodes: OPML_MCP_MAX_NODES,
             }),
-          )
-          yield* commit(store, [...ensure.ops, ...plan.ops])
+          );
+          yield* commit(store, [...ensure.ops, ...plan.ops]);
           return renderImportReceipt({
             report,
             rootIds: plan.rootIds,
             rootTexts,
             landing: `onto ${formatDayText(dateKey)} (daily note id: ${dayId})`,
             dryRun: false,
-          })
+          });
         }
 
         // Parent (or top-level) path. No synthetic wrapper container — the
         // fresh-container rule is app-UI presentation, not data semantics.
-        const index = yield* loadIndex(store)
-        let parentId: string | null = null
+        const index = yield* loadIndex(store);
+        let parentId: string | null = null;
         if (input.parentId != null) {
           if (!index.byId.has(input.parentId)) {
             return yield* Effect.fail(
               new ToolError({ reason: `node not found: ${input.parentId}` }),
-            )
+            );
           }
-          parentId = trueSourceOf(index, input.parentId)
+          parentId = trueSourceOf(index, input.parentId);
         }
-        const siblings = childrenOf(index, parentId)
-        const firstPrev = siblings.length ? siblings[siblings.length - 1]!.id : null
+        const siblings = childrenOf(index, parentId);
+        const firstPrev = siblings.length
+          ? siblings[siblings.length - 1]!.id
+          : null;
         const plan = yield* unwrap(
           planOpmlImport(forest, {
             parentId,
@@ -882,26 +993,34 @@ export const tools: ReadonlyArray<ToolDef> = [
             newId: createId,
             maxNodes: OPML_MCP_MAX_NODES,
           }),
-        )
-        if (!dryRun) yield* commit(store, plan.ops)
+        );
+        if (!dryRun) yield* commit(store, plan.ops);
         const landing = parentId
           ? `under "${index.byId.get(parentId)?.text ?? parentId}" (id: ${parentId})`
-          : 'at the top level'
-        return renderImportReceipt({ report, rootIds: plan.rootIds, rootTexts, landing, dryRun })
+          : "at the top level";
+        return renderImportReceipt({
+          report,
+          rootIds: plan.rootIds,
+          rootTexts,
+          landing,
+          dryRun,
+        });
       }),
   },
   {
-    name: 'export_opml',
+    name: "export_opml",
     description:
-      'Export the outline (or one node and its whole subtree via nodeId) as an OPML 2.0 document in the Workflowy dialect. Returns the raw OPML string with no preamble. Ceiling: 5,000 nodes — pass nodeId to scope a large outline.',
+      "Export the outline (or one node and its whole subtree via nodeId) as an OPML 2.0 document in the Workflowy dialect. Returns the raw OPML string with no preamble. Ceiling: 5,000 nodes — pass nodeId to scope a large outline.",
     input: ExportOpmlInput,
     readOnly: true,
     handle: (input: typeof ExportOpmlInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const rootId = input.nodeId ?? null
+        const index = yield* loadIndex(store);
+        const rootId = input.nodeId ?? null;
         if (rootId !== null && !index.byId.has(rootId)) {
-          return yield* Effect.fail(new ToolError({ reason: `node not found: ${rootId}` }))
+          return yield* Effect.fail(
+            new ToolError({ reason: `node not found: ${rootId}` }),
+          );
         }
         // The same walk the serializer performs (mirror windows included, cycle
         // caps identical) sizes the scope; over the ceiling the WHOLE call is
@@ -911,20 +1030,23 @@ export const tools: ReadonlyArray<ToolDef> = [
             maxDepth: Number.POSITIVE_INFINITY,
             maxNodes: Number.POSITIVE_INFINITY,
           }),
-        )
+        );
         if (flat.lines.length > OPML_MCP_MAX_NODES) {
           return yield* Effect.fail(
             new ToolError({
               reason: `the export scope holds ${flat.lines.length} nodes, over the ${OPML_MCP_MAX_NODES}-node ceiling for export_opml — pass a nodeId to export a smaller subtree, or use the app's own OPML export for the whole outline`,
             }),
-          )
+          );
         }
-        const rootNode = rootId !== null ? index.byId.get(trueSourceOf(index, rootId)) : null
+        const rootNode =
+          rootId !== null ? index.byId.get(trueSourceOf(index, rootId)) : null;
         // MCP egress: redact spoilers before serializing (ADR 0043). Redact the
         // title too -- a spoiler-bearing root node's text becomes the <title>.
         // The shared exportOpml walk stays verbatim; it's fed a redacted index.
-        const title = rootNode?.text.trim() ? redactSpoilers(rootNode.text) : 'dotflowy'
-        return exportOpml(redactSpoilerIndex(index), rootId, { title })
+        const title = rootNode?.text.trim()
+          ? redactSpoilers(rootNode.text)
+          : "dotflowy";
+        return exportOpml(redactSpoilerIndex(index), rootId, { title });
       }),
   },
-]
+];

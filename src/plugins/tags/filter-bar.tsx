@@ -1,5 +1,7 @@
 import { X } from "lucide-react";
+
 import { Badge, Button } from "@/plugins/kit";
+
 import { useTagFilter } from "./use-tag-filter";
 
 function TagPill({
@@ -62,10 +64,6 @@ export function TagFilterSubheader() {
   const { activeTags, removeTag, clearTags } = useTagFilter();
   if (activeTags.length === 0) return null;
   return (
-    <TagFilterBar
-      tags={activeTags}
-      onRemove={removeTag}
-      onClear={clearTags}
-    />
+    <TagFilterBar tags={activeTags} onRemove={removeTag} onClear={clearTags} />
   );
 }

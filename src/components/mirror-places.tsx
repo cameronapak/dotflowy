@@ -1,3 +1,5 @@
+import { useNavigate } from "@tanstack/react-router";
+import { ChevronRight, CopyPlus } from "lucide-react";
 import {
   Fragment,
   useEffect,
@@ -5,16 +7,15 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { ChevronRight, CopyPlus } from "lucide-react";
-import { useTree } from "../data/useTree";
+
+import { flattenNodeText } from "../data/node-links";
 import {
   buildTrail,
   trueSourceOf,
   type Node,
   type TreeIndex,
 } from "../data/tree";
-import { flattenNodeText } from "../data/node-links";
+import { useTree } from "../data/useTree";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMirrorPlacesOpener } from "./mirror-places-opener";
 import { Badge } from "./ui/badge";
@@ -173,7 +174,7 @@ function PlaceRow({
       <button
         type="button"
         onClick={onSelect}
-        className="grid grid-cols-[auto_1fr_auto] w-full items-center gap-2.5 rounded-md px-2 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+        className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2.5 rounded-md px-2 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
       >
         <Badge
           variant={place.isSource ? "outline" : "secondary"}
@@ -227,7 +228,7 @@ export function Crumbs({ crumbs }: { crumbs: string[] }) {
                 ? "min-w-6 shrink-[999] truncate"
                 : shown.length === 1
                   ? "min-w-0 truncate"
-                  : "min-w-0 max-w-[60%] shrink-0 truncate"
+                  : "max-w-[60%] min-w-0 shrink-0 truncate"
             }
           >
             {crumb}

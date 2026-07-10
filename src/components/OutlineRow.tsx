@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -6,25 +7,25 @@ import {
   useRef,
   type RefObject,
 } from "react";
-import { ChevronRight } from "lucide-react";
+
 import type { Node } from "../data/schema";
 import type { TagFilter } from "../data/tags";
+import type { PluginContext, SlotSpec } from "../plugins/types";
+import type { NodeCommands } from "./OutlineNode";
+
+import { echoedTextFor } from "../data/collection";
+import { isMirrorsEnabled } from "../data/flags";
+import { useSelectionFill } from "../data/selection-fill";
+import { clearSelection } from "../data/selection-state";
 import {
   useMirrorCount,
   useNode,
   useVisibleChildIds,
 } from "../data/tree-store";
-import { echoedTextFor } from "../data/collection";
-import { isMirrorsEnabled } from "../data/flags";
-import { MirrorBadge } from "./mirror-chrome";
-import type { PluginContext, SlotSpec } from "../plugins/types";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
-import { NodeDecorations } from "./NodeDecorations";
-import { clearSelection } from "../data/selection-state";
-import { useSelectionFill } from "../data/selection-fill";
-import { useSlashMenu } from "./slash-menu";
-import { useMenus } from "./menu-engine";
-import { useBulletKeymap } from "./use-bullet-keymap";
+import { hasFoldingToken } from "../plugins/registry";
+import { focusTextFromRowTap } from "./caret-place";
+import { flashRow } from "./flash-node";
 import {
   decorate,
   getCaretOffset,
@@ -33,18 +34,19 @@ import {
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
-import { hasFoldingToken } from "../plugins/registry";
+import { useMenus } from "./menu-engine";
+import { MirrorBadge } from "./mirror-chrome";
+import { NodeDecorations } from "./NodeDecorations";
 import {
   copySourceSelection,
   cutSourceSelection,
   pasteIntoBullet,
 } from "./paste";
+import { applyPendingCaret } from "./pending-caret";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
-import { focusTextFromRowTap } from "./caret-place";
-import { applyPendingCaret } from "./pending-caret";
-import { flashRow } from "./flash-node";
-import type { NodeCommands } from "./OutlineNode";
+import { useSlashMenu } from "./slash-menu";
+import { useBulletKeymap } from "./use-bullet-keymap";
 
 // Indent per depth level. Matches `.outline-children { padding-left }` in the
 // recursive path -- the one number both render models and the drag projection

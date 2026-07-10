@@ -1,4 +1,5 @@
 import type { ComponentType, CSSProperties, Ref } from "react";
+
 import { cn } from "@/lib/utils";
 
 /** The minimal item shape this list renders: an id, the two text lines, and a
@@ -41,11 +42,11 @@ export function SlashMenuList({
     <div
       ref={ref}
       role="listbox"
-      className="bg-popover text-popover-foreground fixed z-50 max-h-72 w-64 overflow-y-auto rounded-md border p-1 shadow-md"
+      className="fixed z-50 max-h-72 w-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
       style={style}
     >
       {items.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-1.5 text-sm">
+        <div className="px-2 py-1.5 text-sm text-muted-foreground">
           No commands
         </div>
       ) : (
@@ -71,7 +72,7 @@ export function SlashMenuList({
               <Icon className="size-4 shrink-0 opacity-70" />
               <span className="flex flex-col">
                 <span className="font-medium">{item.label}</span>
-                <span className="text-muted-foreground text-xs">
+                <span className="text-xs text-muted-foreground">
                   {item.description}
                 </span>
               </span>

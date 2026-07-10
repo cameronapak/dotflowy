@@ -23,9 +23,10 @@
 // it off `data-src` generically, so every consumer keeps speaking source
 // offsets -- with no per-token special-casing (the unlock in ADR 0001 D6).
 
+import type { El, WidgetEl } from "../plugins/types";
+
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
-import type { El, WidgetEl } from "../plugins/types";
 
 /** True for a widget descriptor (Seam A's React mode -- ADR 0006) vs an `El`. */
 function isWidgetEl(el: El | WidgetEl): el is WidgetEl {
@@ -50,10 +51,7 @@ const renderCache = new WeakMap<HTMLElement, string>();
 // you can arrow/click in from either edge); otherwise it FOLDS to a clean <a>.
 // At most one link reveals -- the one under the caret. Code and tags keep their
 // source visible in both states. See ADR 0005 (per-link reveal).
-function inlineMarkupHtml(
-  text: string,
-  revealOffset: number | null,
-): string {
+function inlineMarkupHtml(text: string, revealOffset: number | null): string {
   let html = "";
   let last = 0;
   for (const m of text.matchAll(tokenRegex)) {
@@ -309,7 +307,10 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
     if (isAtom(node)) {
       const len = foldedSrcLen(node as HTMLElement);
       if (remaining <= len) {
-        placeAtWidget(node as HTMLElement, remaining === 0 ? "before" : "after");
+        placeAtWidget(
+          node as HTMLElement,
+          remaining === 0 ? "before" : "after",
+        );
         placed = true;
       } else {
         remaining -= len;
@@ -343,11 +344,7 @@ function selectedAtomFromSelection(): HTMLElement | null {
   if (range.startContainer !== range.endContainer) return null;
   const parent = range.startContainer;
   const child = parent.childNodes.item(range.startOffset);
-  if (
-    range.endOffset !== range.startOffset + 1 ||
-    !child ||
-    !isAtom(child)
-  ) {
+  if (range.endOffset !== range.startOffset + 1 || !child || !isAtom(child)) {
     return null;
   }
   return child;

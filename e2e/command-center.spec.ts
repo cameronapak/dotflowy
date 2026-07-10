@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // A small nested tree: alpha has a subtree (for "Collapse all"), bravo is a

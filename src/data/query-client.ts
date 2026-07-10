@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/query-core'
+import { QueryClient } from "@tanstack/query-core";
 
 /**
  * One app-wide QueryClient backing the plugin side-collections (tag-colors,
@@ -19,4 +19,4 @@ export const queryClient = new QueryClient({
       retry: 1,
     },
   },
-})
+});

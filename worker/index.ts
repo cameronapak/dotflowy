@@ -25,9 +25,19 @@
  * unambiguous 500s without collapsing known validation errors into the same bucket.
  */
 
-import { Data, Effect, Schema } from 'effect'
-import { UserOutlineDO } from './outline-do'
-import type { Node } from './wire'
+import {
+  oAuthDiscoveryMetadata,
+  oAuthProtectedResourceMetadata,
+} from "better-auth/plugins";
+import { Data, Effect, Schema } from "effect";
+
+import type { AuthEnv } from "./auth";
+import type { Node } from "./wire";
+
+import { createAuth } from "./auth";
+import { handleMcp, mcpCorsPreflight } from "./mcp";
+import { UserOutlineDO } from "./outline-do";
+import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
   KvClaimBody,
   KvDeleteBody,
@@ -36,58 +46,53 @@ import {
   NodesPatchBody,
   NodesPostBody,
   WaitlistPostBody,
-} from './wire'
-import { oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from 'better-auth/plugins'
-import { createAuth } from './auth'
-import type { AuthEnv } from './auth'
-import { handleMcp, mcpCorsPreflight } from './mcp'
-import { isHttpUrlString, unfurlTitle } from './unfurl'
+} from "./wire";
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
 // wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
-export { UserOutlineDO }
+export { UserOutlineDO };
 
 interface Env extends AuthEnv {
-  DB: D1Database
-  ASSETS: Fetcher
-  USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>
+  DB: D1Database;
+  ASSETS: Fetcher;
+  USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>;
   /** The owner's Better Auth `user.id`. When set, that one account routes to
    *  the constant 'default' DO (where the pre-auth outline already lives), so
    *  the owner's existing data carries over with zero copy. Everyone else
    *  routes to their own `user.id`. See resolveUserId. */
-  OWNER_USER_ID?: string
+  OWNER_USER_ID?: string;
   /** Owner key the legacy D1 rows are scoped under, read once during the
    *  one-time import into the owner's DO. Defaults to 'owner'. */
-  APP_OWNER?: string
+  APP_OWNER?: string;
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
-  UNFURL_LIMIT: RateLimit
+  UNFURL_LIMIT: RateLimit;
   /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
-  WAITLIST_LIMIT: RateLimit
+  WAITLIST_LIMIT: RateLimit;
   /** Comma-separated emails allowed on admin surfaces (the waitlist view).
    *  Fail-closed: unset = no admins. Email is fine HERE (unlike DO keying) —
    *  it's an allowlist entry, not a permanent storage key; if the admin's
    *  email changes, update the var in wrangler.jsonc. */
-  ADMIN_EMAILS?: string
+  ADMIN_EMAILS?: string;
 }
 
 /** A legacy D1 node row (booleans as 0/1). Only read during the one-time import
  *  of pre-DO data into a user's Durable Object. */
 interface NodeRow {
-  id: string
-  parentId: string | null
-  prevSiblingId: string | null
-  text: string
-  isTask: number
-  completed: number
-  collapsed: number
-  bookmarkedAt: number | null
-  createdAt: number
-  updatedAt: number
+  id: string;
+  parentId: string | null;
+  prevSiblingId: string | null;
+  text: string;
+  isTask: number;
+  completed: number;
+  collapsed: number;
+  bookmarkedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // Plugin side-collections backed by the kv store. The allowlist stops a client
 // writing arbitrary collection namespaces.
-const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
+const KV_COLLECTIONS = new Set(["tag-colors", "daily-index"]);
 
 /**
  * The Durable Object name for the signed-in user's outline.
@@ -103,11 +108,12 @@ const KV_COLLECTIONS = new Set(['tag-colors', 'daily-index'])
  * existing data over with zero copy. Removable once that data is wherever it
  * belongs.
  */
-const OWNER_DO_ID = 'default'
+const OWNER_DO_ID = "default";
 
 function resolveUserId(sessionUserId: string, env: Env): string {
-  if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID) return OWNER_DO_ID
-  return sessionUserId
+  if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID)
+    return OWNER_DO_ID;
+  return sessionUserId;
 }
 
 /**
@@ -118,12 +124,17 @@ function resolveUserId(sessionUserId: string, env: Env): string {
  * Falls back to a generic `'agent'` when the token carries no client id or the
  * client registered no name — the marker still reads as "not the user", unnamed.
  */
-async function resolveMcpOrigin(env: Env, clientId: string | null): Promise<string> {
-  if (!clientId) return 'agent'
-  const row = await env.DB.prepare('SELECT name FROM oauthApplication WHERE clientId = ?')
+async function resolveMcpOrigin(
+  env: Env,
+  clientId: string | null,
+): Promise<string> {
+  if (!clientId) return "agent";
+  const row = await env.DB.prepare(
+    "SELECT name FROM oauthApplication WHERE clientId = ?",
+  )
     .bind(clientId)
-    .first<{ name: string }>()
-  return row?.name?.trim() || 'agent'
+    .first<{ name: string }>();
+  return row?.name?.trim() || "agent";
 }
 
 function rowToNode(r: NodeRow): Node {
@@ -144,14 +155,18 @@ function rowToNode(r: NodeRow): Node {
     // Legacy D1 rows predate provenance and were all authored by the owner in
     // the editor, so they import as human (null) — never agent-stamped.
     origin: null,
-  }
+  };
 }
 
-function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
+function json(
+  data: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json', ...headers },
-  })
+    headers: { "content-type": "application/json", ...headers },
+  });
 }
 
 // --- Typed domain errors ----------------------------------------------------
@@ -161,15 +176,19 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
  * environment without the legacy migrations applied. The seed import simply
  * skips; the DO starts from whatever state it already has.
  */
-class SeedLegacyTablesAbsent extends Data.TaggedError('SeedLegacyTablesAbsent')<{}> {}
+class SeedLegacyTablesAbsent extends Data.TaggedError(
+  "SeedLegacyTablesAbsent",
+)<{}> {}
 
 /**
  * The `?collection=` parameter is missing or not in the KV_COLLECTIONS
  * allow-list. The client sent a collection name we don't serve.
  */
-class UnknownCollection extends Data.TaggedError('UnknownCollection')<{ collection: string | null }> {
+class UnknownCollection extends Data.TaggedError("UnknownCollection")<{
+  collection: string | null;
+}> {
   get message() {
-    return `unknown kv collection: ${this.collection ?? '(none)'}`
+    return `unknown kv collection: ${this.collection ?? "(none)"}`;
   }
 }
 
@@ -180,9 +199,9 @@ class UnknownCollection extends Data.TaggedError('UnknownCollection')<{ collecti
  * reaches the DO and dereferences `undefined` deep inside the SQLite write loop
  * (which would surface as a 500 from inside storage). See docs/adr/0014.
  */
-class BadRequest extends Data.TaggedError('BadRequest')<{ reason: string }> {
+class BadRequest extends Data.TaggedError("BadRequest")<{ reason: string }> {
   get message() {
-    return `bad request: ${this.reason}`
+    return `bad request: ${this.reason}`;
   }
 }
 
@@ -190,10 +209,12 @@ class BadRequest extends Data.TaggedError('BadRequest')<{ reason: string }> {
  * /api/sync was reached without a WebSocket Upgrade header. The caller must
  * open a proper WebSocket connection — plain HTTP is not accepted on this route.
  */
-class UpgradeRequired extends Data.TaggedError('UpgradeRequired')<{}> {}
+class UpgradeRequired extends Data.TaggedError("UpgradeRequired")<{}> {}
 
 /** The request URL didn't match any /api/* route we own. */
-class RouteNotFound extends Data.TaggedError('RouteNotFound')<{ path: string }> {}
+class RouteNotFound extends Data.TaggedError("RouteNotFound")<{
+  path: string;
+}> {}
 
 // --- ensureSeededE ----------------------------------------------------------
 
@@ -212,22 +233,25 @@ function ensureSeededE(
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
 ): Effect.Effect<void> {
-  const owner = env.APP_OWNER ?? 'owner'
+  const owner = env.APP_OWNER ?? "owner";
 
   // Fetch both legacy tables in parallel. The `SeedLegacyTablesAbsent` typed
   // error signals the expected "no legacy tables" case; any other thrown error
   // is promoted to a defect so the DO stays un-seeded and retries on next load.
   const queryLegacyData = Effect.callback<
-    { nodeRows: NodeRow[]; kvRows: { collection: string; key: string; value: string }[] },
+    {
+      nodeRows: NodeRow[];
+      kvRows: { collection: string; key: string; value: string }[];
+    },
     SeedLegacyTablesAbsent
   >((resume) => {
     Promise.all([
       env.DB.prepare(
-        'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE owner = ?',
+        "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, createdAt, updatedAt FROM nodes WHERE owner = ?",
       )
         .bind(owner)
         .all<NodeRow>(),
-      env.DB.prepare('SELECT collection, key, value FROM kv WHERE owner = ?')
+      env.DB.prepare("SELECT collection, key, value FROM kv WHERE owner = ?")
         .bind(owner)
         .all<{ collection: string; key: string; value: string }>(),
     ]).then(
@@ -241,30 +265,30 @@ function ensureSeededE(
       (err) => {
         if (/no such table/i.test(String(err))) {
           // Expected on fresh deploys — no legacy rows to import.
-          resume(Effect.fail(new SeedLegacyTablesAbsent()))
+          resume(Effect.fail(new SeedLegacyTablesAbsent()));
         } else {
           // Real D1 failure — promote to defect so we don't mark the DO seeded.
-          resume(Effect.die(err))
+          resume(Effect.die(err));
         }
       },
-    )
-  })
+    );
+  });
 
   return Effect.gen(function* () {
-    const seeded = yield* Effect.promise(() => stub.isSeeded())
-    if (seeded) return
+    const seeded = yield* Effect.promise(() => stub.isSeeded());
+    if (seeded) return;
 
     const data = yield* queryLegacyData.pipe(
       // Absorb the expected no-tables case: produce empty seed data so the
       // stub.seed() call still runs and marks the DO seeded, preventing
       // repeated D1 queries on every subsequent request.
-      Effect.catchTag('SeedLegacyTablesAbsent', () =>
+      Effect.catchTag("SeedLegacyTablesAbsent", () =>
         Effect.succeed({
           nodeRows: [] as NodeRow[],
           kvRows: [] as { collection: string; key: string; value: string }[],
         }),
       ),
-    )
+    );
 
     yield* Effect.promise(() =>
       stub.seed({
@@ -275,8 +299,8 @@ function ensureSeededE(
           value: JSON.parse(r.value) as unknown,
         })),
       }),
-    )
-  })
+    );
+  });
 }
 
 // --- Route handlers ---------------------------------------------------------
@@ -293,16 +317,16 @@ function ensureSeededE(
 function decodeBody<S extends Schema.Top>(
   request: Request,
   schema: S,
-): Effect.Effect<S['Type'], BadRequest, S['DecodingServices']> {
+): Effect.Effect<S["Type"], BadRequest, S["DecodingServices"]> {
   return Effect.gen(function* () {
     const raw = yield* Effect.tryPromise({
       try: () => request.json(),
-      catch: () => new BadRequest({ reason: 'malformed JSON body' }),
-    })
+      catch: () => new BadRequest({ reason: "malformed JSON body" }),
+    });
     return yield* Schema.decodeUnknownEffect(schema)(raw).pipe(
       Effect.mapError((issue) => new BadRequest({ reason: issue.message })),
-    )
-  })
+    );
+  });
 }
 
 function handleNodes(
@@ -311,37 +335,38 @@ function handleNodes(
 ): Effect.Effect<Response, BadRequest> {
   return Effect.gen(function* () {
     switch (request.method) {
-      case 'GET':
-        return json(yield* Effect.promise(() => stub.getNodes()))
-      case 'POST': {
-        const { ops, nodes } = yield* decodeBody(request, NodesPostBody)
+      case "GET":
+        return json(yield* Effect.promise(() => stub.getNodes()));
+      case "POST": {
+        const { ops, nodes } = yield* decodeBody(request, NodesPostBody);
         // Atomic-batch path: a single structural mutation arrives as a list of
         // ops and persists as ONE DO frame (one seq, one broadcast). Reply with
         // that seq so the client can hold its optimistic overlay until the frame
         // echoes back — closing the half-applied / reverted-state window.
         if (ops) {
-          const seq = yield* Effect.promise(() => stub.applyBatch(ops))
-          return json({ seq })
+          const seq = yield* Effect.promise(() => stub.applyBatch(ops));
+          return json({ seq });
         }
         // Legacy upsert path: the first-run seed and any pre-batch client. Kept
         // for back-compat during rollout.
-        if (nodes?.length) yield* Effect.promise(() => stub.upsertNodes(nodes))
-        return json({ ok: true })
+        if (nodes?.length) yield* Effect.promise(() => stub.upsertNodes(nodes));
+        return json({ ok: true });
       }
-      case 'PATCH': {
-        const { updates } = yield* decodeBody(request, NodesPatchBody)
-        if (updates.length) yield* Effect.promise(() => stub.patchNodes(updates))
-        return json({ ok: true })
+      case "PATCH": {
+        const { updates } = yield* decodeBody(request, NodesPatchBody);
+        if (updates.length)
+          yield* Effect.promise(() => stub.patchNodes(updates));
+        return json({ ok: true });
       }
-      case 'DELETE': {
-        const { ids } = yield* decodeBody(request, NodesDeleteBody)
-        if (ids.length) yield* Effect.promise(() => stub.deleteNodes(ids))
-        return json({ ok: true })
+      case "DELETE": {
+        const { ids } = yield* decodeBody(request, NodesDeleteBody);
+        if (ids.length) yield* Effect.promise(() => stub.deleteNodes(ids));
+        return json({ ok: true });
       }
       default:
-        return json({ error: 'method not allowed' }, 405)
+        return json({ error: "method not allowed" }, 405);
     }
-  })
+  });
 }
 
 function handleKv(
@@ -351,30 +376,34 @@ function handleKv(
 ): Effect.Effect<Response, BadRequest> {
   return Effect.gen(function* () {
     switch (request.method) {
-      case 'GET':
-        return json(yield* Effect.promise(() => stub.getKv(collection)))
-      case 'POST': {
+      case "GET":
+        return json(yield* Effect.promise(() => stub.getKv(collection)));
+      case "POST": {
         // `?op=claim` is the atomic get-or-create: insert the value only if the
         // key is absent, return the authoritative one. Used by the daily plugin
         // to race-safely create today's note / container (the DO serializes it).
-        if (new URL(request.url).searchParams.get('op') === 'claim') {
-          const { key, value } = yield* decodeBody(request, KvClaimBody)
-          const claimed = yield* Effect.promise(() => stub.getOrCreateKv(collection, key, value))
-          return json({ value: claimed })
+        if (new URL(request.url).searchParams.get("op") === "claim") {
+          const { key, value } = yield* decodeBody(request, KvClaimBody);
+          const claimed = yield* Effect.promise(() =>
+            stub.getOrCreateKv(collection, key, value),
+          );
+          return json({ value: claimed });
         }
-        const { rows } = yield* decodeBody(request, KvUpsertBody)
-        if (rows.length) yield* Effect.promise(() => stub.upsertKv(collection, rows))
-        return json({ ok: true })
+        const { rows } = yield* decodeBody(request, KvUpsertBody);
+        if (rows.length)
+          yield* Effect.promise(() => stub.upsertKv(collection, rows));
+        return json({ ok: true });
       }
-      case 'DELETE': {
-        const { keys } = yield* decodeBody(request, KvDeleteBody)
-        if (keys.length) yield* Effect.promise(() => stub.deleteKv(collection, keys))
-        return json({ ok: true })
+      case "DELETE": {
+        const { keys } = yield* decodeBody(request, KvDeleteBody);
+        if (keys.length)
+          yield* Effect.promise(() => stub.deleteKv(collection, keys));
+        return json({ ok: true });
       }
       default:
-        return json({ error: 'method not allowed' }, 405)
+        return json({ error: "method not allowed" }, 405);
     }
-  })
+  });
 }
 
 // --- Waitlist (public) --------------------------------------------------------
@@ -382,32 +411,35 @@ function handleKv(
 /** Origins allowed to POST the waitlist form cross-origin: the landing site
  *  (prod + its local dev port). Same-origin app requests need no CORS. */
 const WAITLIST_ALLOWED_ORIGINS = new Set([
-  'https://dotflowy.com',
-  'https://www.dotflowy.com',
-  'http://localhost:3100',
-])
+  "https://dotflowy.com",
+  "https://www.dotflowy.com",
+  "http://localhost:3100",
+]);
 
 function waitlistCorsHeaders(request: Request): Record<string, string> {
-  const origin = request.headers.get('Origin')
+  const origin = request.headers.get("Origin");
   return origin && WAITLIST_ALLOWED_ORIGINS.has(origin)
-    ? { 'access-control-allow-origin': origin, vary: 'Origin' }
-    : {}
+    ? { "access-control-allow-origin": origin, vary: "Origin" }
+    : {};
 }
 
 /** Good-enough shape check for an address someone wants an invite sent to.
  *  Deliverability is unknowable here; this only rejects obvious junk. */
 function isPlausibleEmail(email: string): boolean {
-  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 /** Is this session's email on the ADMIN_EMAILS allowlist? Fail-closed. */
-function isAdminSession(session: { user: { email: string } } | null, env: Env): boolean {
-  if (!session) return false
-  const admins = (env.ADMIN_EMAILS ?? '')
-    .split(',')
+function isAdminSession(
+  session: { user: { email: string } } | null,
+  env: Env,
+): boolean {
+  if (!session) return false;
+  const admins = (env.ADMIN_EMAILS ?? "")
+    .split(",")
     .map((e) => e.trim().toLowerCase())
-    .filter(Boolean)
-  return admins.includes(session.user.email.toLowerCase())
+    .filter(Boolean);
+  return admins.includes(session.user.email.toLowerCase());
 }
 
 /**
@@ -418,40 +450,46 @@ function isAdminSession(session: { user: { email: string } } | null, env: Env): 
  * still returns ok — the response never reveals whether an address is already
  * on the list.
  */
-function handleWaitlist(request: Request, env: Env): Effect.Effect<Response, BadRequest> {
+function handleWaitlist(
+  request: Request,
+  env: Env,
+): Effect.Effect<Response, BadRequest> {
   return Effect.gen(function* () {
-    const cors = waitlistCorsHeaders(request)
-    if (request.method === 'OPTIONS') {
+    const cors = waitlistCorsHeaders(request);
+    if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
         headers: {
           ...cors,
-          'access-control-allow-methods': 'POST, OPTIONS',
-          'access-control-allow-headers': 'content-type',
-          'access-control-max-age': '86400',
+          "access-control-allow-methods": "POST, OPTIONS",
+          "access-control-allow-headers": "content-type",
+          "access-control-max-age": "86400",
         },
-      })
+      });
     }
-    if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405, cors)
+    if (request.method !== "POST")
+      return json({ error: "method not allowed" }, 405, cors);
 
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
-    const { success } = yield* Effect.promise(() => env.WAITLIST_LIMIT.limit({ key: ip }))
-    if (!success) return json({ error: 'rate limited' }, 429, cors)
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const { success } = yield* Effect.promise(() =>
+      env.WAITLIST_LIMIT.limit({ key: ip }),
+    );
+    if (!success) return json({ error: "rate limited" }, 429, cors);
 
-    const { email, source } = yield* decodeBody(request, WaitlistPostBody)
-    const normalized = email.trim().toLowerCase()
+    const { email, source } = yield* decodeBody(request, WaitlistPostBody);
+    const normalized = email.trim().toLowerCase();
     if (!isPlausibleEmail(normalized)) {
-      return yield* Effect.fail(new BadRequest({ reason: 'invalid email' }))
+      return yield* Effect.fail(new BadRequest({ reason: "invalid email" }));
     }
     yield* Effect.promise(() =>
       env.DB.prepare(
-        'INSERT INTO waitlist (email, source, createdAt) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING',
+        "INSERT INTO waitlist (email, source, createdAt) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING",
       )
-        .bind(normalized, source === 'landing' ? 'landing' : 'app', Date.now())
+        .bind(normalized, source === "landing" ? "landing" : "app", Date.now())
         .run(),
-    )
-    return json({ ok: true }, 200, cors)
-  })
+    );
+    return json({ ok: true }, 200, cors);
+  });
 }
 
 // --- Main API pipeline ------------------------------------------------------
@@ -467,14 +505,17 @@ function handleApiRequest(
   request: Request,
   url: URL,
   env: Env,
-): Effect.Effect<Response, UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest> {
+): Effect.Effect<
+  Response,
+  UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest
+> {
   return Effect.gen(function* () {
-    const auth = createAuth(env, url.origin)
+    const auth = createAuth(env, url.origin);
 
     // Better Auth owns everything under /api/auth/* (sign-up/in/out, session,
     // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
-    if (url.pathname.startsWith('/api/auth/')) {
-      return yield* Effect.promise(() => auth.handler(request))
+    if (url.pathname.startsWith("/api/auth/")) {
+      return yield* Effect.promise(() => auth.handler(request));
     }
 
     // Alpha waitlist: POST is PUBLIC (submitters have no account yet) — must
@@ -482,22 +523,22 @@ function handleApiRequest(
     // GET is the ADMIN view (the /admin/waitlist page): session + the
     // ADMIN_EMAILS allowlist. Non-admins get the same 404 as a route that
     // doesn't exist — the admin surface shouldn't advertise itself.
-    if (url.pathname === '/api/waitlist') {
-      if (request.method === 'GET') {
+    if (url.pathname === "/api/waitlist") {
+      if (request.method === "GET") {
         const session = yield* Effect.promise(() =>
           auth.api.getSession({ headers: request.headers }),
-        )
+        );
         if (!isAdminSession(session, env)) {
-          return yield* Effect.fail(new RouteNotFound({ path: url.pathname }))
+          return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
         }
         const { results } = yield* Effect.promise(() =>
           env.DB.prepare(
-            'SELECT email, source, createdAt FROM waitlist ORDER BY createdAt DESC',
+            "SELECT email, source, createdAt FROM waitlist ORDER BY createdAt DESC",
           ).all<{ email: string; source: string; createdAt: number }>(),
-        )
-        return json({ entries: results })
+        );
+        return json({ entries: results });
       }
-      return yield* handleWaitlist(request, env)
+      return yield* handleWaitlist(request, env);
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
@@ -507,41 +548,45 @@ function handleApiRequest(
     // so an agent and the editor share one outline, live. ADR 0026. Served at
     // the ecosystem-default `/mcp` (what clients probe); `/api/mcp` stays a
     // working alias so an already-configured client keeps connecting.
-    if (url.pathname === '/mcp' || url.pathname === '/api/mcp') {
-      if (request.method === 'OPTIONS') return mcpCorsPreflight()
+    if (url.pathname === "/mcp" || url.pathname === "/api/mcp") {
+      if (request.method === "OPTIONS") return mcpCorsPreflight();
       const token = yield* Effect.promise(() =>
         auth.api.getMcpSession({ headers: request.headers }),
-      )
+      );
       if (!token?.userId) {
         // RFC 9728: point the client at the protected-resource metadata so it
         // can discover the authorization server and start the OAuth flow.
-        return new Response(JSON.stringify({ error: 'unauthorized' }), {
+        return new Response(JSON.stringify({ error: "unauthorized" }), {
           status: 401,
           headers: {
-            'content-type': 'application/json',
-            'www-authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-            'access-control-allow-origin': '*',
-            'access-control-expose-headers': 'WWW-Authenticate',
+            "content-type": "application/json",
+            "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+            "access-control-allow-origin": "*",
+            "access-control-expose-headers": "WWW-Authenticate",
           },
-        })
+        });
       }
-      const mcpUserId = resolveUserId(token.userId, env)
-      const mcpStub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(mcpUserId))
+      const mcpUserId = resolveUserId(token.userId, env);
+      const mcpStub = env.USER_OUTLINE.get(
+        env.USER_OUTLINE.idFromName(mcpUserId),
+      );
       // Provenance: which agent is calling. The bearer token's OAuth client maps
       // to a registered harness name; every node its write tools create is
       // stamped with it, so the editor can mark agent edits apart from the user's.
-      const clientId = (token as { clientId?: string }).clientId ?? null
-      const origin = yield* Effect.promise(() => resolveMcpOrigin(env, clientId))
-      return yield* handleMcp(request, mcpStub, origin)
+      const clientId = (token as { clientId?: string }).clientId ?? null;
+      const origin = yield* Effect.promise(() =>
+        resolveMcpOrigin(env, clientId),
+      );
+      return yield* handleMcp(request, mcpStub, origin);
     }
 
     // Identity = the validated session's stable user id. No session → 401.
     const session = yield* Effect.promise(() =>
       auth.api.getSession({ headers: request.headers }),
-    )
-    if (!session) return json({ error: 'unauthorized' }, 401)
+    );
+    if (!session) return json({ error: "unauthorized" }, 401);
 
-    const userId = resolveUserId(session.user.id, env)
+    const userId = resolveUserId(session.user.id, env);
 
     // Link title unfurl (ADR 0016): fetch a pasted URL's <title> server-side so
     // a bare-url link can upgrade its label. DO-independent, so it runs before
@@ -549,59 +594,63 @@ function handleApiRequest(
     // `url` param; every other "no title" reason (blocked target, non-HTML,
     // unreachable, timeout) is a 200 `{title:null}` from unfurlTitle. Per-user
     // rate-limited (the fetch is an authenticated SSRF surface).
-    if (url.pathname === '/api/unfurl') {
-      const target = url.searchParams.get('url')
+    if (url.pathname === "/api/unfurl") {
+      const target = url.searchParams.get("url");
       if (!target || !isHttpUrlString(target)) {
-        return yield* Effect.fail(new BadRequest({ reason: 'missing or non-http(s) url param' }))
+        return yield* Effect.fail(
+          new BadRequest({ reason: "missing or non-http(s) url param" }),
+        );
       }
-      const { success } = yield* Effect.promise(() => env.UNFURL_LIMIT.limit({ key: userId }))
-      if (!success) return json({ error: 'rate limited' }, 429)
-      return json({ title: yield* Effect.promise(() => unfurlTitle(target)) })
+      const { success } = yield* Effect.promise(() =>
+        env.UNFURL_LIMIT.limit({ key: userId }),
+      );
+      if (!success) return json({ error: "rate limited" }, 429);
+      return json({ title: yield* Effect.promise(() => unfurlTitle(target)) });
     }
 
-    const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId))
+    const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId));
 
     // Only the owner's DO ('default') has legacy D1 rows to import; new users
     // start empty, so skip the import (and its D1 query) for them.
     const maybeSeed =
-      request.method === 'GET' && userId === OWNER_DO_ID
+      request.method === "GET" && userId === OWNER_DO_ID
         ? ensureSeededE(stub, env)
-        : Effect.sync(() => {})
+        : Effect.sync(() => {});
 
     // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
     // hibernation-accepts it and streams outline changes. The session is
     // already validated above, so the socket only ever opens for an authed
     // user. Seed first (owner only) so the DO's initial snapshot includes any
     // imported legacy rows — the live client no longer GETs /api/nodes.
-    if (url.pathname === '/api/sync') {
-      if (request.headers.get('Upgrade') !== 'websocket') {
-        return yield* Effect.fail(new UpgradeRequired())
+    if (url.pathname === "/api/sync") {
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return yield* Effect.fail(new UpgradeRequired());
       }
-      yield* maybeSeed
-      return yield* Effect.promise(() => stub.fetch(request))
+      yield* maybeSeed;
+      return yield* Effect.promise(() => stub.fetch(request));
     }
 
-    if (url.pathname === '/api/nodes') {
-      yield* maybeSeed
-      return yield* handleNodes(request, stub)
+    if (url.pathname === "/api/nodes") {
+      yield* maybeSeed;
+      return yield* handleNodes(request, stub);
     }
 
-    if (url.pathname === '/api/kv') {
-      const collection = url.searchParams.get('collection')
+    if (url.pathname === "/api/kv") {
+      const collection = url.searchParams.get("collection");
       if (!collection || !KV_COLLECTIONS.has(collection)) {
-        return yield* Effect.fail(new UnknownCollection({ collection }))
+        return yield* Effect.fail(new UnknownCollection({ collection }));
       }
-      yield* maybeSeed
-      return yield* handleKv(request, stub, collection)
+      yield* maybeSeed;
+      return yield* handleKv(request, stub, collection);
     }
 
-    return yield* Effect.fail(new RouteNotFound({ path: url.pathname }))
-  })
+    return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+  });
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url)
+    const url = new URL(request.url);
 
     // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). These MUST live at
     // the site root — clients resolve them from the resource origin, not from
@@ -611,18 +660,20 @@ export default {
     // (`/.well-known/oauth-protected-resource/mcp`) before the root one. The
     // metadata is path-independent (resource = origin), so answer either shape;
     // an exact match 404s the suffixed probe and the SDK chokes parsing it.
-    if (url.pathname.startsWith('/.well-known/oauth-authorization-server')) {
-      return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request)
+    if (url.pathname.startsWith("/.well-known/oauth-authorization-server")) {
+      return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request);
     }
-    if (url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
-      return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(request)
+    if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+      return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(
+        request,
+      );
     }
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve
     // them without instantiating auth — only the data API (and the token-gated
     // `/mcp`, handled in the pipeline below) is gated.
-    if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/')) {
-      return env.ASSETS.fetch(request)
+    if (url.pathname !== "/mcp" && !url.pathname.startsWith("/api/")) {
+      return env.ASSETS.fetch(request);
     }
 
     // Run the typed pipeline. Typed errors (validation) are caught here and
@@ -631,19 +682,19 @@ export default {
     // mapping exhaustive and the 500 path reserved for genuine surprises.
     return Effect.runPromise(
       handleApiRequest(request, url, env).pipe(
-        Effect.catchTag('BadRequest', (e) =>
+        Effect.catchTag("BadRequest", (e) =>
           Effect.succeed(json({ error: e.message }, 400)),
         ),
-        Effect.catchTag('UnknownCollection', (e) =>
+        Effect.catchTag("UnknownCollection", (e) =>
           Effect.succeed(json({ error: e.message }, 400)),
         ),
-        Effect.catchTag('UpgradeRequired', () =>
-          Effect.succeed(json({ error: 'expected a websocket upgrade' }, 426)),
+        Effect.catchTag("UpgradeRequired", () =>
+          Effect.succeed(json({ error: "expected a websocket upgrade" }, 426)),
         ),
-        Effect.catchTag('RouteNotFound', () =>
-          Effect.succeed(json({ error: 'not found' }, 404)),
+        Effect.catchTag("RouteNotFound", () =>
+          Effect.succeed(json({ error: "not found" }, 404)),
         ),
       ),
-    ).catch((err) => json({ error: String(err) }, 500))
+    ).catch((err) => json({ error: String(err) }, 500));
   },
-} satisfies ExportedHandler<Env>
+} satisfies ExportedHandler<Env>;

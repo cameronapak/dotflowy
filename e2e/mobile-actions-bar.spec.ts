@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+
 import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 // The mobile actions bar (ADR 0030) is a coarse-pointer, focus-gated toolbar. As
@@ -53,9 +54,15 @@ async function caretAt(page: Page, id: string, col: number) {
 }
 
 test.describe("mobile actions bar (coarse pointer)", () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 900 } });
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 412, height: 900 },
+  });
 
-  test("mobile emulation actually reports a coarse pointer", async ({ page }) => {
+  test("mobile emulation actually reports a coarse pointer", async ({
+    page,
+  }) => {
     await load(page);
     const coarse = await page.evaluate(
       () => window.matchMedia("(pointer: coarse)").matches,
@@ -64,7 +71,9 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     expect(coarse).toBe(true);
   });
 
-  test("hidden until a bullet is focused, shown while editing", async ({ page }) => {
+  test("hidden until a bullet is focused, shown while editing", async ({
+    page,
+  }) => {
     await load(page);
     // Nothing focused on load -> no bar.
     await expect(bar(page)).toHaveCount(0);
@@ -72,7 +81,9 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(bar(page)).toBeVisible();
   });
 
-  test("indent then outdent restructure the focused bullet", async ({ page }) => {
+  test("indent then outdent restructure the focused bullet", async ({
+    page,
+  }) => {
     await load(page);
     // alpha-2 has a previous sibling (alpha-1), so it can indent under it.
     await text(page, "alpha-2").click();
@@ -111,15 +122,23 @@ test.describe("mobile actions bar (coarse pointer)", () => {
   test("complete toggles the focused bullet's completion", async ({ page }) => {
     await load(page);
     await text(page, "alpha").click();
-    await expect(text(page, "alpha")).not.toHaveAttribute("data-completed", "true");
+    await expect(text(page, "alpha")).not.toHaveAttribute(
+      "data-completed",
+      "true",
+    );
     await btn(page, "Toggle complete").click();
     await expect(text(page, "alpha")).toHaveAttribute("data-completed", "true");
     // Toggling again un-completes it (un-mark is always allowed).
     await btn(page, "Toggle complete").click();
-    await expect(text(page, "alpha")).not.toHaveAttribute("data-completed", "true");
+    await expect(text(page, "alpha")).not.toHaveAttribute(
+      "data-completed",
+      "true",
+    );
   });
 
-  test("the slash button inserts / and opens the command menu", async ({ page }) => {
+  test("the slash button inserts / and opens the command menu", async ({
+    page,
+  }) => {
     await load(page);
     // Caret at the START so the inserted "/" is at offset 0 and detectSlash fires
     // (it triggers only when the "/" leads the line or follows whitespace).
@@ -143,7 +162,9 @@ test.describe("mobile actions bar (coarse pointer)", () => {
 });
 
 test.describe("mobile actions bar (fine pointer)", () => {
-  test("never mounts on a fine pointer even while editing", async ({ page }) => {
+  test("never mounts on a fine pointer even while editing", async ({
+    page,
+  }) => {
     await load(page);
     await text(page, "alpha").click();
     await expect(text(page, "alpha")).toBeFocused();
