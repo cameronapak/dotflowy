@@ -335,7 +335,8 @@ const UpdateNodeInput = Schema.Struct({
   text: optional(Schema.String.annotate({ description: "New bullet text." })),
   isTask: optional(
     Schema.Boolean.annotate({
-      description: "Turn the checkbox on (true) or off (false).",
+      description:
+        "Turn the checkbox on (true) or off (false). Either value also turns a paragraph back into a list item — a node is exactly one of bullet, to-do, or paragraph.",
     }),
   ),
   completed: optional(

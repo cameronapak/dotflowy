@@ -294,6 +294,16 @@ describe("mirror re-link (the dotflowy dialect)", () => {
     expect(report.unknownAttributes).toEqual({ _uuid: 1 });
   });
 
+  it("_kind wins over _task: the illegal pair can never be imported", () => {
+    // OPML is a trust boundary like the MCP one -- a hand-written document can
+    // carry both attributes, and `planOpmlImport` would persist the pair.
+    const { forest } = run(
+      doc('<outline text="illegal" _task="true" _kind="paragraph" />'),
+    );
+    expect(forest[0]!.kind).toBe("paragraph");
+    expect(forest[0]!.isTask).toBe(false);
+  });
+
   it("imports _kind=paragraph; absent or unrecognized is a bullet", () => {
     const { forest, report } = run(
       doc(

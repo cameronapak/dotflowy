@@ -15,6 +15,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import type { CommandSpec } from "../plugins/types";
 import type { NodeActionBridge } from "./command-bridge";
 import type { Node, TreeIndex } from "./tree";
 
@@ -228,13 +229,18 @@ export function buildNodeVerbActions(
  * specs too, but they already appear above as node VERBS, so only the paragraph
  * spec crosses over -- no row is doubled.
  */
+const PALETTE_SPECS: readonly CommandSpec[] = [
+  ...commandSpecs,
+  paragraphCommand,
+];
+
 export function buildCommandSpecActions(
   node: Node,
   bridge: NodeActionBridge,
 ): CommandCenterAction[] {
   const { getCtx } = bridge;
   const out: CommandCenterAction[] = [];
-  for (const spec of [...commandSpecs, paragraphCommand]) {
+  for (const spec of PALETTE_SPECS) {
     if (spec.caretScoped) continue;
     if (!spec.available(node)) continue;
     out.push({

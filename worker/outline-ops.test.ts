@@ -1034,6 +1034,21 @@ describe("reads", () => {
     expect(searchNodes(index(nodes), "prose", 10)[0]!.kind).toBe("paragraph");
   });
 
+  test("kind outranks isTask on the agent read path, as it does in the renderer", () => {
+    // The illegal pair a raw PATCH or a stale client can still write. The app
+    // draws a pilcrow and no checkbox; the agent must not be told `- [ ]`.
+    const nodes = [
+      makeNode({ id: "p", text: "prose", isTask: true, kind: "paragraph" }),
+    ];
+    const result = flattenSubtree(index(nodes), null, {
+      maxDepth: 99,
+      maxNodes: 100,
+    });
+    if (result instanceof Error) throw result;
+    expect(result.lines[0]!.isTask).toBe(false);
+    expect(formatOutlineLines(result.lines)).toBe("- prose (id: p, paragraph)");
+  });
+
   test("flattenSubtree windows a mirror's source children and caps cycles", () => {
     // m mirrors a; a contains m2, which mirrors a again -> the inner instance
     // must render capped instead of recursing forever.

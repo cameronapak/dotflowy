@@ -1014,7 +1014,11 @@ export function flattenSubtree(
       // enters the agent's context window (ADR 0043). In-app copy/export read
       // the raw node text, not this path.
       text: redactSpoilers(content.text),
-      isTask: content.isTask,
+      // `kind` outranks `isTask` (ADR 0045). The renderer applies this tie-break,
+      // so the agent must see the same node the user does: an illegal pair from a
+      // raw PATCH or a stale client reads as a paragraph with no checkbox, never
+      // as a `- [ ]` to-do the app never draws.
+      isTask: content.kind === "paragraph" ? false : content.isTask,
       completed: content.completed,
       kind: content.kind,
       mirrorOf: node.mirrorOf,
