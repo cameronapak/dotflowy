@@ -18,6 +18,7 @@
 
 import { Data } from "effect";
 
+import type { NodeKind } from "../src/data/schema";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import { redactSpoilers } from "../src/data/spoiler";
@@ -121,6 +122,9 @@ function newNode(args: {
   prevSiblingId: string | null;
   text: string;
   isTask?: boolean;
+  /** ADR 0045. `"paragraph"` wins over `isTask`, so an agent that passes both
+   *  gets a paragraph — the same tie-break the renderer applies. */
+  kind?: NodeKind;
   mirrorOf?: string | null;
   /** Provenance: the agent harness that created this node, or null/omitted for
    *  structural scaffolding the DO would create either way (the daily container
@@ -128,12 +132,16 @@ function newNode(args: {
   origin?: string | null;
   timestamp: number;
 }): Node {
+  const kind = args.kind ?? null;
   return makeNode({
     id: args.id,
     parentId: args.parentId,
     prevSiblingId: args.prevSiblingId,
     text: args.text,
-    isTask: args.isTask ?? false,
+    // The kind exclusivity invariant, enforced at the trust boundary exactly as
+    // the client funnels enforce it (`setKind` clears `isTask`).
+    isTask: kind === "paragraph" ? false : (args.isTask ?? false),
+    kind,
     mirrorOf: args.mirrorOf ?? null,
     origin: args.origin ?? null,
     createdAt: args.timestamp,
@@ -165,6 +173,7 @@ export function planAddNode(
     parentId: string | null;
     position: "first" | "last";
     isTask: boolean;
+    kind?: NodeKind;
     origin?: string | null;
     timestamp: number;
   },
@@ -206,6 +215,7 @@ export interface NodeFieldChanges {
   isTask?: boolean;
   completed?: boolean;
   collapsed?: boolean;
+  kind?: NodeKind;
 }
 
 /**
@@ -237,11 +247,21 @@ export function planUpdateNode(
 
   const { changes } = args;
   if (changes.text !== undefined) patchFor(contentId).text = changes.text;
-  if (changes.isTask !== undefined) patchFor(contentId).isTask = changes.isTask;
+  if (changes.isTask !== undefined) {
+    patchFor(contentId).isTask = changes.isTask;
+    patchFor(contentId).kind = null;
+  }
   if (changes.completed !== undefined)
     patchFor(contentId).completed = changes.completed;
   if (changes.collapsed !== undefined)
     patchFor(args.nodeId).collapsed = changes.collapsed;
+  // Kind LAST, so it wins when an agent passes both -- the renderer's tie-break,
+  // normalized here at the trust boundary rather than left for the client to
+  // discover (ADR 0045).
+  if (changes.kind !== undefined) {
+    patchFor(contentId).kind = changes.kind;
+    if (changes.kind === "paragraph") patchFor(contentId).isTask = false;
+  }
 
   const ops: ChangeOp[] = [];
   const touchedIds: string[] = [];
@@ -532,6 +552,7 @@ export function planReparent(
 export interface SubtreeInput {
   readonly text: string;
   readonly isTask?: boolean | null;
+  readonly kind?: NodeKind;
   readonly children?: readonly SubtreeInput[] | null;
 }
 
@@ -601,6 +622,7 @@ function emitForest(
           prevSiblingId: prev,
           text: input.text,
           isTask: input.isTask ?? false,
+          kind: input.kind ?? null,
           origin,
           timestamp,
         }),
@@ -817,6 +839,7 @@ export function planAddToDaily(
     newNodeId: string;
     text: string;
     isTask: boolean;
+    kind?: NodeKind;
     origin?: string | null;
     timestamp: number;
   },
@@ -835,6 +858,7 @@ export function planAddToDaily(
       prevSiblingId: last ? last.id : null,
       text: args.text,
       isTask: args.isTask,
+      kind: args.kind ?? null,
       origin: args.origin,
       timestamp: args.timestamp,
     }),
@@ -942,6 +966,8 @@ export interface OutlineLine {
   text: string;
   isTask: boolean;
   completed: boolean;
+  /** `"paragraph"` when this node is prose rather than a list item (ADR 0045). */
+  kind: NodeKind;
   /** Set when this row is a mirror instance (points at its true source). */
   mirrorOf: string | null;
   /** True when a mirror was not expanded because its source is already an
@@ -990,6 +1016,7 @@ export function flattenSubtree(
       text: redactSpoilers(content.text),
       isTask: content.isTask,
       completed: content.completed,
+      kind: content.kind,
       mirrorOf: node.mirrorOf,
       capped,
     });
@@ -1031,6 +1058,7 @@ export function formatOutlineLines(lines: ReadonlyArray<OutlineLine>): string {
       const indent = "  ".repeat(l.depth);
       const check = l.isTask ? (l.completed ? "[x] " : "[ ] ") : "";
       const meta: string[] = [`id: ${l.id}`];
+      if (l.kind === "paragraph") meta.push("paragraph");
       if (l.mirrorOf) meta.push(`mirror of ${l.mirrorOf}`);
       if (l.capped) meta.push("cycle capped");
       if (!l.isTask && l.completed) meta.push("completed");
@@ -1042,6 +1070,8 @@ export function formatOutlineLines(lines: ReadonlyArray<OutlineLine>): string {
 export interface SearchHit {
   id: string;
   text: string;
+  /** `"paragraph"` when the hit is prose rather than a list item (ADR 0045). */
+  kind: NodeKind;
   /** Ancestor texts from the top of the outline down to (not including) the hit. */
   path: string[];
 }
@@ -1066,6 +1096,7 @@ export function searchNodes(
     hits.push({
       id: node.id,
       text: redactSpoilers(node.text),
+      kind: node.kind,
       path: buildTrail(index, node.id)
         .slice(0, -1)
         .map((n) => redactSpoilers(n.text)),

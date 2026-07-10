@@ -223,6 +223,135 @@ describe("planUpdateNode", () => {
     });
     expect(plan).toBeInstanceOf(NodeNotFound);
   });
+
+  // Kind exclusivity at the trust boundary (ADR 0045): the server normalizes the
+  // pair exactly as the client funnels do, so no agent can persist an illegal one.
+  test("setting kind=paragraph clears isTask", () => {
+    const nodes = [makeNode({ id: "t", text: "job", isTask: true })];
+    const plan = planUpdateNode(index(nodes), {
+      nodeId: "t",
+      changes: { kind: "paragraph" },
+      timestamp: T,
+    });
+    if (plan instanceof Error) throw plan;
+    const node = updated(plan.ops)[0]!;
+    expect(node.kind).toBe("paragraph");
+    expect(node.isTask).toBe(false);
+  });
+
+  test("setting isTask clears kind", () => {
+    const nodes = [makeNode({ id: "p", text: "prose", kind: "paragraph" })];
+    const plan = planUpdateNode(index(nodes), {
+      nodeId: "p",
+      changes: { isTask: true },
+      timestamp: T,
+    });
+    if (plan instanceof Error) throw plan;
+    const node = updated(plan.ops)[0]!;
+    expect(node.isTask).toBe(true);
+    expect(node.kind).toBeNull();
+  });
+
+  test("kind wins when an agent passes both in one call", () => {
+    const nodes = [makeNode({ id: "n", text: "x" })];
+    const plan = planUpdateNode(index(nodes), {
+      nodeId: "n",
+      changes: { isTask: true, kind: "paragraph" },
+      timestamp: T,
+    });
+    if (plan instanceof Error) throw plan;
+    const node = updated(plan.ops)[0]!;
+    expect(node.kind).toBe("paragraph");
+    expect(node.isTask).toBe(false);
+  });
+
+  test("kind=null turns a paragraph back into a plain bullet", () => {
+    const nodes = [makeNode({ id: "p", text: "prose", kind: "paragraph" })];
+    const plan = planUpdateNode(index(nodes), {
+      nodeId: "p",
+      changes: { kind: null },
+      timestamp: T,
+    });
+    if (plan instanceof Error) throw plan;
+    expect(updated(plan.ops)[0]!.kind).toBeNull();
+  });
+});
+
+describe("kind at the write planners", () => {
+  /** A deterministic id factory: n0, n1, n2, ... in emission order. */
+  const idFactory = () => {
+    let i = 0;
+    return () => `n${i++}`;
+  };
+
+  test("planAddNode creates a paragraph, and a paragraph is never a task", () => {
+    const plan = planAddNode(index(fixture()), {
+      id: "new",
+      text: "prose",
+      parentId: null,
+      position: "last",
+      isTask: true,
+      kind: "paragraph",
+      timestamp: T,
+    });
+    if (plan instanceof Error) throw plan;
+    const node = inserted(plan.ops)[0]!;
+    expect(node.kind).toBe("paragraph");
+    expect(node.isTask).toBe(false);
+  });
+
+  test("planAddNode defaults to a bullet", () => {
+    const plan = planAddNode(index(fixture()), {
+      id: "new",
+      text: "x",
+      parentId: null,
+      position: "last",
+      isTask: false,
+      timestamp: T,
+    });
+    if (plan instanceof Error) throw plan;
+    expect(inserted(plan.ops)[0]!.kind).toBeNull();
+  });
+
+  test("planAddSubtree carries kind per node, root and descendant", () => {
+    const plan = planAddSubtree(index(fixture()), {
+      nodes: [
+        {
+          text: "heading",
+          children: [
+            { text: "prose", kind: "paragraph" },
+            { text: "task", isTask: true },
+          ],
+        },
+      ],
+      parentId: null,
+      position: "last",
+      timestamp: T,
+      newId: idFactory(),
+      maxNodes: 10,
+    });
+    if (plan instanceof Error) throw plan;
+    const byText = new Map(inserted(plan.ops).map((n) => [n.text, n]));
+    expect(byText.get("heading")!.kind).toBeNull();
+    expect(byText.get("prose")!.kind).toBe("paragraph");
+    expect(byText.get("task")!.kind).toBeNull();
+    expect(byText.get("task")!.isTask).toBe(true);
+  });
+
+  test("planAddToDaily carries kind onto the captured node", () => {
+    const plan = planAddToDaily(index([]), {
+      dateKey: "2026-07-10",
+      containerId: "c",
+      dayId: "d",
+      newNodeId: "n",
+      text: "prose",
+      isTask: false,
+      kind: "paragraph",
+      timestamp: T,
+    });
+    const node = inserted(plan.ops).find((n) => n.id === "n")!;
+    expect(node.kind).toBe("paragraph");
+  });
 });
 
 describe("planDeleteNode", () => {
@@ -883,6 +1012,28 @@ describe("daily planning", () => {
 });
 
 describe("reads", () => {
+  test("kind reaches the agent through flattenSubtree, formatOutlineLines, and search", () => {
+    const nodes = [
+      makeNode({ id: "a", text: "alpha" }),
+      makeNode({
+        id: "p",
+        text: "alpha prose",
+        parentId: "a",
+        kind: "paragraph",
+      }),
+    ];
+    const result = flattenSubtree(index(nodes), null, {
+      maxDepth: 99,
+      maxNodes: 100,
+    });
+    if (result instanceof Error) throw result;
+    expect(result.lines.map((l) => l.kind)).toEqual([null, "paragraph"]);
+    expect(formatOutlineLines(result.lines)).toBe(
+      ["- alpha (id: a)", "  - alpha prose (id: p, paragraph)"].join("\n"),
+    );
+    expect(searchNodes(index(nodes), "prose", 10)[0]!.kind).toBe("paragraph");
+  });
+
   test("flattenSubtree windows a mirror's source children and caps cycles", () => {
     // m mirrors a; a contains m2, which mirrors a again -> the inner instance
     // must render capped instead of recursing forever.

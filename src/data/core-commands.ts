@@ -2,7 +2,6 @@ import { CopyPlusIcon, CornerUpRightIcon, PilcrowIcon } from "lucide-react";
 
 import type { CommandSpec } from "../plugins/types";
 
-import { isProtected } from "../plugins/registry";
 import { isMirrorsEnabled } from "./flags";
 import { capture } from "./history";
 import { setKind } from "./mutations";
@@ -31,13 +30,18 @@ export const paragraphCommand: CommandSpec = {
   available: (node) => node.kind !== "paragraph",
   run: (id, ctx) => ctx.mutations.onSetKind(id, "paragraph"),
   // Node multi-selection: convert every selected root in ONE batch -- a single
-  // undo step, one DO frame. Copies the todos To-do shape verbatim: skip nodes
-  // already paragraphs (a redundant write) and protected ones (the daily
-  // container keeps its bullet), and no-op cleanly when nothing qualifies.
+  // undo step, one DO frame. The todos To-do shape, minus its `isProtected`
+  // filter: To-do skips protected nodes because ADR 0015 BLOCKS the single-node
+  // `/todo` on them, and the batch must agree with it. Nothing blocks
+  // `/paragraph` (a paragraph is still a plain text node -- none of the four
+  // protected rules are delete, blank, to-do, or complete), so filtering here
+  // would invent a fifth rule that the single-node path doesn't enforce.
+  // Already-paragraph nodes are skipped as a redundant write; an empty run
+  // no-ops cleanly.
   runMany: (ids, ctx) => {
     const targets = ids.filter((id) => {
       const n = ctx.tree.byId.get(id);
-      return !!n && n.kind !== "paragraph" && !isProtected(id);
+      return !!n && n.kind !== "paragraph";
     });
     if (targets.length === 0) return;
     runStructural(() => {
