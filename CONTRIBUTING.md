@@ -120,6 +120,9 @@ Rules of thumb, expanded in `AGENTS.md`:
 - If you change a documented fact (a command, a path, repo structure), fix the
   affected doc (`AGENTS.md` and/or `README.md`) in the same change. See
   _Documentation Freshness_ in `AGENTS.md`.
+- **PR descriptions follow the snapshot template** in
+  `.agents/skills/ft-create-concise-pr/SKILL.md` (agents: run
+  `/ft-create-concise-pr`) — one consistent, skimmable shape for every review.
 
 ## Conventions worth knowing
 
