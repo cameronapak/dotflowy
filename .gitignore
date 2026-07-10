@@ -18,3 +18,6 @@ dist
 .impeccable/
 
 .shipstudio/
+
+# Playwright artifacts
+test-results/
