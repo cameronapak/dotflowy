@@ -37,7 +37,7 @@ Use exactly this template. Omit sections that don't apply. Never add sections.
 
 Rules:
 
-- **Title**: imperative mood, under 70 characters.
+- **Title**: under 70 characters, written for the PR list. Name the outcome in whichever shape reads most naturally: the new reality ("Multi-line paste builds a tree"), the win as the verb ("Speed up caret pickers: maintained tag corpus"), or the thing gained ("Add dark mode"). Then the spoken test: read it aloud — if a teammate would look at you funny ("Mandate snapshot PR descriptions via ft-create-concise-pr"), rewrite it. No tool or skill names. Prefix with `type:` only if the repo's merged PRs do.
 - **Summary**: max 2 sentences. What changed and why. No "This PR..." openers. If the PR closes an issue, add `Fixes #N` on its own line — GitHub auto-closes it on merge.
 - **Changes**: 1–7 bullets, one line each — as few as the change honestly needs. Order: behavior changes first, then logic changes, then refactors/chores. Lead with the outcome, trail the mechanism: "Highlights survive flaky networks (retry with backoff)", not "Added retry logic for highlights". The outcome names who benefits and how — a user keeping their moments, a developer getting faster builds. Never file names; the diff shows those.
 - **Flow**: only when the gate below passes.
@@ -66,3 +66,4 @@ When a PR that already has a snapshot description changes:
 - Don't let the Summary grow.
 - If a change reverses an earlier bullet, replace the bullet rather than appending.
 - Refresh the Test plan if new verification happened. Refresh or delete the diagram if the flow changed.
+- Leave bot-appended blocks (release notes, coverage reports — usually wrapped in HTML comments) untouched. They're not yours.

@@ -43,17 +43,11 @@
       "skillPath": "skills/engineering/domain-modeling/SKILL.md",
       "computedHash": "67343881f5def98487d56243155716110afbcbf22ec92421c882d532b941cb17"
     },
-    "errore": {
-      "source": "remorses/errore",
-      "sourceType": "github",
-      "skillPath": "skills/errore/SKILL.md",
-      "computedHash": "c8c58707dfee91f71d479431d3ab3d64d63f824c22760444e7ae08b6397fd378"
-    },
     "ft-create-concise-pr": {
       "source": "cameronapak/jstack",
       "sourceType": "github",
       "skillPath": "skills/ft-create-concise-pr/SKILL.md",
-      "computedHash": "122e980e1374016860ad585caf3215662460f87d2f3320dd4bdf179822677832"
+      "computedHash": "5e3c024fa89149469b82ceb73d2d4c1e2c952d33469654e6f4016be13ef8bd75"
     },
     "grill-with-docs": {
       "source": "mattpocock/skills",
@@ -77,7 +71,7 @@
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/engineering/setup-matt-pocock-skills/SKILL.md",
-      "computedHash": "400da4521ed701c99e8824ae7b71c7859632ee91481b3715890036cf8aec6857"
+      "computedHash": "4850d7286f7176178963ff53aeb928b241854785a0d8b5d8fe6d285190188651"
     },
     "shadcn": {
       "source": "shadcn/ui",
@@ -88,8 +82,8 @@
     "wayfinder": {
       "source": "mattpocock/skills",
       "sourceType": "github",
-      "skillPath": "skills/in-progress/wayfinder/SKILL.md",
-      "computedHash": "9c40fce711bf19beb5e1a71db905eef2b57dbb233ba62ede1978e19568472023"
+      "skillPath": "skills/engineering/wayfinder/SKILL.md",
+      "computedHash": "3eb72cd9abdfaa00e10fa69f0b4410ff8639a6cf4eb9e5d187b289c3aa9be2fc"
     }
   }
 }
