@@ -32,6 +32,18 @@ bun run setup    # copies .dev.vars, generates BETTER_AUTH_SECRET, applies local
 the local invite code is **`dev-invite`**, the code to use when creating a
 local account by hand. No codes = signup closed.
 
+### Worktrees provision themselves
+
+Worktrees created by Claude Code (`claude --worktree`, or an agent running with
+`isolation: "worktree"`) skip the two commands above — a `WorktreeCreate` hook
+(`.claude/hooks/create-worktree.sh`, wired up in `.claude/settings.json`) runs
+them for you, plus copies the gitignored `.dev.vars` over from the base repo. A
+fresh worktree can run `typecheck`, `lint`, and `test` immediately.
+
+The one thing it can't do is `bun run seed:user`, which signs up through the
+live Worker and so needs `bun run dev` already running. Seed the worktree's D1
+by hand the first time you want to sign in there.
+
 ## Running locally
 
 Dotflowy is a static SPA that talks to a Cloudflare Worker over `/api/*`, so the
