@@ -5,8 +5,20 @@ The ubiquitous language for dotflowy's outline domain. A glossary, not a spec �
 ## Language
 
 **Node**:
-A single bullet in the outline. Owns its text and, via child pointers, its subtree.
+A single item in the outline. Owns its text and, via child pointers, its subtree. Every node has exactly one Kind; "bullet" names one kind of node, not the node itself.
 _Avoid_: item, bullet (when precision matters), block
+
+**Kind**:
+Which of the mutually exclusive presentations a node has: bullet, task, or paragraph. Exactly one — converting between kinds is allowed, combining is not. Independent of Completed.
+_Avoid_: type, mode, style
+
+**Paragraph**:
+A node that reads as prose rather than a list item — a pilcrow (¶) stands where a bullet shows its dot, carrying the same zoom and drag affordance. Full tree citizen: children, collapse, zoom, complete.
+_Avoid_: text node, block, prose node
+
+**Completed**:
+Done-status on any node, regardless of kind: "I'm done with it, mentally archiving it, but it still exists." Not deletion, and not task-only — a checkbox is a Kind; done-ness is state.
+_Avoid_: done, checked, archived
 
 **Mirror**:
 A node that, instead of owning its own text and children, windows another node's. Editing a mirror edits the underlying content, so every place it appears updates. Has its own location and view state, but not its own content.

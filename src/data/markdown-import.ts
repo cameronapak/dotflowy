@@ -22,7 +22,7 @@
 // nothing else. See ADR 0044; do not add a markdown dependency here.
 
 import { OPML_APP_MAX_NODES } from "./opml-import";
-import { childrenOf, type TreeIndex } from "./tree";
+import { childrenOf, type NodeKind, type TreeIndex } from "./tree";
 
 /** The paste ceiling, shared with the OPML app import (ADR 0044: one number,
  *  one place). Over it, the paste is rejected outright -- nothing inserted. */
@@ -40,6 +40,9 @@ export interface MdNode {
   text: string;
   isTask: boolean;
   completed: boolean;
+  /** `"paragraph"` for a marker-less line, `null` for everything with a marker
+   *  (list, task, heading, fence). See `stripLine` and ADR 0044's amendment. */
+  kind: NodeKind;
   children: MdNode[];
 }
 
@@ -97,8 +100,13 @@ function indentWidth(line: string): number {
   return width;
 }
 
-function leaf(text: string, isTask = false, completed = false): MdNode {
-  return { text, isTask, completed, children: [] };
+function leaf(
+  text: string,
+  isTask = false,
+  completed = false,
+  kind: NodeKind = null,
+): MdNode {
+  return { text, isTask, completed, kind, children: [] };
 }
 
 /**
@@ -106,10 +114,11 @@ function leaf(text: string, isTask = false, completed = false): MdNode {
  *
  * Two rules a reader will want up front, both deliberate divergences:
  *
- *  - **One line, one bullet.** CommonMark joins consecutive non-blank lines into
+ *  - **One line, one node.** CommonMark joins consecutive non-blank lines into
  *    a paragraph; we do not. Honoring paragraph continuation reads nicely on
  *    hard-wrapped prose and then fuses a pasted poem, name list, or stack trace
- *    into a single bullet. The outliner's atomic unit is the line.
+ *    into a single bullet. The outliner's atomic unit is the line. A marker-less
+ *    line becomes a PARAGRAPH node (ADR 0045); marker lines parse as before.
  *  - **Headings drive nesting.** `## Background` is a CHILD of the preceding
  *    `# Intro`; body and lists under a heading nest beneath it. A document's
  *    heading hierarchy IS an outline in another notation, and flattening it to
@@ -117,7 +126,9 @@ function leaf(text: string, isTask = false, completed = false): MdNode {
  *    Heading depth sets a floor; list indentation nests inside that floor.
  *
  * `literal` (the `Mod+Shift+V` hatch) skips the grammar entirely: every line
- * becomes one top-level bullet, verbatim. No marker stripping, no depth.
+ * becomes one top-level bullet, verbatim. No marker stripping, no depth -- and
+ * no kind inference either: no interpretation means no paragraphs. Fenced raw
+ * mode is untouched for the same reason.
  */
 export function parseMarkdownForest(
   source: string,
@@ -242,15 +253,48 @@ function pushListLine(
  * `- - foo`; one strip yields `- foo`, which is correct. Recurse and the
  * content is gone. Likewise `- # foo` keeps the text `# foo` -- the heading
  * grammar only fires at the start of a line's content, before any marker.
+ *
+ * A line with NO list marker is a **paragraph** (ADR 0045 / ADR 0044's
+ * amendment): markdown's own paragraph syntax is a bare line, so that is what a
+ * bare line maps to. A blockquote whose `>` run was just stripped is marker-less
+ * by this rule and lands as a paragraph too.
  */
-function stripLine(content: string): [string, boolean, boolean] {
+function stripLine(content: string): [string, boolean, boolean, NodeKind] {
   const quoted = content.replace(BLOCKQUOTE_RE, "");
   const marker = LIST_MARKER_RE.exec(quoted);
-  if (!marker) return [quoted, false, false];
+  if (!marker) return [quoted, false, false, "paragraph"];
   const rest = quoted.slice(marker[0].length);
   const task = TASK_RE.exec(rest);
-  if (!task) return [rest, false, false];
-  return [rest.slice(task[0].length), true, task[1]!.toLowerCase() === "x"];
+  if (!task) return [rest, false, false, null];
+  return [
+    rest.slice(task[0].length),
+    true,
+    task[1]!.toLowerCase() === "x",
+    null,
+  ];
+}
+
+/**
+ * Whether `text` survives being emitted as a BARE line -- i.e. whether the
+ * parser above would read `INDENT * d + text` back as a paragraph carrying
+ * exactly `text`. The exporter's guard (ADR 0044's amendment): when this is
+ * false, the paragraph falls back to the `- ` prefix and its kind degrades to
+ * bullet, keeping every character and staying a fixed point.
+ *
+ * The four ways a bare line fails to come back unchanged, in the order the
+ * parser would hit them:
+ *
+ *  - **Empty** -- a blank line is a separator, so the node would vanish.
+ *  - **Leading whitespace** -- `content = line.trimStart()` eats it.
+ *  - **A fence delimiter** -- it would open raw mode and suppress the grammar.
+ *  - **A heading, blockquote, or list marker** -- `stripLine`/`HEADING_RE` would
+ *    consume it, so the text comes back short (and, for a heading, as a bullet).
+ */
+export function paragraphRoundTrips(text: string): boolean {
+  if (text === "" || text.trimStart() !== text) return false;
+  if (FENCE_RE.test(text) || HEADING_RE.test(text)) return false;
+  const [stripped, , , kind] = stripLine(text);
+  return kind === "paragraph" && stripped === text;
 }
 
 /** Total nodes in the forest -- what the ceiling counts. */
@@ -279,11 +323,21 @@ export interface MdPasteInsert {
   text: string;
   isTask: boolean;
   completed: boolean;
+  kind: NodeKind;
 }
 
 export interface MdPastePlan {
-  /** Fields to write onto the node the caret was in. */
-  anchor: { text: string; isTask: boolean | null; completed: boolean | null };
+  /** Fields to write onto the node the caret was in. `null` on `isTask` /
+   *  `completed` / `kind` means "leave it alone" -- a paste mid-sentence never
+   *  changes what the anchor IS. `kind` can only ever be `"paragraph"` here, so
+   *  the overload is unambiguous: a paste never un-paragraphs a node, exactly as
+   *  a plain line never un-tasks one. */
+  anchor: {
+    text: string;
+    isTask: boolean | null;
+    completed: boolean | null;
+    kind: NodeKind;
+  };
   /** New nodes, depth-first pre-order, sibling chain wired by construction. */
   inserts: MdPasteInsert[];
   /** Existing nodes whose `prevSiblingId` now points at a pasted node. */
@@ -357,6 +411,7 @@ export function planMarkdownPaste(args: {
         text: node.text,
         isTask: node.isTask,
         completed: node.completed,
+        kind: node.kind,
       });
       ids.push(id);
       if (node.children.length) emit(node.children, id, null);
@@ -411,6 +466,10 @@ export function planMarkdownPaste(args: {
       // when it truly leads the bullet. A plain line never un-tasks.
       isTask: head === "" && first.isTask ? true : null,
       completed: head === "" && first.isTask ? first.completed : null,
+      // Kind inherits under the same head-is-empty rule (ADR 0044's amendment):
+      // pasting prose into an empty bullet makes it a paragraph; pasting it
+      // mid-sentence leaves the bullet a bullet.
+      kind: head === "" ? first.kind : null,
     },
     inserts,
     repoints,

@@ -634,12 +634,33 @@ h2 span.protected-lock {
 }
 
 /*
+ * A paragraph's glyph (ADR 0045): the pilcrow standing exactly where the dot
+ * would, inside the same 16px `.bullet` button. The button carries the optical
+ * alignment (`.outline-row .bullet` margin-top) and the flex centering, so the
+ * pilcrow's box center lands on the dot's -- the K constant needs no companion.
+ * Colors mirror `.bullet-dot`'s three states, in `color` rather than
+ * `background-color` since the glyph is a `currentColor` SVG.
+ */
+.bullet-pilcrow {
+  @apply flex items-center justify-center text-accent-foreground/70;
+  transition: color 0.15s ease;
+}
+
+.bullet:hover .bullet-pilcrow {
+  @apply text-primary;
+}
+
+/*
  * Inactive bullet dim. When a bullet in the outline holds focus, every OTHER
  * row's dot is dimmed (lighter/muted color) so the active/focused bullet stands
  * out clearly. Pure CSS. Row hover restores strength.
  */
 .outline-list:focus-within .outline-row:not(:focus-within) .bullet-dot {
   @apply bg-muted-foreground/50;
+}
+
+.outline-list:focus-within .outline-row:not(:focus-within) .bullet-pilcrow {
+  @apply text-muted-foreground/50;
 }
 
 /*
@@ -684,6 +705,13 @@ h2 span.protected-lock {
   .bullet-dot {
     width: 9px;
     height: 9px;
+  }
+  /* The dot grows with the box on coarse; the pilcrow grows with it too, so the
+     two kinds keep the same visual weight side by side. The box stays centered,
+     so the coarse K above still lands both glyphs on the text optical center. */
+  .bullet-pilcrow svg {
+    width: 17px;
+    height: 17px;
   }
 
   /*
@@ -791,13 +819,63 @@ h2 span.protected-lock {
   margin-top: calc(var(--reading-line-box) / 2 - 6.25px);
 }
 
+/* A zoomed paragraph's pilcrow (ADR 0045). Deliberately inert -- there is no
+   zoom target on the title -- and sized to the same 20px box as the title
+   checkbox so it inherits that control's proven optical nudge below. */
+.title-pilcrow {
+  @apply flex size-5 items-center justify-center text-muted-foreground;
+  pointer-events: none;
+}
+
 h2.zoomed-title {
   & button.mirror-badge {
     @apply mt-2.5;
   }
 
-  & .checkbox {
+  & .checkbox,
+  & .title-pilcrow {
     @apply mt-2;
+  }
+}
+
+/* Unlike every other before-text decoration, the title pilcrow does NOT float:
+   a paragraph is prose, so all of its lines must share one left edge rather
+   than the first one alone being shortened. It's a HANGING mark, outdented into
+   the left margin -- the wrapped-title-flows-under-its-icons behavior that float
+   buys (see `.row-body > :not(.node-text)`) is exactly wrong here.
+
+   NARROW (the base rule): the content column's padding collapses to 16px, which
+   is less than the mark's own 20px box -- a hanging mark would clip off the
+   viewport's left edge. So the mark sits INSIDE a gutter carved from the text
+   column, centered on the bullet column (8px lead + an 8px half-glyph). */
+h2.zoomed-title:has(.title-pilcrow) {
+  position: relative;
+  padding-inline-start: 30px;
+}
+
+/* Overrides the float and the `position: relative` further down; needs the
+   `.row-body >` child selector to out-specify the latter. */
+h2.zoomed-title .row-body > .title-pilcrow {
+  position: absolute;
+  inset-inline-start: 6px;
+  float: none;
+  margin-right: 0;
+}
+
+/* WIDE: there's margin to hang into, so the mark outdents out of the text
+   column entirely. The title then keeps the 8px lead every zoomed title has --
+   its text sits on the same column as a bullet title's, and as the dot, the
+   child glyphs, and the `+` below it -- so changing the zoom root's kind never
+   shifts the title sideways. The 20px box ends flush with the title's border
+   box, making that 8px lead the gap between the mark and the text it marks.
+   Breakpoint: below `md` the padding is too tight for the outdent (measured). */
+@media (min-width: 768px) {
+  h2.zoomed-title:has(.title-pilcrow) {
+    padding-inline-start: 8px;
+  }
+
+  h2.zoomed-title .row-body > .title-pilcrow {
+    inset-inline-start: -20px;
   }
 }
 

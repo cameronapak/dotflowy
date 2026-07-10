@@ -17,7 +17,9 @@ it emits `node.text` verbatim and only adds the bullet prefix + indentation.
 
 - **Uniform bullets, never headings.** Root and descendants all serialize identically: `- text`,
   tasks as `- [ ] ` / `- [x] `, 2 spaces of indent per depth level, the export root(s) included as
-  the top bullets, an empty node as a bare `- `. _Why not promote the root to an `#` heading?_ It
+  the top bullets, an empty node as a bare `- `. _(Amended with ADR 0045: a **paragraph** node
+  serializes as its text with no `- ` prefix — markdown's own paragraph syntax — guarded and
+  round-tripped per ADR 0044's amendment. "Never headings" stands.)_ _Why not promote the root to an `#` heading?_ It
   would be lossy (a task root `- [ ] Ship it` can't be a heading) and non-uniform (depth would
   change a node's syntax). Bullets match the outline's actual shape and round-trip.
 - **Full fidelity — nothing dropped.** The whole subtree is emitted regardless of `collapsed`,

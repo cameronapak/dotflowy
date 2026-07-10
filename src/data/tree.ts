@@ -4,7 +4,7 @@ import { parseNodeLinks } from "./node-links";
 import { orderSiblings } from "./sibling-chain";
 import { parseTags, type TagEntry } from "./tags";
 
-export type { Node } from "./schema";
+export type { Node, NodeKind } from "./schema";
 
 /**
  * In-memory index over the flat node list.
@@ -342,6 +342,8 @@ export function makeNode(partial: Partial<Node> & Pick<Node, "id">): Node {
     // Human by default: every client-side create leaves this null. The MCP
     // planners override it with the agent's harness name (outline-ops.ts).
     origin: null,
+    // A bullet (or a task, if `isTask`) unless a caller asks for a paragraph.
+    kind: null,
     ...partial,
   };
 }

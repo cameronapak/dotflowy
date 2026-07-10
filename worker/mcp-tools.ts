@@ -235,6 +235,15 @@ const guardContainerUpdate = (
 const optional = <S extends Schema.Top>(schema: S) =>
   Schema.optional(Schema.NullOr(schema));
 
+/** Node kind (ADR 0045). The only value is `"paragraph"`; omit it (or pass null)
+ *  for a plain bullet or, with `isTask`, a to-do. `kind` overrides `isTask`. */
+const kindField = optional(
+  Schema.Literal("paragraph").annotate({
+    description:
+      "Create as a paragraph (prose, drawn with a pilcrow instead of a bullet) rather than a list item. Mutually exclusive with isTask, which it overrides.",
+  }),
+);
+
 const GetOutlineInput = Schema.Struct({
   nodeId: optional(
     Schema.String.annotate({
@@ -272,6 +281,7 @@ const AddNodeInput = Schema.Struct({
       description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
+  kind: kindField,
 });
 
 /** One node in an `add_subtree` forest — recursive via `Schema.suspend`, which
@@ -285,6 +295,7 @@ const SubtreeNodeInput: Schema.Codec<SubtreeInput> = Schema.Struct({
       description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
+  kind: kindField,
   children: optional(
     Schema.Array(
       Schema.suspend((): Schema.Codec<SubtreeInput> => SubtreeNodeInput),
@@ -324,7 +335,8 @@ const UpdateNodeInput = Schema.Struct({
   text: optional(Schema.String.annotate({ description: "New bullet text." })),
   isTask: optional(
     Schema.Boolean.annotate({
-      description: "Turn the checkbox on (true) or off (false).",
+      description:
+        "Turn the checkbox on (true) or off (false). Either value also turns a paragraph back into a list item — a node is exactly one of bullet, to-do, or paragraph.",
     }),
   ),
   completed: optional(
@@ -335,6 +347,15 @@ const UpdateNodeInput = Schema.Struct({
   collapsed: optional(
     Schema.Boolean.annotate({
       description: "Collapse (true) or expand (false) the bullet.",
+    }),
+  ),
+  // Two explicit words rather than `"paragraph" | null`: an omitted key and an
+  // explicit null both decode to "no change" everywhere else in this schema set,
+  // so null cannot also mean "make it a bullet". `"bullet"` says it out loud.
+  kind: optional(
+    Schema.Literals(["paragraph", "bullet"]).annotate({
+      description:
+        'Turn the node into a paragraph ("paragraph") or back into a plain list item ("bullet"). Overrides isTask in the same call.',
     }),
   ),
 });
@@ -379,6 +400,7 @@ const AddToTodayInput = Schema.Struct({
       description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
+  kind: kindField,
   date: dateField,
 });
 
@@ -580,7 +602,9 @@ export const tools: ReadonlyArray<ToolDef> = [
         const body = hits
           .map((h) => {
             const path = h.path.length ? ` — in: ${h.path.join(" > ")}` : "";
-            return `- "${h.text}" (id: ${h.id})${path}`;
+            const meta =
+              h.kind === "paragraph" ? `id: ${h.id}, paragraph` : `id: ${h.id}`;
+            return `- "${h.text}" (${meta})${path}`;
           })
           .join("\n");
         return hits.length >= MAX_SEARCH_HITS
@@ -591,7 +615,7 @@ export const tools: ReadonlyArray<ToolDef> = [
   {
     name: "add_node",
     description:
-      "Add a new bullet to the outline — under a parent node or at the top level. Returns the new node id.",
+      'Add a new bullet to the outline — under a parent node or at the top level. Pass kind: "paragraph" for prose. Returns the new node id.',
     input: AddNodeInput,
     readOnly: false,
     handle: (input: typeof AddNodeInput.Type, store, origin) =>
@@ -605,6 +629,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             parentId: input.parentId ?? null,
             position: input.position ?? "last",
             isTask: input.isTask ?? false,
+            kind: input.kind ?? null,
             origin,
             timestamp,
           }),
@@ -701,12 +726,19 @@ export const tools: ReadonlyArray<ToolDef> = [
           ...(input.isTask != null ? { isTask: input.isTask } : {}),
           ...(input.completed != null ? { completed: input.completed } : {}),
           ...(input.collapsed != null ? { collapsed: input.collapsed } : {}),
+          // `"bullet"` is the explicit reset; the stored field is nullable.
+          ...(input.kind != null
+            ? {
+                kind:
+                  input.kind === "paragraph" ? ("paragraph" as const) : null,
+              }
+            : {}),
         };
         if (!Object.keys(changes).length) {
           return yield* Effect.fail(
             new ToolError({
               reason:
-                "nothing to change — pass at least one of text, isTask, completed, collapsed",
+                "nothing to change — pass at least one of text, isTask, completed, collapsed, kind",
             }),
           );
         }
@@ -800,6 +832,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           newNodeId: createId(),
           text: input.text,
           isTask: input.isTask ?? false,
+          kind: input.kind ?? null,
           origin,
           timestamp,
         });

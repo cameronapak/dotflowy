@@ -1,8 +1,9 @@
 // Shared OPML export core (ADR 0037): a TreeIndex scope -> one OPML string in
 // the Workflowy dialect (`text` with escaped inline HTML, `_complete`
 // present-iff-true, `&#10;` newlines) plus dotflowy's invented extensions
-// (`_task`, and the mirror dialect: `id` on in-scope mirror sources,
-// `_mirror="<sourceId>"` on mirror roots over a fully resolved duplicate).
+// (`_task`, `_kind="paragraph"`, and the mirror dialect: `id` on in-scope mirror
+// sources, `_mirror="<sourceId>"` on mirror roots over a fully resolved
+// duplicate).
 // Both surfaces — the app's export action and the MCP `export_opml` tool —
 // serialize through THIS module, the wire-schema.ts shared-leaf precedent.
 //
@@ -285,6 +286,9 @@ function emitNode(
   let attrs = "";
   if (content.completed) attrs += ' _complete="true"';
   if (content.isTask) attrs += ' _task="true"';
+  // ADR 0045. Present only for a paragraph, so an absent `_kind` means bullet:
+  // foreign OPML and every export that predates this attribute import unchanged.
+  if (content.kind === "paragraph") attrs += ' _kind="paragraph"';
   if (!inExpansion) {
     if (state.sourcesNeedingId.has(id)) attrs += ` id="${escapeXmlAttr(id)}"`;
     if (isMirror) attrs += ` _mirror="${escapeXmlAttr(contentId)}"`;

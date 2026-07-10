@@ -1,6 +1,7 @@
 import { nodesCollection } from "./collection";
 import {
   type Node,
+  type NodeKind,
   type TreeIndex,
   buildTreeIndex,
   childrenOf,
@@ -31,7 +32,9 @@ function update(nodeId: string, patch: Partial<Node>) {
  * new last child of `parentId` when afterId is null.
  *
  * `isTask` lets the caller carry the node type forward so pressing Enter at
- * the end of a task creates another task (not a plain bullet).
+ * the end of a task creates another task (not a plain bullet). `kind` carries
+ * paragraph-ness forward the same way (ADR 0045), so Enter in a paragraph makes
+ * another paragraph and a mid-text split leaves two of them.
  *
  * `text` seeds the new node's text -- used by the Enter-mid-bullet split, where
  * everything right of the caret moves into this new sibling.
@@ -44,6 +47,7 @@ export function insertSibling(
   afterId: string | null,
   isTask = false,
   text = "",
+  kind: NodeKind = null,
 ): string {
   const id = createId();
   const prevSiblingId = afterId;
@@ -59,7 +63,7 @@ export function insertSibling(
   }
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text, isTask }),
+    makeNode({ id, parentId, prevSiblingId, text, isTask, kind }),
   );
 
   // Repoint the follower at the new node.
@@ -87,11 +91,12 @@ export function insertChildAtStart(
   isTask = false,
   text = "",
   id = createId(),
+  kind: NodeKind = null,
 ): string {
   const head = childrenOf(index, parentId)[0] ?? null;
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId: null, text, isTask }),
+    makeNode({ id, parentId, prevSiblingId: null, text, isTask, kind }),
   );
 
   // The old head now follows the new node.
@@ -747,9 +752,29 @@ export function toggleCompleted(nodeId: string, completed: boolean) {
  * Make a bullet a task (gains a checkbox) or a plain bullet. `isTask` is
  * purely a display choice and is independent of `completed`: a plain bullet
  * keeps whatever done-status it had. See ADR 0001.
+ *
+ * Clearing `kind` is the ONE half of the kind exclusivity invariant this funnel
+ * owns (ADR 0045): bullet | task | paragraph are mutually exclusive, and the
+ * two-field encoding cannot say so, so every make-it-a-task gesture (`/todo`,
+ * the `[]` autoformat) and every back-to-a-plain-bullet gesture (`/bullet`,
+ * Backspace on the checkbox) writes both fields in one PATCH. Redundant on a
+ * node that was already `kind: null` — and that's the point: it can't be
+ * forgotten at a call site.
  */
 export function setIsTask(nodeId: string, isTask: boolean) {
-  update(nodeId, { isTask });
+  update(nodeId, { isTask, kind: null });
+}
+
+/**
+ * Make a node a paragraph (a pilcrow where the dot would be) or, with `null`,
+ * a plain bullet. The other half of the exclusivity invariant: a paragraph is
+ * never a task, so this clears `isTask`. See ADR 0045.
+ *
+ * A FIELD edit, like `setIsTask` — a single-field PATCH, already atomic. Never
+ * wrap it in `runStructural`.
+ */
+export function setKind(nodeId: string, kind: NodeKind) {
+  update(nodeId, { kind, isTask: false });
 }
 
 export function toggleCollapsed(nodeId: string, collapsed: boolean) {

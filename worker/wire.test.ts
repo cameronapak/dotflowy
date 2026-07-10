@@ -37,6 +37,7 @@ const node = (id: string): Node => ({
   createdAt: 1,
   updatedAt: 1,
   origin: null,
+  kind: null,
 });
 
 type AnyBody = Schema.Codec<unknown, unknown, never, never>;

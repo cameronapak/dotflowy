@@ -24,6 +24,7 @@ import {
 } from "../data/tree-store";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
 import { hasFoldingToken } from "../plugins/registry";
+import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
 import { flashRow } from "./flash-node";
 import {
@@ -417,11 +418,12 @@ function RowChrome({
           onClick={() => commands.onBulletClick(content.id)}
           title="Zoom in"
         >
-          <span
-            className="bullet-dot"
-            data-completed={content.completed}
-            data-has-children={hasChildren}
-            data-collapsed={effectiveCollapsed}
+          {/* Dot or pilcrow, per the CONTENT's kind (ADR 0045). */}
+          <BulletGlyph
+            kind={content.kind}
+            completed={content.completed}
+            hasChildren={hasChildren}
+            collapsed={effectiveCollapsed}
           />
         </button>
         {/* Block cell so wrapped text flows UNDER the slot icons: the icons

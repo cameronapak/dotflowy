@@ -23,7 +23,7 @@ import type { ChangeOp } from "./wire-schema";
 import { isValidDateKey } from "./date-links";
 import { buildHighlightRun, type HighlightColor } from "./highlight";
 import { encodeUrlForMarkdown, sanitizeLinkLabel } from "./links";
-import { makeNode } from "./tree";
+import { makeNode, type NodeKind } from "./tree";
 
 // --- Typed failures -----------------------------------------------------------
 
@@ -91,6 +91,9 @@ export interface OpmlImportNode {
   text: string;
   completed: boolean;
   isTask: boolean;
+  /** `"paragraph"` from a `_kind="paragraph"` attribute (ADR 0045); null (a
+   *  bullet-or-task) for any other value, and for foreign OPML that has none. */
+  kind: NodeKind;
   /** The document's `id` attribute (the dotflowy mirror dialect), if any. */
   opmlId: string | null;
   /** An in-document `id` this node mirrors (`_mirror` resolved against the
@@ -485,12 +488,13 @@ function convertEl(
 // --- <outline> walk -----------------------------------------------------------------
 
 /** The complete known attribute set: Workflowy's three + the dotflowy export
- *  dialect's three (ADR 0037 mirror persistence + `_task`). */
+ *  dialect's four (ADR 0037 mirror persistence + `_task`, ADR 0045 `_kind`). */
 const KNOWN_ATTRS = new Set([
   "text",
   "_note",
   "_complete",
   "_task",
+  "_kind",
   "id",
   "_mirror",
 ]);
@@ -573,7 +577,15 @@ function convertOutline(el: XmlElement, state: MapState): OpmlImportNode {
   }
 
   const completed = el.attributes["_complete"] === "true";
-  const isTask = el.attributes["_task"] === "true";
+  // Absent (foreign OPML, and every export that predates ADR 0045) = a bullet.
+  // An unrecognized value reads as a bullet too, never as a decode failure.
+  const kind: NodeKind =
+    el.attributes["_kind"] === "paragraph" ? "paragraph" : null;
+  // Kind exclusivity (ADR 0045), enforced here because OPML is a trust boundary
+  // like the MCP one: a hand-written or hostile document can carry BOTH
+  // `_task="true"` and `_kind="paragraph"`, and `planOpmlImport` would persist
+  // the illegal pair. `kind` wins, the same tie-break the renderer applies.
+  const isTask = kind === null && el.attributes["_task"] === "true";
   const opmlId = el.attributes["id"] || null;
 
   // Mirror re-link (ADR 0037): a `_mirror` referencing an in-document `id`
@@ -588,6 +600,7 @@ function convertOutline(el: XmlElement, state: MapState): OpmlImportNode {
       text,
       completed,
       isTask,
+      kind,
       opmlId,
       mirrorOfOpmlId: mirrorRef,
       children: [],
@@ -606,6 +619,7 @@ function convertOutline(el: XmlElement, state: MapState): OpmlImportNode {
     text,
     completed,
     isTask,
+    kind,
     opmlId,
     mirrorOfOpmlId: null,
     children: [...prepend, ...realChildren],
@@ -617,6 +631,9 @@ function plainNode(text: string): OpmlImportNode {
     text,
     completed: false,
     isTask: false,
+    // A `_note` / continuation line becomes a plain bullet, never a paragraph:
+    // the attribute belongs to the outline element, not to its spilled lines.
+    kind: null,
     opmlId: null,
     mirrorOfOpmlId: null,
     children: [],
@@ -797,6 +814,7 @@ export function planOpmlImport(
           text: node.text,
           isTask: node.isTask,
           completed: node.completed,
+          kind: node.kind,
           mirrorOf,
           origin: args.origin ?? null,
           createdAt: args.timestamp,

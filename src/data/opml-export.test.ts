@@ -53,6 +53,16 @@ describe("document shape", () => {
     expect(out).toContain('<outline text="alpha">');
   });
 
+  it("emits _kind only for a paragraph (ADR 0045)", () => {
+    const withPara = buildTreeIndex([
+      makeNode({ id: "a", text: "alpha" }),
+      makeNode({ id: "p", parentId: "a", text: "prose", kind: "paragraph" }),
+    ]);
+    const opml = exportOpml(withPara, null, { title: "t" });
+    expect(opml).toContain('<outline _kind="paragraph" text="prose" />');
+    expect(opml).toContain('<outline text="alpha">');
+  });
+
   it("drops view state and provenance: no collapsed/bookmarked/origin/timestamps", () => {
     for (const forbidden of [
       "collapsed",

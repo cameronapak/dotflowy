@@ -1,49 +1,19 @@
-import { CopyPlusIcon, CornerUpRightIcon } from "lucide-react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
 import type { Node } from "../data/schema";
 import type { CommandSpec, PluginContext } from "../plugins/types";
 
-import { isMirrorsEnabled } from "../data/flags";
+import { CORE_COMMANDS } from "../data/core-commands";
 import { commandSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { SlashMenuList } from "./slash-menu-list";
 
-/**
- * The core's own slash commands. Move is structural (reparent any node), not a
- * feature concept, so it stays core; feature commands (`/todo`, `/bullet`) are
- * the todos plugin's, registered via Seam C. The whole list is plugin commands
- * (array order) THEN core, so the contextual type-change commands lead and Move
- * trails -- preserving the pre-plugin palette order.
- */
-const CORE_COMMANDS: CommandSpec[] = [
-  {
-    id: "move",
-    label: "Move",
-    description: "Move under another node",
-    icon: CornerUpRightIcon,
-    keywords: ["move", "reparent", "under", "into", "relocate", "home"],
-    available: () => true,
-    run: (id, ctx) => ctx.mutations.onRequestMove(id),
-  },
-  // Mirror is structural like Move (it relinks the tree), so it stays core too.
-  // Hidden until the mirrors feature flag is on (ADR 0022) -- a mirror-free
-  // build never offers it. Opens the SAME destination picker, in mirror mode.
-  {
-    id: "mirror",
-    label: "Mirror to",
-    description: "Show a live copy under another node",
-    icon: CopyPlusIcon,
-    keywords: ["mirror", "synced", "instance", "alias", "reference", "clone"],
-    available: () => isMirrorsEnabled(),
-    run: (id, ctx) => ctx.mutations.onRequestMirror(id),
-  },
-];
-
-/** The composed command list driving the `/` palette: plugin commands (Seam C),
- *  then the core's. Detection/filtering/keyboard/rendering below stay generic. */
+/** The composed command list driving the `/` palette: plugin commands (Seam C,
+ *  array order), then the core's (`data/core-commands.ts`) -- so the contextual
+ *  type-change commands lead and the destination pickers trail, preserving the
+ *  pre-plugin palette order. Detection/filtering/keyboard/rendering stay generic. */
 const COMMANDS: CommandSpec[] = [...commandSpecs, ...CORE_COMMANDS];
 
 function filterCommands(node: Node, query: string): CommandSpec[] {

@@ -371,24 +371,31 @@ function healMirrorOrphans(nodes: Node[]): void {
 
 /**
  * Backfill nullable-required fields added after some rows were persisted (ADR
- * 0022's `mirrorOf`, and node `origin`). The per-user DO adds each column with a
- * NULL default in its migrator, so a healthy DO always sends them; this guards
- * the brief pre-migration window and any mock/snapshot that predates the field
- * (e.g. the e2e Worker mock). Done inline rather than via the post-commit
- * sibling-chain heal because the value must be present BEFORE the schema-typed
- * collection write (both fields are required, no default — ADR 0003), and it
- * allocates a new object only when something is actually absent (the never-taken
- * branch once every DO has migrated). */
+ * 0022's `mirrorOf`, node `origin`, and ADR 0045's `kind`). The per-user DO adds
+ * each column with a NULL default in its migrator, so a healthy DO always sends
+ * them; this guards the brief pre-migration window and any mock/snapshot that
+ * predates the field (e.g. the e2e Worker mock). Done inline rather than via the
+ * post-commit sibling-chain heal because the value must be present BEFORE the
+ * schema-typed collection write (every one is required, no default — ADR 0003),
+ * and it allocates a new object only when something is actually absent (the
+ * never-taken branch once every DO has migrated). */
 function withNodeDefaults(n: Node): Node {
   // The wire/DO type says these are always present, so read them through a loose
   // cast: a row persisted before a field existed (or the e2e mock) may omit it
   // at runtime even though the type can't express that.
-  const loose = n as { mirrorOf?: unknown; origin?: unknown };
-  if (loose.mirrorOf !== undefined && loose.origin !== undefined) return n;
+  const loose = n as { mirrorOf?: unknown; origin?: unknown; kind?: unknown };
+  if (
+    loose.mirrorOf !== undefined &&
+    loose.origin !== undefined &&
+    loose.kind !== undefined
+  ) {
+    return n;
+  }
   return {
     ...n,
     mirrorOf: loose.mirrorOf === undefined ? null : n.mirrorOf,
     origin: loose.origin === undefined ? null : n.origin,
+    kind: loose.kind === undefined ? null : n.kind,
   };
 }
 

@@ -170,6 +170,31 @@ describe("MCP transport", () => {
     expect(getOutline.annotations.readOnlyHint).toBe(true);
   });
 
+  test("tools/list publishes the paragraph `kind` on every write tool", async () => {
+    const { store } = makeStore();
+    const json = (await (await rpc(store, "tools/list")).json()) as any;
+    const tool = (name: string) =>
+      json.result.tools.find((t: any) => t.name === name);
+
+    // Creation tools take `kind: "paragraph"`; none of them REQUIRE it.
+    for (const name of ["add_node", "add_to_today"]) {
+      expect(JSON.stringify(tool(name).inputSchema.properties.kind)).toContain(
+        "paragraph",
+      );
+      expect(tool(name).inputSchema.required).not.toContain("kind");
+    }
+    // The recursive `$def` carries it too, so a whole forest can land as prose.
+    expect(
+      JSON.stringify(tool("add_subtree").inputSchema.$defs.SubtreeNode),
+    ).toContain("paragraph");
+    // update_node names the reset explicitly rather than overloading null.
+    const updateKind = JSON.stringify(
+      tool("update_node").inputSchema.properties.kind,
+    );
+    expect(updateKind).toContain("paragraph");
+    expect(updateKind).toContain("bullet");
+  });
+
   test("unknown method is -32601, unknown tool and bad args are -32602", async () => {
     const { store } = makeStore();
     expect(

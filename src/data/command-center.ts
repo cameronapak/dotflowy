@@ -15,10 +15,12 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import type { CommandSpec } from "../plugins/types";
 import type { NodeActionBridge } from "./command-bridge";
 import type { Node, TreeIndex } from "./tree";
 
 import { commandSpecs } from "../plugins/registry";
+import { paragraphCommand } from "./core-commands";
 import { isMirrorsEnabled } from "./flags";
 import { childrenOf } from "./tree";
 import { getViewRootId } from "./view-state";
@@ -218,18 +220,27 @@ export function buildNodeVerbActions(
 }
 
 /**
- * The plugin-`CommandSpec` adapter: whole-node commands that opt IN to the
- * palette by NOT being `caretScoped` (ADR 0034 -- emphasis wrap is excluded, it
- * needs the live caret the overlay steals). Gated by each spec's own
- * `available(node)`. `run` is bound to the target id + the live PluginContext.
+ * The `CommandSpec` adapter: whole-node commands that opt IN to the palette by
+ * NOT being `caretScoped` (ADR 0034 -- emphasis wrap is excluded, it needs the
+ * live caret the overlay steals). Gated by each spec's own `available(node)`.
+ * `run` is bound to the target id + the live PluginContext.
+ *
+ * Plugin specs, then core's `/paragraph` (ADR 0045). Move/Mirror/Zoom are core
+ * specs too, but they already appear above as node VERBS, so only the paragraph
+ * spec crosses over -- no row is doubled.
  */
+const PALETTE_SPECS: readonly CommandSpec[] = [
+  ...commandSpecs,
+  paragraphCommand,
+];
+
 export function buildCommandSpecActions(
   node: Node,
   bridge: NodeActionBridge,
 ): CommandCenterAction[] {
   const { getCtx } = bridge;
   const out: CommandCenterAction[] = [];
-  for (const spec of commandSpecs) {
+  for (const spec of PALETTE_SPECS) {
     if (spec.caretScoped) continue;
     if (!spec.available(node)) continue;
     out.push({

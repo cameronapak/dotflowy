@@ -1,14 +1,26 @@
 import type { Node } from "./schema";
 
 import { bibleRefsToMarkdownLinks } from "../plugins/route-bible/bible";
+import { paragraphRoundTrips } from "./markdown-import";
 import { childrenOf, type TreeIndex } from "./tree";
 
 /** Two spaces per depth level (CommonMark-friendly, readable). */
 const INDENT = "  ";
 
-/** The bullet marker for a node: a GFM task checkbox when it's a task, else a
- *  plain bullet. */
-function prefixFor(node: Node): string {
+/**
+ * The line prefix for a node: a GFM task checkbox when it's a task, nothing at
+ * all for a paragraph, else a plain bullet.
+ *
+ * A paragraph emits markdown's own paragraph syntax -- a bare line -- but ONLY
+ * when that line reads back as the same paragraph (ADR 0044's amendment).
+ * `- foo`, `# foo`, an empty paragraph, and anything the block grammar would
+ * consume fall back to the `- ` prefix: every character kept, kind degrades to
+ * bullet, idempotent. `text` is the line as it will actually be emitted (post
+ * bible-ref projection), not `node.text` -- the guard has to see what the parser
+ * will see. Kind outranks `isTask` here as it does in the renderer.
+ */
+function prefixFor(node: Node, text: string): string {
+  if (node.kind === "paragraph") return paragraphRoundTrips(text) ? "" : "- ";
   if (node.isTask) return node.completed ? "- [x] " : "- [ ] ";
   return "- ";
 }
@@ -35,11 +47,8 @@ function emit(
   // plain reference text and derive the URL at render time, so export projects
   // them to portable markdown links. Empty text yields a bare `- ` bullet,
   // preserving structure. See ADR 0017.
-  lines.push(
-    INDENT.repeat(depth) +
-      prefixFor(content) +
-      bibleRefsToMarkdownLinks(content.text),
-  );
+  const text = bibleRefsToMarkdownLinks(content.text);
+  lines.push(INDENT.repeat(depth) + prefixFor(content, text) + text);
   // A mirror nested inside its own source's subtree would recurse forever: its
   // text is emitted once (above) and the walk does not descend. `path` is the
   // ANCESTOR chain, not a global seen-set -- one source mirrored into two
@@ -55,10 +64,10 @@ function emit(
 }
 
 /**
- * Serialize one or more subtrees to a nested markdown bullet list. Each id in
- * `rootIds` becomes a top-level bullet; its full subtree is emitted beneath it,
- * indented two spaces per level. Uniform bullets (never headings) so every node
- * serializes identically and task roots survive as `- [ ]`. Pure and
+ * Serialize one or more subtrees to a nested markdown list. Each id in `rootIds`
+ * becomes a top-level line; its full subtree is emitted beneath it, indented two
+ * spaces per level. Never headings, so depth never changes a node's syntax: a
+ * bullet is `- `, a task `- [ ] `, a paragraph a bare line (ADR 0045). Pure and
  * view-agnostic -- its only inputs are the index and the roots. See ADR 0017.
  *
  * The inverse is `markdown-import.ts`; the pair is held to
