@@ -8,97 +8,97 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as NodeIdRouteImport } from "./routes/$nodeId";
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as AdminWaitlistRouteImport } from "./routes/admin.waitlist";
-import { Route as IndexRouteImport } from "./routes/index";
-import { Route as TodayRouteImport } from "./routes/today";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as TodayRouteImport } from './routes/today'
+import { Route as NodeIdRouteImport } from './routes/$nodeId'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
 
 const TodayRoute = TodayRouteImport.update({
-  id: "/today",
-  path: "/today",
+  id: '/today',
+  path: '/today',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const NodeIdRoute = NodeIdRouteImport.update({
-  id: "/$nodeId",
-  path: "/$nodeId",
+  id: '/$nodeId',
+  path: '/$nodeId',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AdminWaitlistRoute = AdminWaitlistRouteImport.update({
-  id: "/admin/waitlist",
-  path: "/admin/waitlist",
+  id: '/admin/waitlist',
+  path: '/admin/waitlist',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/$nodeId": typeof NodeIdRoute;
-  "/today": typeof TodayRoute;
-  "/admin/waitlist": typeof AdminWaitlistRoute;
+  '/': typeof IndexRoute
+  '/$nodeId': typeof NodeIdRoute
+  '/today': typeof TodayRoute
+  '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/$nodeId": typeof NodeIdRoute;
-  "/today": typeof TodayRoute;
-  "/admin/waitlist": typeof AdminWaitlistRoute;
+  '/': typeof IndexRoute
+  '/$nodeId': typeof NodeIdRoute
+  '/today': typeof TodayRoute
+  '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/$nodeId": typeof NodeIdRoute;
-  "/today": typeof TodayRoute;
-  "/admin/waitlist": typeof AdminWaitlistRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/$nodeId': typeof NodeIdRoute
+  '/today': typeof TodayRoute
+  '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/$nodeId" | "/today" | "/admin/waitlist";
-  fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/$nodeId" | "/today" | "/admin/waitlist";
-  id: "__root__" | "/" | "/$nodeId" | "/today" | "/admin/waitlist";
-  fileRoutesById: FileRoutesById;
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths: '/' | '/$nodeId' | '/today' | '/admin/waitlist'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/$nodeId' | '/today' | '/admin/waitlist'
+  id: '__root__' | '/' | '/$nodeId' | '/today' | '/admin/waitlist'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  NodeIdRoute: typeof NodeIdRoute;
-  TodayRoute: typeof TodayRoute;
-  AdminWaitlistRoute: typeof AdminWaitlistRoute;
+  IndexRoute: typeof IndexRoute
+  NodeIdRoute: typeof NodeIdRoute
+  TodayRoute: typeof TodayRoute
+  AdminWaitlistRoute: typeof AdminWaitlistRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/today": {
-      id: "/today";
-      path: "/today";
-      fullPath: "/today";
-      preLoaderRoute: typeof TodayRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/$nodeId": {
-      id: "/$nodeId";
-      path: "/$nodeId";
-      fullPath: "/$nodeId";
-      preLoaderRoute: typeof NodeIdRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/admin/waitlist": {
-      id: "/admin/waitlist";
-      path: "/admin/waitlist";
-      fullPath: "/admin/waitlist";
-      preLoaderRoute: typeof AdminWaitlistRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/today': {
+      id: '/today'
+      path: '/today'
+      fullPath: '/today'
+      preLoaderRoute: typeof TodayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$nodeId': {
+      id: '/$nodeId'
+      path: '/$nodeId'
+      fullPath: '/$nodeId'
+      preLoaderRoute: typeof NodeIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/waitlist': {
+      id: '/admin/waitlist'
+      path: '/admin/waitlist'
+      fullPath: '/admin/waitlist'
+      preLoaderRoute: typeof AdminWaitlistRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,17 +107,16 @@ const rootRouteChildren: RootRouteChildren = {
   NodeIdRoute: NodeIdRoute,
   TodayRoute: TodayRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()
 
-import type { createStart } from "@tanstack/react-start";
-
-import type { getRouter } from "./router.tsx";
-declare module "@tanstack/react-start" {
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
   interface Register {
-    ssr: true;
-    router: Awaited<ReturnType<typeof getRouter>>;
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
   }
 }
