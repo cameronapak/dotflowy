@@ -149,20 +149,31 @@ export default definePlugin({
     },
   ],
 
-  // Seam I: typing `[]` or `[ ]` at the very start of a plain bullet turns it
-  // into a task and strips the marker (mirrors the Backspace-on-the-checkbox
-  // demotion, which stays core for now). The core writes the stripped text and
-  // places the caret; this only decides the rewrite + the type flip.
+  // Seam I: typing `[]`, `[ ]` or `[x]` at the very start of a plain bullet
+  // turns it into a task and strips the marker (mirrors the
+  // Backspace-on-the-checkbox demotion, which stays core for now). The core
+  // writes the stripped text and places the caret; this only decides the
+  // rewrite + the type flip.
+  //
+  // The `[x]` spelling exists so the SAME markdown a paste understands is also
+  // typeable: todos speak markdown at every boundary a user or agent can touch
+  // (paste, Copy as Markdown, OPML, MCP), even though the `isTask`/`completed`
+  // FIELDS remain the storage (ADR 0044: markdown is the interchange format for
+  // node state, never its storage).
   input: {
     autoformat: ({ text, node }) => {
       if (node.isTask) return null;
-      const marker = text.match(/^\[ ?\] ?/);
+      const marker = text.match(/^\[( |x|X)?\] ?/);
       if (!marker) return null;
+      const done = marker[1]?.toLowerCase() === "x";
       return {
         text: text.slice(marker[0].length),
         // The stripped marker sat at the start, so the caret lands there.
         caret: 0,
-        before: (ctx) => ctx.mutations.onSetTask(node.id, true),
+        before: (ctx) => {
+          ctx.mutations.onSetTask(node.id, true);
+          if (done) ctx.mutations.onToggleCompleted(node.id, true);
+        },
       };
     },
   },

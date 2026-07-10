@@ -25,6 +25,12 @@ it emits `node.text` verbatim and only adds the bullet prefix + indentation.
   can't see was omitted. "Export what I see" is a later opt-in (a checkbox), not the default.
 - **Anchor = the zoom root** (`getViewRootId()`), read at click time — the header is contextual to
   the current zoom view. At home it's every top-level node.
+- **Mirrors resolve to their content.** A mirror row owns no text or children (`mirrorOf` points at
+  the source), so the serializer emits the **source's** text and subtree (`contentId = mirrorOf ?? id`,
+  with a visited-set guard against a mirror inside its own source's subtree). Markdown can't carry
+  mirror-ness, so a mirror exports as a copy — [ADR 0044](./0044-markdown-paste.md)'s round-trip
+  exception 3. (Amended with ADR 0044; before this the exporter read the mirror row raw and emitted
+  an empty bullet, silently dropping the windowed content.)
 
 **Don't:** switch the root to a heading; make it respect `showCompleted`/filters by default;
 re-render tokens or reconstruct display HTML (emit raw `node.text`); reach for a bespoke stored

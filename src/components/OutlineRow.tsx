@@ -41,11 +41,8 @@ import {
 } from "./paste";
 import { healProtectedText } from "./protected-text";
 import { ProtectedLock } from "./protection";
-import {
-  focusTextFromRowTap,
-  placeCaretAtEnd,
-  placeCaretAtStart,
-} from "./caret-place";
+import { focusTextFromRowTap } from "./caret-place";
+import { applyPendingCaret } from "./pending-caret";
 import { flashRow } from "./flash-node";
 import type { NodeCommands } from "./OutlineNode";
 
@@ -307,8 +304,7 @@ function RowChrome({
     if (!el) return;
     if (pendingFocus.current === rowKey) {
       el.focus();
-      if (pendingFocusAtStart.current) placeCaretAtStart(el);
-      else placeCaretAtEnd(el);
+      applyPendingCaret(el, rowKey, pendingFocusAtStart.current);
       pendingFocus.current = null;
       pendingFocusAtStart.current = false;
     }
@@ -491,8 +487,28 @@ function RowChrome({
             }}
             onPaste={(e) => {
               const el = e.currentTarget;
-              const next = pasteIntoBullet(e, el, content.id, pluginCtx, (t) =>
-                commands.onTextChange(content.id, t),
+              const next = pasteIntoBullet(
+                e,
+                el,
+                content.id,
+                pluginCtx,
+                (t) => commands.onTextChange(content.id, t),
+                // A multi-line paste builds a tree here (ADR 0044). `content.id`
+                // is already mirror-resolved, so a paste into a mirror creates
+                // children on the SOURCE, never on the instance (ADR 0022).
+                {
+                  placement: "sibling",
+                  activeKey: rowKey,
+                  rowEl: el.closest(".outline-row"),
+                  focus: {
+                    setPendingFocus: commands.setPendingFocus,
+                    placeCaretHere: (text, offset) => {
+                      decorate(el, text, offset, true);
+                      setCaretOffset(el, offset);
+                      syncedRef.current = text;
+                    },
+                  },
+                },
               );
               if (next !== null) syncedRef.current = next;
             }}

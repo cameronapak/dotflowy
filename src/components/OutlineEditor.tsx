@@ -41,16 +41,17 @@ import { isMirrorsEnabled, isMobileBar, isVirtualized } from "../data/flags";
 import { Backlinks } from "./backlinks";
 import { MirrorBadge } from "./mirror-chrome";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
+import { focusKeyFor } from "../data/focus-key";
 import { OutlineRow } from "./OutlineRow";
 import { OutlineLoading } from "./OutlineLoading";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
 import {
   getViewIsHidden,
   getViewRootId,
+  useSyncViewFilter,
   useSyncViewState,
 } from "../data/view-state";
 import {
-  buildTreeIndex,
   childrenOf,
   countSubtreeNodes,
   type Node,
@@ -61,12 +62,9 @@ import {
   openDeleteConfirm,
 } from "./delete-confirm-opener";
 import {
-  buildVisibleRows,
   findVisibleNeighbor,
-  focusKeyAfterEdit,
   instanceIdForKey,
 } from "../data/visible-order";
-import { nodesCollection } from "../data/collection";
 import { clearSelection } from "../data/selection-state";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
 import {
@@ -102,14 +100,21 @@ import {
   getSelectedAtom,
   readSource,
   revealLinkAtCaret,
+  setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
 import { hasLink } from "../data/links";
 import {
   copySourceSelection,
   cutSourceSelection,
+  installLiteralPasteArm,
   pasteIntoBullet,
 } from "./paste";
+import {
+  applyPendingCaret,
+  clearPendingCaretOffset,
+  setPendingCaretOffset,
+} from "./pending-caret";
 import {
   blocksCaret,
   commandSpecs,
@@ -256,6 +261,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // the tree (ADR 0014). The write runs in an effect, so nothing writes a ref
   // during render. Render reads below use `rootId`/`isHidden` directly.
   useSyncViewState(rootId, isHidden);
+
+  // Mod+Shift+V arms the literal paste (ADR 0044). A window listener, not three
+  // element ones: bullets AND the zoomed title paste, and the chord has to be
+  // seen on its keydown -- the `paste` event that follows carries no modifiers.
+  useEffect(() => installLiteralPasteArm(), []);
 
   // Focus plumbing: the id->contentEditable registry, the post-render focus/
   // flash pass, and undo/redo (which restore focus where the action left it).
@@ -528,6 +538,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // live; with no filter its snapshot stays a stable null. Render-time only,
   // never mutates a node (ADR 0015).
   const filter = useViewFilter(viewCtx, isHidden);
+  // Mirrored for event-time reads: a structural paste asks, after it lands,
+  // whether the bullets it created are actually on screen (ADR 0044).
+  useSyncViewFilter(filter);
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
   // Top-level visible child ids, read as a stable slice (useVisibleChildIds
@@ -733,6 +746,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   isPivot={pivotId === zoomedNode.id}
                   registerRef={registerRef}
                   getCtx={pluginCtx}
+                  setPendingFocus={commands.setPendingFocus}
                   onTextChange={(text) => setText(zoomedNode.id, text)}
                   onAddChild={() =>
                     runStructural(() => {
@@ -1026,8 +1040,7 @@ function FocusPass({
       const el = refs.get(fid);
       if (el) {
         el.focus();
-        if (pendingFocusAtStart.current) placeCaretAtStart(el);
-        else placeCaretAtEnd(el);
+        applyPendingCaret(el, fid, pendingFocusAtStart.current);
         pendingFocus.current = null;
         pendingFocusAtStart.current = false;
       } else if (!scrollRowIntoView(fid)) {
@@ -1036,6 +1049,7 @@ function FocusPass({
         // it set -- OutlineRow claims it in its mount effect once scrolled in.
         pendingFocus.current = null;
         pendingFocusAtStart.current = false;
+        clearPendingCaretOffset();
       }
     }
     const flid = pendingFlash.current;
@@ -1235,32 +1249,6 @@ function useZoomNavigation({
   return { navigateZoom, pivotId };
 }
 
-/**
- * The render key to focus after a structural edit, re-derived from the LIVE post-
- * edit render walk so the focus key can never drift from what's on screen (ADR
- * 0022, Stage 2c). `instanceId` is the new/moved node; `activeKey` is the row the
- * user was editing — we return the matching instance's key under the same mirror
- * anchor, so a child added to a source lands under the mirror you were in (not the
- * source's far-away copy).
- *
- * Off the flag (the 99% path) a node id is unique, so we return it directly and
- * skip the rebuild entirely. With the flag on we build a fresh index from
- * `nodesCollection.toArray` — synchronously current after `runStructural`, the
- * same technique the structural invariant check uses — rather than
- * `getTreeIndex()`, whose change-notify can lag the optimistic apply.
- */
-function focusKeyFor(instanceId: string, activeKey: string): string {
-  if (!isMirrorsEnabled()) return instanceId;
-  const index = buildTreeIndex(nodesCollection.toArray as Node[]);
-  const rows = buildVisibleRows(
-    index,
-    getViewRootId(),
-    getViewIsHidden(),
-    null,
-    true,
-  );
-  return focusKeyAfterEdit(rows, instanceId, activeKey) ?? instanceId;
-}
 
 /**
  * Facade for the mobile actions bar (ADR 0030): the existing per-bullet commands
@@ -1738,6 +1726,12 @@ function useNodeCommands({
           if (consumeClick()) return;
           navigateZoom(id, id);
         },
+
+        setPendingFocus: (key, offset) => {
+          pendingFocus.current = key;
+          pendingFocusAtStart.current = false;
+          setPendingCaretOffset(key, offset);
+        },
       };
     },
     // commands MUST keep stable identity (a prop on every memoized OutlineNode,
@@ -1763,6 +1757,7 @@ function ZoomedTitle({
   onTextChange,
   onAddChild,
   onArrowDown,
+  setPendingFocus,
 }: {
   node: Node;
   isPivot: boolean;
@@ -1773,6 +1768,8 @@ function ZoomedTitle({
   onTextChange: (text: string) => void;
   onAddChild: () => void;
   onArrowDown: () => void;
+  /** Hand the caret to the seam bullet a structural paste created (ADR 0044). */
+  setPendingFocus: (key: string, offset: number) => void;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
   // Mirror OutlineNode's live inline-`code` decoration so a backtick run in the
@@ -1896,7 +1893,22 @@ function ZoomedTitle({
           }}
           onPaste={(e) => {
             const el = e.currentTarget;
-            const next = pasteIntoBullet(e, el, node.id, getCtx, onTextChange);
+            const next = pasteIntoBullet(e, el, node.id, getCtx, onTextChange, {
+              // THE exception (ADR 0044): the title's siblings live outside the
+              // view, so inserting one would make it vanish. Remaining pasted
+              // roots become the title's prepended children instead.
+              placement: "child-prepend",
+              activeKey: node.id,
+              rowEl: el.closest(".zoomed-title"),
+              focus: {
+                setPendingFocus,
+                placeCaretHere: (text, offset) => {
+                  decorate(el, text, offset, true);
+                  setCaretOffset(el, offset);
+                  syncedRef.current = text;
+                },
+              },
+            });
             if (next !== null) syncedRef.current = next;
           }}
           // Copy/cut hand back the markdown SOURCE (a folded link's rendered

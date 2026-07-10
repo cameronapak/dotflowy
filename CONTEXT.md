@@ -13,8 +13,12 @@ A node that, instead of owning its own text and children, windows another node's
 _Avoid_: copy, clone, alias, synced block, transclusion
 
 **Source**:
-The node a mirror points at — the one that actually owns the text and children. Every mirror has exactly one source; a node with no `mirrorOf` is its own source.
+The node a mirror points at — the one that actually owns the text and children. Every mirror has exactly one source; a node with no `mirrorOf` is its own source. Not to be confused with Text source, a different thing the code also calls "source".
 _Avoid_: original, master, target
+
+**Text source**:
+A node's text as the author wrote it: raw markdown. What the editor renders is derived from it — a link folds to a chip, `**bold**` to a styled run — but the text source is what is stored, copied, exported, and parsed. Distinct from Source (the mirror target); the code says "source" for both, and `readSource` means this one.
+_Avoid_: raw text, markup, content
 
 **Instance**:
 Any one rendering of a node's content at a location. The source is an instance; each mirror is an instance. Instances are equal for editing — there is no read-only one.
@@ -31,6 +35,14 @@ _Avoid_: reference (too generic), citation
 **Render path**:
 The chain of node ids from the current view root down to a rendered row. A row's identity (its key, its focus/caret/drag address) — distinct from the node id, because the same node can render at more than one path once mirrors exist.
 _Avoid_: trail (that's the ancestor breadcrumb, a different walk)
+
+**Structural paste**:
+A paste that lands as nodes rather than as text — the pasted markdown's block structure becomes real bullets with real nesting. Contrast with an ordinary paste, which splices text into one node at the caret. Multi-line is structural; single-line never is.
+_Avoid_: smart paste, markdown paste (that names the input, not what happens)
+
+**Literal paste**:
+A paste told to transform nothing. Multi-line still lands as nodes — one line, one bullet — but no grammar runs: markers stay, depth is not inferred. Single-line splices in as plain text with no plugin rewriting. An escape from interpretation, not from structure.
+_Avoid_: plain-text paste (names the clipboard lane, not the behavior), paste without formatting
 
 **Spoiler**:
 A run of a node's text the author marks as sensitive — `||hidden||` in the source. To a human (in the editor, in a copy, in an export) it is merely *hidden until revealed*: shown as an opaque bar until the caret enters it. To an AI agent over MCP it is **redacted** — the interior never crosses the boundary; the agent sees `[spoiler]` and cannot search inside it. The same mark, treated differently by audience. Not access control (the agent holds the user's own credentials) — a context-hygiene default that keeps flagged text out of an LLM's window.
