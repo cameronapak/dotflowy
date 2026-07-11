@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { hardResetToRoot, signIn, signUp } from "../lib/auth-client";
+import { hardReset, signIn, signUp } from "../lib/auth-client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -86,12 +86,16 @@ export function AuthScreen() {
         resumeAuthorize();
         return;
       } else {
-        // Hard-navigate on success (hardResetToRoot's doc has the full why).
-        // This covers what the sign-out reload can't: a session that EXPIRES
-        // flips the gate here with no reload, and signing in as a different
-        // user would leak the prior account's data. Keeps `busy` true — the
-        // page is navigating away.
-        hardResetToRoot();
+        // Hard-navigate on success (hardReset's doc has the full why). This
+        // covers what the sign-out reload can't: a session that EXPIRES flips
+        // the gate here with no reload, and signing in as a different user
+        // would leak the prior account's data. Sign-IN keeps the current URL
+        // (a shared /$nodeId deep link, or your own spot after expiry — a
+        // foreign id degrades to the missing-node view); sign-UP resets to "/"
+        // (a brand-new outline has no nodes, the welcome seed beats a
+        // guaranteed-missing node). Keeps `busy` true — the page is navigating
+        // away.
+        hardReset(isSignup ? "/" : window.location.href);
         return;
       }
     } catch {

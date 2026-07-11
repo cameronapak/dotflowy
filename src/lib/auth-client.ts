@@ -14,19 +14,21 @@ const authClient = createAuthClient();
 export const { signIn, signUp, useSession } = authClient;
 
 /**
- * Hard-navigate to "/". The data layer (nodesCollection, the kv
- * side-collections, tree store, undo history) is a set of module singletons and
- * the /api/sync WebSocket authenticates only at upgrade, so an SPA-internal auth
- * swap keeps the previous account's outline in memory and its socket open —
- * signing back in leaks that outline into the new account (cross-account
- * contamination). A full navigation is the only honest teardown: it destroys
- * every singleton and the socket. `replace` (not `assign`) keeps the dead auth
- * state out of history; "/" (not reload) drops the previous account's /$nodeId
- * URL. Every auth boundary (sign-out here, sign-in/sign-up in auth-screen.tsx,
- * the account-switch guard in __root.tsx's AuthGate) funnels through this.
+ * Hard-navigate. The data layer (nodesCollection, the kv side-collections,
+ * tree store, undo history) is a set of module singletons and the /api/sync
+ * WebSocket authenticates only at upgrade, so an SPA-internal auth swap keeps
+ * the previous account's outline in memory and its socket open — signing back
+ * in leaks that outline into the new account (cross-account contamination). A
+ * full navigation is the only honest teardown: it destroys every singleton and
+ * the socket. `replace` (not `assign`) keeps the dead auth state out of
+ * history. The default "/" target drops the previous account's /$nodeId URL —
+ * right whenever the NEXT occupant is a different account (sign-out, the
+ * account-switch guard in __root.tsx's AuthGate, sign-up); sign-in passes the
+ * current URL instead so deep links and expiry re-auth keep their place. Every
+ * auth boundary funnels through this.
  */
-export function hardResetToRoot() {
-  window.location.replace("/");
+export function hardReset(target: string = "/") {
+  window.location.replace(target);
 }
 
 /**
@@ -38,7 +40,7 @@ export function hardResetToRoot() {
 export function signOutAndReload() {
   void authClient.signOut({
     fetchOptions: {
-      onSuccess: hardResetToRoot,
+      onSuccess: () => hardReset(),
       onError: () => {
         toast.error("Sign out failed. Check your connection and try again.");
       },

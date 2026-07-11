@@ -21,7 +21,7 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
-import { hardResetToRoot, useSession } from "../lib/auth-client";
+import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
   LEGACY_THEME_KEY,
@@ -137,7 +137,7 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
   if (firstUserId === null) {
     firstUserId = session.user.id;
   } else if (session.user.id !== firstUserId) {
-    hardResetToRoot();
+    hardReset();
     return null;
   }
   return <>{children}</>;
