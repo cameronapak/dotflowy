@@ -71,3 +71,7 @@ _Avoid_: keyword, flag, modifier
 **Match**:
 A node the active filter selects. A match shows undimmed with its subtree reachable as normal; its ancestors render dimmed, as context that says where the match lives rather than as results themselves.
 _Avoid_: result, hit
+
+**Saved query**:
+A filter query kept for reuse, with a name. Saves the question, not the place — running it filters whatever view you're in. The pin's twin is the Bookmark: a bookmark pins a place, a saved query pins a question.
+_Avoid_: saved search (a filter stays put; see Filter), smart view
