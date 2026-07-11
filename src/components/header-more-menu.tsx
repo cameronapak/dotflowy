@@ -32,7 +32,7 @@ import { runStructural } from "../data/structural";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
-import { signOut } from "../lib/auth-client";
+import { signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import { openOpmlImport } from "./opml-import-opener";
@@ -345,7 +345,10 @@ export function HeaderMoreMenu() {
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem variant="destructive" onClick={() => signOut()}>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => signOutAndReload()}
+          >
             <LogOutIcon />
             Sign out
           </DropdownMenuItem>

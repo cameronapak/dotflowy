@@ -26,7 +26,7 @@ import { openFeedbackReport } from "../data/feedback";
 import { capture } from "../data/history";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
-import { signOut } from "../lib/auth-client";
+import { signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
@@ -247,7 +247,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["sign out", "logout", "log out", "exit"],
         run: () => {
-          void signOut();
+          signOutAndReload();
         },
       },
     );

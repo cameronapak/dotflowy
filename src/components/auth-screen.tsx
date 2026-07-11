@@ -78,8 +78,16 @@ export function AuthScreen() {
       } else if (oauthQuery) {
         resumeAuthorize();
         return;
+      } else {
+        // Hard-navigate on success — the SPA-internal gate swap would leave the
+        // previous occupant's outline singletons and /api/sync socket alive (see
+        // signOutAndReload in ../lib/auth-client). This covers what sign-out
+        // reload can't: a session that EXPIRES flips the gate here with no
+        // reload, and signing in as a different user would leak the prior
+        // account's data. Keeps `busy` true — the page is navigating away.
+        window.location.replace("/");
+        return;
       }
-      // On success the session store updates and the gate swaps in the editor.
     } catch {
       if (oauthQuery) {
         // The after-hook redirect can throw inside fetch (mixed content /

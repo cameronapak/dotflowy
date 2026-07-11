@@ -185,11 +185,11 @@ src/
     index.tsx         # the outline at the top level (Home)
     $nodeId.tsx       # the same outline zoomed into one bullet
   lib/
-    auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOut)
+    auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOut / signOutAndReload)
     utils.ts          # cn() and small helpers
   components/
     auth-screen.tsx     # login / signup screen (shown by the root AuthGate when signed out)
-    sign-out-button.tsx # header sign-out control
+    # sign out lives in the header More menu (header-more-menu.tsx) and the Cmd+K command center (command-actions.tsx)
     OutlineEditor.tsx   # reads tree, focus + command dispatch, the zoom view
     OutlineNode.tsx     # one bullet + its subtree (memoized, per-node store subscription)
     inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
