@@ -22,8 +22,19 @@ jobs:
         run: bun run fmt:check
       - name: Lint
         run: bun run lint
-      - name: Typecheck
+      - name: Typecheck (app)
         run: bun run typecheck
+      # The gate whose absence started this: a red `typecheck:worker` sat on
+      # main unnoticed because nothing ran it. The worker has its own tsconfig
+      # (workers-types, no DOM lib), so the app typecheck can't cover it.
+      - name: Typecheck (worker)
+        run: bun run typecheck:worker
+      - name: Typecheck (tests)
+        run: bun run typecheck:test
+      - name: Unit tests
+        run: bun run test
+      - name: Build
+        run: bun run build
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.
@@ -32,3 +43,21 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           bunx changeset status --since="origin/$GITHUB_BASE_REF"
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps chromium
+      # `--workers=2` caps parallelism to dodge the one documented flake: the
+      # daily-notes protected-container tests contend under high parallelism
+      # (clean at 2). `retries: 1` in playwright.config.ts is the backstop.
+      # The suite boots its own Vite server (playwright.config.ts webServer) and
+      # mocks /api, so no wrangler / D1 / secrets are needed in CI.
+      - name: E2E (chromium)
+        run: bun run test:e2e --workers=2

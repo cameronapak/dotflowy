@@ -21,8 +21,11 @@ const TREE: SeedNode[] = [
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
+// The mark is a SparkleIcon carrying `data-origin`; there is no dedicated
+// class. It sits inside a Radix tooltip trigger, so the human-readable
+// attribution is `aria-label`, not a native `title`.
 const mark = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .provenance-mark`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row [data-origin]`);
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
@@ -43,7 +46,7 @@ test.describe("provenance marker", () => {
     const agentMark = mark(page, "ai");
     await expect(agentMark).toBeVisible();
     await expect(agentMark).toHaveAttribute("data-origin", "Claude");
-    await expect(agentMark).toHaveAttribute("title", /Created by Claude/);
+    await expect(agentMark).toHaveAttribute("aria-label", /Created by Claude/);
   });
 
   test("the mark rides the zoom into the page title (Seam F title slot)", async ({
@@ -55,7 +58,7 @@ test.describe("provenance marker", () => {
     await page.locator(`li[data-node-id="ai"] .bullet`).first().click();
 
     // The zoomed title (registered under the rootId) shows the same mark.
-    const titleMark = page.locator(`.zoomed-title .provenance-mark`);
+    const titleMark = page.locator(`.zoomed-title [data-origin]`);
     await expect(titleMark).toBeVisible();
     await expect(titleMark).toHaveAttribute("data-origin", "Claude");
   });
