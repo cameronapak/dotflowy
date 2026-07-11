@@ -74,9 +74,12 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
           : { height: open ? height : 0, opacity: open ? 1 : 0 }
       }
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="overflow-hidden"
+      className="overflow-hidden bg-background"
       aria-hidden={!open}
     >
+      {/* bg-background under the translucent tint: the band is sticky, so a
+          see-through background lets scrolled bullets bleed into the filter
+          row. The tint keeps its look but now composites opaque. */}
       <div
         ref={shellRef}
         className={cn("bg-muted/30", open && "border-b border-border")}
