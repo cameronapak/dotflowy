@@ -44,6 +44,10 @@ test.describe("/delete slash command", () => {
     // Siblings survive; the sibling chain still renders both.
     await expect(text(page, "alpha")).toBeVisible();
     await expect(text(page, "charlie")).toBeVisible();
+    // Focus lands on the visible row directly ABOVE the deleted one (Workflowy
+    // backspace behavior). Nothing is collapsed, so that's alpha's last visible
+    // child `alpha-2`, NOT `alpha` itself.
+    await expect(text(page, "alpha-2")).toBeFocused();
   });
 
   test("removes the node's whole subtree in one shot", async ({ page }) => {
@@ -57,6 +61,9 @@ test.describe("/delete slash command", () => {
     await expect(row(page, "alpha-2")).toHaveCount(0);
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(text(page, "bravo")).toBeVisible();
+    // Nothing sits above the first top-level node, so focus falls back to
+    // removeNode's structural pick -- the next sibling, `bravo`.
+    await expect(text(page, "bravo")).toBeFocused();
   });
 
   // The zoomed title is the second render path (its own keymap), so the slash
