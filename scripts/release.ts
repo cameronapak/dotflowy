@@ -116,7 +116,10 @@ async function version() {
 
   await $`git add -A`;
   await $`git commit -m ${`chore(release): v${after}`}`;
-  await $`git tag ${`v${after}`}`;
+  // Annotated (`-a`), not lightweight, so `git push --follow-tags` actually
+  // pushes it — lightweight tags are skipped, which strands `release:publish`
+  // (`gh release create --verify-tag`) with no tag on the remote.
+  await $`git tag -a ${`v${after}`} -m ${`v${after}`}`;
 
   console.log(`
 release: v${before} -> v${after}  (${entries} entr${entries === 1 ? "y" : "ies"})
