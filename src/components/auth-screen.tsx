@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { signIn, signUp } from "../lib/auth-client";
+import { hardReset, signIn, signUp } from "../lib/auth-client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -66,9 +66,16 @@ export function AuthScreen() {
         password,
         inviteCode: inviteCode.trim(),
       };
+      // disableSignal: every success branch below leaves via a top-level
+      // navigation, but Better Auth otherwise fires its session signal ~10ms
+      // after resolve — the /get-session refetch can flip the AuthGate and
+      // mount the whole editor (collections, /api/sync socket) against the
+      // previous occupant's still-live singletons before the navigation
+      // commits. Errors never fire the signal, so that path is unaffected.
+      const fetchOptions = { disableSignal: true };
       const res = isSignup
-        ? await signUp.email(signupBody)
-        : await signIn.email({ email, password });
+        ? await signUp.email({ ...signupBody, fetchOptions })
+        : await signIn.email({ email, password, fetchOptions });
       // A real credential/validation failure (>= 400) shows the error; on an
       // OAuth hop anything else (success, or the mcp plugin's after-hook 302
       // that fetch couldn't follow cross-origin) means the session was set —
@@ -78,8 +85,19 @@ export function AuthScreen() {
       } else if (oauthQuery) {
         resumeAuthorize();
         return;
+      } else {
+        // Hard-navigate on success (hardReset's doc has the full why). This
+        // covers what the sign-out reload can't: a session that EXPIRES flips
+        // the gate here with no reload, and signing in as a different user
+        // would leak the prior account's data. Sign-IN keeps the current URL
+        // (a shared /$nodeId deep link, or your own spot after expiry — a
+        // foreign id degrades to the missing-node view); sign-UP resets to "/"
+        // (a brand-new outline has no nodes, the welcome seed beats a
+        // guaranteed-missing node). Keeps `busy` true — the page is navigating
+        // away.
+        hardReset(isSignup ? "/" : window.location.href);
+        return;
       }
-      // On success the session store updates and the gate swaps in the editor.
     } catch {
       if (oauthQuery) {
         // The after-hook redirect can throw inside fetch (mixed content /
