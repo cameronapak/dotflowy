@@ -8,8 +8,8 @@ import {
   type RefObject,
 } from "react";
 
+import type { QueryFilter } from "../data/filter-query";
 import type { Node } from "../data/schema";
-import type { TagFilter } from "../data/tags";
 import type { PluginContext, SlotSpec } from "../plugins/types";
 import type { NodeCommands } from "./OutlineNode";
 
@@ -107,7 +107,7 @@ export interface OutlineRowProps {
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
   pivotId: string | null;
   isHidden: (node: Node) => boolean;
-  filter: TagFilter | null;
+  filter: QueryFilter | null;
   // Focus plumbing, claimed on mount. Stable refs (from useOutlineFocus).
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;

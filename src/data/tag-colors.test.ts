@@ -9,13 +9,12 @@ describe("tagColorsCss", () => {
     expect(tagColorsCss([])).toBe("");
   });
 
-  test("emits two keyed rules for a valid colored tag", () => {
+  test("emits one keyed rule for a valid colored tag", () => {
     const css = tagColorsCss([row("work", "blue")]);
-    expect(css.split("\n")).toHaveLength(2);
+    expect(css.split("\n")).toHaveLength(1);
     expect(css).toContain(
       '[data-tag="work" i][data-tag]{background:var(--tag-blue)',
     );
-    expect(css).toContain("--tag-blue-fg"); // the pill hover rule
   });
 
   test("skips an unknown color", () => {

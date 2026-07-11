@@ -1,4 +1,4 @@
-import type { TagFilter } from "./tags";
+import type { QueryFilter } from "./filter-query";
 
 import { childrenOf, type Node, type TreeIndex } from "./tree";
 
@@ -115,11 +115,13 @@ export function parentKeyOf(key: string): string | null {
  * `isHidden` is the composed Seam-G prune (hide-completed today), so this MIRRORS
  * what the editor renders -- a node absent from the DOM is absent here too.
  *
- * `filter` (the tags plugin's pruned set, ADR 0015) switches the walk to
- * filter-mode: collapse state is IGNORED (matches inside a closed subtree are
- * revealed) and only nodes in `filter.visibleIds` survive -- exactly the
- * recursive render's per-node filter. Omitted by the caret walk (nav doesn't
- * prune to the filter), so render and nav share one builder, parameterized.
+ * `filter` (the `?q=` query filter's pruned set, ADR 0047) switches the walk to
+ * filter-mode: collapse state is IGNORED at the walk level (matches inside a
+ * closed subtree are revealed) and only nodes in `filter.visibleIds` survive --
+ * exactly the recursive render's per-node filter. A match's OWN collapse is
+ * respected by which descendants `buildQueryFilter` put in `visibleIds`
+ * (ADR 0047 §8), not here. Omitted by the caret walk (nav doesn't prune to the
+ * filter), so render and nav share one builder, parameterized.
  *
  * `mirrorsEnabled` (ADR 0022) turns on mirror resolution: a node with `mirrorOf`
  * windows its source's content + children, rows gain a content id + a path-based
@@ -134,7 +136,7 @@ export function buildVisibleRows(
   index: TreeIndex,
   rootId: string | null,
   isHidden: (n: Node) => boolean,
-  filter?: TagFilter | null,
+  filter?: QueryFilter | null,
   mirrorsEnabled = false,
 ): VisibleRow[] {
   const out: VisibleRow[] = [];

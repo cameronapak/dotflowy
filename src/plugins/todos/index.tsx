@@ -185,4 +185,17 @@ export default definePlugin({
       };
     },
   },
+
+  // Query filter (ADR 0047 §4): `is:complete`. Completion is the todos plugin's
+  // concept (D9), so the operator that reads it lives here too -- registered
+  // beside the core `is:todo|bullet|paragraph|mirror`, sharing the `is` key
+  // without collision (the guard is on the (key, value) pair).
+  filterOperators: [
+    {
+      key: "is",
+      values: ["complete"],
+      description: "Filter to completed nodes",
+      predicate: (node) => node.completed,
+    },
+  ],
 });

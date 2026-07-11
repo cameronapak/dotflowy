@@ -13,7 +13,10 @@ import type { ComponentType, ReactNode } from "react";
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
 import type { NodeCommands } from "../components/OutlineNode";
+import type { FilterOperator } from "../data/filter-query";
 import type { Node, TreeIndex } from "../data/tree";
+
+export type { FilterOperator } from "../data/filter-query";
 
 // --- Seam A: inline token + decorator (D6) ---------------------------------
 //
@@ -666,8 +669,16 @@ export interface PluginDef {
    *  first decorated render and popping in after paint. Idempotent by contract:
    *  the reactive read path may also start the same fetch. */
   preload?(): void;
-  /** Seam G: render-time view transforms (hide-completed, the tag filter). */
+  /** Seam G: render-time view transforms (hide-completed). The `?q=` query
+   *  filter itself is CORE now (ADR 0047); this seam stays for per-node prunes
+   *  (`hidesNode`) and any future whole-tree `buildFilter`. */
   viewTransforms?: ViewTransform[];
+  /** Query-filter operators (ADR 0047 §4): the `key:value` terms this plugin
+   *  owns semantically -- `is:complete` (todos), `has:link` (links),
+   *  `highlight:` (highlight), `is:agent` (provenance). The core parses the
+   *  grammar; each operator supplies a `(node, index, value) => boolean`
+   *  predicate. Collisions are guarded at load on the (key, value) pair. */
+  filterOperators?: FilterOperator[];
   /** Seam H: caret autocomplete menus (the `#` tag menu). */
   menus?: MenuSpec[];
   /** Seam I: input transforms (paste + autoformat). */

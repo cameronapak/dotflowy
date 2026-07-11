@@ -34,7 +34,7 @@ export function TagColorStyles() {
 
 /**
  * The tag color picker: a "clear" (Auto) swatch then the named palette. Opened
- * by right-clicking a tag chip or filter pill (the tags plugin's Seam-B
+ * by right-clicking an inline tag chip (the tags plugin's Seam-B
  * interaction routes it through ctx.openOverlay); picking applies to every
  * instance of the tag. Anchored at the pointer, dismissed on outside click or
  * Escape. See docs/adr/0007-custom-tag-colors.md.

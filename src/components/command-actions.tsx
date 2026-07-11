@@ -9,6 +9,7 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   FileUpIcon,
+  FilterIcon,
   FocusIcon,
   LogOutIcon,
   MessageSquareWarningIcon,
@@ -34,6 +35,7 @@ import {
   setViewCollapsed,
 } from "./header-more-menu";
 import { openOpmlImport } from "./opml-import-opener";
+import { openFilterInput } from "./query-filter-nav";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { useTextSize, type TextSize } from "./text-size-provider";
@@ -131,6 +133,17 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["spotlight", "focus", "dim", "zen"],
         run: () => setSpotlightEnabled(!spotlight),
+      },
+      {
+        id: "g:filter",
+        label: "Filter this view",
+        description: "Filter by #tag, is:todo, has:link, text, and more",
+        icon: FilterIcon,
+        scope: "global",
+        keywords: ["filter", "search", "query", "find", "tag", "todo"],
+        // The switcher closes first (runAction), releasing focus; the opener
+        // defers focus a frame so the input wins the focus race (ADR 0047 §6).
+        run: () => openFilterInput(),
       },
     ];
 

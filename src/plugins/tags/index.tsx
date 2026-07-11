@@ -1,18 +1,16 @@
 // Tags plugin (ADR 0001). `#tag` as a plugin. Seam A: the chip render. Seam B:
-// the delegated chip click -> filter and right-click -> color picker. Seam F
-// (subheader): the active-tag filter bar. Seam G: the `?q=` view transform.
-// Seam H: `#` autocomplete. The pure tag layer (parse/normalize/collect/filter)
-// stays in src/data/tags.ts and the color side-collection in
-// src/data/tag-colors.ts (Seam E); this folder wires them.
+// the delegated chip click -> filter and right-click -> color picker. Seam H:
+// `#` autocomplete. The `?q=` filter itself is CORE now (the query grammar +
+// the summoned resident input, ADR 0047 §6) -- this plugin only contributes
+// `#tag` terms to it (chip click, `addTermToFilter`) and the `#`-token
+// predicate; the pure tag layer (parse/normalize/collect) stays in
+// src/data/tags.ts and the color side-collection in src/data/tag-colors.ts
+// (Seam E). This folder wires them.
 
 import { Badge } from "@/plugins/kit";
 
-import {
-  buildTagFilter,
-  collectTagCorpus,
-  parseQuery,
-  TAG_PATTERN,
-} from "../../data/tags";
+import { addTermToFilter } from "../../components/query-filter-nav";
+import { collectTagCorpus, TAG_PATTERN } from "../../data/tags";
 import {
   definePlugin,
   type El,
@@ -20,10 +18,8 @@ import {
   type MenuTrigger,
   type PluginContext,
 } from "../types";
-import { TagFilterSubheader } from "./filter-bar";
 import { TAG_CHIP_CLASS } from "./tag-classes";
 import { TagColorMenu } from "./tag-color-menu";
-import { addTagToFilter } from "./use-tag-filter";
 
 // Inline chips use badgeVariants via TAG_CHIP_CLASS (innerHTML, not <Badge>).
 // React surfaces (filter bar, `#` menu) use <Badge variant="outline"> directly.
@@ -66,7 +62,7 @@ function tagOption(tag: string) {
 }
 
 // Open the color picker at the pointer, routed through the generic overlay host
-// (ctx.openOverlay). Shared by chips and filter pills.
+// (ctx.openOverlay). Opened by right-clicking an inline tag chip.
 function openColorMenu(
   el: HTMLElement,
   ctx: PluginContext,
@@ -99,7 +95,8 @@ export default definePlugin({
 
   // Seam B: a chip click AND-s the tag into the filter; a chip's mousedown
   // blocks the editing caret (it's inside contentEditable); right-click on a
-  // chip OR a filter pill opens the color picker.
+  // chip opens the color picker. (The old filter-pill recolor died with the
+  // pills, amended ADR 0047 §6 -- inline chip recolor stays.)
   interactions: [
     {
       selector: ".tag[data-tag]",
@@ -109,45 +106,17 @@ export default definePlugin({
         if (!name) return;
         e.preventDefault();
         e.stopPropagation();
-        addTagToFilter("#" + name);
+        addTermToFilter("#" + name);
       },
-      onContextMenu: openColorMenu,
-    },
-    {
-      // Filter pills live outside the contentEditable, so no caret to block and
-      // no filter-on-click; only the color picker.
-      selector: "[data-tag-pill][data-tag]",
       onContextMenu: openColorMenu,
     },
   ],
 
-  // Seam G: the `#tag` filter, expressed as a global view transform. Active only
-  // when the `?q=` carries tags; prunes the tree to matches + their ancestor
-  // context (the pure walk stays in src/data/tags.ts). It's handed the composed
-  // `isHidden` so completed subtrees drop out without this layer knowing about
-  // completion. The core wires the result in as the `filter` prop (still
-  // core-rendered for now -- see ADR 0001's "still core-wired" note).
-  viewTransforms: [
-    {
-      id: "tag-filter",
-      buildFilter: (index, ctx, isHidden) => {
-        const tags = parseQuery(ctx.search.q as string | undefined);
-        if (!tags.length) return null;
-        const filter = buildTagFilter(index, ctx.rootId, tags, isHidden);
-        return {
-          ...filter,
-          emptyMessage: `No nodes tagged ${tags.join(" ")} here.`,
-        };
-      },
-    },
-  ],
-
-  subheaderSlots: [
-    {
-      id: "tag-filter",
-      render: () => <TagFilterSubheader />,
-    },
-  ],
+  // The `?q=` filter is CORE (ADR 0047): the query grammar parses `#tag` terms,
+  // the tag PREDICATE (exact `#tag` equality) is a native parser term, and the
+  // summoned filter input + pill bar are core subheader chrome (`query-filter`).
+  // This plugin no longer owns a Seam-G `buildFilter` or the subheader slot; it
+  // only contributes the `#tag` term on chip click (Seam B, `addTermToFilter`).
 
   // Seam H: `#` autocomplete over existing tags (read live from the tree). New
   // tags are made by just finishing typing -- no "create" row, so the menu only

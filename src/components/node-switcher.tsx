@@ -1,6 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { Search, BookmarkIcon, ChevronRightIcon } from "lucide-react";
+import {
+  Command as CommandIcon,
+  BookmarkIcon,
+  ChevronRightIcon,
+  FilterIcon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -23,6 +28,8 @@ import {
 } from "../data/command-center";
 import { isMirrorsEnabled } from "../data/flags";
 import { flattenNodeText } from "../data/node-links";
+import { useSavedQueries } from "../data/saved-queries";
+import { matchSavedQuery } from "../data/saved-queries-core";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { useTree } from "../data/useTree";
 import {
@@ -36,6 +43,7 @@ import {
   setNodeSwitcherOpener,
   openNodeSwitcher,
 } from "./node-switcher-opener";
+import { writeQuery } from "./query-filter-nav";
 import { Button } from "./ui/button";
 import {
   Command,
@@ -84,6 +92,13 @@ const BOOKMARKS_HEADING = (
   <div className="flex items-center gap-1">
     <BookmarkIcon className="size-4" />
     Bookmarks
+  </div>
+);
+
+const SAVED_FILTERS_HEADING = (
+  <div className="flex items-center gap-1">
+    <FilterIcon className="size-4" />
+    Saved filters
   </div>
 );
 
@@ -269,6 +284,11 @@ function SwitcherDialog({
 
   const globalActions = useGlobalActions({ openConnect: onOpenConnect });
 
+  // Saved filters (ADR 0048): listed in the empty state beside Bookmarks and
+  // matchable by name while typing. Running one applies the query to the current
+  // view (query-only scope -- writeQuery keeps wherever you are) and closes.
+  const savedQueries = useSavedQueries();
+
   // Per-result "actions for this node" sub-view (ADR 0034 / #83's `->` path).
   const [actionNodeId, setActionNodeId] = useState<string | null>(null);
   const subActions = useMemo(
@@ -335,6 +355,15 @@ function SwitcherDialog({
     ? globalActions.filter((a) => matchAction(q, a)).slice(0, ACTIONS_CAP)
     : globalActions;
   const shownSub = q ? subActions.filter((a) => matchAction(q, a)) : subActions;
+  // Empty query: all saved filters (newest-first from the hook). A query: matches.
+  const shownSaved = q
+    ? savedQueries.filter((r) => matchSavedQuery(q, r))
+    : savedQueries;
+
+  function runSavedFilter(query: string) {
+    close();
+    writeQuery(query);
+  }
 
   function onKeyDown(e: React.KeyboardEvent) {
     // Sub-view: Left (or Backspace on an empty box) steps back to the list.
@@ -442,11 +471,25 @@ function SwitcherDialog({
                   </CommandGroup>
                 )}
 
+                {shownSaved.length > 0 && (
+                  <CommandGroup heading={SAVED_FILTERS_HEADING}>
+                    {shownSaved.map((r) => (
+                      <SavedFilterRow
+                        key={r.id}
+                        row={r}
+                        onRun={() => runSavedFilter(r.query)}
+                      />
+                    ))}
+                  </CommandGroup>
+                )}
+
                 {results === null ? (
                   bookmarks.length === 0 ? (
-                    <Hint>
-                      No bookmarks yet. Type to search nodes and actions.
-                    </Hint>
+                    shownSaved.length === 0 ? (
+                      <Hint>
+                        No bookmarks yet. Type to search nodes and actions.
+                      </Hint>
+                    ) : null
                   ) : (
                     <CommandGroup heading={BOOKMARKS_HEADING}>
                       {bookmarks.map((node) => (
@@ -461,7 +504,9 @@ function SwitcherDialog({
                     </CommandGroup>
                   )
                 ) : results.length === 0 ? (
-                  actions.length === 0 && shownGlobals.length === 0 ? (
+                  actions.length === 0 &&
+                  shownGlobals.length === 0 &&
+                  shownSaved.length === 0 ? (
                     <Hint>No matches.</Hint>
                   ) : null
                 ) : (
@@ -487,12 +532,19 @@ function SwitcherDialog({
   );
 }
 
-/** The header magnifier -- the touch (and desktop) entry point. */
-export function NodeSearchButton() {
+/** The header ⌘ button -- opens the Cmd+K command center (ADR 0034). The
+ *  magnifier now summons the filter (ADR 0047 §6), so the switcher gets its own
+ *  glyph beside it as the touch (and desktop) entry point. */
+export function CommandCenterButton() {
   return (
-    <Button variant="ghost" size="icon-sm" onClick={() => openNodeSwitcher()}>
-      <Search />
-      <span className="sr-only">Search nodes</span>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={() => openNodeSwitcher()}
+      aria-label="Command center"
+    >
+      <CommandIcon />
+      <span className="sr-only">Command center</span>
     </Button>
   );
 }
@@ -543,6 +595,31 @@ function SearchActionRow({ action }: { action: SearchAction }) {
         {action.hint && (
           <span className="truncate text-xs text-muted-foreground">
             {action.hint}
+          </span>
+        )}
+      </div>
+    </CommandItem>
+  );
+}
+
+/** A saved-filter row (ADR 0048): runs the query on select. `value` is prefixed
+ *  so it never collides with a node id or action id in cmdk. */
+function SavedFilterRow({
+  row,
+  onRun,
+}: {
+  row: { id: string; name: string; query: string };
+  onRun: () => void;
+}) {
+  const showQuery = row.name.trim() !== row.query.trim();
+  return (
+    <CommandItem value={`saved:${row.id}`} onSelect={onRun}>
+      <FilterIcon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate">{row.name}</span>
+        {showQuery && (
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {row.query}
           </span>
         )}
       </div>

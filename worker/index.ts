@@ -92,7 +92,12 @@ interface NodeRow {
 
 // Plugin side-collections backed by the kv store. The allowlist stops a client
 // writing arbitrary collection namespaces.
-const KV_COLLECTIONS = new Set(["tag-colors", "daily-index", "changelog"]);
+const KV_COLLECTIONS = new Set([
+  "tag-colors",
+  "daily-index",
+  "changelog",
+  "saved-queries",
+]);
 
 /**
  * The Durable Object name for the signed-in user's outline.
