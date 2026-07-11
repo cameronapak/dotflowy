@@ -4,7 +4,6 @@ import type { PluginContext } from "../plugins/types";
 
 import { headerSlots } from "../plugins/registry";
 import { BookmarkStar } from "./bookmarks";
-import { ChangelogBadge } from "./changelog-badge";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { NodeSearchButton } from "./node-switcher";
 import { SpotlightIndicator } from "./spotlight-indicator";
@@ -37,17 +36,16 @@ export function Header({
           720px outline content below. */}
       <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3 max-sm:px-4">
         <div className="min-w-0 flex-1">{children}</div>
-        {/* Right cluster: the two present-only-when-relevant chips lead -- the
-            spotlight-on indicator (ADR 0033: awareness + off-switch) and the
-            unread-changelog badge (ADR 0046) -- then plugin header slots (the
-            daily Today button), then the focused-node action (BookmarkStar
-            renders itself + its trailing divider only when zoomed), then search,
-            and finally the "More" overflow holding the secondary set-once
-            actions (theme, text size, show completed, sign out). See
-            header-more-menu.tsx for the v1/v2 split. */}
+        {/* Right cluster: the spotlight-on indicator leads (ADR 0033: awareness
+            + off-switch), then plugin header slots (the daily Today button),
+            then the focused-node action (BookmarkStar renders itself + its
+            trailing divider only when zoomed), then search, and finally the
+            "More" overflow holding the secondary set-once actions (theme, text
+            size, show completed, sign out) -- which also carries the unread
+            changelog signal (ADR 0046): a quiet notification dot on the trigger
+            rather than a loud header CTA. See header-more-menu.tsx. */}
         <div className="flex shrink-0 items-center gap-1">
           <SpotlightIndicator />
-          <ChangelogBadge />
           {getCtx &&
             headerSlots.map((s) => (
               <Fragment key={s.id}>{s.render(getCtx)}</Fragment>

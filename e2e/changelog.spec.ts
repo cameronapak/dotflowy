@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 /**
- * The changelog (ADR 0046): a "What's new" dialog reached from the header badge,
- * the More menu, and Cmd+K, with an unread badge driven by a synced cursor.
+ * The changelog (ADR 0046): a "What's new" dialog reached from the More menu and
+ * Cmd+K, with an unread signal (a dot on the More trigger, plus emphasis on the
+ * "What's new" item) driven by a synced cursor.
  *
  * The release array is BUILD-TIME data (`virtual:dotflowy-changelog`), so there
  * is no fixture to seed. `package.json`'s version IS the latest release — that
@@ -23,7 +24,7 @@ const LATEST: string = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ).version;
 
-const badge = (page: Page) => page.locator("[data-changelog-badge]");
+const badge = (page: Page) => page.locator("[data-changelog-dot]");
 const dialog = (page: Page) => page.getByTestId("changelog-dialog");
 const whatsNewItem = (page: Page) =>
   page.getByRole("menuitem", { name: "What's new" });

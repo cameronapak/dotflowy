@@ -20,6 +20,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
@@ -201,6 +202,10 @@ export function HeaderMoreMenu() {
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
+  // Unread-changelog signal (ADR 0046): a quiet dot on this trigger replaces the
+  // old loud header CTA. Presence IS the signal; opening the dialog marks
+  // everything read, so both the dot and the item emphasis clear themselves.
+  const unseen = useUnseenReleaseCount();
   // The connect dialog is a sibling of the menu (not nested in its content) so
   // it survives the menu closing on item select.
   const [connectOpen, setConnectOpen] = useState(false);
@@ -210,9 +215,23 @@ export function HeaderMoreMenu() {
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button variant="ghost" size="icon-sm" title="More">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title={unseen > 0 ? "More — what's new" : "More"}
+              className="relative"
+            >
               <MoreHorizontalIcon />
-              <span className="sr-only">More actions</span>
+              {unseen > 0 && (
+                <span
+                  data-changelog-dot=""
+                  aria-hidden="true"
+                  className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-background"
+                />
+              )}
+              <span className="sr-only">
+                More actions{unseen > 0 ? " (new releases available)" : ""}
+              </span>
             </Button>
           }
         />
@@ -242,11 +261,26 @@ export function HeaderMoreMenu() {
             Report a bug
           </DropdownMenuItem>
 
-          {/* The permanent home for the changelog. The header badge (ADR 0046)
-              is the same dialog, but it exists only while something is unread. */}
-          <DropdownMenuItem onClick={() => openChangelog()}>
+          {/* The permanent home for the changelog (ADR 0046). While releases
+              are unread, it's emphasized -- bolder text + a solid count pill --
+              so the eye lands here once the trigger's dot draws the menu open. */}
+          <DropdownMenuItem
+            onClick={() => openChangelog()}
+            data-unseen={unseen > 0 ? "" : undefined}
+            className={unseen > 0 ? "font-medium" : undefined}
+          >
             <SparklesIcon />
             What's new
+            {unseen > 0 && (
+              // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
+              // `focus:**:text-accent-foreground` recolors EVERY descendant on
+              // hover, which would flip this number to near-white on the near-
+              // white pill (an unreadable white circle). The bang shields it so
+              // the chip stays legible at rest and on hover, both themes.
+              <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground! tabular-nums">
+                {unseen}
+              </span>
+            )}
           </DropdownMenuItem>
 
           <DropdownMenuItem
