@@ -427,6 +427,18 @@ export function QueryFilterBar() {
     }, DEBOUNCE_MS);
   }, []);
 
+  // A queued write must die with the component -- firing after unmount would
+  // stamp a stale `?q=` onto whatever route replaced the editor.
+  useEffect(
+    () => () => {
+      if (debounceRef.current != null) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    },
+    [],
+  );
+
   // Recompute the suggestions from the LIVE input (value + caret), so the token
   // is always exactly what the browser sees. Cheap; runs only while composing.
   const recompute = useCallback(() => {
