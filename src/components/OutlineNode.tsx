@@ -8,8 +8,8 @@ import {
   type PointerEvent,
 } from "react";
 
+import type { QueryFilter } from "../data/filter-query";
 import type { Node, NodeKind } from "../data/schema";
-import type { TagFilter } from "../data/tags";
 import type { PluginContext } from "../plugins/types";
 
 import { echoedTextFor } from "../data/collection";
@@ -71,7 +71,7 @@ interface OutlineNodeProps {
   // it's in `visibleIds`; it's a match (normal styling) when in `matchIds`,
   // otherwise dimmed ancestor context. Filtering is render-time, so `collapsed`
   // is ignored -- matches inside collapsed subtrees are revealed. See ADR 0015.
-  filter: TagFilter | null;
+  filter: QueryFilter | null;
 }
 
 export interface NodeCommands {

@@ -2,10 +2,12 @@ import type { ChangeMessage } from "@tanstack/react-db";
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
+import type { QueryFilter } from "./filter-query";
+
 import { isSyncReady, nodesCollection, subscribeSyncReady } from "./collection";
 import { isMirrorsEnabled } from "./flags";
 import { parseNodeLinks } from "./node-links";
-import { parseTags, type TagFilter } from "./tags";
+import { parseTags } from "./tags";
 import {
   buildTreeIndex,
   buildTrail,
@@ -558,13 +560,13 @@ const EMPTY_ROWS: VisibleRow[] = [];
 export function useVisibleRows(
   rootId: string | null,
   isHidden: (node: Node) => boolean,
-  filter: TagFilter | null,
+  filter: QueryFilter | null,
 ): VisibleRow[] {
   const cache = useRef<{
     rev: number;
     rootId: string | null;
     isHidden: (n: Node) => boolean;
-    filter: TagFilter | null;
+    filter: QueryFilter | null;
     rows: VisibleRow[];
   } | null>(null);
   const getSnapshot = useCallback(() => {

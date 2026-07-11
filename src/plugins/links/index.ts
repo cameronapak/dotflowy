@@ -18,6 +18,7 @@ import { openUrlInFocusedTab } from "../../components/open-url";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
+  hasLink,
   isHttpUrl,
   LINK_PATTERN,
   sanitizeLinkLabel,
@@ -422,4 +423,16 @@ export default definePlugin({
       );
     },
   },
+
+  // Query filter (ADR 0047 §4): `has:link` -- a markdown `[label](url)` run in
+  // the text. Reuses the pure `hasLink` (bails before any regex on `[`-free
+  // text), so the predicate is O(1) on the overwhelming majority of nodes.
+  filterOperators: [
+    {
+      key: "has",
+      values: ["link"],
+      description: "Filter to nodes containing a link",
+      predicate: (node) => hasLink(node.text),
+    },
+  ],
 });

@@ -1,18 +1,15 @@
 // Tags plugin (ADR 0001). `#tag` as a plugin. Seam A: the chip render. Seam B:
 // the delegated chip click -> filter and right-click -> color picker. Seam F
-// (subheader): the active-tag filter bar. Seam G: the `?q=` view transform.
-// Seam H: `#` autocomplete. The pure tag layer (parse/normalize/collect/filter)
-// stays in src/data/tags.ts and the color side-collection in
-// src/data/tag-colors.ts (Seam E); this folder wires them.
+// (subheader): the active-tag filter bar. Seam H: `#` autocomplete. The `?q=`
+// filter itself is CORE now (the query grammar, ADR 0047) -- this plugin only
+// contributes `#tag` terms to it (chip click) and the `#`-token predicate; the
+// pure tag layer (parse/normalize/collect) stays in src/data/tags.ts and the
+// color side-collection in src/data/tag-colors.ts (Seam E). This folder wires
+// them.
 
 import { Badge } from "@/plugins/kit";
 
-import {
-  buildTagFilter,
-  collectTagCorpus,
-  parseQuery,
-  TAG_PATTERN,
-} from "../../data/tags";
+import { collectTagCorpus, TAG_PATTERN } from "../../data/tags";
 import {
   definePlugin,
   type El,
@@ -121,26 +118,11 @@ export default definePlugin({
     },
   ],
 
-  // Seam G: the `#tag` filter, expressed as a global view transform. Active only
-  // when the `?q=` carries tags; prunes the tree to matches + their ancestor
-  // context (the pure walk stays in src/data/tags.ts). It's handed the composed
-  // `isHidden` so completed subtrees drop out without this layer knowing about
-  // completion. The core wires the result in as the `filter` prop (still
-  // core-rendered for now -- see ADR 0001's "still core-wired" note).
-  viewTransforms: [
-    {
-      id: "tag-filter",
-      buildFilter: (index, ctx, isHidden) => {
-        const tags = parseQuery(ctx.search.q as string | undefined);
-        if (!tags.length) return null;
-        const filter = buildTagFilter(index, ctx.rootId, tags, isHidden);
-        return {
-          ...filter,
-          emptyMessage: `No nodes tagged ${tags.join(" ")} here.`,
-        };
-      },
-    },
-  ],
+  // The `?q=` filter is CORE (ADR 0047): the query grammar parses `#tag` terms
+  // and the tag PREDICATE (exact `#tag` equality) is a native parser term, so
+  // this plugin no longer owns a Seam-G `buildFilter`. It still contributes the
+  // `#tag` term to the query on chip click (Seam B, `addTagToFilter`) and the
+  // pill bar below.
 
   subheaderSlots: [
     {

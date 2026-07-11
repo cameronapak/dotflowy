@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import type { TagFilter } from "./tags";
+import type { QueryFilter } from "./filter-query";
 import type { Node } from "./tree";
 
 /**
@@ -27,7 +27,7 @@ import type { Node } from "./tree";
 
 let rootId: string | null = null;
 let isHidden: (node: Node) => boolean = () => false;
-let filter: TagFilter | null = null;
+let filter: QueryFilter | null = null;
 
 /** The current zoom root, read live OUTSIDE render (event handlers, command
  *  closures, drag, hotkeys). Render reads must use the `rootId` prop instead so
@@ -42,11 +42,11 @@ export function getViewIsHidden(): (node: Node) => boolean {
   return isHidden;
 }
 
-/** The tags plugin's active pruned set (`?q=`), read live OUTSIDE render. Null
+/** The active `?q=` query filter's pruned set (ADR 0047), read live OUTSIDE render. Null
  *  when no filter is on. Its one event-time reader is the markdown paste, which
  *  must know whether what it just inserted actually landed on screen (ADR 0044:
  *  a paste never mutates view state, so it discloses instead). */
-export function getViewFilter(): TagFilter | null {
+export function getViewFilter(): QueryFilter | null {
   return filter;
 }
 
@@ -69,7 +69,7 @@ export function useSyncViewState(
 
 /** The filter is derived further down the editor than `useSyncViewState`'s
  *  inputs (it needs `isHidden` first), so it mirrors on its own. */
-export function useSyncViewFilter(nextFilter: TagFilter | null): void {
+export function useSyncViewFilter(nextFilter: QueryFilter | null): void {
   useEffect(() => {
     filter = nextFilter;
   }, [nextFilter]);

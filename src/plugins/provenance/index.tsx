@@ -95,4 +95,17 @@ export default definePlugin({
       render: (node) => <ProvenanceMark node={node} placement="title" />,
     },
   ],
+
+  // Query filter (ADR 0047 §4): `is:agent` -- nodes an agent created over MCP
+  // (`origin` non-null), an axis Workflowy can't offer. Provenance owns the
+  // field, so it owns the operator; it joins the `is` key alongside the core
+  // kind values and todos' `is:complete` without collision.
+  filterOperators: [
+    {
+      key: "is",
+      values: ["agent"],
+      description: "Filter to agent-created nodes",
+      predicate: (node) => node.origin != null,
+    },
+  ],
 });

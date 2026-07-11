@@ -206,4 +206,35 @@ export default definePlugin({
         ),
     },
   ],
+
+  // Query filter (ADR 0047 §4): `highlight:` (any highlight run) plus one value
+  // per palette color. Color lives IN the source as a leading emoji (ADR 0035),
+  // so the predicate re-uses `parseHighlight` -- a bare/default run counts as
+  // blue (its own default color), so `highlight:blue` finds it. The `bare` flag
+  // claims the value-less `highlight:` form (the (key, null) pair).
+  filterOperators: [
+    {
+      key: "highlight",
+      values: ["red", "orange", "yellow", "green", "blue", "purple"],
+      bare: true,
+      description: "Filter to highlighted nodes (optionally by color)",
+      predicate: (node, _index, value) => {
+        const colors = highlightColorsIn(node.text);
+        if (value === null) return colors.length > 0;
+        return colors.includes(value as HighlightColor);
+      },
+    },
+  ],
 });
+
+/** The color of every highlight run in `text`, in order. Bails before any regex
+ *  on `==`-free text (the `stripHighlights` guard). A bare run resolves to blue
+ *  via `parseHighlight`'s default. */
+function highlightColorsIn(text: string): HighlightColor[] {
+  if (!text.includes("==")) return [];
+  const out: HighlightColor[] = [];
+  for (const m of text.matchAll(new RegExp(HIGHLIGHT_PATTERN, "gu"))) {
+    out.push(parseHighlight(m[0]).color);
+  }
+  return out;
+}

@@ -35,6 +35,8 @@ import type {
 } from "./types";
 
 import { registerWidget } from "../components/plugin-widget";
+import { CORE_FILTER_OPERATORS } from "../data/core-filter-operators";
+import { buildFilterOperatorMap, buildQueryFilter } from "../data/filter-query";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
 import { plugins } from "./index";
 
@@ -237,16 +239,42 @@ export function composeHidden(ctx: ViewContext): (node: Node) => boolean {
   return (node) => hidePredicates.some((p) => p(node, ctx));
 }
 
+// --- Query-filter operators (ADR 0047) -------------------------------------
+
+/** Every filter operator: core kind operators (`is:todo|bullet|paragraph|
+ *  mirror`) plus each plugin's `filterOperators` (`is:complete`, `has:link`,
+ *  `highlight:*`, `is:agent`). Folded into ONE (key, value) -> operator map at
+ *  load; `buildFilterOperatorMap` THROWS on a duplicate (key, value) claim (the
+ *  keymap reserved-key guard's stricter twin -- an ambiguous operator is a real
+ *  bug, so fail the build, not just a warn). A correct build never throws, so
+ *  the prerender is unaffected. */
+const filterOperatorMap = buildFilterOperatorMap([
+  ...CORE_FILTER_OPERATORS,
+  ...plugins.flatMap((p) => p.filterOperators ?? []),
+]);
+
 /**
- * Run the global `buildFilter` transforms; the first non-null result wins (only
- * the tag filter contributes one today). Passes the already-composed `isHidden`
- * so a filter prunes hidden nodes without re-deriving completion.
+ * The active view filter. The `?q=` query grammar is CORE now (ADR 0047), so
+ * the query filter runs FIRST (against the composed operator map); only if there
+ * is no query do the plugin `buildFilter` transforms get a turn (none contribute
+ * one today -- hide-completed is a `hidesNode` prune). Passes the already-
+ * composed `isHidden` so a filter prunes hidden nodes without re-deriving
+ * completion.
  */
 export function buildViewFilter(
   index: TreeIndex,
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
 ): ViewFilter | null {
+  const q = typeof ctx.search.q === "string" ? ctx.search.q : undefined;
+  const queryFilter = buildQueryFilter(
+    index,
+    ctx.rootId,
+    q,
+    isHidden,
+    filterOperatorMap,
+  );
+  if (queryFilter) return queryFilter;
   for (const t of viewTransforms) {
     const f = t.buildFilter?.(index, ctx, isHidden);
     if (f) return f;
