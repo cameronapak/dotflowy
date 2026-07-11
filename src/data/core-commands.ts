@@ -93,7 +93,7 @@ export const CORE_COMMANDS: CommandSpec[] = [
   // delete funnel (`onDeleteNode`), so it inherits protection guards, the
   // mirror-source guard, the big-subtree confirm dialog, the atomic
   // `runStructural` batch, and neighbor-focus for free (ADR 0009/0015/0022). A
-  // protected node ( the daily container) shakes + toasts rather than deleting,
+  // protected node (the daily container) shakes + toasts rather than deleting,
   // exactly as Backspace does, so `available` stays true -- hiding the command
   // would swap a legible block for a silent absence. No `runMany`: the selection
   // actions menu wires its own Delete (`ops.remove`), the Move/Mirror precedent.

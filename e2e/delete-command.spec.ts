@@ -9,6 +9,10 @@ const text = (page: Page, id: string) =>
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"]`);
 
+// The zoomed page title's editable span (the SECOND render path -- not in an
+// `li`, so it needs its own selector). See ZoomedTitle in OutlineEditor.tsx.
+const title = (page: Page) => page.locator(".zoomed-title .node-text");
+
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
   await page.goto("/");
@@ -53,5 +57,28 @@ test.describe("/delete slash command", () => {
     await expect(row(page, "alpha-2")).toHaveCount(0);
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(text(page, "bravo")).toBeVisible();
+  });
+
+  // The zoomed title is the second render path (its own keymap), so the slash
+  // menu has to be wired there separately. Prove `/delete` works from the title.
+  test("runs from the zoomed page title", async ({ page }) => {
+    await load(page, STANDARD_TREE);
+    await page.goto("/alpha"); // zoom in: `alpha` is now the page title
+    await expect(title(page)).toBeVisible();
+
+    await title(page).click();
+    await expect(title(page)).toBeFocused();
+    await page.keyboard.type(" /delete");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: "Delete", exact: false }),
+    ).toBeVisible();
+    await page.keyboard.press("Enter");
+
+    // Deleting the zoom root leaves the deep-link on a now-missing node, so the
+    // editor shows its "doesn't exist" placeholder rather than crashing.
+    await expect(
+      page.getByText("That bullet doesn't exist", { exact: false }),
+    ).toBeVisible();
   });
 });

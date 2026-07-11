@@ -121,6 +121,7 @@ import {
   watchCaretReveal,
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
+import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
@@ -151,6 +152,7 @@ import {
   type SelectionFormatActions,
 } from "./SelectionFormatToolbar";
 import { useShowCompleted } from "./show-completed-provider";
+import { useSlashMenu } from "./slash-menu";
 import { Subheader } from "./Subheader";
 import { Button } from "./ui/button";
 import {
@@ -1852,6 +1854,31 @@ function ZoomedTitle({
     syncedRef.current = node.text;
   });
 
+  // The `/` palette (Seam C) on the zoomed title too, mirroring OutlineRow --
+  // so `/delete`, `/paragraph`, Move, Mirror, and every plugin `/` command work
+  // whether the node is a list bullet or the page title (the two-render-paths
+  // rule; see AGENTS.md "a node renders in TWO paths"). The title keymap below
+  // is gated on `!slash.isOpen` so the menu's Enter/Arrow/Escape win while it's
+  // open, exactly as OutlineRow gates useBulletKeymap.
+  const slash = useSlashMenu({
+    node,
+    ctx: getCtx,
+    getEl: () => ref.current,
+    onTextChange,
+  });
+
+  // The caret menus (Seam H) on the title too, mirroring OutlineRow -- so the
+  // `#` tag picker and the `[[` node-link picker open on the zoomed page title,
+  // not just on list bullets. Same three-signal wiring as `slash`; the keymap
+  // below is gated on `!menus.isOpen` as well so an open picker's Enter/Arrow
+  // reach it.
+  const menus = useMenus({
+    node,
+    getEl: () => ref.current,
+    ctx: getCtx,
+    onTextChange,
+  });
+
   // Title shortcuts, scoped to the title's own contentEditable. Enter adds a
   // first child under the title; ArrowDown drops focus into the first child.
   // The plugin keymap (Seam D) is registered here too, so todos' Mod+Enter /
@@ -1875,7 +1902,10 @@ function ZoomedTitle({
         },
       })),
     ],
-    { target: ref },
+    // Suspend the title keymap while the `/` palette OR a caret menu (#, [[) is
+    // open, so their Enter/Arrow/Escape reach the menu (handleKeyDown) instead
+    // of adding a child.
+    { target: ref, enabled: !slash.isOpen && !menus.isOpen },
   );
 
   return (
@@ -1904,6 +1934,8 @@ function ZoomedTitle({
             const el = e.currentTarget;
             const text = readSource(el);
             onTextChange(text);
+            slash.handleInput();
+            menus.handleInput();
             // Re-decorate live, revealing the link under the caret. Suspended
             // during IME composition; compositionend handles that case.
             if (!composingRef.current) {
@@ -1971,6 +2003,8 @@ function ZoomedTitle({
             });
           }}
           onBlur={(e) => {
+            slash.close();
+            menus.close();
             const el = e.currentTarget;
             caretWatchRef.current?.();
             caretWatchRef.current = null;
@@ -1983,6 +2017,14 @@ function ZoomedTitle({
               syncedRef.current = text;
             }
           }}
+          onKeyDown={(e) => {
+            // While a menu is open its Enter/Arrow/Escape/Tab are handled here;
+            // the title keymap above is suspended, so these are the sole
+            // consumers. Both no-op when closed. A caret menu (#, [[) wins over
+            // the `/` palette (they never co-open, but mirror OutlineRow's order).
+            if (menus.handleKeyDown(e)) return;
+            slash.handleKeyDown(e);
+          }}
         />
       </span>
       {/* Trailing decoration zone for the zoomed title (Seam F
@@ -1994,6 +2036,8 @@ function ZoomedTitle({
         position="title:after-text"
         getCtx={getCtx}
       />
+      {slash.menu}
+      {menus.menu}
     </h2>
   );
 }

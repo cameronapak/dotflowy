@@ -94,4 +94,26 @@ test.describe("tag autocomplete (plugin Seam H)", () => {
 
     await expect(page.locator('[role="listbox"]')).toHaveCount(0);
   });
+
+  test("opens on the zoomed page title too (the second render path)", async ({
+    page,
+  }) => {
+    await load(page);
+    await page.goto("/b"); // zoom into the empty node -- it's now the title
+
+    const title = page.locator(".zoomed-title .node-text");
+    await expect(title).toBeVisible();
+    await title.click();
+    await page.keyboard.type("#urg");
+
+    await expect(
+      page.locator('[role="listbox"] .tag-option[data-tag="urgent"]'),
+    ).toBeVisible();
+
+    await page
+      .locator('[role="listbox"] .tag-option[data-tag="urgent"]')
+      .click();
+    await expect(page.locator('[role="listbox"]')).toHaveCount(0);
+    await expect(title.locator('.tag[data-tag="urgent"]')).toBeVisible();
+  });
 });
