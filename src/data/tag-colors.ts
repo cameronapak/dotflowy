@@ -163,9 +163,6 @@ export function tagColorsCss(rows: TagColorRow[]): string {
       lines.push(
         `[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${color});color:var(--tag-${color}-fg);border-color:transparent}`,
       );
-      lines.push(
-        `[data-tag="${r.tag}" i][data-tag-pill][data-tag] [data-tag-pill-remove]:hover{background:color-mix(in oklch,var(--tag-${color}-fg) 14%,transparent);color:var(--tag-${color}-fg)}`,
-      );
     }
   }
   return lines.join("\n");

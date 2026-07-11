@@ -1,6 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { Search, BookmarkIcon, ChevronRightIcon } from "lucide-react";
+import {
+  Command as CommandIcon,
+  BookmarkIcon,
+  ChevronRightIcon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -487,12 +491,19 @@ function SwitcherDialog({
   );
 }
 
-/** The header magnifier -- the touch (and desktop) entry point. */
-export function NodeSearchButton() {
+/** The header ⌘ button -- opens the Cmd+K command center (ADR 0034). The
+ *  magnifier now summons the filter (ADR 0047 §6), so the switcher gets its own
+ *  glyph beside it as the touch (and desktop) entry point. */
+export function CommandCenterButton() {
   return (
-    <Button variant="ghost" size="icon-sm" onClick={() => openNodeSwitcher()}>
-      <Search />
-      <span className="sr-only">Search nodes</span>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={() => openNodeSwitcher()}
+      aria-label="Command center"
+    >
+      <CommandIcon />
+      <span className="sr-only">Command center</span>
     </Button>
   );
 }

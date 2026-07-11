@@ -1,11 +1,11 @@
 // Tags plugin (ADR 0001). `#tag` as a plugin. Seam A: the chip render. Seam B:
 // the delegated chip click -> filter and right-click -> color picker. Seam H:
 // `#` autocomplete. The `?q=` filter itself is CORE now (the query grammar +
-// the summoned input/pill bar, ADR 0047) -- this plugin only contributes `#tag`
-// terms to it (chip click, `addTermToFilter`) and the `#`-token predicate; the
-// pure tag layer (parse/normalize/collect) stays in src/data/tags.ts and the
-// color side-collection in src/data/tag-colors.ts (Seam E). This folder wires
-// them.
+// the summoned resident input, ADR 0047 §6) -- this plugin only contributes
+// `#tag` terms to it (chip click, `addTermToFilter`) and the `#`-token
+// predicate; the pure tag layer (parse/normalize/collect) stays in
+// src/data/tags.ts and the color side-collection in src/data/tag-colors.ts
+// (Seam E). This folder wires them.
 
 import { Badge } from "@/plugins/kit";
 
@@ -95,7 +95,8 @@ export default definePlugin({
 
   // Seam B: a chip click AND-s the tag into the filter; a chip's mousedown
   // blocks the editing caret (it's inside contentEditable); right-click on a
-  // chip OR a filter pill opens the color picker.
+  // chip opens the color picker. (The old filter-pill recolor died with the
+  // pills, amended ADR 0047 §6 -- inline chip recolor stays.)
   interactions: [
     {
       selector: ".tag[data-tag]",
@@ -107,12 +108,6 @@ export default definePlugin({
         e.stopPropagation();
         addTermToFilter("#" + name);
       },
-      onContextMenu: openColorMenu,
-    },
-    {
-      // Filter pills live outside the contentEditable, so no caret to block and
-      // no filter-on-click; only the color picker.
-      selector: "[data-tag-pill][data-tag]",
       onContextMenu: openColorMenu,
     },
   ],

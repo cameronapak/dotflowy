@@ -1,10 +1,9 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -16,7 +15,6 @@ import {
   buildFilterSuggestions,
   caretToken,
   type FilterSuggestion,
-  tokenizeQuery,
 } from "../data/filter-query";
 import { collectTagCorpus } from "../data/tags";
 import { getTreeIndex } from "../data/tree-store";
@@ -24,68 +22,55 @@ import { filterOperatorInfos } from "../plugins/registry";
 import {
   addTermToFilter,
   bindQueryFilterNav,
+  openFilterInput,
   setFilterInputOpener,
   writeQuery,
-  writeQueryTokens,
 } from "./query-filter-nav";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
 // The `?q=` filter is CORE chrome now (the query grammar, ADR 0047 §6): a
-// summoned input in the subheader, opened by Cmd+F, the Cmd+K "Filter this view"
-// action, or tapping the active-filter pill bar. Composing shows the RAW query
-// text (live-as-you-type, debounced `router.replace`); blurred-with-a-filter
-// shows the parsed surface tokens as removable pills. The tags plugin no longer
-// owns this -- it only contributes a `#tag` term on chip click (Seam B, via
-// {@link addTermToFilter}). Re-exported here so this file is the single filter
-// surface.
+// resident input in the subheader, opened by Cmd+F, the Cmd+K "Filter this view"
+// action, or the header magnifier. It shows the RAW query text (live-as-you-type,
+// debounced `router.replace`) and STAYS resident -- focused or not -- as long as
+// `?q=` is non-empty (the blurred-with-pills state is dead, amended ADR 0047 §6).
+// The tags plugin no longer owns this -- it only contributes a `#tag` term on
+// chip click (Seam B, via {@link addTermToFilter}). Re-exported here so this file
+// is the single filter surface.
 export { addTermToFilter };
 
 const DEBOUNCE_MS = 200;
 
-/** The `?q=` surface-token state + route writers, shared by the pill bar and the
- *  Cmd+K action. Reads route state directly (no bridge needed). */
+/** The `?q=` filter state + route writers. Reads route state directly (no bridge
+ *  needed) and owns the window-level Escape clear. */
 export function useQueryFilter() {
   const params = useParams({ strict: false });
   const rootId = params.nodeId ?? null;
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as { q?: string };
   const rawQuery = search.q ?? "";
-  const tokens = useMemo(() => tokenizeQuery(search.q), [search.q]);
-  const tokensRef = useRef(tokens);
-  tokensRef.current = tokens;
+  const active = rawQuery.trim().length > 0;
 
   useEffect(() => {
     bindQueryFilterNav(navigate, rootId);
   }, [navigate, rootId]);
 
-  const removeToken = useCallback((token: string) => {
-    // Drop only the FIRST occurrence, so duplicate literals stay addressable.
-    const current = tokensRef.current;
-    const i = current.indexOf(token);
-    if (i === -1) return;
-    writeQueryTokens([...current.slice(0, i), ...current.slice(i + 1)]);
-  }, []);
+  const clear = useCallback(() => writeQuery(""), []);
 
-  const clear = useCallback(() => writeQueryTokens([]), []);
-
-  // Stage-2 Escape (ADR 0047 §6): with an active filter and no input focused,
-  // Escape clears the whole filter -- but NOT while a bullet caret is in the
-  // outline. The input's own Escape (stage 1) stops propagation, so on the first
-  // press this never fires; the second press (input already closed) does.
+  // Window-level Escape (ADR 0047 §6): with an active filter and no input
+  // focused, Escape clears the whole filter in one press -- but NOT while a
+  // bullet caret is in the outline. The input's own Escape (its ladder) stops
+  // propagation, so this only fires when the caret is elsewhere.
   useEffect(() => {
-    if (tokens.length === 0) return;
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       // A capture-phase handler already claimed this Escape (node multi-selection
       // exits, an open caret menu closes -- both preventDefault). Don't ALSO clear.
       if (e.defaultPrevented) return;
-      const active = document.activeElement;
-      if (
-        active instanceof HTMLElement &&
-        active.classList.contains("node-text")
-      )
+      const el = document.activeElement;
+      if (el instanceof HTMLElement && el.classList.contains("node-text"))
         return;
       // A modal overlay (Cmd+K, a confirm dialog, a plugin sheet) owns Escape --
       // closing it must not clear the filter underneath it.
@@ -94,79 +79,24 @@ export function useQueryFilter() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tokens.length, clear]);
+  }, [active, clear]);
 
-  return { tokens, rawQuery, removeToken, clear };
+  return { rawQuery, active, clear };
 }
 
-/** A `#tag` surface token gets its painted chip (`data-tag` -> TagColorStyles);
- *  every other term (`is:todo`, `"a phrase"`, `-word`, `OR`) is a plain outline
- *  pill. */
-function isTagToken(token: string): boolean {
-  return /^#[\p{L}\p{N}_-]+$/u.test(token);
-}
-
-function FilterPill({
-  token,
-  onRemove,
-}: {
-  token: string;
-  onRemove: (token: string) => void;
-}) {
-  const isTag = isTagToken(token);
+/** The header magnifier -- summons the filter input (ADR 0047 §6: the magnifier
+ *  filters the view; the switcher moved to its own ⌘ button). */
+export function FilterButton() {
   return (
-    <Badge
-      variant="outline"
-      {...(isTag ? { "data-tag-pill": true, "data-tag": token.slice(1) } : {})}
-      className="gap-0.5 pr-0.5"
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={() => openFilterInput()}
+      aria-label="Filter this view"
     >
-      {token}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        data-tag-pill-remove
-        className="size-5 shrink-0 text-inherit opacity-60 hover:!bg-current/10 hover:!text-inherit hover:opacity-100 dark:hover:!bg-current/15"
-        aria-label={`Remove ${token} from filter`}
-        onClick={() => onRemove(token)}
-      >
-        <X />
-      </Button>
-    </Badge>
-  );
-}
-
-function FilterPillBar({
-  tokens,
-  onRemove,
-  onClear,
-  onEdit,
-}: {
-  tokens: string[];
-  onRemove: (token: string) => void;
-  onClear: () => void;
-  onEdit: () => void;
-}) {
-  return (
-    <search
-      aria-label="Filter"
-      className="flex w-full flex-wrap items-center gap-1.5"
-      // Tapping the bar (not a pill's X, not Clear) swaps it back into the input
-      // for editing (ADR 0047 §6). `closest("button")` lets the X/Clear buttons
-      // win the click.
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest("button")) return;
-        onEdit();
-      }}
-    >
-      {tokens.map((token, i) => (
-        // Tokens can repeat (two `#a`s), so the key includes the index.
-        <FilterPill key={`${token}:${i}`} token={token} onRemove={onRemove} />
-      ))}
-      <Button type="button" variant="ghost" size="xs" onClick={onClear}>
-        Clear
-      </Button>
-    </search>
+      <Search />
+      <span className="sr-only">Filter this view</span>
+    </Button>
   );
 }
 
@@ -196,7 +126,7 @@ function SuggestionRow({
         active && "bg-accent text-accent-foreground",
       )}
       // Keep the input focused across the press (the row lives in a portal, so a
-      // plain click would blur -> close the input before onClick fires).
+      // plain click would blur -> close the popover before onClick fires).
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => onPick(suggestion)}
     >
@@ -290,15 +220,21 @@ function SuggestionPopover({
 }
 
 /**
- * The core subheader filter surface: an input while composing, the parsed-term
- * pill bar while a filter is active, and NOTHING (so the subheader collapses)
- * when idle. Summoned via {@link openFilterInput} (Cmd+F / the Cmd+K action) or
- * by tapping the pill bar.
+ * The core subheader filter surface: a resident input whenever a filter is
+ * active OR the input was summoned, and NOTHING (so the subheader collapses)
+ * when idle with no query. Summoned via {@link openFilterInput} (Cmd+F, the
+ * Cmd+K action, the header magnifier). The blurred-with-pills state is gone
+ * (ADR 0047 §6, amended): while `?q=` is non-empty the raw query stays in the
+ * input, focused or not.
  */
 export function QueryFilterBar() {
-  const { tokens, rawQuery, removeToken, clear } = useQueryFilter();
-  const [inputOpen, setInputOpen] = useState(false);
+  const { rawQuery, active } = useQueryFilter();
+  // `summoned` keeps the input open when there's no query yet (an empty summon);
+  // an active filter keeps it resident on its own. Blur with empty text drops
+  // `summoned`, which -- with no query -- collapses the row.
+  const [summoned, setSummoned] = useState(false);
   const [draft, setDraft] = useState("");
+  const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<number | null>(null);
   // Autocomplete (ADR 0047 §7): suggestions for the token at the caret, the
@@ -309,6 +245,16 @@ export function QueryFilterBar() {
   // Live raw query, read at open time without re-binding the mount-once opener.
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
+
+  const showInput = summoned || active;
+
+  // While NOT focused, mirror the input to `?q=` -- so an external write (a tag
+  // chip click AND-ing `#tag`, a shared `?q=` URL) shows up in the resident
+  // input. While focused the draft is user-owned; the debounced write drives the
+  // URL, so clobbering it here would fight the caret.
+  useEffect(() => {
+    if (!focused) setDraft(rawQuery);
+  }, [rawQuery, focused]);
 
   const flush = useCallback((value: string) => {
     if (debounceRef.current != null) {
@@ -370,7 +316,7 @@ export function QueryFilterBar() {
     // Prefill with the raw `?q=` string (caret goes to the end in the focus
     // effect), so summoning an active filter lands you editing it.
     setDraft(rawRef.current);
-    setInputOpen(true);
+    setSummoned(true);
   }, []);
 
   // Register the summon-opener (Cmd+K action / chip taps reach it) mount-once.
@@ -394,11 +340,12 @@ export function QueryFilterBar() {
       window.removeEventListener("keydown", onKey, { capture: true });
   }, [open]);
 
-  // Focus + caret-to-end once the input mounts, then open the cheat sheet.
-  // Deferred a frame so it wins the focus race against Radix restoring focus
-  // when the Cmd+K dialog closes.
+  // Focus + caret-to-end when the input is SUMMONED (not merely resident from a
+  // URL query -- a page load with `?q=` must not steal the caret). Deferred a
+  // frame so it wins the focus race against Radix restoring focus when the
+  // Cmd+K dialog closes.
   useEffect(() => {
-    if (!inputOpen) return;
+    if (!summoned) return;
     const id = requestAnimationFrame(() => {
       const el = inputRef.current;
       if (!el) return;
@@ -409,111 +356,162 @@ export function QueryFilterBar() {
       recompute();
     });
     return () => cancelAnimationFrame(id);
-  }, [inputOpen, recompute]);
+  }, [summoned, recompute]);
 
-  if (inputOpen) {
-    const showPopover = popoverOpen && suggestions.length > 0;
-    const closeInput = () => {
-      flush(draft);
-      setInputOpen(false);
-      setPopoverOpen(false);
-    };
-    const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      setDraft(value);
-      scheduleWrite(value);
-      setPopoverOpen(true);
-      recompute();
-    };
-    const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "ArrowDown") {
-        if (!showPopover) return;
-        e.preventDefault();
-        setActiveIndex((i) => (i + 1) % suggestions.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        if (!showPopover) return;
-        e.preventDefault();
-        setActiveIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
-        return;
-      }
-      if (e.key === "Tab") {
-        // Tab accepts the active row (or the first, autocomplete-style); with no
-        // popover it keeps native focus movement.
-        if (!showPopover) return;
-        e.preventDefault();
-        applySuggestion(suggestions[activeIndex >= 0 ? activeIndex : 0]!);
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        // With a highlighted row, Enter inserts it (stays open). Otherwise it
-        // keeps its Slice-2 meaning: commit the filter and show pills.
-        if (showPopover && activeIndex >= 0) {
-          applySuggestion(suggestions[activeIndex]!);
-          return;
-        }
-        closeInput();
-        return;
-      }
-      if (e.key === "Escape") {
-        // Stop propagation so the window-level stage-2 clear never also fires.
-        e.preventDefault();
-        e.stopPropagation();
-        // Stage 0: an open popover closes first, leaving the input open.
-        if (showPopover) {
-          setPopoverOpen(false);
-          return;
-        }
-        // Stage 1: flush, close the input (pills remain if a filter is active).
-        closeInput();
-        return;
-      }
-    };
-    const onBlur = () => closeInput();
-    return (
-      <search aria-label="Filter" className="w-full">
-        <Input
-          ref={inputRef}
-          value={draft}
-          onChange={onChange}
-          onKeyDown={onKeyDown}
-          onBlur={onBlur}
-          placeholder="Filter… e.g. #work is:todo -done"
-          aria-label="Filter query"
-          role="combobox"
-          aria-expanded={showPopover}
-          aria-controls={LISTBOX_ID}
-          aria-autocomplete="list"
-          aria-activedescendant={
-            showPopover && activeIndex >= 0 ? optionId(activeIndex) : undefined
-          }
-          spellCheck={false}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-        />
-        {showPopover ? (
-          <SuggestionPopover
-            anchorRef={inputRef}
-            suggestions={suggestions}
-            activeIndex={activeIndex}
-            onPick={applySuggestion}
-          />
-        ) : null}
-      </search>
-    );
-  }
+  if (!showInput) return null;
 
-  if (tokens.length === 0) return null;
+  const showPopover = focused && popoverOpen && suggestions.length > 0;
+  const showClear = draft.length > 0;
+
+  // Blur to the outline: flush the pending write and drop the summon flag. With
+  // no query left the row collapses; with an active query the input stays
+  // resident (blurred), showing the raw string.
+  const collapse = () => {
+    flush(draft);
+    setSummoned(false);
+    setPopoverOpen(false);
+    inputRef.current?.blur();
+  };
+
+  // The clear X (and Escape stage 2): wipe the text AND `?q=`, keeping focus.
+  const clearText = (reopenCheatSheet: boolean) => {
+    setDraft("");
+    flush("");
+    setActiveIndex(-1);
+    setPopoverOpen(reopenCheatSheet);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(0, 0);
+      if (reopenCheatSheet) recompute();
+    });
+  };
+
+  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setDraft(value);
+    scheduleWrite(value);
+    setPopoverOpen(true);
+    recompute();
+  };
+
+  const onFocus = () => {
+    setFocused(true);
+    setPopoverOpen(true);
+    recompute();
+  };
+
+  const onBlur = () => {
+    setFocused(false);
+    // Flush without dropping residency: a blurred active filter stays in the
+    // input. An empty draft collapses via `showInput` once the write lands.
+    flush(draft);
+    setSummoned(false);
+    setPopoverOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      if (!showPopover) return;
+      e.preventDefault();
+      setActiveIndex((i) => (i + 1) % suggestions.length);
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      if (!showPopover) return;
+      e.preventDefault();
+      setActiveIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+      return;
+    }
+    if (e.key === "Tab") {
+      // Tab accepts the active row (or the first, autocomplete-style); with no
+      // popover it keeps native focus movement.
+      if (!showPopover) return;
+      e.preventDefault();
+      applySuggestion(suggestions[activeIndex >= 0 ? activeIndex : 0]!);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // With a highlighted row, Enter inserts it (stays open). Otherwise it
+      // commits: flush the debounce and blur to the outline.
+      if (showPopover && activeIndex >= 0) {
+        applySuggestion(suggestions[activeIndex]!);
+        return;
+      }
+      collapse();
+      return;
+    }
+    if (e.key === "Escape") {
+      // Stop propagation so the window-level clear never also fires.
+      e.preventDefault();
+      e.stopPropagation();
+      // Ladder (ADR 0047 §6): (1) an open popover closes first; (2) else text is
+      // cleared, focus kept; (3) else the row collapses.
+      if (showPopover) {
+        setPopoverOpen(false);
+        return;
+      }
+      if (draft.length > 0) {
+        clearText(false);
+        return;
+      }
+      collapse();
+      return;
+    }
+  };
 
   return (
-    <FilterPillBar
-      tokens={tokens}
-      onRemove={removeToken}
-      onClear={clear}
-      onEdit={open}
-    />
+    <search aria-label="Filter" className="relative w-full">
+      <Search
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+      />
+      <Input
+        ref={inputRef}
+        value={draft}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder="Filter… e.g. #work is:todo -done"
+        aria-label="Filter query"
+        role="combobox"
+        aria-expanded={showPopover}
+        aria-controls={LISTBOX_ID}
+        aria-autocomplete="list"
+        aria-activedescendant={
+          showPopover && activeIndex >= 0 ? optionId(activeIndex) : undefined
+        }
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        className={cn("pl-8", showClear && "pr-8")}
+      />
+      {showClear ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          // Keep focus across the press so clearing doesn't blur -> collapse.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => clearText(true)}
+          aria-label="Clear filter"
+          className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground"
+        >
+          <X />
+        </Button>
+      ) : null}
+      {showPopover ? (
+        <SuggestionPopover
+          anchorRef={inputRef}
+          suggestions={suggestions}
+          activeIndex={activeIndex}
+          onPick={applySuggestion}
+        />
+      ) : null}
+    </search>
   );
 }

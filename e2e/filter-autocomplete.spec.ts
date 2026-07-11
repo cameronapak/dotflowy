@@ -127,7 +127,7 @@ test.describe("filter autocomplete (ADR 0047 §7)", () => {
     await expect(listbox(page).locator('[style*="--tag-red"]')).toBeVisible();
   });
 
-  test("Escape closes the popover first, then the input, then the filter", async ({
+  test("Escape ladder: popover -> clear text -> collapse (ADR 0047 §6)", async ({
     page,
   }) => {
     await load(page);
@@ -136,19 +136,20 @@ test.describe("filter autocomplete (ADR 0047 §7)", () => {
     await input(page).fill("#work");
     await expect(listbox(page)).toBeVisible();
 
-    // Stage 0: popover only.
+    // Stage 1: the popover only; the input + query stay.
     await input(page).press("Escape");
     await expect(listbox(page)).toHaveCount(0);
     await expect(input(page)).toBeFocused();
     await expect(page).toHaveURL(/q=%23work/);
 
-    // Stage 1: the input.
+    // Stage 2: clear the text AND the query, keeping focus.
+    await input(page).press("Escape");
+    await expect(input(page)).toHaveValue("");
+    await expect(input(page)).toBeFocused();
+    await expect(page).not.toHaveURL(/q=/);
+
+    // Stage 3: collapse the row.
     await input(page).press("Escape");
     await expect(input(page)).toHaveCount(0);
-    await expect(page).toHaveURL(/q=%23work/);
-
-    // Stage 2: the filter.
-    await page.keyboard.press("Escape");
-    await expect(page).not.toHaveURL(/q=/);
   });
 });
