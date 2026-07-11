@@ -123,6 +123,12 @@ bun run test:e2e        # playwright (chromium) — behavior/integration
 bunx changeset          # describe your change for the changelog (see below)
 ```
 
+Then **run the app**: before calling an observable change done, drive it in the
+running app (`bun run dev`) — or exercise it through an e2e spec — and confirm
+the behavior. Green gates are necessary, not sufficient (see _Run the app
+before declaring done_ in `AGENTS.md`). Skip only for changes with no runtime
+surface (docs, types, tooling).
+
 Rules of thumb, expanded in `AGENTS.md`:
 
 - **Every PR carries a changeset.** `bunx changeset` writes a fragment saying what
@@ -137,6 +143,16 @@ Rules of thumb, expanded in `AGENTS.md`:
   `links.ts`, the Worker planners/schemas. Editor behavior (caret, contentEditable,
   the collection/DO path) stays in **Playwright** (`e2e/`). Don't unit-test the
   DOM path; you'd just be mocking the world.
+- **Chasing a flake? `bun run test:e2e:serial`** (`--workers=1`) is the
+  maximum-determinism local run; CI runs Playwright at `--workers=2` — faster
+  and clean enough as a gate. Don't confuse the two: a parallel-contention
+  flake isn't a real failure, and a serial-only pass isn't a CI guarantee.
+- **react-doctor is an occasional manual audit, not a gate** — its accepted
+  editor false-positives (the deliberately kept manual memos) are known noise
+  on every run, so it stays out of the recurring validation set.
+- **Shipping a multi-session branch? Delete `HANDOFF.md`** — it's transient
+  branch-local build state (see _Session handoffs_ in `AGENTS.md`) and must not
+  reach `main`.
 - **`src/routeTree.gen.ts` is generated** — never hand-edit. After adding or
   renaming a file in `src/routes/`, run `bun run dev` once to regenerate it.
 - If you change a documented fact (a command, a path, repo structure), fix the
