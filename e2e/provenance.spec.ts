@@ -21,8 +21,10 @@ const TREE: SeedNode[] = [
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
+// The mark is a SparkleIcon carrying `data-origin` (the harness name) and an
+// aria-label attribution -- the same hook styles.css keys its alignment rule on.
 const mark = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .provenance-mark`);
+  page.locator(`li[data-node-id="${id}"] > .outline-row [data-origin]`);
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
@@ -39,11 +41,12 @@ test.describe("provenance marker", () => {
     // The user's node carries no mark.
     await expect(mark(page, "mine")).toHaveCount(0);
 
-    // The agent's node does, tagged with the harness name for the tooltip.
+    // The agent's node does, tagged with the harness name plus an aria-label
+    // attribution (the visible copy lives in the hover tooltip).
     const agentMark = mark(page, "ai");
     await expect(agentMark).toBeVisible();
     await expect(agentMark).toHaveAttribute("data-origin", "Claude");
-    await expect(agentMark).toHaveAttribute("title", /Created by Claude/);
+    await expect(agentMark).toHaveAttribute("aria-label", /Created by Claude/);
   });
 
   test("the mark rides the zoom into the page title (Seam F title slot)", async ({
@@ -55,7 +58,7 @@ test.describe("provenance marker", () => {
     await page.locator(`li[data-node-id="ai"] .bullet`).first().click();
 
     // The zoomed title (registered under the rootId) shows the same mark.
-    const titleMark = page.locator(`.zoomed-title .provenance-mark`);
+    const titleMark = page.locator(`.zoomed-title [data-origin]`);
     await expect(titleMark).toBeVisible();
     await expect(titleMark).toHaveAttribute("data-origin", "Claude");
   });
