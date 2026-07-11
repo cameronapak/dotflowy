@@ -1,4 +1,9 @@
-import { CopyPlusIcon, CornerUpRightIcon, PilcrowIcon } from "lucide-react";
+import {
+  CopyPlusIcon,
+  CornerUpRightIcon,
+  PilcrowIcon,
+  Trash2Icon,
+} from "lucide-react";
 
 import type { CommandSpec } from "../plugins/types";
 
@@ -52,11 +57,12 @@ export const paragraphCommand: CommandSpec = {
 };
 
 /**
- * The core's own slash commands. Move and Mirror are structural (they relink the
- * tree), not feature concepts, so they stay core; feature commands (`/todo`,
- * `/bullet`) are the todos plugin's, registered via Seam C. Paragraph leads:
- * it's a contextual type-change command, so it belongs beside To-do/Bullet
- * rather than trailing with the destination pickers.
+ * The core's own slash commands. Move, Mirror, and Delete are structural (they
+ * relink or prune the tree), not feature concepts, so they stay core; feature
+ * commands (`/todo`, `/bullet`) are the todos plugin's, registered via Seam C.
+ * Paragraph leads: it's a contextual type-change command, so it belongs beside
+ * To-do/Bullet rather than trailing with the destination pickers. Delete trails
+ * last -- it's the one destructive verb, so it should never be the top match.
  */
 export const CORE_COMMANDS: CommandSpec[] = [
   paragraphCommand,
@@ -80,5 +86,24 @@ export const CORE_COMMANDS: CommandSpec[] = [
     keywords: ["mirror", "synced", "instance", "alias", "reference", "clone"],
     available: () => isMirrorsEnabled(),
     run: (id, ctx) => ctx.mutations.onRequestMirror(id),
+  },
+  // Delete is the fourth surface for removing a node -- the bullet keymap
+  // (Backspace), the Cmd+K `node:delete` verb, and the selection menu already
+  // cover it; this puts it in the `/` palette too. It delegates to the ONE
+  // delete funnel (`onDeleteNode`), so it inherits protection guards, the
+  // mirror-source guard, the big-subtree confirm dialog, the atomic
+  // `runStructural` batch, and neighbor-focus for free (ADR 0009/0015/0022). A
+  // protected node (the daily container) shakes + toasts rather than deleting,
+  // exactly as Backspace does, so `available` stays true -- hiding the command
+  // would swap a legible block for a silent absence. No `runMany`: the selection
+  // actions menu wires its own Delete (`ops.remove`), the Move/Mirror precedent.
+  {
+    id: "delete",
+    label: "Delete",
+    description: "Delete this node and its subtree",
+    icon: Trash2Icon,
+    keywords: ["delete", "remove", "trash", "destroy"],
+    available: () => true,
+    run: (id, ctx) => ctx.mutations.onDeleteNode(id),
   },
 ];

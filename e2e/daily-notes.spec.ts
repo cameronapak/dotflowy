@@ -25,9 +25,19 @@ async function load(page: Page, tree: SeedNode[] = STANDARD_TREE) {
 // The breadcrumb's leading icon button zooms back to the top. It's a CLIENT
 // navigation, so the seedOutline init script does not re-run and wipe the nodes
 // created at runtime (a full reload would).
+//
+// The nav rides a view transition (navigateZoom). When a write-intent Today nav
+// left the page on `/<day>?focus=last` (ADR 0041), that transition can race the
+// focus-last mount effect and swallow the first click before it commits -- so
+// under parallel load the URL stayed on the day note (a deterministic race, not
+// slowness). Retry the click until it lands: the Home button always renders and
+// no-ops once we're home, so a re-click is safe.
 async function goHome(page: Page) {
-  await page.locator("nav.breadcrumb button").first().click();
-  await expect(page).toHaveURL(/\/$/);
+  const home = page.locator("nav.breadcrumb button").first();
+  await expect(async () => {
+    await home.click();
+    await expect(page).toHaveURL(/\/$/, { timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
 }
 
 async function clientNavigate(page: Page, path: string) {

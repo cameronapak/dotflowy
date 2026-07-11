@@ -122,6 +122,25 @@ test.describe("node links (ADR 0032)", () => {
 
     await expect(page.locator('[role="listbox"]')).toHaveCount(0);
   });
+
+  test("the [[ picker opens on the zoomed page title too", async ({ page }) => {
+    await load(page);
+    await page.goto("/blank"); // zoom into the empty node -- it's now the title
+
+    const title = page.locator(".zoomed-title .node-text");
+    await expect(title).toBeVisible();
+    await title.click();
+    await page.keyboard.type("[[Phoe");
+
+    const option = page
+      .locator('[role="listbox"]')
+      .getByText("Project Phoenix");
+    await expect(option).toBeVisible();
+
+    await option.click();
+    await expect(page.locator('[role="listbox"]')).toHaveCount(0);
+    await expect(title.locator(`[data-node-link="${TARGET}"]`)).toBeVisible();
+  });
 });
 
 test.describe("backlinks (ADR 0032)", () => {
