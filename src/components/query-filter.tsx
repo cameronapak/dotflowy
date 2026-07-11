@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Search, X } from "lucide-react";
+import { Pencil, Pin, Search, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -16,6 +16,14 @@ import {
   caretToken,
   type FilterSuggestion,
 } from "../data/filter-query";
+import {
+  deleteSavedQuery,
+  renameSavedQuery,
+  toggleSavedQuery,
+  useIsQuerySaved,
+  useSavedQueries,
+} from "../data/saved-queries";
+import { normalizeQuery } from "../data/saved-queries-core";
 import { collectTagCorpus } from "../data/tags";
 import { getTreeIndex } from "../data/tree-store";
 import { filterOperatorInfos } from "../plugins/registry";
@@ -162,20 +170,154 @@ function SuggestionRow({
   );
 }
 
+const SAVED_SECTION_CAP = 6;
+
+/** The "Saved" section atop the filter popover's cheat sheet (ADR 0048): the
+ *  user summoned search, so their saved searches lead. Newest-first, top ~6.
+ *  Clicking a row fills the input AND applies the query; hover reveals a pencil
+ *  (inline rename) and an X (delete). Rename/delete live ONLY here -- Cmd+K just
+ *  lists and runs.
+ *
+ *  Keyboard nav (Arrow/Enter) stays owned by the suggestion listbox below; these
+ *  saved rows are MOUSE-ONLY for v1 (ADR 0048 leaves that open) so they don't
+ *  entangle the existing autocomplete `activeIndex` walk. */
+function SavedQueriesSection({
+  anchorRef,
+  onPick,
+}: {
+  anchorRef: React.RefObject<HTMLInputElement | null>;
+  onPick: (query: string) => void;
+}) {
+  const saved = useSavedQueries();
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
+  const top = saved.slice(0, SAVED_SECTION_CAP);
+
+  useLayoutEffect(() => {
+    if (renamingId) {
+      renameRef.current?.focus();
+      renameRef.current?.select();
+    }
+  }, [renamingId]);
+
+  // Section renders nothing when there are no saved queries (ADR 0048).
+  if (top.length === 0) return null;
+
+  const startRename = (id: string, name: string) => {
+    setNameDraft(name);
+    setRenamingId(id);
+  };
+  // Return focus to the filter input so its focused-state stays real after the
+  // rename input unmounts (the main input's onBlur was guarded, not fired).
+  const endRename = () => {
+    setRenamingId(null);
+    anchorRef.current?.focus();
+  };
+  const commitRename = () => {
+    if (renamingId) renameSavedQuery(renamingId, nameDraft);
+    endRename();
+  };
+
+  return (
+    <div className="border-b p-1" aria-label="Saved filters">
+      <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+        Saved
+      </div>
+      {top.map((row) =>
+        renamingId === row.id ? (
+          <div key={row.id} className="px-2 py-1">
+            <input
+              ref={renameRef}
+              value={nameDraft}
+              // Let the rename input take focus (the container preventDefaults
+              // mousedown to keep the filter input focused; stop it here).
+              onMouseDown={(e) => e.stopPropagation()}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // Own Enter/Escape locally; never bubble to the filter input's
+                // ladder or the window Escape clear.
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  endRename();
+                }
+              }}
+              // Blur = cancel (Enter is the only commit path, ADR 0048).
+              onBlur={endRename}
+              className="w-full rounded border bg-background px-1.5 py-0.5 text-sm"
+              aria-label="Rename saved filter"
+              spellCheck={false}
+            />
+          </div>
+        ) : (
+          <div
+            key={row.id}
+            className="group/saved flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent hover:text-accent-foreground"
+          >
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+              onClick={() => onPick(row.query)}
+            >
+              <span className="truncate">{row.name}</span>
+              {normalizeQuery(row.name) !== normalizeQuery(row.query) ? (
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {row.query}
+                </span>
+              ) : null}
+            </button>
+            <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover/saved:opacity-100">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Rename ${row.name}`}
+                onClick={() => startRename(row.id, row.name)}
+                className="text-muted-foreground"
+              >
+                <Pencil />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Delete ${row.name}`}
+                onClick={() => deleteSavedQuery(row.id)}
+                className="text-muted-foreground"
+              >
+                <X />
+              </Button>
+            </div>
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 /** The suggestion listbox, portaled to the body (the subheader's height-animated
  *  wrapper is `overflow-hidden`, which would clip an in-flow dropdown) and
  *  fixed-positioned under the input. Its `role="listbox"` also keeps a mousedown
- *  inside it from clearing an active node selection (selection-mode.tsx). */
+ *  inside it from clearing an active node selection (selection-mode.tsx). The
+ *  optional Saved section (ADR 0048) leads on empty focus. */
 function SuggestionPopover({
   anchorRef,
   suggestions,
   activeIndex,
   onPick,
+  showSaved,
+  onPickSaved,
 }: {
   anchorRef: React.RefObject<HTMLInputElement | null>;
   suggestions: FilterSuggestion[];
   activeIndex: number;
   onPick: (s: FilterSuggestion) => void;
+  showSaved: boolean;
+  onPickSaved: (query: string) => void;
 }) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   useLayoutEffect(() => {
@@ -195,26 +337,35 @@ function SuggestionPopover({
 
   if (!rect) return null;
   return createPortal(
-    <ul
-      id={LISTBOX_ID}
-      role="listbox"
-      aria-label="Filter suggestions"
-      data-filter-suggestions
-      className="fixed z-50 max-h-64 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+    <div
+      data-filter-popover
+      className="fixed z-50 max-h-80 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-md"
       style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
-      // A press anywhere in the list must not blur the input.
+      // A press anywhere in the popover must not blur the input (the rename input
+      // stops its own mousedown so it can still take focus).
       onMouseDown={(e) => e.preventDefault()}
     >
-      {suggestions.map((s, i) => (
-        <SuggestionRow
-          key={s.id}
-          suggestion={s}
-          id={optionId(i)}
-          active={i === activeIndex}
-          onPick={onPick}
-        />
-      ))}
-    </ul>,
+      {showSaved ? (
+        <SavedQueriesSection anchorRef={anchorRef} onPick={onPickSaved} />
+      ) : null}
+      <ul
+        id={LISTBOX_ID}
+        role="listbox"
+        aria-label="Filter suggestions"
+        data-filter-suggestions
+        className="p-1"
+      >
+        {suggestions.map((s, i) => (
+          <SuggestionRow
+            key={s.id}
+            suggestion={s}
+            id={optionId(i)}
+            active={i === activeIndex}
+            onPick={onPick}
+          />
+        ))}
+      </ul>
+    </div>,
     document.body,
   );
 }
@@ -245,6 +396,10 @@ export function QueryFilterBar() {
   // Live raw query, read at open time without re-binding the mount-once opener.
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
+
+  // Pin pressed-state (ADR 0048): filled when the current (trimmed) query is
+  // already saved. Reads `draft` so it tracks the input even while composing.
+  const isSaved = useIsQuerySaved(draft);
 
   const showInput = summoned || active;
 
@@ -312,6 +467,24 @@ export function QueryFilterBar() {
     [scheduleWrite, recompute],
   );
 
+  // Pick a saved query (ADR 0048): fill the input AND apply it. Keeps the input
+  // focused with the caret at the end so it flows into editing.
+  const pickSaved = useCallback(
+    (query: string) => {
+      setDraft(query);
+      flush(query);
+      setPopoverOpen(true);
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(query.length, query.length);
+        recompute();
+      });
+    },
+    [flush, recompute],
+  );
+
   const open = useCallback(() => {
     // Prefill with the raw `?q=` string (caret goes to the end in the focus
     // effect), so summoning an active filter lands you editing it.
@@ -361,7 +534,10 @@ export function QueryFilterBar() {
   if (!showInput) return null;
 
   const showPopover = focused && popoverOpen && suggestions.length > 0;
-  const showClear = draft.length > 0;
+  // Trailing controls (pin + clear) show together whenever the input has text.
+  const showControls = draft.length > 0;
+  // The Saved section (ADR 0048) leads the cheat sheet on empty focus.
+  const showSaved = draft.trim().length === 0;
 
   // Blur to the outline: flush the pending write and drop the summon flag. With
   // no query left the row collapses; with an active query the input stays
@@ -402,7 +578,12 @@ export function QueryFilterBar() {
     recompute();
   };
 
-  const onBlur = () => {
+  const onBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    // Focus moving INTO the popover (the Saved rename input) must not collapse
+    // it -- return before any state change so `focused` stays true and the
+    // popover (hence the rename input) stays mounted (ADR 0048).
+    const rt = e.relatedTarget as HTMLElement | null;
+    if (rt && rt.closest("[data-filter-popover]")) return;
     setFocused(false);
     // Flush without dropping residency: a blurred active filter stays in the
     // input. An empty draft collapses via `showInput` once the write lands.
@@ -488,21 +669,39 @@ export function QueryFilterBar() {
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
-        className={cn("pl-8", showClear && "pr-8")}
+        className={cn("pl-8", showControls && "pr-14")}
       />
-      {showClear ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          // Keep focus across the press so clearing doesn't blur -> collapse.
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => clearText(true)}
-          aria-label="Clear filter"
-          className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground"
-        >
-          <X />
-        </Button>
+      {showControls ? (
+        <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
+          {/* Pin toggle (ADR 0048): instant save/unsave of the current query,
+              no naming prompt. Pressed/filled when already saved. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            // Keep focus across the press (like the clear X) so saving doesn't
+            // blur -> collapse the input.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => toggleSavedQuery(draft)}
+            aria-label={isSaved ? "Unsave filter" : "Save filter"}
+            aria-pressed={isSaved}
+            className={cn(isSaved ? "text-primary" : "text-muted-foreground")}
+          >
+            <Pin className={cn(isSaved && "fill-current")} />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            // Keep focus across the press so clearing doesn't blur -> collapse.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => clearText(true)}
+            aria-label="Clear filter"
+            className="text-muted-foreground"
+          >
+            <X />
+          </Button>
+        </div>
       ) : null}
       {showPopover ? (
         <SuggestionPopover
@@ -510,6 +709,8 @@ export function QueryFilterBar() {
           suggestions={suggestions}
           activeIndex={activeIndex}
           onPick={applySuggestion}
+          showSaved={showSaved}
+          onPickSaved={pickSaved}
         />
       ) : null}
     </search>
