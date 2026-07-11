@@ -24,6 +24,12 @@ jobs:
         run: bun run lint
       - name: Typecheck
         run: bun run typecheck
+      - name: Typecheck worker
+        run: bun run typecheck:worker
+      - name: Typecheck tests
+        run: bun run typecheck:test
+      - name: Unit tests
+        run: bun run test
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.
@@ -32,3 +38,23 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           bunx changeset status --since="origin/$GITHUB_BASE_REF"
+
+  # Blocking, like everything else in this workflow. Flake policy (#202): a
+  # flaky spec gets `test.fixme()` + a follow-up issue, never a merge-anyway
+  # habit -- there is no advisory/continue-on-error escape valve here.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - name: Install Playwright chromium
+        run: bunx playwright install --with-deps chromium
+      # --workers=2 is the documented clean-signal config (AGENTS.md); the
+      # suite boots its own vite server on :3210 and the fixtures mock /api,
+      # so no Worker/D1 setup is needed. `test:e2e:serial` (--workers=1) is
+      # the local flake-hunting counterpart, maximum determinism over speed.
+      - name: Playwright e2e
+        run: bun run test:e2e --workers=2

@@ -32,6 +32,7 @@
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test": "bun test src worker/",
     "test:e2e": "playwright test",
+    "test:e2e:serial": "playwright test --workers=1",
     "test:e2e:ui": "playwright test --ui",
     "effect:src": "opensrc path Effect-TS/effect-smol"
   },
