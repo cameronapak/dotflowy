@@ -52,9 +52,12 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Install Playwright chromium
         run: bunx playwright install --with-deps chromium
-      # --workers=2 is the documented clean-signal config (AGENTS.md); the
-      # suite boots its own vite server on :3210 and the fixtures mock /api,
-      # so no Worker/D1 setup is needed. `test:e2e:serial` (--workers=1) is
-      # the local flake-hunting counterpart, maximum determinism over speed.
+      # Serial (--workers=1) on purpose: --workers=2 is the clean-signal
+      # config on a dev box, but the hosted runner can't sustain it -- the
+      # baseline PR run failed 10 diverse specs, all load/contention-shaped
+      # (seeded node not visible within the expect timeout, select-all
+      # races), each past its retry. Serial trades ~2x wall time for a
+      # signal that's about the code. The suite boots its own vite server
+      # on :3210 and the fixtures mock /api, so no Worker/D1 setup needed.
       - name: Playwright e2e
-        run: bun run test:e2e --workers=2
+        run: bun run test:e2e:serial
