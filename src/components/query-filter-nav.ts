@@ -42,7 +42,7 @@ export function writeQuery(q: string, opts?: { replace?: boolean }) {
     });
 }
 
-/** Write the query from a token list (the pill bar's remove/clear path). */
+/** Write the query from a token list (the tag-chip AND-in dedup path). */
 export function writeQueryTokens(tokens: string[]) {
   writeQuery(tokens.join(" "));
 }
@@ -62,8 +62,8 @@ export function addTermToFilter(term: string) {
 
 let opener: (() => void) | null = null;
 
-/** Registered by `QueryFilterBar` so Cmd+F / the Cmd+K action / a pill-bar tap
- *  can summon the filter input from anywhere. */
+/** Registered by `QueryFilterBar` so Cmd+F / the header magnifier / the Cmd+K
+ *  action can summon the filter input from anywhere. */
 export function setFilterInputOpener(fn: (() => void) | null) {
   opener = fn;
 }

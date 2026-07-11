@@ -62,7 +62,7 @@ function tagOption(tag: string) {
 }
 
 // Open the color picker at the pointer, routed through the generic overlay host
-// (ctx.openOverlay). Shared by chips and filter pills.
+// (ctx.openOverlay). Opened by right-clicking an inline tag chip.
 function openColorMenu(
   el: HTMLElement,
   ctx: PluginContext,

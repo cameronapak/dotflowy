@@ -156,8 +156,8 @@ export interface FilterQuery {
  * Split a raw query into its SURFACE tokens (re-serializable), respecting
  * quotes: a `"` toggles quote mode so spaces inside a phrase don't end the
  * token. `-"a b"`, `"a b"`, `#tag`, `is:todo`, and `OR` each come back as one
- * token. Also the source of truth for the filter-pill bar's token list (so a
- * removed pill can drop exactly one token and re-join the rest).
+ * token. Also the source of truth for the tag-chip AND-in dedup (so a chip
+ * click adds exactly one token and never duplicates an existing one).
  */
 export function tokenizeQuery(q: string | undefined): string[] {
   if (!q) return [];
