@@ -21,9 +21,8 @@ const TREE: SeedNode[] = [
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-// The mark is a SparkleIcon carrying `data-origin`; there is no dedicated
-// class. It sits inside a Radix tooltip trigger, so the human-readable
-// attribution is `aria-label`, not a native `title`.
+// The mark is a SparkleIcon carrying `data-origin` (the harness name) and an
+// aria-label attribution -- the same hook styles.css keys its alignment rule on.
 const mark = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row [data-origin]`);
 
@@ -42,7 +41,8 @@ test.describe("provenance marker", () => {
     // The user's node carries no mark.
     await expect(mark(page, "mine")).toHaveCount(0);
 
-    // The agent's node does, tagged with the harness name for the tooltip.
+    // The agent's node does, tagged with the harness name plus an aria-label
+    // attribution (the visible copy lives in the hover tooltip).
     const agentMark = mark(page, "ai");
     await expect(agentMark).toBeVisible();
     await expect(agentMark).toHaveAttribute("data-origin", "Claude");

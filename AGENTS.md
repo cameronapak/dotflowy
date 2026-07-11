@@ -134,6 +134,10 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 - Ignore temporary/generated/local-only/unrelated untracked files; ask before broadening scope to unrelated user changes.
 - After repo-reality changes, re-check both docs and mention any freshness updates in your final response.
 
+## Run the app before declaring done
+
+Green gates are necessary, not sufficient. Before declaring an observable change done, drive it in the running app (`bun run dev`) — or exercise it through an e2e spec — and confirm the behavior; typecheck/lint/tests can all pass while the feature does the wrong thing on screen. The `/verify` skill executes exactly this; run it (or the equivalent by hand) before committing a nontrivial change. Skip only for changes with no runtime surface (docs, types, tooling). Same weight as _Documentation Freshness_ above: a stated norm, not a gate.
+
 ## Planning and design
 
 **New feature or design decision? Stop and grill it first — this is a MUST, not a nicety.** Before writing code for any of these — a new plugin (`src/plugins/<name>/`), a new route, a new plugin **seam**, a new `Node` field or wire-schema change, a new side-collection, or any behavior whose _why_ an ADR would carry — you MUST do both, in order:
@@ -145,9 +149,28 @@ Repo reality is the source of truth. If `AGENTS.md` or `README.md` becomes false
 - If the code already makes the call obvious, the code is the doc — don't write it down.
 - When a decision changes, edit its ADR in place (or mark it superseded). History — including superseded decisions and their rejected alternatives — is in `git log`.
 
+## Session handoffs
+
+A single-feature build that spans sessions hands its state forward as **`HANDOFF.md` at the repo root, committed on the feature branch** — never `/tmp` (machine-local, reboot-wiped, invisible to the next agent). Committed, it travels with the code, survives reboots, is versioned, and greets whichever agent checks out the worktree next. **Lifecycle: committed on the branch, deleted in the shipping PR — it must never reach `main`.** Use `docs/handoffs/<slug>.md` only if one branch genuinely needs several.
+
+- **Scope boundary:** single-feature, 2–3 session efforts. Multi-session **fog** efforts still get a wayfinder map (issue + child tickets) — and not every 2-session thing needs a map.
+- **Content is transient build-coordination state ONLY** — uncommitted tree state, worktree/branch logistics, build order, "looks wrong but isn't" lists, next skills to load, risks to spike first. Durable facts belong in memory files; decisions belong in ADRs. Don't fold either in.
+- **Suggested shape:** status / sources of truth / tree state / build order / next skills / risks. (Described here on purpose — a committed template file would itself be a `HANDOFF.md` headed for `main`.)
+- **Two worktrees, one feature:** a branch-local file can't span them — declare one branch canonical and point the other at it.
+
 ## Pull requests
 
 **Opening or updating a PR? Run `/ft-create-concise-pr` — always, not just when asked.** Every PR description in this repo follows that skill's snapshot template (Summary / Changes / Flow / Breaking / Test plan), so reviewers get one consistent, skimmable shape regardless of who — human or agent — wrote the change. Don't hand-write a PR body in your own format, and don't let a description drift after review changes — re-run the skill's Update pass instead. If the skill can't be invoked in your harness, follow `.agents/skills/ft-create-concise-pr/SKILL.md` by hand.
+
+**Cross-agent review before ready:**
+
+- **Every non-trivial PR** (skip chore/docs/changeset-only) runs **`/code-review`** (non-`ultra` effort) before it's marked ready — and **`/security-review`** additionally when the diff touches auth, the SSRF surface (`worker/unfurl.ts`), the Worker→DO trust boundary, or the signup gate.
+- **High-stakes PRs** (DO/sync, auth, the trust boundary, data migrations) can escalate — documented, not mandated: `/code-review ultra` (billed multi-agent cloud review, Cam-triggered) or opening the branch in the configured Codex app for a genuinely different model's review. Cam picks per-PR.
+- No custom review personas — `/code-review` + `/security-review` + oxlint + react-doctor + `/simplify` already cover the split.
+
+**Suspected cross-commit drift** (AI slop accreting over a branch) is handled **on demand** — `/improve`, `/ft-remove-ai-code-slop`, or `/visual-recap` over the range — never by a scheduled sweep; the per-PR `/code-review` + `/simplify` are the recurring quality pass.
+
+**Shipping a multi-session branch? Delete `HANDOFF.md` in the PR** (see _Session handoffs_ above) — it must not reach `main`.
 
 ## Changelog + releases
 
@@ -180,6 +203,7 @@ bun run typecheck:test  # tsc over the unit tests (tsconfig.test.json)
 bun run test       # bun test over src + worker/ (pure-logic unit tests)
 bun run test:e2e   # playwright (chromium) end-to-end tests
 bun run test:e2e:ui  # same, in Playwright's interactive UI
+bun run test:e2e:serial  # deterministic --workers=1 run for flake-hunting (CI runs --workers=2: faster, clean-enough)
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # watch loop (scripts/cf-dev.ts): build:cf + wrangler dev, rebuilds on src/ changes
 bun run deploy     # build:cf, then `wrangler deploy`
@@ -190,6 +214,12 @@ bun run db:migrate:local   # apply D1 migrations locally (db:migrate:remote = pr
 bun run effect:src  # print (fetch on first use) the Effect v4 source path via opensrc
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
+
+`test:e2e:serial` vs CI: `--workers=1` is maximum local determinism when chasing a flake; CI runs Playwright at `--workers=2`, the faster clean-enough gate. Don't read a serial-only pass as a CI guarantee, or a parallel-contention flake as a real failure.
+
+### Agent scripting
+
+When you catch yourself repeating a multi-step incantation, capture it durably rather than re-deriving it. Prefer the natural home: a `package.json` script, or a config fix (`playwright.config.ts`, etc.). Reach for a standalone `scripts/*.ts` (Bun + TS) only when there's no config home. Global, repo-agnostic plumbing (e.g. `gh` wayfinder wiring) belongs in the owning skill, not here.
 
 ## Exploring the Effect v4 source
 
@@ -469,6 +499,23 @@ Bold / italic / strikethrough / underline — `**b**`, `*i*`, `~~s~~`, `~u~` (Be
 ## Environment gotcha: adding a React-importing dependency
 
 `bun add`-ing a package that imports React (e.g. `lucide-react`) while `bun run dev` is running may crash with "Invalid hook call / multiple copies of React" — a stale Vite dep-optimize cache, not a code bug. Fix: stop the server, `rm -rf node_modules/.vite`, restart.
+
+## Perf guards: assert the countable invariant, never a wall clock
+
+A perf guard here asserts the **structural invariant that yields the performance** — an integer read from a store or the DOM — never a wall-clock threshold. Real CPU time swings with CI hardware, flakes, and gets muted; an integer reads identically on a MacBook and a throttled CI box. Two templates:
+
+- **`e2e/zoom-perf.spec.ts`** — reads the hotkey manager's live registration count via `window.__hotkeyManager` and asserts zoom holds ~one focused bullet's keymap, not `visibleRows × ~20` (the bound whose loss burned ~130ms of main thread per zoom).
+- **`e2e/virtualized-windowing.spec.ts`** — counts mounted `li[data-node-id]` rows and asserts the window stays bounded (~a viewport's worth out of thousands) as the outline grows.
+
+**The trigger rule:** when a perf regression has a **countable signature** — re-render fan-out, flatten count on a keystroke, registrations per remount — add a guard spec that asserts the count. When it doesn't, don't invent a timing test.
+
+## Profiling incantations (for agents)
+
+No profiling framework; these existing hooks are the toolkit:
+
+- **Playwright tracing:** `bunx playwright test --trace on <spec>` records per-action timings; wrap phases in `test.step(...)` for named spans in the trace viewer.
+- **`window.__hotkeyManager`** — DEV-only handle on the hotkey store (`src/components/hotkey-devtools.ts`; the `import.meta.env.DEV` branch is stripped from production builds). Read live registration counts from a spec's `page.evaluate` or the dev console.
+- **react-doctor** (`npx -y react-doctor@latest . --verbose`, tuned via `doctor.config.json`) — an OCCASIONAL render-health audit, not a gate: its accepted editor false-positives (the hand-tuned, build-proven memos) are known noise on every run, which is exactly what erodes trust in a recurring gate.
 
 ## Verifying UI changes
 
