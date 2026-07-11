@@ -2,7 +2,7 @@
   <img src="/public/favicon-light.svg" alt="Dotflowy" width="120" height="120" />
 </p>
 
-<h1 align="center">Dotflowy (beta)</h1>
+<h1 align="center">Dotflowy (alpha)</h1>
 
 <p align="center">
   <strong>An infinite outliner for your thoughts and tasks</strong><br/>
@@ -40,13 +40,17 @@ What works:
 
 - Nested bullets with inline editing; collapse / expand subtrees (hover chevron in the gutter)
 - Zoom into any bullet as a temporary root (click its dot), with a breadcrumb trail back out
-- Tasks: a checkbox marks complete; a "show completed" toggle hides done items
+- Three node kinds: bullet, task (a checkbox marks complete; a "show completed" toggle hides done items), and paragraph (reads as prose behind a pilcrow)
 - Drag the bullet dot to reorder **and** reparent in one drop (mouse + touch)
-- Markdown-style rich text: `inline code`, `[links](https://…)` that fold to a clean label, and `#tags`
+- Markdown-style rich text: `inline code`, **bold** / _italic_ / strikethrough / underline, highlights (six colors), `[links](https://…)` that fold to a clean label (pasted URLs unfurl their title), and `||spoilers||` — hidden from humans until the caret enters, redacted from AI agents
 - Clicking a `#tag` filters the outline in place; right-click a tag to color it
-- Bookmarks (the header star pins the current zoom view) and a `Cmd/Ctrl+K` quick-switcher to jump anywhere
-- A `/` command palette (to-do, plain bullet, move) and a move-to dialog
-- Dark mode, undo / redo
+- Daily notes: a header Today button, `[[YYYY-MM-DD]]` date chips that open (or create) that day's note
+- Mirrors: one node windowed into several places, every instance editable; node links (`[[…]]`) with backlinks on the zoomed view
+- Select whole nodes (`Shift+↑/↓`, the `Cmd/Ctrl+A` ladder) and copy / move / indent / delete the run at once
+- Bookmarks (the header star pins the current zoom view) and a `Cmd/Ctrl+K` command center — jump anywhere, run node + global actions
+- A `/` command palette (to-do, paragraph, move, mirror, formatting, …) and a move-to dialog
+- Multi-line paste lands as real nodes (and copy gives markdown back); OPML import / export speaks the Workflowy dialect
+- Dark mode, undo / redo, an in-app "What's new" changelog
 - An MCP server (`/mcp`, OAuth-gated) so AI agents can read and edit the outline — add to today's daily note, mirror nodes, search — with live sync into open editors
 
 ### Keyboard
@@ -62,21 +66,22 @@ What works:
 | `Backspace` on an empty bullet    | Delete it and focus the previous one                                                                            |
 | `Arrow ↑` / `↓` at line edges     | Move between bullets (preserves the caret column)                                                               |
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` | Undo / redo                                                                                                     |
-| `Cmd/Ctrl+K`                      | Open the quick-switcher                                                                                         |
+| `Shift+↑` / `↓`                   | Select whole nodes (then `Tab` indents the run, `Backspace` deletes it, …)                                      |
+| `Cmd/Ctrl+K`                      | Open the command center                                                                                         |
 
 Not built yet: sharing, email verification.
 
 ## Stack
 
-| Layer      | Choice                                                       | Why                                                                                                                                                                                                                                                                                   |
-| ---------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Framework  | TanStack Start (SPA mode)                                    | File-based routing, no SSR needed for a local-first app                                                                                                                                                                                                                               |
-| Data       | TanStack DB query collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes use `/api/nodes`; plugin side data (tag colors, daily index) uses a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
-| Backend    | Cloudflare Worker + Durable Objects                          | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md))                                                                                                                            |
-| Auth       | Better Auth (email + password)                               | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1                                                                                                                                                                 |
-| Validation | Effect Schema                                                | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker                                                                                                                                                  |
-| Build      | Vite 8                                                       | What Start uses                                                                                                                                                                                                                                                                       |
-| Runtime    | Bun (dev/install)                                            | Fast; npm/pnpm/yarn work too                                                                                                                                                                                                                                                          |
+| Layer      | Choice                                                 | Why                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework  | TanStack Start (SPA mode)                              | File-based routing, no SSR needed for a local-first app                                                                                                                                                                                                                                                                                                                          |
+| Data       | TanStack DB collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes ride a custom sync collection (live `/api/sync` WebSocket, writes via `/api/nodes`); plugin side data (tag colors, daily index) rides query collections over a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
+| Backend    | Cloudflare Worker + Durable Objects                    | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md))                                                                                                                                                                                                                       |
+| Auth       | Better Auth (email + password)                         | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1                                                                                                                                                                                                                                                            |
+| Validation | Effect Schema                                          | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker                                                                                                                                                                                                                                             |
+| Build      | Vite 8                                                 | What Start uses                                                                                                                                                                                                                                                                                                                                                                  |
+| Runtime    | Bun (dev/install)                                      | Fast; npm/pnpm/yarn work too                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Run it
 
@@ -91,6 +96,8 @@ Other useful scripts:
 bun run build      # production build
 bun run preview    # preview the production build
 bun run typecheck  # tsc --noEmit
+bun run lint       # oxlint over src + worker
+bun run test       # unit tests (bun test, pure logic only)
 bun run test:e2e   # Playwright end-to-end tests (chromium)
 ```
 
@@ -150,13 +157,13 @@ A flat list of rows maps cleanly onto a sync backend. Nested JSON would force de
 
 ### Persistence
 
-`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **query collection**: the `queryFn` GETs the full node set from `/api/nodes` and the mutation handlers POST/PATCH/DELETE through the same Worker, which **routes each request to the caller's Durable Object** and reads/writes the `nodes` table in its colocated SQLite. We mutate directly (`collection.insert / update / delete`); writes are optimistic locally and persisted server-side, reconciling across devices on tab focus. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
+`nodesCollection` (`src/data/collection.ts`) is a TanStack DB **custom sync collection**: on connect, the Worker **routes `/api/sync` to the caller's Durable Object**, which streams a `snapshot` of the outline and then live `change` deltas over the WebSocket — no window-focus refetch. Writes are optimistic locally (`collection.insert / update / delete`) and persist through the same Worker into the DO's colocated SQLite: field edits (text, completed, …) PATCH `/api/nodes` directly, while structural edits (insert / move / delete) land as **one atomic batch** (`POST /api/nodes {ops}`) whose optimistic overlay is held until the socket echoes the committed change. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md) and [atomic structural writes](docs/adr/0009-atomic-structural-writes.md).
 
-Plugin **side-collections** (tag colors, the daily index) sync the same way, over a generic `/api/kv` store (one `kv` table in the same DO, namespaced by collection) — so a custom tag color or a daily-note follows you across devices too. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
+Plugin **side-collections** (tag colors, the daily index, the changelog cursor) are query collections over a generic `/api/kv` store (one `kv` table in the same DO, namespaced by collection), reconciling on tab focus — so a custom tag color or a daily note follows you across devices too. See [the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md).
 
 ### Plugins
 
-The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `tags`, and `todos` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of _seams_ — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/adr/0001-plugin-architecture.md).
+The editor is a small core extended by **plugins** compiled into the bundle (an internal registry, not runtime-loaded). `code`, `links`, `node-links`, `route-bible`, `tags`, `todos`, `daily`, `emphasis`, `highlight`, `spoiler`, and `provenance` are each a plugin built on the same public API, so the core carries no feature-specific branches. A plugin registers against a fixed set of _seams_ — inline tokens, delegated clicks, `/` commands, keymap, row slots, view transforms, autocomplete menus, paste / autoformat, and side-collections. Adding a feature is a folder under `src/plugins/<name>/` plus one line in `src/plugins/index.ts`. See [the plugin architecture](docs/adr/0001-plugin-architecture.md).
 
 ## Sync: where it stands
 
@@ -185,24 +192,28 @@ src/
     index.tsx         # the outline at the top level (Home)
     $nodeId.tsx       # the same outline zoomed into one bullet
   lib/
-    auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOut / signOutAndReload)
+    auth-client.ts    # Better Auth browser client (useSession / signIn / signUp / signOutAndReload — sign-out always hard-navigates)
     utils.ts          # cn() and small helpers
   components/
     auth-screen.tsx     # login / signup screen (shown by the root AuthGate when signed out)
     # sign out lives in the header More menu (header-more-menu.tsx) and the Cmd+K command center (command-actions.tsx)
     OutlineEditor.tsx   # reads tree, focus + command dispatch, the zoom view
-    OutlineNode.tsx     # one bullet + its subtree (memoized, per-node store subscription)
+    OutlineRow.tsx      # the live row (flat windowed list — virtualized rendering)
+    OutlineNode.tsx     # one bullet + its subtree (the recursive fallback path, flag-gated)
     inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
     menu-engine.tsx     # generic caret-autocomplete engine
     slash-menu.tsx      # the `/` command palette
     node-switcher.tsx   # Cmd+K quick-switcher
     move-dialog.tsx     # the `/move` destination picker
-    bookmarks.tsx       # header star + bookmark browsing
+    bookmarks.tsx       # the header star (browsing lives in the Cmd+K empty state)
     use-drag-reorder.ts # bullet-dot drag (reorder + reparent)
     Header.tsx, paste.ts, flash-node.ts, *-provider.tsx, *-toggle.tsx, ui/
   data/
     schema.ts         # Effect Schema, Node type
-    collection.ts     # TanStack DB query collection over the Worker (/api/nodes)
+    wire-schema.ts    # shared wire schemas (one leaf imported by client + Worker)
+    collection.ts     # TanStack DB custom sync collection (live /api/sync + /api/nodes writes)
+    realtime.ts       # the sync socket as an Effect scoped resource
+    structural.ts     # runStructural: atomic structural batches + echo hold
     api.ts            # REST client for the /api/nodes Worker
     kv-api.ts         # REST client for the generic /api/kv side-collection store
     query-client.ts   # shared TanStack Query client (focus refetch = sync)
@@ -214,20 +225,22 @@ src/
     seed.ts           # first-run bootstrap: seed welcome bullets when the outline is empty
     useTree.ts        # useLiveQuery hook
   plugins/            # the editor's plugin layer (see docs/adr/0001-plugin-architecture.md)
-    index.ts          # the one ordered array: [code, links, tags, todos, daily]
+    index.ts          # the one ordered array (todos, provenance, code, links, node-links, …)
     types.ts          # the typed seam contract (definePlugin)
     registry.ts       # composes every plugin's registrations once at load
-    code/ links/ tags/ todos/ daily/   # one folder per plugin
+    code/ links/ node-links/ route-bible/ tags/ todos/ daily/
+    emphasis/ highlight/ spoiler/ provenance/   # one folder per plugin
   router.tsx
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + /api/kv to per-user DOs
   index.ts            #   session gate + resolveUserId + routes /api to the user's DO (own tsconfig)
+  wire.ts             #   request-body schemas: the validated Worker->DO trust boundary
   auth.ts             #   createAuth(env): Better Auth (email + password + the MCP OAuth provider), sessions in D1
   outline-do.ts       #   UserOutlineDO: per-user SQLite (nodes + kv), the outline store
   mcp.ts              #   the MCP endpoint: stateless JSON-RPC over /mcp (Effect pipeline)
   mcp-tools.ts        #   the MCP tool registry (Effect Schema inputs + handlers over the user's DO)
   outline-ops.ts      #   pure server-side outline planners (snapshot -> atomic ChangeOp batch)
-migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP)
+migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP; 0005 waitlist)
 wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
 docs/adr/             # one ADR per load-bearing decision (history in git log)
 vite.config.ts        # SPA mode + /api dev proxy
