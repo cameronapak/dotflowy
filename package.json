@@ -19,6 +19,7 @@
     "deploy": "bun run build:cf && wrangler deploy",
     "release": "bun scripts/release.ts",
     "release:publish": "bun scripts/release.ts --publish",
+    "release:ship": "git checkout main && git pull --ff-only && bun run release && git push --follow-tags && bun run release:publish",
     "db:migrate:local": "wrangler d1 migrations apply dotflowy-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply dotflowy-db --remote",
     "lint": "oxlint src worker",
