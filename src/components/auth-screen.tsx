@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { signIn, signUp } from "../lib/auth-client";
+import { hardResetToRoot, signIn, signUp } from "../lib/auth-client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -66,9 +66,16 @@ export function AuthScreen() {
         password,
         inviteCode: inviteCode.trim(),
       };
+      // disableSignal: every success branch below leaves via a top-level
+      // navigation, but Better Auth otherwise fires its session signal ~10ms
+      // after resolve — the /get-session refetch can flip the AuthGate and
+      // mount the whole editor (collections, /api/sync socket) against the
+      // previous occupant's still-live singletons before the navigation
+      // commits. Errors never fire the signal, so that path is unaffected.
+      const fetchOptions = { disableSignal: true };
       const res = isSignup
-        ? await signUp.email(signupBody)
-        : await signIn.email({ email, password });
+        ? await signUp.email({ ...signupBody, fetchOptions })
+        : await signIn.email({ email, password, fetchOptions });
       // A real credential/validation failure (>= 400) shows the error; on an
       // OAuth hop anything else (success, or the mcp plugin's after-hook 302
       // that fetch couldn't follow cross-origin) means the session was set —
@@ -79,13 +86,12 @@ export function AuthScreen() {
         resumeAuthorize();
         return;
       } else {
-        // Hard-navigate on success — the SPA-internal gate swap would leave the
-        // previous occupant's outline singletons and /api/sync socket alive (see
-        // signOutAndReload in ../lib/auth-client). This covers what sign-out
-        // reload can't: a session that EXPIRES flips the gate here with no
-        // reload, and signing in as a different user would leak the prior
-        // account's data. Keeps `busy` true — the page is navigating away.
-        window.location.replace("/");
+        // Hard-navigate on success (hardResetToRoot's doc has the full why).
+        // This covers what the sign-out reload can't: a session that EXPIRES
+        // flips the gate here with no reload, and signing in as a different
+        // user would leak the prior account's data. Keeps `busy` true — the
+        // page is navigating away.
+        hardResetToRoot();
         return;
       }
     } catch {

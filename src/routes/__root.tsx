@@ -21,7 +21,7 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
-import { useSession } from "../lib/auth-client";
+import { hardResetToRoot, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
   LEGACY_THEME_KEY,
@@ -116,10 +116,30 @@ function RootComponent() {
  * data API it hits) require a session. While the session is still loading we
  * render nothing to avoid flashing the login screen at an authed user.
  */
+/**
+ * The user id this page's data-layer singletons first loaded under. A module
+ * value (not a ref): it must survive the gate unmounting/remounting and be
+ * remembered across an expiry (id → null → different id), where a previous-
+ * render comparison would misread the new id as a fresh sign-in.
+ */
+let firstUserId: string | null = null;
+
 function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
   const { data: session, isPending } = useSession();
   if (isPending) return null;
   if (!session) return <AuthScreen />;
+  // Identity guard: the per-call-site reloads (signOutAndReload, AuthScreen)
+  // only fire in the tab where the auth action happened. If the account is
+  // switched in ANOTHER tab, this tab's session store revalidates to the new
+  // user while its singletons and /api/sync socket still belong to the old one
+  // — truthiness alone would keep the gate open and route writes to the wrong
+  // account. A different id here always means stale in-memory state: reload.
+  if (firstUserId === null) {
+    firstUserId = session.user.id;
+  } else if (session.user.id !== firstUserId) {
+    hardResetToRoot();
+    return null;
+  }
   return <>{children}</>;
 }
 
