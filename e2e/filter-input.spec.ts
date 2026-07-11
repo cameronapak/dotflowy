@@ -88,13 +88,23 @@ test.describe("summoned filter input (ADR 0047 §6)", () => {
     await expect(page).toHaveURL(/q=%23work/);
   });
 
-  test("two-stage Escape: close the input, then clear the filter", async ({
+  test("three-stage Escape: close the popover, the input, then clear", async ({
     page,
   }) => {
     await load(page);
     await summon(page);
 
     await input(page).fill("#work");
+    await expect(page).toHaveURL(/q=%23work/);
+    // `#work` opens the tag-suggestion popover (ADR 0047 §7 autocomplete).
+    const listbox = page.locator('[role="listbox"]');
+    await expect(listbox).toBeVisible();
+
+    // Stage 0: Escape closes ONLY the popover; the input stays open + focused.
+    await input(page).press("Escape");
+    await expect(listbox).toHaveCount(0);
+    await expect(input(page)).toBeVisible();
+    await expect(input(page)).toBeFocused();
     await expect(page).toHaveURL(/q=%23work/);
 
     // Stage 1: Escape closes the input but keeps the active filter (pills).
@@ -103,7 +113,7 @@ test.describe("summoned filter input (ADR 0047 §6)", () => {
     await expect(bar(page).getByText("#work", { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/q=%23work/);
 
-    // Stage 2: a second Escape (input already gone) clears the whole filter.
+    // Stage 2: a third Escape (input already gone) clears the whole filter.
     await page.keyboard.press("Escape");
     await expect(page).not.toHaveURL(/q=/);
     await expect(page.locator('[aria-label="Filter"]')).toHaveCount(0);

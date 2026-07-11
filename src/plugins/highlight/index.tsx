@@ -217,6 +217,8 @@ export default definePlugin({
       key: "highlight",
       values: ["red", "orange", "yellow", "green", "blue", "purple"],
       bare: true,
+      // Values are palette color names, so autocomplete paints a swatch per row.
+      swatch: true,
       description: "Filter to highlighted nodes (optionally by color)",
       predicate: (node, _index, value) => {
         const colors = highlightColorsIn(node.text);

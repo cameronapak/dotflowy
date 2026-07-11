@@ -36,7 +36,11 @@ import type {
 
 import { registerWidget } from "../components/plugin-widget";
 import { CORE_FILTER_OPERATORS } from "../data/core-filter-operators";
-import { buildFilterOperatorMap, buildQueryFilter } from "../data/filter-query";
+import {
+  buildFilterOperatorMap,
+  buildQueryFilter,
+  collectOperatorKeyInfos,
+} from "../data/filter-query";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
 import { plugins } from "./index";
 
@@ -248,10 +252,19 @@ export function composeHidden(ctx: ViewContext): (node: Node) => boolean {
  *  keymap reserved-key guard's stricter twin -- an ambiguous operator is a real
  *  bug, so fail the build, not just a warn). A correct build never throws, so
  *  the prerender is unaffected. */
-const filterOperatorMap = buildFilterOperatorMap([
+const allFilterOperators = [
   ...CORE_FILTER_OPERATORS,
   ...plugins.flatMap((p) => p.filterOperators ?? []),
-]);
+];
+const filterOperatorMap = buildFilterOperatorMap(allFilterOperators);
+
+/** The registry-driven cheat sheet for the filter input's autocomplete (ADR
+ *  0047 §7): one row per distinct operator key, folding shared-key operators
+ *  (`is:todo|bullet|paragraph|mirror` + `is:complete` + `is:agent`) into one
+ *  entry with the union of their values. Built once at load beside the operator
+ *  map, from the SAME list -- so a new plugin operator shows up in suggestions
+ *  for free, never hand-maintained. Consumed by `query-filter.tsx`. */
+export const filterOperatorInfos = collectOperatorKeyInfos(allFilterOperators);
 
 /**
  * The active view filter. The `?q=` query grammar is CORE now (ADR 0047), so

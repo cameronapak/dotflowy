@@ -3,7 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { CORE_FILTER_OPERATORS } from "./core-filter-operators";
 import {
   buildFilterOperatorMap,
+  buildFilterSuggestions,
   buildQueryFilter,
+  caretToken,
+  collectOperatorKeyInfos,
   type FilterOperator,
   parseFilterQuery,
   tokenizeQuery,
@@ -188,6 +191,143 @@ describe("buildFilterOperatorMap", () => {
       predicate: () => true,
     };
     expect(() => buildFilterOperatorMap([bare, bare])).toThrow(/highlight:/);
+  });
+});
+
+// The operators the autocomplete tests read: core kind values + inline twins of
+// the plugin operators (so `is` folds three owners' values, `highlight` paints).
+const AUTOCOMPLETE_OPS: FilterOperator[] = [
+  ...CORE_FILTER_OPERATORS,
+  { key: "is", values: ["complete"], description: "", predicate: () => true },
+  { key: "is", values: ["agent"], description: "", predicate: () => true },
+  {
+    key: "has",
+    values: ["link"],
+    description: "Has a link",
+    predicate: () => true,
+  },
+  {
+    key: "highlight",
+    values: ["red", "blue"],
+    bare: true,
+    swatch: true,
+    description: "Highlighted",
+    predicate: () => true,
+  },
+];
+
+describe("collectOperatorKeyInfos", () => {
+  const infos = collectOperatorKeyInfos(AUTOCOMPLETE_OPS);
+  const is = infos.find((i) => i.key === "is")!;
+
+  test("folds shared-key operators into one entry (union of values)", () => {
+    expect(infos.map((i) => i.key)).toEqual(["is", "has", "highlight"]);
+    expect(is.values).toEqual([
+      "todo",
+      "bullet",
+      "paragraph",
+      "mirror",
+      "complete",
+      "agent",
+    ]);
+  });
+
+  test("description is the FIRST-registered operator's (core for `is`)", () => {
+    expect(is.description).toBe(CORE_FILTER_OPERATORS[0]!.description);
+  });
+
+  test("bare + swatch flags fold across a key", () => {
+    const hl = infos.find((i) => i.key === "highlight")!;
+    expect(hl.bare).toBe(true);
+    expect(hl.swatch).toBe(true);
+    expect(is.bare).toBe(false);
+    expect(is.swatch).toBe(false);
+  });
+});
+
+describe("caretToken", () => {
+  test("returns the whitespace-delimited chunk containing the caret", () => {
+    expect(caretToken("is:todo #work", 3)).toEqual({
+      token: "is:todo",
+      start: 0,
+      end: 7,
+    });
+    // caret inside the second token
+    expect(caretToken("is:todo #work", 11)).toMatchObject({ token: "#work" });
+  });
+
+  test("an empty token when the caret sits between spaces", () => {
+    expect(caretToken("a  b", 2)).toEqual({ token: "", start: 2, end: 2 });
+  });
+
+  test("clamps an out-of-range caret", () => {
+    expect(caretToken("abc", 99)).toEqual({ token: "abc", start: 0, end: 3 });
+  });
+});
+
+describe("buildFilterSuggestions", () => {
+  const infos = collectOperatorKeyInfos(AUTOCOMPLETE_OPS);
+  const tags = ["#home", "#work", "#workflow"];
+  const build = (token: string) => buildFilterSuggestions(token, infos, tags);
+
+  test("empty token = the cheat sheet (keys + a #tag row)", () => {
+    const s = build("");
+    expect(s.map((r) => r.label)).toEqual([
+      "is:",
+      "has:",
+      "highlight:",
+      "#tag",
+    ]);
+    // A cheat-sheet key inserts `key:` with NO trailing space (chains to values).
+    expect(s[0]!.insert).toBe("is:");
+    expect(s.at(-1)!.insert).toBe("#");
+  });
+
+  test("a partial key filters the cheat sheet by prefix (no #tag row)", () => {
+    expect(build("hi").map((r) => r.label)).toEqual(["highlight:"]);
+  });
+
+  test("`key:` lists that key's values (complete term + trailing space)", () => {
+    const s = build("is:");
+    expect(s.map((r) => r.label)).toEqual([
+      "is:todo",
+      "is:bullet",
+      "is:paragraph",
+      "is:mirror",
+      "is:complete",
+      "is:agent",
+    ]);
+    expect(s[0]!.insert).toBe("is:todo ");
+  });
+
+  test("`key:partial` filters values by prefix", () => {
+    expect(build("is:co").map((r) => r.label)).toEqual(["is:complete"]);
+  });
+
+  test("a bare-owning key offers its bare form + swatches", () => {
+    const s = build("highlight:");
+    expect(s[0]!.label).toBe("highlight:"); // the bare (any) form
+    expect(s[0]!.insert).toBe("highlight: ");
+    const red = s.find((r) => r.label === "highlight:red")!;
+    expect(red.swatch).toBe("red");
+  });
+
+  test("`#partial` = tag corpus by case-insensitive substring", () => {
+    const s = build("#work");
+    expect(s.map((r) => r.label)).toEqual(["#work", "#workflow"]);
+    expect(s[0]!.display).toBe("tag");
+    expect(s[0]!.tag).toBe("work");
+    expect(s[0]!.insert).toBe("#work ");
+  });
+
+  test("a leading `-` is transparent but rides the insert", () => {
+    expect(build("-is:").map((r) => r.insert)).toContain("-is:todo ");
+    expect(build("-#wor")[0]!.insert).toBe("-#work ");
+  });
+
+  test("an unknown key and a quoted phrase yield nothing", () => {
+    expect(build("nope:x")).toEqual([]);
+    expect(build('"phrase')).toEqual([]);
   });
 });
 

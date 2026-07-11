@@ -48,8 +48,13 @@ export interface FilterOperator {
   /** Also own the BARE `key:` form (no value). Only `highlight:` uses it today
    *  ("any highlight run"). Represented as the (key, null) pair. */
   bare?: boolean;
-  /** One-line description for the (future) autocomplete cheat sheet. Registered
-   *  now so a new operator shows up in suggestions for free (ADR 0047 §7). */
+  /** Paint each value with its color swatch in autocomplete (ADR 0047 §7): a dot
+   *  filled with `var(--tag-<value>)`. Set only by `highlight:` today, whose
+   *  values (`red`, `blue`, ...) ARE the shared `--tag-*` palette names. A pure
+   *  render HINT -- the component reads it, this module stays DOM-free. */
+  swatch?: boolean;
+  /** One-line description for the autocomplete cheat sheet. Registered so a new
+   *  operator shows up in suggestions for free (ADR 0047 §7). */
   description: string;
   /**
    * True iff `node` matches this operator at `value` (null = the bare form). The
@@ -418,4 +423,206 @@ export interface QueryFilter {
   visibleIds: Set<string>;
   matchIds: Set<string>;
   emptyMessage?: string;
+}
+
+// --- Autocomplete (ADR 0047 §7) ---------------------------------------------
+//
+// The registry-driven suggestions for the filter input. Pure: it consumes the
+// operator metadata (folded into {@link OperatorKeyInfo}) plus the tag corpus
+// and returns typed rows; the component only maps rows to JSX. "Nothing
+// hand-maintained -- a new plugin operator appears in autocomplete for free."
+// Scope guard (ADR 0047 §7): suggestions ONLY produce text to insert into a
+// plain input -- no inline pill editing, no caret-menu engine, no cmdk.
+
+/** One cheat-sheet KEY, folding every operator that shares that key into one
+ *  row: the union of their static values, the description of the first-
+ *  registered operator, and whether any of them owns the bare form / paints
+ *  swatches. Core is registered first, so `is`'s description is core's. */
+export interface OperatorKeyInfo {
+  key: string;
+  description: string;
+  bare: boolean;
+  swatch: boolean;
+  /** The union of static values across every operator sharing `key`, lower-
+   *  cased and deduped, in registration order. Function-form value sets are
+   *  skipped (dynamic, resolved elsewhere -- as in the operator map). */
+  values: string[];
+}
+
+/** Fold the flat operator list into one {@link OperatorKeyInfo} per distinct
+ *  key, preserving first-seen key order. Mirrors {@link buildFilterOperatorMap}
+ *  (static arrays only) but for suggestions, not the eval lookup. */
+export function collectOperatorKeyInfos(
+  operators: readonly FilterOperator[],
+): OperatorKeyInfo[] {
+  const byKey = new Map<string, OperatorKeyInfo>();
+  const order: string[] = [];
+  for (const op of operators) {
+    let info = byKey.get(op.key);
+    if (!info) {
+      info = {
+        key: op.key,
+        description: op.description,
+        bare: false,
+        swatch: false,
+        values: [],
+      };
+      byKey.set(op.key, info);
+      order.push(op.key);
+    }
+    if (op.bare) info.bare = true;
+    if (op.swatch) info.swatch = true;
+    if (Array.isArray(op.values)) {
+      for (const v of op.values) {
+        const lv = v.toLowerCase();
+        if (!info.values.includes(lv)) info.values.push(lv);
+      }
+    }
+  }
+  return order.map((k) => byKey.get(k)!);
+}
+
+/** The whitespace-delimited chunk of `text` containing the caret (the token
+ *  being typed), with its bounds so an insertion can replace exactly it. An
+ *  empty token (caret between spaces) yields `start === end === caret`. */
+export interface CaretToken {
+  token: string;
+  start: number;
+  end: number;
+}
+
+/** Extract the {@link CaretToken} at `caret`. Whitespace-delimited on purpose --
+ *  keys, tags, and values never contain spaces, so a quote-aware split is
+ *  unnecessary here (a quoted phrase is free text and yields no suggestions). */
+export function caretToken(text: string, caret: number): CaretToken {
+  const pos = Math.max(0, Math.min(caret, text.length));
+  let start = pos;
+  while (start > 0 && !/\s/.test(text[start - 1]!)) start--;
+  let end = pos;
+  while (end < text.length && !/\s/.test(text[end]!)) end++;
+  return { token: text.slice(start, end), start, end };
+}
+
+/** One autocomplete row. `insert` is the literal text that replaces the caret
+ *  token (it carries its own trailing space, or none for a bare key that should
+ *  chain into value suggestions). `display` tells the component how to paint it. */
+export interface FilterSuggestion {
+  /** Stable id (listbox option key + `aria-activedescendant`). */
+  id: string;
+  /** The text that replaces the caret token on selection. */
+  insert: string;
+  /** Primary label. */
+  label: string;
+  /** One-line description (cheat-sheet key rows + the bare `key:` row). */
+  description?: string;
+  /** How the row renders: a colored `#tag` chip, an operator value, or a
+   *  cheat-sheet key. */
+  display: "tag" | "value" | "key";
+  /** For a swatch-painting value (`highlight:red`): the palette color name,
+   *  filled into `var(--tag-<swatch>)`. */
+  swatch?: string;
+  /** For `display: "tag"`: the bare tag name (no `#`), the `data-tag` key. */
+  tag?: string;
+}
+
+const TAG_SUGGESTION_CAP = 8;
+
+/**
+ * The suggestions for `token` (the caret token, from {@link caretToken}):
+ *
+ * - `#` / `#partial` -> the tag corpus, case-insensitive substring, capped.
+ * - `key:` / `key:partial` -> that key's registered values by prefix (plus the
+ *   bare `key:` form for a bare-owning key when no value is typed yet). An
+ *   unknown key yields nothing (it degrades to free text at eval time).
+ * - empty / a partial key -> the operator cheat sheet (keys by prefix) plus the
+ *   `#tag` entry on the empty sheet.
+ * - a leading `-` is transparent (suggest for the rest; the `-` rides the
+ *   insert), and a `"quoted` phrase yields nothing (it is free text).
+ */
+export function buildFilterSuggestions(
+  token: string,
+  keyInfos: readonly OperatorKeyInfo[],
+  tags: readonly string[],
+): FilterSuggestion[] {
+  const neg = token.startsWith("-") ? "-" : "";
+  const body = neg ? token.slice(1) : token;
+
+  // A quoted phrase is free text -- no operator/tag suggestions apply.
+  if (body.startsWith('"')) return [];
+
+  // Tag corpus mode.
+  if (body.startsWith("#")) {
+    const partial = body.slice(1).toLowerCase();
+    const out: FilterSuggestion[] = [];
+    for (const tag of tags) {
+      if (out.length >= TAG_SUGGESTION_CAP) break;
+      if (partial && !tag.slice(1).toLowerCase().includes(partial)) continue;
+      out.push({
+        id: `tag:${tag}`,
+        insert: `${neg}${tag} `,
+        label: tag,
+        display: "tag",
+        tag: tag.slice(1),
+      });
+    }
+    return out;
+  }
+
+  // Value mode: `key:` or `key:partial`.
+  const colon = body.indexOf(":");
+  if (colon !== -1) {
+    const key = body.slice(0, colon).toLowerCase();
+    const partial = body.slice(colon + 1).toLowerCase();
+    const info = keyInfos.find((k) => k.key === key);
+    if (!info) return [];
+    const out: FilterSuggestion[] = [];
+    // The bare `key:` form (highlight today), offered before a value is typed.
+    if (info.bare && partial === "") {
+      out.push({
+        id: `bare:${key}`,
+        insert: `${neg}${key}: `,
+        label: `${key}:`,
+        description: info.description,
+        display: "value",
+      });
+    }
+    for (const v of info.values) {
+      if (partial && !v.startsWith(partial)) continue;
+      out.push({
+        id: `val:${key}:${v}`,
+        insert: `${neg}${key}:${v} `,
+        label: `${key}:${v}`,
+        display: "value",
+        ...(info.swatch ? { swatch: v } : {}),
+      });
+    }
+    return out;
+  }
+
+  // Cheat sheet: empty token or a partial key.
+  const partial = body.toLowerCase();
+  const out: FilterSuggestion[] = [];
+  for (const info of keyInfos) {
+    if (partial && !info.key.startsWith(partial)) continue;
+    out.push({
+      id: `key:${info.key}`,
+      // No trailing space: chain straight into this key's value suggestions.
+      insert: `${neg}${info.key}:`,
+      label: `${info.key}:`,
+      description: info.description,
+      display: "key",
+    });
+  }
+  // The `#tag` entry leads into tag-corpus mode; only on the empty sheet (a
+  // partial key can't prefix-match it).
+  if (partial === "") {
+    out.push({
+      id: "key:tag",
+      insert: `${neg}#`,
+      label: "#tag",
+      description: "Filter by tag",
+      display: "key",
+    });
+  }
+  return out;
 }

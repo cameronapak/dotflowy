@@ -1,8 +1,26 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 
-import { tokenizeQuery } from "../data/filter-query";
+import { cn } from "@/lib/utils";
+
+import {
+  buildFilterSuggestions,
+  caretToken,
+  type FilterSuggestion,
+  tokenizeQuery,
+} from "../data/filter-query";
+import { collectTagCorpus } from "../data/tags";
+import { getTreeIndex } from "../data/tree-store";
+import { filterOperatorInfos } from "../plugins/registry";
 import {
   addTermToFilter,
   bindQueryFilterNav,
@@ -146,6 +164,125 @@ function FilterPillBar({
   );
 }
 
+const LISTBOX_ID = "filter-suggestions";
+const optionId = (i: number) => `filter-suggestion-${i}`;
+
+/** One autocomplete row: a colored `#tag` chip, an operator value (with a color
+ *  swatch for `highlight:`), or a cheat-sheet key + description. */
+function SuggestionRow({
+  suggestion,
+  id,
+  active,
+  onPick,
+}: {
+  suggestion: FilterSuggestion;
+  id: string;
+  active: boolean;
+  onPick: (s: FilterSuggestion) => void;
+}) {
+  return (
+    <li
+      id={id}
+      role="option"
+      aria-selected={active}
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+        active && "bg-accent text-accent-foreground",
+      )}
+      // Keep the input focused across the press (the row lives in a portal, so a
+      // plain click would blur -> close the input before onClick fires).
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onPick(suggestion)}
+    >
+      {suggestion.display === "tag" ? (
+        <Badge
+          variant="outline"
+          className="text-[0.85em]"
+          data-tag={suggestion.tag}
+        >
+          {suggestion.label}
+        </Badge>
+      ) : suggestion.swatch ? (
+        <>
+          {/* Soft-bordered fill -- the highlight/tag color-menu swatch. */}
+          <span
+            aria-hidden="true"
+            className="size-3.5 shrink-0 rounded-full border"
+            style={{ background: `var(--tag-${suggestion.swatch})` }}
+          />
+          <span className="font-mono text-xs">{suggestion.label}</span>
+        </>
+      ) : (
+        <>
+          <span className="font-mono text-xs">{suggestion.label}</span>
+          {suggestion.description ? (
+            <span className="truncate text-xs text-muted-foreground">
+              {suggestion.description}
+            </span>
+          ) : null}
+        </>
+      )}
+    </li>
+  );
+}
+
+/** The suggestion listbox, portaled to the body (the subheader's height-animated
+ *  wrapper is `overflow-hidden`, which would clip an in-flow dropdown) and
+ *  fixed-positioned under the input. Its `role="listbox"` also keeps a mousedown
+ *  inside it from clearing an active node selection (selection-mode.tsx). */
+function SuggestionPopover({
+  anchorRef,
+  suggestions,
+  activeIndex,
+  onPick,
+}: {
+  anchorRef: React.RefObject<HTMLInputElement | null>;
+  suggestions: FilterSuggestion[];
+  activeIndex: number;
+  onPick: (s: FilterSuggestion) => void;
+}) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = anchorRef.current;
+      if (el) setRect(el.getBoundingClientRect());
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    // Capture-phase: the sticky header sits in a scroll container.
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [anchorRef]);
+
+  if (!rect) return null;
+  return createPortal(
+    <ul
+      id={LISTBOX_ID}
+      role="listbox"
+      aria-label="Filter suggestions"
+      data-filter-suggestions
+      className="fixed z-50 max-h-64 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+      style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
+      // A press anywhere in the list must not blur the input.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      {suggestions.map((s, i) => (
+        <SuggestionRow
+          key={s.id}
+          suggestion={s}
+          id={optionId(i)}
+          active={i === activeIndex}
+          onPick={onPick}
+        />
+      ))}
+    </ul>,
+    document.body,
+  );
+}
+
 /**
  * The core subheader filter surface: an input while composing, the parsed-term
  * pill bar while a filter is active, and NOTHING (so the subheader collapses)
@@ -158,6 +295,11 @@ export function QueryFilterBar() {
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<number | null>(null);
+  // Autocomplete (ADR 0047 §7): suggestions for the token at the caret, the
+  // active row, and whether the popover is showing (Escape stage 0 hides it).
+  const [suggestions, setSuggestions] = useState<FilterSuggestion[]>([]);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [popoverOpen, setPopoverOpen] = useState(false);
   // Live raw query, read at open time without re-binding the mount-once opener.
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
@@ -169,6 +311,54 @@ export function QueryFilterBar() {
     }
     writeQuery(value, { replace: true });
   }, []);
+
+  const scheduleWrite = useCallback((value: string) => {
+    if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      debounceRef.current = null;
+      writeQuery(value, { replace: true });
+    }, DEBOUNCE_MS);
+  }, []);
+
+  // Recompute the suggestions from the LIVE input (value + caret), so the token
+  // is always exactly what the browser sees. Cheap; runs only while composing.
+  const recompute = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? el.value.length;
+    const { token } = caretToken(el.value, caret);
+    const tags = collectTagCorpus(getTreeIndex().tagCorpus);
+    setSuggestions(buildFilterSuggestions(token, filterOperatorInfos, tags));
+    setActiveIndex(-1);
+  }, []);
+
+  // Insert a suggestion: replace the caret token with its text (a leading `-`,
+  // if any, was already folded into `insert`), keep the input open, then apply
+  // the caret + recompute after React commits so a bare `key:` chains straight
+  // into value suggestions. Writes flow through the same debounced `?q=` path.
+  const applySuggestion = useCallback(
+    (s: FilterSuggestion) => {
+      const el = inputRef.current;
+      if (!el) return;
+      const value = el.value;
+      const caret = el.selectionStart ?? value.length;
+      const tok = caretToken(value, caret);
+      const nextValue =
+        value.slice(0, tok.start) + s.insert + value.slice(tok.end);
+      const nextCaret = tok.start + s.insert.length;
+      setDraft(nextValue);
+      scheduleWrite(nextValue);
+      setPopoverOpen(true);
+      requestAnimationFrame(() => {
+        const el2 = inputRef.current;
+        if (!el2) return;
+        el2.focus();
+        el2.setSelectionRange(nextCaret, nextCaret);
+        recompute();
+      });
+    },
+    [scheduleWrite, recompute],
+  );
 
   const open = useCallback(() => {
     // Prefill with the raw `?q=` string (caret goes to the end in the focus
@@ -198,8 +388,9 @@ export function QueryFilterBar() {
       window.removeEventListener("keydown", onKey, { capture: true });
   }, [open]);
 
-  // Focus + caret-to-end once the input mounts. Deferred a frame so it wins the
-  // focus race against Radix restoring focus when the Cmd+K dialog closes.
+  // Focus + caret-to-end once the input mounts, then open the cheat sheet.
+  // Deferred a frame so it wins the focus race against Radix restoring focus
+  // when the Cmd+K dialog closes.
   useEffect(() => {
     if (!inputOpen) return;
     const id = requestAnimationFrame(() => {
@@ -208,39 +399,73 @@ export function QueryFilterBar() {
       el.focus();
       const end = el.value.length;
       el.setSelectionRange(end, end);
+      setPopoverOpen(true);
+      recompute();
     });
     return () => cancelAnimationFrame(id);
-  }, [inputOpen]);
+  }, [inputOpen, recompute]);
 
   if (inputOpen) {
+    const showPopover = popoverOpen && suggestions.length > 0;
+    const closeInput = () => {
+      flush(draft);
+      setInputOpen(false);
+      setPopoverOpen(false);
+    };
     const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setDraft(value);
-      if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
-      debounceRef.current = window.setTimeout(() => {
-        debounceRef.current = null;
-        writeQuery(value, { replace: true });
-      }, DEBOUNCE_MS);
+      scheduleWrite(value);
+      setPopoverOpen(true);
+      recompute();
     };
     const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        // Commit immediately and show pills.
+      if (e.key === "ArrowDown") {
+        if (!showPopover) return;
         e.preventDefault();
-        flush(draft);
-        setInputOpen(false);
-      } else if (e.key === "Escape") {
-        // Stage 1: flush, close the input (pills remain if a filter is active).
-        // Stop propagation so the window-level stage-2 clear doesn't also fire.
+        setActiveIndex((i) => (i + 1) % suggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        if (!showPopover) return;
+        e.preventDefault();
+        setActiveIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+        return;
+      }
+      if (e.key === "Tab") {
+        // Tab accepts the active row (or the first, autocomplete-style); with no
+        // popover it keeps native focus movement.
+        if (!showPopover) return;
+        e.preventDefault();
+        applySuggestion(suggestions[activeIndex >= 0 ? activeIndex : 0]!);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        // With a highlighted row, Enter inserts it (stays open). Otherwise it
+        // keeps its Slice-2 meaning: commit the filter and show pills.
+        if (showPopover && activeIndex >= 0) {
+          applySuggestion(suggestions[activeIndex]!);
+          return;
+        }
+        closeInput();
+        return;
+      }
+      if (e.key === "Escape") {
+        // Stop propagation so the window-level stage-2 clear never also fires.
         e.preventDefault();
         e.stopPropagation();
-        flush(draft);
-        setInputOpen(false);
+        // Stage 0: an open popover closes first, leaving the input open.
+        if (showPopover) {
+          setPopoverOpen(false);
+          return;
+        }
+        // Stage 1: flush, close the input (pills remain if a filter is active).
+        closeInput();
+        return;
       }
     };
-    const onBlur = () => {
-      flush(draft);
-      setInputOpen(false);
-    };
+    const onBlur = () => closeInput();
     return (
       <search aria-label="Filter" className="w-full">
         <Input
@@ -251,11 +476,26 @@ export function QueryFilterBar() {
           onBlur={onBlur}
           placeholder="Filter… e.g. #work is:todo -done"
           aria-label="Filter query"
+          role="combobox"
+          aria-expanded={showPopover}
+          aria-controls={LISTBOX_ID}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            showPopover && activeIndex >= 0 ? optionId(activeIndex) : undefined
+          }
           spellCheck={false}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
         />
+        {showPopover ? (
+          <SuggestionPopover
+            anchorRef={inputRef}
+            suggestions={suggestions}
+            activeIndex={activeIndex}
+            onPick={applySuggestion}
+          />
+        ) : null}
       </search>
     );
   }
