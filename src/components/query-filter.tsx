@@ -78,12 +78,18 @@ export function useQueryFilter() {
     if (tokens.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // A capture-phase handler already claimed this Escape (node multi-selection
+      // exits, an open caret menu closes -- both preventDefault). Don't ALSO clear.
+      if (e.defaultPrevented) return;
       const active = document.activeElement;
       if (
         active instanceof HTMLElement &&
         active.classList.contains("node-text")
       )
         return;
+      // A modal overlay (Cmd+K, a confirm dialog, a plugin sheet) owns Escape --
+      // closing it must not clear the filter underneath it.
+      if (document.querySelector('[role="dialog"]')) return;
       clear();
     };
     window.addEventListener("keydown", onKey);
