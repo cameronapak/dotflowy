@@ -73,8 +73,9 @@ so it syncs across a user's devices. It passes its **concrete** Effect Schema in
 forbids a generic `createKvCollection<T>` factory.
 
 **Read it with `subscribeChanges` + `useSyncExternalStore`, never `useLiveQuery`**, which hard-fails
-the `/` prerender (see `src/data/tag-colors.ts`). The badge lives in the header, and the header
-renders during that prerender.
+the `/` prerender (see `src/data/tag-colors.ts`). The unread signal rides the header's "More" menu
+(a quiet notification dot on the trigger, and emphasis on the "What's new" item when the menu opens
+— not a standalone header CTA, which read as too loud), and the header renders during that prerender.
 
 **`getServerSnapshot` returns `null`, and `null` is ambiguous** — it means both "the collection
 hasn't loaded" and "this user has no cursor row." Distinguish them via the collection's `status`,
@@ -95,9 +96,10 @@ credibility to do marketing — that loan can never be repaid.
 ## The in-app surface is a dialog in `__root.tsx`
 
 Mounted once, beside `McpConnectDialog` / `OpmlImportDialog` / `DeleteConfirmDialog`, behind a
-module-singleton opener (the `move-dialog-opener.ts` pattern). Entry points: the badge, the header
-More menu, a Cmd+K global action. MAJOR renders a "Breaking" callout derived from the bump type
-already in the data — not a louder badge, and **no new state**.
+module-singleton opener (the `move-dialog-opener.ts` pattern). Entry points: the header More menu
+(its "What's new" item, emphasized while unread) and a Cmd+K global action. MAJOR renders a
+"Breaking" callout derived from the bump type already in the data — not a louder badge, and **no new
+state**.
 
 It is **not** the Tier-3 panel: `openPanel` is the containment boundary
 ([ADR 0031](./0031-two-lane-plugin-trust.md)) for plugin and Lane-B UI, and core chrome must not
