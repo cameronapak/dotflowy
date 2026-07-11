@@ -33,7 +33,9 @@ test.describe("tag filtering (plugin Seam B)", () => {
 
     // The click AND-s the tag into the URL-driven filter (tags plugin).
     await expect(page).toHaveURL(/q=%23work/);
-    await expect(page.locator('[aria-label="Tag filter"]')).toBeVisible();
+    // The filter bar is generalized core chrome now (ADR 0047 §6): aria-label
+    // "Filter", not "Tag filter".
+    await expect(page.locator('[aria-label="Filter"]')).toBeVisible();
 
     // Matching nodes stay; the untagged one is pruned out of the render.
     await expect(row(page, "a").first()).toBeVisible();
@@ -61,11 +63,11 @@ test.describe("tag filtering (plugin Seam B)", () => {
     await load(page);
 
     await page.locator('.tag[data-tag="work"]').first().click();
-    await expect(page.locator('[aria-label="Tag filter"]')).toBeVisible();
+    await expect(page.locator('[aria-label="Filter"]')).toBeVisible();
 
     await page.getByRole("button", { name: "Clear" }).click();
     await expect(page).not.toHaveURL(/q=/);
-    await expect(page.locator('[aria-label="Tag filter"]')).toHaveCount(0);
+    await expect(page.locator('[aria-label="Filter"]')).toHaveCount(0);
 
     const subheader = page.locator('[aria-label="Active filters"]');
     await expect(subheader).toHaveCSS("padding-top", "0px");

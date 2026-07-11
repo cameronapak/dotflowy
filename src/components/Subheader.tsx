@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { PluginContext } from "../plugins/types";
 
 import { subheaderSlots } from "../plugins/registry";
+import { QueryFilterBar } from "./query-filter";
 
 /**
  * Contextual chrome band below the main header. Plugin subheader slots render
@@ -88,6 +89,10 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
             open && "px-6 py-2 max-sm:px-4",
           )}
         >
+          {/* The `?q=` filter is CORE chrome (ADR 0047 §6); it sits beside the
+              plugin subheader slots the way core commands sit beside plugin
+              commands. Renders nothing when idle, so the band still collapses. */}
+          <QueryFilterBar />
           {subheaderSlots.map((s) => (
             <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
           ))}
