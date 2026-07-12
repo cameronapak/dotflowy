@@ -7,6 +7,7 @@ import {
   DownloadIcon,
   FileUpIcon,
   FocusIcon,
+  LinkIcon,
   LogOutIcon,
   MonitorIcon,
   MessageSquareWarningIcon,
@@ -33,7 +34,7 @@ import { runStructural } from "../data/structural";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
-import { signOutAndReload } from "../lib/auth-client";
+import { connectGoogle, signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import { openOpmlImport } from "./opml-import-opener";
@@ -378,6 +379,15 @@ export function HeaderMoreMenu() {
           </DropdownMenuCheckboxItem>
 
           <DropdownMenuSeparator />
+
+          {/* Explicit Google account linking — the only way an existing
+              email+password account gains Google sign-in (worker/auth.ts has
+              the policy). Idempotent: re-connecting an already-linked Google
+              account just refreshes its tokens and lands back here. */}
+          <DropdownMenuItem onClick={() => connectGoogle()}>
+            <LinkIcon />
+            Connect Google
+          </DropdownMenuItem>
 
           <DropdownMenuItem
             variant="destructive"

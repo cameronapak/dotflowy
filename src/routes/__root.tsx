@@ -14,6 +14,7 @@ import { HistoryRestoreDialog } from "../components/history-restore";
 import { MirrorPlaces } from "../components/mirror-places";
 import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
+import { OAuthCallbackErrorToast } from "../components/oauth-callback-error";
 import { OpmlImportDialog } from "../components/opml-import-dialog";
 import { ShowCompletedProvider } from "../components/show-completed-provider";
 import { SpotlightController } from "../components/spotlight-mode";
@@ -100,6 +101,10 @@ function RootComponent() {
               {/* A distinct mechanism from the changelog (ADR 0046): the
                   changelog says WHAT changed; this says THIS TAB is stale. */}
               <UpdateAvailableToast />
+              {/* Inside the gate: surfaces a failed "Connect Google" round
+                  trip (signed-in). Signed-out failures render inline in
+                  AuthScreen via the same consume helper. */}
+              <OAuthCallbackErrorToast />
             </ShowCompletedProvider>
           </AuthGate>
         </TextSizeProvider>

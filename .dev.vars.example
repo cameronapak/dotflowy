@@ -20,3 +20,11 @@ INVITE_CODES=dev-invite
 # the OAuth login flow work under `wrangler dev`. Local-only; in prod the origin
 # IS the prod domain and is already trusted via BETTER_AUTH_URL.
 # BETTER_AUTH_TRUSTED_ORIGINS=http://app.dotflowy.com,https://app.dotflowy.com
+
+# Optional: Google OAuth client for "Sign in with Google" (Google Cloud console
+# -> Credentials -> OAuth client ID, type "Web application"). Local redirect
+# URI: http://localhost:3000/api/auth/callback/google. Unset = the provider
+# isn't registered and the button errors; email+password is unaffected. In
+# prod: `wrangler secret put GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=

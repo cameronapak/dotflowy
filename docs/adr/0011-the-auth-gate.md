@@ -24,6 +24,25 @@ to `'default'`, carrying their existing data over with **zero copy** — everyon
 own `user.id` DO. `ensureSeeded` (the legacy D1 import) therefore runs only for the `'default'` DO;
 new users start empty. Removable once that data is wherever it belongs.
 
+**Google sign-in (sign-IN only, explicit linking).** `socialProviders.google` is registered when the
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` secrets exist, with **`disableSignUp: true`** — the OAuth
+face of the invite gate. It must be `disableSignUp` (hard), not `disableImplicitSignUp`, which a
+client-supplied `requestSignUp: true` waives — that would be an invite bypass. A Google identity
+with no account gets `?error=signup_disabled` back on the AuthScreen. **Linking an existing
+email+password account to Google is EXPLICIT only** (`linkSocial` behind the More menu's "Connect
+Google", while signed in): implicit linking on a signed-out Google sign-in stays at Better Auth's
+default, which refuses when the local email is unverified — all of ours, since no verification
+email is wired — because an attacker who pre-registered the victim's address could otherwise
+capture the victim's Google identity into an attacker-owned account. Don't reach for
+`requireLocalEmailVerified: false`: deprecated upstream, and the gate becomes unconditional next
+minor. `allowDifferentEmails: true` loosens only the authenticated explicit-link path (the session
+proves ownership); the signed-out lookup is email-keyed, so a different-address Google sign-in
+finds no account and hits the signup gate. Linking preserves `user.id`, so the outline DO routing
+never changes. The whole flow is navigation-based (redirects, fresh page loads), which satisfies
+the hardReset teardown rule by construction; on an MCP OAuth hop the AuthScreen passes
+`/api/auth/mcp/authorize?<query>` as the `callbackURL`, so the Google callback itself resumes the
+authorize flow top-level.
+
 **node:crypto** — Better Auth needs it, so wrangler sets `compatibility_flags: ["nodejs_compat"]`.
 
 **Known gap (v1):** no email-verification requirement — no transactional email is wired yet, so
