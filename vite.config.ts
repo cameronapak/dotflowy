@@ -10,8 +10,10 @@ import { changelogPlugin } from "./scripts/vite-plugin-changelog";
 
 // Upload client source maps to Sentry (#227), build-time only. Gated on the
 // build secret so a normal `bun run build` (no token — local, CI, a fork) stays
-// clean: no map emission, no upload. The plugin deletes the emitted maps after
-// upload, so they never reach the CDN.
+// clean: no map emission, no upload. `filesToDeleteAfterUpload` is REQUIRED for
+// the plugin to delete the maps post-upload — without it (we enable
+// build.sourcemap ourselves, so the plugin won't infer it) the .map files ship
+// to the public CDN and expose original source.
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
@@ -64,6 +66,10 @@ export default defineConfig({
             org: "cameron-pak-sole-trader",
             project: "dotflowy",
             authToken: sentryAuthToken,
+            // Delete the emitted maps after upload so they never reach the CDN.
+            sourcemaps: {
+              filesToDeleteAfterUpload: ["./dist/client/**/*.map"],
+            },
           }),
         ]
       : []),
