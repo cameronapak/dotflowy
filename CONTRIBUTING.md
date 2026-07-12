@@ -109,8 +109,8 @@ Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
 
 ## Before you open a PR
 
-Run the full gate. These mirror CI and are the same checks the review process
-expects to pass:
+Run the full gate. These mirror CI — except `bun run test:e2e`, which is
+local-only — and are the same checks the review process expects to pass:
 
 ```sh
 bun run fmt:check       # oxfmt
