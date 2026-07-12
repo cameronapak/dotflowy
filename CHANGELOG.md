@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.1.0
+
+### Minor Changes
+
+- e806f5a: Sign in with Google. Existing accounts connect Google from the More menu ("Connect Google") and can then use either sign-in method; signup stays invite-only, including through Google.
+
 ## 1.0.0
 
 ### Major Changes
