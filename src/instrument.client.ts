@@ -1,5 +1,7 @@
 import * as Sentry from "@sentry/react";
 
+import { scrubSentryEvent } from "./data/sentry-scrub";
+
 /**
  * Client-side error monitoring (ticket #227, decided in #156): Sentry,
  * errors-only. Omitting tracing/replay integrations keeps this to exception
@@ -20,27 +22,11 @@ if (import.meta.env.PROD && dsn && typeof window !== "undefined") {
   Sentry.init({
     dsn,
     sendDefaultPii: false,
-    beforeSend(event) {
-      // Outline node text must never ride an error payload (#227): drop the
-      // request body, query string (?q= filter / ?url= unfurl carry user
-      // text), cookies, and the auth header.
-      const request = event.request;
-      if (request) {
-        delete request.data;
-        delete request.cookies;
-        delete request.query_string;
-        if (request.headers) {
-          for (const header of [
-            "authorization",
-            "Authorization",
-            "cookie",
-            "Cookie",
-          ]) {
-            delete request.headers[header];
-          }
-        }
-      }
-      return event;
-    },
+    // Shared scrub (src/data/sentry-scrub.ts, same leaf the Worker uses):
+    // outline node text must never ride an error payload (#227). The leak isn't
+    // the obvious fields — the browser SDK puts the full href (incl. the ?q=
+    // filter) in request.url and navigation breadcrumbs, so the scrub strips
+    // the query string wherever a url appears.
+    beforeSend: (event) => scrubSentryEvent(event),
   });
 }
