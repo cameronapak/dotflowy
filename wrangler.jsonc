@@ -9,6 +9,9 @@
   // Better Auth (worker/auth.ts) imports node:crypto; nodejs_compat polyfills
   // Node built-ins on the Workers runtime.
   "compatibility_flags": ["nodejs_compat"],
+  // Upload Worker source maps to Cloudflare so stack traces in Workers Logs
+  // (and Sentry, #227) point at original source, not the minified bundle.
+  "upload_source_maps": true,
   // Custom domain declared in code so it survives a fresh deploy instead of
   // living only in the Cloudflare dashboard. Declaring `routes` without
   // `workers_dev: true` disables the *.workers.dev URL, so app.dotflowy.com is
@@ -36,6 +39,10 @@
   // requires signing IN as that account. Unset = no admins (fail-closed).
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
+    // Public Sentry DSN (#227) — errors-only monitoring for the Worker + DO.
+    // Public-by-design (it also ships in the client bundle), so a var, not a
+    // secret. Unset in a fork => Sentry stays dormant. See worker/sentry.ts.
+    "SENTRY_DSN": "https://b2613a2ced209c174bc083a22b926b5f@o4506518599434240.ingest.us.sentry.io/4511720305917952",
   },
   // Transactional email (password reset today; invites later) via Cloudflare
   // Email Service. A binding, not an API key — nothing to leak or rotate. The

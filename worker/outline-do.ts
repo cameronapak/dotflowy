@@ -109,7 +109,10 @@ function toSqlValue(key: string, value: unknown): SqlVal {
 }
 
 interface Env {
-  // The DO uses only its own colocated SQLite storage; it needs no bindings yet.
+  // The DO uses only its own colocated SQLite storage; it needs no bindings.
+  /** Public Sentry DSN (wrangler.jsonc var), read by the Sentry DO wrapper in
+   *  worker/index.ts (#227). Unset => error monitoring is dormant. */
+  SENTRY_DSN?: string;
 }
 
 /**

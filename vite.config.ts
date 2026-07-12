@@ -1,4 +1,5 @@
 import babel from "@rolldown/plugin-babel";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -7,6 +8,12 @@ import { defineConfig } from "vite";
 import pkg from "./package.json";
 import { changelogPlugin } from "./scripts/vite-plugin-changelog";
 
+// Upload client source maps to Sentry (#227), build-time only. Gated on the
+// build secret so a normal `bun run build` (no token — local, CI, a fork) stays
+// clean: no map emission, no upload. The plugin deletes the emitted maps after
+// upload, so they never reach the CDN.
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
 // which matters because TanStack DB's localStorage collection reads
 // globalThis.localStorage. With SPA mode there's no server render pass
@@ -14,6 +21,9 @@ import { changelogPlugin } from "./scripts/vite-plugin-changelog";
 //
 // It also keeps deployment trivial: any static CDN works.
 export default defineConfig({
+  // Emit source maps only when we're going to upload + delete them (below), so
+  // they never ship to the CDN on a tokenless build.
+  build: sentryAuthToken ? { sourcemap: true } : {},
   server: {
     port: 3000,
     // Dev only: proxy the data API to a locally-running Worker + D1
@@ -47,6 +57,16 @@ export default defineConfig({
     // reactCompilerPreset helper rather than a viteReact `babel` option.
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
+    // Last: after the bundle + maps exist. No-op without SENTRY_AUTH_TOKEN.
+    ...(sentryAuthToken
+      ? [
+          sentryVitePlugin({
+            org: "cameron-pak-sole-trader",
+            project: "dotflowy",
+            authToken: sentryAuthToken,
+          }),
+        ]
+      : []),
   ],
   resolve: {
     alias: {
