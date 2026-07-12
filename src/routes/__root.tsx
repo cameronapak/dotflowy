@@ -74,12 +74,41 @@ const noFlashTextSizeScript = `
 })();
 `;
 
+const APP_URL = "https://app.dotflowy.com";
+const APP_TITLE = "Dotflowy";
+const APP_DESCRIPTION =
+  "A fast, keyboard-first outliner you can own and extend.";
+const OG_IMAGE = `${APP_URL}/og.png`;
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Dotflowy" },
+      { title: APP_TITLE },
+      { name: "description", content: APP_DESCRIPTION },
+      { name: "application-name", content: APP_TITLE },
+      // iOS add-to-home-screen: standalone launch + status-bar styling + label.
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: APP_TITLE },
+      {
+        name: "apple-mobile-web-app-status-bar-style",
+        content: "default",
+      },
+      { name: "mobile-web-app-capable", content: "yes" },
+      // Share cards (link unfurls).
+      { property: "og:type", content: "website" },
+      { property: "og:site_name", content: APP_TITLE },
+      { property: "og:url", content: APP_URL },
+      { property: "og:title", content: APP_TITLE },
+      { property: "og:description", content: APP_DESCRIPTION },
+      { property: "og:image", content: OG_IMAGE },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: APP_TITLE },
+      { name: "twitter:description", content: APP_DESCRIPTION },
+      { name: "twitter:image", content: OG_IMAGE },
     ],
   }),
   component: RootComponent,
@@ -175,11 +204,44 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" className="[scrollbar-gutter:stable]">
       <head>
+        {/* SVG tab icon — theme-swapped in place by noFlashThemeScript. */}
         <link
           rel="icon"
           type="image/svg+xml"
           href={FAVICON_LIGHT}
           id="dotflowy-favicon"
+        />
+        {/* PNG + .ico fallbacks for browsers/tools that don't take the SVG. */}
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="32x32"
+          href="/favicon-32.png"
+        />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="16x16"
+          href="/favicon-16.png"
+        />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        {/* iOS home screen (ignores the manifest + SVG icons). */}
+        <link
+          rel="apple-touch-icon"
+          sizes="180x180"
+          href="/apple-touch-icon.png"
+        />
+        {/* PWA manifest + browser-UI theme color (light/dark). */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: light)"
+          content="#ffffff"
+        />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: dark)"
+          content="#171717"
         />
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
         <script dangerouslySetInnerHTML={{ __html: noFlashTextSizeScript }} />

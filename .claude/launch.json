@@ -9,6 +9,13 @@
       "autoPort": false
     },
     {
+      "name": "dev:web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev:web"],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
       "name": "cf:dev",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "cf:dev"],
