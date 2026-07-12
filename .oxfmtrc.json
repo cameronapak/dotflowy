@@ -6,7 +6,8 @@
     ".vscode/**",
     ".wrangler/**",
     "dist/**",
-    "src/routeTree.gen.ts"
+    "src/routeTree.gen.ts",
+    "landing/src/routeTree.gen.ts"
   ],
   "sortTailwindcss": {
     "stylesheet": "./src/styles.css",
