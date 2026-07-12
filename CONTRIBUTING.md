@@ -109,8 +109,8 @@ Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
 
 ## Before you open a PR
 
-Run the full gate. These mirror CI and are the same checks the review process
-expects to pass:
+Run the full gate. These mirror CI — except `bun run test:e2e`, which is
+local-only — and are the same checks the review process expects to pass:
 
 ```sh
 bun run fmt:check       # oxfmt
@@ -144,9 +144,10 @@ Rules of thumb, expanded in `AGENTS.md`:
   the collection/DO path) stays in **Playwright** (`e2e/`). Don't unit-test the
   DOM path; you'd just be mocking the world.
 - **Chasing a flake? `bun run test:e2e:serial`** (`--workers=1`) is the
-  maximum-determinism local run; CI runs Playwright at `--workers=2` — faster
-  and clean enough as a gate. Don't confuse the two: a parallel-contention
-  flake isn't a real failure, and a serial-only pass isn't a CI guarantee.
+  maximum-determinism local run; `--workers=2` is the clean-signal full run
+  before a PR. **e2e does not run in CI** — Playwright is a local pre-PR gate,
+  so running it here is what stands in for a CI check. A parallel-contention
+  flake isn't a real failure.
 - **react-doctor is an occasional manual audit, not a gate** — its accepted
   editor false-positives (the deliberately kept manual memos) are known noise
   on every run, so it stays out of the recurring validation set.

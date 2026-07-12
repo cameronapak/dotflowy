@@ -203,7 +203,7 @@ bun run typecheck:test  # tsc over the unit tests (tsconfig.test.json)
 bun run test       # bun test over src + worker/ (pure-logic unit tests)
 bun run test:e2e   # playwright (chromium) end-to-end tests
 bun run test:e2e:ui  # same, in Playwright's interactive UI
-bun run test:e2e:serial  # deterministic --workers=1 run for flake-hunting (CI runs --workers=2: faster, clean-enough)
+bun run test:e2e:serial  # deterministic --workers=1 run for flake-hunting (--workers=2 = the clean-signal full local run)
 bun run build:cf   # vite build + copy _shell.html -> index.html (Cloudflare)
 bun run cf:dev     # watch loop (scripts/cf-dev.ts): build:cf + wrangler dev, rebuilds on src/ changes
 bun run deploy     # build:cf, then `wrangler deploy`
@@ -215,7 +215,7 @@ bun run effect:src  # print (fetch on first use) the Effect v4 source path via o
 npx -y react-doctor@latest . --verbose  # React health scan; tuned via doctor.config.json
 ```
 
-`test:e2e:serial` vs CI: `--workers=1` is maximum local determinism when chasing a flake; CI runs Playwright at `--workers=2`, the faster clean-enough gate. Don't read a serial-only pass as a CI guarantee, or a parallel-contention flake as a real failure.
+`test:e2e:serial` vs the full run: `--workers=1` is maximum local determinism when chasing a flake; `--workers=2` is the documented clean-signal full run before a PR. **e2e does NOT run in CI** — Playwright is a local pre-PR gate, so nothing upstream catches a skipped run. Don't read a parallel-contention flake as a real failure.
 
 ### Agent scripting
 
