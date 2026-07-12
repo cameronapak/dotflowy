@@ -109,8 +109,7 @@ Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
 
 ## Before you open a PR
 
-Run the full gate. These mirror CI and are the same checks the review process
-expects to pass:
+Run the full gate:
 
 ```sh
 bun run fmt:check       # oxfmt
@@ -122,6 +121,13 @@ bun run test            # bun test — pure-logic unit tests (src + worker/)
 bun run test:e2e        # playwright (chromium) — behavior/integration
 bunx changeset          # describe your change for the changelog (see below)
 ```
+
+Everything above `test:e2e` is enforced by CI (`.github/workflows/ci.yml`).
+**`test:e2e` is a local-only gate — it is NOT in CI.** The Playwright suite is
+macOS-authored (Cmd keybindings, caret geometry, dev-server timing) and doesn't
+run green on Linux runners without a portability pass, and a 12-minute browser
+job on every push isn't worth the Actions minutes. Run it locally before you
+open a PR; it's still the same check the review process expects to pass.
 
 Then **run the app**: before calling an observable change done, drive it in the
 running app (`bun run dev`) — or exercise it through an e2e spec — and confirm

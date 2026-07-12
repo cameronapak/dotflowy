@@ -44,20 +44,9 @@ jobs:
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           bunx changeset status --since="origin/$GITHUB_BASE_REF"
 
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-      - run: bun install --frozen-lockfile
-      - name: Install Playwright browsers
-        run: bunx playwright install --with-deps chromium
-      # `--workers=2` caps parallelism to dodge the one documented flake: the
-      # daily-notes protected-container tests contend under high parallelism
-      # (clean at 2). `retries: 1` in playwright.config.ts is the backstop.
-      # The suite boots its own Vite server (playwright.config.ts webServer) and
-      # mocks /api, so no wrangler / D1 / secrets are needed in CI.
-      - name: E2E (chromium)
-        run: bun run test:e2e --workers=2
+# The Playwright e2e suite is deliberately NOT a CI job. It's macOS-authored
+# (Cmd/`Meta` keybindings, caret geometry, dev-server timing) and doesn't run
+# green on Linux runners without a portability pass -- and a 12-minute browser
+# job on every push isn't worth the Actions minutes for that. It stays a LOCAL
+# pre-PR gate instead: run `bun run test:e2e` before opening a PR
+# (CONTRIBUTING.md "Before you open a PR").
