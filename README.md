@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>An infinite outliner for your thoughts and tasks</strong><br/>
-	<span>If Workflowy was open source and had the extensibility of Obsidian plugins</span>
+	<span>The open-source alternative to Workflowy, extensible with plugins like Obsidian</span>
 </p>
 
 <p align="center">
