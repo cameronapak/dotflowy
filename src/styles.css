@@ -1459,6 +1459,31 @@ body.dragging-active * {
   }
 }
 
+/* Filter suggestion popover enter (ADR 0047 §7): portaled under the input, so
+   it can't ride the subheader's height tween. A dedicated keyframe keeps the
+   reveal readable after the expand wait — tw-animate/motion enter was too easy
+   to miss on this mount path. */
+@keyframes filter-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+[data-filter-popover] {
+  animation: filter-popover-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-filter-popover] {
+    animation: none;
+  }
+}
+
 /* The edit affordance (ADR 0005, bracket reveal): a small pencil painted with
    the current text color via an SVG mask (lucide `pencil`). It trails the label
    inside a folded <a> and fills the revealed link's `(✎)` chip -- a text-free

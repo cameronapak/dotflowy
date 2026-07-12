@@ -61,14 +61,31 @@ export function addTermToFilter(term: string) {
 // --- The summon-input opener singleton --------------------------------------
 
 let opener: (() => void) | null = null;
+let closer: (() => void) | null = null;
+let isOpenProbe: (() => boolean) | null = null;
 
 /** Registered by `QueryFilterBar` so Cmd+F / the header magnifier / the Cmd+K
- *  action can summon the filter input from anywhere. */
-export function setFilterInputOpener(fn: (() => void) | null) {
-  opener = fn;
+ *  action can summon (or dismiss) the filter input from anywhere. */
+export function setFilterInputController(
+  next: {
+    open: () => void;
+    close: () => void;
+    isOpen: () => boolean;
+  } | null,
+) {
+  opener = next?.open ?? null;
+  closer = next?.close ?? null;
+  isOpenProbe = next?.isOpen ?? null;
 }
 
 /** Summon the filter input (focused, prefilled if a filter is active). */
 export function openFilterInput() {
   opener?.();
+}
+
+/** Header-magnifier toggle: open when idle, dismiss (clear + collapse) when
+ *  the filter row is showing. Cmd+F / Cmd+K keep the open-only path. */
+export function toggleFilterInput() {
+  if (isOpenProbe?.()) closer?.();
+  else opener?.();
 }

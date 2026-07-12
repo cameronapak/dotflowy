@@ -13,6 +13,7 @@ import type { PluginContext } from "../plugins/types";
 
 import { subheaderSlots } from "../plugins/registry";
 import { QueryFilterBar } from "./query-filter";
+import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 
 /**
  * Contextual chrome band below the main header. Plugin subheader slots render
@@ -73,7 +74,7 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
           ? { height: open ? "auto" : 0 }
           : { height: open ? height : 0, opacity: open ? 1 : 0 }
       }
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      transition={{ duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }}
       className="overflow-hidden bg-background"
       aria-hidden={!open}
     >
