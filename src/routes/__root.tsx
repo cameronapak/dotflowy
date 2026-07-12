@@ -5,6 +5,7 @@ import {
   createRootRoute,
   HeadContent,
   Scripts,
+  useLocation,
 } from "@tanstack/react-router";
 
 import { AuthScreen } from "../components/auth-screen";
@@ -82,6 +83,24 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  // The reset-password page is PUBLIC by construction (its visitor has no
+  // session — revokeSessionsOnPasswordReset killed them). It renders as a bare
+  // Outlet: outside the AuthGate (which would swap it for the login screen)
+  // AND outside the editor chrome, whose dialogs assume a signed-in data
+  // layer. It leaves only via hardReset, so no editor state can leak across.
+  const isPublicRoute = useLocation({
+    select: (l) => l.pathname === "/reset-password",
+  });
+  if (isPublicRoute) {
+    return (
+      <RootDocument>
+        <ThemeProvider>
+          <Outlet />
+          <Toaster />
+        </ThemeProvider>
+      </RootDocument>
+    );
+  }
   return (
     <RootDocument>
       <ThemeProvider>

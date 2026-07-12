@@ -11,7 +11,13 @@ import { toast } from "sonner";
  */
 const authClient = createAuthClient();
 
-export const { signIn, signUp, useSession } = authClient;
+export const {
+  signIn,
+  signUp,
+  useSession,
+  requestPasswordReset,
+  resetPassword,
+} = authClient;
 
 /**
  * Connect the signed-in account to a Google identity (explicit account

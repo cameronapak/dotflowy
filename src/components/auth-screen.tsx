@@ -1,6 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 
-import { hardReset, signIn, signUp } from "../lib/auth-client";
+import {
+  hardReset,
+  requestPasswordReset,
+  signIn,
+  signUp,
+} from "../lib/auth-client";
 import { consumeOAuthCallbackError } from "./oauth-callback-error";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -30,7 +35,7 @@ function pendingOAuthQuery(): string | null {
 }
 
 export function AuthScreen() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,8 +45,13 @@ export function AuthScreen() {
   // Alpha is invite-only (the gate is server-side in worker/auth.ts); people
   // without a code leave their email on the waitlist instead.
   const [waitlist, setWaitlist] = useState<"idle" | "busy" | "done">("idle");
+  // Forgot-password confirmation. Better Auth answers 200 whether or not the
+  // email has an account (non-enumerable, same posture as the waitlist), so
+  // this is the only success signal there is.
+  const [resetSent, setResetSent] = useState(false);
 
   const isSignup = mode === "signup";
+  const isForgot = mode === "forgot";
 
   // A failed Google round trip lands back here with ?error=… — show it where
   // a form error would show. Only a truthy result sets state, so Strict
@@ -80,8 +90,33 @@ export function AuthScreen() {
     }
   }
 
+  async function onForgot() {
+    setError(null);
+    setBusy(true);
+    try {
+      // The emailed link round-trips through /api/auth/reset-password/:token,
+      // which validates and redirects to this page with ?token= (or ?error=).
+      const res = await requestPasswordReset({
+        email,
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (res.error) {
+        setError(res.error.message ?? "Something went wrong. Try again.");
+      } else {
+        setResetSent(true);
+      }
+    } catch {
+      setError("Network error. Check your connection and try again.");
+    }
+    setBusy(false);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (isForgot) {
+      await onForgot();
+      return;
+    }
     setError(null);
     setBusy(true);
     const oauthQuery = pendingOAuthQuery();
@@ -178,59 +213,94 @@ export function AuthScreen() {
         <div className="mb-6 text-center">
           <h1 className="text-xl font-semibold">Dotflowy</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isSignup ? "Create your outline" : "Welcome back"}
+            {isForgot
+              ? "Reset your password"
+              : isSignup
+                ? "Create your outline"
+                : "Welcome back"}
           </p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-3">
-          {isSignup && (
+        {isForgot && resetSent ? (
+          <p className="text-center text-sm text-muted-foreground">
+            If an account exists for that email, a reset link is on its way.
+            Check your inbox.
+          </p>
+        ) : (
+          <form onSubmit={onSubmit} className="space-y-3">
+            {isSignup && (
+              <Input
+                type="text"
+                placeholder="Name"
+                autoComplete="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            )}
             <Input
-              type="text"
-              placeholder="Name"
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          )}
-          <Input
-            type="email"
-            placeholder="Email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <Input
-            type="password"
-            placeholder="Password"
-            autoComplete={isSignup ? "new-password" : "current-password"}
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          {isSignup && (
-            <Input
-              type="text"
-              placeholder="Invite code"
-              autoComplete="off"
+              type="email"
+              placeholder="Email"
+              autoComplete="email"
               required
-              value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value)}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
-          )}
+            {!isForgot && (
+              <Input
+                type="password"
+                placeholder="Password"
+                autoComplete={isSignup ? "new-password" : "current-password"}
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            )}
+            {isSignup && (
+              <Input
+                type="text"
+                placeholder="Invite code"
+                autoComplete="off"
+                required
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+              />
+            )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? "…" : isSignup ? "Sign up" : "Sign in"}
-          </Button>
-        </form>
+            <Button type="submit" className="w-full" disabled={busy}>
+              {busy
+                ? "…"
+                : isForgot
+                  ? "Send reset link"
+                  : isSignup
+                    ? "Sign up"
+                    : "Sign in"}
+            </Button>
+          </form>
+        )}
+
+        {mode === "signin" && (
+          <p className="mt-2 text-center text-sm">
+            <button
+              type="button"
+              className="text-muted-foreground underline-offset-4 hover:underline"
+              onClick={() => {
+                setMode("forgot");
+                setError(null);
+                setResetSent(false);
+              }}
+            >
+              Forgot password?
+            </button>
+          </p>
+        )}
 
         {/* Sign-in mode only: Google can't create an account (the server-side
             invite gate covers OAuth too — worker/auth.ts), so offering it on
             the signup form would only manufacture signup_disabled errors. */}
-        {!isSignup && (
+        {mode === "signin" && (
           <>
             <div className="my-4 flex items-center gap-3">
               <div className="h-px flex-1 bg-border" />
@@ -250,17 +320,33 @@ export function AuthScreen() {
         )}
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
-          {isSignup ? "Already have an account?" : "New here?"}{" "}
-          <button
-            type="button"
-            className="font-medium text-foreground underline-offset-4 hover:underline"
-            onClick={() => {
-              setMode(isSignup ? "signin" : "signup");
-              setError(null);
-            }}
-          >
-            {isSignup ? "Sign in" : "Have an invite?"}
-          </button>
+          {isForgot ? (
+            <button
+              type="button"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+              onClick={() => {
+                setMode("signin");
+                setError(null);
+                setResetSent(false);
+              }}
+            >
+              Back to sign in
+            </button>
+          ) : (
+            <>
+              {isSignup ? "Already have an account?" : "New here?"}{" "}
+              <button
+                type="button"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+                onClick={() => {
+                  setMode(isSignup ? "signin" : "signup");
+                  setError(null);
+                }}
+              >
+                {isSignup ? "Sign in" : "Have an invite?"}
+              </button>
+            </>
+          )}
         </p>
 
         {isSignup && (

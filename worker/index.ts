@@ -513,12 +513,15 @@ function handleApiRequest(
   request: Request,
   url: URL,
   env: Env,
+  executionCtx: ExecutionContext,
 ): Effect.Effect<
   Response,
   UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest
 > {
   return Effect.gen(function* () {
-    const auth = createAuth(env, url.origin);
+    // executionCtx lets auth ride transactional-email sends on waitUntil
+    // (worker/auth.ts sendResetPassword) instead of blocking the response.
+    const auth = createAuth(env, url.origin, executionCtx);
 
     // Better Auth owns everything under /api/auth/* (sign-up/in/out, session,
     // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
@@ -657,7 +660,11 @@ function handleApiRequest(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
 
     // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). These MUST live at
@@ -689,7 +696,7 @@ export default {
     // fall through to the Promise rejection handler, keeping the status code
     // mapping exhaustive and the 500 path reserved for genuine surprises.
     return Effect.runPromise(
-      handleApiRequest(request, url, env).pipe(
+      handleApiRequest(request, url, env, ctx).pipe(
         Effect.catchTag("BadRequest", (e) =>
           Effect.succeed(json({ error: e.message }, 400)),
         ),
