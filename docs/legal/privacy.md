@@ -48,6 +48,7 @@ We share data with exactly these processors, for exactly these purposes:
 - **Cloudflare** — hosts everything: the app, your outline database, account records, and transactional email delivery (e.g., password resets).
 - **Stripe** — payment processing and subscription state.
 - **Google** — only if you use Google sign-in (we receive your basic profile), and one small thing worth disclosing: when a note contains a web link, **your browser** loads that site's icon from Google's favicon service, so Google sees the link's domain (not the full URL, and never your note's content).
+- **Sentry** — error reporting. When something crashes, we send Sentry the technical details of the error so we can fix it; we scrub personal data and request contents first, so **your note text never rides an error report**.
 
 Two more behaviors in the spirit of full disclosure:
 

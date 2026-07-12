@@ -25,6 +25,7 @@
  * unambiguous 500s without collapsing known validation errors into the same bucket.
  */
 
+import * as Sentry from "@sentry/cloudflare";
 import {
   oAuthDiscoveryMetadata,
   oAuthProtectedResourceMetadata,
@@ -36,7 +37,8 @@ import type { Node } from "./wire";
 
 import { createAuth } from "./auth";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
-import { UserOutlineDO } from "./outline-do";
+import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
+import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
   KvClaimBody,
@@ -50,9 +52,20 @@ import {
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
 // wrangler `durable_objects` binding resolves `UserOutlineDO` from the entry).
-export { UserOutlineDO };
+// Wrap the EXPORT with Sentry (#227) — instrumenting the class alone drops
+// events in v10; the wrapper must be what wrangler resolves by name. The type
+// alias preserves the `UserOutlineDO` type name the bindings/stubs below use.
+export const UserOutlineDO = Sentry.instrumentDurableObjectWithSentry(
+  workerSentryOptions,
+  BaseUserOutlineDO,
+);
+type UserOutlineDO = BaseUserOutlineDO;
 
 interface Env extends AuthEnv {
+  /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
+   *  client bundle too). Unset => error monitoring is dormant. See worker/
+   *  sentry.ts (ticket #227, decided in #156). */
+  SENTRY_DSN?: string;
   DB: D1Database;
   ASSETS: Fetcher;
   USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>;
@@ -659,7 +672,7 @@ function handleApiRequest(
   });
 }
 
-export default {
+const handler = {
   async fetch(
     request: Request,
     env: Env,
@@ -710,6 +723,24 @@ export default {
           Effect.succeed(json({ error: "not found" }, 404)),
         ),
       ),
-    ).catch((err) => json({ error: String(err) }, 500));
+    ).catch((err) => {
+      // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
+      // the internal error string (audit #159, finding 1) — it goes to Workers
+      // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
+      // `withSentry` never sees this rejection on its own: the `.catch`
+      // swallows it before it escapes the handler, so capture it here.
+      console.error(err);
+      Sentry.captureException(err);
+      return json({ error: "internal error" }, 500);
+    });
   },
 } satisfies ExportedHandler<Env>;
+
+// Errors-only Sentry around the whole Worker (#227). Dormant when SENTRY_DSN is
+// unset (local dev, tests), so nothing phones home there. The callback is typed
+// to the full `Env` so `withSentry` keeps the handler's env type (it otherwise
+// infers the narrower `SentryEnv` from `workerSentryOptions`).
+export default Sentry.withSentry(
+  (env: Env) => workerSentryOptions(env),
+  handler,
+);
