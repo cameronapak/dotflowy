@@ -12,6 +12,7 @@
     "dev:web": "vite dev",
     "dev:api": "wrangler dev --port 8787",
     "build": "vite build",
+    "gen:icons": "bun run scripts/gen-icons.ts",
     "build:cf": "vite build && cp dist/client/_shell.html dist/client/index.html",
     "preview": "vite preview",
     "cf:dev": "bun scripts/cf-dev.ts",
