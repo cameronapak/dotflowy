@@ -9,9 +9,9 @@ import {
 
 import "../styles.css";
 
-const TITLE = "Dotflowy — an open-source outliner. Workflowy, but yours.";
+const TITLE = "Dotflowy — an infinite outliner, finally yours";
 const DESCRIPTION =
-  "A fast, keyboard-first outliner you can own and extend. Open-source, real-time sync, daily notes, tags, and an outline your AI can edit too. A Workflowy alternative.";
+  "The open-source alternative to Workflowy — a fast, keyboard-first outliner you own and extend. Real-time sync, daily notes, tags, and an outline your AI agents can edit too.";
 const URL = "https://dotflowy.com";
 
 // Respect the visitor's system theme with no flash of the wrong one. The app's

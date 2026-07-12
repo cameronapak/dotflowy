@@ -158,13 +158,14 @@ function Hero() {
   return (
     <section className="mx-auto w-full max-w-2xl px-6 pt-20 pb-24 sm:pt-28">
       <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
-        Workflowy,
+        An infinite outliner,
         <br />
-        but <span className="text-brand-blue">yours</span>.
+        finally <span className="text-brand-blue">yours</span>.
       </h1>
       <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-        A fast, keyboard-first outliner you can actually own. Nest anything,
-        zoom into any bullet, and build on it with plugins.
+        The open-source alternative to Workflowy — a fast, keyboard-first
+        outliner you actually own. Nest anything, zoom into any bullet, and
+        extend it with plugins.
       </p>
 
       <ul className="mt-8 space-y-2.5 text-[15px] text-muted-foreground">
@@ -218,6 +219,15 @@ function Footer() {
           </a>
           <span className="text-muted-foreground/70">© {year}</span>
         </nav>
+      </div>
+      {/* Nominative-fair-use disclaimer: naming Workflowy is lawful, but state
+       * plainly that we're independent and unaffiliated. */}
+      <div className="mx-auto w-full max-w-2xl px-6 pb-10">
+        <p className="text-xs leading-relaxed text-muted-foreground/70">
+          Workflowy is a trademark of its respective owner. Dotflowy is an
+          independent, open-source project and is not affiliated with, sponsored
+          by, or endorsed by Workflowy.
+        </p>
       </div>
     </footer>
   );
