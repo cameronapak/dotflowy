@@ -24,6 +24,12 @@ jobs:
         run: bun run lint
       - name: Typecheck
         run: bun run typecheck
+      - name: Typecheck worker
+        run: bun run typecheck:worker
+      - name: Typecheck tests
+        run: bun run typecheck:test
+      - name: Unit tests
+        run: bun run test
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.
