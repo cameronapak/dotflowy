@@ -14,6 +14,28 @@ const authClient = createAuthClient();
 export const { signIn, signUp, useSession } = authClient;
 
 /**
+ * Connect the signed-in account to a Google identity (explicit account
+ * linking — the ONLY linking path while local emails are unverified; see
+ * worker/auth.ts). Fully navigation-based: the client redirects to Google,
+ * and Better Auth's callback redirects back to the current URL — success
+ * lands silently, failure lands with ?error=… which
+ * <OAuthCallbackErrorToast> surfaces. The round trip is a full page load,
+ * so no singleton teardown concerns (same user, same data).
+ */
+export function connectGoogle() {
+  void authClient.linkSocial({
+    provider: "google",
+    callbackURL: window.location.href,
+    errorCallbackURL: window.location.href,
+    fetchOptions: {
+      onError: () => {
+        toast.error("Couldn't start Google connect. Try again.");
+      },
+    },
+  });
+}
+
+/**
  * Hard-navigate. The data layer (nodesCollection, the kv side-collections,
  * tree store, undo history) is a set of module singletons and the /api/sync
  * WebSocket authenticates only at upgrade, so an SPA-internal auth swap keeps

@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { hardReset, signIn, signUp } from "../lib/auth-client";
+import { consumeOAuthCallbackError } from "./oauth-callback-error";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -41,6 +42,43 @@ export function AuthScreen() {
   const [waitlist, setWaitlist] = useState<"idle" | "busy" | "done">("idle");
 
   const isSignup = mode === "signup";
+
+  // A failed Google round trip lands back here with ?error=… — show it where
+  // a form error would show. Only a truthy result sets state, so Strict
+  // Mode's second effect run (which sees the already-stripped URL) is a no-op.
+  useEffect(() => {
+    const message = consumeOAuthCallbackError();
+    if (message) setError(message);
+  }, []);
+
+  async function onGoogle() {
+    setError(null);
+    setBusy(true);
+    const oauthQuery = pendingOAuthQuery();
+    try {
+      // The client navigates to Google on success (top-level), so the whole
+      // flow is navigation-based: the OAuth callback's redirect is a fresh
+      // page load, which is the hardReset teardown by construction. On an
+      // MCP OAuth hop, the callbackURL IS the authorize resume — the same
+      // top-level navigation the email path does by hand below.
+      const res = await signIn.social({
+        provider: "google",
+        callbackURL: oauthQuery
+          ? `/api/auth/mcp/authorize?${oauthQuery}`
+          : window.location.href,
+        // Land failures back on this screen (keeps any OAuth query intact).
+        errorCallbackURL: window.location.href,
+      });
+      if (res.error) {
+        setError(res.error.message ?? "Couldn't start Google sign-in.");
+        setBusy(false);
+      }
+      // No error: the page is navigating away — keep `busy` true.
+    } catch {
+      setError("Network error. Check your connection and try again.");
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -188,6 +226,28 @@ export function AuthScreen() {
             {busy ? "…" : isSignup ? "Sign up" : "Sign in"}
           </Button>
         </form>
+
+        {/* Sign-in mode only: Google can't create an account (the server-side
+            invite gate covers OAuth too — worker/auth.ts), so offering it on
+            the signup form would only manufacture signup_disabled errors. */}
+        {!isSignup && (
+          <>
+            <div className="my-4 flex items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={busy}
+              onClick={onGoogle}
+            >
+              Continue with Google
+            </Button>
+          </>
+        )}
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
           {isSignup ? "Already have an account?" : "New here?"}{" "}

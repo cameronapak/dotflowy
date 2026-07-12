@@ -29,6 +29,11 @@ export interface AuthEnv {
    *  or empty = signup CLOSED — nobody can create an account. Rotate the
    *  secret to revoke every outstanding code at once. */
   INVITE_CODES?: string;
+  /** Google OAuth client for "Sign in with Google". Both unset = the provider
+   *  simply isn't registered (sign-in button errors with provider-not-found;
+   *  local dev works fine without them). Set via `wrangler secret put`. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
 }
 
 export function createAuth(env: AuthEnv, requestOrigin?: string) {
@@ -46,6 +51,49 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
       // v1 has no transactional email wired, so signup can't gate on a
       // verification link yet. Tracked as a known gap (docs/adr/0011-the-auth-gate.md).
       requireEmailVerification: false,
+    },
+    // "Sign in with Google" — sign-IN only. `disableSignUp: true` is the same
+    // invite gate as the /sign-up/email hook, expressed for OAuth: a Google
+    // callback with no matching account is rejected server-side instead of
+    // creating a user, so the social path can't bypass INVITE_CODES. It must
+    // be `disableSignUp` (hard), NOT `disableImplicitSignUp` — the latter is
+    // waived by a client-supplied `requestSignUp: true`, which would reopen
+    // the bypass. Registered only when both secrets exist so a bare local dev
+    // env still constructs auth cleanly.
+    socialProviders:
+      env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+        ? {
+            google: {
+              clientId: env.GOOGLE_CLIENT_ID,
+              clientSecret: env.GOOGLE_CLIENT_SECRET,
+              disableSignUp: true,
+              prompt: "select_account",
+            },
+          }
+        : undefined,
+    // Account-linking policy (how an existing email+password user gets Google
+    // on the same account — same `user.id`, hence the same outline DO):
+    // EXPLICIT linking only, via `linkSocial` while signed in (the "Connect
+    // Google" menu item). Implicit linking on a signed-out Google sign-in is
+    // left at Better Auth's default, which refuses to link into a local
+    // account whose email is unverified — ours all are (no verification
+    // email yet) — because an attacker who pre-registered the victim's email
+    // could otherwise capture the victim's Google identity. That refusal
+    // surfaces as ?error=account_not_linked and the AuthScreen points at the
+    // explicit path. (Don't "fix" it with `requireLocalEmailVerified: false`:
+    // deprecated, and the gate becomes unconditional next minor.)
+    account: {
+      accountLinking: {
+        // Google reports emailVerified, so this is belt-and-braces today; it
+        // matters once local emails get verified (then implicit linking works).
+        trustedProviders: ["google"],
+        // Explicit link only: the live session already proves account
+        // ownership, so the connected Google identity may use a different
+        // address. Does NOT loosen the signed-out path (that lookup is
+        // email-keyed, so a different-address Google sign-in just finds no
+        // account and hits disableSignUp).
+        allowDifferentEmails: true,
+      },
     },
     // Dev serves the SPA from Vite (:3000) and proxies /api to the Worker, so
     // a sign-in request's Origin is the Vite origin, not the Worker's. Trust
