@@ -19,6 +19,11 @@ export const {
   resetPassword,
 } = authClient;
 
+/** The one fetch-failed message every auth surface shows, so a copy edit
+ *  can't leave one screen reading differently from the rest. */
+export const NETWORK_ERROR_MESSAGE =
+  "Network error. Check your connection and try again.";
+
 /**
  * Connect the signed-in account to a Google identity (explicit account
  * linking — the ONLY linking path while local emails are unverified; see

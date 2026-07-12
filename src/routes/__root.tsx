@@ -82,51 +82,52 @@ export const Route = createRootRoute({
   component: RootComponent,
 });
 
+/** Routes that render for a VISITOR — outside the AuthGate (which would swap
+ *  them for the login screen) and outside the editor chrome, whose dialogs
+ *  assume a signed-in data layer. Today just the password-reset landing page
+ *  (its visitor has no session — revokeSessionsOnPasswordReset killed them);
+ *  a future signed-out landing (e.g. email verification) is added HERE. */
+const PUBLIC_ROUTES = new Set(["/reset-password"]);
+
 function RootComponent() {
-  // The reset-password page is PUBLIC by construction (its visitor has no
-  // session — revokeSessionsOnPasswordReset killed them). It renders as a bare
-  // Outlet: outside the AuthGate (which would swap it for the login screen)
-  // AND outside the editor chrome, whose dialogs assume a signed-in data
-  // layer. It leaves only via hardReset, so no editor state can leak across.
+  // Trailing-slash-tolerant: the router matches `/reset-password/` to the
+  // route without normalizing location.pathname, so a naive equality would
+  // render the reset page inside the gate and kill the emailed link.
   const isPublicRoute = useLocation({
-    select: (l) => l.pathname === "/reset-password",
+    select: (l) => PUBLIC_ROUTES.has(l.pathname.replace(/\/+$/, "") || "/"),
   });
-  if (isPublicRoute) {
-    return (
-      <RootDocument>
-        <ThemeProvider>
-          <Outlet />
-          <Toaster />
-        </ThemeProvider>
-      </RootDocument>
-    );
-  }
   return (
     <RootDocument>
       <ThemeProvider>
-        <TextSizeProvider>
-          <AuthGate>
-            <ShowCompletedProvider>
-              <Outlet />
-              <NodeSwitcher />
-              <MoveDialog />
-              <OpmlImportDialog />
-              <DeleteConfirmDialog />
-              <HistoryRestoreDialog />
-              <ChangelogDialog />
-              <MirrorPlaces />
-              <TagColorStyles />
-              <SpotlightController />
-              {/* A distinct mechanism from the changelog (ADR 0046): the
-                  changelog says WHAT changed; this says THIS TAB is stale. */}
-              <UpdateAvailableToast />
-              {/* Inside the gate: surfaces a failed "Connect Google" round
-                  trip (signed-in). Signed-out failures render inline in
-                  AuthScreen via the same consume helper. */}
-              <OAuthCallbackErrorToast />
-            </ShowCompletedProvider>
-          </AuthGate>
-        </TextSizeProvider>
+        {isPublicRoute ? (
+          // Bare Outlet: a public page leaves only via hardReset, so no
+          // editor state can leak across.
+          <Outlet />
+        ) : (
+          <TextSizeProvider>
+            <AuthGate>
+              <ShowCompletedProvider>
+                <Outlet />
+                <NodeSwitcher />
+                <MoveDialog />
+                <OpmlImportDialog />
+                <DeleteConfirmDialog />
+                <HistoryRestoreDialog />
+                <ChangelogDialog />
+                <MirrorPlaces />
+                <TagColorStyles />
+                <SpotlightController />
+                {/* A distinct mechanism from the changelog (ADR 0046): the
+                    changelog says WHAT changed; this says THIS TAB is stale. */}
+                <UpdateAvailableToast />
+                {/* Inside the gate: surfaces a failed "Connect Google" round
+                    trip (signed-in). Signed-out failures render inline in
+                    AuthScreen via the same consume helper. */}
+                <OAuthCallbackErrorToast />
+              </ShowCompletedProvider>
+            </AuthGate>
+          </TextSizeProvider>
+        )}
         {/* Outside the gate so auth-screen errors can still toast. */}
         <Toaster />
       </ThemeProvider>

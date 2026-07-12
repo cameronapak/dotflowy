@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import {
   hardReset,
+  NETWORK_ERROR_MESSAGE,
   requestPasswordReset,
   signIn,
   signUp,
@@ -85,7 +86,7 @@ export function AuthScreen() {
       }
       // No error: the page is navigating away — keep `busy` true.
     } catch {
-      setError("Network error. Check your connection and try again.");
+      setError(NETWORK_ERROR_MESSAGE);
       setBusy(false);
     }
   }
@@ -106,7 +107,7 @@ export function AuthScreen() {
         setResetSent(true);
       }
     } catch {
-      setError("Network error. Check your connection and try again.");
+      setError(NETWORK_ERROR_MESSAGE);
     }
     setBusy(false);
   }
@@ -180,7 +181,7 @@ export function AuthScreen() {
         resumeAuthorize();
         return;
       }
-      setError("Network error. Check your connection and try again.");
+      setError(NETWORK_ERROR_MESSAGE);
     }
     setBusy(false);
   }

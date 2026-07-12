@@ -3,7 +3,11 @@ import { useState, type FormEvent } from "react";
 
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { hardReset, resetPassword } from "../lib/auth-client";
+import {
+  hardReset,
+  NETWORK_ERROR_MESSAGE,
+  resetPassword,
+} from "../lib/auth-client";
 
 /**
  * The password-reset landing page. The emailed link points at Better Auth's
@@ -55,7 +59,7 @@ function ResetPassword() {
         setDone(true);
       }
     } catch {
-      setError("Network error. Check your connection and try again.");
+      setError(NETWORK_ERROR_MESSAGE);
     }
     setBusy(false);
   }
@@ -70,23 +74,19 @@ function ResetPassword() {
           </p>
         </div>
 
-        {done ? (
+        {done || invalidLink ? (
+          // One terminal card, two scripts. Both exits hard-navigate to "/":
+          // after a SUCCESSFUL reset every session is revoked, so "/" is the
+          // sign-in screen; on a dead link a still-signed-in visitor lands in
+          // their outline instead — hence the neutral button label.
           <div className="space-y-4 text-center">
             <p className="text-sm text-muted-foreground">
-              Password updated. Sign in with your new password.
+              {done
+                ? "Password updated. Sign in with your new password."
+                : "This reset link is invalid or has expired. Request a new one from the sign-in screen."}
             </p>
             <Button className="w-full" onClick={() => hardReset("/")}>
-              Go to sign in
-            </Button>
-          </div>
-        ) : invalidLink ? (
-          <div className="space-y-4 text-center">
-            <p className="text-sm text-muted-foreground">
-              This reset link is invalid or has expired. Request a new one from
-              the sign-in screen.
-            </p>
-            <Button className="w-full" onClick={() => hardReset("/")}>
-              Back to sign in
+              {done ? "Go to sign in" : "Back to Dotflowy"}
             </Button>
           </div>
         ) : (
