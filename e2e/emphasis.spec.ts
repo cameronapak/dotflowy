@@ -251,10 +251,7 @@ test.describe("Inline emphasis: creation", () => {
     await expect(text(page, "n").locator("b")).toHaveCount(0);
   });
 
-  // Quarantined (#217): flaky under --workers=2 parallel contention -- the
-  // select-all/keypress races the load and the wrap lands on a collapsed
-  // caret. Passes reliably at --workers=1. Un-quarantine per the issue.
-  test.fixme("Cmd+I / Cmd+U / Cmd+Shift+X wrap a selection in each kind", async ({
+  test("Cmd+I / Cmd+U / Cmd+Shift+X wrap a selection in each kind", async ({
     page,
   }) => {
     for (const [combo, tag] of [
