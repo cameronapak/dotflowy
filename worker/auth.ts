@@ -16,9 +16,14 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
 
+import { sendEmail } from "./email";
+
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
   DB: D1Database;
+  /** The `send_email` binding (worker/email.ts). Optional: absent in plain
+   *  local dev, where sends fall back to console logging. */
+  EMAIL?: SendEmail;
   /** Signing secret. Set in prod via `wrangler secret put BETTER_AUTH_SECRET`,
    *  locally via `.dev.vars`. Better Auth fails closed without it in prod. */
   BETTER_AUTH_SECRET?: string;
@@ -36,7 +41,27 @@ export interface AuthEnv {
   GOOGLE_CLIENT_SECRET?: string;
 }
 
-export function createAuth(env: AuthEnv, requestOrigin?: string) {
+/** The password-reset email, as an HTML + plain-text pair (both always sent —
+ *  spam score + client compatibility). Two templates is below the bar for a
+ *  template system; inline strings are the system. */
+function resetPasswordEmail(url: string) {
+  return {
+    subject: "Reset your Dotflowy password",
+    text: `Reset your Dotflowy password:\n\n${url}\n\nThis link expires in 1 hour. If you didn't ask for a reset, you can ignore this email — your password is unchanged.`,
+    html: `<div style="font-family: system-ui, -apple-system, sans-serif; max-width: 28rem; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 18px; font-weight: 600;">Reset your Dotflowy password</h1>
+  <p style="font-size: 14px; color: #444; line-height: 1.5;">Someone (hopefully you) asked to reset the password for this email address.</p>
+  <p style="margin: 24px 0;"><a href="${url}" style="display: inline-block; background: #111; color: #fff; text-decoration: none; font-size: 14px; padding: 10px 16px; border-radius: 6px;">Choose a new password</a></p>
+  <p style="font-size: 13px; color: #666; line-height: 1.5;">This link expires in 1 hour. If you didn't ask for a reset, ignore this email — your password is unchanged.</p>
+</div>`,
+  };
+}
+
+export function createAuth(
+  env: AuthEnv,
+  requestOrigin?: string,
+  executionCtx?: ExecutionContext,
+) {
   return betterAuth({
     // Better Auth accepts a D1 binding directly (kysely under the hood).
     database: env.DB,
@@ -48,9 +73,31 @@ export function createAuth(env: AuthEnv, requestOrigin?: string) {
     baseURL: env.BETTER_AUTH_URL ?? requestOrigin,
     emailAndPassword: {
       enabled: true,
-      // v1 has no transactional email wired, so signup can't gate on a
-      // verification link yet. Tracked as a known gap (docs/adr/0011-the-auth-gate.md).
+      // Deliberately OFF for beta even though email is wired now: signup is
+      // already invite-gated, so verification adds friction without closing a
+      // real hole (a reset email always goes to the account's stored address,
+      // so an unverified signup can't hijack anything). Revisit when signup
+      // opens up (docs/adr/0011-the-auth-gate.md).
       requireEmailVerification: false,
+      // The delivery function password reset was missing until #169. Better
+      // Auth AWAITS this callback (no backgroundTasks handler configured), so
+      // it must return fast and uniformly: the send rides ctx.waitUntil —
+      // registered, not awaited — which (a) keeps the response time identical
+      // whether or not the email exists (no enumeration side channel; the
+      // endpoint already fakes the token work for unknown emails) and (b)
+      // keeps the Workers isolate alive until the send finishes, which a bare
+      // dangling promise would NOT survive. sendEmail itself never throws.
+      sendResetPassword: async ({ user, url }) => {
+        const send = sendEmail(env, {
+          to: user.email,
+          ...resetPasswordEmail(url),
+        });
+        if (executionCtx) executionCtx.waitUntil(send);
+        else await send;
+      },
+      // A reset is the "my password leaked" move: kill every existing session
+      // so a stolen one dies with the old password.
+      revokeSessionsOnPasswordReset: true,
     },
     // "Sign in with Google" — sign-IN only. `disableSignUp: true` is the same
     // invite gate as the /sign-up/email hook, expressed for OAuth: a Google

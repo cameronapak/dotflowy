@@ -37,6 +37,20 @@
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
   },
+  // Transactional email (password reset today; invites later) via Cloudflare
+  // Email Service. A binding, not an API key — nothing to leak or rotate. The
+  // sender allowlist pins the From address at the platform layer (worker/
+  // email.ts pins it again in code). Requires the domain onboarded once:
+  // `npx wrangler email sending enable dotflowy.com` (Workers Paid plan).
+  // Local `wrangler dev` SIMULATES the binding (miniflare logs the message,
+  // reset URL included, instead of sending — zero-config dev); flip
+  // `"remote": true` here temporarily to test real sends through dev.
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["no-reply@dotflowy.com"],
+    },
+  ],
   "d1_databases": [
     {
       "binding": "DB",

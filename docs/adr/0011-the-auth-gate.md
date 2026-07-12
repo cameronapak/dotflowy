@@ -31,8 +31,8 @@ client-supplied `requestSignUp: true` waives — that would be an invite bypass.
 with no account gets `?error=signup_disabled` back on the AuthScreen. **Linking an existing
 email+password account to Google is EXPLICIT only** (`linkSocial` behind the More menu's "Connect
 Google", while signed in): implicit linking on a signed-out Google sign-in stays at Better Auth's
-default, which refuses when the local email is unverified — all of ours, since no verification
-email is wired — because an attacker who pre-registered the victim's address could otherwise
+default, which refuses when the local email is unverified — all of ours, since verification is
+off for beta — because an attacker who pre-registered the victim's address could otherwise
 capture the victim's Google identity into an attacker-owned account. Don't reach for
 `requireLocalEmailVerified: false`: deprecated upstream, and the gate becomes unconditional next
 minor. `allowDifferentEmails: true` loosens only the authenticated explicit-link path (the session
@@ -45,8 +45,15 @@ authorize flow top-level.
 
 **node:crypto** — Better Auth needs it, so wrangler sets `compatibility_flags: ["nodejs_compat"]`.
 
-**Known gap (v1):** no email-verification requirement — no transactional email is wired yet, so
-`requireEmailVerification` is off. Harden when an email sender (e.g. Resend) lands.
+**Transactional email** is wired (map #151 / #169): Cloudflare Email Service via the Workers
+`send_email` binding, every sender funneled through the one `worker/email.ts` seam (the
+provider-swap point; Resend is the named fallback). Password reset works: `sendResetPassword`
+rides `ctx.waitUntil` (uniform response timing — no enumeration side channel — and the isolate
+outlives the response) with `revokeSessionsOnPasswordReset: true`; the public `/reset-password`
+route renders OUTSIDE the root AuthGate. `requireEmailVerification` stays **deliberately off for
+beta**: signup is invite-gated, so verification adds friction without closing a real hole (a
+reset email only ever goes to the account's stored address). Revisit when signup opens up —
+flipping it on also makes implicit Google linking start working (see above).
 
 **Don't:** key the DO off the email (permanent-name orphaning — use `user.id`); make `createAuth` a
 module singleton (the D1 binding is request-scoped); gate the static shell (the login screen must
