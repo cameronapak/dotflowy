@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "cf:dev"],
       "port": 8787,
       "autoPort": false
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "landing",
+      "port": 3100
     }
   ]
 }
