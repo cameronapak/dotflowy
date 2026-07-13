@@ -1,5 +1,14 @@
 # dotflowy
 
+## 1.2.1
+
+### Patch Changes
+
+- cf52c65: Drag-reorder now follows the active filter: while a `?q=` filter is on, drops target only the visible rows (landing right after the visible predecessor when the real tree has hidden siblings in between), and a drop that lands the node hidden shows a quiet toast instead of silently vanishing it.
+- 651c480: Escape in the filter input reliably clears the text on the second press again — a deferred popover reveal from the summon animation no longer re-opens a popover you already closed.
+- 37d1554: Keyboard navigation now works while a filter is active: Arrow Up/Down (and delete/selection focus landing) walk exactly the rows the filter shows, instead of silently getting stuck on rows the filter hid.
+- 11aa087: Disable pinch-zoom on mobile.
+
 ## 1.2.0
 
 ### Minor Changes
