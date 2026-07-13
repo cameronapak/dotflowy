@@ -16,9 +16,14 @@ import { SlashMenuList } from "./slash-menu-list";
  *  pre-plugin palette order. Detection/filtering/keyboard/rendering stay generic. */
 const COMMANDS: CommandSpec[] = [...commandSpecs, ...CORE_COMMANDS];
 
-function filterCommands(node: Node, query: string): CommandSpec[] {
+function filterCommands(
+  node: Node,
+  query: string,
+  commandFilter?: (spec: CommandSpec) => boolean,
+): CommandSpec[] {
   const q = query.toLowerCase();
-  const available = COMMANDS.filter((c) => c.available(node));
+  const base = commandFilter ? COMMANDS.filter(commandFilter) : COMMANDS;
+  const available = base.filter((c) => c.available(node));
   if (!q) return available;
   return available.filter(
     (c) =>
@@ -48,6 +53,7 @@ export function useSlashMenu({
   ctx,
   getEl,
   onTextChange,
+  commandFilter,
 }: {
   node: Node;
   /** The PluginContext factory (read live values at event time), the same one
@@ -55,10 +61,15 @@ export function useSlashMenu({
   ctx: () => PluginContext;
   getEl: () => HTMLElement | null;
   onTextChange: (text: string) => void;
+  /** Restrict the palette to a subset of commands (ADR 0049): the quick-add
+   *  mini-editor curates out the structural verbs (Move/Mirror/Delete/Send to
+   *  Today) so its text-authoring surface never relocates the capture. Omit for
+   *  the full outline palette. */
+  commandFilter?: (spec: CommandSpec) => boolean;
 }) {
   const [state, setState] = useState<SlashState | null>(null);
 
-  const items = state ? filterCommands(node, state.query) : [];
+  const items = state ? filterCommands(node, state.query, commandFilter) : [];
 
   const close = () => setState(null);
 
@@ -85,7 +96,7 @@ export function useSlashMenu({
   const select = (index: number) => {
     const el = getEl();
     if (!el || !state) return;
-    const list = filterCommands(node, state.query);
+    const list = filterCommands(node, state.query, commandFilter);
     const item = list[index];
     if (!item) {
       setState(null);

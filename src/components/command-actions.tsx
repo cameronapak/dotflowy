@@ -16,6 +16,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PlugZapIcon,
+  PlusIcon,
   SparklesIcon,
   SunIcon,
 } from "lucide-react";
@@ -36,6 +37,7 @@ import {
 } from "./header-more-menu";
 import { openOpmlImport } from "./opml-import-opener";
 import { openFilterInput } from "./query-filter-nav";
+import { openQuickAdd } from "./quick-add-opener";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { useTextSize, type TextSize } from "./text-size-provider";
@@ -69,6 +71,15 @@ export function useGlobalActions(opts: {
 
   return useMemo(() => {
     const a: CommandCenterAction[] = [
+      {
+        id: "g:quick-add",
+        label: "Quick add",
+        description: "Capture a thought to Today without leaving where you are",
+        icon: PlusIcon,
+        scope: "global",
+        keywords: ["quick", "add", "capture", "new", "today", "inbox", "note"],
+        run: () => openQuickAdd(),
+      },
       {
         id: "g:copy-md",
         label: "Copy as Markdown",

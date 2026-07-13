@@ -925,6 +925,15 @@ h2.zoomed-title .row-body > .title-pilcrow {
   display: inline-block;
 }
 
+/* Quick-add mini-editor (ADR 0049): show its placeholder while the capture is
+   empty. Scoped to the overlay so the outline's empty bullets stay blank. The
+   contentEditable's own `data-placeholder` supplies the text. */
+.quick-add-editor .node-text:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
 /* --- Drag to reorder (ADR 0010) --- */
 
 /* While a drag is live: a grab cursor everywhere, and no accidental text

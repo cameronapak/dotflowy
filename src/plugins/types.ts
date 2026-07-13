@@ -621,6 +621,24 @@ export interface SearchAction {
   run(): void;
 }
 
+// --- Seam: default capture destination (ADR 0049) ---------------------------
+//
+// Quick-add is CORE chrome (its own overlay + hotkey + FAB + Cmd+K action), but
+// "capture defaults to Today" is a daily-plugin concept, and the clean-core rule
+// (ADR 0001) forbids core importing a plugin. So the default destination is
+// resolved through this seam: a plugin returns the node id new captures append
+// into (get-or-created SEED-FREE, like Send to Today -- ADR 0041). Core never
+// imports `daily`; with no provider quick-add falls back to the root. First
+// non-null across plugins wins.
+
+export interface CaptureDestination {
+  /** The node to capture into -- new nodes append as its LAST child. `null`
+   *  means the top level (the core fallback when no plugin provides one). */
+  parentId: string | null;
+  /** A short human label for the destination chip, e.g. "Today". */
+  label: string;
+}
+
 // --- The plugin object ------------------------------------------------------
 
 /**
@@ -695,6 +713,12 @@ export interface PluginDef {
    *  so a day note reads "Tuesday, June 23, 2026 (Today)". Never highlighted,
    *  never searched -- pure clarity. First non-null across plugins wins. */
   searchAnnotation?(node: Node): string | null;
+  /** Seam: the default capture destination for quick-add (ADR 0049). Resolves
+   *  (get-or-creates, SEED-FREE) the node new captures append into -- the daily
+   *  plugin returns today's note. Async: it may round-trip the daily atomic
+   *  claim. First non-null across plugins wins; with no provider quick-add falls
+   *  back to the root. */
+  captureDestination?(): Promise<CaptureDestination | null>;
 }
 
 /** Identity helper -- gives a plugin object its type without a cast (D5). */
