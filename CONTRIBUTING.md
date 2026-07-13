@@ -124,6 +124,21 @@ carry the lookup keys in `worker/auth.ts` (`STRIPE_LOOKUP_KEYS`) — the code
 references prices by lookup key, never by id, so test and live mode need no
 config difference.
 
+Create those Prices (and their Products) with the idempotent setup script
+instead of hand-running `stripe prices create`:
+
+```sh
+STRIPE_SECRET_KEY=sk_test_… bun scripts/stripe-setup.ts            # test mode
+STRIPE_SECRET_KEY=sk_test_… bun scripts/stripe-setup.ts --dry-run  # plan only, no writes
+```
+
+The lookup keys are the state (no state file); re-running only creates what's
+missing. Test mode skips the webhook endpoint (that's what `stripe listen` is
+for). For prod, run it once against the live key with the explicit `--live`
+guard — `STRIPE_SECRET_KEY=sk_live_… bun scripts/stripe-setup.ts --live` — which
+also registers the `app.dotflowy.com` webhook endpoint and prints the `whsec_…`
+signing secret once (feed it to `wrangler secret put STRIPE_WEBHOOK_SECRET`).
+
 ## Before you open a PR
 
 Run the full gate. These mirror CI — except `bun run test:e2e`, which is
