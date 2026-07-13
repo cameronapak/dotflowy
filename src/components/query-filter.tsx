@@ -422,8 +422,21 @@ export function QueryFilterBar() {
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
   // While the subheader expands on a fresh summon, onFocus must not open the
-  // popover early — timestamp until which reveal is deferred.
+  // popover early — timestamp until which reveal is deferred, plus the timer
+  // that reveals once the band settles. Any EXPLICIT close (Escape stage 1,
+  // clear, collapse, blur) must cancel the pending reveal, or it fires after
+  // the close and silently re-opens `popoverOpen` — which desyncs the Escape
+  // ladder (stage 2 re-closes a popover the user already closed instead of
+  // clearing the text).
   const deferPopoverUntilRef = useRef(0);
+  const revealTimerRef = useRef<number | null>(null);
+  const cancelDeferredReveal = useCallback(() => {
+    if (revealTimerRef.current != null) {
+      window.clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+    deferPopoverUntilRef.current = 0;
+  }, []);
 
   // Pin pressed-state (ADR 0048): filled when the current (trimmed) query is
   // already saved. Reads `draft` so it tracks the input even while composing.
@@ -539,6 +552,7 @@ export function QueryFilterBar() {
       window.clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
+    cancelDeferredReveal();
     draftRef.current = "";
     setDraft("");
     writeQuery("", { replace: true });
@@ -546,7 +560,7 @@ export function QueryFilterBar() {
     setPopoverOpen(false);
     setFocused(false);
     inputRef.current?.blur();
-  }, []);
+  }, [cancelDeferredReveal]);
 
   // Live open-probe for the header toggle -- `showInput` itself isn't stable
   // across the mount-once registration, so the probe reads refs/state live.
@@ -588,7 +602,6 @@ export function QueryFilterBar() {
     if (!summoned) return;
     // Collapsed → expand animates; already-resident (active `?q=`) does not.
     const needsExpandWait = rawRef.current.trim().length === 0;
-    let popoverTimer: number | null = null;
     const id = requestAnimationFrame(() => {
       const el = inputRef.current;
       if (!el) return;
@@ -603,8 +616,8 @@ export function QueryFilterBar() {
         // onFocus would open immediately; hold until the band settles.
         deferPopoverUntilRef.current = Date.now() + SUBHEADER_EXPAND_MS;
         setPopoverOpen(false);
-        popoverTimer = window.setTimeout(() => {
-          popoverTimer = null;
+        revealTimerRef.current = window.setTimeout(() => {
+          revealTimerRef.current = null;
           deferPopoverUntilRef.current = 0;
           if (document.activeElement === inputRef.current) {
             setPopoverOpen(true);
@@ -617,10 +630,9 @@ export function QueryFilterBar() {
     });
     return () => {
       cancelAnimationFrame(id);
-      if (popoverTimer != null) window.clearTimeout(popoverTimer);
-      deferPopoverUntilRef.current = 0;
+      cancelDeferredReveal();
     };
-  }, [summoned, recompute]);
+  }, [summoned, recompute, cancelDeferredReveal]);
 
   if (!showInput) return null;
 
@@ -635,6 +647,7 @@ export function QueryFilterBar() {
   // resident (blurred), showing the raw string.
   const collapse = () => {
     flush(draftRef.current);
+    cancelDeferredReveal();
     setSummoned(false);
     setPopoverOpen(false);
     inputRef.current?.blur();
@@ -642,6 +655,7 @@ export function QueryFilterBar() {
 
   // The clear X (and Escape stage 2): wipe the text AND `?q=`, keeping focus.
   const clearText = (reopenCheatSheet: boolean) => {
+    cancelDeferredReveal();
     draftRef.current = "";
     setDraft("");
     flush("");
@@ -685,6 +699,7 @@ export function QueryFilterBar() {
     // Read the live draft (not the render closure) so a close()+blur in the
     // same tick can't resurrect a just-cleared query.
     flush(draftRef.current);
+    cancelDeferredReveal();
     setSummoned(false);
     setPopoverOpen(false);
   };
@@ -728,6 +743,7 @@ export function QueryFilterBar() {
       // Ladder (ADR 0047 §6): (1) an open popover closes first; (2) else text is
       // cleared, focus kept; (3) else the row collapses.
       if (showPopover) {
+        cancelDeferredReveal();
         setPopoverOpen(false);
         return;
       }
