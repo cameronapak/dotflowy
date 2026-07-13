@@ -2,11 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
-// Phase B (ADR 0019): the windowed render mounts only ~viewport rows, regardless
-// of how many nodes exist. These specs force the flag ON (so they're meaningful
-// even if the compiled default ever flips) and prove the DOM row count stays
-// bounded as the outline grows to thousands of nodes -- the whole point of the
-// virtualization, which the parity suite (behavioral) doesn't directly assert.
+// ADR 0019: the windowed render mounts only ~viewport rows, regardless of how
+// many nodes exist. These specs prove the DOM row count stays bounded as the
+// outline grows to thousands of nodes -- the whole point of the virtualization,
+// which the behavioral suite doesn't directly assert.
 
 // 40 parents x 50 children = 2040 nodes, all expanded -- two depths so the
 // screenshot shows real indentation, and far more rows than any viewport holds.
@@ -40,9 +39,6 @@ function bigTree(): SeedNode[] {
 const rowCount = (page: Page) => page.locator("li[data-node-id]").count();
 
 async function loadBig(page: Page) {
-  await page.addInitScript(() =>
-    localStorage.setItem("dotflowy:flag:virtualized", "on"),
-  );
   await seedOutline(page, bigTree());
   await page.goto("/");
   await expect(

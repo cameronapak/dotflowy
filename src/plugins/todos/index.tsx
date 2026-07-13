@@ -9,7 +9,7 @@
 // Seams contributed: F (checkbox row slot), G (hide-completed view transform),
 // D (Mod+Enter / Mod+D toggle), C (`/todo` + `/bullet`), I (`[]` autoformat).
 // Still core-wired (next passes): the fade-inheritance cascade and the
-// Backspace-on-the-checkbox demotion read `completed`/`isTask` in OutlineNode --
+// Backspace-on-the-checkbox demotion read `completed`/`isTask` in OutlineRow --
 // they await a row-decoration / reserved-key seam.
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";

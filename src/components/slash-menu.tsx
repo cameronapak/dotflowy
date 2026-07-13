@@ -39,7 +39,7 @@ interface SlashState {
 /**
  * Drives the `/` command menu for a single bullet's contentEditable span.
  *
- * Returns input/keydown handlers the OutlineNode wires into its existing
+ * Returns input/keydown handlers the OutlineRow wires into its existing
  * handlers, a `close` callback (for blur), `isOpen`, and the rendered menu
  * element (portaled, so it's safe to drop anywhere in the JSX).
  */

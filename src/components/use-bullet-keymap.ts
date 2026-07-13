@@ -3,7 +3,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
 
 import type { Node } from "../data/schema";
 import type { PluginContext } from "../plugins/types";
-import type { NodeCommands } from "./OutlineNode";
+import type { NodeCommands } from "./node-commands";
 
 import { selectSingle } from "../data/selection-state";
 import { dispatchClick, keymapSpecs } from "../plugins/registry";
@@ -41,7 +41,7 @@ interface BulletKeymapArgs {
  * (Enter/Tab/Backspace/Arrows) fire from a contentEditable -- the manager only
  * ignores input elements that aren't the registration's own target.
  *
- * Extracted from OutlineNodeBody so the body stays readable; the wiring is
+ * Extracted from the row body so the body stays readable; the wiring is
  * unchanged. Caret-conditional keys (Backspace/Arrows) opt out of the default
  * preventDefault/stopPropagation and call them manually only when they actually
  * act, so normal in-line editing and caret movement still work.

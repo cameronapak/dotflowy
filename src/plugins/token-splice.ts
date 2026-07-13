@@ -1,6 +1,6 @@
 // The pure string core of token write-back, split out from `token-kit.ts` so it
 // carries ZERO imports. `token-kit.ts` also holds DOM helpers (it imports the
-// tree store, view state, and `OutlineNode`'s JSX types), so any module that
+// tree store, view state, and `OutlineRow`'s JSX types), so any module that
 // pulls a helper out of it drags the whole DOM surface along. The worker
 // compilation reaches this function through `src/data/{links,highlight}.ts` and
 // `route-bible/bible.ts` (via OPML import/export), and the Workers-types

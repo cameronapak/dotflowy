@@ -118,7 +118,7 @@ export function parentKeyOf(key: string): string | null {
  * `filter` (the `?q=` query filter's pruned set, ADR 0047) switches the walk to
  * filter-mode: collapse state is IGNORED at the walk level (matches inside a
  * closed subtree are revealed) and only nodes in `filter.visibleIds` survive --
- * exactly the recursive render's per-node filter. A match's OWN collapse is
+ * exactly the per-node filter the render applies. A match's OWN collapse is
  * respected by which descendants `buildQueryFilter` put in `visibleIds`
  * (ADR 0047 §8), not here. The caret walk passes the SAME filter (ADR 0047
  * amendment), so render and nav share one builder AND one visible set.

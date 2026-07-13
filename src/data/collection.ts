@@ -108,7 +108,7 @@ const seqWaiters = new Set<SeqWaiter>();
  * stale or out-of-order) keystrokes back -- repainting it mid-type is exactly
  * what scrambles characters and jumps the caret. A LOCAL change (undo/redo, a
  * slash insert) carries a value that does NOT match the latest echo, so it still
- * repaints. See OutlineNode's store-sync effect.
+ * repaints. See OutlineRow's store-sync effect.
  */
 const echoedText = new Map<string, string>();
 export function echoedTextFor(id: string): string | undefined {

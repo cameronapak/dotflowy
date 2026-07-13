@@ -12,7 +12,7 @@ import type { ComponentType, ReactNode } from "react";
 
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
-import type { NodeCommands } from "../components/OutlineNode";
+import type { NodeCommands } from "../components/node-commands";
 import type { FilterOperator } from "../data/filter-query";
 import type { Node, TreeIndex } from "../data/tree";
 
@@ -430,7 +430,7 @@ export interface KeymapSpec {
 //
 // A plugin renders a REAL React node (D10) into a named position decorating a
 // node -- the todos checkbox / the daily date badge, before the text. The same
-// node renders in TWO paths: a list bullet (`row:`, OutlineNode) and the zoomed
+// node renders in TWO paths: a list bullet (`row:`, OutlineRow) and the zoomed
 // page title (`title:`, OutlineEditor's ZoomedTitle). A slot opts into either or
 // both by registering one spec per position. The core renders whatever the
 // matching slots return, in plugin/array order; a slot returns null to

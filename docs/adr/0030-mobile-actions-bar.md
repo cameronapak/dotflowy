@@ -7,9 +7,9 @@ status: accepted
 **What.** A mobile-only, keyboard-anchored action strip live only while a bullet is being edited. Six buttons,
 grouped: `[outdent ⇤][indent ⇥] | [undo ↺][redo ↻] | [complete ☑][/]`. It gives thumb-reachable access to the
 structural + history actions that on desktop are keyboard shortcuts (`Tab`/`Shift+Tab`, `Mod+Z`/`Mod+Shift+Z`,
-`Mod+Enter`) plus the `/` command palette — none of which a software keyboard exposes. Compiled default ON
-behind the `isMobileBar()` localStorage flag (`dotflowy:flag:mobile-bar`), same escape-hatch shape as
-`isVirtualized()` (ADR 0019); deleted once dogfooded.
+`Mod+Enter`) plus the `/` command palette — none of which a software keyboard exposes. Shipped compiled
+default ON behind an `isMobileBar()` localStorage escape-hatch flag (the ADR 0019 shape); the flag was
+deleted once dogfooded (2026-07-12) — the bar now mounts unconditionally and self-gates on pointer type.
 
 **Signal assignment (the load-bearing decision).** Three orthogonal browser signals drive three orthogonal
 behaviors, and keeping them separate is what makes the bar robust:

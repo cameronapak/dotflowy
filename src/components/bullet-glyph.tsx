@@ -12,9 +12,6 @@ import type { NodeKind } from "../data/schema";
  * touch zoom target, and the pilcrow inherits that job wholesale). Both glyphs
  * are a `<span>` carrying `data-has-children`/`data-collapsed`, because the
  * collapsed-ring rule selects `.bullet:has(span[data-has-children][data-collapsed])`.
- *
- * Shared by BOTH render paths -- `OutlineRow` (windowed, live) and `OutlineNode`
- * (the recursive rollback path) -- so the two cannot drift on a node's kind.
  */
 export function BulletGlyph({
   kind,

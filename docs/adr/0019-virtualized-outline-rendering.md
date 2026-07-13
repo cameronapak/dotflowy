@@ -59,8 +59,10 @@ attempt it.
 - One flatten definition (`visible-order.ts`) drives both render and caret nav — don't fork a
   render-only copy that can drift from the neighbor walk.
 - Delete the recursive path once the flag flips; don't leave two render models alive.
+  _Done (2026-07-12): the recursive `OutlineNode` path, the `isVirtualized()` flag, and the
+  flag-parity e2e coverage were deleted after dogfooding. `OutlineRow` is the only render path._
 
-**Shipped (default on, recursive path retained as the rollback fallback).** What
+**Shipped (default on; the recursive rollback fallback has since been deleted).** What
 landed and the non-obvious calls:
 
 - **The flat row is `OutlineRow` (`OutlineRow.tsx`), windowed by `useWindowVirtualizer`** over

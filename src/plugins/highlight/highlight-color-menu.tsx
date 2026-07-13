@@ -19,7 +19,7 @@ import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 
-import type { NodeCommands } from "../../components/OutlineNode";
+import type { NodeCommands } from "../../components/node-commands";
 import type { PluginContext } from "../types";
 
 import { useDismissable } from "../../components/use-dismissable";

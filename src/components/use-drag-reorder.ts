@@ -9,7 +9,7 @@ import type { QueryFilter } from "../data/filter-query";
 
 import { isMirrorsEnabled } from "../data/flags";
 import { type Node, type TreeIndex } from "../data/tree";
-import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
+import { virtualRowRect } from "../data/virtual-nav";
 import {
   buildVisibleRows,
   instanceIdForKey,
@@ -32,10 +32,9 @@ import { INDENT_PX } from "./OutlineRow";
 
 // Movement (px) before a press becomes a drag. Below this, it's a click → zoom.
 const THRESHOLD = 5;
-// Indent per depth level. The render's single source (OutlineRow.INDENT_PX, also
-// the recursive path's `.outline-children` padding); measured from the live rows
-// when possible, this is the fallback so the windowed drop-depth projection can't
-// drift from the rendered indent.
+// Indent per depth level. The render's single source (OutlineRow.INDENT_PX);
+// measured from the live rows when possible, this is the fallback so the
+// windowed drop-depth projection can't drift from the rendered indent.
 const INDENT_FALLBACK = INDENT_PX;
 // How much of an indent the pointer must travel rightward before a drop nests
 // one level deeper. 0 = snap to the nearest level (flips at the halfway point);
@@ -71,8 +70,8 @@ interface Row {
   el: HTMLElement | null;
 }
 
-// A row's viewport box for hit-testing. Sourced from a DOMRect (recursive path)
-// or synthesized from the virtualizer's measurements (windowed path).
+// A row's viewport box for hit-testing, synthesized from the virtualizer's
+// measurements (so an off-screen target still has geometry).
 interface RowRect {
   top: number;
   bottom: number;
@@ -149,7 +148,6 @@ export function useDragReorder(deps: DragDeps) {
     s.pill?.remove();
     const sourceRow = depsRef.current.getRowEl(s.id);
     sourceRow?.classList.remove("drag-source");
-    sourceRow?.closest(".outline-node")?.classList.remove("drag-collapsed");
     document.body.classList.remove("dragging-active");
     document.removeEventListener("pointermove", s.moveHandler);
     document.removeEventListener("pointerup", s.upHandler);
@@ -243,8 +241,6 @@ export function useDragReorder(deps: DragDeps) {
 
     const sourceRow = depsRef.current.getRowEl(s.id);
     sourceRow?.classList.add("drag-source");
-    // Visually collapse the grabbed subtree so we carry one compact row.
-    sourceRow?.closest(".outline-node")?.classList.add("drag-collapsed");
 
     const index = depsRef.current.getIndex();
     const text =
@@ -269,46 +265,30 @@ export function useDragReorder(deps: DragDeps) {
   const project = useCallback((px: number, py: number) => {
     const s = state.current;
     if (!s) return;
-    // Geometry source: the virtualizer's measurements when windowed (so an
-    // off-screen drop target still has a position, estimated until it renders),
-    // else the rendered rows' DOM rects (recursive path). The depth math after
-    // is identical -- only where top/left come from differs.
-    const virtualized = isVirtualNavActive();
+    // Geometry source: the virtualizer's measurements (via the nav bridge the
+    // editor wires on mount), so an off-screen drop target still has a
+    // position, estimated until it renders.
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();
     const scrollY = window.scrollY;
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
-      if (virtualized) {
-        const vr = virtualRowRect(r.key, scrollY);
-        if (!vr) continue;
-        // Uniform indent: depth-0 left is the container left; deeper rows add
-        // depth * indent (OutlineRow's paddingInlineStart). project() backs
-        // baseLeft out of this exactly, so the synthesized left is self-consistent.
-        const left = (listRect?.left ?? 0) + r.depth * s.indent;
-        pairs.push({
-          row: r,
-          rect: {
-            top: vr.top,
-            bottom: vr.top + vr.height,
-            height: vr.height,
-            left,
-            right: listRect?.right ?? left + 240,
-          },
-        });
-      } else if (r.el) {
-        const b = r.el.getBoundingClientRect();
-        pairs.push({
-          row: r,
-          rect: {
-            top: b.top,
-            bottom: b.bottom,
-            height: b.height,
-            left: b.left,
-            right: b.right,
-          },
-        });
-      }
+      const vr = virtualRowRect(r.key, scrollY);
+      if (!vr) continue;
+      // Uniform indent: depth-0 left is the container left; deeper rows add
+      // depth * indent (OutlineRow's paddingInlineStart). project() backs
+      // baseLeft out of this exactly, so the synthesized left is self-consistent.
+      const left = (listRect?.left ?? 0) + r.depth * s.indent;
+      pairs.push({
+        row: r,
+        rect: {
+          top: vr.top,
+          bottom: vr.top + vr.height,
+          height: vr.height,
+          left,
+          right: listRect?.right ?? left + 240,
+        },
+      });
     }
     const rows = pairs.map((p) => p.row);
     const rects = pairs.map((p) => p.rect);
