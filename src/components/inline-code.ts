@@ -5,7 +5,7 @@
 // This file owns only the generic machinery -- the one decorate pass, escaping
 // + serialization, and the source-offset caret math -- with no per-token branch.
 //
-// Both the outline bullets (OutlineNode) and the zoomed page title
+// Both the outline bullets (OutlineRow) and the zoomed page title
 // (OutlineEditor's ZoomedTitle) render their stored markdown as live HTML:
 // the contentEditable always holds formatted output (mono chips, tag chips,
 // folded links), and each keystroke re-tokenizes the line and rebuilds its DOM.

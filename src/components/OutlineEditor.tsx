@@ -249,7 +249,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
   // hide (hide-completed today). Memoized so it stays referentially stable
   // across keystrokes, which keeps useVisibleChildIds' cache warm and every
-  // memoized OutlineNode from re-rendering on a sibling's keystroke (ADR 0014).
+  // memoized OutlineRow from re-rendering on a sibling's keystroke (ADR 0014).
   // Depends on the whole view context for forward-correctness, though today's
   // only hide rule reads showCompleted.
   const viewCtx = useMemo<ViewContext>(
@@ -437,7 +437,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const { startDrag, consumeClick } = drag;
 
   // The per-bullet command set. Recreating it each render would change a prop
-  // on every memoized OutlineNode and re-render the whole tree on every
+  // on every memoized OutlineRow and re-render the whole tree on every
   // keystroke -- the exact bug ADR 0014 fixes. It stays stable because every
   // live value it needs is read through a ref or is itself stable. See
   // useNodeCommands.
@@ -901,7 +901,7 @@ function useOutlineFocus(): OutlineFocus {
   const [refs] = useState(() => new Map<string, HTMLSpanElement | null>());
   // `refs` is a stable useState Map (never replaced), so listing it keeps this
   // callback's identity stable -- registerRef is a prop on every memoized
-  // OutlineNode, so it MUST stay referentially stable (ADR 0014).
+  // OutlineRow, so it MUST stay referentially stable (ADR 0014).
   const registerRef = useCallback(
     (id: string, el: HTMLSpanElement | null) => {
       if (el) refs.set(id, el);
@@ -1143,7 +1143,7 @@ function useZoomNavigation({
   //  - Zooming OUT: the node you came from.
   // Then scroll the target into view if it landed below the fold. Mount-only by
   // design (the editor remounts per zoom view) and passive: each bullet's text
-  // is written in OutlineNode's own passive effect, so only by now is the list
+  // is written in OutlineRow's own passive effect, so only by now is the list
   // laid out at its real heights.
   useEffect(() => {
     // Fresh load with ?focus=last (e.g. /today redirecting to a daily note):
@@ -1351,7 +1351,7 @@ interface NodeCommandsArgs {
 }
 
 /**
- * The per-bullet command set, handed to every OutlineNode. Stable identity
+ * The per-bullet command set, handed to every OutlineRow. Stable identity
  * (a prop on every memoized node) because every live value it needs is read
  * through a ref or is itself stable. See ADR 0014.
  */
@@ -1717,7 +1717,7 @@ function useNodeCommands({
         },
       };
     },
-    // commands MUST keep stable identity (a prop on every memoized OutlineNode,
+    // commands MUST keep stable identity (a prop on every memoized OutlineRow,
     // ADR 0014). The live tree is read via getTreeIndex() and the live view
     // state via getViewRootId()/getViewIsHidden() (view-state.ts) at call time,
     // and the remaining live values through refs (refs/pendingFocus/...), so the
@@ -1729,7 +1729,7 @@ function useNodeCommands({
 }
 
 /**
- * The zoomed node rendered as an editable page title. Mirrors OutlineNode's
+ * The zoomed node rendered as an editable page title. Mirrors OutlineRow's
  * contentEditable text-sync so the caret is never clobbered during typing.
  */
 function ZoomedTitle({
@@ -1755,14 +1755,14 @@ function ZoomedTitle({
   setPendingFocus: (key: string, offset: number) => void;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  // Mirror OutlineNode's live inline-`code` decoration so a backtick run in the
-  // title renders as a mono chip too. See inline-code.ts and OutlineNode.
+  // Mirror OutlineRow's live inline-`code` decoration so a backtick run in the
+  // title renders as a mono chip too. See inline-code.ts and OutlineRow.
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
   // node just as on a list bullet, so it wears the same lock when zoomed in.
-  // Reactive: a plugin's protection can load async (mirrors OutlineNode). See
+  // Reactive: a plugin's protection can load async (mirrors OutlineRow). See
   // ADR 0015.
   const protectedNode = useIsProtected(node.id);
 

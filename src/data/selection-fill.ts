@@ -114,10 +114,10 @@ function subscribe(cb: () => void): () => void {
 
 /**
  * Per-row subscription to this row's fill: a row re-renders only when ITS OWN
- * value changes (ADR 0014), exactly `useSelectionEdge`'s contract -- the
- * windowed-list counterpart, keyed by `row.key` (not the bare node id, so a
- * windowed mirror descendant and its source's canonical row -- different keys,
- * same id -- are independent reads). Returns null when this row isn't covered.
+ * value changes (ADR 0014, the `useIsProtected` shape), keyed by `row.key` (not
+ * the bare node id, so a windowed mirror descendant and its source's canonical
+ * row -- different keys, same id -- are independent reads). Returns null when
+ * this row isn't covered.
  */
 export function useSelectionFill(key: string): SelectionFill | null {
   const getSnapshot = useCallback(() => fillMap.get(key) ?? null, [key]);

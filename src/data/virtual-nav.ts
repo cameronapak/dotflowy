@@ -8,9 +8,8 @@
  * closure can capture. So the editor mirrors both here in an effect, exactly as
  * `view-state.ts` mirrors the zoom root, and the closures read them at call time.
  *
- * Inactive (returns false / no-op) while no editor is mounted, so callers can
- * branch on {@link isVirtualNavActive} and fall back to the direct
- * `refs.get(id)` focus.
+ * Inactive (null-returning no-ops) while no editor is mounted; every helper
+ * guards internally, so callers never branch.
  */
 
 interface VirtualNav {
@@ -34,10 +33,6 @@ let nav: VirtualNav | null = null;
 /** Editor wires this each render (cheap; the virtualizer instance is stable). */
 export function setVirtualNav(next: VirtualNav | null) {
   nav = next;
-}
-
-export function isVirtualNavActive(): boolean {
-  return nav !== null;
 }
 
 /**

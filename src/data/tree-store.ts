@@ -27,12 +27,12 @@ import { buildVisibleRows, type VisibleRow } from "./visible-order";
  * identity, so the editor shell no longer re-renders on every keystroke.
  *
  * Why this exists: `useLiveQuery(nodesCollection)` rebuilds a brand-new `index`
- * object on every edit. Threading that object as a prop into every `OutlineNode`
+ * object on every edit. Threading that object as a prop into every `OutlineRow`
  * defeats `React.memo` (a changed reference fails the shallow compare), so a
  * single keystroke re-rendered the entire visible tree -- O(visible nodes) per
  * keystroke, measured at 300 commits on a 300-node outline. See ADR 0014.
  *
- * The fix is a pull model: each `OutlineNode` reads *its own* node and child-id
+ * The fix is a pull model: each `OutlineRow` reads *its own* node and child-id
  * list from this store. Because TanStack DB preserves object identity for
  * unchanged rows (an edit is an Immer draft of one row), `useNode`'s snapshot is
  * referentially stable for every node except the one that actually changed -- so

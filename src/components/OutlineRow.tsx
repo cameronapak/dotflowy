@@ -278,8 +278,10 @@ function RowChrome({
     onTextChange: (text) => commands.onTextChange(content.id, text),
   });
 
-  // Mount: seed the span's text synchronously before paint (mirrors OutlineNode;
-  // the update effect's focused-skip guard is unsafe until the DOM is populated).
+  // Mount: seed the span's text synchronously before paint (the update effect's
+  // focused-skip guard is unsafe until the DOM is populated, which never happens
+  // on a fresh mount -- a reparent or scroll-in mounts an empty span that
+  // FocusPass may focus before any onInput runs).
   useLayoutEffect(() => {
     const el = textRef.current;
     if (!el) return;
@@ -314,7 +316,11 @@ function RowChrome({
   // Push store text into the contentEditable when it changes from something
   // other than this bullet's own typing (undo, programmatic setText, a genuine
   // echo, OR a sibling instance of the same source editing it -- the live mirror
-  // sync). Identical to OutlineNode -- see there for the focused-skip rationale.
+  // sync). Focused-skip rationale: while THIS bullet is focused the DOM is the
+  // source of truth (onInput already wrote the latest text), and a store change
+  // that merely echoes the network back is a lagging/out-of-order echo of our
+  // own keystrokes -- repainting it scrambles characters and jumps the caret
+  // mid-type, so it's skipped; blur reconciles. See collection.ts `echoedText`.
   useEffect(() => {
     const el = textRef.current;
     if (!el || composingRef.current) return;

@@ -41,7 +41,7 @@ interface BulletKeymapArgs {
  * (Enter/Tab/Backspace/Arrows) fire from a contentEditable -- the manager only
  * ignores input elements that aren't the registration's own target.
  *
- * Extracted from OutlineNodeBody so the body stays readable; the wiring is
+ * Extracted from the row body so the body stays readable; the wiring is
  * unchanged. Caret-conditional keys (Backspace/Arrows) opt out of the default
  * preventDefault/stopPropagation and call them manually only when they actually
  * act, so normal in-line editing and caret movement still work.

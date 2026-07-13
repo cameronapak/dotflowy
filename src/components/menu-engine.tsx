@@ -23,7 +23,7 @@ import { MenuList } from "./menu-list";
  * links keep their url -- we work in readSource space, never textContent). The
  * per-menu behavior (which trigger, which entries) is a plugin `MenuSpec`.
  *
- * Mirrors the old useTagMenu/useSlashMenu shape so OutlineNode wires it in the
+ * Mirrors the old useTagMenu/useSlashMenu shape so OutlineRow wires it in the
  * same way; the `#` tag menu now lives in the tags plugin.
  */
 

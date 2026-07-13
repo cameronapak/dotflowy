@@ -10,7 +10,7 @@ import type { Node } from "./tree";
  * depending on this render -- exactly as {@link getTreeIndex} does for the tree
  * itself (tree-store.ts). Keeping these out of the closures' deps is what lets
  * `commands` keep its identity across renders, a prop on every memoized
- * OutlineNode (see docs/adr/0004-localized-rendering-via-the-tree-store.md).
+ * OutlineRow (see docs/adr/0004-localized-rendering-via-the-tree-store.md).
  *
  * Two read paths for the same value:
  *  - **Render reads** use the React value directly (the `rootId` prop, the

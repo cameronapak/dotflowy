@@ -7,7 +7,7 @@ import {
 
 import { isMirrorsEnabled } from "../data/flags";
 import { type Node, type TreeIndex } from "../data/tree";
-import { isVirtualNavActive, virtualRowRect } from "../data/virtual-nav";
+import { virtualRowRect } from "../data/virtual-nav";
 import {
   buildVisibleRows,
   instanceIdForKey,
@@ -68,9 +68,8 @@ interface Row {
   el: HTMLElement | null;
 }
 
-// A row's viewport box for hit-testing. Synthesized from the virtualizer's
-// measurements when the nav bridge is wired (so an off-screen target still has
-// geometry), else from a DOMRect.
+// A row's viewport box for hit-testing, synthesized from the virtualizer's
+// measurements (so an off-screen target still has geometry).
 interface RowRect {
   top: number;
   bottom: number;
@@ -251,46 +250,30 @@ export function useDragReorder(deps: DragDeps) {
   const project = useCallback((px: number, py: number) => {
     const s = state.current;
     if (!s) return;
-    // Geometry source: the virtualizer's measurements when the nav bridge is
-    // wired (so an off-screen drop target still has a position, estimated until
-    // it renders), else the rendered rows' DOM rects. The depth math after is
-    // identical -- only where top/left come from differs.
-    const virtualized = isVirtualNavActive();
+    // Geometry source: the virtualizer's measurements (via the nav bridge the
+    // editor wires on mount), so an off-screen drop target still has a
+    // position, estimated until it renders.
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();
     const scrollY = window.scrollY;
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
-      if (virtualized) {
-        const vr = virtualRowRect(r.key, scrollY);
-        if (!vr) continue;
-        // Uniform indent: depth-0 left is the container left; deeper rows add
-        // depth * indent (OutlineRow's paddingInlineStart). project() backs
-        // baseLeft out of this exactly, so the synthesized left is self-consistent.
-        const left = (listRect?.left ?? 0) + r.depth * s.indent;
-        pairs.push({
-          row: r,
-          rect: {
-            top: vr.top,
-            bottom: vr.top + vr.height,
-            height: vr.height,
-            left,
-            right: listRect?.right ?? left + 240,
-          },
-        });
-      } else if (r.el) {
-        const b = r.el.getBoundingClientRect();
-        pairs.push({
-          row: r,
-          rect: {
-            top: b.top,
-            bottom: b.bottom,
-            height: b.height,
-            left: b.left,
-            right: b.right,
-          },
-        });
-      }
+      const vr = virtualRowRect(r.key, scrollY);
+      if (!vr) continue;
+      // Uniform indent: depth-0 left is the container left; deeper rows add
+      // depth * indent (OutlineRow's paddingInlineStart). project() backs
+      // baseLeft out of this exactly, so the synthesized left is self-consistent.
+      const left = (listRect?.left ?? 0) + r.depth * s.indent;
+      pairs.push({
+        row: r,
+        rect: {
+          top: vr.top,
+          bottom: vr.top + vr.height,
+          height: vr.height,
+          left,
+          right: listRect?.right ?? left + 240,
+        },
+      });
     }
     const rows = pairs.map((p) => p.row);
     const rects = pairs.map((p) => p.rect);

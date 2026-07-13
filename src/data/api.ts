@@ -116,7 +116,7 @@ export const createNodes = (nodes: Node[]): Promise<void> =>
 // This deliberately does NOT await the echo (the text path must stay snappy,
 // per docs/adr/0010-field-edits-serialize-coalesce-ignore-echoes.md); the overlay still drops on the PATCH ack. The
 // companion client guard (the focused bullet ignores echo-driven repaints, see
-// collection.ts `echoedText` + OutlineNode) keeps that ack/echo gap from ever
+// collection.ts `echoedText` + OutlineRow) keeps that ack/echo gap from ever
 // touching the DOM you're typing into.
 //
 // See .scratch/effect-tightening issue 02 for the timing proof (why the merge
