@@ -2,7 +2,7 @@
 // pieces the folding + editable tokens all need, so the rule lives in one place
 // instead of N copies. Pure/DOM helpers only — no UI barrel imports.
 
-import type { NodeCommands } from "../components/OutlineNode";
+import type { NodeCommands } from "../components/node-commands";
 import type { TokenView } from "./types";
 
 import { getTreeIndex } from "../data/tree-store";

@@ -30,10 +30,9 @@ import { INDENT_PX } from "./OutlineRow";
 
 // Movement (px) before a press becomes a drag. Below this, it's a click → zoom.
 const THRESHOLD = 5;
-// Indent per depth level. The render's single source (OutlineRow.INDENT_PX, also
-// the recursive path's `.outline-children` padding); measured from the live rows
-// when possible, this is the fallback so the windowed drop-depth projection can't
-// drift from the rendered indent.
+// Indent per depth level. The render's single source (OutlineRow.INDENT_PX);
+// measured from the live rows when possible, this is the fallback so the
+// windowed drop-depth projection can't drift from the rendered indent.
 const INDENT_FALLBACK = INDENT_PX;
 // How much of an indent the pointer must travel rightward before a drop nests
 // one level deeper. 0 = snap to the nearest level (flips at the halfway point);
@@ -69,8 +68,9 @@ interface Row {
   el: HTMLElement | null;
 }
 
-// A row's viewport box for hit-testing. Sourced from a DOMRect (recursive path)
-// or synthesized from the virtualizer's measurements (windowed path).
+// A row's viewport box for hit-testing. Synthesized from the virtualizer's
+// measurements when the nav bridge is wired (so an off-screen target still has
+// geometry), else from a DOMRect.
 interface RowRect {
   top: number;
   bottom: number;
@@ -141,7 +141,6 @@ export function useDragReorder(deps: DragDeps) {
     s.pill?.remove();
     const sourceRow = depsRef.current.getRowEl(s.id);
     sourceRow?.classList.remove("drag-source");
-    sourceRow?.closest(".outline-node")?.classList.remove("drag-collapsed");
     document.body.classList.remove("dragging-active");
     document.removeEventListener("pointermove", s.moveHandler);
     document.removeEventListener("pointerup", s.upHandler);
@@ -228,8 +227,6 @@ export function useDragReorder(deps: DragDeps) {
 
     const sourceRow = depsRef.current.getRowEl(s.id);
     sourceRow?.classList.add("drag-source");
-    // Visually collapse the grabbed subtree so we carry one compact row.
-    sourceRow?.closest(".outline-node")?.classList.add("drag-collapsed");
 
     const index = depsRef.current.getIndex();
     const text =
@@ -254,10 +251,10 @@ export function useDragReorder(deps: DragDeps) {
   const project = useCallback((px: number, py: number) => {
     const s = state.current;
     if (!s) return;
-    // Geometry source: the virtualizer's measurements when windowed (so an
-    // off-screen drop target still has a position, estimated until it renders),
-    // else the rendered rows' DOM rects (recursive path). The depth math after
-    // is identical -- only where top/left come from differs.
+    // Geometry source: the virtualizer's measurements when the nav bridge is
+    // wired (so an off-screen drop target still has a position, estimated until
+    // it renders), else the rendered rows' DOM rects. The depth math after is
+    // identical -- only where top/left come from differs.
     const virtualized = isVirtualNavActive();
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();

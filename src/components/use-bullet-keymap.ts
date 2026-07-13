@@ -3,7 +3,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
 
 import type { Node } from "../data/schema";
 import type { PluginContext } from "../plugins/types";
-import type { NodeCommands } from "./OutlineNode";
+import type { NodeCommands } from "./node-commands";
 
 import { selectSingle } from "../data/selection-state";
 import { dispatchClick, keymapSpecs } from "../plugins/registry";

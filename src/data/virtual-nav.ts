@@ -8,8 +8,9 @@
  * closure can capture. So the editor mirrors both here in an effect, exactly as
  * `view-state.ts` mirrors the zoom root, and the closures read them at call time.
  *
- * Inactive (returns false / no-op) on the recursive path, so callers can branch
- * on {@link isVirtualNavActive} and fall back to the direct `refs.get(id)` focus.
+ * Inactive (returns false / no-op) while no editor is mounted, so callers can
+ * branch on {@link isVirtualNavActive} and fall back to the direct
+ * `refs.get(id)` focus.
  */
 
 interface VirtualNav {

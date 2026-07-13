@@ -537,10 +537,9 @@ export function getStructureRev(): number {
 const EMPTY_ROWS: VisibleRow[] = [];
 
 /**
- * The flat, depth-tagged list of visible rows under `rootId` -- the Phase B
- * render driver (ADR 0019). One subscription feeds the whole windowed list,
- * replacing the per-parent {@link useVisibleChildIds} fan-out of the recursive
- * path.
+ * The flat, depth-tagged list of visible rows under `rootId` -- the windowed
+ * render driver (ADR 0019). One subscription feeds the whole windowed list;
+ * {@link useVisibleChildIds} stays per-row (a row's own children slice).
  *
  * Identity discipline (the reason this is cheap at 100k): getSnapshot rebuilds
  * the array ONLY when {@link structureRev} changes -- a structural edit or a
@@ -554,8 +553,8 @@ const EMPTY_ROWS: VisibleRow[] = [];
  *
  * Mirror resolution (ADR 0022) is gated on {@link isMirrorsEnabled}, read here
  * rather than threaded as a dep: the flag is fixed for a session (set before the
- * first render, like {@link isVirtualized}), so a flip is picked up on the next
- * structural rebuild -- it never needs to invalidate the keystroke-hot cache.
+ * first render), so a flip is picked up on the next structural rebuild -- it
+ * never needs to invalidate the keystroke-hot cache.
  */
 export function useVisibleRows(
   rootId: string | null,

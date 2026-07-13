@@ -22,9 +22,6 @@ function flatList(): SeedNode[] {
 }
 
 async function load(page: Page) {
-  await page.addInitScript(() =>
-    localStorage.setItem("dotflowy:flag:virtualized", "on"),
-  );
   await seedOutline(page, flatList());
   await page.goto("/");
   await expect(

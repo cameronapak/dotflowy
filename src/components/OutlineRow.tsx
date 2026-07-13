@@ -11,7 +11,7 @@ import {
 import type { QueryFilter } from "../data/filter-query";
 import type { Node } from "../data/schema";
 import type { PluginContext, SlotSpec } from "../plugins/types";
-import type { NodeCommands } from "./OutlineNode";
+import type { NodeCommands } from "./node-commands";
 
 import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
@@ -49,23 +49,16 @@ import { ProtectedLock } from "./protection";
 import { useSlashMenu } from "./slash-menu";
 import { useBulletKeymap } from "./use-bullet-keymap";
 
-// Indent per depth level. Matches `.outline-children { padding-left }` in the
-// recursive path -- the one number both render models and the drag projection
-// agree on (use-drag-reorder.ts INDENT_FALLBACK). Once the recursive path is
-// deleted (ADR 0019), this is the single source for outline indentation.
+// Indent per depth level -- the single source for outline indentation, which
+// the drag projection reads too (use-drag-reorder.ts INDENT_FALLBACK).
 export const INDENT_PX = 24;
 
 /**
- * One flat, windowed outline row (Phase B, ADR 0019). The virtualized
- * counterpart to {@link OutlineNode}: same bullet, same contentEditable, same
- * plugin slots/menus -- but it is a LEAF (no `OutlineNodeChildren` recursion),
- * its nesting is `depth`-driven padding rather than DOM structure, and it claims
- * pending focus/flash on its own mount (a scroll that mounts a row is not a tree
- * change, so the editor's central FocusPass can't see it).
- *
- * This intentionally duplicates OutlineNode's bullet during the flag window so
- * the recursive baseline stays untouched for e2e parity; the recursive path is
- * deleted (and this becomes the only row) when the flag flips.
+ * One flat, windowed outline row (ADR 0019) -- THE outline row (the recursive
+ * fallback path was deleted once dogfooded). It is a LEAF (no children
+ * recursion): its nesting is `depth`-driven padding rather than DOM structure,
+ * and it claims pending focus/flash on its own mount (a scroll that mounts a
+ * row is not a tree change, so the editor's central FocusPass can't see it).
  *
  * Mirrors (ADR 0022) split a row's identity in two: {@link nodeId} is the
  * INSTANCE (where the row physically sits -- its `parentId`, `collapsed`, drag
@@ -208,8 +201,8 @@ function RowChrome({
   // Direct visible children of the CONTENT -- a mirror windows its source's
   // subtree, so the chevron + collapsed dot follow the source's children. No
   // recursion: the flat list already holds the descendants as their own rows.
-  // With windowing only ~viewport rows call this, so the per-parent fan-out the
-  // recursive path paid is gone.
+  // With windowing only ~viewport rows call this, so the per-parent fan-out
+  // stays a viewport's worth, never the whole tree.
   const childIds = useVisibleChildIds(content.id, isHidden);
   // Only the boolean is needed here (a leaf row has no children list to pass
   // down), so test emptiness without materializing the filtered array. A capped
@@ -243,9 +236,9 @@ function RowChrome({
   });
 
   const protectedNode = useIsProtected(content.id);
-  // Covers this row AND its visible descendants (2e-2) -- unlike the recursive
-  // path's useSelectionEdge, the flat list has no DOM nesting for a root's tint
-  // to paint behind its children, so every covered row reads its own value.
+  // Covers this row AND its visible descendants (2e-2) -- the flat list has no
+  // DOM nesting for a root's tint to paint behind its children, so every
+  // covered row reads its own value.
   // Keyed by rowKey (the render address), not instance.id, so a windowed mirror
   // descendant and its source's canonical row are independent reads.
   const selectionFill = useSelectionFill(rowKey);
@@ -338,9 +331,9 @@ function RowChrome({
     syncedRef.current = content.text;
   });
 
-  // Unmount: tear down the caret-reveal watcher if it's still live. onBlur clears
-  // it in the recursive path, but a windowed row can unmount while still focused
-  // (its bullet scrolls out of the window), and a blur isn't guaranteed on DOM
+  // Unmount: tear down the caret-reveal watcher if it's still live. onBlur
+  // clears it too, but a windowed row can unmount while still focused (its
+  // bullet scrolls out of the window), and a blur isn't guaranteed on DOM
   // disconnect -- so the document `selectionchange` listener would otherwise leak.
   useEffect(() => {
     return () => {

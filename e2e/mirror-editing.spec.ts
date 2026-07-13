@@ -8,7 +8,7 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // INSTANCE, content + child inserts target the SOURCE -- and lands focus in the
 // instance the user was editing (never teleporting to the source's far copy).
 //
-// Tree (display order, flag on, nothing collapsed):
+// Tree (display order, nothing collapsed):
 //   A  "alphasource"
 //     a1 "childone"
 //     a2 "childtwo"
@@ -53,16 +53,7 @@ const nodeOrder = (page: Page) =>
     ),
   );
 
-async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
-  await page.addInitScript(() => {
-    localStorage.setItem("dotflowy:flag:virtualized", "on");
-  });
-  // Set the mirrors flag EXPLICITLY -- the compiled default is ON (flags.ts), so
-  // relying on "don't set it" for the off case actually leaves mirrors on and the
-  // parity tests run against the wrong path. Always write the concrete value.
-  await page.addInitScript((on) => {
-    localStorage.setItem("dotflowy:flag:mirrors", on ? "on" : "off");
-  }, mirrors);
+async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
   await page.goto("/");
   await expect(spans(page, "A")).toBeVisible();
@@ -104,7 +95,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
   test("Enter-split inside a mirror splits the source and lands focus under the mirror", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(spans(page, "a1")).toHaveCount(2);
 
     // Split the WINDOWED copy of a1 (under M) at "child|one". The split edits the
@@ -126,7 +117,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
   test("Enter at the end of a mirror's own row adds a child to the source", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
 
     // The mirror row shows the SOURCE's text; pressing Enter at its end dives in,
     // adding a child to the source (windows into every instance), not a local
@@ -158,7 +149,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
         chainErrors.push(msg.text());
       }
     });
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
 
     // Tab on the windowed a2 indents it under a1. a2 is a real node, so its parent
     // changes everywhere -- both copies now hang under a1.
@@ -225,7 +216,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       },
       { id: "X", parentId: "P", prevSiblingId: "M", text: "extranode" },
     ];
-    await load(page, tree, true);
+    await load(page, tree);
     await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
 
     // Tab X. It must parent into A (M's source), NOT the instance id.
@@ -248,40 +239,6 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     // Focus survived on X (never dropped into the void).
     await expect(focused(page)).toHaveText("extranode");
     expect(chainErrors).toEqual([]);
-  });
-
-  test("flag OFF: Tab under a mirrorOf node indents normally (no source redirect)", async ({
-    page,
-  }) => {
-    // The escape hatch must run today's exact code: OFF, a `mirrorOf` node is a
-    // plain leaf, so X indents under IT (not the phantom source). Proves the fix
-    // is gated on the flag, not an unconditional `mirrorOf` read.
-    const tree: SeedNode[] = [
-      { id: "A", parentId: null, prevSiblingId: null, text: "alphasource" },
-      { id: "P", parentId: null, prevSiblingId: "A", text: "project" },
-      { id: "a1", parentId: "A", prevSiblingId: null, text: "childone" },
-      {
-        id: "M",
-        parentId: "P",
-        prevSiblingId: null,
-        text: "placeholder",
-        mirrorOf: "A",
-      },
-      { id: "X", parentId: "P", prevSiblingId: "M", text: "extranode" },
-    ];
-    await load(page, tree, false);
-    await expect(spans(page, "a1")).toHaveCount(1); // no windowing
-
-    await spans(page, "X").click();
-    await expect(spans(page, "X")).toBeFocused();
-    await page.keyboard.press("Tab");
-
-    // X indented under the plain M, rendering once. No redirect to A.
-    await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
-    await expect(page.locator('li[data-node-id="X"]')).toHaveAttribute(
-      "data-parent-id",
-      "M",
-    );
   });
 
   test("edge reparent (Cmd+Shift+Up) into a mirror UNCLE lands in the source, not the vanishing instance", async ({
@@ -316,7 +273,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "Q", parentId: "P", prevSiblingId: "M", text: "queue" },
       { id: "X", parentId: "Q", prevSiblingId: null, text: "extranode" },
     ];
-    await load(page, tree, true);
+    await load(page, tree);
     await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
 
     await spans(page, "X").click();
@@ -368,7 +325,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       { id: "X", parentId: "P", prevSiblingId: "M", text: "extraone" },
       { id: "Y", parentId: "P", prevSiblingId: "X", text: "extratwo" },
     ];
-    await load(page, tree, true);
+    await load(page, tree);
     await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
     await expect(page.locator('li[data-node-id="Y"]')).toHaveCount(1);
 
@@ -441,7 +398,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
       },
       { id: "X", parentId: "P", prevSiblingId: "M", text: "targetnode" },
     ];
-    await load(page, tree, true);
+    await load(page, tree);
     await expect(page.locator('li[data-node-id="X"]')).toHaveCount(1);
 
     await spans(page, "X").click();
@@ -461,7 +418,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
   test("deleting a mirror instance removes only that instance, not the source", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(spans(page, "a1")).toHaveCount(2);
 
     // Delete the mirror's own row. The keymap hands the command the SOURCE's id,
@@ -481,7 +438,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
   test("selecting a mirror selects the INSTANCE, so delete removes only the mirror", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(spans(page, "a1")).toHaveCount(2);
 
     // Enter node selection on the mirror's own row (Shift+Down from line end is
@@ -532,7 +489,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
   test("deleting a SOURCE that has a live mirror is blocked (no orphaned instances)", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(spans(page, "a1")).toHaveCount(2); // source + windowed under M
 
     // Try to delete the real source A. Removing it would strand the mirror M
@@ -573,7 +530,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
         morphErrors.push(err.message);
     });
 
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(spans(page, "a1")).toHaveCount(2); // source + windowed under M
 
     // Zoom INTO the source A (bullet click -> A becomes the title), then back OUT
@@ -634,7 +591,7 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
         mirrorOf: "A",
       },
     ];
-    await load(page, tree, true);
+    await load(page, tree);
     await expect(spans(page, "a1")).toHaveCount(2);
     expect(await nodeOrder(page)).toEqual([
       "A",
@@ -684,23 +641,5 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     expect(mirror).toEqual(source); // reflected in the mirror
     expect(source).toContain("a1"); // still present, just relocated
     expect(chainErrors).toEqual([]);
-  });
-
-  test("flag OFF: a mirrorOf node Enter-splits as an ordinary leaf (parity)", async ({
-    page,
-  }) => {
-    await load(page, MIRROR_TREE, false);
-
-    // Mirrors disabled: M is a plain node showing its own text, no windowing.
-    await expect(spans(page, "M")).toHaveText("placeholder");
-    await expect(spans(page, "a1")).toHaveCount(1);
-
-    await caretIn(spans(page, "M"), 4);
-    await page.keyboard.press("Enter");
-
-    await expect(spans(page, "M")).toHaveText("plac");
-    await expect(focused(page)).toHaveText("eholder");
-    // Still no windowing -- a1 stays single.
-    await expect(spans(page, "a1")).toHaveCount(1);
   });
 });

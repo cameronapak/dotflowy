@@ -10,13 +10,13 @@ import {
 } from "./selection-state";
 
 /**
- * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The
- * recursive path's `useSelectionEdge` only marks a selected ROOT, because its
- * descendants are DOM-nested inside the root's `<li>` and inherit the tint for
- * free. The flat list has no such nesting -- every row is its own absolutely
- * positioned sibling -- so a selected root's descendants need their OWN
- * `data-selected` value or they render untinted (the windowed-subtree-tint bug;
- * affects any node, not just mirrors).
+ * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The old
+ * recursive render only marked a selected ROOT, because its descendants were
+ * DOM-nested inside the root's `<li>` and inherited the tint for free. The flat
+ * list has no such nesting -- every row is its own absolutely positioned
+ * sibling -- so a selected root's descendants need their OWN `data-selected`
+ * value or they render untinted (the windowed-subtree-tint bug; affects any
+ * node, not just mirrors).
  *
  * `SelectionFill` reuses {@link SelectionEdge}'s vocabulary (same four values,
  * same CSS) -- only what counts as "covered" changes: every visible row inside

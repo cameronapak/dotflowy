@@ -148,60 +148,10 @@
   margin: 0 0 32px;
 }
 
-.outline-list,
-.outline-children {
+.outline-list {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.outline-children {
-  padding-left: 24px;
-}
-
-/*
- * Reveal/hide animation. The wrapper animates grid-template-rows from 1fr
- * (open) to 0fr (collapsed); the inner list needs overflow:hidden + min-height:0
- * for the row track to actually clamp it. Children stay mounted in both states
- * (see OutlineNode) so the hide can animate, not just the reveal.
- *
- * Expand is the default state, so the transitions here time the *reveal*; the
- * collapsed selectors below carry their own shorter transitions so the *hide*
- * runs faster -- exits should feel quicker and softer than enters.
- */
-.outline-children-wrap {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows 0.2s cubic-bezier(0.2, 0, 0, 1);
-}
-
-.outline-children-wrap[data-collapsed="true"] {
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.12s cubic-bezier(0.2, 0, 0, 1);
-}
-
-/*
- * The reveal grows out of the top-left corner (the parent bullet): the wrapper
- * clamps height while the list scales up from 0.96 with its origin pinned to
- * the top-left, so it reads as unfolding from the parent rather than sliding.
- * Opacity is synced to the height so content fades in *as* the clip edge passes
- * it -- otherwise solid text gets visibly un-masked, which reads as "clipped".
- */
-.outline-children-wrap > .outline-children {
-  overflow: hidden;
-  min-height: 0;
-  transform-origin: top left;
-  transition:
-    opacity 0.2s cubic-bezier(0.2, 0, 0, 1),
-    transform 0.2s cubic-bezier(0.2, 0, 0, 1);
-}
-
-.outline-children-wrap[data-collapsed="true"] > .outline-children {
-  opacity: 0;
-  transform: scale(0.96);
-  transition:
-    opacity 0.12s cubic-bezier(0.2, 0, 0, 1),
-    transform 0.12s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .outline-node {
@@ -326,7 +276,7 @@ h2 span.protected-lock {
 
 /*
  * Completion fade. A row is faded when it's completed or sits under something
- * completed (data-faded set in OutlineNode). Opacity lives on the row, NOT on
+ * completed (data-faded set in OutlineRow). Opacity lives on the row, NOT on
  * .outline-node, so it never nests with descendant rows -- one uniform fade
  * level at any depth, never compounding. See ADR 0002.
  */
@@ -998,10 +948,6 @@ body.dragging-active * {
   }
 }
 
-.outline-node.drag-collapsed > .outline-children-wrap {
-  display: none;
-}
-
 /* The floating label that follows the pointer. */
 .drag-pill {
   position: fixed;
@@ -1339,9 +1285,7 @@ body.dragging-active * {
     animation: none !important;
   }
 
-  .collapse-toggle svg,
-  .outline-children-wrap,
-  .outline-children-wrap > .outline-children {
+  .collapse-toggle svg {
     transition: none !important;
   }
 }
