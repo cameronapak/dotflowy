@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
+import { buildFilterOperatorMap, buildQueryFilter } from "./filter-query";
 import { buildTreeIndex, makeNode } from "./tree";
 import {
   buildVisibleRows,
   contentIdForKey,
+  findVisibleNeighbor,
   focusKeyAfterEdit,
   instanceIdForKey,
+  lastVisibleDescendant,
   parentKeyOf,
   parseRowKey,
   rowKeyFor,
@@ -355,5 +358,106 @@ describe("focusKeyAfterEdit (land focus in the editing instance, ADR 0022 2c)", 
 
   test("returns null when the id is no longer visible (moved out of the view)", () => {
     expect(focusKeyAfterEdit(rows, "ghost", "M")).toBeNull();
+  });
+});
+
+describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () => {
+  // A #go
+  // P            (no tag -- dimmed ancestor context of K)
+  //   K #go
+  // B            (no tag, no tagged descendant -- filtered OUT of the render)
+  // C #go
+  // P2 (collapsed, no tag -- context ancestor; filter force-descends to D)
+  //   D #go
+  const tree = [
+    makeNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
+    makeNode({ id: "P", prevSiblingId: "A", text: "parent" }),
+    makeNode({ id: "K", parentId: "P", prevSiblingId: null, text: "kid #go" }),
+    makeNode({ id: "B", prevSiblingId: "P", text: "bravo" }),
+    makeNode({ id: "C", prevSiblingId: "B", text: "charlie #go" }),
+    makeNode({ id: "P2", prevSiblingId: "C", text: "papa", collapsed: true }),
+    makeNode({
+      id: "D",
+      parentId: "P2",
+      prevSiblingId: null,
+      text: "deep #go",
+    }),
+  ];
+  const index = buildTreeIndex(tree);
+  const filter = buildQueryFilter(
+    index,
+    null,
+    "#go",
+    show,
+    buildFilterOperatorMap([]),
+  )!;
+
+  test("fixture sanity: the filter renders A, P, K, C, P2, D and drops B", () => {
+    const rows = buildVisibleRows(index, null, show, filter);
+    expect(rows.map((r) => r.id)).toEqual(["A", "P", "K", "C", "P2", "D"]);
+  });
+
+  test("Down skips a filtered-out row instead of handing back an unmounted one", () => {
+    // Unfiltered, K's down-neighbor is B; B isn't rendered under the filter, so
+    // returning it pins focus (the filtered-nav bug). Render parity says C.
+    expect(findVisibleNeighbor(index, null, "K", "down", show, filter)).toBe(
+      "C",
+    );
+    expect(findVisibleNeighbor(index, null, "C", "up", show, filter)).toBe("K");
+  });
+
+  test("nav lands on dimmed ancestor context rows (they're rendered + editable)", () => {
+    expect(findVisibleNeighbor(index, null, "A", "down", show, filter)).toBe(
+      "P",
+    );
+  });
+
+  test("a row revealed under a collapsed context ancestor is reachable", () => {
+    // D renders (filter force-descends P2) but isn't in the unfiltered walk at
+    // all -- indexOf would be -1 and every arrow from D a no-op.
+    expect(findVisibleNeighbor(index, null, "P2", "down", show, filter)).toBe(
+      "D",
+    );
+    expect(findVisibleNeighbor(index, null, "D", "up", show, filter)).toBe(
+      "P2",
+    );
+    expect(
+      findVisibleNeighbor(index, null, "D", "down", show, filter),
+    ).toBeNull();
+  });
+
+  test("lastVisibleDescendant descends a collapsed context ancestor to its revealed match", () => {
+    expect(lastVisibleDescendant(index, "P2", show, filter)).toBe("D");
+    // ...but stops at children the filter prunes: B has none visible anyway,
+    // and P's only child K is visible, so parity holds there too.
+    expect(lastVisibleDescendant(index, "P", show, filter)).toBe("K");
+  });
+
+  test("lastVisibleDescendant stops at a COLLAPSED MATCH (its children aren't revealed)", () => {
+    // M #go is collapsed with an untagged child: pass 2 skips collapsed
+    // matches, so the child isn't in visibleIds and the walk must end at M.
+    const t2 = [
+      makeNode({
+        id: "M",
+        prevSiblingId: null,
+        text: "m #go",
+        collapsed: true,
+      }),
+      makeNode({ id: "m1", parentId: "M", prevSiblingId: null, text: "inner" }),
+    ];
+    const i2 = buildTreeIndex(t2);
+    const f2 = buildQueryFilter(
+      i2,
+      null,
+      "#go",
+      show,
+      buildFilterOperatorMap([]),
+    )!;
+    expect(lastVisibleDescendant(i2, "M", show, f2)).toBe("M");
+  });
+
+  test("no filter (null) keeps today's unfiltered behavior byte-for-byte", () => {
+    expect(findVisibleNeighbor(index, null, "K", "down", show)).toBe("B");
+    expect(lastVisibleDescendant(index, "P2", show)).toBe("P2");
   });
 });

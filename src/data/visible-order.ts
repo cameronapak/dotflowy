@@ -120,8 +120,8 @@ export function parentKeyOf(key: string): string | null {
  * closed subtree are revealed) and only nodes in `filter.visibleIds` survive --
  * exactly the recursive render's per-node filter. A match's OWN collapse is
  * respected by which descendants `buildQueryFilter` put in `visibleIds`
- * (ADR 0047 §8), not here. Omitted by the caret walk (nav doesn't prune to the
- * filter), so render and nav share one builder, parameterized.
+ * (ADR 0047 §8), not here. The caret walk passes the SAME filter (ADR 0047
+ * amendment), so render and nav share one builder AND one visible set.
  *
  * `mirrorsEnabled` (ADR 0022) turns on mirror resolution: a node with `mirrorOf`
  * windows its source's content + children, rows gain a content id + a path-based
@@ -269,7 +269,12 @@ const EMPTY_EXPANDED: ReadonlySet<string> = new Set<string>();
  *
  * The root is prepended so ArrowUp from the first child lands on the title (the
  * root registers a contentEditable span under its own id, which is its key).
- * Filter is not applied here -- caret nav walks the unfiltered visible tree.
+ *
+ * `filter` MUST be the active `?q=` filter (callers pass `getViewFilter()`) for
+ * the same reason `mirrorsEnabled` must match the render: the neighbor sequence
+ * has to be the rendered sequence. An unfiltered walk hands back rows the filter
+ * pruned out of the DOM -- an unmounted neighbor is a silent focus no-op (ADR
+ * 0047 amendment; this was the filtered-nav bug).
  */
 export function findVisibleNeighbor(
   index: TreeIndex,
@@ -277,9 +282,16 @@ export function findVisibleNeighbor(
   key: string,
   direction: "up" | "down",
   isHidden: (n: Node) => boolean,
+  filter: QueryFilter | null = null,
   mirrorsEnabled = false,
 ): string | null {
-  const rows = buildVisibleRows(index, rootId, isHidden, null, mirrorsEnabled);
+  const rows = buildVisibleRows(
+    index,
+    rootId,
+    isHidden,
+    filter,
+    mirrorsEnabled,
+  );
   const seq = rootId
     ? [rootId, ...rows.map((r) => r.key)]
     : rows.map((r) => r.key);
@@ -344,17 +356,26 @@ export function focusKeyAfterEdit(
  * the BOTTOM row of a selected subtree -- the anchor for "drop the caret below
  * the selection" (the row just after the deepest-last descendant), which is not
  * the same as the row after the subtree's root.
+ *
+ * `filter` mirrors {@link buildVisibleRows}'s walk exactly: with a filter the
+ * descent ignores `collapsed` (filter-mode force-descends) and children are
+ * gated on `visibleIds` -- so a collapsed match still ends the walk (its
+ * children aren't in `visibleIds`) while a collapsed context ancestor descends
+ * to its revealed match.
  */
 export function lastVisibleDescendant(
   index: TreeIndex,
   id: string,
   isHidden: (n: Node) => boolean,
+  filter: QueryFilter | null = null,
 ): string {
   let last = id;
   let node = index.byId.get(id);
   let guard = index.byId.size + 1;
-  while (node && !node.collapsed && guard-- > 0) {
-    const kids = childrenOf(index, node.id).filter((n) => !isHidden(n));
+  while (node && (filter !== null || !node.collapsed) && guard-- > 0) {
+    const kids = childrenOf(index, node.id).filter(
+      (n) => !isHidden(n) && (filter === null || filter.visibleIds.has(n.id)),
+    );
     if (kids.length === 0) break;
     last = kids[kids.length - 1]!.id;
     node = index.byId.get(last);

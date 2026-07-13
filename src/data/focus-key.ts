@@ -30,6 +30,12 @@ export function focusKeyFor(instanceId: string, activeKey: string): string {
     index,
     getViewRootId(),
     getViewIsHidden(),
+    // Deliberately UNFILTERED, unlike the caret-nav walks (findVisibleNeighbor):
+    // this runs synchronously inside runStructural, so getViewFilter() would be
+    // the PRE-edit visibleIds -- it can't contain a just-inserted node. And key
+    // derivation only needs the right instance's key among candidates, not the
+    // rendered sequence: a superset walk always finds it; a filtered walk can
+    // only drop it (falling back to the bare id, wrong inside a mirror).
     null,
     true,
   );

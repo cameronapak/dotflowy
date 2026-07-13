@@ -181,6 +181,62 @@ test.describe("keyboard arrow navigation", () => {
     await expect(text(page, "alpha")).toBeFocused();
   });
 
+  test("arrows walk the FILTERED rows while a ?q= filter is active", async ({
+    page,
+  }) => {
+    // Regression: findVisibleNeighbor walked the UNFILTERED tree, so with
+    // ?q=#go active the computed neighbor was often a row the filter pruned
+    // out of the DOM -- an unmounted target is a silent focus no-op ("can't
+    // move between nodes while filtering"). Nav must walk exactly what
+    // renders: matches, revealed descendants, AND dimmed ancestor context.
+    //
+    //   A #go
+    //   P            (dimmed context: untagged, has a tagged child)
+    //     K #go
+    //   B            (untagged, no tagged descendant -> filtered OUT)
+    //   C #go
+    //   P2 collapsed (dimmed context; filter force-descends to reveal D)
+    //     D #go
+    // Rendered order under #go: A, P, K, C, P2, D.
+    const tree: SeedNode[] = [
+      { id: "A", parentId: null, prevSiblingId: null, text: "alpha #go" },
+      { id: "P", parentId: null, prevSiblingId: "A", text: "parent" },
+      { id: "K", parentId: "P", prevSiblingId: null, text: "kid #go" },
+      { id: "B", parentId: null, prevSiblingId: "P", text: "bravo" },
+      { id: "C", parentId: null, prevSiblingId: "B", text: "charlie #go" },
+      {
+        id: "P2",
+        parentId: null,
+        prevSiblingId: "C",
+        text: "papa",
+        collapsed: true,
+      },
+      { id: "D", parentId: "P2", prevSiblingId: null, text: "deep #go" },
+    ];
+    await seedOutline(page, tree);
+    await page.goto("/?q=%23go");
+    await expect(text(page, "A")).toBeVisible();
+    // Sanity: B is pruned out of the DOM; D is revealed despite P2's collapse.
+    await expect(text(page, "B")).toHaveCount(0);
+    await expect(text(page, "D")).toBeVisible();
+
+    const order = ["A", "P", "K", "C", "P2", "D"];
+    await text(page, order[0]!).click();
+    await expect(text(page, order[0]!)).toBeFocused();
+    for (let i = 1; i < order.length; i++) {
+      await page.keyboard.press("ArrowDown");
+      await expect(text(page, order[i]!)).toBeFocused();
+    }
+    // Bottom of the filtered view: focus holds.
+    await page.keyboard.press("ArrowDown");
+    await expect(text(page, "D")).toBeFocused();
+    // And the walk reverses cleanly (D -> P2 crosses the force-descend seam).
+    for (let i = order.length - 2; i >= 0; i--) {
+      await page.keyboard.press("ArrowUp");
+      await expect(text(page, order[i]!)).toBeFocused();
+    }
+  });
+
   test("ArrowLeft/ArrowRight snake between adjacent visible bullets", async ({
     page,
   }) => {
