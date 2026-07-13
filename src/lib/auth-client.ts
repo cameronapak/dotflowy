@@ -1,3 +1,4 @@
+import { stripeClient } from "@better-auth/stripe/client";
 import { createAuthClient } from "better-auth/react";
 import { toast } from "sonner";
 
@@ -8,8 +9,14 @@ import { toast } from "sonner";
  *
  * The bare `signOut` is deliberately NOT exported: a sign-out that skips the
  * hard navigation reintroduces the cross-account leak. Use signOutAndReload.
+ *
+ * The stripe plugin adds `subscription.*` — `.upgrade({ plan, annual })` for
+ * hosted Checkout, `.list()` for the current plan, `.cancel()`/
+ * `.billingPortal()` for self-serve — the surface #171's pricing UI consumes.
  */
-const authClient = createAuthClient();
+const authClient = createAuthClient({
+  plugins: [stripeClient({ subscription: true })],
+});
 
 export const {
   signIn,
@@ -17,6 +24,7 @@ export const {
   useSession,
   requestPasswordReset,
   resetPassword,
+  subscription,
 } = authClient;
 
 /** The one fetch-failed message every auth surface shows, so a copy edit
