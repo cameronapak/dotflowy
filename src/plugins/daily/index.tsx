@@ -553,16 +553,16 @@ export default definePlugin({
     return key ? formatDayRelative(key) : null;
   },
 
-  // Seam (ADR 0049): quick-add captures default to today's note. Get-or-create
-  // is SEED-FREE (like Send to Today, ADR 0041 -- quick-add is a "leaves
-  // structure untouched" path, not one of the three write-intent surfaces that
-  // seed an entry line), so a freshly-created day takes the capture as its first
-  // child with no stray empty line. Core resolves this without importing daily.
-  captureDestination: async () => {
-    const index = buildTreeIndex(nodesCollection.toArray);
-    const dayId = await getOrCreateDay(localDateKey(), index);
-    return dayId ? { parentId: dayId, label: "Today" } : null;
-  },
+  // Seam (ADR 0049): quick-add captures default to today's note. LAZY -- the
+  // label is known up front (the chip reads "Today" the instant the overlay
+  // opens), but `resolve` -- which get-or-creates the day SEED-FREE (like Send
+  // to Today, ADR 0041) -- runs only at born-on-first-keystroke, so an abandoned
+  // open never mints today's note. Core resolves this without importing daily.
+  captureDestination: () => ({
+    label: "Today",
+    resolve: () =>
+      getOrCreateDay(localDateKey(), buildTreeIndex(nodesCollection.toArray)),
+  }),
 
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
   // exist yet (when it does, the alias above surfaces the real node -- no dup).

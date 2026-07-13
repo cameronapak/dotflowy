@@ -72,8 +72,10 @@ test.describe("quick-add capture", () => {
 
     const firstRow = rowWithText(page, "first-capture");
     const secondRow = rowWithText(page, "second-capture");
-    await expect(firstRow).toBeVisible();
-    await expect(secondRow).toBeVisible();
+    // Capture -> Today get-or-create -> WS echo -> nav is a longer async chain
+    // than a synchronous outline edit, so allow for it under parallel contention.
+    await expect(firstRow).toBeVisible({ timeout: 10_000 });
+    await expect(secondRow).toBeVisible({ timeout: 10_000 });
 
     // first-capture precedes second-capture (chronological log).
     const firstIdx = await firstRow.evaluate((el) => {
@@ -85,6 +87,28 @@ test.describe("quick-add capture", () => {
       return rows.indexOf(el.closest("li[data-node-id]")!);
     });
     expect(firstIdx).toBeLessThan(secondIdx);
+  });
+
+  test("open + abandon (no keystroke) leaves no today note (lazy resolve)", async ({
+    page,
+  }) => {
+    await load(page);
+    await page.keyboard.press("Alt+Meta+KeyN");
+    await expect(dialog(page)).toBeVisible();
+    // The chip reads Today immediately (label is known without creating anything).
+    await expect(destChip(page)).toHaveAttribute(
+      "data-quick-add-dest",
+      "Today",
+    );
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toBeHidden();
+    // Nothing was typed, so today's note was never minted -- no Daily container.
+    await expect(rowWithText(page, "Daily")).toHaveCount(0);
+  });
+
+  test("the FAB never mounts on a fine pointer", async ({ page }) => {
+    await load(page);
+    await expect(page.locator("[data-quick-add-fab]")).toHaveCount(0);
   });
 
   test("discard-if-empty: a typed-then-cleared capture leaves nothing", async ({
@@ -165,5 +189,52 @@ test.describe("quick-add capture", () => {
     await expect(palette).toContainText("Paragraph");
     await expect(palette).not.toContainText("Move");
     await expect(palette).not.toContainText("Delete");
+  });
+});
+
+// The FAB is a coarse-pointer surface (ADR 0030's presence seam), so drive it in
+// Chromium mobile emulation where `(pointer: coarse)` actually matches. The
+// keyboard-anchored overlay positioning (visualViewport) is NOT exercisable here
+// (no real software keyboard) -- that's the PR's manual iPhone checklist. This
+// covers the FAB's mount gating: coarse-only, and its not-editing visibility.
+test.describe("quick-add mobile FAB (coarse pointer)", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  const fab = (page: Page) => page.locator("[data-quick-add-fab]");
+
+  test("mobile emulation actually reports a coarse pointer", async ({
+    page,
+  }) => {
+    await load(page);
+    const coarse = await page.evaluate(
+      () => window.matchMedia("(pointer: coarse)").matches,
+    );
+    expect(coarse).toBe(true);
+  });
+
+  test("mounts when not editing and opens the overlay on tap", async ({
+    page,
+  }) => {
+    await load(page);
+    await expect(fab(page)).toBeVisible();
+    await fab(page).tap();
+    await expect(dialog(page)).toBeVisible();
+  });
+
+  test("is hidden while a bullet is being edited (complement of the mobile bar)", async ({
+    page,
+  }) => {
+    await load(page);
+    await expect(fab(page)).toBeVisible();
+    // Focus a bullet -> editing -> the FAB yields to the mobile actions bar.
+    const bullet = page.locator(
+      'li[data-node-id="alpha"] > .outline-row .node-text',
+    );
+    await bullet.tap();
+    await expect(bullet).toBeFocused();
+    await expect(fab(page)).toBeHidden();
+    // Blur back out -> the FAB returns.
+    await bullet.evaluate((el) => (el as HTMLElement).blur());
+    await expect(fab(page)).toBeVisible();
   });
 });

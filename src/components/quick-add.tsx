@@ -41,6 +41,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
+import { cn } from "@/lib/utils";
+
 import type {
   CaptureDestination,
   CommandSpec,
@@ -62,7 +64,6 @@ import {
 import { appRuntime } from "../data/runtime";
 import { runStructural } from "../data/structural";
 import {
-  buildTrail,
   childrenOf,
   createId,
   makeNode,
@@ -70,9 +71,11 @@ import {
   type TreeIndex,
 } from "../data/tree";
 import { getTreeIndex, useNode } from "../data/tree-store";
+import { useCoarsePointer } from "../hooks/use-coarse-pointer";
+import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import {
+  getCaptureDestination,
   keymapSpecs,
-  resolveCaptureDestination,
   searchAliases,
 } from "../plugins/registry";
 import {
@@ -101,16 +104,13 @@ import {
   CommandList,
 } from "./ui/command";
 
-// --- The default destination cache -----------------------------------------
-//
-// Resolving Today round-trips the daily atomic claim (ADR 0041) the first time.
-// Cache the last resolved destination so a second open is instant and a fast
-// first keystroke lands in the right place; refreshed on every open.
-const FALLBACK_DEST: CaptureDestination = {
-  parentId: null,
-  label: "Top level",
-};
-let cachedDest: CaptureDestination = FALLBACK_DEST;
+/** A concrete destination a target pick yields: the parent node id (null = top
+ *  level) plus its label. The overlay wraps it into a lazy {@link
+ *  CaptureDestination} (resolve -> the fixed id) for the current draft. */
+interface PickTarget {
+  parentId: string | null;
+  label: string;
+}
 
 // --- The curated slash palette (ADR 0049) ----------------------------------
 //
@@ -149,20 +149,20 @@ export interface MiniEditorHandle {
  *  fork of `OutlineEditor`'s `ZoomedTitle` (AGENTS.md "a node renders in TWO
  *  paths" -- now three): it calls the SAME shared decorate/caret/slash/menu
  *  primitives, but wires NO structural nav and a filtered `/` palette. `onText`
- *  is born-aware (creates the node on the first non-empty input); `ensureBorn`
- *  materializes the node so a paste (link unfurl) has a real id to write into. */
+ *  is born-aware (creates the node on the first non-empty input, possibly async
+ *  while the daily claim settles -- the DOM already holds the typed char, so the
+ *  keystroke never blocks). */
 const MiniNodeEditor = forwardRef<
   MiniEditorHandle,
   {
     node: Node;
     getCtx: () => PluginContext;
     onText: (text: string) => void;
-    ensureBorn: () => string;
     onCommit: () => void;
     onEscape: () => void;
   }
 >(function MiniNodeEditor(
-  { node, getCtx, onText, ensureBorn, onCommit, onEscape },
+  { node, getCtx, onText, onCommit, onEscape },
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -265,13 +265,12 @@ const MiniNodeEditor = forwardRef<
         }}
         onPaste={(e) => {
           const el = e.currentTarget;
-          // Born the node first so a pasted URL's unfurl (afterPaste) has a real
-          // id to write the title back into. `structural=null`: a multi-line
-          // paste joins with spaces rather than creating a subtree -- the capture
-          // stays a single node (ADR 0049; markdown-tree paste is the outline's).
-          const plain = e.clipboardData?.getData("text/plain") ?? "";
-          const id = plain.trim() ? ensureBorn() : node.id;
-          const next = pasteIntoBullet(e, el, id, getCtx, onText, null);
+          // `structural=null`: a multi-line paste joins with spaces rather than
+          // creating a subtree -- the capture stays a single node (ADR 0049;
+          // markdown-tree paste is the outline's). `onText` borns the node from
+          // the pasted text; unfurl (afterPaste) writes back only once the node
+          // has a real id (a paste into an already-born capture).
+          const next = pasteIntoBullet(e, el, node.id, getCtx, onText, null);
           if (next !== null) syncedRef.current = next;
         }}
         onCopy={(e) => copySourceSelection(e, e.currentTarget)}
@@ -340,7 +339,7 @@ function CaptureTargetPicker({
   index: TreeIndex;
   /** The node being retargeted -- excluded from its own destination list. */
   excludeId: string | null;
-  onPick: (dest: CaptureDestination) => void;
+  onPick: (target: PickTarget) => void;
   onCancel: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -444,21 +443,57 @@ interface Capture {
   label: string;
 }
 
+/** A single in-progress capture. Self-contained so committing can hand the old
+ *  draft off (its born finishes against its OWN text) and start a fresh one
+ *  synchronously (ADR 0049). */
+interface DraftState {
+  /** The settled node id, or null until born resolves. */
+  id: string | null;
+  /** The latest typed text (read by an in-flight born at resolve time). */
+  text: string;
+  /** The in-flight born, or null. De-dupes concurrent borns. */
+  promise: Promise<string | null> | null;
+  /** This draft's destination resolver (get-or-create the parent, seed-free). */
+  resolve: () => Promise<string | null>;
+}
+
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const editorRef = useRef<MiniEditorHandle | null>(null);
+  // Position signal (ADR 0030): lift the panel above the software keyboard on a
+  // coarse pointer; a fine pointer centers it and ignores the offset.
+  const coarse = useCoarsePointer();
+  const keyboardOffset = useKeyboardViewport();
 
-  // The current draft: born on first keystroke, null until then. A ref for
-  // event-time reads (born decisions run synchronously), a state for rendering
-  // the live node into the mini-editor.
-  const draftIdRef = useRef<string | null>(null);
-  const [draftId, setDraftId] = useState<string | null>(null);
-
-  // The destination for the CURRENT draft (resets to the default per node) + the
-  // default (Today). Refs shadow the state so born/live-move read the live value.
-  const [dest, setDest] = useState<CaptureDestination>(cachedDest);
+  // The destination for the CURRENT draft (resets to the default per node). The
+  // default is the LAZY provider (label known now, node created only at born) --
+  // captured fresh each open. Refs shadow the state so born/live-move read the
+  // live value at event time.
+  const [dest, setDest] = useState<CaptureDestination>(getCaptureDestination);
   const destRef = useRef(dest);
   destRef.current = dest;
-  const defaultRef = useRef<CaptureDestination>(cachedDest);
+  const defaultRef = useRef<CaptureDestination>(dest);
+
+  // The current draft (ADR 0049). Born LAZILY on the first keystroke: the typed
+  // char is already in the DOM (native contentEditable), and the destination
+  // resolve (the daily atomic claim) is awaited OFF the keystroke path, so typing
+  // never blocks. Each draft is a self-contained object carrying its own text +
+  // born promise + destination resolver, so committing can start a fresh draft
+  // IMMEDIATELY (fast follow-up typing lands in the new one) while the previous
+  // draft's born finishes independently against its OWN text -- no shared mutable
+  // "pending text" for a slow claim to read stale.
+  const makeDraft = useCallback(
+    (): DraftState => ({
+      id: null,
+      text: "",
+      promise: null,
+      resolve: destRef.current.resolve,
+    }),
+    [],
+  );
+  const draftRef = useRef<DraftState | null>(null);
+  draftRef.current ??= makeDraft();
+  // `draftId` mirrors the CURRENT draft's settled id, for rendering its node.
+  const [draftId, setDraftId] = useState<string | null>(null);
 
   const [captures, setCaptures] = useState<Capture[]>([]);
   // Which surface the target picker is retargeting: the current draft
@@ -468,137 +503,163 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const liveDraft = useNode(draftId ?? "");
   const node = draftId && liveDraft ? liveDraft : PLACEHOLDER_NODE;
 
-  // Resolve the default destination (Today) once per open, and focus the editor.
+  // `mountedRef` lets an in-flight born SAVE its capture even if the overlay
+  // closed mid-claim (commit-immediately) without a post-unmount setState.
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    resolveCaptureDestination()
-      .then((d) => {
-        if (cancelled) return;
-        const resolved = d ?? FALLBACK_DEST;
-        cachedDest = resolved;
-        defaultRef.current = resolved;
-        // Only adopt as the current destination if the user hasn't already
-        // retargeted or started a draft this session.
-        if (draftIdRef.current === null) setDest(resolved);
-      })
-      .catch(() => {});
+    mountedRef.current = true;
     const raf = requestAnimationFrame(() => editorRef.current?.focus());
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
       cancelAnimationFrame(raf);
     };
   }, []);
 
-  // Materialize the node NOW at the bottom of the destination -- one
-  // `runStructural` batch, one undo point (ADR 0009). Used by born-on-first-
-  // keystroke and by a paste (which needs a real id before its afterPaste).
-  const born = useCallback((text: string) => {
-    const parentId = destRef.current.parentId;
-    const index = getTreeIndex();
-    const kids = childrenOf(index, parentId);
-    const after = kids.length ? kids[kids.length - 1]!.id : null;
-    const newId = createId();
-    runStructural(() => {
-      capture(index, parentId);
-      appendChild(parentId, after, text, newId);
-    });
-    draftIdRef.current = newId;
-    setDraftId(newId);
-    return newId;
+  // Kick off a draft's born: resolve ITS destination (get-or-create Today,
+  // seed-free), then create the node from the draft's OWN latest text as ONE
+  // `runStructural` batch, one undo point (ADR 0009). Idempotent (returns the
+  // live promise). Reflects into the rendered node only while `d` is still the
+  // current draft. If the draft's text went empty while we awaited (cleared, or
+  // an abandoned open), NOTHING is created -- the whole point of the lazy model.
+  const startBorn = useCallback((d: DraftState): Promise<string | null> => {
+    if (d.promise) return d.promise;
+    d.promise = d
+      .resolve()
+      .then((parentId) => {
+        if (d.id || d.text.trim() === "") return d.id;
+        const index = getTreeIndex();
+        const kids = childrenOf(index, parentId);
+        const after = kids.length ? kids[kids.length - 1]!.id : null;
+        const newId = createId();
+        runStructural(() => {
+          capture(index, parentId);
+          appendChild(parentId, after, d.text, newId);
+        });
+        d.id = newId;
+        if (mountedRef.current && draftRef.current === d) setDraftId(newId);
+        return newId;
+      })
+      .catch(() => null);
+    return d.promise;
   }, []);
 
-  // Born-aware text writer: the first non-empty input CREATES the node; later
-  // inputs are direct field PATCHes (never structural -- the keystroke path must
-  // not await an echo, ADR 0009).
+  // Born-aware text writer for the CURRENT draft: the first non-empty input kicks
+  // off the lazy born; later inputs are direct field PATCHes (never structural --
+  // the keystroke path must not await an echo, ADR 0009). Always records the
+  // latest text on the draft so an in-flight born creates with everything typed.
   const commitText = useCallback(
     (text: string) => {
-      const existing = draftIdRef.current;
-      if (existing) {
-        setText(existing, text);
-        return existing;
+      const d = draftRef.current!;
+      d.text = text;
+      if (d.id) {
+        setText(d.id, text);
+        return;
       }
-      if (text.trim() === "") return null;
-      return born(text);
+      if (text.trim() === "") return;
+      void startBorn(d);
     },
-    [born],
+    [startBorn],
   );
 
-  const ensureBorn = useCallback(() => draftIdRef.current ?? born(""), [born]);
-
-  // Remove the current draft iff it is empty (never-typed, or cleared back to
-  // blank) -- discard-if-empty. Drops the born undo point too (like a no-op
-  // move-dialog action) so Cmd+Z isn't left a dead step.
-  const discardIfEmpty = useCallback(() => {
-    const id = draftIdRef.current;
-    if (!id) return;
+  // Remove a draft's node iff it is empty -- discard-if-empty. Drops the born
+  // undo point too (like a no-op move-dialog action) so Cmd+Z isn't a dead step.
+  // A born still in flight is left alone: it self-discards on empty text and
+  // self-saves on non-empty (commit-immediately, even if the overlay closed
+  // mid-claim), so clobbering it here would kill a real capture.
+  const discardDraftIfEmpty = useCallback((d: DraftState) => {
+    if (!d.id) return;
     const index = getTreeIndex();
-    const n = index.byId.get(id);
+    const n = index.byId.get(d.id);
     if (!n || n.text.trim() === "") {
+      const id = d.id;
       runStructural(() => removeNode(index, id));
       drop();
     }
-    draftIdRef.current = null;
-    setDraftId(null);
+    d.id = null;
   }, []);
 
-  // Reset for the next capture: destination back to the default (Today), editor
-  // cleared and refocused.
+  // Start a FRESH draft for the next capture: destination back to the default,
+  // editor cleared and refocused. The just-committed draft object lives on until
+  // its own born settles (referenced by the caller), untouched by this.
   const resetDraft = useCallback(() => {
-    draftIdRef.current = null;
+    draftRef.current = makeDraft();
     setDraftId(null);
     setDest(defaultRef.current);
     editorRef.current?.clear();
     editorRef.current?.focus();
-  }, []);
+  }, [makeDraft]);
 
-  // Enter = commit & next. A non-empty draft is already live in its destination
-  // (born-on-keystroke), so "commit" just files it into the session list and
-  // starts a fresh draft. An empty Enter discards and starts fresh.
+  // Enter = commit & next. Snapshot the current draft, RESET immediately (so a
+  // fast follow-up keystroke lands in a new draft), then file the snapshot into
+  // the session list once its born settles -- the node is already live in its
+  // destination (commit-immediately), so filing is just bookkeeping. An empty
+  // Enter discards and starts fresh.
   const commitAndNext = useCallback(() => {
-    const id = draftIdRef.current;
+    const d = draftRef.current!;
     const text = editorRef.current?.readText() ?? "";
-    if (!id || text.trim() === "") {
-      discardIfEmpty();
-      resetDraft();
+    d.text = text;
+    const label = destRef.current.label;
+    resetDraft();
+    if (text.trim() === "") {
+      discardDraftIfEmpty(d);
       return;
     }
-    setCaptures((c) => [...c, { id, label: destRef.current.label }]);
-    resetDraft();
-  }, [discardIfEmpty, resetDraft]);
+    // `startBorn` only creates a node when the draft's text is non-empty, so a
+    // returned id is always a real, non-empty capture -- no need to re-read the
+    // tree (which lags the optimistic insert by a rebuild tick and would spuriously
+    // skip a just-born node). The session row renders its text reactively via
+    // useNode. A null id means the born self-discarded (empty) -- nothing to file.
+    const file = (id: string | null) => {
+      if (!id || !mountedRef.current) return;
+      setCaptures((c) => [...c, { id, label }]);
+    };
+    if (d.id) file(d.id);
+    else void startBorn(d).then(file);
+  }, [discardDraftIfEmpty, resetDraft, startBorn]);
 
   const close = useCallback(() => {
     // A non-empty draft is already committed to its destination; only an empty
-    // one is discarded. The session list is ephemeral -- it clears on close.
-    discardIfEmpty();
+    // one is discarded. An in-flight born with real text completes and saves
+    // (mountedRef gates the setState, not the create). The session list is
+    // ephemeral -- it clears on close.
+    const d = draftRef.current!;
+    // Ensure a started-but-unborn non-empty draft still lands (commit-immediately
+    // across a fast close); an empty one self-discards inside the born.
+    if (!d.id && d.text.trim() !== "") void startBorn(d);
+    discardDraftIfEmpty(d);
     setCaptures([]);
     onClose();
-  }, [discardIfEmpty, onClose]);
+  }, [discardDraftIfEmpty, startBorn, onClose]);
 
-  // Live-move a node to a new destination as ONE atomic batch (ADR 0009).
-  const relocate = useCallback((id: string, next: CaptureDestination) => {
+  // Live-move a node under a new parent as ONE atomic batch (ADR 0009).
+  const relocate = useCallback((id: string, parentId: string | null) => {
     const index = getTreeIndex();
-    const kids = childrenOf(index, next.parentId);
+    const kids = childrenOf(index, parentId);
     const after = kids.length ? kids[kids.length - 1]!.id : null;
     runStructural(() => {
       capture(index, id);
-      moveNode(index, id, next.parentId, after);
+      moveNode(index, id, parentId, after);
     });
   }, []);
 
   const onPickTarget = useCallback(
-    (next: CaptureDestination) => {
+    (target: PickTarget) => {
       const which = picking;
       setPicking(null);
       if (which === "current") {
-        setDest(next);
-        const id = draftIdRef.current;
-        if (id) relocate(id, next);
+        // Wrap the concrete pick into a lazy destination (its resolve just yields
+        // the fixed id) and point the current draft at it, so an unborn draft
+        // borns there and a born one live-moves.
+        setDest({ label: target.label, resolve: async () => target.parentId });
+        const d = draftRef.current!;
+        d.resolve = async () => target.parentId;
+        if (d.id) relocate(d.id, target.parentId);
         editorRef.current?.focus();
       } else if (which) {
-        relocate(which, next);
+        relocate(which, target.parentId);
         setCaptures((c) =>
           c.map((row) =>
-            row.id === which ? { ...row, label: next.label } : row,
+            row.id === which ? { ...row, label: target.label } : row,
           ),
         );
       }
@@ -661,23 +722,35 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   );
 
   const index = getTreeIndex();
-  const crumbs =
-    dest.parentId === null
-      ? "Top level"
-      : buildTrail(index, dest.parentId)
-          .map((n) => n.text.trim() || "Untitled")
-          .join(" › ");
 
+  // Mobile keyboard anchoring (ADR 0030's discipline): on a coarse pointer the
+  // panel rides the BOTTOM, lifted above the software keyboard by the
+  // visualViewport gap (falling back to the safe-area inset when there's no
+  // keyboard). On a fine pointer it centers near the top like a command palette.
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-[12vh]"
+      className={cn(
+        "fixed inset-0 z-50 flex justify-center bg-black/40 p-4",
+        coarse ? "items-end" : "items-start pt-[12vh]",
+      )}
       onMouseDown={(e) => {
         // Backdrop click closes; clicks inside the panel don't bubble here.
         if (e.target === e.currentTarget) close();
       }}
     >
       <div
-        className="flex w-full max-w-xl flex-col gap-3 rounded-xl border bg-background p-4 shadow-2xl"
+        className="flex w-full max-w-xl flex-col gap-3 rounded-xl border bg-background p-4 shadow-2xl transition-transform duration-200 ease-out"
+        style={
+          coarse
+            ? {
+                transform: `translateY(-${keyboardOffset}px)`,
+                marginBottom:
+                  keyboardOffset === 0
+                    ? "env(safe-area-inset-bottom)"
+                    : undefined,
+              }
+            : undefined
+        }
         role="dialog"
         aria-label="Quick add"
         onKeyDown={(e: ReactKeyboardEvent) => {
@@ -701,7 +774,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                 setPicking(picking === "current" ? null : "current")
               }
               className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted"
-              title={crumbs}
+              title={`Capture into ${dest.label}`}
               data-quick-add-dest={dest.label}
             >
               <Badge variant="secondary" className="border-0 px-0 font-normal">
@@ -739,7 +812,6 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
             node={node}
             getCtx={getCtx}
             onText={commitText}
-            ensureBorn={ensureBorn}
             onCommit={commitAndNext}
             onEscape={close}
           />
@@ -780,11 +852,68 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   );
 }
 
+// --- The mobile FAB --------------------------------------------------------
+
+/** Whether ANY contentEditable currently holds focus -- the "is editing" probe
+ *  for the FAB (its complement of the mobile actions bar's focus gate, ADR 0030,
+ *  but DOM-based so the __root-mounted FAB needs no focus registry). focusout
+ *  fires before the next focusin when hopping spans, so re-check next frame. */
+function useContentEditableFocused(): boolean {
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    const update = () => {
+      const el = document.activeElement as HTMLElement | null;
+      setEditing(!!el?.isContentEditable);
+    };
+    const onFocusOut = () => requestAnimationFrame(update);
+    update();
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+  return editing;
+}
+
+/**
+ * The mobile capture button (ADR 0049 / build order phase 6). There's no hotkey
+ * on mobile, and the mobile actions bar only appears WHILE editing, so the FAB
+ * is its complement -- shown when NOT editing -- giving thumb-reach capture. Same
+ * three-signal discipline as the mobile bar (ADR 0030): presence = coarse
+ * pointer, visibility = not-editing (and overlay-closed), position = a fixed
+ * bottom-right anchor with the safe-area inset. A frosted circle in the app's
+ * grayscale grammar, kept unobtrusive.
+ */
+function QuickAddFab({ onOpen }: { onOpen: () => void }) {
+  const coarse = useCoarsePointer();
+  const editing = useContentEditableFocused();
+  if (!coarse || editing) return null;
+  return (
+    <button
+      type="button"
+      aria-label="Quick add"
+      data-quick-add-fab
+      onClick={onOpen}
+      className={cn(
+        "fixed right-4 bottom-4 z-40 flex size-14 items-center justify-center rounded-full",
+        "border border-border/60 bg-background/70 text-foreground shadow-lg backdrop-blur-xl",
+        "ring-1 ring-black/5 transition-transform duration-100 ease-out active:scale-[0.94] dark:ring-white/10",
+      )}
+      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+    >
+      <PlusIcon className="size-6" />
+    </button>
+  );
+}
+
 /**
  * The quick-add shell (ADR 0049): registers the opener + the global Opt+Cmd+N
- * hotkey, and mounts the overlay when open. Client-only (the overlay reads the
- * live tree via TanStack DB, which hard-fails the `/` prerender -- ADR 0004), so
- * it renders nothing until mounted, mirroring MoveDialog/NodeSwitcher.
+ * hotkey, mounts the mobile FAB (coarse pointer), and mounts the overlay when
+ * open. Client-only (the overlay reads the live tree via TanStack DB, which
+ * hard-fails the `/` prerender -- ADR 0004), so it renders nothing until
+ * mounted, mirroring MoveDialog/NodeSwitcher.
  */
 export function QuickAdd() {
   const [open, setOpen] = useState(false);
@@ -815,6 +944,11 @@ export function QuickAdd() {
       window.removeEventListener("keydown", onKey, { capture: true });
   }, []);
 
-  if (!mounted || !open) return null;
-  return <QuickAddOverlay onClose={() => setOpen(false)} />;
+  if (!mounted) return null;
+  return (
+    <>
+      {!open && <QuickAddFab onOpen={() => setOpen(true)} />}
+      {open && <QuickAddOverlay onClose={() => setOpen(false)} />}
+    </>
+  );
 }

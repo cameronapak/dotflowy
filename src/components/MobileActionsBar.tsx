@@ -6,16 +6,11 @@ import {
   SquareSlash,
   Undo2,
 } from "lucide-react";
-import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 
 /**
@@ -32,20 +27,6 @@ export interface MobileBarActions {
   /** Insert a literal "/" at the caret so the row's own detectSlash opens the
    *  command palette (insert-and-open, not a toggle). */
   insertSlash: () => void;
-}
-
-/** A coarse pointer ("this is a finger"). Mirrors use-mobile.ts's store shape. */
-function subscribeCoarse(onChange: () => void) {
-  const mql = window.matchMedia("(pointer: coarse)");
-  mql.addEventListener("change", onChange);
-  return () => mql.removeEventListener("change", onChange);
-}
-function useCoarsePointer(): boolean {
-  return useSyncExternalStore(
-    subscribeCoarse,
-    () => window.matchMedia("(pointer: coarse)").matches,
-    () => false,
-  );
 }
 
 /**

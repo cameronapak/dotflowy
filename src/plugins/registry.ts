@@ -575,15 +575,17 @@ const captureDestinationProviders = plugins
   .map((p) => p.captureDestination)
   .filter((f): f is NonNullable<typeof f> => f != null);
 
-/** Resolve quick-add's default capture destination (get-or-created seed-free by
- *  the owning plugin -- the daily plugin returns today's note). First non-null
- *  across plugins wins, in array order; null when no plugin provides one, so the
- *  core falls back to the top level. Async: the provider may round-trip the
- *  daily atomic claim. Core never imports the daily plugin (ADR 0001). */
-export async function resolveCaptureDestination(): Promise<CaptureDestination | null> {
+/** Quick-add's default capture destination: a LAZY provider (a `label` known
+ *  synchronously + a `resolve()` invoked only at born-on-first-keystroke -- the
+ *  daily plugin's returns today's note, get-or-created seed-free). First non-null
+ *  across plugins wins, in array order; with no provider the core falls back to
+ *  the top level (`resolve` yields null). SYNCHRONOUS -- nothing is created until
+ *  the caller invokes `resolve`, so an abandoned open leaves no trace. Core never
+ *  imports the daily plugin (ADR 0001 / ADR 0049). */
+export function getCaptureDestination(): CaptureDestination {
   for (const fn of captureDestinationProviders) {
-    const d = await fn();
+    const d = fn();
     if (d) return d;
   }
-  return null;
+  return { label: "Top level", resolve: async () => null };
 }
