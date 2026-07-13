@@ -97,15 +97,25 @@ export function useQueryFilter() {
  *  filters the view; the switcher moved to its own ⌘ button). Open when idle;
  *  a second press dismisses (clears + collapses). `preventDefault` on
  *  pointerdown keeps the input focused across the press so blur doesn't
- *  collapse-then-reopen before the click can close. */
+ *  collapse-then-reopen before the click can close.
+ *
+ *  Lit (solid `--primary`, ADR 0033's grayscale "on" idiom -- same as
+ *  SpotlightIndicator) whenever a `?q=` filter is applied, so the magnifier
+ *  reads as a pressed toggle. This is intentional: the toggle-off press that
+ *  WIPES the query only fires while the button visibly signals "on". Reads the
+ *  search param directly rather than `useQueryFilter()`, whose Escape/nav side
+ *  effects would double-bind if this button ran them too. */
 export function FilterButton() {
+  const search = useSearch({ strict: false }) as { q?: string };
+  const active = (search.q ?? "").trim().length > 0;
   return (
     <Button
-      variant="ghost"
+      variant={active ? "default" : "ghost"}
       size="icon-sm"
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => toggleFilterInput()}
       aria-label="Filter this view"
+      aria-pressed={active}
     >
       <Search />
       <span className="sr-only">Filter this view</span>
