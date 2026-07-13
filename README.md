@@ -198,8 +198,7 @@ src/
     auth-screen.tsx     # login / signup screen (shown by the root AuthGate when signed out)
     # sign out lives in the header More menu (header-more-menu.tsx) and the Cmd+K command center (command-actions.tsx)
     OutlineEditor.tsx   # reads tree, focus + command dispatch, the zoom view
-    OutlineRow.tsx      # the live row (flat windowed list — virtualized rendering)
-    OutlineNode.tsx     # one bullet + its subtree (the recursive fallback path, flag-gated)
+    OutlineRow.tsx      # the outline row (flat windowed list — virtualized rendering)
     inline-code.ts      # contentEditable decorate / caret engine (source-offset aware)
     menu-engine.tsx     # generic caret-autocomplete engine
     slash-menu.tsx      # the `/` command palette

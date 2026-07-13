@@ -5,9 +5,9 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // Node mirrors (ADR 0022), slice 1b: render + field split. A node carrying
 // `mirrorOf` windows its source's text + children; all instances are editable
 // and text-synced. These specs SEED a mirror (creation is slice 1c) and prove
-// the rendered behavior behind the flag, plus flag-off parity.
+// the rendered behavior.
 //
-// Tree (display order, flag on, nothing collapsed):
+// Tree (display order, nothing collapsed):
 //   A  "alpha source"
 //     a1 "alpha child one"
 //     a2 "alpha child two"
@@ -33,16 +33,7 @@ const MIRROR_TREE: SeedNode[] = [
 const text = (page: Page, nodeId: string) =>
   page.locator(`li[data-node-id="${nodeId}"] > .outline-row .node-text`);
 
-async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
-  await page.addInitScript(() => {
-    localStorage.setItem("dotflowy:flag:virtualized", "on");
-  });
-  // Set the flag EXPLICITLY -- the compiled default is ON (flags.ts), so the
-  // "off" parity cases must write "off", not rely on leaving it unset (which
-  // leaves mirrors on and runs the wrong path).
-  await page.addInitScript((on) => {
-    localStorage.setItem("dotflowy:flag:mirrors", on ? "on" : "off");
-  }, mirrors);
+async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
   await page.goto("/");
   await expect(text(page, "A")).toBeVisible();
@@ -50,7 +41,7 @@ async function load(page: Page, tree: SeedNode[], mirrors: boolean) {
 
 test.describe("node mirrors -- render + field split (ADR 0022)", () => {
   test("a mirror windows its source's text and children", async ({ page }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
 
     // The mirror row reads the SOURCE's content, not its own placeholder text.
     await expect(text(page, "M")).toHaveText("alpha source");
@@ -73,7 +64,7 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
   test("editing the source updates the mirror live, and vice versa", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(text(page, "M")).toHaveText("alpha source");
 
     // Type into the SOURCE -> the mirror reflects it (one client, no reload).
@@ -96,7 +87,7 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
     const completedTree = MIRROR_TREE.map((n) =>
       n.id === "A" ? { ...n, completed: true } : n,
     );
-    await load(page, completedTree, true);
+    await load(page, completedTree);
 
     // data-completed lives on the node-text and bullet-dot; the mirror reads it
     // from the source, so checking the source off strikes through every instance.
@@ -107,7 +98,7 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
   test("collapse is local: collapsing the mirror hides only its windowed children", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(page.locator('li[data-node-id="a1"]')).toHaveCount(2);
 
     // Collapse the MIRROR via its own chevron -> its windowed copy of a1/a2
@@ -134,10 +125,6 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
         mirrorOf: "ghost",
       },
     ];
-    await page.addInitScript(() => {
-      localStorage.setItem("dotflowy:flag:virtualized", "on");
-      localStorage.setItem("dotflowy:flag:mirrors", "on");
-    });
     await seedOutline(page, brokenTree);
     await page.goto("/");
 
@@ -145,22 +132,6 @@ test.describe("node mirrors -- render + field split (ADR 0022)", () => {
     await expect(broken).toBeVisible();
     await expect(broken).toHaveAttribute("data-mirror", "broken");
     await expect(broken).toContainText("source not found");
-  });
-
-  test("flag OFF: a mirrorOf node renders as a plain leaf (parity)", async ({
-    page,
-  }) => {
-    await load(page, MIRROR_TREE, false);
-
-    // With mirrors disabled, M is an ordinary node: its own text, no windowing.
-    await expect(text(page, "M")).toHaveText("mirror placeholder");
-    await expect(page.locator('li[data-node-id="M"]')).not.toHaveAttribute(
-      "data-mirror",
-      /.*/,
-    );
-    // a1/a2 appear exactly once -- only under the real source.
-    await expect(page.locator('li[data-node-id="a1"]')).toHaveCount(1);
-    await expect(page.locator('li[data-node-id="a2"]')).toHaveCount(1);
   });
 });
 
@@ -197,7 +168,7 @@ test.describe("node mirrors -- create via the picker (ADR 0022)", () => {
   test("/mirror creates a live copy under the chosen destination", async ({
     page,
   }) => {
-    await load(page, CREATE_TREE, true);
+    await load(page, CREATE_TREE);
     await openMirror(page, "A");
 
     // Pick the bookmarked destination from the empty-query state.
@@ -241,7 +212,7 @@ test.describe("node mirrors -- create via the picker (ADR 0022)", () => {
         bookmarkedAt: 200,
       },
     ];
-    await load(page, tree, true);
+    await load(page, tree);
     await openMirror(page, "A");
 
     const dialog = page.getByRole("dialog");
@@ -262,7 +233,7 @@ test.describe("node mirrors -- chrome (ADR 0022)", () => {
   test("the source and the instance both show the 'appears in N places' badge", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
 
     // A is the source of exactly one mirror, so the content appears in 2 places.
     // The badge shows the total (2) on BOTH the source row and the mirror row.
@@ -290,7 +261,7 @@ test.describe("node mirrors -- chrome (ADR 0022)", () => {
   test("clicking the badge opens the places list and jumps to the source", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
 
     await page
       .locator('li[data-node-id="A"] > .outline-row .mirror-badge')
@@ -308,18 +279,6 @@ test.describe("node mirrors -- chrome (ADR 0022)", () => {
     await dialog.getByText("Source", { exact: true }).click();
     await expect(page).toHaveURL(/\/A$/);
     await expect(page.locator("h2.zoomed-title")).toContainText("alpha source");
-  });
-
-  test("flag OFF: no badge, no data-mirror attribute (parity)", async ({
-    page,
-  }) => {
-    await load(page, MIRROR_TREE, false);
-
-    await expect(page.locator(".mirror-badge")).toHaveCount(0);
-    await expect(page.locator('li[data-node-id="A"]')).not.toHaveAttribute(
-      "data-mirror",
-      /.*/,
-    );
   });
 });
 
@@ -341,7 +300,7 @@ test.describe("node mirrors -- caret nav (ADR 0022)", () => {
   test("ArrowDown from a mirror enters its windowed child, not the source's row", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
     await expect(a1Copies(page)).toHaveCount(2);
 
     await text(page, "M").click();
@@ -362,7 +321,7 @@ test.describe("node mirrors -- caret nav (ADR 0022)", () => {
   test("arrow nav walks between windowed instances and back to the mirror", async ({
     page,
   }) => {
-    await load(page, MIRROR_TREE, true);
+    await load(page, MIRROR_TREE);
 
     await text(page, "M").click();
     await page.keyboard.press("ArrowDown"); // M -> windowed a1

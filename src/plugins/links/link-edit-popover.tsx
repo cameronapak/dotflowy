@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 
 import { Button, Input } from "@/plugins/kit";
 
-import type { NodeCommands } from "../../components/OutlineNode";
+import type { NodeCommands } from "../../components/node-commands";
 import type { PluginContext } from "../types";
 
 import { useDismissable } from "../../components/use-dismissable";

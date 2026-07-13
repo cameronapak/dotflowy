@@ -10,13 +10,13 @@ import {
 } from "./selection-state";
 
 /**
- * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The
- * recursive path's `useSelectionEdge` only marks a selected ROOT, because its
- * descendants are DOM-nested inside the root's `<li>` and inherit the tint for
- * free. The flat list has no such nesting -- every row is its own absolutely
- * positioned sibling -- so a selected root's descendants need their OWN
- * `data-selected` value or they render untinted (the windowed-subtree-tint bug;
- * affects any node, not just mirrors).
+ * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The old
+ * recursive render only marked a selected ROOT, because its descendants were
+ * DOM-nested inside the root's `<li>` and inherited the tint for free. The flat
+ * list has no such nesting -- every row is its own absolutely positioned
+ * sibling -- so a selected root's descendants need their OWN `data-selected`
+ * value or they render untinted (the windowed-subtree-tint bug; affects any
+ * node, not just mirrors).
  *
  * `SelectionFill` reuses {@link SelectionEdge}'s vocabulary (same four values,
  * same CSS) -- only what counts as "covered" changes: every visible row inside
@@ -114,10 +114,10 @@ function subscribe(cb: () => void): () => void {
 
 /**
  * Per-row subscription to this row's fill: a row re-renders only when ITS OWN
- * value changes (ADR 0014), exactly `useSelectionEdge`'s contract -- the
- * windowed-list counterpart, keyed by `row.key` (not the bare node id, so a
- * windowed mirror descendant and its source's canonical row -- different keys,
- * same id -- are independent reads). Returns null when this row isn't covered.
+ * value changes (ADR 0014, the `useIsProtected` shape), keyed by `row.key` (not
+ * the bare node id, so a windowed mirror descendant and its source's canonical
+ * row -- different keys, same id -- are independent reads). Returns null when
+ * this row isn't covered.
  */
 export function useSelectionFill(key: string): SelectionFill | null {
   const getSnapshot = useCallback(() => fillMap.get(key) ?? null, [key]);

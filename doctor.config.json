@@ -15,10 +15,7 @@
         "rules": ["react-doctor/dangerous-html-sink"]
       },
       {
-        "files": [
-          "src/components/OutlineEditor.tsx",
-          "src/components/OutlineNode.tsx"
-        ],
+        "files": ["src/components/OutlineEditor.tsx"],
         "rules": [
           "react-doctor/interactive-supports-focus",
           "react-doctor/no-event-handler",

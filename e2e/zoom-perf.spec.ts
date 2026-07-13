@@ -87,9 +87,6 @@ async function settledRegistrationCount(page: Page): Promise<number> {
 }
 
 async function load(page: Page) {
-  await page.addInitScript(() =>
-    localStorage.setItem("dotflowy:flag:virtualized", "on"),
-  );
   await seedOutline(page, perfTree());
   await page.goto("/");
   await expect(

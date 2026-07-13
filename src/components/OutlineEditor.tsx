@@ -28,9 +28,10 @@ import {
 } from "react";
 
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
+import type { NodeCommands } from "./node-commands";
 
 import { setNodeActionBridge } from "../data/command-bridge";
-import { isMirrorsEnabled, isMobileBar, isVirtualized } from "../data/flags";
+import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop } from "../data/history";
 import { hasLink } from "../data/links";
@@ -68,7 +69,6 @@ import {
   useSyncReady,
   useTrail,
   useTreeIndex,
-  useVisibleChildIds,
   useVisibleRows,
 } from "../data/tree-store";
 import {
@@ -128,7 +128,6 @@ import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
 import { NodeDecorations } from "./NodeDecorations";
 import { OutlineLoading } from "./OutlineLoading";
-import { OutlineNode, type NodeCommands } from "./OutlineNode";
 import { OutlineRow } from "./OutlineRow";
 import {
   copySourceSelection,
@@ -226,7 +225,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // The shell reads the tree through NARROW slices, never the whole index, so a
   // keystroke in a bullet doesn't re-render the editor itself (ADR 0014): the
-  // visible top-level ids (useVisibleChildIds), the zoomed node (useNode), the
+  // flat visible rows (useVisibleRows), the zoomed node (useNode), the
   // breadcrumb trail (useTrail), the loaded flag (useHasNodes), and the filter
   // (useViewFilter, live only while filtering). Each re-renders only when its
   // own slice changes identity. Event-time reads (commands, drag, zoom) still go
@@ -251,7 +250,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
   // hide (hide-completed today). Memoized so it stays referentially stable
   // across keystrokes, which keeps useVisibleChildIds' cache warm and every
-  // memoized OutlineNode from re-rendering on a sibling's keystroke (ADR 0014).
+  // memoized OutlineRow from re-rendering on a sibling's keystroke (ADR 0014).
   // Depends on the whole view context for forward-correctness, though today's
   // only hide rule reads showCompleted.
   const viewCtx = useMemo<ViewContext>(
@@ -284,7 +283,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     findFocusedId,
   } = useOutlineFocus();
 
-  // The list container (recursive <ul> or virtualized <div>), so the drag
+  // The windowed list container, so the drag
   // indicator knows how wide to draw and the window virtualizer can measure its
   // document-top offset (scrollMargin).
   const listRef = useRef<HTMLElement | null>(null);
@@ -439,7 +438,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const { startDrag, consumeClick } = drag;
 
   // The per-bullet command set. Recreating it each render would change a prop
-  // on every memoized OutlineNode and re-render the whole tree on every
+  // on every memoized OutlineRow and re-render the whole tree on every
   // keystroke -- the exact bug ADR 0014 fixes. It stays stable because every
   // live value it needs is read through a ref or is itself stable. See
   // useNodeCommands.
@@ -551,15 +550,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   useSyncViewFilter(filter);
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
-  // Top-level visible child ids, read as a stable slice (useVisibleChildIds
-  // already applies the composed prune, so it changes identity only on a
-  // structural edit -- never on typing). While filtering, keep only the ones on
-  // a path to a match. The fade cascade starts fresh here: a completed ancestor
-  // above the current view contributes nothing.
-  const topLevelIds = useVisibleChildIds(rootId, isHidden);
-  const topLevel = filter
-    ? topLevelIds.filter((id) => filter.visibleIds.has(id))
-    : topLevelIds;
   const zoomedNode = useNode(rootId ?? "") ?? null;
   const trail = useTrail(rootId);
   const hasNodes = useHasNodes();
@@ -581,13 +571,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   if (loading) showedSkeletonRef.current = true;
   const revealOnLoad = !loading && showedSkeletonRef.current;
 
-  // --- Phase B: windowed rendering (ADR 0019) -------------------------------
+  // --- Windowed rendering (ADR 0019) ----------------------------------------
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
-  // Hooks run unconditionally (rules of hooks); when the flag is off, count is 0
-  // and the recursive <ul> renders instead. Default on (flags.ts) -- the
-  // recursive path is the rollback/parity fallback.
-  const virtualized = isVirtualized();
   const rows = useVisibleRows(rootId, isHidden, filter);
   // Mirror `rows` into the selection-fill module (2e-2) so each row's own
   // `useSelectionFill` read covers its visible descendants, not just a selected
@@ -614,7 +600,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
-    count: virtualized ? rows.length : 0,
+    count: rows.length,
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
     scrollMargin,
@@ -657,17 +643,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // silently dropped. rowIndexRef is seeded by useRef on mount, so indexOf works
   // here even before its own (passive) sync effect runs.
   useLayoutEffect(() => {
-    if (!virtualized) {
-      setVirtualNav(null);
-      return;
-    }
     setVirtualNav({
       scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
       indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
       measurementAt: (i) => virtualizer.measurementsCache[i],
     });
     return () => setVirtualNav(null);
-  }, [virtualized, virtualizer]);
+  }, [virtualizer]);
 
   // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && hasNodes) {
@@ -717,12 +699,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
             pointer and only while a bullet is focused (both gated inside the
             component), so on desktop this renders nothing. ADR 0030. */}
-        {isMobileBar() && (
-          <MobileActionsBar
-            actions={mobileBarActions}
-            findFocusedId={findFocusedId}
-          />
-        )}
+        <MobileActionsBar
+          actions={mobileBarActions}
+          findFocusedId={findFocusedId}
+        />
 
         {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
             Gates itself on a fine pointer + a single-span selection, so it
@@ -779,70 +759,47 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
               <div className="outline-empty">{filter.emptyMessage}</div>
             ) : (
               <>
-                {virtualized ? (
-                  <ul
-                    className="outline-list"
-                    ref={(el) => {
-                      listRef.current = el;
-                    }}
-                    style={{
-                      position: "relative",
-                      height: virtualizer.getTotalSize(),
-                    }}
-                  >
-                    {virtualizer.getVirtualItems().map((vi) => {
-                      const row = rows[vi.index];
-                      if (!row) return null;
-                      return (
-                        <OutlineRow
-                          key={vi.key}
-                          nodeId={row.id}
-                          rowKey={row.key}
-                          contentId={row.contentId}
-                          isMirror={row.isMirror}
-                          capped={row.capped}
-                          broken={row.broken}
-                          depth={row.depth}
-                          ancestorCompleted={row.ancestorCompleted}
-                          commands={commands}
-                          pluginCtx={pluginCtx}
-                          registerRef={registerRef}
-                          pivotId={pivotId}
-                          isHidden={isHidden}
-                          filter={filter}
-                          pendingFocus={pendingFocus}
-                          pendingFocusAtStart={pendingFocusAtStart}
-                          pendingFlash={pendingFlash}
-                          index={vi.index}
-                          start={vi.start}
-                          scrollMargin={virtualizer.options.scrollMargin}
-                          measureRef={virtualizer.measureElement}
-                        />
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <ul
-                    className="outline-list"
-                    ref={(el) => {
-                      listRef.current = el;
-                    }}
-                  >
-                    {topLevel.map((id) => (
-                      <OutlineNode
-                        key={id}
-                        nodeId={id}
+                <ul
+                  className="outline-list"
+                  ref={(el) => {
+                    listRef.current = el;
+                  }}
+                  style={{
+                    position: "relative",
+                    height: virtualizer.getTotalSize(),
+                  }}
+                >
+                  {virtualizer.getVirtualItems().map((vi) => {
+                    const row = rows[vi.index];
+                    if (!row) return null;
+                    return (
+                      <OutlineRow
+                        key={vi.key}
+                        nodeId={row.id}
+                        rowKey={row.key}
+                        contentId={row.contentId}
+                        isMirror={row.isMirror}
+                        capped={row.capped}
+                        broken={row.broken}
+                        depth={row.depth}
+                        ancestorCompleted={row.ancestorCompleted}
                         commands={commands}
                         pluginCtx={pluginCtx}
                         registerRef={registerRef}
                         pivotId={pivotId}
-                        ancestorCompleted={false}
                         isHidden={isHidden}
                         filter={filter}
+                        pendingFocus={pendingFocus}
+                        pendingFocusAtStart={pendingFocusAtStart}
+                        pendingFlash={pendingFlash}
+                        index={vi.index}
+                        start={vi.start}
+                        scrollMargin={virtualizer.options.scrollMargin}
+                        measureRef={virtualizer.measureElement}
                       />
-                    ))}
-                  </ul>
-                )}
+                    );
+                  })}
+                </ul>
                 {/* Click in the whitespace below the list adds a new top-level
                 bullet. Hidden while filtering -- there's no "add here" then.
                 `size="icon"` (32px) is what puts the glyph on the same vertical
@@ -911,9 +868,9 @@ function useBootstrapOutline() {
 interface OutlineFocus {
   /** row key -> contentEditable span. Keyed by the render ADDRESS (row.key), not
    *  the bare id, so a source descendant windowed under two mirrors keeps two
-   *  distinct spans (ADR 0022); key === id for every mirror-free row and for the
-   *  recursive path, so titles and list items still register uniformly (the
-   *  zoomed title registers under rootId, which is its own key). */
+   *  distinct spans (ADR 0022); key === id for every mirror-free row, so titles
+   *  and list items still register uniformly (the zoomed title registers under
+   *  rootId, which is its own key). */
   refs: Map<string, HTMLSpanElement | null>;
   registerRef: (key: string, el: HTMLSpanElement | null) => void;
   /** The row key to focus after the next render (most-recently inserted/moved). */
@@ -945,7 +902,7 @@ function useOutlineFocus(): OutlineFocus {
   const [refs] = useState(() => new Map<string, HTMLSpanElement | null>());
   // `refs` is a stable useState Map (never replaced), so listing it keeps this
   // callback's identity stable -- registerRef is a prop on every memoized
-  // OutlineNode, so it MUST stay referentially stable (ADR 0014).
+  // OutlineRow, so it MUST stay referentially stable (ADR 0014).
   const registerRef = useCallback(
     (id: string, el: HTMLSpanElement | null) => {
       if (el) refs.set(id, el);
@@ -1187,7 +1144,7 @@ function useZoomNavigation({
   //  - Zooming OUT: the node you came from.
   // Then scroll the target into view if it landed below the fold. Mount-only by
   // design (the editor remounts per zoom view) and passive: each bullet's text
-  // is written in OutlineNode's own passive effect, so only by now is the list
+  // is written in OutlineRow's own passive effect, so only by now is the list
   // laid out at its real heights.
   useEffect(() => {
     // Fresh load with ?focus=last (e.g. /today redirecting to a daily note):
@@ -1395,7 +1352,7 @@ interface NodeCommandsArgs {
 }
 
 /**
- * The per-bullet command set, handed to every OutlineNode. Stable identity
+ * The per-bullet command set, handed to every OutlineRow. Stable identity
  * (a prop on every memoized node) because every live value it needs is read
  * through a ref or is itself stable. See ADR 0014.
  */
@@ -1763,7 +1720,7 @@ function useNodeCommands({
         },
       };
     },
-    // commands MUST keep stable identity (a prop on every memoized OutlineNode,
+    // commands MUST keep stable identity (a prop on every memoized OutlineRow,
     // ADR 0014). The live tree is read via getTreeIndex() and the live view
     // state via getViewRootId()/getViewIsHidden() (view-state.ts) at call time,
     // and the remaining live values through refs (refs/pendingFocus/...), so the
@@ -1775,7 +1732,7 @@ function useNodeCommands({
 }
 
 /**
- * The zoomed node rendered as an editable page title. Mirrors OutlineNode's
+ * The zoomed node rendered as an editable page title. Mirrors OutlineRow's
  * contentEditable text-sync so the caret is never clobbered during typing.
  */
 function ZoomedTitle({
@@ -1801,14 +1758,14 @@ function ZoomedTitle({
   setPendingFocus: (key: string, offset: number) => void;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  // Mirror OutlineNode's live inline-`code` decoration so a backtick run in the
-  // title renders as a mono chip too. See inline-code.ts and OutlineNode.
+  // Mirror OutlineRow's live inline-`code` decoration so a backtick run in the
+  // title renders as a mono chip too. See inline-code.ts and OutlineRow.
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
   // node just as on a list bullet, so it wears the same lock when zoomed in.
-  // Reactive: a plugin's protection can load async (mirrors OutlineNode). See
+  // Reactive: a plugin's protection can load async (mirrors OutlineRow). See
   // ADR 0015.
   const protectedNode = useIsProtected(node.id);
 

@@ -1,4 +1,4 @@
-import type { NodeCommands } from "../components/OutlineNode";
+import type { NodeCommands } from "../components/node-commands";
 import type { PluginContext } from "../plugins/types";
 
 /**

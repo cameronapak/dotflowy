@@ -422,7 +422,7 @@ const slotSpecs: SlotSpec[] = plugins.flatMap((p) => p.slots ?? []);
 
 // Group slots by position once, so the per-render lookup returns a STABLE array
 // (a fresh filter() each render would be a changing prop on the memoized
-// OutlineNode -- ADR 0014). An empty position shares one frozen array.
+// OutlineRow -- ADR 0014). An empty position shares one frozen array.
 const EMPTY_SLOTS: readonly SlotSpec[] = Object.freeze([]);
 const slotsByPosition = new Map<SlotPosition, SlotSpec[]>();
 for (const s of slotSpecs) {
