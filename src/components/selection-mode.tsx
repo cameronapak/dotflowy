@@ -46,7 +46,11 @@ import {
 import { runStructural } from "../data/structural";
 import { countSubtreeNodes, orphanedMirrorsBy } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
-import { getViewIsHidden, getViewRootId } from "../data/view-state";
+import {
+  getViewFilter,
+  getViewIsHidden,
+  getViewRootId,
+} from "../data/view-state";
 import {
   findVisibleNeighbor,
   lastVisibleDescendant,
@@ -169,6 +173,7 @@ function makeSelectionOps({
     }
     const isHidden = getViewIsHidden();
     const rootId = getViewRootId();
+    const filter = getViewFilter();
     // Focus relative to the rows actually being DELETED, not the full selection:
     // a surviving protected node at the top/bottom edge must not be jumped over.
     // `above` = the row above the first deleted node (often that surviving
@@ -182,15 +187,17 @@ function makeSelectionOps({
       firstDel,
       "up",
       isHidden,
+      filter,
       mirrorsOn,
     );
-    const bottom = lastVisibleDescendant(index, lastDel, isHidden);
+    const bottom = lastVisibleDescendant(index, lastDel, isHidden, filter);
     const below = findVisibleNeighbor(
       index,
       rootId,
       bottom,
       "down",
       isHidden,
+      filter,
       mirrorsOn,
     );
     runStructural(() => {
@@ -265,6 +272,7 @@ function makeSelectionOps({
         top,
         "up",
         getViewIsHidden(),
+        getViewFilter(),
         isMirrorsEnabled(),
       ) ?? top;
     clearSelection();
@@ -278,8 +286,9 @@ function makeSelectionOps({
     if (!state) return;
     const index = getTreeIndex();
     const isHidden = getViewIsHidden();
+    const filter = getViewFilter();
     const lastRoot = state.rootIds[state.rootIds.length - 1]!;
-    const bottom = lastVisibleDescendant(index, lastRoot, isHidden);
+    const bottom = lastVisibleDescendant(index, lastRoot, isHidden, filter);
     const target =
       findVisibleNeighbor(
         index,
@@ -287,6 +296,7 @@ function makeSelectionOps({
         bottom,
         "down",
         isHidden,
+        filter,
         isMirrorsEnabled(),
       ) ?? bottom;
     clearSelection();

@@ -72,6 +72,7 @@ import {
   useVisibleRows,
 } from "../data/tree-store";
 import {
+  getViewFilter,
   getViewIsHidden,
   getViewRootId,
   useSyncViewFilter,
@@ -1657,6 +1658,7 @@ function useNodeCommands({
               activeKey,
               "up",
               getViewIsHidden(),
+              getViewFilter(),
               mirrorsOn,
             );
             const focusId = removeNode(idx, instanceId);
@@ -1723,6 +1725,7 @@ function useNodeCommands({
             from,
             direction,
             getViewIsHidden(),
+            getViewFilter(),
             isMirrorsEnabled(),
           );
           if (!target) return;
