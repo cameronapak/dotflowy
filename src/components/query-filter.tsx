@@ -421,21 +421,19 @@ export function QueryFilterBar() {
   // Live raw query, read at open time without re-binding the mount-once opener.
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
-  // While the subheader expands on a fresh summon, onFocus must not open the
-  // popover early — timestamp until which reveal is deferred, plus the timer
-  // that reveals once the band settles. Any EXPLICIT close (Escape stage 1,
-  // clear, collapse, blur) must cancel the pending reveal, or it fires after
-  // the close and silently re-opens `popoverOpen` — which desyncs the Escape
-  // ladder (stage 2 re-closes a popover the user already closed instead of
-  // clearing the text).
-  const deferPopoverUntilRef = useRef(0);
+  // While the subheader expands on a fresh summon, the reveal that opens the
+  // popover once the band settles is deferred behind this timer. A pending timer
+  // (ref non-null) is also the "still deferring" flag onFocus reads. Any EXPLICIT
+  // close (Escape stage 1, clear, collapse, blur) must cancel it, or it fires
+  // after the close and silently re-opens `popoverOpen` — which desyncs the
+  // Escape ladder (stage 2 re-closes a popover the user already closed instead
+  // of clearing the text).
   const revealTimerRef = useRef<number | null>(null);
   const cancelDeferredReveal = useCallback(() => {
     if (revealTimerRef.current != null) {
       window.clearTimeout(revealTimerRef.current);
       revealTimerRef.current = null;
     }
-    deferPopoverUntilRef.current = 0;
   }, []);
 
   // Pin pressed-state (ADR 0048): filled when the current (trimmed) query is
@@ -614,11 +612,9 @@ export function QueryFilterBar() {
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (needsExpandWait && !reduceMotion) {
         // onFocus would open immediately; hold until the band settles.
-        deferPopoverUntilRef.current = Date.now() + SUBHEADER_EXPAND_MS;
         setPopoverOpen(false);
         revealTimerRef.current = window.setTimeout(() => {
           revealTimerRef.current = null;
-          deferPopoverUntilRef.current = 0;
           if (document.activeElement === inputRef.current) {
             setPopoverOpen(true);
             recompute();
@@ -682,8 +678,9 @@ export function QueryFilterBar() {
   const onFocus = () => {
     setFocused(true);
     recompute();
-    // Fresh summon: the summon effect opens the popover after the expand anim.
-    if (Date.now() < deferPopoverUntilRef.current) return;
+    // Fresh summon: the summon effect's reveal timer (still pending) opens the
+    // popover after the expand anim; don't pre-empt it here.
+    if (revealTimerRef.current != null) return;
     setPopoverOpen(true);
   };
 
