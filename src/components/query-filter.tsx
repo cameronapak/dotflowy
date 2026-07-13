@@ -30,10 +30,11 @@ import { filterOperatorInfos } from "../plugins/registry";
 import {
   addTermToFilter,
   bindQueryFilterNav,
-  openFilterInput,
-  setFilterInputOpener,
+  setFilterInputController,
+  toggleFilterInput,
   writeQuery,
 } from "./query-filter-nav";
+import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -92,15 +93,29 @@ export function useQueryFilter() {
   return { rawQuery, active, clear };
 }
 
-/** The header magnifier -- summons the filter input (ADR 0047 §6: the magnifier
- *  filters the view; the switcher moved to its own ⌘ button). */
+/** The header magnifier -- toggles the filter input (ADR 0047 §6: the magnifier
+ *  filters the view; the switcher moved to its own ⌘ button). Open when idle;
+ *  a second press dismisses (clears + collapses). `preventDefault` on
+ *  pointerdown keeps the input focused across the press so blur doesn't
+ *  collapse-then-reopen before the click can close.
+ *
+ *  Lit (solid `--primary`, ADR 0033's grayscale "on" idiom -- same as
+ *  SpotlightIndicator) whenever a `?q=` filter is applied, so the magnifier
+ *  reads as a pressed toggle. This is intentional: the toggle-off press that
+ *  WIPES the query only fires while the button visibly signals "on". Reads the
+ *  search param directly rather than `useQueryFilter()`, whose Escape/nav side
+ *  effects would double-bind if this button ran them too. */
 export function FilterButton() {
+  const search = useSearch({ strict: false }) as { q?: string };
+  const active = (search.q ?? "").trim().length > 0;
   return (
     <Button
-      variant="ghost"
+      variant={active ? "default" : "ghost"}
       size="icon-sm"
-      onClick={() => openFilterInput()}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => toggleFilterInput()}
       aria-label="Filter this view"
+      aria-pressed={active}
     >
       <Search />
       <span className="sr-only">Filter this view</span>
@@ -303,7 +318,8 @@ function SavedQueriesSection({
  *  wrapper is `overflow-hidden`, which would clip an in-flow dropdown) and
  *  fixed-positioned under the input. Its `role="listbox"` also keeps a mousedown
  *  inside it from clearing an active node selection (selection-mode.tsx). The
- *  optional Saved section (ADR 0048) leads on empty focus. */
+ *  optional Saved section (ADR 0048) leads on empty focus. Enter animation is
+ *  `[data-filter-popover]` in styles.css (220ms fade + slide). */
 function SuggestionPopover({
   anchorRef,
   suggestions,
@@ -319,7 +335,11 @@ function SuggestionPopover({
   showSaved: boolean;
   onPickSaved: (query: string) => void;
 }) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
+  // Eager measure so the first paint already has a rect (avoids a null→mount
+  // flash that would skip or clip the CSS enter animation).
+  const [rect, setRect] = useState<DOMRect | null>(
+    () => anchorRef.current?.getBoundingClientRect() ?? null,
+  );
   useLayoutEffect(() => {
     const measure = () => {
       const el = anchorRef.current;
@@ -339,7 +359,7 @@ function SuggestionPopover({
   return createPortal(
     <div
       data-filter-popover
-      className="fixed z-50 max-h-80 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-md"
+      className="fixed z-50 max-h-80 origin-top overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-md"
       style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
       // A press anywhere in the popover must not blur the input (the rename input
       // stops its own mousedown so it can still take focus).
@@ -373,8 +393,9 @@ function SuggestionPopover({
 /**
  * The core subheader filter surface: a resident input whenever a filter is
  * active OR the input was summoned, and NOTHING (so the subheader collapses)
- * when idle with no query. Summoned via {@link openFilterInput} (Cmd+F, the
- * Cmd+K action, the header magnifier). The blurred-with-pills state is gone
+ * when idle with no query. Summoned via {@link toggleFilterInput} / Cmd+F /
+ * the Cmd+K action; the header magnifier toggles (open ↔ dismiss). The
+ * blurred-with-pills state is gone
  * (ADR 0047 §6, amended): while `?q=` is non-empty the raw query stays in the
  * input, focused or not.
  */
@@ -388,6 +409,10 @@ export function QueryFilterBar() {
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<number | null>(null);
+  // Live draft for blur/close — a setState + blur in the same tick would otherwise
+  // flush the pre-clear value from the onBlur closure and resurrect `?q=`.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   // Autocomplete (ADR 0047 §7): suggestions for the token at the caret, the
   // active row, and whether the popover is showing (Escape stage 0 hides it).
   const [suggestions, setSuggestions] = useState<FilterSuggestion[]>([]);
@@ -396,6 +421,9 @@ export function QueryFilterBar() {
   // Live raw query, read at open time without re-binding the mount-once opener.
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
+  // While the subheader expands on a fresh summon, onFocus must not open the
+  // popover early — timestamp until which reveal is deferred.
+  const deferPopoverUntilRef = useRef(0);
 
   // Pin pressed-state (ADR 0048): filled when the current (trimmed) query is
   // already saved. Reads `draft` so it tracks the input even while composing.
@@ -504,11 +532,36 @@ export function QueryFilterBar() {
     setSummoned(true);
   }, []);
 
-  // Register the summon-opener (Cmd+K action / chip taps reach it) mount-once.
+  // Dismiss: wipe any pending/active query and collapse the row. Used by the
+  // header magnifier's toggle-off path (open-only stays on Cmd+F / Cmd+K).
+  const close = useCallback(() => {
+    if (debounceRef.current != null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    draftRef.current = "";
+    setDraft("");
+    writeQuery("", { replace: true });
+    setSummoned(false);
+    setPopoverOpen(false);
+    setFocused(false);
+    inputRef.current?.blur();
+  }, []);
+
+  // Live open-probe for the header toggle -- `showInput` itself isn't stable
+  // across the mount-once registration, so the probe reads refs/state live.
+  const summonedRef = useRef(summoned);
+  summonedRef.current = summoned;
+  const isOpen = useCallback(
+    () => summonedRef.current || rawRef.current.trim().length > 0,
+    [],
+  );
+
+  // Register the summon/dismiss controller (Cmd+K / chip taps / magnifier).
   useEffect(() => {
-    setFilterInputOpener(open);
-    return () => setFilterInputOpener(null);
-  }, [open]);
+    setFilterInputController({ open, close, isOpen });
+    return () => setFilterInputController(null);
+  }, [open, close, isOpen]);
 
   // Cmd+F summons the input (ADR 0047 §6): virtualization already broke native
   // browser find, so hijacking it is a repair. Capture phase + preventDefault,
@@ -528,19 +581,45 @@ export function QueryFilterBar() {
   // Focus + caret-to-end when the input is SUMMONED (not merely resident from a
   // URL query -- a page load with `?q=` must not steal the caret). Deferred a
   // frame so it wins the focus race against Radix restoring focus when the
-  // Cmd+K dialog closes.
+  // Cmd+K dialog closes. The suggestion popover waits for the subheader expand
+  // animation when the band was collapsed -- opening it mid-slide pins it to a
+  // stale input rect (portaled, fixed).
   useEffect(() => {
     if (!summoned) return;
+    // Collapsed → expand animates; already-resident (active `?q=`) does not.
+    const needsExpandWait = rawRef.current.trim().length === 0;
+    let popoverTimer: number | null = null;
     const id = requestAnimationFrame(() => {
       const el = inputRef.current;
       if (!el) return;
       el.focus();
       const end = el.value.length;
       el.setSelectionRange(end, end);
-      setPopoverOpen(true);
       recompute();
+      const reduceMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (needsExpandWait && !reduceMotion) {
+        // onFocus would open immediately; hold until the band settles.
+        deferPopoverUntilRef.current = Date.now() + SUBHEADER_EXPAND_MS;
+        setPopoverOpen(false);
+        popoverTimer = window.setTimeout(() => {
+          popoverTimer = null;
+          deferPopoverUntilRef.current = 0;
+          if (document.activeElement === inputRef.current) {
+            setPopoverOpen(true);
+            recompute();
+          }
+        }, SUBHEADER_EXPAND_MS);
+      } else {
+        setPopoverOpen(true);
+      }
     });
-    return () => cancelAnimationFrame(id);
+    return () => {
+      cancelAnimationFrame(id);
+      if (popoverTimer != null) window.clearTimeout(popoverTimer);
+      deferPopoverUntilRef.current = 0;
+    };
   }, [summoned, recompute]);
 
   if (!showInput) return null;
@@ -555,7 +634,7 @@ export function QueryFilterBar() {
   // no query left the row collapses; with an active query the input stays
   // resident (blurred), showing the raw string.
   const collapse = () => {
-    flush(draft);
+    flush(draftRef.current);
     setSummoned(false);
     setPopoverOpen(false);
     inputRef.current?.blur();
@@ -563,6 +642,7 @@ export function QueryFilterBar() {
 
   // The clear X (and Escape stage 2): wipe the text AND `?q=`, keeping focus.
   const clearText = (reopenCheatSheet: boolean) => {
+    draftRef.current = "";
     setDraft("");
     flush("");
     setActiveIndex(-1);
@@ -578,6 +658,7 @@ export function QueryFilterBar() {
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
+    draftRef.current = value;
     setDraft(value);
     scheduleWrite(value);
     setPopoverOpen(true);
@@ -586,8 +667,10 @@ export function QueryFilterBar() {
 
   const onFocus = () => {
     setFocused(true);
-    setPopoverOpen(true);
     recompute();
+    // Fresh summon: the summon effect opens the popover after the expand anim.
+    if (Date.now() < deferPopoverUntilRef.current) return;
+    setPopoverOpen(true);
   };
 
   const onBlur = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -599,7 +682,9 @@ export function QueryFilterBar() {
     setFocused(false);
     // Flush without dropping residency: a blurred active filter stays in the
     // input. An empty draft collapses via `showInput` once the write lands.
-    flush(draft);
+    // Read the live draft (not the render closure) so a close()+blur in the
+    // same tick can't resurrect a just-cleared query.
+    flush(draftRef.current);
     setSummoned(false);
     setPopoverOpen(false);
   };

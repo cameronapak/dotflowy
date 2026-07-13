@@ -56,6 +56,49 @@ test.describe("resident filter input (ADR 0047 §6)", () => {
     await expect(input(page)).toBeFocused();
   });
 
+  test("the header magnifier toggles the filter closed", async ({ page }) => {
+    await load(page);
+    const magnifier = page.getByRole("button", { name: "Filter this view" });
+
+    await magnifier.click();
+    await expect(input(page)).toBeVisible();
+    await expect(input(page)).toBeFocused();
+
+    // Empty summon: second press collapses the row.
+    await magnifier.click();
+    await expect(input(page)).toHaveCount(0);
+
+    // With an active query: second press clears `?q=` AND collapses.
+    await magnifier.click();
+    await input(page).fill("#work");
+    await expect(page).toHaveURL(/q=%23work/);
+    await magnifier.click();
+    await expect(page).not.toHaveURL(/q=/);
+    await expect(input(page)).toHaveCount(0);
+  });
+
+  test("the magnifier lights (aria-pressed) while a filter is active", async ({
+    page,
+  }) => {
+    await load(page);
+    const magnifier = page.getByRole("button", { name: "Filter this view" });
+
+    // Idle: not pressed.
+    await expect(magnifier).toHaveAttribute("aria-pressed", "false");
+
+    // Active query lights it -- so the toggle-off press that WIPES the query
+    // only fires while the button visibly reads as "on".
+    await magnifier.click();
+    await input(page).fill("#work");
+    await expect(page).toHaveURL(/q=%23work/);
+    await expect(magnifier).toHaveAttribute("aria-pressed", "true");
+
+    // Toggle-off clears the query and drops the lit state.
+    await magnifier.click();
+    await expect(page).not.toHaveURL(/q=/);
+    await expect(magnifier).toHaveAttribute("aria-pressed", "false");
+  });
+
   test("the ⌘ button opens the command center", async ({ page }) => {
     await load(page);
     await page.getByRole("button", { name: "Command center" }).click();
