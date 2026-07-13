@@ -1,5 +1,18 @@
 # dotflowy
 
+## 1.2.0
+
+### Minor Changes
+
+- 1cd17ff: The header filter magnifier is now a toggle: press to open the filter, press again to clear the query and collapse the row. It lights up solid while a filter is active, so it reads as an on/off control. Filter autocomplete suggestions now ease in after the subheader finishes expanding instead of flashing at a stale position, and respect reduced-motion settings.
+- 718f269: Forgot your password? You can now reset it from the sign-in screen — a reset link lands in your inbox and expires after an hour.
+- 28e18c9: Dotflowy now installs to your home screen with a proper app icon (iOS and Android), and links to the app show a rich preview card when shared.
+
+### Patch Changes
+
+- 46aa0e4: When something goes wrong, the app now shows a recover screen instead of a blank page, and errors are reported to us (with your note text scrubbed out) so we can fix them faster.
+- 008cc9a: Error reports now strip the query string from URLs and navigation breadcrumbs, so an active outline filter (`?q=`) or a pasted link can't ride an error report — closing a gap in the note-text scrub.
+
 ## 1.1.0
 
 ### Minor Changes
