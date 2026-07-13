@@ -49,9 +49,6 @@ const visibleOrder = (page: Page) =>
   );
 
 async function load(page: Page, tree: SeedNode[], query: string) {
-  await page.addInitScript(() =>
-    localStorage.setItem("dotflowy:flag:virtualized", "on"),
-  );
   await seedOutline(page, tree);
   await page.goto(`/?q=${encodeURIComponent(query)}`);
 }
