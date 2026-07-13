@@ -36,11 +36,18 @@ import type { AuthEnv } from "./auth";
 import type { Node } from "./wire";
 
 import { createAuth } from "./auth";
+import {
+  mintInvites,
+  normalizeEmail,
+  pendingWaitlistEmails,
+  type InviteBatchResult,
+} from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
+  AdminInvitePostBody,
   KvClaimBody,
   KvDeleteBody,
   KvUpsertBody,
@@ -513,6 +520,40 @@ function handleWaitlist(
   });
 }
 
+/** Default number of pending waitlist rows a batch invites when neither
+ *  explicit emails nor `all` is given. Kept small so a bare call is safe. */
+const INVITE_BATCH_DEFAULT = 25;
+const INVITE_BATCH_MAX = 500;
+
+/**
+ * Resolve the target addresses for an admin invite batch, then mint + email a
+ * per-email single-use code for each (#251). Explicit `emails` win; otherwise it
+ * pulls pending (not-yet-invited) waitlist rows — every row with `all`, else the
+ * oldest `limit`. Runs on the Worker because mintInvites sends through the
+ * `send_email` binding, which only exists here.
+ */
+async function runInviteBatch(
+  env: Env,
+  body: { emails?: readonly string[]; all?: boolean; limit?: number },
+  origin: string,
+): Promise<InviteBatchResult & { count: number }> {
+  const signupUrl = `${origin}/`;
+  let targets: string[];
+  if (body.emails && body.emails.length > 0) {
+    targets = body.emails.map(normalizeEmail).filter(isPlausibleEmail);
+  } else {
+    const limit = body.all
+      ? null
+      : Math.max(
+          1,
+          Math.min(body.limit ?? INVITE_BATCH_DEFAULT, INVITE_BATCH_MAX),
+        );
+    targets = await pendingWaitlistEmails(env, limit);
+  }
+  const result = await mintInvites(env, targets, signupUrl);
+  return { ...result, count: result.invited.length };
+}
+
 // --- Main API pipeline ------------------------------------------------------
 
 /**
@@ -563,6 +604,31 @@ function handleApiRequest(
         return json({ entries: results });
       }
       return yield* handleWaitlist(request, env);
+    }
+
+    // Admin-only: mint + email per-email single-use invite codes (#251). Sits
+    // before the generic session gate so it can 404 (not 401) for non-admins —
+    // the admin surface shouldn't advertise itself, same as the waitlist GET.
+    // Session + ADMIN_EMAILS gated; driven by scripts/invite.ts. Lives on the
+    // Worker because the send needs the `send_email` binding, which only exists
+    // here.
+    if (url.pathname === "/api/admin/invite") {
+      // Admin-gate FIRST, then method-check: a non-admin gets the same 404 for
+      // any method, so a wrong-method probe can't confirm the route exists (the
+      // 405 is only for authenticated admins). Mirrors the waitlist GET.
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminInvitePostBody);
+      return json(
+        yield* Effect.promise(() => runInviteBatch(env, body, url.origin)),
+      );
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the

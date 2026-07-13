@@ -17,6 +17,7 @@
     "preview": "vite preview",
     "cf:dev": "bun scripts/cf-dev.ts",
     "seed:user": "bun scripts/seed-user.ts",
+    "invite": "bun scripts/invite.ts",
     "deploy": "bun run build:cf && wrangler deploy",
     "gen:og": "bun scripts/gen-og.ts",
     "release": "bun scripts/release.ts",
