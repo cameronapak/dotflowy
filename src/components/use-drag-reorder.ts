@@ -5,6 +5,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import type { QueryFilter } from "../data/filter-query";
+
 import { isMirrorsEnabled } from "../data/flags";
 import { type Node, type TreeIndex } from "../data/tree";
 import { virtualRowRect } from "../data/virtual-nav";
@@ -84,6 +86,12 @@ interface DragDeps {
   /** The composed Seam-G visibility prune (hide-completed today). Drag mirrors
    *  the render: a hidden node is not a droppable row. See ADR 0001. */
   getIsHidden: () => (node: Node) => boolean;
+  /** The active `?q=` query filter (ADR 0047), or null. Read at event time (the
+   *  editor supplies `getViewFilter`) so the drag's row model is exactly the
+   *  filtered rows the editor renders: a row the filter pruned out of the DOM is
+   *  not a drop target, and a match revealed inside a collapsed subtree IS one.
+   *  See the ADR 0047 amendment and issue #244. */
+  getFilter: () => QueryFilter | null;
   /** The `.outline-row` element for a row KEY (via the editor's refs registry,
    *  keyed by row.key since ADR 0022; key === id off the flag). */
   getRowEl: (key: string) => HTMLElement | null;
@@ -157,9 +165,16 @@ export function useDragReorder(deps: DragDeps) {
   // the drop line projected off only the non-mirror rows). The grabbed subtree
   // is the CONTIGUOUS run of deeper rows right after the grabbed one -- the flat
   // list's standard subtree property, uniform across mirror-free and crossed
-  // paths. Filter is null to match today's drag (it ignores the tag filter).
+  // paths. The active `?q=` filter is threaded through (issue #244 / the ADR 0047
+  // amendment): the drag's rows are exactly the filtered rows the render shows,
+  // so a filtered-out row is never a drop target and a match revealed inside a
+  // collapsed subtree is. A drop in a gap whose real siblings are hidden lands
+  // after the visible predecessor (the projection already computes that once the
+  // model is filtered); a node that lands hidden is disclosed by the editor's
+  // onMove (the "vanish" toast).
   const buildRows = useCallback((grabbedKey: string): Row[] => {
-    const { getIndex, getRootId, getIsHidden, getRowEl } = depsRef.current;
+    const { getIndex, getRootId, getIsHidden, getFilter, getRowEl } =
+      depsRef.current;
     const index = getIndex();
     const rootId = getRootId();
     const isHidden = getIsHidden();
@@ -167,7 +182,7 @@ export function useDragReorder(deps: DragDeps) {
       index,
       rootId,
       isHidden,
-      null,
+      getFilter(),
       isMirrorsEnabled(),
     );
 
