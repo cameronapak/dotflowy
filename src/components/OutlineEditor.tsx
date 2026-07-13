@@ -26,9 +26,11 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { toast } from "sonner";
 
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 
+import { nodesCollection } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled, isMobileBar, isVirtualized } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
@@ -55,6 +57,7 @@ import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import { runStructural } from "../data/structural";
 import {
+  buildTreeIndex,
   childrenOf,
   countSubtreeNodes,
   type Node,
@@ -84,6 +87,7 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import {
   blocksCaret,
+  buildViewFilter,
   commandSpecs,
   composeHidden,
   dispatchClick,
@@ -405,6 +409,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     getIndex: getTreeIndex,
     getRootId: getViewRootId,
     getIsHidden: getViewIsHidden,
+    // The active `?q=` filter, so the drag's row model is exactly the filtered
+    // rows the render shows (issue #244 / the ADR 0047 amendment).
+    getFilter: getViewFilter,
     getRowEl: (key) =>
       (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ?? null,
     getListEl: () => listRef.current,
@@ -431,6 +438,28 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           pendingFocus.current = key;
           // Tint the row it landed on so the eye can find what just moved.
           pendingFlash.current = key;
+          // Vanish disclosure (issue #244): a drop that lands the node outside
+          // the active filter's visible set (e.g. a match-descendant dragged
+          // under a non-matching context ancestor, or into a collapsed match)
+          // leaves it unrendered -- pendingFlash then harmlessly no-ops. RECOMPUTE
+          // the filter against the post-move tree (getViewFilter()'s visibleIds
+          // is the pre-move set, so it can't answer this), then toast so the move
+          // isn't silent. Fresh index off the live collection, the focusKeyFor /
+          // paste-resolveSeam technique (getTreeIndex()'s notify can lag).
+          if (getViewFilter()) {
+            const fresh = buildTreeIndex(nodesCollection.toArray as Node[]);
+            const recomputed = buildViewFilter(fresh, viewCtx, isHidden);
+            // The render gates a row's filter-visibility on its CONTENT id (a
+            // mirror instance is shown iff its source is in visibleIds, ADR
+            // 0022), so test that key -- else dragging a still-visible mirror
+            // row fires a spurious toast. Equals instanceId off the flag.
+            const contentId = isMirrorsEnabled()
+              ? (fresh.byId.get(instanceId)?.mirrorOf ?? instanceId)
+              : instanceId;
+            if (recomputed && !recomputed.visibleIds.has(contentId)) {
+              toast("Moved — hidden by the current filter.");
+            }
+          }
         } else drop();
       }),
   });
