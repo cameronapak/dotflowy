@@ -43,9 +43,11 @@ export function getViewIsHidden(): (node: Node) => boolean {
 }
 
 /** The active `?q=` query filter's pruned set (ADR 0047), read live OUTSIDE render. Null
- *  when no filter is on. Its one event-time reader is the markdown paste, which
- *  must know whether what it just inserted actually landed on screen (ADR 0044:
- *  a paste never mutates view state, so it discloses instead). */
+ *  when no filter is on. Event-time readers: the caret/focus walks (arrow nav,
+ *  delete-focus, selection caret exits -- they must hand back RENDERED rows,
+ *  ADR 0047 amendment) and the markdown paste, which must know whether what it
+ *  just inserted actually landed on screen (ADR 0044: a paste never mutates
+ *  view state, so it discloses instead). */
 export function getViewFilter(): QueryFilter | null {
   return filter;
 }
