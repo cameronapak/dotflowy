@@ -1056,6 +1056,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                   onEscape={close}
                 />
               </div>
+            </div>
+            {/* Destination pill on its own right-aligned row below the input, so a
+                growing label never squishes the editor's width (ADR 0049 UX fix). */}
+            <div className="mt-1.5 flex justify-end">
               <DestinationButton
                 index={index}
                 excludeId={draftId}
@@ -1065,7 +1069,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                 triggerClassName="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs transition-transform hover:bg-muted active:scale-[0.97]"
               >
                 {destIcon}
-                <span className="max-w-40 truncate font-medium">
+                <span className="max-w-64 truncate font-medium">
                   {dest.label}
                 </span>
                 <ChevronDownIcon className="size-3 text-muted-foreground" />
@@ -1096,18 +1100,18 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
               it's fine-pointer only (ADR 0049 refinement / ADR 0030 discipline). */}
           {!coarse && (
             <div className="flex items-center gap-4 border-t px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
                 <Kbd>Enter</Kbd>
                 save &amp; close
               </span>
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
                 <KbdGroup>
                   <Kbd>⌘</Kbd>
                   <Kbd>Enter</Kbd>
                 </KbdGroup>
-                save &amp; keep going
+                save &amp; continue
               </span>
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="ms-auto flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
                 <Kbd>Esc</Kbd>
                 close
               </span>
