@@ -3,6 +3,7 @@ import type { VariantProps } from "class-variance-authority";
 import { Star } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 
+import { Logo } from "@/components/Logo";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
@@ -60,12 +61,8 @@ function Nav() {
   return (
     <header className="border-b border-border/60">
       <div className="mx-auto flex h-14 w-full max-w-2xl items-center justify-between px-6">
-        <a
-          href="/"
-          className="flex items-center gap-2 font-mono text-[15px] font-semibold tracking-tight"
-        >
-          <Dot className="size-2.5" />
-          dotflowy
+        <a href="/" className="flex items-center">
+          <Logo className="h-5 w-auto" />
         </a>
         <nav className="flex items-center gap-1 sm:gap-2">
           <LinkButton href={GITHUB_URL} external variant="ghost" size="sm">
