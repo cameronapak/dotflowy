@@ -1,7 +1,7 @@
 // Quick-add: a distraction-free capture surface (ADR 0049). Core chrome mounted
-// once in `__root.tsx`, opened by Opt+Cmd+N / a Cmd+K action / the mobile FAB
-// (a later session). It captures a REAL node in one gesture and never shows you
-// Today unless you choose to look:
+// once in `__root.tsx`, opened by the bare "q" hotkey (Todoist parity -- fired
+// only when you're not typing) / a Cmd+K action / the mobile FAB. It captures a
+// REAL node in one gesture and never shows you Today unless you choose to look:
 //
 //  - The node is BORN on the first keystroke in the current destination, edited
 //    live-synced. An untouched or fully-cleared capture leaves NOTHING behind
@@ -50,6 +50,7 @@ import {
 import {
   forwardRef,
   Fragment,
+  type ReactNode,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -127,6 +128,7 @@ import {
 } from "./ui/command";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { Kbd, KbdGroup } from "./ui/kbd";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 /** A concrete destination a target pick yields: the parent node id (null = top
  *  level) plus its label. The overlay wraps it into a lazy {@link
@@ -413,7 +415,7 @@ function CaptureTargetPicker({
   const label = (n: Node) => n.text.trim() || "Untitled";
 
   return (
-    <Command shouldFilter={false} className="rounded-md border">
+    <Command shouldFilter={false}>
       <CommandInput
         autoFocus
         value={query}
@@ -457,16 +459,70 @@ function CaptureTargetPicker({
   );
 }
 
+/** The destination selector: a trigger button whose press opens the {@link
+ *  CaptureTargetPicker} in an origin-aware popover ANCHORED to the button (ADR
+ *  0049 refinement -- was an in-place swap that shoved the capture text around).
+ *  Shared by the current-draft chip and each session row, so the two rank the
+ *  same query identically and neither reflows the overlay when picking. Base UI's
+ *  Popover scales from `--transform-origin` and knows it's a child popup of the
+ *  Quick-add Dialog, so the dialog's focus trap lets the picker input take focus.
+ */
+function DestinationButton({
+  index,
+  excludeId,
+  onPick,
+  triggerClassName,
+  title,
+  children,
+  ...dataProps
+}: {
+  index: TreeIndex;
+  /** The node being (re)targeted -- excluded from its own destination list. */
+  excludeId: string | null;
+  onPick: (target: PickTarget) => void;
+  triggerClassName?: string;
+  title?: string;
+  children: ReactNode;
+  /** e.g. `data-quick-add-dest` for the e2e chip locator. */
+  "data-quick-add-dest"?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger className={triggerClassName} title={title} {...dataProps}>
+        {children}
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="w-80 max-w-[calc(100vw-2rem)] gap-0 p-0"
+      >
+        <CaptureTargetPicker
+          index={index}
+          excludeId={excludeId}
+          onPick={(target) => {
+            setOpen(false);
+            onPick(target);
+          }}
+          onCancel={() => setOpen(false)}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // --- The session-capture list ----------------------------------------------
 
 function SessionCaptureRow({
   id,
   label,
+  index,
   onRelocate,
 }: {
   id: string;
   label: string;
-  onRelocate: () => void;
+  index: TreeIndex;
+  onRelocate: (target: PickTarget) => void;
 }) {
   const node = useNode(id);
   // A discarded capture (undo, or a later empty-clear) drops out of the list.
@@ -476,14 +532,15 @@ function SessionCaptureRow({
     <li className="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted">
       <CornerDownLeftIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
       <span className="min-w-0 flex-1 truncate">{text}</span>
-      <button
-        type="button"
-        onClick={onRelocate}
-        className="max-w-40 shrink-0 truncate rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
+      <DestinationButton
+        index={index}
+        excludeId={id}
+        onPick={onRelocate}
         title={label}
+        triggerClassName="max-w-40 shrink-0 truncate rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-transform hover:bg-muted-foreground/10 active:scale-[0.97]"
       >
         {label}
-      </button>
+      </DestinationButton>
     </li>
   );
 }
@@ -599,9 +656,6 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const [draftId, setDraftId] = useState<string | null>(null);
 
   const [captures, setCaptures] = useState<Capture[]>([]);
-  // Which surface the target picker is retargeting: the current draft
-  // ("current") or a committed session row (its id). Null = picker closed.
-  const [picking, setPicking] = useState<"current" | string | null>(null);
 
   const liveDraft = useNode(draftId ?? "");
   const node = draftId && liveDraft ? liveDraft : PLACEHOLDER_NODE;
@@ -834,31 +888,35 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     close();
   }, [close, startBorn, navigate]);
 
-  const onPickTarget = useCallback(
+  // Retarget the CURRENT draft (the input's destination popover). Update BOTH the
+  // resolver (for a born that hasn't resolved yet) AND `desiredParent` (for one
+  // whose resolve already returned the stale parent) -- so wherever the in-flight
+  // born is, it lands under the pick (bug 3). A born draft live-moves now. Focus
+  // returns to the editor next frame, after Base UI settles the popover close.
+  const retargetCurrent = useCallback(
     (target: PickTarget) => {
-      const which = picking;
-      setPicking(null);
-      if (which === "current") {
-        // Retarget the CURRENT draft. Update BOTH the resolver (for a born that
-        // hasn't resolved yet) AND `desiredParent` (for one whose resolve already
-        // returned the stale parent) -- so wherever the in-flight born is, it
-        // lands under the pick (bug 3). A born draft live-moves now.
-        setDest({ label: target.label, resolve: async () => target.parentId });
-        const d = draftRef.current!;
-        d.resolveParent = async () => target.parentId;
-        d.desiredParent = { value: target.parentId };
-        if (d.id) relocate(d.id, target.parentId);
-        editorRef.current?.focus();
-      } else if (which) {
-        relocate(which, target.parentId);
-        setCaptures((c) =>
-          c.map((row) =>
-            row.id === which ? { ...row, label: target.label } : row,
-          ),
-        );
-      }
+      setDest({ label: target.label, resolve: async () => target.parentId });
+      const d = draftRef.current!;
+      d.resolveParent = async () => target.parentId;
+      d.desiredParent = { value: target.parentId };
+      if (d.id) relocate(d.id, target.parentId);
+      requestAnimationFrame(() => editorRef.current?.focus());
     },
-    [picking, relocate],
+    [relocate],
+  );
+
+  // Relocate a committed session row (its own destination popover). The node is
+  // already live in its old destination; this live-moves it and re-labels the row.
+  const relocateRow = useCallback(
+    (rowId: string, target: PickTarget) => {
+      relocate(rowId, target.parentId);
+      setCaptures((c) =>
+        c.map((row) =>
+          row.id === rowId ? { ...row, label: target.label } : row,
+        ),
+      );
+    },
+    [relocate],
   );
 
   // The PluginContext the slash/menu commands run with. Curated: text edits and
@@ -981,7 +1039,9 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
 
           {/* Input row: the command-center InputGroup vibe with the destination
             pill trailing (the Raycast spot). The editor is a contentEditable, so
-            the InputGroup look is replicated on a plain container. */}
+            the InputGroup look is replicated on a plain container. The pill opens
+            the destination picker in an anchored popover -- no in-place swap, so
+            the capture text never shifts (ADR 0049 refinement). */}
           <div className="p-1 pb-0">
             <div className="flex min-h-9 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
               <PlusIcon className="size-4 shrink-0 opacity-60" />
@@ -996,37 +1056,22 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                   onEscape={close}
                 />
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setPicking(picking === "current" ? null : "current")
-                }
-                className="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+              <DestinationButton
+                index={index}
+                excludeId={draftId}
+                onPick={retargetCurrent}
                 title={`Capture into ${dest.label}`}
                 data-quick-add-dest={dest.label}
+                triggerClassName="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs transition-transform hover:bg-muted active:scale-[0.97]"
               >
                 {destIcon}
                 <span className="max-w-40 truncate font-medium">
                   {dest.label}
                 </span>
                 <ChevronDownIcon className="size-3 text-muted-foreground" />
-              </button>
+              </DestinationButton>
             </div>
           </div>
-
-          {picking === "current" && (
-            <div className="p-1 pb-0">
-              <CaptureTargetPicker
-                index={index}
-                excludeId={draftId}
-                onPick={onPickTarget}
-                onCancel={() => {
-                  setPicking(null);
-                  editorRef.current?.focus();
-                }}
-              />
-            </div>
-          )}
 
           {captures.length > 0 && (
             <div className="min-h-0 flex-1 overflow-y-auto p-1">
@@ -1039,42 +1084,35 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                     key={c.id}
                     id={c.id}
                     label={c.label}
-                    onRelocate={() =>
-                      setPicking(picking === c.id ? null : c.id)
-                    }
+                    index={index}
+                    onRelocate={(target) => relocateRow(c.id, target)}
                   />
                 ))}
               </ul>
-              {picking && picking !== "current" && (
-                <div className="pt-1">
-                  <CaptureTargetPicker
-                    index={index}
-                    excludeId={picking}
-                    onPick={onPickTarget}
-                    onCancel={() => setPicking(null)}
-                  />
-                </div>
-              )}
             </div>
           )}
 
-          <div className="flex items-center gap-4 border-t px-3 py-2">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Kbd>Enter</Kbd>
-              save &amp; close
-            </span>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <KbdGroup>
-                <Kbd>⌘</Kbd>
+          {/* The keyboard-shortcut legend is meaningless on a touch keyboard, so
+              it's fine-pointer only (ADR 0049 refinement / ADR 0030 discipline). */}
+          {!coarse && (
+            <div className="flex items-center gap-4 border-t px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Kbd>Enter</Kbd>
-              </KbdGroup>
-              save &amp; keep going
-            </span>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Kbd>Esc</Kbd>
-              close
-            </span>
-          </div>
+                save &amp; close
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <KbdGroup>
+                  <Kbd>⌘</Kbd>
+                  <Kbd>Enter</Kbd>
+                </KbdGroup>
+                save &amp; keep going
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Kbd>Esc</Kbd>
+                close
+              </span>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -1138,7 +1176,7 @@ function QuickAddFab({ onOpen }: { onOpen: () => void }) {
 }
 
 /**
- * The quick-add shell (ADR 0049): registers the opener + the global Opt+Cmd+N
+ * The quick-add shell (ADR 0049): registers the opener + the global bare-"q"
  * hotkey, mounts the mobile FAB (coarse pointer), and mounts the overlay when
  * open. Client-only (the overlay reads the live tree via TanStack DB, which
  * hard-fails the `/` prerender -- ADR 0004), so it renders nothing until
@@ -1161,12 +1199,22 @@ export function QuickAdd() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // Opt+Cmd+N (Workflowy Quick Add parity). `code === "KeyN"` because Option
-      // turns the `n` KEY into a dead-key/composed char on macOS.
-      if (e.altKey && (e.metaKey || e.ctrlKey) && e.code === "KeyN") {
-        e.preventDefault();
-        if (!openRef.current) setOpen(true);
-      }
+      // Bare "q" opens Quick-add when you're NOT typing (Todoist parity), replacing
+      // Opt+Cmd+N -- browsers and macOS swallow that chord (the in-app browser ate
+      // it too). The guards make an accidental open near-impossible: no modifier
+      // held (so Cmd/Ctrl/Alt shortcuts pass through), the focus isn't in any text
+      // field or contentEditable (so typing "q" in a bullet is untouched), and no
+      // dialog is already open (Cmd+K, a confirm dialog, or Quick-add itself).
+      if (e.key !== "q" && e.key !== "Q") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (openRef.current) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el?.isContentEditable) return;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (document.querySelector('[role="dialog"]')) return;
+      e.preventDefault();
+      setOpen(true);
     }
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>

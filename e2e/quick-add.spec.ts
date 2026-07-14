@@ -25,11 +25,21 @@ async function load(page: Page) {
   ).toBeVisible();
 }
 
-/** Open quick-add via the global Opt+Cmd+N hotkey, then wait for the destination
- *  to resolve to Today (a kv get-or-create round-trip) before returning -- typing
- *  before it settles would race the born-in-destination decision. */
+/** Press the global bare-"q" hotkey (Todoist parity, ADR 0049 refinement). It's
+ *  guarded on "not typing", so blur any focused bullet first -- otherwise the "q"
+ *  just types into the outline. */
+async function pressQuickAddKey(page: Page) {
+  await page.evaluate(() =>
+    (document.activeElement as HTMLElement | null)?.blur(),
+  );
+  await page.keyboard.press("q");
+}
+
+/** Open quick-add via the "q" hotkey, then wait for the destination to resolve to
+ *  Today (a kv get-or-create round-trip) before returning -- typing before it
+ *  settles would race the born-in-destination decision. */
 async function openQuickAdd(page: Page) {
-  await page.keyboard.press("Alt+Meta+KeyN");
+  await pressQuickAddKey(page);
   await expect(dialog(page)).toBeVisible();
   await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Today");
   await editor(page).click();
@@ -79,12 +89,27 @@ async function parentIdOf(page: Page, text: string): Promise<string | null> {
 }
 
 test.describe("quick-add capture", () => {
-  test("Opt+Cmd+N opens the overlay and Esc closes it", async ({ page }) => {
+  test("the 'q' hotkey opens the overlay and Esc closes it", async ({
+    page,
+  }) => {
     await load(page);
-    await page.keyboard.press("Alt+Meta+KeyN");
+    await pressQuickAddKey(page);
     await expect(dialog(page)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog(page)).toBeHidden();
+  });
+
+  test("'q' while typing in a bullet does NOT open the overlay", async ({
+    page,
+  }) => {
+    await load(page);
+    // Focus a bullet and type a word containing "q" -- the guard must let it
+    // through to the contentEditable rather than summoning quick-add.
+    const alpha = page.locator('li[data-node-id="alpha"] .node-text');
+    await alpha.click();
+    await page.keyboard.type("quick");
+    await expect(dialog(page)).toBeHidden();
+    await expect(alpha).toContainText("quick");
   });
 
   test("rapid-fire Cmd+Enter commits each capture as a sibling at the bottom of Today", async ({
@@ -238,7 +263,7 @@ test.describe("quick-add capture", () => {
     page,
   }) => {
     await load(page);
-    await page.keyboard.press("Alt+Meta+KeyN");
+    await pressQuickAddKey(page);
     await expect(dialog(page)).toBeVisible();
     // The chip reads Today immediately (label is known without creating anything).
     await expect(destChip(page)).toHaveAttribute(
@@ -289,12 +314,23 @@ test.describe("quick-add capture", () => {
     await expect(rowWithText(page, "kept-on-close")).toBeVisible();
   });
 
+  test("the keyboard-shortcut legend shows on a fine pointer", async ({
+    page,
+  }) => {
+    await load(page);
+    await openQuickAdd(page);
+    // The Enter / Cmd+Enter / Esc legend is useful on a physical keyboard; the
+    // mobile block below asserts it's gone on a touch pointer (ADR 0049 refinement).
+    await expect(dialog(page).getByText("save & close")).toBeVisible();
+  });
+
   test("the Today chip retargets the current capture", async ({ page }) => {
     await load(page);
     await openQuickAdd(page);
     await type(page, "moved-capture");
 
-    // Open the retarget picker and choose Bravo.
+    // Open the retarget picker (an anchored popover over the chip) and choose
+    // Bravo -- the picker input is portaled but reachable by its placeholder.
     await destChip(page).click();
     const picker = page.getByPlaceholder("Capture into…");
     await expect(picker).toBeVisible();
@@ -519,6 +555,17 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
     await expect(fab(page)).toBeVisible();
     await fab(page).tap();
     await expect(dialog(page)).toBeVisible();
+  });
+
+  test("hides the keyboard-shortcut legend on a touch pointer", async ({
+    page,
+  }) => {
+    await load(page);
+    await fab(page).tap();
+    await expect(dialog(page)).toBeVisible();
+    // The Enter / Cmd+Enter / Esc legend is meaningless on a software keyboard
+    // and is fine-pointer only now (ADR 0049 refinement).
+    await expect(dialog(page).getByText("save & close")).toHaveCount(0);
   });
 
   test("is hidden while a bullet is being edited (complement of the mobile bar)", async ({
