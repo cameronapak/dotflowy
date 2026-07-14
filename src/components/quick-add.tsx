@@ -6,13 +6,24 @@
 //  - The node is BORN on the first keystroke in the current destination, edited
 //    live-synced. An untouched or fully-cleared capture leaves NOTHING behind
 //    (discard-if-empty).
-//  - Enter = commit & next (clears the editor, overlay stays open); Esc closes.
+//  - Enter = commit & CLOSE (ADR 0049 amendment): files the single node and
+//    dismisses the overlay. If you're NOT viewing the destination (the current
+//    zoom root differs from where it landed), a sonner toast confirms it with a
+//    "Go there" action that zooms to the destination. An empty Enter just closes.
+//  - Cmd+Enter = commit & NEXT: files the node, clears the editor, keeps the
+//    overlay open, and appends to the session list -- the rapid-fire burst path.
+//    (This DROPS the mini-editor's old Mod+Enter bindings -- the inline-link-open
+//    special case and todos' toggle-task; todo toggle stays on /todo and Mod+D.)
 //    Each capture is its own sibling appended at the BOTTOM of the destination.
 //  - The destination defaults to Today via the `captureDestination` seam (the
 //    daily plugin fills it, seed-free -- core never imports daily). A `Today ▾`
 //    chip retargets the CURRENT node; the destination resets to Today per node.
-//  - A quiet running list of THIS session's captures gives proof-of-capture
-//    without peeking at Today; each row relocates inline.
+//  - A quiet running list of THIS session's captures gives proof-of-capture in
+//    the Cmd+Enter multi-capture flow (Enter closes before it's useful); each
+//    row relocates inline.
+//  - Once a capture is BORN, the node's before-text slots (Seam F -- the todos
+//    checkbox et al.) render inline in the mini-editor, mirroring ZoomedTitle, so
+//    `/todo` shows a real checkbox. Decoration only -- no structural nav leaks.
 //  - Every commit and live-move is ONE `runStructural` batch (ADR 0009).
 //
 // The surface is a full mini single-node editor (`MiniNodeEditor`) so #tags,
@@ -26,6 +37,7 @@
 // the capture can never act in the destination's context.
 
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
+import { useNavigate } from "@tanstack/react-router";
 import { Cause, Effect } from "effect";
 import Fuse from "fuse.js";
 import {
@@ -37,6 +49,7 @@ import {
 } from "lucide-react";
 import {
   forwardRef,
+  Fragment,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -45,6 +58,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 
@@ -52,6 +66,7 @@ import type {
   CaptureDestination,
   CommandSpec,
   PluginContext,
+  SlotSpec,
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
@@ -76,9 +91,14 @@ import {
   type TreeIndex,
 } from "../data/tree";
 import { getTreeIndex, useNode } from "../data/tree-store";
+import { getViewRootId } from "../data/view-state";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
-import { getCaptureDestination, keymapSpecs } from "../plugins/registry";
+import {
+  getCaptureDestination,
+  keymapSpecs,
+  slotsAt,
+} from "../plugins/registry";
 import {
   decorate,
   getCaretOffset,
@@ -86,7 +106,6 @@ import {
   revealLinkAtCaret,
   watchCaretReveal,
 } from "./inline-code";
-import { openInlineTargetAtCaret } from "./link-keymap";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
@@ -107,7 +126,7 @@ import {
   CommandList,
 } from "./ui/command";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
-import { Kbd } from "./ui/kbd";
+import { Kbd, KbdGroup } from "./ui/kbd";
 
 /** A concrete destination a target pick yields: the parent node id (null = top
  *  level) plus its label. The overlay wraps it into a lazy {@link
@@ -160,21 +179,32 @@ export interface MiniEditorHandle {
  *
  *  DRIFT OBLIGATION (ADR 0049): this handler block deliberately MIRRORS
  *  `ZoomedTitle`'s contentEditable wiring (onInput/onPaste/onCopy/onCut/onFocus/
- *  onBlur/onKeyDown + the slash/menus engines + the caret-reveal watcher). The
- *  duplication is accepted rather than extracting a shared hook (that would touch
- *  the outline's hot path for one consumer). When you change caret/decorate/menu
- *  behavior in ZoomedTitle, mirror it here (and vice versa). */
+ *  onBlur/onKeyDown + the slash/menus engines + the caret-reveal watcher + the
+ *  `*:before-text` node slots -- the THIRD render path for a node's decorations,
+ *  AGENTS.md "a node renders in TWO paths"). The duplication is accepted rather
+ *  than extracting a shared hook (that would touch the outline's hot path for one
+ *  consumer). When you change caret/decorate/menu/slot behavior in ZoomedTitle,
+ *  mirror it here (and vice versa). Two DELIBERATE divergences from the title:
+ *  (1) the keymap is text-authoring-only -- Enter commits & closes, Cmd+Enter
+ *  commits & continues, and the title's Mod+Enter (inline-link-open + todos
+ *  toggle) is DROPPED here (todo toggle stays on /todo + Mod+D); (2) only the
+ *  PLUGIN slots render, and only once BORN -- the core paragraph-mark/protected-
+ *  lock/mirror-badge decorations are omitted (a fresh capture is never a
+ *  paragraph title, protected, or a mirror source). */
 const MiniNodeEditor = forwardRef<
   MiniEditorHandle,
   {
     node: Node;
     getCtx: () => PluginContext;
     onText: (text: string) => void;
+    /** Enter: commit the single node & close the overlay (toast if off-page). */
     onCommit: () => void;
+    /** Cmd+Enter: commit & keep going -- clear the editor, overlay stays open. */
+    onCommitNext: () => void;
     onEscape: () => void;
   }
 >(function MiniNodeEditor(
-  { node, getCtx, onText, onCommit, onEscape },
+  { node, getCtx, onText, onCommit, onCommitNext, onEscape },
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -217,32 +247,46 @@ const MiniNodeEditor = forwardRef<
   // Text-authoring keymap ONLY (ADR 0049): the plugin keymaps (emphasis Mod+B/I/
   // U, highlight, spoiler, todos toggle) all format text or node state -- none is
   // structural nav (indent/move/zoom are core-reserved keys we never wire here).
-  // Enter commits & starts the next capture; Escape closes the overlay.
+  //
+  // Enter = commit & CLOSE; Cmd+Enter = commit & keep going (ADR 0049 amendment).
+  // Cmd+Enter is claimed OUTRIGHT here, so the mini-editor DROPS the title path's
+  // two Mod+Enter behaviors: the inline-link-open special case AND todos'
+  // toggle-task keymap contribution (filtered out below). Todo toggle stays
+  // reachable via `/todo` and Mod+D -- this suppression is scoped to quick-add;
+  // OutlineRow/ZoomedTitle keep their Mod+Enter bindings.
   useHotkeys(
     [
       { hotkey: "Enter", callback: () => onCommit() },
+      { hotkey: "Mod+Enter", callback: () => onCommitNext() },
       { hotkey: "Escape", callback: () => onEscape() },
-      ...keymapSpecs.map((k) => ({
-        hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
-        callback: () => {
-          const el = ref.current;
-          if (
-            k.hotkey === "Mod+Enter" &&
-            el &&
-            openInlineTargetAtCaret(el, getCtx(), { linkParens: "edit" })
-          ) {
-            return;
-          }
-          k.run(node.id, getCtx());
-        },
-      })),
+      ...keymapSpecs
+        .filter((k) => k.hotkey !== "Mod+Enter")
+        .map((k) => ({
+          hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
+          callback: () => k.run(node.id, getCtx()),
+        })),
     ],
     // Suspend while a menu owns the keys, exactly like ZoomedTitle.
     { target: ref, enabled: !slash.isOpen && !menus.isOpen },
   );
 
+  // The node's before-text slots (Seam F), mirroring ZoomedTitle's
+  // `title:before-text` wiring -- but ONLY the plugin slots (todos checkbox et
+  // al.) and ONLY once the draft is BORN. Before born the node is the
+  // PLACEHOLDER_NODE (a fake id), whose `getCtx().mutations` would target the
+  // placeholder; a slot's own onChange must never fire against it. Node-state is
+  // queued as an intent until born (runNodeIntent), so `/todo` on an unborn draft
+  // sets no checkbox yet -- it appears the instant the node is real (ADR 0049).
+  const born = node.id !== PLACEHOLDER_NODE.id;
+  const beforeTextSlots: readonly SlotSpec[] = born
+    ? slotsAt("title:before-text")
+    : [];
+
   return (
     <div className="quick-add-editor">
+      {beforeTextSlots.map((slot) => (
+        <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
+      ))}
       <span
         ref={ref}
         className="node-text"
@@ -524,6 +568,10 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
 
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const editorRef = useRef<MiniEditorHandle | null>(null);
+  // The off-page toast's "Go there" zooms to the destination (ADR 0049
+  // amendment). Quick-add is mounted in `__root.tsx`, inside the router, so the
+  // TanStack navigate is available here just as it is to move-dialog/daily.
+  const navigate = useNavigate();
   // Position signal (ADR 0030): lift the panel above the software keyboard on a
   // coarse pointer; a fine pointer centers it and ignores the offset.
   const coarse = useCoarsePointer();
@@ -743,6 +791,48 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     onClose();
   }, [discardDraftIfEmpty, startBorn, onClose]);
 
+  // Enter = commit & CLOSE (ADR 0049 amendment). Files the SINGLE current draft,
+  // then dismisses the overlay. When the destination isn't the view you're on
+  // (its parent differs from the current zoom root), a toast confirms the landing
+  // with a "Go there" that zooms to it -- the toast REPLACES the session list as
+  // proof-of-capture for the one-and-done case. An empty Enter just closes.
+  //
+  // Reuses `close()` for teardown: `close()` itself borns a non-empty unborn
+  // draft (idempotent with the `startBorn` below -- both return the SAME cached
+  // promise) and discards an empty one, so the only extra work here is snapshotting
+  // the label and firing the toast once the id settles. The `.then(notify)` is a
+  // NEW async path off the born, so it's exercised via the deferred-resolve seam.
+  const commitAndClose = useCallback(() => {
+    const d = draftRef.current!;
+    const text = editorRef.current?.readText() ?? "";
+    d.text = text;
+    if (text.trim() !== "") {
+      // Snapshot the label NOW so a retarget that settles mid-flight can't change
+      // the toast copy from under us (the born still lands under the live target).
+      const label = destRef.current.label;
+      const notify = (id: string | null) => {
+        if (!id) return;
+        // The born node's parent IS the destination -- read it back rather than
+        // re-resolving, so a mid-flight retarget is reflected. If you're already
+        // viewing that parent (its zoom root), the capture is on screen: no toast.
+        const parentId = getTreeIndex().byId.get(id)?.parentId ?? null;
+        if (parentId === getViewRootId()) return;
+        toast.success(`Added to ${label}`, {
+          action: {
+            label: "Go there",
+            onClick: () => {
+              if (parentId === null) navigate({ to: "/" });
+              else navigate({ to: "/$nodeId", params: { nodeId: parentId } });
+            },
+          },
+        });
+      };
+      if (d.id) notify(d.id);
+      else void startBorn(d).then(notify);
+    }
+    close();
+  }, [close, startBorn, navigate]);
+
   const onPickTarget = useCallback(
     (target: PickTarget) => {
       const which = picking;
@@ -900,7 +990,8 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                   node={node}
                   getCtx={getCtx}
                   onText={commitText}
-                  onCommit={commitAndNext}
+                  onCommit={commitAndClose}
+                  onCommitNext={commitAndNext}
                   onEscape={close}
                 />
               </div>
@@ -967,6 +1058,13 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-4 border-t px-3 py-2">
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Kbd>Enter</Kbd>
+              save &amp; close
+            </span>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <KbdGroup>
+                <Kbd>⌘</Kbd>
+                <Kbd>Enter</Kbd>
+              </KbdGroup>
               save &amp; keep going
             </span>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
