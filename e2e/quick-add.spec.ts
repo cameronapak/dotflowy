@@ -40,6 +40,16 @@ async function type(page: Page, text: string) {
   await page.keyboard.type(text);
 }
 
+// Cmd+Enter = commit & next (the rapid-fire burst key, ADR 0049 amendment):
+// commits the current node, clears the editor, keeps the overlay open, appends
+// to the session list. Plain Enter now commits & CLOSES.
+async function commitNext(page: Page) {
+  await page.keyboard.press(`${modifier()}+Enter`);
+}
+
+const toastByText = (page: Page, text: string) =>
+  page.locator("[data-sonner-toast]", { hasText: text });
+
 // The deferred-resolve test seam (ADR 0049): hold the destination resolve open
 // to exercise the in-flight-born window (clear/retarget/slash while borning),
 // which the seedOutline Map mock otherwise resolves in a microtask.
@@ -77,18 +87,26 @@ test.describe("quick-add capture", () => {
     await expect(dialog(page)).toBeHidden();
   });
 
-  test("rapid-fire Enter commits each capture as a sibling at the bottom of Today", async ({
+  test("rapid-fire Cmd+Enter commits each capture as a sibling at the bottom of Today", async ({
     page,
   }) => {
     await load(page);
     await openQuickAdd(page);
 
     await type(page, "first-capture");
-    await page.keyboard.press("Enter");
-    await type(page, "second-capture");
-    await page.keyboard.press("Enter");
+    await commitNext(page);
+    // Wait for the first capture to land in the session list (and the editor to
+    // clear) before typing the next -- otherwise the second type() races the
+    // post-commit re-render and drops keystrokes under parallel load.
+    await expect(dialog(page)).toContainText("first-capture");
+    await expect(editor(page)).toHaveText("");
 
-    // The running session list proves both landed without peeking at Today.
+    await type(page, "second-capture");
+    await commitNext(page);
+
+    // Cmd+Enter keeps the overlay open; the running session list proves both
+    // landed without peeking at Today.
+    await expect(dialog(page)).toBeVisible();
     await expect(dialog(page)).toContainText("first-capture");
     await expect(dialog(page)).toContainText("second-capture");
 
@@ -115,6 +133,105 @@ test.describe("quick-add capture", () => {
       return rows.indexOf(el.closest("li[data-node-id]")!);
     });
     expect(firstIdx).toBeLessThan(secondIdx);
+  });
+
+  test("Enter commits the single node and closes the overlay", async ({
+    page,
+  }) => {
+    await load(page);
+    await openQuickAdd(page);
+
+    await type(page, "one-and-done");
+    await page.keyboard.press("Enter");
+
+    // Enter closes (commit & close), unlike Cmd+Enter which keeps going.
+    await expect(dialog(page)).toBeHidden();
+
+    // The node still landed in Today (commit-immediately).
+    await todayButton(page).click();
+    await expect(rowWithText(page, "one-and-done")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("Enter shows an off-page toast whose 'Go there' zooms to the destination", async ({
+    page,
+  }) => {
+    await load(page);
+    // We're on the top-level home view, NOT on Today -- so a capture to Today is
+    // off-page and must announce itself.
+    await openQuickAdd(page);
+    await type(page, "toasted-note");
+    await page.keyboard.press("Enter");
+
+    const toast = toastByText(page, "Added to Today");
+    await expect(toast).toBeVisible({ timeout: 10_000 });
+
+    // "Go there" zooms to Today, where the capture is waiting.
+    await toast.getByRole("button", { name: "Go there" }).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await expect(rowWithText(page, "toasted-note")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("Enter fires no toast when you're already viewing the destination", async ({
+    page,
+  }) => {
+    await load(page);
+    // Zoom into Today FIRST, so the capture lands in the view we're already on.
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+
+    await openQuickAdd(page);
+    await type(page, "silent-note");
+    await page.keyboard.press("Enter");
+    await expect(dialog(page)).toBeHidden();
+
+    // On-page: the node is already on screen, so no toast interrupts.
+    await expect(rowWithText(page, "silent-note")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(toastByText(page, "Added to")).toHaveCount(0);
+  });
+
+  test("/todo shows the checkbox inline once the capture is born", async ({
+    page,
+  }) => {
+    await load(page);
+    await openQuickAdd(page);
+
+    await type(page, "grab coffee");
+    // Turn the born capture into a to-do via the slash palette.
+    await page.keyboard.type(" /todo");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Enter");
+
+    // The Seam-F checkbox now renders inline in the mini-editor (flow 3), just
+    // like a normal node -- proving the third render path wires the node slots.
+    await expect(
+      dialog(page).locator(".quick-add-editor .checkbox"),
+    ).toBeVisible();
+  });
+
+  test("progressive Escape: the first press closes an open menu, the next closes the dialog", async ({
+    page,
+  }) => {
+    await load(page);
+    await openQuickAdd(page);
+
+    // Open the `/` palette, then Escape once -- the menu closes but the dialog
+    // stays (Base UI's document Escape listener is stopped while a listbox is up).
+    await type(page, "note ");
+    await page.keyboard.type("/");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toBeHidden();
+    await expect(dialog(page)).toBeVisible();
+
+    // A second Escape now closes the whole overlay.
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toBeHidden();
   });
 
   test("open + abandon (no keystroke) leaves no today note (lazy resolve)", async ({
@@ -239,7 +356,7 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
     // The now-idle draft must accept a fresh keystroke (no poisoned dead promise).
     await page.waitForTimeout(50);
     await type(page, "bbb");
-    await page.keyboard.press("Enter");
+    await commitNext(page);
 
     await expect(dialog(page)).toContainText("bbb");
     await page.keyboard.press("Escape");
@@ -262,7 +379,7 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
       "data-quick-add-dest",
       "Bravo",
     );
-    await page.keyboard.press("Enter"); // files note-one under Bravo
+    await commitNext(page); // files note-one under Bravo, keeps the overlay open
 
     // The fresh draft must be back on Today, not still Bravo.
     await expect(destChip(page)).toHaveAttribute(
@@ -270,7 +387,7 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
       "Today",
     );
     await type(page, "note-two");
-    await page.keyboard.press("Enter");
+    await commitNext(page);
 
     await expect(dialog(page)).toContainText("note-two");
     await page.keyboard.press("Escape");
@@ -299,7 +416,7 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
     await page.getByRole("option", { name: "Charlie" }).click();
     await releaseResolve(page); // born resolves under the NEW target
 
-    await page.keyboard.press("Enter");
+    await commitNext(page);
     await expect(dialog(page)).toContainText("relocated");
     await page.keyboard.press("Escape");
 
@@ -324,7 +441,7 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
     await page.keyboard.press("Enter"); // selects To-do -> intent queued, not applied to placeholder
     await releaseResolve(page); // born creates the node + applies the queued task intent
 
-    await page.keyboard.press("Enter"); // commit
+    await commitNext(page); // commit, keep the overlay open to read the session list
     await expect(dialog(page)).toContainText("buy milk");
     await page.keyboard.press("Escape");
     await todayButton(page).click();
@@ -335,7 +452,7 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
     expect(errors).toEqual([]);
   });
 
-  test("rapid-fire Enter preserves order under a slow resolve (bug 6)", async ({
+  test("rapid-fire Cmd+Enter preserves order under a slow resolve (bug 6)", async ({
     page,
   }) => {
     await load(page);
@@ -343,9 +460,13 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
 
     await holdResolve(page);
     await type(page, "alpha-cap");
-    await page.keyboard.press("Enter");
+    await commitNext(page);
+    // resetDraft clears the editor synchronously even while the born is held;
+    // wait for that before the next type so keystrokes aren't dropped by the
+    // post-commit re-render under load.
+    await expect(editor(page)).toHaveText("");
     await type(page, "beta-cap");
-    await page.keyboard.press("Enter");
+    await commitNext(page);
     await releaseResolve(page); // both borns unblock; creates must run in order
 
     await expect(dialog(page)).toContainText("alpha-cap");
