@@ -1003,7 +1003,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         animate={false}
         aria-label="Quick add"
         className={cn(
-          "flex max-h-[85vh] w-[calc(100%-2rem)] max-w-xl flex-col gap-0 overflow-hidden rounded-xl! p-0",
+          // `sm:max-w-lg` (not a bare `max-w-*`): the DialogContent base carries
+          // `sm:max-w-sm`, which outlives any unprefixed max-width at that
+          // breakpoint -- the wider capture surface must override it in kind.
+          "flex max-h-[85vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
           coarse ? "top-auto bottom-4 translate-y-0" : "top-1/3 translate-y-0",
         )}
         style={
@@ -1037,12 +1040,12 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         >
           <DialogTitle className="sr-only">Quick add</DialogTitle>
 
-          {/* Input row: the command-center InputGroup vibe with the destination
-            pill trailing (the Raycast spot). The editor is a contentEditable, so
-            the InputGroup look is replicated on a plain container. The pill opens
-            the destination picker in an anchored popover -- no in-place swap, so
-            the capture text never shifts (ADR 0049 refinement). */}
-          <div className="p-3 pb-0">
+          {/* Input row: the command-center InputGroup vibe. Full-width -- nothing
+            shares the line, so a growing draft never fights another control for
+            space (the destination lives in the footer now). The editor is a
+            contentEditable, so the InputGroup look is replicated on a plain
+            container. */}
+          <div className="p-3">
             <div className="flex min-h-9 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-3 py-2 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
               <PlusIcon className="size-4 shrink-0 opacity-60" />
               <div className="min-w-0 flex-1">
@@ -1057,28 +1060,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                 />
               </div>
             </div>
-            {/* Destination pill on its own right-aligned row below the input, so a
-                growing label never squishes the editor's width (ADR 0049 UX fix). */}
-            <div className="mt-2.5 flex justify-end pb-3">
-              <DestinationButton
-                index={index}
-                excludeId={draftId}
-                onPick={retargetCurrent}
-                title={`Capture into ${dest.label}`}
-                data-quick-add-dest={dest.label}
-                triggerClassName="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-xs transition-transform hover:bg-muted active:scale-[0.97]"
-              >
-                {destIcon}
-                <span className="max-w-64 truncate font-medium">
-                  {dest.label}
-                </span>
-                <ChevronDownIcon className="size-3 text-muted-foreground" />
-              </DestinationButton>
-            </div>
           </div>
 
           {captures.length > 0 && (
-            <div className="min-h-0 flex-1 overflow-y-auto p-1">
+            <div className="min-h-0 flex-1 overflow-y-auto border-t px-1 py-1">
               <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
                 Captured this session
               </div>
@@ -1096,33 +1081,51 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* The keyboard-shortcut legend is meaningless on a touch keyboard, so
-              it's fine-pointer only (ADR 0049 refinement / ADR 0030 discipline). */}
-          {!coarse && (
-            <div className="flex items-start justify-between border-t px-4 py-2.5">
-              <div className="flex flex-col items-center gap-1">
-                <Kbd>Enter</Kbd>
-                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+          {/* Footer: one calm line (the Todoist quick-add shape). The destination
+              sits bottom-left -- it's a property of WHERE the commit lands, so it
+              reads as part of the save action, and the anchored popover keeps the
+              capture text from shifting (ADR 0049 refinement). The keyboard legend
+              trails on the right. The legend is meaningless on a software keyboard,
+              so it's fine-pointer only (ADR 0030 discipline); the destination pill
+              stays on coarse -- it's the only retarget control on touch. */}
+          {/* `pl-4` + the pill's `px-2` lands the destination glyph on the input's
+              plus-icon column (12px padding + 12px input inset = 24px). */}
+          <div className="flex items-center justify-between gap-3 border-t py-2 pr-3 pl-4">
+            <DestinationButton
+              index={index}
+              excludeId={draftId}
+              onPick={retargetCurrent}
+              title={`Capture into ${dest.label}`}
+              data-quick-add-dest={dest.label}
+              triggerClassName="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-[background-color,transform] duration-100 ease-out hover:bg-muted active:scale-[0.97]"
+            >
+              {destIcon}
+              <span className="max-w-[12rem] truncate font-medium text-foreground">
+                {dest.label}
+              </span>
+              <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
+            </DestinationButton>
+
+            {!coarse && (
+              <div className="flex shrink-0 items-center gap-4 text-[11px] whitespace-nowrap text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Kbd>Enter</Kbd>
                   save &amp; close
                 </span>
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <KbdGroup>
-                  <Kbd>⌘</Kbd>
-                  <Kbd>Enter</Kbd>
-                </KbdGroup>
-                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <KbdGroup>
+                    <Kbd>⌘</Kbd>
+                    <Kbd>Enter</Kbd>
+                  </KbdGroup>
                   save &amp; add more
                 </span>
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <Kbd>Esc</Kbd>
-                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Kbd>Esc</Kbd>
                   close
                 </span>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
