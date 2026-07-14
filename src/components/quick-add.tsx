@@ -1042,8 +1042,8 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
             the InputGroup look is replicated on a plain container. The pill opens
             the destination picker in an anchored popover -- no in-place swap, so
             the capture text never shifts (ADR 0049 refinement). */}
-          <div className="p-1 pb-0">
-            <div className="flex min-h-9 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+          <div className="p-3 pb-0">
+            <div className="flex min-h-9 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-3 py-2 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
               <PlusIcon className="size-4 shrink-0 opacity-60" />
               <div className="min-w-0 flex-1">
                 <MiniNodeEditor
@@ -1059,14 +1059,14 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
             </div>
             {/* Destination pill on its own right-aligned row below the input, so a
                 growing label never squishes the editor's width (ADR 0049 UX fix). */}
-            <div className="mt-1.5 flex justify-end">
+            <div className="mt-2.5 flex justify-end pb-3">
               <DestinationButton
                 index={index}
                 excludeId={draftId}
                 onPick={retargetCurrent}
                 title={`Capture into ${dest.label}`}
                 data-quick-add-dest={dest.label}
-                triggerClassName="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs transition-transform hover:bg-muted active:scale-[0.97]"
+                triggerClassName="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-xs transition-transform hover:bg-muted active:scale-[0.97]"
               >
                 {destIcon}
                 <span className="max-w-64 truncate font-medium">
@@ -1099,22 +1099,28 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
           {/* The keyboard-shortcut legend is meaningless on a touch keyboard, so
               it's fine-pointer only (ADR 0049 refinement / ADR 0030 discipline). */}
           {!coarse && (
-            <div className="flex items-center gap-4 border-t px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+            <div className="flex items-start justify-between border-t px-4 py-2.5">
+              <div className="flex flex-col items-center gap-1">
                 <Kbd>Enter</Kbd>
-                save &amp; close
-              </span>
-              <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+                  save &amp; close
+                </span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
                 <KbdGroup>
                   <Kbd>⌘</Kbd>
                   <Kbd>Enter</Kbd>
                 </KbdGroup>
-                save &amp; continue
-              </span>
-              <span className="ms-auto flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+                  save &amp; add more
+                </span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
                 <Kbd>Esc</Kbd>
-                close
-              </span>
+                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+                  close
+                </span>
+              </div>
             </div>
           )}
         </div>
