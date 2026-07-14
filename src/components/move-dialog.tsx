@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
+import Fuse, { type FuseResultMatch } from "fuse.js";
 import { BookmarkIcon, HomeIcon } from "lucide-react";
 import {
   useEffect,
@@ -17,15 +17,19 @@ import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import {
   buildTrail,
-  childrenOf,
   trueSourceOf,
   type Node,
   type TreeIndex,
 } from "../data/tree";
 import { useTree } from "../data/useTree";
-import { searchAliases, searchAnnotation } from "../plugins/registry";
+import { searchAnnotation } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMoveDialogOpener, type MoveMode } from "./move-dialog-opener";
+import {
+  buildTargetCandidates,
+  subtreeIds,
+  TARGET_SEARCH_OPTIONS,
+} from "./node-target-search";
 import {
   Command,
   CommandDialog,
@@ -55,17 +59,11 @@ import {
  * you away from where you were working.
  */
 
-const FUSE_OPTIONS: IFuseOptions<Node> = {
-  // Plus plugin-contributed aliases (Seam J) so `/move` -> "today" finds the
-  // daily note despite its full-date text. Matched, never highlighted
-  // (textMatchIndices keeps only the "text" key). See ADR 0001.
-  keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
-  includeMatches: true,
-  // Match late in the string too, so "notes" finds "Weekly team notes" (ADR 0012).
-  ignoreLocation: true,
-  threshold: 0.3,
-  minMatchCharLength: 2,
-};
+// The shared destination-search ranking (node-target-search.ts), plus
+// `includeMatches` for the highlighter -- so `/move` and the quick-add retarget
+// chip can't rank the same query differently. Aliases (Seam J) ride along, so
+// `/move` -> "today" finds the daily note despite its full-date text.
+const FUSE_OPTIONS = { ...TARGET_SEARCH_OPTIONS, includeMatches: true };
 
 /** A destination row: a node, plus its Fuse match ranges when searched. */
 interface Hit {
@@ -166,9 +164,7 @@ function MoveDialogInner({
       const rootId = mode === "mirror" ? trueSourceOf(index, id) : id;
       for (const sub of subtreeIds(index, rootId)) excluded.add(sub);
     }
-    return Array.from(index.byId.values()).filter(
-      (n) => !excluded.has(n.id) && n.text.trim() !== "",
-    );
+    return buildTargetCandidates(index, excluded);
   }, [index, nodeIds, mode]);
 
   const fuse = useMemo(
@@ -434,20 +430,4 @@ function highlight(
   });
   if (last < text.length) parts.push(text.slice(last));
   return parts;
-}
-
-/** The node plus every descendant -- the set you can't move it into. */
-function subtreeIds(index: TreeIndex, rootId: string): Set<string> {
-  const ids = new Set<string>([rootId]);
-  const stack = [rootId];
-  while (stack.length) {
-    const id = stack.pop()!;
-    for (const child of childrenOf(index, id)) {
-      if (!ids.has(child.id)) {
-        ids.add(child.id);
-        stack.push(child.id);
-      }
-    }
-  }
-  return ids;
 }

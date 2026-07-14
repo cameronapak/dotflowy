@@ -6,21 +6,21 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "dev"],
       "port": 3000,
-      "autoPort": false
+      "autoPort": true
     },
     {
       "name": "dev:web",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "dev:web"],
       "port": 3000,
-      "autoPort": false
+      "autoPort": true
     },
     {
       "name": "cf:dev",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "cf:dev"],
       "port": 8787,
-      "autoPort": false
+      "autoPort": true
     },
     {
       "name": "landing",

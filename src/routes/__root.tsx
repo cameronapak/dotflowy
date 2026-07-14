@@ -20,6 +20,7 @@ import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
 import { OAuthCallbackErrorToast } from "../components/oauth-callback-error";
 import { OpmlImportDialog } from "../components/opml-import-dialog";
+import { QuickAdd } from "../components/quick-add";
 import { ShowCompletedProvider } from "../components/show-completed-provider";
 import { SpotlightController } from "../components/spotlight-mode";
 import { TextSizeProvider } from "../components/text-size-provider";
@@ -145,6 +146,7 @@ function RootComponent() {
               <ShowCompletedProvider>
                 <Outlet />
                 <NodeSwitcher />
+                <QuickAdd />
                 <MoveDialog />
                 <OpmlImportDialog />
                 <DeleteConfirmDialog />

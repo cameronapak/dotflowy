@@ -197,13 +197,17 @@ function hasChildInLiveCollection(parentId: string): boolean {
 async function getOrCreateDay(
   key: string,
   index: TreeIndex,
-  opts?: { seedEntryLine?: boolean },
+  opts?: { seedEntryLine?: boolean; trackNavigation?: boolean },
 ): Promise<string | null> {
-  return withDailyNavigation(async () => {
+  const run = async () => {
     const containerId = await ensureContainer(index);
     if (!containerId) return null;
     return ensureDay(key, containerId, index, opts?.seedEntryLine ?? false);
-  });
+  };
+  // `trackNavigation: false` skips the shared nav-pending signal (ADR 0049): a
+  // background quick-add born resolves today's note WITHOUT spinning the
+  // unrelated header "Today" button, which is reserved for an actual navigation.
+  return opts?.trackNavigation === false ? run() : withDailyNavigation(run);
 }
 
 export { getOrCreateDay };
@@ -552,6 +556,19 @@ export default definePlugin({
     const key = getDayKey(node.id);
     return key ? formatDayRelative(key) : null;
   },
+
+  // Seam (ADR 0049): quick-add captures default to today's note. LAZY -- the
+  // label is known up front (the chip reads "Today" the instant the overlay
+  // opens), but `resolve` -- which get-or-creates the day SEED-FREE (like Send
+  // to Today, ADR 0041) -- runs only at born-on-first-keystroke, so an abandoned
+  // open never mints today's note. Core resolves this without importing daily.
+  captureDestination: () => ({
+    label: "Today",
+    resolve: () =>
+      getOrCreateDay(localDateKey(), buildTreeIndex(nodesCollection.toArray), {
+        trackNavigation: false,
+      }),
+  }),
 
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
   // exist yet (when it does, the alias above surfaces the real node -- no dup).

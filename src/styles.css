@@ -925,6 +925,30 @@ h2.zoomed-title .row-body > .title-pilcrow {
   display: inline-block;
 }
 
+/* Quick-add mini-editor (ADR 0049): show its placeholder while the capture is
+   empty. Scoped to the overlay so the outline's empty bullets stay blank. The
+   contentEditable's own `data-placeholder` supplies the text. */
+.quick-add-editor .node-text:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+/* Once BORN, the node's before-text slots (Seam F -- the todos checkbox) render
+   inline ahead of the text, mirroring the list row / zoomed title. Lay the
+   surface out as a flex row so the checkbox sits beside the text and the
+   contentEditable takes the remaining width (ADR 0049 inline-decoration flow). */
+.quick-add-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.quick-add-editor .node-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* --- Drag to reorder (ADR 0010) --- */
 
 /* While a drag is live: a grab cursor everywhere, and no accidental text

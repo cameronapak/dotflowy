@@ -621,6 +621,30 @@ export interface SearchAction {
   run(): void;
 }
 
+// --- Seam: default capture destination (ADR 0049) ---------------------------
+//
+// Quick-add is CORE chrome (its own overlay + hotkey + FAB + Cmd+K action), but
+// "capture defaults to Today" is a daily-plugin concept, and the clean-core rule
+// (ADR 0001) forbids core importing a plugin. So the default destination is
+// resolved through this seam. Core never imports `daily`; with no provider
+// quick-add falls back to the top level. First non-null across plugins wins.
+//
+// The provider is a LAZY resolver, not a pre-resolved id: `label` is known
+// synchronously (shown in the chip the instant the overlay opens), but `resolve`
+// -- which get-or-creates the node SEED-FREE (like Send to Today, ADR 0041) --
+// is invoked only at born-on-first-keystroke. So opening quick-add and typing
+// nothing leaves ZERO trace: today's note is never minted for an abandoned open.
+
+export interface CaptureDestination {
+  /** The chip label, known BEFORE anything is created (e.g. "Today"). */
+  label: string;
+  /** Get-or-create (SEED-FREE) the node new captures append into as its LAST
+   *  child -- invoked LAZILY at born-on-first-keystroke, never on open. Returns
+   *  the parent node id, or null for the top level / on failure. Async: it may
+   *  round-trip the daily atomic claim. */
+  resolve(): Promise<string | null>;
+}
+
 // --- The plugin object ------------------------------------------------------
 
 /**
@@ -695,6 +719,12 @@ export interface PluginDef {
    *  so a day note reads "Tuesday, June 23, 2026 (Today)". Never highlighted,
    *  never searched -- pure clarity. First non-null across plugins wins. */
   searchAnnotation?(node: Node): string | null;
+  /** Seam: the default capture destination for quick-add (ADR 0049). Returns a
+   *  LAZY provider (synchronous) -- a `label` shown up front plus a `resolve()`
+   *  that get-or-creates the node SEED-FREE only at born-on-first-keystroke (the
+   *  daily plugin returns today's note). First non-null across plugins wins; with
+   *  no provider quick-add falls back to the top level. */
+  captureDestination?(): CaptureDestination | null;
 }
 
 /** Identity helper -- gives a plugin object its type without a cast (D5). */
