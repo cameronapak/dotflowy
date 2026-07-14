@@ -199,11 +199,10 @@ function Footer() {
   return (
     <footer className="border-t border-border/60">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 font-mono text-sm">
-          <Dot className="size-2" />
-          <span className="font-semibold">dotflowy</span>
-          <span className="text-muted-foreground">
-            — an open-source outliner
+        <div className="flex items-center gap-2.5 text-sm">
+          <Logo className="h-4 w-auto" />
+          <span className="font-mono text-muted-foreground">
+            — an open-source Workflowy alternative
           </span>
         </div>
         <nav className="flex items-center gap-5 text-sm text-muted-foreground">
