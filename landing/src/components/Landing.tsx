@@ -3,6 +3,7 @@ import type { VariantProps } from "class-variance-authority";
 import { Star } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 
+import { Logo } from "@/components/Logo";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
@@ -60,12 +61,8 @@ function Nav() {
   return (
     <header className="border-b border-border/60">
       <div className="mx-auto flex h-14 w-full max-w-2xl items-center justify-between px-6">
-        <a
-          href="/"
-          className="flex items-center gap-2 font-mono text-[15px] font-semibold tracking-tight"
-        >
-          <Dot className="size-2.5" />
-          dotflowy
+        <a href="/" className="flex items-center">
+          <Logo className="h-5 w-auto" />
         </a>
         <nav className="flex items-center gap-1 sm:gap-2">
           <LinkButton href={GITHUB_URL} external variant="ghost" size="sm">
@@ -148,34 +145,38 @@ function WaitlistForm() {
   );
 }
 
+// One bullet per stage of the job: capture, retrieve, shape.
 const POINTS = [
-  "Infinite nesting, one-click zoom, keyboard-first.",
-  "Daily notes, #tags, to-dos, and rich links built in.",
-  "Open source, syncing in real time. Export anytime.",
+  "Capture a thought in one keystroke, before it slips away.",
+  "Find it again with tags, filters, and instant search.",
+  "Shape ideas like they're physical — drag, nest, zoom into anything.",
 ];
 
 function Hero() {
   return (
     <section className="mx-auto w-full max-w-2xl px-6 pt-20 pb-24 sm:pt-28">
       <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
-        An infinite outliner,
-        <br />
-        finally <span className="text-brand-blue">yours</span>.
+        Room to <span className="text-brand-blue">think</span>.
       </h1>
       <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-        The open-source alternative to Workflowy — a fast, keyboard-first
-        outliner you actually own. Nest anything, zoom into any bullet, and
-        extend it with plugins.
+        Get everything out of your head, shape it when you're ready, and find it
+        when it matters. Dotflowy is a calm, fast outliner that keeps up with
+        the way you think.
       </p>
 
       <ul className="mt-8 space-y-2.5 text-[15px] text-muted-foreground">
         {POINTS.map((p) => (
-          <li key={p} className="flex items-center gap-2.5">
-            <Dot />
+          <li key={p} className="flex items-start gap-2.5">
+            {/* mt centers the dot on the first text line when a bullet wraps */}
+            <Dot className="mt-2" />
             {p}
           </li>
         ))}
       </ul>
+
+      <p className="mt-6 font-mono text-xs text-muted-foreground">
+        Open source. Real-time sync. Export everything, anytime.
+      </p>
 
       <div className="mt-10">
         <WaitlistForm />
@@ -198,11 +199,10 @@ function Footer() {
   return (
     <footer className="border-t border-border/60">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 font-mono text-sm">
-          <Dot className="size-2" />
-          <span className="font-semibold">dotflowy</span>
-          <span className="text-muted-foreground">
-            — an open-source outliner
+        <div className="flex items-center gap-2.5 text-sm">
+          <Logo className="h-4 w-auto" />
+          <span className="font-mono text-muted-foreground">
+            — an open-source Workflowy alternative
           </span>
         </div>
         <nav className="flex items-center gap-5 text-sm text-muted-foreground">

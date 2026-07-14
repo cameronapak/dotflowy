@@ -1,16 +1,17 @@
 <p align="center">
-  <img src="/public/favicon-light.svg" alt="Dotflowy" width="120" height="120" />
-</p>
-
-<h1 align="center">Dotflowy (alpha)</h1>
-
-<p align="center">
-  <strong>An infinite outliner for your thoughts and tasks</strong><br/>
-	<span>The open-source alternative to Workflowy, extensible with plugins like Obsidian</span>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="/public/logo-dark.svg" />
+    <img src="/public/logo-light.svg" alt="Dotflowy" width="316" height="64" />
+  </picture>
 </p>
 
 <p align="center">
-  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a>
+  <strong>Room to think — get everything out of your head, shape it when you're ready, and find it when it matters.</strong><br/>
+	<span>An open-source Workflowy alternative, extensible with plugins like Obsidian. Agent-native via MCP.</span>
+</p>
+
+<p align="center">
+  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a> · invite-gated alpha
 </p>
 
 ---

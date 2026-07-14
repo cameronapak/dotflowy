@@ -78,7 +78,7 @@ const noFlashTextSizeScript = `
 const APP_URL = "https://app.dotflowy.com";
 const APP_TITLE = "Dotflowy";
 const APP_DESCRIPTION =
-  "A fast, keyboard-first outliner you can own and extend.";
+  "Room to think. Get everything out of your head, shape it when you're ready, and find it when it matters.";
 const OG_IMAGE = `${APP_URL}/og.png`;
 
 export const Route = createRootRoute({
