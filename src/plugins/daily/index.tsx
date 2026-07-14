@@ -197,13 +197,17 @@ function hasChildInLiveCollection(parentId: string): boolean {
 async function getOrCreateDay(
   key: string,
   index: TreeIndex,
-  opts?: { seedEntryLine?: boolean },
+  opts?: { seedEntryLine?: boolean; trackNavigation?: boolean },
 ): Promise<string | null> {
-  return withDailyNavigation(async () => {
+  const run = async () => {
     const containerId = await ensureContainer(index);
     if (!containerId) return null;
     return ensureDay(key, containerId, index, opts?.seedEntryLine ?? false);
-  });
+  };
+  // `trackNavigation: false` skips the shared nav-pending signal (ADR 0049): a
+  // background quick-add born resolves today's note WITHOUT spinning the
+  // unrelated header "Today" button, which is reserved for an actual navigation.
+  return opts?.trackNavigation === false ? run() : withDailyNavigation(run);
 }
 
 export { getOrCreateDay };
@@ -561,7 +565,9 @@ export default definePlugin({
   captureDestination: () => ({
     label: "Today",
     resolve: () =>
-      getOrCreateDay(localDateKey(), buildTreeIndex(nodesCollection.toArray)),
+      getOrCreateDay(localDateKey(), buildTreeIndex(nodesCollection.toArray), {
+        trackNavigation: false,
+      }),
   }),
 
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT

@@ -27,7 +27,7 @@
 
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import { Cause, Effect } from "effect";
-import Fuse, { type IFuseOptions } from "fuse.js";
+import Fuse from "fuse.js";
 import { ChevronDownIcon, HomeIcon, PlusIcon, XIcon } from "lucide-react";
 import {
   forwardRef,
@@ -73,11 +73,7 @@ import {
 import { getTreeIndex, useNode } from "../data/tree-store";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
-import {
-  getCaptureDestination,
-  keymapSpecs,
-  searchAliases,
-} from "../plugins/registry";
+import { getCaptureDestination, keymapSpecs } from "../plugins/registry";
 import {
   decorate,
   getCaretOffset,
@@ -87,6 +83,10 @@ import {
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { useMenus } from "./menu-engine";
+import {
+  buildTargetCandidates,
+  TARGET_SEARCH_OPTIONS,
+} from "./node-target-search";
 import {
   copySourceSelection,
   cutSourceSelection,
@@ -151,7 +151,14 @@ export interface MiniEditorHandle {
  *  primitives, but wires NO structural nav and a filtered `/` palette. `onText`
  *  is born-aware (creates the node on the first non-empty input, possibly async
  *  while the daily claim settles -- the DOM already holds the typed char, so the
- *  keystroke never blocks). */
+ *  keystroke never blocks).
+ *
+ *  DRIFT OBLIGATION (ADR 0049): this handler block deliberately MIRRORS
+ *  `ZoomedTitle`'s contentEditable wiring (onInput/onPaste/onCopy/onCut/onFocus/
+ *  onBlur/onKeyDown + the slash/menus engines + the caret-reveal watcher). The
+ *  duplication is accepted rather than extracting a shared hook (that would touch
+ *  the outline's hot path for one consumer). When you change caret/decorate/menu
+ *  behavior in ZoomedTitle, mirror it here (and vice versa). */
 const MiniNodeEditor = forwardRef<
   MiniEditorHandle,
   {
@@ -316,18 +323,11 @@ const MiniNodeEditor = forwardRef<
 
 // --- The compact retarget picker -------------------------------------------
 //
-// Reuses MoveDialogInner's target-search technique (a Fuse over every node, plus
-// plugin search aliases so "today" finds the daily note despite its date text) --
-// but INLINE, not a modal-over-modal (ADR 0049). Picking calls `onPick` with the
-// chosen destination; "Top level" is the Home option.
+// Reuses `/move`'s target-search config + candidate builder (node-target-search.ts,
+// so the two pickers can't rank the same query differently) -- but INLINE, not a
+// modal-over-modal (ADR 0049). Picking calls `onPick` with the chosen
+// destination; "Top level" is the Home option.
 
-const TARGET_FUSE_OPTIONS: IFuseOptions<Node> = {
-  keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
-  includeMatches: true,
-  ignoreLocation: true,
-  threshold: 0.3,
-  minMatchCharLength: 2,
-};
 const TARGET_LIMIT = 30;
 
 function CaptureTargetPicker({
@@ -345,13 +345,14 @@ function CaptureTargetPicker({
   const [query, setQuery] = useState("");
   const candidates = useMemo(
     () =>
-      Array.from(index.byId.values()).filter(
-        (n) => n.id !== excludeId && n.text.trim() !== "",
+      buildTargetCandidates(
+        index,
+        excludeId ? new Set([excludeId]) : new Set(),
       ),
     [index, excludeId],
   );
   const fuse = useMemo(
-    () => new Fuse(candidates, TARGET_FUSE_OPTIONS),
+    () => new Fuse(candidates, TARGET_SEARCH_OPTIONS),
     [candidates],
   );
   const q = query.trim();
@@ -445,16 +446,74 @@ interface Capture {
 
 /** A single in-progress capture. Self-contained so committing can hand the old
  *  draft off (its born finishes against its OWN text) and start a fresh one
- *  synchronously (ADR 0049). */
+ *  synchronously (ADR 0049). Every field a born reads lives HERE, not in shared
+ *  mutable overlay state, so concurrent drafts and a slow resolve can't corrupt
+ *  each other. */
 interface DraftState {
   /** The settled node id, or null until born resolves. */
   id: string | null;
-  /** The latest typed text (read by an in-flight born at resolve time). */
+  /** The latest typed text (read by an in-flight born at CREATE time, so it
+   *  reflects everything typed while the destination claim was resolving). */
   text: string;
-  /** The in-flight born, or null. De-dupes concurrent borns. */
+  /** The in-flight born, or null. De-dupes concurrent borns; cleared back to
+   *  null when a born settles WITHOUT creating (empty text), so a later keystroke
+   *  can retry instead of hitting a poisoned dead promise. */
   promise: Promise<string | null> | null;
-  /** This draft's destination resolver (get-or-create the parent, seed-free). */
-  resolve: () => Promise<string | null>;
+  /** This draft's destination resolver (get-or-create the parent, seed-free).
+   *  Reassigned on retarget so a not-yet-resolved born lands under the new pick. */
+  resolveParent: () => Promise<string | null>;
+  /** A retarget that landed after the born already resolved its parent (`null` =
+   *  none): the born prefers this at CREATE time so it lands under the pick, not
+   *  the stale resolved parent. */
+  desiredParent: { value: string | null } | null;
+  /** Node-state commands (/todo, /paragraph, Mod+D) issued before the node
+   *  exists: queued here and applied against the REAL id once it borns, never
+   *  against the placeholder id. */
+  intents: Array<(id: string) => void>;
+}
+
+function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
+  return {
+    id: null,
+    text: "",
+    promise: null,
+    resolveParent,
+    desiredParent: null,
+    intents: [],
+  };
+}
+
+// --- Deferred-resolve test seam (ADR 0049) ---------------------------------
+//
+// `seedOutline`'s Map mock resolves the daily claim in a microtask, so the
+// in-flight-born window (clear/retarget/slash while borning) never actually
+// happens under e2e -- the exact blind spot that hid a cluster of async-lifecycle
+// bugs. This DEV-only gate lets a spec HOLD the destination resolve open, drive
+// the interfering actions, then release -- exercising the real races. No-op (and
+// tree-shaken) in production.
+let resolveGate: Promise<void> | null = null;
+let releaseResolveGate: (() => void) | null = null;
+
+function awaitResolveGate(): Promise<void> {
+  return resolveGate ?? Promise.resolve();
+}
+
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  const w = window as unknown as {
+    __quickAddHoldResolve?: () => void;
+    __quickAddReleaseResolve?: () => void;
+  };
+  w.__quickAddHoldResolve = () => {
+    if (resolveGate) return;
+    resolveGate = new Promise<void>((r) => {
+      releaseResolveGate = r;
+    });
+  };
+  w.__quickAddReleaseResolve = () => {
+    releaseResolveGate?.();
+    resolveGate = null;
+    releaseResolveGate = null;
+  };
 }
 
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
@@ -474,24 +533,13 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const defaultRef = useRef<CaptureDestination>(dest);
 
   // The current draft (ADR 0049). Born LAZILY on the first keystroke: the typed
-  // char is already in the DOM (native contentEditable), and the destination
+  // char is already in the DOM (native contentEditable) and the destination
   // resolve (the daily atomic claim) is awaited OFF the keystroke path, so typing
-  // never blocks. Each draft is a self-contained object carrying its own text +
-  // born promise + destination resolver, so committing can start a fresh draft
-  // IMMEDIATELY (fast follow-up typing lands in the new one) while the previous
-  // draft's born finishes independently against its OWN text -- no shared mutable
-  // "pending text" for a slow claim to read stale.
-  const makeDraft = useCallback(
-    (): DraftState => ({
-      id: null,
-      text: "",
-      promise: null,
-      resolve: destRef.current.resolve,
-    }),
-    [],
-  );
+  // never blocks. The draft owns ALL state a born reads (text/target/intents),
+  // so committing starts a fresh draft immediately while the previous born
+  // finishes against its OWN object.
   const draftRef = useRef<DraftState | null>(null);
-  draftRef.current ??= makeDraft();
+  draftRef.current ??= makeDraft(destRef.current.resolve);
   // `draftId` mirrors the CURRENT draft's settled id, for rendering its node.
   const [draftId, setDraftId] = useState<string | null>(null);
 
@@ -506,6 +554,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // `mountedRef` lets an in-flight born SAVE its capture even if the overlay
   // closed mid-claim (commit-immediately) without a post-unmount setState.
   const mountedRef = useRef(true);
+  // Serializes the node-CREATE step across drafts (not the resolves), so rapid
+  // Enters preserve chronological order regardless of which resolve settles
+  // first (bug 6). Overlay-scoped, reset each open.
+  const createChainRef = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     mountedRef.current = true;
     const raf = requestAnimationFrame(() => editorRef.current?.focus());
@@ -515,38 +567,77 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // Kick off a draft's born: resolve ITS destination (get-or-create Today,
-  // seed-free), then create the node from the draft's OWN latest text as ONE
-  // `runStructural` batch, one undo point (ADR 0009). Idempotent (returns the
-  // live promise). Reflects into the rendered node only while `d` is still the
-  // current draft. If the draft's text went empty while we awaited (cleared, or
-  // an abandoned open), NOTHING is created -- the whole point of the lazy model.
+  // Live-move a node under a new parent as ONE atomic batch (ADR 0009). Skips the
+  // undo point when nothing actually moved (re-picking the same parent), via the
+  // move-dialog drop-on-no-op pattern -- SAFE here because the capture we just
+  // pushed is guaranteed the stack top (relocate is atomic, nothing between).
+  const relocate = useCallback((id: string, parentId: string | null) => {
+    const index = getTreeIndex();
+    const kids = childrenOf(index, parentId);
+    const after = kids.length ? kids[kids.length - 1]!.id : null;
+    const moved = runStructural(() => {
+      capture(index, id);
+      return moveNode(index, id, parentId, after);
+    });
+    if (!moved) drop();
+  }, []);
+
+  // Kick off a draft's born. Serialized through `createChainRef` so the CREATE
+  // steps run in submission order (chronological log). Resolves the draft's
+  // destination (get-or-create Today, seed-free), creates the node from the
+  // draft's OWN latest text as ONE `runStructural` batch, applies any queued
+  // node-state intents, and lands it under the currently-desired target (a
+  // retarget mid-flight wins). Idempotent (returns the live promise). If the
+  // text is empty at create time (cleared, or an abandoned open), NOTHING is
+  // created AND the cached promise is released so a later keystroke can retry.
   const startBorn = useCallback((d: DraftState): Promise<string | null> => {
     if (d.promise) return d.promise;
-    d.promise = d
-      .resolve()
-      .then((parentId) => {
-        if (d.id || d.text.trim() === "") return d.id;
-        const index = getTreeIndex();
-        const kids = childrenOf(index, parentId);
-        const after = kids.length ? kids[kids.length - 1]!.id : null;
-        const newId = createId();
-        runStructural(() => {
-          capture(index, parentId);
-          appendChild(parentId, after, d.text, newId);
-        });
-        d.id = newId;
-        if (mountedRef.current && draftRef.current === d) setDraftId(newId);
-        return newId;
-      })
-      .catch(() => null);
-    return d.promise;
+    const prev = createChainRef.current;
+    const p = (async (): Promise<string | null> => {
+      await prev; // preserve create order across drafts (bug 6)
+      await awaitResolveGate(); // deferred-resolve test seam
+      if (d.id) return d.id;
+      const resolved = await d.resolveParent();
+      if (d.text.trim() === "") return null; // empty -> no node
+      // A retarget that landed after we called resolveParent wins at create time.
+      const target = d.desiredParent ? d.desiredParent.value : resolved;
+      const index = getTreeIndex();
+      const kids = childrenOf(index, target);
+      const after = kids.length ? kids[kids.length - 1]!.id : null;
+      const newId = createId();
+      // Apply any queued node-state intents (/todo, /paragraph, Mod+D) INSIDE the
+      // same batch as the insert -- so the node is born with its state in ONE
+      // atomic op. Applying them AFTER (a separate PATCH) races the insert POST
+      // on the wire: the field edit can reach the DO before the node exists there
+      // and be lost. Coalescing into one batch removes the race (ADR 0009).
+      const intents = d.intents;
+      d.intents = [];
+      runStructural(() => {
+        capture(index, target);
+        appendChild(target, after, d.text, newId);
+        for (const intent of intents) intent(newId);
+      });
+      d.id = newId;
+      if (mountedRef.current && draftRef.current === d) setDraftId(newId);
+      return newId;
+    })();
+    d.promise = p;
+    createChainRef.current = p.then(
+      () => {},
+      () => {},
+    );
+    // Release a cached promise that created nothing, so a later keystroke on the
+    // same draft can retry instead of hitting a poisoned dead promise (bug 1).
+    void p.then((id) => {
+      if (id === null && d.promise === p) d.promise = null;
+    });
+    return p;
   }, []);
 
   // Born-aware text writer for the CURRENT draft: the first non-empty input kicks
   // off the lazy born; later inputs are direct field PATCHes (never structural --
   // the keystroke path must not await an echo, ADR 0009). Always records the
-  // latest text on the draft so an in-flight born creates with everything typed.
+  // latest text so an in-flight born creates with everything typed so far.
   const commitText = useCallback(
     (text: string) => {
       const d = draftRef.current!;
@@ -561,33 +652,52 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     [startBorn],
   );
 
-  // Remove a draft's node iff it is empty -- discard-if-empty. Drops the born
-  // undo point too (like a no-op move-dialog action) so Cmd+Z isn't a dead step.
-  // A born still in flight is left alone: it self-discards on empty text and
-  // self-saves on non-empty (commit-immediately, even if the overlay closed
-  // mid-claim), so clobbering it here would kill a real capture.
+  // A node-STATE command (/todo, /paragraph, /bullet, Mod+D/Mod+Enter) targets
+  // the draft's REAL id -- never the placeholder. If the node exists, apply now;
+  // otherwise QUEUE the intent so it applies when the draft borns (bug 4). This
+  // is why the slash/keymap can't throw against "__quick_add_draft__".
+  const runNodeIntent = useCallback(
+    (apply: (id: string) => void) => {
+      const d = draftRef.current!;
+      if (d.id) {
+        apply(d.id);
+        return;
+      }
+      d.intents.push(apply);
+      void startBorn(d);
+    },
+    [startBorn],
+  );
+
+  // Remove a draft's node iff it is empty -- discard-if-empty. Captures + removes
+  // as its OWN undo step (never a blind `drop()`, which would pop the wrong entry
+  // when a relocate captured after the born -- bug 5). An UNBORN draft needs no
+  // cleanup: an in-flight born self-discards on empty text.
   const discardDraftIfEmpty = useCallback((d: DraftState) => {
     if (!d.id) return;
     const index = getTreeIndex();
     const n = index.byId.get(d.id);
     if (!n || n.text.trim() === "") {
       const id = d.id;
-      runStructural(() => removeNode(index, id));
-      drop();
+      runStructural(() => {
+        capture(index, null);
+        removeNode(index, id);
+      });
     }
     d.id = null;
   }, []);
 
-  // Start a FRESH draft for the next capture: destination back to the default,
-  // editor cleared and refocused. The just-committed draft object lives on until
+  // Start a FRESH draft for the next capture: destination back to the DEFAULT
+  // (bug 2 -- read defaultRef directly, not destRef, which setDest hasn't flushed
+  // yet), editor cleared and refocused. The just-committed draft lives on until
   // its own born settles (referenced by the caller), untouched by this.
   const resetDraft = useCallback(() => {
-    draftRef.current = makeDraft();
+    draftRef.current = makeDraft(defaultRef.current.resolve);
     setDraftId(null);
     setDest(defaultRef.current);
     editorRef.current?.clear();
     editorRef.current?.focus();
-  }, [makeDraft]);
+  }, []);
 
   // Enter = commit & next. Snapshot the current draft, RESET immediately (so a
   // fast follow-up keystroke lands in a new draft), then file the snapshot into
@@ -605,10 +715,8 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       return;
     }
     // `startBorn` only creates a node when the draft's text is non-empty, so a
-    // returned id is always a real, non-empty capture -- no need to re-read the
-    // tree (which lags the optimistic insert by a rebuild tick and would spuriously
-    // skip a just-born node). The session row renders its text reactively via
-    // useNode. A null id means the born self-discarded (empty) -- nothing to file.
+    // returned id is always a real capture. No tree re-read (it lags the
+    // optimistic insert); the session row renders text reactively via useNode.
     const file = (id: string | null) => {
       if (!id || !mountedRef.current) return;
       setCaptures((c) => [...c, { id, label }]);
@@ -623,36 +731,25 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     // (mountedRef gates the setState, not the create). The session list is
     // ephemeral -- it clears on close.
     const d = draftRef.current!;
-    // Ensure a started-but-unborn non-empty draft still lands (commit-immediately
-    // across a fast close); an empty one self-discards inside the born.
     if (!d.id && d.text.trim() !== "") void startBorn(d);
     discardDraftIfEmpty(d);
     setCaptures([]);
     onClose();
   }, [discardDraftIfEmpty, startBorn, onClose]);
 
-  // Live-move a node under a new parent as ONE atomic batch (ADR 0009).
-  const relocate = useCallback((id: string, parentId: string | null) => {
-    const index = getTreeIndex();
-    const kids = childrenOf(index, parentId);
-    const after = kids.length ? kids[kids.length - 1]!.id : null;
-    runStructural(() => {
-      capture(index, id);
-      moveNode(index, id, parentId, after);
-    });
-  }, []);
-
   const onPickTarget = useCallback(
     (target: PickTarget) => {
       const which = picking;
       setPicking(null);
       if (which === "current") {
-        // Wrap the concrete pick into a lazy destination (its resolve just yields
-        // the fixed id) and point the current draft at it, so an unborn draft
-        // borns there and a born one live-moves.
+        // Retarget the CURRENT draft. Update BOTH the resolver (for a born that
+        // hasn't resolved yet) AND `desiredParent` (for one whose resolve already
+        // returned the stale parent) -- so wherever the in-flight born is, it
+        // lands under the pick (bug 3). A born draft live-moves now.
         setDest({ label: target.label, resolve: async () => target.parentId });
         const d = draftRef.current!;
-        d.resolve = async () => target.parentId;
+        d.resolveParent = async () => target.parentId;
+        d.desiredParent = { value: target.parentId };
         if (d.id) relocate(d.id, target.parentId);
         editorRef.current?.focus();
       } else if (which) {
@@ -667,24 +764,24 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     [picking, relocate],
   );
 
-  // The PluginContext the slash/menu commands run with. Curated: text/kind/
-  // task/complete mutations are real (they act on the single draft node); the
+  // The PluginContext the slash/menu commands run with. Curated: text edits and
+  // node-state changes act on the DRAFT's real id (node-state ones queue until it
+  // borns -- runNodeIntent, so no command ever hits the placeholder id); the
   // structural verbs are no-ops (and filtered out of the palette anyway).
   const commands: NodeCommands = useMemo(() => {
     const noop = () => {};
     return {
-      onTextChange: (_id, text) => {
-        commitText(text);
-      },
+      onTextChange: (_id, text) => commitText(text),
       onEnter: noop,
       onIndent: noop,
       onOutdent: noop,
       onMoveUp: noop,
       onMoveDown: noop,
       onDeleteNode: noop,
-      onToggleCompleted: (id, completed) => toggleCompleted(id, completed),
-      onSetTask: (id, isTask) => setIsTask(id, isTask),
-      onSetKind: (id, kind) => setKind(id, kind),
+      onToggleCompleted: (_id, completed) =>
+        runNodeIntent((id) => toggleCompleted(id, completed)),
+      onSetTask: (_id, isTask) => runNodeIntent((id) => setIsTask(id, isTask)),
+      onSetKind: (_id, kind) => runNodeIntent((id) => setKind(id, kind)),
       onRequestMove: noop,
       onRequestMirror: noop,
       onToggleCollapsed: noop,
@@ -694,7 +791,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       onBulletClick: noop,
       setPendingFocus: noop,
     };
-  }, [commitText]);
+  }, [commitText, runNodeIntent]);
 
   const getCtx = useCallback(
     (): PluginContext => ({
