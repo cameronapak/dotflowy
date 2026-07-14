@@ -28,7 +28,13 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import { Cause, Effect } from "effect";
 import Fuse from "fuse.js";
-import { ChevronDownIcon, HomeIcon, PlusIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  CornerDownLeftIcon,
+  HomeIcon,
+  PlusIcon,
+  SunIcon,
+} from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -38,7 +44,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
 import { cn } from "@/lib/utils";
@@ -94,8 +99,6 @@ import {
 } from "./paste";
 import { setQuickAddOpener } from "./quick-add-opener";
 import { useSlashMenu } from "./slash-menu";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
 import {
   Command,
   CommandGroup,
@@ -103,6 +106,8 @@ import {
   CommandItem,
   CommandList,
 } from "./ui/command";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import { Kbd } from "./ui/kbd";
 
 /** A concrete destination a target pick yields: the parent node id (null = top
  *  level) plus its label. The overlay wraps it into a lazy {@link
@@ -424,12 +429,13 @@ function SessionCaptureRow({
   if (!node) return null;
   const text = node.text.trim() || "Untitled";
   return (
-    <li className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60">
+    <li className="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted">
+      <CornerDownLeftIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
       <span className="min-w-0 flex-1 truncate">{text}</span>
       <button
         type="button"
         onClick={onRelocate}
-        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+        className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
       >
         {label}
       </button>
@@ -820,23 +826,37 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
 
   const index = getTreeIndex();
 
-  // Mobile keyboard anchoring (ADR 0030's discipline): on a coarse pointer the
-  // panel rides the BOTTOM, lifted above the software keyboard by the
-  // visualViewport gap (falling back to the safe-area inset when there's no
-  // keyboard). On a fine pointer it centers near the top like a command palette.
+  // The destination glyph (Today = sun, Top level = home) leads the trailing
+  // pill, mirroring the Cmd+K command-center chrome.
+  const destIcon =
+    dest.label === "Today" ? (
+      <SunIcon className="size-3.5 text-muted-foreground" />
+    ) : dest.label === "Top level" ? (
+      <HomeIcon className="size-3.5 text-muted-foreground" />
+    ) : null;
+
+  // The shadcn Dialog owns focus-trap, Escape, backdrop, and a11y (ADR 0049 now
+  // adopts the Cmd+K command-center frame). `onOpenChange(false)` routes both the
+  // Escape and the backdrop tap through the engine's `close()` so discard-if-empty
+  // and the commit-immediately born still run. Positioned per pointer type: a
+  // fine pointer centers near the top like the command palette; a coarse pointer
+  // rides the bottom, lifted above the software keyboard by the visualViewport
+  // gap (ADR 0030), falling back to the safe-area inset when there's no keyboard.
   return (
-    <div
-      className={cn(
-        "fixed inset-0 z-50 flex justify-center bg-black/40 p-4",
-        coarse ? "items-end" : "items-start pt-[12vh]",
-      )}
-      onMouseDown={(e) => {
-        // Backdrop click closes; clicks inside the panel don't bubble here.
-        if (e.target === e.currentTarget) close();
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) close();
       }}
     >
-      <div
-        className="flex w-full max-w-xl flex-col gap-3 rounded-xl border bg-background p-4 shadow-2xl transition-transform duration-200 ease-out"
+      <DialogContent
+        showCloseButton={false}
+        animate={false}
+        aria-label="Quick add"
+        className={cn(
+          "flex max-h-[85vh] w-[calc(100%-2rem)] max-w-xl flex-col gap-0 overflow-hidden rounded-xl! p-0",
+          coarse ? "top-auto bottom-4 translate-y-0" : "top-1/3 translate-y-0",
+        )}
         style={
           coarse
             ? {
@@ -848,104 +868,115 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
               }
             : undefined
         }
-        role="dialog"
-        aria-label="Quick add"
-        onKeyDown={(e: ReactKeyboardEvent) => {
-          // A window-level Escape belongs to the overlay, but let an open menu
-          // (slash/#/[[) or the target picker consume its own Escape first.
-          if (e.key === "Escape" && !picking && e.target === e.currentTarget) {
-            e.preventDefault();
-            close();
-          }
-        }}
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <PlusIcon className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Quick add</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() =>
-                setPicking(picking === "current" ? null : "current")
-              }
-              className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted"
-              title={`Capture into ${dest.label}`}
-              data-quick-add-dest={dest.label}
-            >
-              <Badge variant="secondary" className="border-0 px-0 font-normal">
-                {dest.label}
-              </Badge>
-              <ChevronDownIcon className="size-3 text-muted-foreground" />
-            </button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Close"
-              onClick={close}
-            >
-              <XIcon />
-            </Button>
-          </div>
-        </div>
+        {/* Escape guard: a caret menu (slash / # / [[) or the target picker owns
+            Escape to close ITSELF, but Base UI's Dialog listens for Escape on
+            `document` and ignores preventDefault -- so without this it would also
+            close the whole overlay. While a menu listbox is open (portaled, so it
+            survives to this bubble), stop the native event before it reaches that
+            document listener. Result: the ADR-0049 progressive Escape -- the first
+            press closes the menu, the next closes the dialog. */}
+        <div
+          className="contents"
+          onKeyDown={(e) => {
+            if (
+              e.key === "Escape" &&
+              document.querySelector('[role="listbox"]')
+            )
+              e.stopPropagation();
+          }}
+        >
+          <DialogTitle className="sr-only">Quick add</DialogTitle>
 
-        {picking === "current" && (
-          <CaptureTargetPicker
-            index={index}
-            excludeId={draftId}
-            onPick={onPickTarget}
-            onCancel={() => {
-              setPicking(null);
-              editorRef.current?.focus();
-            }}
-          />
-        )}
-
-        <div className="rounded-lg border bg-card px-3 py-2 focus-within:ring-2 focus-within:ring-ring/40">
-          <MiniNodeEditor
-            ref={editorRef}
-            node={node}
-            getCtx={getCtx}
-            onText={commitText}
-            onCommit={commitAndNext}
-            onEscape={close}
-          />
-        </div>
-
-        <p className="px-1 text-xs text-muted-foreground">
-          <kbd className="font-sans">Enter</kbd> to save &amp; keep going ·{" "}
-          <kbd className="font-sans">Esc</kbd> to close
-        </p>
-
-        {captures.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <p className="px-2 text-xs font-medium text-muted-foreground">
-              Captured this session
-            </p>
-            <ul className="max-h-48 overflow-y-auto">
-              {captures.map((c) => (
-                <SessionCaptureRow
-                  key={c.id}
-                  id={c.id}
-                  label={c.label}
-                  onRelocate={() => setPicking(picking === c.id ? null : c.id)}
+          {/* Input row: the command-center InputGroup vibe with the destination
+            pill trailing (the Raycast spot). The editor is a contentEditable, so
+            the InputGroup look is replicated on a plain container. */}
+          <div className="p-1 pb-0">
+            <div className="flex min-h-9 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+              <PlusIcon className="size-4 shrink-0 opacity-60" />
+              <div className="min-w-0 flex-1">
+                <MiniNodeEditor
+                  ref={editorRef}
+                  node={node}
+                  getCtx={getCtx}
+                  onText={commitText}
+                  onCommit={commitAndNext}
+                  onEscape={close}
                 />
-              ))}
-            </ul>
-            {picking && picking !== "current" && (
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setPicking(picking === "current" ? null : "current")
+                }
+                className="flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+                title={`Capture into ${dest.label}`}
+                data-quick-add-dest={dest.label}
+              >
+                {destIcon}
+                <span className="font-medium">{dest.label}</span>
+                <ChevronDownIcon className="size-3 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+
+          {picking === "current" && (
+            <div className="p-1 pb-0">
               <CaptureTargetPicker
                 index={index}
-                excludeId={picking}
+                excludeId={draftId}
                 onPick={onPickTarget}
-                onCancel={() => setPicking(null)}
+                onCancel={() => {
+                  setPicking(null);
+                  editorRef.current?.focus();
+                }}
               />
-            )}
+            </div>
+          )}
+
+          {captures.length > 0 && (
+            <div className="min-h-0 flex-1 overflow-y-auto p-1">
+              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                Captured this session
+              </div>
+              <ul className="flex flex-col">
+                {captures.map((c) => (
+                  <SessionCaptureRow
+                    key={c.id}
+                    id={c.id}
+                    label={c.label}
+                    onRelocate={() =>
+                      setPicking(picking === c.id ? null : c.id)
+                    }
+                  />
+                ))}
+              </ul>
+              {picking && picking !== "current" && (
+                <div className="pt-1">
+                  <CaptureTargetPicker
+                    index={index}
+                    excludeId={picking}
+                    onPick={onPickTarget}
+                    onCancel={() => setPicking(null)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-4 border-t px-3 py-2">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Kbd>Enter</Kbd>
+              save &amp; keep going
+            </span>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Kbd>Esc</Kbd>
+              close
+            </span>
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

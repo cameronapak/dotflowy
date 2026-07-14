@@ -26,6 +26,8 @@ Quick-add is **core chrome**, mounted in `__root.tsx` like the Cmd+K command cen
 
 But "default to Today" is a **daily-plugin concept**, and the clean-core rule (ADR 0001) forbids core importing a plugin. So the default destination is resolved through a **new seam — a "default capture destination" provider** the daily plugin fills ("the capture default is today's note; get-or-create it seed-free"). The provider is a **lazy** shape — `{ label, resolve() }` — so core can show the chip's label without creating anything and only invoke `resolve()` at born time (see decision 8). Core never imports `daily`; if the seam has no provider, quick-add falls back to the **top level** (`resolve` yields `null`). This seam goes in `src/plugins/types.ts` + `registry.ts` alongside the others. Rejected a direct `goToDate` import from core (the exact core→plugin coupling ADR 0001 forbids — a precedent that erodes the boundary) and shipping quick-add inside the daily plugin.
 
+The overlay is rendered in the shared shadcn `Dialog` frame (the same one the Cmd+K command center uses) so quick-add reads as its sibling — Base UI's dialog owns focus-trap/Escape/backdrop/a11y, positioned `top-1/3` on a fine pointer and keyboard-anchored (ADR 0030) on a coarse one. Behavior is unchanged; only the shell chrome was restyled.
+
 ## Reach
 
 - **Desktop:** `Opt+Cmd+N` (Workflowy Quick Add parity, so switchers keep their muscle memory) + a Cmd+K action. **No new desktop header button** — Cmd+K already has one and quick-add is a Cmd+K action, so the header stays exactly as it is.
