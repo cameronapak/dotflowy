@@ -479,7 +479,8 @@ function SessionCaptureRow({
       <button
         type="button"
         onClick={onRelocate}
-        className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
+        className="max-w-40 shrink-0 truncate rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
+        title={label}
       >
         {label}
       </button>
@@ -1005,7 +1006,9 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                 data-quick-add-dest={dest.label}
               >
                 {destIcon}
-                <span className="font-medium">{dest.label}</span>
+                <span className="max-w-40 truncate font-medium">
+                  {dest.label}
+                </span>
                 <ChevronDownIcon className="size-3 text-muted-foreground" />
               </button>
             </div>
