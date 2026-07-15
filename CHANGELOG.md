@@ -1,5 +1,12 @@
 # dotflowy
 
+## 1.3.1
+
+### Patch Changes
+
+- a76bfe7: The header filter magnifier now shows a subtle "engaged" state the moment you open it (before you've typed a query), and turns solid only once a filter is actually applied. Its active look now tracks what's happening: muted while the search box is just open, solid when your view is genuinely filtered.
+- c8d1a19: Scrollable menus, command palettes, and dialog lists now fade softly at their edges when there's more to scroll, so it's clearer when a list runs past what's visible. The breadcrumb trail and mobile action bar get the same left/right hint. The fade dissolves content into the menu's own surface, and the `/` command menu and the `#`/`[[` caret menus now always stay fully on screen instead of clipping off the right or bottom edge. It's pure CSS with no runtime cost, and falls back cleanly to plain scrolling in browsers that don't support scroll-driven animations.
+
 ## 1.3.0
 
 ### Minor Changes
