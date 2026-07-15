@@ -76,3 +76,13 @@ export const WaitlistPostBody = Schema.Struct({
   email: Schema.String,
   source: Schema.optional(Schema.String),
 });
+
+/** POST /api/admin/invite — mint per-email single-use invite codes (#251).
+ *  Admin-gated in the route (session + ADMIN_EMAILS). Provide `emails` to invite
+ *  specific addresses, or `all`/`limit` to pull pending waitlist rows. The
+ *  schema only guards shape; targeting is resolved in the route. */
+export const AdminInvitePostBody = Schema.Struct({
+  emails: Schema.optional(Schema.Array(Schema.String)),
+  all: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(Schema.Number),
+});
