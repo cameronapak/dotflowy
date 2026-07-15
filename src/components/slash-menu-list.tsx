@@ -1,4 +1,10 @@
-import type { ComponentType, CSSProperties, Ref } from "react";
+import {
+  useEffect,
+  useRef,
+  type ComponentType,
+  type CSSProperties,
+  type Ref,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -38,6 +44,17 @@ export function SlashMenuList({
   /** Attach the floating element (e.g. floating-ui's `refs.setFloating`). */
   ref?: Ref<HTMLDivElement>;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Keep the active option visible when arrow keys move it past the scroll
+  // window. "nearest" makes this a no-op for hover-driven changes (the item
+  // under the pointer is already on screen), so hovering never scrolls.
+  useEffect(() => {
+    scrollRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
   return (
     <div
       ref={ref}
@@ -48,7 +65,7 @@ export function SlashMenuList({
       {/* Scroll + fade live on an inner div with NO background, so the mask
           dissolves content into the card's bg-popover (matching the Cmd+K
           list), not into the darker editor background behind the card. */}
-      <div className="max-h-72 scroll-fade overflow-y-auto p-1">
+      <div ref={scrollRef} className="max-h-72 scroll-fade overflow-y-auto p-1">
         {items.length === 0 ? (
           <div className="px-2 py-1.5 text-sm text-muted-foreground">
             No commands
