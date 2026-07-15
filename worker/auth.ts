@@ -170,6 +170,9 @@ export function createAuth(
             });
           }
           // Throws on a real Stripe failure → deletion aborts, DO untouched.
+          // Also clears the D1 subscription row (here in beforeDelete, not the
+          // best-effort afterDelete sweep: deleteUser doesn't cascade the
+          // Stripe plugin's table, and a failed afterDelete would orphan it).
           await cancelActiveSubscriptions(env, user.id);
           // Non-owner, so resolveUserId(user.id) === user.id: the caller's own
           // DO, resolved from the authenticated user.id (never client input).
@@ -179,13 +182,17 @@ export function createAuth(
           await stub.wipe();
         },
         // afterDelete runs once the identity rows are gone. Better Auth's core
-        // deletes user/session/account; the subscription row (no FK), the mcp
-        // OAuth rows, and the email-keyed waitlist row are cleaned here.
-        // Best-effort: any leftover is unreachable (nothing routes to a
-        // deleted user.id), so a failure here never un-does an
-        // already-completed deletion.
+        // deletes user/session/account; the mcp OAuth rows and the email-keyed
+        // waitlist + invites rows are cleaned here. Best-effort AND non-fatal
+        // (ADR 0051): the account is already deleted, so a failure here must
+        // be logged (Workers Logs + Sentry pick up console.error), never
+        // surfaced as an error on a deletion that already happened.
         afterDelete: async (user) => {
-          await deleteResidualUserRows(env.DB, user.id, user.email);
+          try {
+            await deleteResidualUserRows(env.DB, user.id, user.email);
+          } catch (err) {
+            console.error("account-deletion residual-row scrub failed", err);
+          }
         },
       },
     },

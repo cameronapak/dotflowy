@@ -92,7 +92,8 @@ export function DeleteAccountDialog({
           <DialogDescription>
             This is permanent and immediate. It deletes your entire outline and
             your account, and cancels any active subscription. This can't be
-            undone.
+            undone. Your data is removed from the app right away; automatic
+            backups are purged within 30 days.
           </DialogDescription>
         </DialogHeader>
 

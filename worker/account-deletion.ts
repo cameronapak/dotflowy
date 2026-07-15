@@ -9,6 +9,8 @@
 
 import Stripe from "stripe";
 
+import { normalizeEmail } from "./invites";
+
 /**
  * The owner-continuity account (OWNER_USER_ID) maps to the constant 'default'
  * Durable Object (worker/index.ts `resolveUserId`) — where the pre-auth outline
@@ -75,78 +77,88 @@ export const BILLABLE_SUBSCRIPTION_STATUSES = [
  * paying subscription must never outlive the account it was attached to (that
  * would keep billing a user who can no longer sign in). An already-cancelled /
  * missing subscription or customer is treated as success (goal achieved). In
- * dev (no STRIPE_SECRET_KEY) there is no Stripe state, so this is a clean
- * no-op skip that never touches D1.
+ * dev (no STRIPE_SECRET_KEY) there is no Stripe state, so the Stripe half is a
+ * clean skip.
+ *
+ * The D1 `subscription` rows are then deleted HERE, in beforeDelete — not in
+ * the best-effort afterDelete sweep (ADR 0051, the grilled ordering): Better
+ * Auth's `deleteUser` does not cascade the Stripe plugin's table, and a failed
+ * afterDelete would orphan the row. This runs UNCONDITIONALLY (no Stripe key
+ * needed): a comped user is an operator-inserted `active` row with NO Stripe
+ * ids (#170), and a free user has no row — both skip the Stripe call and just
+ * clear D1. Idempotent: deleting an absent row is a no-op, so a retry after a
+ * partial failure is safe.
  */
 export async function cancelActiveSubscriptions(
   env: StripeCancelEnv,
   userId: string,
 ): Promise<void> {
-  if (!env.STRIPE_SECRET_KEY) return;
-  const statuses = BILLABLE_SUBSCRIPTION_STATUSES.map((s) => `'${s}'`).join(
-    ", ",
-  );
-  const [{ results }, customerRow] = await Promise.all([
-    env.DB.prepare(
-      `SELECT stripeSubscriptionId FROM subscription
-         WHERE referenceId = ?1 AND status IN (${statuses})
-         AND stripeSubscriptionId IS NOT NULL`,
-    )
-      .bind(userId)
-      .all<{ stripeSubscriptionId: string }>(),
-    // The @better-auth/stripe plugin stores the customer mapping on the user
-    // row (migration 0006's `user.stripeCustomerId`); no row value = the user
-    // never reached checkout, so there is nothing at Stripe to erase.
-    env.DB.prepare(`SELECT stripeCustomerId FROM user WHERE id = ?1`)
-      .bind(userId)
-      .first<{ stripeCustomerId: string | null }>(),
-  ]);
-  const customerId = customerRow?.stripeCustomerId ?? null;
-  if (!results.length && !customerId) return;
+  if (env.STRIPE_SECRET_KEY) {
+    const statuses = BILLABLE_SUBSCRIPTION_STATUSES.map((s) => `'${s}'`).join(
+      ", ",
+    );
+    const [{ results }, customerRow] = await Promise.all([
+      env.DB.prepare(
+        `SELECT stripeSubscriptionId FROM subscription
+           WHERE referenceId = ?1 AND status IN (${statuses})
+           AND stripeSubscriptionId IS NOT NULL`,
+      )
+        .bind(userId)
+        .all<{ stripeSubscriptionId: string }>(),
+      // The @better-auth/stripe plugin stores the customer mapping on the user
+      // row (migration 0006's `user.stripeCustomerId`); no row value = the user
+      // never reached checkout, so there is nothing at Stripe to erase.
+      env.DB.prepare(`SELECT stripeCustomerId FROM user WHERE id = ?1`)
+        .bind(userId)
+        .first<{ stripeCustomerId: string | null }>(),
+    ]);
+    const customerId = customerRow?.stripeCustomerId ?? null;
 
-  const stripe = new Stripe(env.STRIPE_SECRET_KEY);
-  for (const { stripeSubscriptionId } of results) {
-    try {
-      await stripe.subscriptions.cancel(stripeSubscriptionId);
-    } catch (err) {
-      if (isAlreadyCancelled(err)) continue;
-      throw err;
+    if (results.length || customerId) {
+      const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+      for (const { stripeSubscriptionId } of results) {
+        try {
+          await stripe.subscriptions.cancel(stripeSubscriptionId);
+        } catch (err) {
+          if (isAlreadyCancelled(err)) continue;
+          throw err;
+        }
+      }
+      if (customerId) {
+        try {
+          // Deleting the customer also cancels any subscription still attached
+          // to it, so this doubly guarantees "no future billing".
+          await stripe.customers.del(customerId);
+        } catch (err) {
+          if (!isAlreadyCancelled(err)) throw err; // already gone = goal met
+        }
+      }
     }
   }
-  if (customerId) {
-    try {
-      // Deleting the customer also cancels any subscription still attached to
-      // it, so this doubly guarantees "no future billing".
-      await stripe.customers.del(customerId);
-    } catch (err) {
-      if (isAlreadyCancelled(err)) return; // already gone = goal achieved
-      throw err;
-    }
-  }
-}
-
-/**
- * The exact normalization POST /api/waitlist applies before inserting
- * (worker/index.ts `handleWaitlist`), so the deletion below hits the same row
- * the signup-era insert created. Exported for the unit test.
- */
-export function normalizeWaitlistEmail(email: string): string {
-  return email.trim().toLowerCase();
+  // Only after Stripe has committed (or was rightly skipped) does the D1 row
+  // go — the row is the entitlement record, and clearing it before a failed
+  // cancel would hide a still-live subscription from the retry.
+  await env.DB.prepare(`DELETE FROM subscription WHERE referenceId = ?1`)
+    .bind(userId)
+    .run();
 }
 
 /**
  * Remove the D1 rows Better Auth's core `deleteUser` does NOT itself remove.
- * Core deletes `user`/`session`/`account`/`verification`; these are the plugin
- * and generated tables keyed on the deleted user:
+ * Core deletes `user`/`session`/`account`/`verification`; the `subscription`
+ * row is already gone (cleared in beforeDelete's Stripe step — it's the
+ * entitlement record, too load-bearing for a best-effort sweep). What's left:
  *
- * - `subscription` (@better-auth/stripe, migration 0006) has NO foreign key on
- *   `referenceId`, so it would ORPHAN without this — the one row we MUST delete.
  * - the mcp OAuth tables (migration 0004) DO declare `ON DELETE CASCADE`, so
  *   they may already be gone; deleting them by `userId` is idempotent and makes
  *   cleanup correct whether or not D1 enforced the cascade.
- * - the `waitlist` row (migration 0005) is keyed on the EMAIL, not a user id —
- *   a user who joined the waitlist before their invite still has one, and
- *   "delete my account" is a privacy-erasure promise that covers it.
+ * - the `waitlist` row (migration 0005) and the `invites` row (migration 0007)
+ *   are keyed on the EMAIL, not a user id — a user who joined the waitlist or
+ *   was invited still has one, both carry PII (the address), and "delete my
+ *   account" is a privacy-erasure promise that covers them. Deleted under the
+ *   SAME normalization their inserts used (`normalizeEmail`, worker/invites.ts
+ *   — the waitlist insert in worker/index.ts applies the identical
+ *   trim+lowercase).
  *
  * Best-effort by design: it runs in `afterDelete`, when the identity rows are
  * already gone, so any leftover here is unreachable (nothing routes to a
@@ -157,13 +169,12 @@ export function deleteResidualUserRows(
   userId: string,
   email: string,
 ): Promise<D1Result[]> {
+  const normalized = normalizeEmail(email);
   return db.batch([
-    db.prepare("DELETE FROM subscription WHERE referenceId = ?").bind(userId),
     db.prepare("DELETE FROM oauthAccessToken WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthConsent WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthApplication WHERE userId = ?").bind(userId),
-    db
-      .prepare("DELETE FROM waitlist WHERE email = ?")
-      .bind(normalizeWaitlistEmail(email)),
+    db.prepare("DELETE FROM waitlist WHERE email = ?").bind(normalized),
+    db.prepare("DELETE FROM invites WHERE email = ?").bind(normalized),
   ]);
 }

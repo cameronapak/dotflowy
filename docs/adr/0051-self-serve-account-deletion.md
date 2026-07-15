@@ -1,6 +1,6 @@
 # Self-serve account deletion
 
-The privacy policy (ticket #161) commits to "You can delete your account yourself, in the app," so deletion has to be a real button, not a support request. The account's data lives in three places — the D1 identity rows (Better Auth), the per-user outline Durable Object (ADR 0008), and Stripe (a subscription) — and a delete has to take all three down **atomically enough** that we never leave a paying subscription attached to a dead account, or an orphaned outline nobody can reach. This ADR records how the one button coordinates the three.
+The privacy policy (ticket #161) commits to "You can delete your account yourself, in the app," so deletion has to be a real button, not a support request. The account's data lives in three places — the D1 identity rows (Better Auth), the per-user outline Durable Object (ADR 0008), and Stripe (a subscription) — **three systems that share no transaction**: any step can succeed while the next fails. The design method is to rank the partial-failure states worst-to-mildest and order the teardown so the worst is **unreachable by construction**: _worst_ — identity gone, Stripe still charging (a silent recurring charge with no account left to cancel it from); _bad-ish_ — DO wiped, identity survives (log back in to an empty outline; annoying, recoverable); _mildest_ — billing torn down, identity survives (a working free account; re-subscribe or retry). Cancelling Stripe **first**, where a failure aborts the whole delete, removes the worst state entirely; every step is idempotent, and a partial failure aborts _before_ session revoke, so the user is still signed in and simply retries. This ADR records how the one button coordinates the three. (An earlier grilled design of this flow was drafted as ADR 0050 on a side branch — its number was taken on main by the header-toggle ADR, and **this ADR supersedes it**; deltas from it are recorded below.)
 
 ## The flow
 
@@ -10,9 +10,9 @@ Server-side, Better Auth's built-in `user.deleteUser` owns the lifecycle; we han
 
 - **`beforeDelete(user)`** — runs while the account still exists, in this order:
   1. **Owner guard.** Refuse the `OWNER_USER_ID` account (`isOwnerAccount`). It maps to the constant `'default'` DO (the owner-continuity bridge, ADR 0011) holding pre-auth/shared data — wiping that is an operator decision, not a button. A `throw` here aborts with nothing destroyed.
-  2. **Cancel Stripe** (`cancelActiveSubscriptions`) — immediately, and **throw on failure** so the whole deletion aborts. This is the crux (below).
+  2. **Cancel Stripe and clear the D1 `subscription` rows** (`cancelActiveSubscriptions`) — cancel immediately, **throw on failure** so the whole deletion aborts (the crux, below), then delete the rows for `referenceId = user.id`. The row delete lives HERE, not in the best-effort `afterDelete` sweep: Better Auth's `deleteUser` does not cascade the Stripe plugin's table, and a failed `afterDelete` would orphan the entitlement record. It runs unconditionally — a comped user (operator-inserted active row, no Stripe ids) and a free user (no row) both skip the Stripe call and just clear D1.
   3. **Wipe the outline DO** — `stub.wipe()` → `ctx.storage.deleteAll()`, which on a SQLite-backed DO erases both the SQL tables and the KV storage atomically. The stub is resolved from the authenticated `user.id` (never client input — the ADR 0014 trust boundary), and it also closes any live sync sockets.
-- **`afterDelete(user)`** — the identity rows are gone; clean up the rows core deletion doesn't (`deleteResidualUserRows`): the `subscription` row (no FK, so it would orphan), the mcp OAuth rows (they cascade, but deleting by `userId` is idempotent belt-and-suspenders), and the email-keyed `waitlist` row (privacy erasure covers the pre-invite signup trail; deleted under the same normalization the insert used). Best-effort — any leftover is unreachable, so it never fails an already-done deletion.
+- **`afterDelete(user)`** — the identity rows are gone; clean up the rows core deletion doesn't (`deleteResidualUserRows`): the mcp OAuth rows (they cascade, but deleting by `userId` is idempotent belt-and-suspenders) and the email-keyed `waitlist` (0005) + `invites` (0007) rows — both carry PII (the address) that the erasure promise covers, deleted under the same `normalizeEmail` their inserts used. Best-effort AND non-fatal (wrapped, logged): any leftover is unreachable, so it never fails an already-done deletion.
 
 ## The two decisions worth recording
 
@@ -20,8 +20,22 @@ Server-side, Better Auth's built-in `user.deleteUser` owns the lifecycle; we han
 
 **The wiped DO stays empty and inert — no resurrection.** `deleteAll()` takes the `seeded` flag and the schema version with it, but that's fine: a deleted `user.id` is never routed to again (Better Auth mints fresh ids, so a re-signup with the same email gets a _different_ DO), and `ensureSeeded` (worker/index.ts) re-imports legacy D1 rows **only** for the `'default'` owner DO — which the owner guard refuses to delete. This was the specific worry worth checking (the task flagged it): the seed-if-empty bootstrap (`bootstrapOutline`) would re-seed welcome bullets if the _same_ account reached an empty DO, but a deleted account never does.
 
+## Deltas from the grilled design (superseded ADR-0050 draft)
+
+Two places the implementation deliberately goes **beyond** it:
+
+- **Hard owner-guard refusal.** The grilled design left the `OWNER_USER_ID` edge "noted, not special-cased" (the owner realistically won't self-delete). The implemented guard refuses outright — strictly safer, one testable function, and it supersedes the note: wiping the shared `'default'` DO stays an operator decision.
+- **Stripe Customer deletion.** Added by security review for PII erasure: the Customer object carries the user's email + payment metadata, so the deletion promise extends to the processor. Also hard-stops any billing a missed subscription row could still produce.
+
+Two grilled items consciously **not built**:
+
+- **Type-to-confirm.** Password re-entry already forces a deliberate, identity-proving act — the mis-click and the shared-machine cases are both covered by one field; a second ritual adds friction without adding proof.
+- **Email-token confirmation for Google-only accounts.** Impossible today — email+password is the only signup path, so every account has a password. Revisit if Google-only signup ever exists.
+
 ## Consequences / rejected
 
 - **DO wipe in `beforeDelete`, not `afterDelete`.** If the core user-row delete then failed, we'd have wiped a still-alive account's outline — recoverable (they're signed in; the outline re-seeds). The inverse (wipe in `afterDelete`, fails) orphans data we _promised_ to delete — a privacy regression. So the irreversible wipe goes last-in-`beforeDelete`, after Stripe has committed.
-- **Not e2e-tested.** `seedOutline` mocks `/api/auth`, so the real deleteUser path is unreachable in Playwright; the owner guard + the Stripe dev-skip are unit-tested (`worker/account-deletion.test.ts`) and the full flow is verified by hand against the dev loop.
+- **"Deleted" is honest about the 30-day PITR floor.** Durable Objects carry automatic 30-day Point-in-Time Recovery: `deleteAll()` removes the outline from every live path immediately, but the operator retains a recoverable backup for up to 30 days. The confirmation dialog says so in one line ("removed from the app right away; automatic backups are purged within 30 days") — disclosure, not a user-facing undo; a PITR restore is a manual operator support action, and the accidental-delete safety net in lieu of a product undo window (deferred).
+- **Refunds are decoupled.** Deletion cancels immediately, never auto-refunds; the ToS's 14-day window stays a manual support action.
+- **Not e2e-tested.** `seedOutline` mocks `/api/auth`, so the real deleteUser path is unreachable in Playwright; the owner guard, the billable-status sweep, and the residual-row scrub are unit-tested (`worker/account-deletion.test.ts`) and the full flow is verified by hand against the dev loop.
 - **`USER_OUTLINE` + `OWNER_USER_ID` are now on `AuthEnv`** (they were only on the Worker's `Env`), because the delete hook, living inside `createAuth`, needs the DO namespace and the owner id.

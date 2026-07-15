@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import {
   BILLABLE_SUBSCRIPTION_STATUSES,
   cancelActiveSubscriptions,
+  deleteResidualUserRows,
   isOwnerAccount,
-  normalizeWaitlistEmail,
 } from "./account-deletion";
 
 // Pure logic only (the repo's unit-test rule). The owner guard is the load-
@@ -55,66 +55,91 @@ describe("BILLABLE_SUBSCRIPTION_STATUSES", () => {
   });
 });
 
-describe("normalizeWaitlistEmail", () => {
-  test("matches the waitlist insert's normalization (trim + lowercase)", () => {
-    // Must stay in lockstep with worker/index.ts handleWaitlist, or the
-    // afterDelete waitlist purge misses the row the signup-era insert created.
-    expect(normalizeWaitlistEmail("  User@Example.COM ")).toBe(
-      "user@example.com",
+/** A D1 stub that records every prepared statement + its bindings. `all()`
+ *  returns empty results and `first()` a null customer id, so no Stripe client
+ *  is ever constructed (which would fire real network calls). */
+function recordingDb(calls: Array<{ sql: string; args: unknown[] }>) {
+  return {
+    prepare(sql: string) {
+      return {
+        bind(...args: unknown[]) {
+          calls.push({ sql, args });
+          return {
+            all: () => Promise.resolve({ results: [] }),
+            first: () => Promise.resolve({ stripeCustomerId: null }),
+            run: () => Promise.resolve({}),
+          };
+        },
+      };
+    },
+    batch: (stmts: unknown[]) => Promise.resolve(stmts.map(() => ({}))),
+  } as unknown as D1Database;
+}
+
+describe("cancelActiveSubscriptions", () => {
+  test("no STRIPE_SECRET_KEY = skip Stripe but STILL clear the D1 subscription row", async () => {
+    // The row delete is unconditional (a comped user is an operator-inserted
+    // active row with NO Stripe ids; dev has no key at all) — only the Stripe
+    // API half is gated on the key. ADR 0051: the row is cleared in
+    // beforeDelete, not the best-effort afterDelete sweep.
+    const calls: Array<{ sql: string; args: unknown[] }> = [];
+    await cancelActiveSubscriptions({ DB: recordingDb(calls) }, "user-abc");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.sql).toContain("DELETE FROM subscription");
+    expect(calls[0]!.args).toEqual(["user-abc"]);
+  });
+
+  test("Stripe key set, no billable rows, no customer id = no Stripe client, row still cleared", async () => {
+    const calls: Array<{ sql: string; args: unknown[] }> = [];
+    await cancelActiveSubscriptions(
+      { DB: recordingDb(calls), STRIPE_SECRET_KEY: "sk_test_x" },
+      "user-abc",
     );
-    expect(normalizeWaitlistEmail("plain@x.dev")).toBe("plain@x.dev");
+    const subQuery = calls.find((c) =>
+      c.sql.includes("SELECT stripeSubscriptionId"),
+    );
+    expect(subQuery).toBeDefined();
+    // The widened status list is what the subscription query filters on.
+    for (const status of BILLABLE_SUBSCRIPTION_STATUSES) {
+      expect(subQuery!.sql).toContain(`'${status}'`);
+    }
+    // The customer lookup reads the plugin's column on the user row.
+    expect(calls.some((c) => c.sql.includes("stripeCustomerId"))).toBe(true);
+    // And the D1 row is cleared last (after Stripe committed / was skipped).
+    expect(calls[calls.length - 1]!.sql).toContain("DELETE FROM subscription");
   });
 });
 
-describe("cancelActiveSubscriptions", () => {
-  test("no STRIPE_SECRET_KEY = clean no-op, never touches D1", async () => {
-    // A DB whose every call throws proves the guard short-circuits before any
-    // query (dev has no Stripe key and no real subscriptions).
-    const throwingDb = {
-      prepare() {
-        throw new Error("DB should not be touched without a Stripe key");
-      },
-    } as unknown as D1Database;
-    await expect(
-      cancelActiveSubscriptions({ DB: throwingDb }, "user-abc"),
-    ).resolves.toBeUndefined();
-  });
-
-  test("Stripe key set, no billable rows, no customer id = no Stripe client", async () => {
-    // With a key present we query D1; empty subscription results AND a null
-    // stripeCustomerId must return before constructing a Stripe client (which
-    // would fire real network calls). Also asserts the widened status list is
-    // what the subscription query filters on.
-    const queries: string[] = [];
-    const emptyDb = {
+describe("deleteResidualUserRows", () => {
+  test("scrubs OAuth by userId and waitlist + invites by NORMALIZED email; subscription is NOT here", async () => {
+    // The subscription row is the entitlement record — too load-bearing for a
+    // best-effort sweep, so it's cleared in beforeDelete's Stripe step (ADR
+    // 0051) and must NOT reappear here. The email-keyed waitlist (0005) and
+    // invites (0007) rows must be deleted under the same trim+lowercase their
+    // inserts used (normalizeEmail, worker/invites.ts).
+    const calls: Array<{ sql: string; args: unknown[] }> = [];
+    const db = {
       prepare(sql: string) {
-        queries.push(sql);
         return {
-          bind() {
-            return {
-              all() {
-                return Promise.resolve({ results: [] });
-              },
-              first() {
-                return Promise.resolve({ stripeCustomerId: null });
-              },
-            };
+          bind(...args: unknown[]) {
+            calls.push({ sql, args });
+            return {};
           },
         };
       },
+      batch(stmts: unknown[]) {
+        return Promise.resolve(stmts.map(() => ({})));
+      },
     } as unknown as D1Database;
-    await expect(
-      cancelActiveSubscriptions(
-        { DB: emptyDb, STRIPE_SECRET_KEY: "sk_test_x" },
-        "user-abc",
-      ),
-    ).resolves.toBeUndefined();
-    const subQuery = queries.find((q) => q.includes("FROM subscription"));
-    expect(subQuery).toBeDefined();
-    for (const status of BILLABLE_SUBSCRIPTION_STATUSES) {
-      expect(subQuery).toContain(`'${status}'`);
-    }
-    // And the customer lookup reads the plugin's column on the user row.
-    expect(queries.some((q) => q.includes("stripeCustomerId"))).toBe(true);
+
+    await deleteResidualUserRows(db, "user-abc", "  User@Example.COM ");
+
+    const bySql = (frag: string) => calls.find((c) => c.sql.includes(frag));
+    expect(bySql("oauthAccessToken")!.args).toEqual(["user-abc"]);
+    expect(bySql("oauthConsent")!.args).toEqual(["user-abc"]);
+    expect(bySql("oauthApplication")!.args).toEqual(["user-abc"]);
+    expect(bySql("DELETE FROM waitlist")!.args).toEqual(["user@example.com"]);
+    expect(bySql("DELETE FROM invites")!.args).toEqual(["user@example.com"]);
+    expect(bySql("subscription")).toBeUndefined();
   });
 });
