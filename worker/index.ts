@@ -44,6 +44,7 @@ import {
 } from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
+import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
@@ -244,6 +245,15 @@ class RouteNotFound extends Data.TaggedError("RouteNotFound")<{
   path: string;
 }> {}
 
+/**
+ * A free-tier outline is at its node ceiling and the write would grow it past
+ * the cap (#170). Mapped to a 403 whose body names the reason + limit so the
+ * client can surface an upgrade prompt (mirroring the protected-node rejection).
+ * Never raised for edits/moves/deletes, and never for a paid user — see
+ * batchExceedsNodeLimit / the DO's applyBatchGated.
+ */
+class NodeLimitExceeded extends Data.TaggedError("NodeLimitExceeded")<{}> {}
+
 // --- ensureSeededE ----------------------------------------------------------
 
 /**
@@ -360,7 +370,9 @@ function decodeBody<S extends Schema.Top>(
 function handleNodes(
   request: Request,
   stub: DurableObjectStub<UserOutlineDO>,
-): Effect.Effect<Response, BadRequest> {
+  env: Env,
+  userId: string,
+): Effect.Effect<Response, BadRequest | NodeLimitExceeded> {
   return Effect.gen(function* () {
     switch (request.method) {
       case "GET":
@@ -371,13 +383,37 @@ function handleNodes(
         // ops and persists as ONE DO frame (one seq, one broadcast). Reply with
         // that seq so the client can hold its optimistic overlay until the frame
         // echoes back — closing the half-applied / reverted-state window.
+        //
+        // Free-tier node ceiling (#170): resolve the caller's limit and let the
+        // DO reject a batch that would grow the outline past it (null seq → 403).
+        // A pure-delete batch can never grow the outline, so skip the plan query
+        // (deletes are never blocked) — most structural edits (moves) DO touch
+        // existing nodes, but the DO's per-op growth count makes that safe.
         if (ops) {
-          const seq = yield* Effect.promise(() => stub.applyBatch(ops));
+          const growable = ops.some((o) => o.op !== "delete");
+          const limit = growable
+            ? nodeLimitForPlan(
+                yield* Effect.promise(() => getPlan(userId, env)),
+              )
+            : null;
+          const seq = yield* Effect.promise(() =>
+            stub.applyBatchGated(ops, limit),
+          );
+          if (seq === null) return yield* Effect.fail(new NodeLimitExceeded());
           return json({ seq });
         }
         // Legacy upsert path: the first-run seed and any pre-batch client. Kept
-        // for back-compat during rollout.
-        if (nodes?.length) yield* Effect.promise(() => stub.upsertNodes(nodes));
+        // for back-compat during rollout — gated too, so a raw POST can't slip
+        // past the cap the batch path enforces.
+        if (nodes?.length) {
+          const limit = nodeLimitForPlan(
+            yield* Effect.promise(() => getPlan(userId, env)),
+          );
+          const applied = yield* Effect.promise(() =>
+            stub.upsertNodesGated(nodes, limit),
+          );
+          if (!applied) return yield* Effect.fail(new NodeLimitExceeded());
+        }
         return json({ ok: true });
       }
       case "PATCH": {
@@ -570,7 +606,11 @@ function handleApiRequest(
   executionCtx: ExecutionContext,
 ): Effect.Effect<
   Response,
-  UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest
+  | UnknownCollection
+  | UpgradeRequired
+  | RouteNotFound
+  | BadRequest
+  | NodeLimitExceeded
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -667,7 +707,14 @@ function handleApiRequest(
       const origin = yield* Effect.promise(() =>
         resolveMcpOrigin(env, clientId),
       );
-      return yield* handleMcp(request, mcpStub, origin);
+      // MCP (agent access) is a paid capability (#152/#170). Resolve the plan
+      // from the token's `userId` — the Better Auth id the subscription table is
+      // keyed on (never the resolved DO id, which collapses the owner to
+      // 'default'). A free token gets a clean in-protocol error on tool calls
+      // (handleMcp), not a 500. An operator comps themselves with a manual
+      // subscription row (getPlan treats it as paid).
+      const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
+      return yield* handleMcp(request, mcpStub, origin, mcpPlan !== "free");
     }
 
     // Identity = the validated session's stable user id. No session → 401.
@@ -722,7 +769,7 @@ function handleApiRequest(
 
     if (url.pathname === "/api/nodes") {
       yield* maybeSeed;
-      return yield* handleNodes(request, stub);
+      return yield* handleNodes(request, stub, env, userId);
     }
 
     if (url.pathname === "/api/kv") {
@@ -787,6 +834,13 @@ const handler = {
         ),
         Effect.catchTag("RouteNotFound", () =>
           Effect.succeed(json({ error: "not found" }, 404)),
+        ),
+        // 403 with a machine-readable body the client keys on to show an upgrade
+        // prompt (src/data/nodes-client-effect.ts NodesLimitError).
+        Effect.catchTag("NodeLimitExceeded", () =>
+          Effect.succeed(
+            json({ error: "node_limit", limit: FREE_NODE_LIMIT }, 403),
+          ),
         ),
       ),
     ).catch((err) => {

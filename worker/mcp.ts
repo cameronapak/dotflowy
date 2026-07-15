@@ -51,6 +51,12 @@ const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
+// Server-defined range (-32000..-32099): the caller's plan doesn't include agent
+// access (#170). A JSON-RPC error, not a tool `isError`, so a free connection
+// can still initialize + discover but no tool call ever touches the outline.
+const UPGRADE_REQUIRED = -32001;
+const UPGRADE_MESSAGE =
+  "Agent access requires a paid Dotflowy plan. Upgrade at https://dotflowy.com to connect an agent.";
 
 // --- Wire schemas (the /api/mcp trust boundary) --------------------------------
 
@@ -216,6 +222,7 @@ function dispatch(
   message: typeof JsonRpcMessageSchema.Type,
   store: OutlineStore,
   origin: string | null,
+  agentAccess: boolean,
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -230,7 +237,12 @@ function dispatch(
     case "tools/list":
       return Effect.succeed(rpcResult(id, { tools: toolList }));
     case "tools/call":
-      return handleToolCall(id, message.params, store, origin);
+      // The entitlement gate: initialize/ping/tools/list stay open so a free
+      // connection can handshake and see WHY, but every tool call — read AND
+      // write — is refused until the plan includes agent access (#170).
+      return agentAccess
+        ? handleToolCall(id, message.params, store, origin)
+        : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
         rpcError(id, METHOD_NOT_FOUND, `method not found: ${message.method}`),
@@ -249,11 +261,16 @@ function dispatch(
  * OAuth client behind the bearer token (worker/index.ts), written onto every
  * node a write tool creates. Null when it can't be resolved (falls back to a
  * generic marker there).
+ *
+ * `agentAccess` is the caller's entitlement (#170): false for a free plan, which
+ * refuses every tools/call with an upgrade error while leaving the handshake +
+ * discovery open. worker/index.ts resolves it from the token's plan.
  */
 export function handleMcp(
   request: Request,
   store: OutlineStore,
   origin: string | null,
+  agentAccess: boolean,
 ): Effect.Effect<Response> {
   switch (request.method) {
     case "OPTIONS":
@@ -294,7 +311,7 @@ export function handleMcp(
         rpcError(null, INVALID_REQUEST, issue.message),
       ),
     );
-    return yield* dispatch(message, store, origin);
+    return yield* dispatch(message, store, origin, agentAccess);
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),
