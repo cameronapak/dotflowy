@@ -57,13 +57,15 @@ The Effect v4 source is fetched on demand with [opensrc](https://github.com/verc
 
 ```sh
 bunx opensrc path Effect-TS/effect-smol            # fetches on first use, prints the cached path
-rg "fnUntraced" $(bunx opensrc path Effect-TS/effect-smol)/packages/effect/src
+grep -rn "fnUntraced" "$(bunx opensrc path Effect-TS/effect-smol)/packages/effect/src"
 ```
 
+- **Search it with `grep -rn` / Read / glob — NOT fff or codegraph.** The cache lives outside the git tree, and both fff and codegraph are scoped to the git-indexed workspace (that's their job — searching _dotflowy's_ code), so neither can reach `~/.opensrc/`. Don't try to make them by moving the cache into the tree: that re-creates the search skew ADR 0040 removed. `grep` here is **ugrep** (ripgrep-class fast), so grepping a 32MB source tree is instant.
 - **Read-only reference.** Treat the fetched repo as the source of truth for Effect v4 APIs, patterns, tests, and module structure. Never `node_modules/effect/` — always the opensrc copy's `packages/effect/src/`.
 - **Never import from it.** Application and worker code continue to `import { Effect } from "effect"` from the normal npm dependency. The fetched copy is for agent reference only, not bundling.
 - Before writing Effect code, read its `AGENTS.md` and `.patterns/effect.md` (repo root of the fetched copy) for v4 idioms (e.g. `Effect.fnUntraced`, `Effect.callback` not `Effect.async`, `Data.TaggedError("Tag")<{}>`, no `async/await`, use `Effect.gen`).
-- `bun run effect:src` prints the same path; `bun run setup` pre-warms the cache so the source is available offline.
+- `bun run effect:src` prints the same path; `bun run setup` pre-warms the cache so the source is available offline. **`bun run effect:src:update` refreshes it to latest** (`opensrc remove` + `fetch`) — `opensrc path` only fetches on a cache _miss_, so without this the copy stays pinned at first fetch; run it on demand when you want the newest `main`.
+- **The same tool reads ANY dependency's source, not just Effect.** `bunx opensrc path <pkg>` (e.g. `zod`, `pypi:requests`, `crates:serde`, `owner/repo`) prints the cached path — read/`grep -rn` under it instead of `node_modules/`. Pin betas/pre-releases by exact version (`bunx opensrc path effect@4.0.0-beta.50`).
 
 ## Agent skills
 
@@ -142,7 +144,7 @@ Green gates are necessary, not sufficient. Before declaring an observable change
 
 **New feature or design decision? Stop and grill it first — this is a MUST, not a nicety.** Before writing code for any of these — a new plugin (`src/plugins/<name>/`), a new route, a new plugin **seam**, a new `Node` field or wire-schema change, a new side-collection, or any behavior whose _why_ an ADR would carry — you MUST do both, in order:
 
-1. **Read the ADRs that already constrain the area, before designing.** Grep [`docs/adr/`](./docs/adr/) for the surfaces you're touching and read the matching ADRs _first_. The rules that PRs keep breaking live there — this file cites them by number (ADR 0009 atomic structural writes, ADR 0014 the trust boundary, and so on) but the _content_ is in `docs/adr/`, and an agent that never opens the file designs blind against invariants it can't see. Designing against `docs/adr/` is not optional.
+1. **Read the ADRs that already constrain the area, before designing.** Search [`docs/adr/`](./docs/adr/) (with fff) for the surfaces you're touching and read the matching ADRs _first_. The rules that PRs keep breaking live there — this file cites them by number (ADR 0009 atomic structural writes, ADR 0014 the trust boundary, and so on) but the _content_ is in `docs/adr/`, and an agent that never opens the file designs blind against invariants it can't see. Designing against `docs/adr/` is not optional.
 2. **Run `/grill-with-docs`** — a relentless interview that _sharpens_ the decision and records new docs (ADRs, and a glossary if warranted) via `/domain-modeling` as they crystallise. If that skill can't be invoked in your harness, run the behavior by hand: hold the design against each constraining ADR from step 1 and stress-test it before committing to an approach.
 
 - A decision earns an **ADR** in [`docs/adr/`](./docs/adr/) when it is hard to reverse, surprising without context, and the result of a real trade-off — the bar and the file shape are in the `domain-modeling` skill's `ADR-FORMAT.md`. ADRs are numbered sequentially (`0001-slug.md`); the dotflowy set captures the calls an agent would get wrong from the code alone (the per-node tree store, atomic structural writes, the per-user DO, and so on).
