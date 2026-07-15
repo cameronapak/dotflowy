@@ -10,7 +10,7 @@ import type {
 } from "../src/data/wire-schema";
 
 import { planChangeFrames } from "./changelog";
-import { batchExceedsNodeLimit } from "./plan";
+import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
@@ -363,12 +363,13 @@ export class UserOutlineDO extends DurableObject<Env> {
    * that to a 403 the client surfaces). A `null` limit skips the check entirely
    * (paid users take the same path as ungated applyBatch, one extra no-op branch).
    *
-   * Growth is counted by read-only existence probes BEFORE any write, over
-   * DISTINCT ids (a batch that names the same new id twice is one new node), so a
-   * delete of an absent row and an upsert of an existing id both contribute zero
-   * — only real new ids count as inserts, only real removals as deletes. The
-   * decision (batchExceedsNodeLimit) is pure and unit-tested; here we just feed
-   * it the three SQLite counts. Rejecting writes nothing, so the client's
+   * Growth is counted by `countNetGrowth` via read-only existence probes BEFORE
+   * any write: for each DISTINCT id its LAST op wins, so a delete of an absent
+   * row, an upsert of an existing id, AND a delete+reinsert of the same id all
+   * contribute zero — only ids that end the batch newly-present count as inserts,
+   * only ids that end newly-absent as deletes. The decision
+   * (batchExceedsNodeLimit) is pure and unit-tested; here we just feed it the two
+   * net counts plus the SQLite total. Rejecting writes nothing, so the client's
    * optimistic overlay rolls back cleanly.
    */
   applyBatchGated(
@@ -377,23 +378,10 @@ export class UserOutlineDO extends DurableObject<Env> {
   ): number | null {
     const frames = this.ctx.storage.transactionSync(() => {
       if (limit !== null) {
-        const newIds = new Set<string>();
-        const removedIds = new Set<string>();
-        for (const op of ops) {
-          if (op.op === "delete") {
-            if (this.nodeExists(op.key)) removedIds.add(op.key);
-          } else if (!this.nodeExists(op.value.id)) {
-            newIds.add(op.value.id);
-          }
-        }
-        if (
-          batchExceedsNodeLimit(
-            this.nodeCount(),
-            newIds.size,
-            removedIds.size,
-            limit,
-          )
-        )
+        const { inserts, deletes } = countNetGrowth(ops, (id) =>
+          this.nodeExists(id),
+        );
+        if (batchExceedsNodeLimit(this.nodeCount(), inserts, deletes, limit))
           return null;
       }
       return this.recordChange(

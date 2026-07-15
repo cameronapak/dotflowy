@@ -1,5 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import type { ChangeOp } from "../src/data/wire-schema";
+
 /**
  * Plan resolution: the ONE read the entitlement checks consume. Subscription
  * state lives in D1 in the @better-auth/stripe plugin's `subscription` table
@@ -47,6 +49,37 @@ export function batchExceedsNodeLimit(
   if (limit === null) return false;
   const after = before + inserts - deletes;
   return after > limit && after > before;
+}
+
+/**
+ * Net node growth a batch produces: for each DISTINCT id, its LAST op wins, and
+ * a new id only counts as an insert if it ends the batch present, an existing id
+ * only as a delete if it ends absent — so a delete+reinsert of the same id nets
+ * zero (the DO-level twin of batchExceedsNodeLimit; keeps that pure fn's inputs
+ * correct under intra-batch id churn). `exists` probes pre-batch row presence.
+ *
+ * Guards the cap against a `delete X, upsert X, insert Y` batch: counting deletes
+ * and inserts as independent sets against pre-batch existence would credit the
+ * delete of X (existed) without debiting its reinsert (still present at probe
+ * time), under-counting `after` and letting a free user at the cap grow +1.
+ */
+export function countNetGrowth(
+  ops: ReadonlyArray<ChangeOp>,
+  exists: (id: string) => boolean,
+): { inserts: number; deletes: number } {
+  const lastIsDelete = new Map<string, boolean>();
+  for (const op of ops) {
+    const id = op.op === "delete" ? op.key : op.value.id;
+    lastIsDelete.set(id, op.op === "delete");
+  }
+  let inserts = 0;
+  let deletes = 0;
+  for (const [id, isDelete] of lastIsDelete) {
+    const existed = exists(id);
+    if (!isDelete && !existed) inserts++;
+    else if (isDelete && existed) deletes++;
+  }
+  return { inserts, deletes };
 }
 
 /** Founding is capped at 50 seats, app-enforced (Stripe has no price-level

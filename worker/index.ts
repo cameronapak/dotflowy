@@ -371,7 +371,7 @@ function handleNodes(
   request: Request,
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
-  userId: string,
+  billingUserId: string,
 ): Effect.Effect<Response, BadRequest | NodeLimitExceeded> {
   return Effect.gen(function* () {
     switch (request.method) {
@@ -389,11 +389,18 @@ function handleNodes(
         // A pure-delete batch can never grow the outline, so skip the plan query
         // (deletes are never blocked) — most structural edits (moves) DO touch
         // existing nodes, but the DO's per-op growth count makes that safe.
+        //
+        // getPlan takes the BILLING id (`session.user.id`), NOT the DO-routing id:
+        // the subscription table is keyed on the raw Better Auth `user.id`, but
+        // resolveUserId collapses the OWNER to the constant 'default' DO — so
+        // querying the resolved id would miss the owner's comp row and wrongly
+        // read `free`. Same split the MCP branch makes (getPlan(token.userId) with
+        // a separately-resolved DO stub).
         if (ops) {
           const growable = ops.some((o) => o.op !== "delete");
           const limit = growable
             ? nodeLimitForPlan(
-                yield* Effect.promise(() => getPlan(userId, env)),
+                yield* Effect.promise(() => getPlan(billingUserId, env)),
               )
             : null;
           const seq = yield* Effect.promise(() =>
@@ -407,7 +414,7 @@ function handleNodes(
         // past the cap the batch path enforces.
         if (nodes?.length) {
           const limit = nodeLimitForPlan(
-            yield* Effect.promise(() => getPlan(userId, env)),
+            yield* Effect.promise(() => getPlan(billingUserId, env)),
           );
           const applied = yield* Effect.promise(() =>
             stub.upsertNodesGated(nodes, limit),
@@ -769,7 +776,9 @@ function handleApiRequest(
 
     if (url.pathname === "/api/nodes") {
       yield* maybeSeed;
-      return yield* handleNodes(request, stub, env, userId);
+      // `stub` routes on the resolved `userId` (owner → 'default'); the plan
+      // lookup takes the raw billing id (`session.user.id`) — see handleNodes.
+      return yield* handleNodes(request, stub, env, session.user.id);
     }
 
     if (url.pathname === "/api/kv") {
