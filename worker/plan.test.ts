@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import type { ChangeOp } from "../src/data/wire-schema";
+
+import { makeNode } from "../src/data/tree";
 import {
   batchExceedsNodeLimit,
+  countNetGrowth,
   FREE_NODE_LIMIT,
   nodeLimitForPlan,
   resolvePlan,
@@ -83,5 +87,67 @@ describe("batchExceedsNodeLimit", () => {
     expect(batchExceedsNodeLimit(CAP, 3, 5, CAP)).toBe(false);
     // a net-zero replace at cap is allowed (never locks).
     expect(batchExceedsNodeLimit(CAP, 1, 1, CAP)).toBe(false);
+  });
+});
+
+describe("countNetGrowth", () => {
+  const ins = (id: string): ChangeOp => ({
+    op: "insert",
+    value: makeNode({ id, text: id }),
+  });
+  const del = (id: string): ChangeOp => ({ op: "delete", key: id });
+  // A pre-batch existence probe backed by the set of ids already in the outline.
+  const existsIn = (ids: string[]) => (id: string) => ids.includes(id);
+
+  test("plain inserts of new ids count as inserts", () => {
+    expect(countNetGrowth([ins("a"), ins("b")], existsIn([]))).toEqual({
+      inserts: 2,
+      deletes: 0,
+    });
+  });
+
+  test("plain deletes of existing ids count as deletes", () => {
+    expect(countNetGrowth([del("a"), del("b")], existsIn(["a", "b"]))).toEqual({
+      inserts: 0,
+      deletes: 2,
+    });
+  });
+
+  test("updating existing ids is zero growth", () => {
+    // An upsert of an id that already exists is neither insert nor delete.
+    expect(countNetGrowth([ins("a"), ins("b")], existsIn(["a", "b"]))).toEqual({
+      inserts: 0,
+      deletes: 0,
+    });
+  });
+
+  test("deleting an absent id is zero growth", () => {
+    expect(countNetGrowth([del("a")], existsIn([]))).toEqual({
+      inserts: 0,
+      deletes: 0,
+    });
+  });
+
+  test("a duplicated upsert of the same new id is one insert", () => {
+    expect(countNetGrowth([ins("a"), ins("a")], existsIn([]))).toEqual({
+      inserts: 1,
+      deletes: 0,
+    });
+  });
+
+  test("THE BUG CASE: delete X + reinsert X + insert Y nets +1, not +0", () => {
+    // X exists pre-batch, is deleted, then upserted again (last op wins → still
+    // present → NOT a delete); Y is genuinely new. Independent-set counting saw
+    // deletes:1/inserts:1 → net 0, letting a capped user grow past the ceiling.
+    expect(
+      countNetGrowth([del("x"), ins("x"), ins("y")], existsIn(["x"])),
+    ).toEqual({ inserts: 1, deletes: 0 });
+  });
+
+  test("insert-then-delete of a new id nets zero (ends absent, never existed)", () => {
+    expect(countNetGrowth([ins("x"), del("x")], existsIn([]))).toEqual({
+      inserts: 0,
+      deletes: 0,
+    });
   });
 });
