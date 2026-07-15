@@ -18,6 +18,13 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
 import Stripe from "stripe";
 
+import type { UserOutlineDO } from "./outline-do";
+
+import {
+  cancelActiveSubscriptions,
+  deleteResidualUserRows,
+  isOwnerAccount,
+} from "./account-deletion";
 import { sendEmail } from "./email";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
@@ -50,6 +57,16 @@ export interface AuthEnv {
    *  dashboard endpoint in prod, `stripe listen` locally. Unset = webhook
    *  signature verification fails closed. */
   STRIPE_WEBHOOK_SECRET?: string;
+  /** The per-user outline Durable Object namespace. Self-serve account deletion
+   *  (ticket #224) reaches the caller's DO through this to wipe their outline as
+   *  part of the delete lifecycle — the same binding worker/index.ts routes
+   *  /api/nodes through, resolved here from the authenticated session's user.id
+   *  (never a client-supplied id; the DO trust boundary, ADR 0014). */
+  USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>;
+  /** The owner's Better Auth `user.id`. When set, that one account routes to the
+   *  constant 'default' DO (worker/index.ts resolveUserId); self-serve deletion
+   *  refuses it (docs/adr/0051). */
+  OWNER_USER_ID?: string;
 }
 
 /**
@@ -123,6 +140,49 @@ export function createAuth(
       // A reset is the "my password leaked" move: kill every existing session
       // so a stolen one dies with the old password.
       revokeSessionsOnPasswordReset: true,
+    },
+    // Self-serve account deletion (ticket #224 / docs/adr/0051). Confirmed
+    // client-side by re-entering the password (`authClient.deleteUser({password})`)
+    // — every account has one (email+password is the only signup path), so the
+    // password path always works even for Google-linked accounts. Email
+    // verification is deliberately NOT wired (`sendDeleteAccountVerification`
+    // absent): verification is off for beta (ADR 0011), and the fresh-password
+    // check already proves it's the account owner at the keyboard.
+    user: {
+      deleteUser: {
+        enabled: true,
+        // beforeDelete runs while the account still exists, so it's the only
+        // safe place to (1) refuse the un-deletable owner account, (2) cancel
+        // Stripe BEFORE the rows it references vanish, and (3) wipe the outline
+        // DO. A throw here ABORTS the deletion with nothing destroyed — which is
+        // exactly what we want if Stripe cancellation fails (a paying
+        // subscription must never outlive its account). Order matters: guard →
+        // Stripe (external, must succeed) → DO wipe (irreversible, last).
+        beforeDelete: async (user) => {
+          if (isOwnerAccount(user.id, env.OWNER_USER_ID)) {
+            throw new APIError("FORBIDDEN", {
+              message:
+                "This account can't be deleted from the app. Contact support.",
+            });
+          }
+          // Throws on a real Stripe failure → deletion aborts, DO untouched.
+          await cancelActiveSubscriptions(env, user.id);
+          // Non-owner, so resolveUserId(user.id) === user.id: the caller's own
+          // DO, resolved from the authenticated user.id (never client input).
+          const stub = env.USER_OUTLINE.get(
+            env.USER_OUTLINE.idFromName(user.id),
+          );
+          await stub.wipe();
+        },
+        // afterDelete runs once the identity rows are gone. Better Auth's core
+        // deletes user/session/account; the subscription row (no FK) and the
+        // mcp OAuth rows are cleaned here. Best-effort: any leftover is
+        // unreachable (nothing routes to a deleted user.id), so a failure here
+        // never un-does an already-completed deletion.
+        afterDelete: async (user) => {
+          await deleteResidualUserRows(env.DB, user.id);
+        },
+      },
     },
     // "Sign in with Google" — sign-IN only. `disableSignUp: true` is the same
     // invite gate as the /sign-up/email hook, expressed for OAuth: a Google
