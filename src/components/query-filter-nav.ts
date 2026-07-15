@@ -89,3 +89,34 @@ export function toggleFilterInput() {
   if (isOpenProbe?.()) closer?.();
   else opener?.();
 }
+
+// --- Reactive open-signal (ADR 0050) ----------------------------------------
+// `QueryFilterBar` owns whether the input is showing (`summoned || active`) in
+// local state, but `FilterButton` lives in the header and must LIGHT while the
+// input is open -- even before a query is typed. The `isOpenProbe` above is a
+// non-reactive read; this is its subscribable twin, mirroring the
+// `spotlight-mode` / `show-completed` store pattern. `QueryFilterBar` publishes
+// `showInput` here; `FilterButton` subscribes via `useSyncExternalStore`.
+
+let filterOpen = false;
+const openListeners = new Set<() => void>();
+
+/** Publish the input's open state (called by `QueryFilterBar` on change). */
+export function setFilterOpen(next: boolean) {
+  if (next === filterOpen) return;
+  filterOpen = next;
+  for (const l of openListeners) l();
+}
+
+/** Subscribe to open-state changes (for `useSyncExternalStore`). */
+export function subscribeFilterOpen(cb: () => void) {
+  openListeners.add(cb);
+  return () => {
+    openListeners.delete(cb);
+  };
+}
+
+/** Snapshot of the input's open state (for `useSyncExternalStore`). */
+export function getFilterOpen() {
+  return filterOpen;
+}

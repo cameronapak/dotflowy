@@ -243,6 +243,23 @@
   );
   mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
 }
+/* scroll-fade fallback suppression.
+   shadcn's `scroll-fade` utility (in shadcn/tailwind.css) is scroll-aware in
+   browsers with CSS scroll-driven animations. Where those are unsupported
+   (older Safari, Firefox by default) it falls back to a STATIC fade on both
+   edges — which would dim the top/bottom of a short, non-overflowing menu for
+   no reason. We treat the fade as pure progressive enhancement, so null the
+   mask entirely in the fallback path: unsupported browsers get exactly today's
+   plain-scroll behavior, no visual regression. */
+@supports not (animation-timeline: scroll()) {
+  .scroll-fade,
+  .scroll-fade-x,
+  .scroll-fade-y {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
 .node-deco-track {
   display: flex;
   align-items: center;
@@ -923,6 +940,30 @@ h2.zoomed-title .row-body > .title-pilcrow {
 .node-text:empty::before {
   content: "";
   display: inline-block;
+}
+
+/* Quick-add mini-editor (ADR 0049): show its placeholder while the capture is
+   empty. Scoped to the overlay so the outline's empty bullets stay blank. The
+   contentEditable's own `data-placeholder` supplies the text. */
+.quick-add-editor .node-text:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+/* Once BORN, the node's before-text slots (Seam F -- the todos checkbox) render
+   inline ahead of the text, mirroring the list row / zoomed title. Lay the
+   surface out as a flex row so the checkbox sits beside the text and the
+   contentEditable takes the remaining width (ADR 0049 inline-decoration flow). */
+.quick-add-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.quick-add-editor .node-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* --- Drag to reorder (ADR 0010) --- */

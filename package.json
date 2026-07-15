@@ -1,6 +1,6 @@
 {
   "name": "dotflowy",
-  "version": "1.2.1",
+  "version": "1.3.1",
   "private": true,
   "description": "A local-first outline editor built with TanStack Start and TanStack DB.",
   "license": "O'Saasy",
@@ -37,7 +37,8 @@
     "test:e2e": "playwright test",
     "test:e2e:serial": "playwright test --workers=1",
     "test:e2e:ui": "playwright test --ui",
-    "effect:src": "opensrc path Effect-TS/effect-smol"
+    "effect:src": "opensrc path Effect-TS/effect-smol",
+    "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -95,7 +96,7 @@
     "oxfmt": "^0.58.0",
     "oxlint": "^1.71.0",
     "tailwindcss": "^4.3.1",
-    "typescript": "^5.6.0",
+    "typescript": "^7.0.2",
     "vite": "^8.0.16",
     "wrangler": "^4.104.0"
   },

@@ -15,7 +15,6 @@
     "noEmit": true,
     "verbatimModuleSyntax": false,
     "isolatedModules": true,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

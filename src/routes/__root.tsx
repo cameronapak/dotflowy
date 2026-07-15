@@ -20,6 +20,7 @@ import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
 import { OAuthCallbackErrorToast } from "../components/oauth-callback-error";
 import { OpmlImportDialog } from "../components/opml-import-dialog";
+import { QuickAdd } from "../components/quick-add";
 import { ShowCompletedProvider } from "../components/show-completed-provider";
 import { SpotlightController } from "../components/spotlight-mode";
 import { TextSizeProvider } from "../components/text-size-provider";
@@ -77,7 +78,7 @@ const noFlashTextSizeScript = `
 const APP_URL = "https://app.dotflowy.com";
 const APP_TITLE = "Dotflowy";
 const APP_DESCRIPTION =
-  "A fast, keyboard-first outliner you can own and extend.";
+  "Room to think. Get everything out of your head, shape it when you're ready, and find it when it matters.";
 const OG_IMAGE = `${APP_URL}/og.png`;
 
 export const Route = createRootRoute({
@@ -145,6 +146,7 @@ function RootComponent() {
               <ShowCompletedProvider>
                 <Outlet />
                 <NodeSwitcher />
+                <QuickAdd />
                 <MoveDialog />
                 <OpmlImportDialog />
                 <DeleteConfirmDialog />

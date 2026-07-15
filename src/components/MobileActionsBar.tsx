@@ -6,16 +6,11 @@ import {
   SquareSlash,
   Undo2,
 } from "lucide-react";
-import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 
 /**
@@ -32,20 +27,6 @@ export interface MobileBarActions {
   /** Insert a literal "/" at the caret so the row's own detectSlash opens the
    *  command palette (insert-and-open, not a toggle). */
   insertSlash: () => void;
-}
-
-/** A coarse pointer ("this is a finger"). Mirrors use-mobile.ts's store shape. */
-function subscribeCoarse(onChange: () => void) {
-  const mql = window.matchMedia("(pointer: coarse)");
-  mql.addEventListener("change", onChange);
-  return () => mql.removeEventListener("change", onChange);
-}
-function useCoarsePointer(): boolean {
-  return useSyncExternalStore(
-    subscribeCoarse,
-    () => window.matchMedia("(pointer: coarse)").matches,
-    () => false,
-  );
 }
 
 /**
@@ -191,7 +172,7 @@ export function MobileActionsBar({
           // instead of clipping. Buttons are shrink-0, so they keep their 44px
           // targets and the strip scrolls rather than squashing; justify-start (the
           // flex default) keeps the leftmost button reachable when it does scroll.
-          "flex max-w-full items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
+          "flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
           // Frosted-glass material: translucent, blurred, hairline edge + soft
           // shadow (depth from shadow, not a hard border) — the iOS accessory
           // pill's grammar, resolved through our own theme tokens so it adapts to

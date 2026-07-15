@@ -1,16 +1,17 @@
 <p align="center">
-  <img src="/public/favicon-light.svg" alt="Dotflowy" width="120" height="120" />
-</p>
-
-<h1 align="center">Dotflowy (alpha)</h1>
-
-<p align="center">
-  <strong>An infinite outliner for your thoughts and tasks</strong><br/>
-	<span>The open-source alternative to Workflowy, extensible with plugins like Obsidian</span>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="/public/logo-dark.svg" />
+    <img src="/public/logo-light.svg" alt="Dotflowy" width="316" height="64" />
+  </picture>
 </p>
 
 <p align="center">
-  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a>
+  <strong>Room to think — get everything out of your head, shape it when you're ready, and find it when it matters.</strong><br/>
+	<span>An open-source Workflowy alternative, extensible with plugins like Obsidian. Agent-native via MCP.</span>
+</p>
+
+<p align="center">
+  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a> · invite-gated alpha
 </p>
 
 ---
@@ -73,15 +74,16 @@ Not built yet: sharing, email verification.
 
 ## Stack
 
-| Layer      | Choice                                                 | Why                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Framework  | TanStack Start (SPA mode)                              | File-based routing, no SSR needed for a local-first app                                                                                                                                                                                                                                                                                                                          |
-| Data       | TanStack DB collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes ride a custom sync collection (live `/api/sync` WebSocket, writes via `/api/nodes`); plugin side data (tag colors, daily index) rides query collections over a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
-| Backend    | Cloudflare Worker + Durable Objects                    | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md))                                                                                                                                                                                                                       |
-| Auth       | Better Auth (email + password)                         | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1                                                                                                                                                                                                                                                            |
-| Validation | Effect Schema                                          | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker                                                                                                                                                                                                                                             |
-| Build      | Vite 8                                                 | What Start uses                                                                                                                                                                                                                                                                                                                                                                  |
-| Runtime    | Bun (dev/install)                                      | Fast; npm/pnpm/yarn work too                                                                                                                                                                                                                                                                                                                                                     |
+| Layer         | Choice                                                 | Why                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework     | TanStack Start (SPA mode)                              | File-based routing, no SSR needed for a local-first app                                                                                                                                                                                                                                                                                                                          |
+| Data          | TanStack DB collections over a per-user Durable Object | Optimistic mutations, schema-validated; the flat-row model swaps backends by changing collection options. Nodes ride a custom sync collection (live `/api/sync` WebSocket, writes via `/api/nodes`); plugin side data (tag colors, daily index) rides query collections over a generic `/api/kv` store ([the sync design](docs/adr/0008-sync-via-a-per-user-durable-object.md)). |
+| Backend       | Cloudflare Worker + Durable Objects                    | One Worker serves the SPA and routes the `/api/nodes` + `/api/kv` sync APIs to a per-user Durable Object ([the auth gate](docs/adr/0011-the-auth-gate.md))                                                                                                                                                                                                                       |
+| Auth          | Better Auth (email + password)                         | Invite-gated signup (alpha); its `user` table is the identity store and `user.id` keys each user's DO. Sessions in D1                                                                                                                                                                                                                                                            |
+| Validation    | Effect Schema                                          | Standard-schema compatible (via `toStandardSchemaV1`), drives the collection's item type; one schema language across client + Worker                                                                                                                                                                                                                                             |
+| Build         | Vite 8                                                 | What Start uses                                                                                                                                                                                                                                                                                                                                                                  |
+| Runtime       | Bun (dev/install)                                      | Fast; npm/pnpm/yarn work too                                                                                                                                                                                                                                                                                                                                                     |
+| Observability | Sentry (errors-only)                                   | Exception capture across the client, Worker, and DO — **no tracing, APM, or replay**, just errors. Gives contributors a real stack trace when something throws in prod. DSN is public-by-design (committed in `.env.production` + `wrangler.jsonc`, not a secret); unset in a fork = dormant, nothing phones home. Outline node text never rides an error payload.               |
 
 ## Run it
 
@@ -222,6 +224,7 @@ src/
     history.ts        # undo / redo capture
     tags.ts, tag-colors.ts, links.ts  # pure parsing + the tag-color side-collection (synced via /api/kv)
     seed.ts           # first-run bootstrap: seed welcome bullets when the outline is empty
+    sentry-scrub.ts   # shared scrub leaf: strip node text / ?q= from error payloads (client + Worker)
     useTree.ts        # useLiveQuery hook
   plugins/            # the editor's plugin layer (see docs/adr/0001-plugin-architecture.md)
     index.ts          # the one ordered array (todos, provenance, code, links, node-links, …)
@@ -229,6 +232,7 @@ src/
     registry.ts       # composes every plugin's registrations once at load
     code/ links/ node-links/ route-bible/ tags/ todos/ daily/
     emphasis/ highlight/ spoiler/ provenance/   # one folder per plugin
+  instrument.client.ts # Sentry init (errors-only), imported first in __root.tsx; no-op in dev/prerender
   router.tsx
   styles.css
 worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + /api/kv to per-user DOs
@@ -239,6 +243,7 @@ worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + 
   mcp.ts              #   the MCP endpoint: stateless JSON-RPC over /mcp (Effect pipeline)
   mcp-tools.ts        #   the MCP tool registry (Effect Schema inputs + handlers over the user's DO)
   outline-ops.ts      #   pure server-side outline planners (snapshot -> atomic ChangeOp batch)
+  sentry.ts           #   errors-only Sentry options for the Worker + DO (dormant when SENTRY_DSN is unset)
 migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP; 0005 waitlist)
 wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
 docs/adr/             # one ADR per load-bearing decision (history in git log)

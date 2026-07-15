@@ -72,9 +72,12 @@ alternative:
 - **A solid fill carries the state on mobile.** The app is grayscale (`--primary` is chroma-0), so a
   low-opacity tint reads as an ordinary ghost-button hover — invisible. The active chip is a **solid**
   `--primary` pill (the grayscale system's "active" idiom, same emphasis as the daily "Today" badge),
-  unmissable even at icon-only size. Desktop adds a "Spotlight" label; on `max-sm` (a tight header that
-  must not crowd the breadcrumb) the label collapses to an SR-only span and the solid fill alone signals
-  the mode. No toast on click — the chip vanishing plus the outline no longer dimming is feedback enough.
+  unmissable at icon-only size. The chip is **icon-only on every breakpoint** — the "Spotlight" label is
+  always an SR-only span, and a `title` tooltip carries the text affordance for pointer users. An earlier
+  version spelled the label out on desktop, but the visible text distracted and stole horizontal space
+  from the breadcrumb and the other header controls; since the solid fill plus present-only-when-on already
+  carry awareness (the label was only ever belt-and-suspenders), dropping it costs nothing. No toast on
+  click — the chip vanishing plus the outline no longer dimming is feedback enough.
 
 **Rejected alternatives.**
 

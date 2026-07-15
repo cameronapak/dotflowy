@@ -1,5 +1,31 @@
 # dotflowy
 
+## 1.3.1
+
+### Patch Changes
+
+- a76bfe7: The header filter magnifier now shows a subtle "engaged" state the moment you open it (before you've typed a query), and turns solid only once a filter is actually applied. Its active look now tracks what's happening: muted while the search box is just open, solid when your view is genuinely filtered.
+- c8d1a19: Scrollable menus, command palettes, and dialog lists now fade softly at their edges when there's more to scroll, so it's clearer when a list runs past what's visible. The breadcrumb trail and mobile action bar get the same left/right hint. The fade dissolves content into the menu's own surface, and the `/` command menu and the `#`/`[[` caret menus now always stay fully on screen instead of clipping off the right or bottom edge. It's pure CSS with no runtime cost, and falls back cleanly to plain scrolling in browsers that don't support scroll-driven animations.
+
+## 1.3.0
+
+### Minor Changes
+
+- ec7b12f: Quick-add: a distraction-free capture surface. Press `q` (or use the mobile capture button, or the Cmd+K "Quick add" action) to file a thought straight into today's note without ever looking at Today. Rapid-fire with Enter, retarget any capture with the Today chip, and see a running list of what you just captured.
+- ec7b12f: Quick-add gets sharper capture flows. Enter now commits your thought and closes the overlay — and if you weren't looking at where it landed, a toast confirms it with a "Go there" jump. For a burst, Cmd+Enter commits and keeps the overlay open so you can fire off the next one. And turning a capture into a to-do (`/todo` or Mod+D) now shows the checkbox inline, right where you're typing.
+- bd88c0e: Wire Stripe subscriptions via the `@better-auth/stripe` plugin: hosted Checkout
+  (`subscription.upgrade()`), the webhook at `/api/auth/stripe/webhook`, and the D1
+  `subscription` table (migration `0006`). Entitlement reads never call Stripe —
+  `worker/plan.ts` resolves a user's plan from one D1 query — and the founding
+  50-seat cap is enforced server-side at checkout creation. Billing secrets are
+  optional in dev (unset = only the billing endpoints fail).
+
+### Patch Changes
+
+- 81d20da: Sharing a link to the app now shows the Dotflowy logo lockup and the new tagline instead of retired copy.
+- ec7b12f: Quick-add now wears the same frame as the Cmd+K command center — a cleaner card with the destination chip trailing the input and a keyboard-hint footer. Same capture behavior, just more at home alongside the command palette.
+- ec7b12f: Quick-add polish: the destination picker now opens as a popover anchored to the "Today" chip instead of rearranging the overlay, so your capture text never jumps while you retarget. On phones, the keyboard-shortcut hints (which you can't press anyway) are hidden.
+
 ## 1.2.1
 
 ### Patch Changes

@@ -392,7 +392,7 @@ export function McpConnectDialog({
             ))}
           </TabsList>
 
-          <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="min-w-0 flex-1 scroll-fade overflow-y-auto">
             <AnimateHeight className="p-5">
               {CLIENTS.map((c) => (
                 <TabsContent

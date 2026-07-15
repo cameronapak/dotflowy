@@ -104,7 +104,7 @@ function BacklinksDialog({
             Nodes whose text links here.
           </DialogDescription>
         </DialogHeader>
-        <ul className="max-h-[60vh] min-w-0 overflow-y-auto overscroll-contain px-2 pb-2">
+        <ul className="max-h-[60vh] min-w-0 scroll-fade overflow-y-auto overscroll-contain px-2 pb-2">
           {referrers.map((referrer) => (
             <li key={referrer.id}>
               <button

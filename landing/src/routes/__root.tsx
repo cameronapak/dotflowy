@@ -9,9 +9,13 @@ import {
 
 import "../styles.css";
 
-const TITLE = "Dotflowy — an infinite outliner, finally yours";
+// The hero leads with the job ("room to think"); the meta description is a
+// SEARCH surface, so the category + "Workflowy alternative" keywords live
+// here on purpose (OSS/comparison is a channel, not the pitch — see
+// .agents/product-marketing.md).
+const TITLE = "Dotflowy — room to think";
 const DESCRIPTION =
-  "The open-source alternative to Workflowy — a fast, keyboard-first outliner you own and extend. Real-time sync, daily notes, tags, and an outline your AI agents can edit too.";
+  "Get everything out of your head, shape it when you're ready, and find it when it matters. A calm, fast, open-source outliner — a Workflowy alternative your AI agents can edit too.";
 const URL = "https://dotflowy.com";
 
 // Respect the visitor's system theme with no flash of the wrong one. The app's
