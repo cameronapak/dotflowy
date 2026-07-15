@@ -23,10 +23,11 @@ import { Button } from "./ui/button";
  * is grayscale (`--primary` is chroma-0), so a 10%-opacity tint would read as an
  * ordinary ghost-button hover — invisible. A solid `--primary` pill (dark fill,
  * light glyph) is the grayscale system's "active" idiom (same emphasis the daily
- * "Today" badge uses) and is unmissable even at icon-only size. On desktop the
- * "Spotlight" label spells it out; on mobile (a tight header that must not crowd
- * the breadcrumb) the label collapses to an SR-only span and the solid fill
- * alone carries the meaning.
+ * "Today" badge uses) and is unmissable even at icon-only size. The chip is
+ * icon-only on every breakpoint: the "Spotlight" label stays an SR-only span
+ * (the `title` tooltip gives pointer users the text). A visible desktop label
+ * distracted and crowded the breadcrumb + other header controls, and the solid
+ * fill already carries the meaning, so the label earns no pixels.
  *
  * No toast on click: the chip vanishing + the outline no longer dimming on the
  * next focus is feedback enough.
@@ -38,7 +39,7 @@ export function SpotlightIndicator() {
   return (
     <Button
       variant="default"
-      size="sm"
+      size="icon-sm"
       data-spotlight-indicator=""
       aria-pressed
       aria-label="Turn off spotlight mode"
@@ -46,7 +47,7 @@ export function SpotlightIndicator() {
       onClick={() => setSpotlightEnabled(false)}
     >
       <FocusIcon />
-      <span className="max-sm:sr-only">Spotlight</span>
+      <span className="sr-only">Spotlight</span>
     </Button>
   );
 }
