@@ -534,7 +534,8 @@ export class UserOutlineDO extends DurableObject<Env> {
         JSON.stringify(f.ops),
       );
     }
-    const finalSeq = frames[frames.length - 1].seq;
+    // Non-empty: the `if (!frames.length)` guard above already returned.
+    const finalSeq = frames[frames.length - 1]!.seq;
     this.setSeq(finalSeq);
     this.sql.exec(
       "DELETE FROM changelog WHERE seq <= ?",
@@ -572,7 +573,8 @@ export class UserOutlineDO extends DurableObject<Env> {
         }
       }
     }
-    return frames[frames.length - 1].seq;
+    // Non-empty: the `if (!frames.length)` guard above already returned.
+    return frames[frames.length - 1]!.seq;
   }
 
   /**
@@ -775,5 +777,22 @@ export class UserOutlineDO extends DurableObject<Env> {
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
     );
+  }
+
+  // --- self-serve account deletion -------------------------------------------
+
+  /**
+   * Erase this user's entire outline + kv side-collections — the DO half of
+   * self-serve account deletion (ADR 0050), called from the delete flow's
+   * `beforeDelete` hook via the stub. `deleteAll()` removes the DO's whole
+   * private SQLite database (SQL data AND key-value data) atomically, so it
+   * drops the schema too; `migrate()` then rebuilds an empty, valid schema so a
+   * reused instance never queries dropped tables. Idempotent: safe to call on
+   * an already-empty DO (a retry after a partial failure). Note: 30-day PITR
+   * still holds an operator-recoverable backup — see ADR 0050.
+   */
+  async purge(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    this.migrate();
   }
 }

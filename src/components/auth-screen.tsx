@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 
 import {
   hardReset,
@@ -60,6 +61,25 @@ export function AuthScreen() {
   useEffect(() => {
     const message = consumeOAuthCallbackError();
     if (message) setError(message);
+  }, []);
+
+  // Account deletion (ADR 0050) completes server-side and redirects here
+  // signed-out with ?account-deleted — the positive confirmation that the
+  // teardown ran. Strip the param so a reload doesn't re-toast, and only the
+  // first Strict-Mode effect run (which still sees the param) fires.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("account-deleted")) return;
+    params.delete("account-deleted");
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname +
+        (query ? `?${query}` : "") +
+        window.location.hash,
+    );
+    toast.success("Your account has been deleted.", { duration: 10_000 });
   }, []);
 
   async function onGoogle() {

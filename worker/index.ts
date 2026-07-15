@@ -36,6 +36,7 @@ import type { AuthEnv } from "./auth";
 import type { Node } from "./wire";
 
 import { createAuth } from "./auth";
+import { OWNER_DO_ID, resolveDoName } from "./delete-account";
 import {
   mintInvites,
   normalizeEmail,
@@ -133,13 +134,14 @@ const KV_COLLECTIONS = new Set([
  * the owner's `user.id` maps that one account back to 'default', carrying their
  * existing data over with zero copy. Removable once that data is wherever it
  * belongs.
+ *
+ * The name resolution itself lives in worker/delete-account.ts (`resolveDoName`
+ * + `OWNER_DO_ID`) so the request router here and the account-deletion teardown
+ * resolve the SAME DO — deleting must wipe exactly the DO the app reads/writes
+ * (ADR 0050).
  */
-const OWNER_DO_ID = "default";
-
 function resolveUserId(sessionUserId: string, env: Env): string {
-  if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID)
-    return OWNER_DO_ID;
-  return sessionUserId;
+  return resolveDoName(sessionUserId, env.OWNER_USER_ID);
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   SparklesIcon,
   SunIcon,
   SunMoonIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -36,6 +37,7 @@ import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { connectGoogle, signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
+import { DeleteAccountDialog } from "./delete-account-dialog";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import { openOpmlImport } from "./opml-import-opener";
 import { useShowCompleted } from "./show-completed-provider";
@@ -207,9 +209,10 @@ export function HeaderMoreMenu() {
   // old loud header CTA. Presence IS the signal; opening the dialog marks
   // everything read, so both the dot and the item emphasis clear themselves.
   const unseen = useUnseenReleaseCount();
-  // The connect dialog is a sibling of the menu (not nested in its content) so
-  // it survives the menu closing on item select.
+  // The connect + delete dialogs are siblings of the menu (not nested in its
+  // content) so they survive the menu closing on item select.
   const [connectOpen, setConnectOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
     <>
@@ -389,16 +392,27 @@ export function HeaderMoreMenu() {
             Connect Google
           </DropdownMenuItem>
 
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => signOutAndReload()}
-          >
+          <DropdownMenuItem onClick={() => signOutAndReload()}>
             <LogOutIcon />
             Sign out
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          {/* Self-serve account deletion (ADR 0050 / #224). Destructive-styled
+              and set apart below its own separator so it can't be mis-clicked
+              for Sign out; the dialog carries the type-to-confirm gate. */}
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2Icon />
+            Delete account
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} />
     </>
   );
 }

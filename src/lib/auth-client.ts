@@ -73,6 +73,20 @@ export function hardReset(target: string = "/") {
 }
 
 /**
+ * Start self-serve account deletion (ADR 0050). Email confirmation is
+ * configured server-side, so this call only SENDS the confirmation email — it
+ * does NOT delete anything. The actual teardown (cancel Stripe → wipe DO →
+ * delete identity) runs when the user clicks the emailed link, whose
+ * /delete-user/callback redirects to `callbackURL`: a full top-level navigation
+ * that lands signed-out on the AuthScreen with ?account-deleted, which is the
+ * hardReset singleton-teardown by construction (no client reload needed).
+ * Returns Better Auth's `{ data, error }`.
+ */
+export function requestAccountDeletion() {
+  return authClient.deleteUser({ callbackURL: "/?account-deleted=1" });
+}
+
+/**
  * Sign out, then hard-reset (Better Auth's documented onSuccess pattern). On
  * failure (offline, 5xx) the session cookie is still valid and no teardown ran,
  * so staying put is correct — but say so, or the user walks away from a shared

@@ -18,6 +18,9 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
 import Stripe from "stripe";
 
+import type { UserOutlineDO } from "./outline-do";
+
+import { deleteAccountData, scrubUserPii } from "./delete-account";
 import { sendEmail } from "./email";
 import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
@@ -51,6 +54,12 @@ export interface AuthEnv {
    *  dashboard endpoint in prod, `stripe listen` locally. Unset = webhook
    *  signature verification fails closed. */
   STRIPE_WEBHOOK_SECRET?: string;
+  /** The per-user outline Durable Object namespace — the account-deletion
+   *  teardown wipes the deleted user's DO through it (ADR 0050). */
+  USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>;
+  /** The owner's Better Auth `user.id` (owner-continuity bridge, index.ts). The
+   *  delete teardown reads it so it wipes the SAME DO the request router uses. */
+  OWNER_USER_ID?: string;
 }
 
 /**
@@ -83,11 +92,37 @@ function resetPasswordEmail(url: string) {
   };
 }
 
+/** The account-deletion confirmation email (ADR 0050). Deletion is gated on
+ *  clicking this link — the uniform, strongest proof of intent + identity for
+ *  an irreversible action, and it works identically for password and
+ *  Google-only accounts. The copy is explicit about the three things that
+ *  surprise people: it's immediate + permanent, it cancels the subscription
+ *  with no automatic refund, and backups purge within 30 days (ADR 0050 / the
+ *  privacy page, #226). */
+function deleteAccountEmail(url: string) {
+  return {
+    subject: "Confirm your Dotflowy account deletion",
+    text: `Confirm you want to permanently delete your Dotflowy account:\n\n${url}\n\nThis permanently deletes your outline and account — it cannot be undone. Any active subscription is cancelled immediately with no automatic refund (contact support within 14 days if you're eligible). Backups are purged within 30 days.\n\nThis link expires in 24 hours. If you didn't ask to delete your account, ignore this email — nothing will happen.`,
+    html: `<div style="font-family: system-ui, -apple-system, sans-serif; max-width: 28rem; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 18px; font-weight: 600;">Confirm account deletion</h1>
+  <p style="font-size: 14px; color: #444; line-height: 1.5;">Click below to <strong>permanently delete</strong> your Dotflowy account and outline. This cannot be undone.</p>
+  <p style="margin: 24px 0;"><a href="${url}" style="display: inline-block; background: #b91c1c; color: #fff; text-decoration: none; font-size: 14px; padding: 10px 16px; border-radius: 6px;">Delete my account</a></p>
+  <p style="font-size: 13px; color: #666; line-height: 1.5;">Any active subscription is cancelled immediately with no automatic refund (contact support within 14 days if you're eligible). Backups are purged within 30 days. This link expires in 24 hours.</p>
+  <p style="font-size: 13px; color: #666; line-height: 1.5;">If you didn't ask to delete your account, ignore this email — nothing will happen.</p>
+</div>`,
+  };
+}
+
 export function createAuth(
   env: AuthEnv,
   requestOrigin?: string,
   executionCtx?: ExecutionContext,
 ) {
+  // One Stripe client for both the billing plugin and the account-deletion
+  // teardown (which cancels subscriptions before wiping data — ADR 0050).
+  const stripeClient = new Stripe(
+    env.STRIPE_SECRET_KEY ?? "sk_test_placeholder",
+  );
   return betterAuth({
     // Better Auth accepts a D1 binding directly (kysely under the hood).
     database: env.DB,
@@ -124,6 +159,50 @@ export function createAuth(
       // A reset is the "my password leaked" move: kill every existing session
       // so a stolen one dies with the old password.
       revokeSessionsOnPasswordReset: true,
+    },
+    // Self-serve account deletion (ADR 0050, ticket #224 — the privacy pages
+    // commit to it). Configuring `sendDeleteAccountVerification` routes EVERY
+    // delete through an email-confirmation link: POST /delete-user only sends
+    // the mail; the actual teardown runs in the /delete-user/callback the link
+    // hits (which requires a live session), so both hooks below fire exactly
+    // once, on confirmation. This is uniform across password AND Google-only
+    // accounts (no per-type branching), and the callback's redirect to the
+    // client-supplied callbackURL is a full navigation — the hardReset
+    // singleton-teardown by construction (see auth-client.ts).
+    user: {
+      deleteUser: {
+        enabled: true,
+        // The confirmation email. Better Auth awaits this (no background-task
+        // handler), and there's no enumeration channel to hide (the caller is
+        // an authenticated session), so a plain await is correct — the "email
+        // sent" response waits for the send. sendEmail never throws.
+        sendDeleteAccountVerification: async ({ user, url }) => {
+          await sendEmail(env, {
+            to: user.email,
+            ...deleteAccountEmail(url),
+          });
+        },
+        // The safe-ordered teardown. Throwing ABORTS the D1 identity delete, so
+        // any failure leaves the account fully intact and retryable — the worst
+        // state (identity gone, Stripe still charging) can't be reached.
+        beforeDelete: async (user) => {
+          await deleteAccountData(
+            {
+              db: env.DB,
+              stripe: stripeClient,
+              userOutline: env.USER_OUTLINE,
+              ownerUserId: env.OWNER_USER_ID,
+            },
+            user.id,
+          );
+        },
+        // Best-effort PII scrub of the email-bearing side tables Better Auth's
+        // cascade doesn't own. Runs after the identity is gone, so it never
+        // throws (nothing left to roll back).
+        afterDelete: async (user) => {
+          await scrubUserPii({ db: env.DB }, user.email);
+        },
+      },
     },
     // "Sign in with Google" — sign-IN only. `disableSignUp: true` is the same
     // invite gate as the /sign-up/email hook, expressed for OAuth: a Google
@@ -266,9 +345,7 @@ export function createAuth(
     plugins: [
       mcp({ loginPage: "/" }),
       stripe({
-        stripeClient: new Stripe(
-          env.STRIPE_SECRET_KEY ?? "sk_test_placeholder",
-        ),
+        stripeClient,
         stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET ?? "",
         // No Stripe customer until first checkout: alpha users need no
         // backfill, and the free tier is the absence of a subscription row.
