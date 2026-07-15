@@ -36,7 +36,8 @@
     "test:e2e": "playwright test",
     "test:e2e:serial": "playwright test --workers=1",
     "test:e2e:ui": "playwright test --ui",
-    "effect:src": "opensrc path Effect-TS/effect-smol"
+    "effect:src": "opensrc path Effect-TS/effect-smol",
+    "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
