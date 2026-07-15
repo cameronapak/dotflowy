@@ -115,7 +115,13 @@ export function useQueryFilter() {
 export function FilterButton() {
   const search = useSearch({ strict: false }) as { q?: string };
   const active = (search.q ?? "").trim().length > 0;
-  const open = useSyncExternalStore(subscribeFilterOpen, getFilterOpen);
+  // `() => false` server snapshot keeps the header prerender-safe (the repo
+  // prerenders `/`), matching every other store hook in the codebase.
+  const open = useSyncExternalStore(
+    subscribeFilterOpen,
+    getFilterOpen,
+    () => false,
+  );
   return (
     <Button
       variant={active ? "default" : "ghost"}
