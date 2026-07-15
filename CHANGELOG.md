@@ -1,5 +1,24 @@
 # dotflowy
 
+## 1.3.0
+
+### Minor Changes
+
+- ec7b12f: Quick-add: a distraction-free capture surface. Press `q` (or use the mobile capture button, or the Cmd+K "Quick add" action) to file a thought straight into today's note without ever looking at Today. Rapid-fire with Enter, retarget any capture with the Today chip, and see a running list of what you just captured.
+- ec7b12f: Quick-add gets sharper capture flows. Enter now commits your thought and closes the overlay — and if you weren't looking at where it landed, a toast confirms it with a "Go there" jump. For a burst, Cmd+Enter commits and keeps the overlay open so you can fire off the next one. And turning a capture into a to-do (`/todo` or Mod+D) now shows the checkbox inline, right where you're typing.
+- bd88c0e: Wire Stripe subscriptions via the `@better-auth/stripe` plugin: hosted Checkout
+  (`subscription.upgrade()`), the webhook at `/api/auth/stripe/webhook`, and the D1
+  `subscription` table (migration `0006`). Entitlement reads never call Stripe —
+  `worker/plan.ts` resolves a user's plan from one D1 query — and the founding
+  50-seat cap is enforced server-side at checkout creation. Billing secrets are
+  optional in dev (unset = only the billing endpoints fail).
+
+### Patch Changes
+
+- 81d20da: Sharing a link to the app now shows the Dotflowy logo lockup and the new tagline instead of retired copy.
+- ec7b12f: Quick-add now wears the same frame as the Cmd+K command center — a cleaner card with the destination chip trailing the input and a keyboard-hint footer. Same capture behavior, just more at home alongside the command palette.
+- ec7b12f: Quick-add polish: the destination picker now opens as a popover anchored to the "Today" chip instead of rearranging the overlay, so your capture text never jumps while you retarget. On phones, the keyboard-shortcut hints (which you can't press anyway) are hidden.
+
 ## 1.2.1
 
 ### Patch Changes
