@@ -77,26 +77,42 @@ test.describe("resident filter input (ADR 0047 §6)", () => {
     await expect(input(page)).toHaveCount(0);
   });
 
-  test("the magnifier lights (aria-pressed) while a filter is active", async ({
+  test("the magnifier's three states track the stakes (ADR 0050)", async ({
     page,
   }) => {
     await load(page);
     const magnifier = page.getByRole("button", { name: "Filter this view" });
+    // Match the STANDALONE fill token, not the ghost variant's `hover:bg-muted`
+    // / `aria-expanded:bg-muted` utilities (a bare `/bg-muted/` would).
+    const muted = /(?:^|\s)bg-muted(?:\s|$)/;
+    const solid = /(?:^|\s)bg-primary(?:\s|$)/;
 
-    // Idle: not pressed.
+    // Idle: ghost, not pressed -- neither the muted nor the solid fill.
     await expect(magnifier).toHaveAttribute("aria-pressed", "false");
+    await expect(magnifier).not.toHaveClass(muted);
+    await expect(magnifier).not.toHaveClass(solid);
 
-    // Active query lights it -- so the toggle-off press that WIPES the query
-    // only fires while the button visibly reads as "on".
+    // Open but empty: pressed + MUTED ("a tool is engaged, view still normal").
+    // This is the state the button previously lacked -- opening it now reads.
     await magnifier.click();
+    await expect(input(page)).toBeVisible();
+    await expect(magnifier).toHaveAttribute("aria-pressed", "true");
+    await expect(magnifier).toHaveClass(muted);
+
+    // Query applied: still pressed, now SOLID ("your view is altered") -- so the
+    // toggle-off press that WIPES the query only fires while it reads as "on".
     await input(page).fill("#work");
     await expect(page).toHaveURL(/q=%23work/);
     await expect(magnifier).toHaveAttribute("aria-pressed", "true");
+    await expect(magnifier).toHaveClass(solid);
+    await expect(magnifier).not.toHaveClass(muted);
 
-    // Toggle-off clears the query and drops the lit state.
+    // Toggle-off clears the query, collapses the row, and drops the lit state.
     await magnifier.click();
     await expect(page).not.toHaveURL(/q=/);
     await expect(magnifier).toHaveAttribute("aria-pressed", "false");
+    await expect(magnifier).not.toHaveClass(muted);
+    await expect(magnifier).not.toHaveClass(solid);
   });
 
   test("the ⌘ button opens the command center", async ({ page }) => {

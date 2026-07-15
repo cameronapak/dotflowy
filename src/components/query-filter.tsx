@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -30,7 +31,10 @@ import { filterOperatorInfos } from "../plugins/registry";
 import {
   addTermToFilter,
   bindQueryFilterNav,
+  getFilterOpen,
   setFilterInputController,
+  setFilterOpen,
+  subscribeFilterOpen,
   toggleFilterInput,
   writeQuery,
 } from "./query-filter-nav";
@@ -99,23 +103,36 @@ export function useQueryFilter() {
  *  pointerdown keeps the input focused across the press so blur doesn't
  *  collapse-then-reopen before the click can close.
  *
- *  Lit (solid `--primary`, ADR 0033's grayscale "on" idiom -- same as
- *  SpotlightIndicator) whenever a `?q=` filter is applied, so the magnifier
- *  reads as a pressed toggle. This is intentional: the toggle-off press that
- *  WIPES the query only fires while the button visibly signals "on". Reads the
- *  search param directly rather than `useQueryFilter()`, whose Escape/nav side
- *  effects would double-bind if this button ran them too. */
+ *  Three states (ADR 0050's header-toggle rule): ghost when idle, **muted**
+ *  (`bg-muted`, "a tool is engaged but the view is normal") while the input is
+ *  open with no query yet, and **solid** (`--primary`, "your view is altered")
+ *  once a `?q=` filter is actually applied. The pressed look tracks the stakes,
+ *  and the toggle-off press that WIPES the query only fires while the button
+ *  visibly signals "on". "Open" comes from the reactive open-signal in
+ *  `query-filter-nav` (the header lives outside `QueryFilterBar`); the applied
+ *  state is read from the search param directly rather than via
+ *  `useQueryFilter()`, whose Escape/nav side effects would double-bind here. */
 export function FilterButton() {
   const search = useSearch({ strict: false }) as { q?: string };
   const active = (search.q ?? "").trim().length > 0;
+  // `() => false` server snapshot keeps the header prerender-safe (the repo
+  // prerenders `/`), matching every other store hook in the codebase.
+  const open = useSyncExternalStore(
+    subscribeFilterOpen,
+    getFilterOpen,
+    () => false,
+  );
   return (
     <Button
       variant={active ? "default" : "ghost"}
       size="icon-sm"
+      // Muted "engaged" state in the open-but-empty window; the `default`
+      // variant above takes over (solid) the moment a query bites (ADR 0050).
+      className={cn(open && !active && "bg-muted text-foreground")}
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => toggleFilterInput()}
       aria-label="Filter this view"
-      aria-pressed={active}
+      aria-pressed={open}
     >
       <Search />
       <span className="sr-only">Filter this view</span>
@@ -441,6 +458,14 @@ export function QueryFilterBar() {
   const isSaved = useIsQuerySaved(draft);
 
   const showInput = summoned || active;
+
+  // Publish the input's open state to the header FilterButton so it can light
+  // (muted) while the box is open with no query yet (ADR 0050). Reset on unmount
+  // so a torn-down editor doesn't leave the magnifier stuck "on".
+  useEffect(() => {
+    setFilterOpen(showInput);
+  }, [showInput]);
+  useEffect(() => () => setFilterOpen(false), []);
 
   // While NOT focused, mirror the input to `?q=` -- so an external write (a tag
   // chip click AND-ing `#tag`, a shared `?q=` URL) shows up in the resident

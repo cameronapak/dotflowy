@@ -23,7 +23,10 @@ import { Button } from "./ui/button";
  * is grayscale (`--primary` is chroma-0), so a 10%-opacity tint would read as an
  * ordinary ghost-button hover — invisible. A solid `--primary` pill (dark fill,
  * light glyph) is the grayscale system's "active" idiom (same emphasis the daily
- * "Today" badge uses) and is unmissable even at icon-only size. The chip is
+ * "Today" badge uses) and is unmissable even at icon-only size. Under the
+ * header-toggle rule (ADR 0050), solid is correct here for a second reason:
+ * spotlight ALTERS the view (everything dims), so it earns the loud treatment —
+ * where the filter magnifier's open-but-empty state stays muted. The chip is
  * icon-only on every breakpoint: the "Spotlight" label stays an SR-only span
  * (the `title` tooltip gives pointer users the text). A visible desktop label
  * distracted and crowded the breadcrumb + other header controls, and the solid
