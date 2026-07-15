@@ -10,6 +10,7 @@ import type {
 } from "../src/data/wire-schema";
 
 import { planChangeFrames } from "./changelog";
+import { batchExceedsNodeLimit } from "./plan";
 import { APP_VERSION } from "./version";
 
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
@@ -330,6 +331,100 @@ export class UserOutlineDO extends DurableObject<Env> {
         this.recordChange(nodes.map((n) => this.putNode(n))),
       ),
     );
+  }
+
+  // --- free-tier node ceiling (#170) -----------------------------------------
+  // The DO enforces a numeric cap it is TOLD by its trusted Worker; it never
+  // learns what a "plan" is (the Worker resolves that from D1 via getPlan and
+  // passes the limit). `null` = unlimited (paid). The check runs INSIDE the
+  // write transaction and, on reject, returns without applying — so the commit
+  // is a clean no-op and no frame is broadcast (the batch simply didn't happen).
+  // Only genuine growth past the ceiling is refused; see batchExceedsNodeLimit.
+
+  /** Total live node rows (the cap counts every node — bullets, tasks, mirrors,
+   *  containers). A single indexed COUNT: sub-millisecond even at 17k rows, so no
+   *  maintained counter is worth its drift/backfill risk at a 2,000-node cap. */
+  private nodeCount(): number {
+    const row = this.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM nodes")
+      .toArray()[0];
+    return row?.n ?? 0;
+  }
+
+  private nodeExists(id: string): boolean {
+    return (
+      this.sql.exec("SELECT 1 FROM nodes WHERE id = ?", id).toArray().length > 0
+    );
+  }
+
+  /**
+   * `applyBatch`, gated by a free-tier node ceiling. Returns the committed seq,
+   * or `null` when the batch would grow the outline past `limit` (the Worker maps
+   * that to a 403 the client surfaces). A `null` limit skips the check entirely
+   * (paid users take the same path as ungated applyBatch, one extra no-op branch).
+   *
+   * Growth is counted by read-only existence probes BEFORE any write, over
+   * DISTINCT ids (a batch that names the same new id twice is one new node), so a
+   * delete of an absent row and an upsert of an existing id both contribute zero
+   * — only real new ids count as inserts, only real removals as deletes. The
+   * decision (batchExceedsNodeLimit) is pure and unit-tested; here we just feed
+   * it the three SQLite counts. Rejecting writes nothing, so the client's
+   * optimistic overlay rolls back cleanly.
+   */
+  applyBatchGated(
+    ops: readonly ChangeOp[],
+    limit: number | null,
+  ): number | null {
+    const frames = this.ctx.storage.transactionSync(() => {
+      if (limit !== null) {
+        const newIds = new Set<string>();
+        const removedIds = new Set<string>();
+        for (const op of ops) {
+          if (op.op === "delete") {
+            if (this.nodeExists(op.key)) removedIds.add(op.key);
+          } else if (!this.nodeExists(op.value.id)) {
+            newIds.add(op.value.id);
+          }
+        }
+        if (
+          batchExceedsNodeLimit(
+            this.nodeCount(),
+            newIds.size,
+            removedIds.size,
+            limit,
+          )
+        )
+          return null;
+      }
+      return this.recordChange(
+        ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+      );
+    });
+    if (frames === null) return null;
+    return this.broadcastChange(frames);
+  }
+
+  /** `upsertNodes`, gated by the same ceiling (the legacy first-run/seed create
+   *  path — a raw POST could otherwise bypass the cap the batch path enforces).
+   *  Every node is an upsert, so growth = ids not already present; returns false
+   *  when applying would exceed the cap (nothing written), true otherwise. */
+  upsertNodesGated(nodes: readonly Node[], limit: number | null): boolean {
+    const frames = this.ctx.storage.transactionSync(() => {
+      if (limit !== null) {
+        const newIds = new Set<string>();
+        for (const n of nodes) if (!this.nodeExists(n.id)) newIds.add(n.id);
+        if (batchExceedsNodeLimit(this.nodeCount(), newIds.size, 0, limit))
+          return null;
+      }
+      return this.recordChange(nodes.map((n) => this.putNode(n)));
+    });
+    if (frames === null) return false;
+    this.broadcastChange(frames);
+    return true;
   }
 
   /**

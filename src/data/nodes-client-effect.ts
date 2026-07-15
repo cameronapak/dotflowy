@@ -60,10 +60,26 @@ export class NodesTimeoutError extends Data.TaggedError(
   }
 }
 
+/**
+ * The write was refused because a free-tier outline is at its node ceiling and
+ * this batch would grow it past the cap (#170 — the Worker's 403 `node_limit`
+ * body). A distinct error, not a generic `NodesResponseError`, so the structural
+ * funnel can surface a dedicated upgrade toast (structural.ts) before the
+ * optimistic overlay rolls back. `limit` is the ceiling the server reported.
+ */
+export class NodesLimitError extends Data.TaggedError("NodesLimitError")<{
+  limit: number;
+}> {
+  get message() {
+    return `nodes -> node limit (${this.limit})`;
+  }
+}
+
 export type NodesError =
   | NodesTransportError
   | NodesResponseError
-  | NodesTimeoutError;
+  | NodesTimeoutError
+  | NodesLimitError;
 
 // --- Core request effect ----------------------------------------------------
 
@@ -105,11 +121,44 @@ function request(
       duration: Duration.seconds(8),
       orElse: () => Effect.fail(new NodesTimeoutError()),
     }),
-    Effect.flatMap((res) =>
-      res.ok
-        ? Effect.succeed(res)
-        : Effect.fail(new NodesResponseError({ status: res.status })),
-    ),
+    Effect.flatMap(classifyResponse),
+  );
+}
+
+/**
+ * Map a received (already non-retried) response to success or a typed failure.
+ * A 403 on /api/nodes is the free-tier node ceiling (#170): read the
+ * `{ error: "node_limit", limit }` body to classify it apart from a generic
+ * failure so the caller can surface an upgrade prompt. Any other non-2xx (incl.
+ * a 403 without that body) stays a plain `NodesResponseError`.
+ */
+function classifyResponse(res: Response): Effect.Effect<Response, NodesError> {
+  if (res.ok) return Effect.succeed(res);
+  if (res.status === 403) {
+    return Effect.tryPromise({
+      try: () => res.json() as Promise<unknown>,
+      catch: () => new NodesResponseError({ status: 403 }),
+    }).pipe(
+      Effect.flatMap(
+        (body): Effect.Effect<never, NodesError> =>
+          isNodeLimitBody(body)
+            ? Effect.fail(new NodesLimitError({ limit: body.limit }))
+            : Effect.fail(new NodesResponseError({ status: 403 })),
+      ),
+    );
+  }
+  return Effect.fail(new NodesResponseError({ status: res.status }));
+}
+
+/** Narrow the Worker's 403 body to the node-limit shape. */
+function isNodeLimitBody(
+  body: unknown,
+): body is { error: string; limit: number } {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    (body as { error?: unknown }).error === "node_limit" &&
+    typeof (body as { limit?: unknown }).limit === "number"
   );
 }
 

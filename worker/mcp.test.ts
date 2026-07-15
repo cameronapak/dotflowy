@@ -68,6 +68,7 @@ async function rpc(
   // The provenance stamp the Worker resolves from the bearer token in prod; a
   // fixed harness name here so the stamping assertions have something to check.
   origin: string | null = "TestAgent",
+  agentAccess = true,
 ) {
   const body: Record<string, unknown> = { jsonrpc: "2.0", method };
   if (id !== null) body["id"] = id;
@@ -77,7 +78,7 @@ async function rpc(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  return Effect.runPromise(handleMcp(request, store, origin));
+  return Effect.runPromise(handleMcp(request, store, origin, agentAccess));
 }
 
 async function callTool(store: OutlineStore, name: string, args: unknown) {
@@ -213,6 +214,7 @@ describe("MCP transport", () => {
         new Request("http://test/api/mcp", { method: "POST", body: "{nope" }),
         store,
         null,
+        true,
       ),
     );
     expect(((await bad.json()) as any).error.code).toBe(-32700);
@@ -222,6 +224,7 @@ describe("MCP transport", () => {
         new Request("http://test/api/mcp", { method: "POST", body: "[]" }),
         store,
         null,
+        true,
       ),
     );
     expect(((await batch.json()) as any).error.code).toBe(-32600);
@@ -234,9 +237,53 @@ describe("MCP transport", () => {
         new Request("http://test/api/mcp", { method: "GET" }),
         store,
         null,
+        true,
       ),
     );
     expect(res.status).toBe(405);
+  });
+
+  test("a free plan (no agent access) refuses tools/call but keeps discovery open (#170)", async () => {
+    const { store, batches } = makeStore(fixture());
+
+    // tools/call — the only entitlement-gated method — is refused, and no write
+    // reaches the store.
+    const call = (await (
+      await rpc(
+        store,
+        "tools/call",
+        { name: "get_outline", arguments: {} },
+        1,
+        "TestAgent",
+        false,
+      )
+    ).json()) as any;
+    expect(call.error.code).toBe(-32001);
+    expect(call.error.message).toContain("paid");
+    expect(call.result).toBeUndefined();
+
+    const write = (await (
+      await rpc(
+        store,
+        "tools/call",
+        { name: "add_node", arguments: { text: "nope" } },
+        1,
+        "TestAgent",
+        false,
+      )
+    ).json()) as any;
+    expect(write.error.code).toBe(-32001);
+    expect(batches.length).toBe(0);
+
+    // initialize / ping / tools/list stay open, so a free connection can still
+    // handshake and see WHY every call is refused.
+    for (const method of ["initialize", "ping", "tools/list"]) {
+      const ok = (await (
+        await rpc(store, method, {}, 1, "TestAgent", false)
+      ).json()) as any;
+      expect(ok.result).toBeDefined();
+      expect(ok.error).toBeUndefined();
+    }
   });
 });
 

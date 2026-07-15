@@ -15,6 +15,40 @@ export type Plan = "free" | "unlimited" | "founding";
 /** Plan names as stored by the plugin (it lowercases `plan` on write). */
 export const PAID_PLANS = ["unlimited", "founding"] as const;
 
+/** Free tier ceiling: total LIVE nodes a free outline may hold (#152/#170).
+ *  Generous by design — the funnel, not a wall; over-cap never locks (edits,
+ *  moves, deletes always apply — see `batchExceedsNodeLimit`). Paid = no cap. */
+export const FREE_NODE_LIMIT = 2000;
+
+/** The node ceiling a plan enforces: free is capped, paid is unlimited (`null`,
+ *  which every gate below reads as "never reject"). */
+export function nodeLimitForPlan(plan: Plan): number | null {
+  return plan === "free" ? FREE_NODE_LIMIT : null;
+}
+
+/**
+ * The node-ceiling decision, pure so it's unit-tested (the DO supplies the three
+ * counts from its SQLite; this is the rule they feed — the `resolvePlan` split).
+ *
+ * Would a batch that adds `inserts` genuinely-new nodes and removes `deletes`
+ * existing ones, applied to an outline currently holding `before` nodes, push it
+ * past `limit`? Two guarantees are baked in:
+ *  - `limit === null` (paid) never rejects.
+ *  - a NON-growing batch never rejects (`after <= before`), so an already
+ *    over-cap outline (a downgraded user) is never locked: edits, moves, and
+ *    deletes always apply, and only real growth past the ceiling is refused.
+ */
+export function batchExceedsNodeLimit(
+  before: number,
+  inserts: number,
+  deletes: number,
+  limit: number | null,
+): boolean {
+  if (limit === null) return false;
+  const after = before + inserts - deletes;
+  return after > limit && after > before;
+}
+
 /** Founding is capped at 50 seats, app-enforced (Stripe has no price-level
  *  inventory cap). Enforced at checkout creation in worker/auth.ts. */
 export const FOUNDING_SEAT_LIMIT = 50;
