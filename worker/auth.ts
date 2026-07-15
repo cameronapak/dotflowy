@@ -151,13 +151,16 @@ export function createAuth(
     user: {
       deleteUser: {
         enabled: true,
-        // beforeDelete runs while the account still exists, so it's the only
-        // safe place to (1) refuse the un-deletable owner account, (2) cancel
-        // Stripe BEFORE the rows it references vanish, and (3) wipe the outline
-        // DO. A throw here ABORTS the deletion with nothing destroyed — which is
-        // exactly what we want if Stripe cancellation fails (a paying
-        // subscription must never outlive its account). Order matters: guard →
-        // Stripe (external, must succeed) → DO wipe (irreversible, last).
+        // beforeDelete runs while the account still exists and BEFORE Better
+        // Auth reports success — the property the teardown needs: the endpoint
+        // must never answer "deleted" unless Stripe is already cancelled and
+        // the outline is already wiped (afterDelete also has env + user, but a
+        // failure there happens AFTER the success response — too late to keep
+        // the promise). A throw here ABORTS the deletion with nothing
+        // destroyed — exactly what we want if Stripe cancellation fails (a
+        // paying subscription must never outlive its account). Order matters:
+        // guard → Stripe (external, must succeed) → DO wipe (irreversible,
+        // last).
         beforeDelete: async (user) => {
           if (isOwnerAccount(user.id, env.OWNER_USER_ID)) {
             throw new APIError("FORBIDDEN", {
@@ -175,12 +178,13 @@ export function createAuth(
           await stub.wipe();
         },
         // afterDelete runs once the identity rows are gone. Better Auth's core
-        // deletes user/session/account; the subscription row (no FK) and the
-        // mcp OAuth rows are cleaned here. Best-effort: any leftover is
-        // unreachable (nothing routes to a deleted user.id), so a failure here
-        // never un-does an already-completed deletion.
+        // deletes user/session/account; the subscription row (no FK), the mcp
+        // OAuth rows, and the email-keyed waitlist row are cleaned here.
+        // Best-effort: any leftover is unreachable (nothing routes to a
+        // deleted user.id), so a failure here never un-does an
+        // already-completed deletion.
         afterDelete: async (user) => {
-          await deleteResidualUserRows(env.DB, user.id);
+          await deleteResidualUserRows(env.DB, user.id, user.email);
         },
       },
     },

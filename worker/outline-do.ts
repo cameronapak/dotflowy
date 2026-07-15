@@ -682,8 +682,11 @@ export class UserOutlineDO extends DurableObject<Env> {
    * fresh ids, so a re-signup with the same email gets a DIFFERENT DO), and
    * `ensureSeeded` (worker/index.ts) re-imports legacy D1 rows ONLY for the
    * 'default' owner DO — which self-serve deletion refuses. So a wiped DO stays
-   * empty and inert; nothing resurrects it. If this same instance were somehow
-   * reached again, the constructor's `migrate()` re-creates empty tables.
+   * empty and inert; nothing resurrects it. Note the constructor does NOT
+   * re-run on a live, non-evicted instance reached post-wipe: its `migrate()`
+   * only runs at construction, so a straggler request against this same
+   * instance throws on the dropped tables (safe — no data can materialize; a
+   * fresh instance after eviction re-creates empty tables).
    *
    * Closing the sockets first tells any live tab's sync stream to drop; the
    * client also hard-navigates away at the auth boundary, so this is belt-and-

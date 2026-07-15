@@ -49,14 +49,24 @@ export function DeleteAccountDialog({
     if (busy || !password) return;
     setBusy(true);
     setError(null);
-    const { error: err } = await deleteUser({ password });
-    if (err) {
-      // Wrong password, a fresh-session requirement, or a beforeDelete abort
-      // (e.g. Stripe cancellation failed) all surface here — the account is
-      // untouched, so let the user read why and retry.
-      setError(
-        err.message ?? "Couldn't delete your account. Please try again.",
-      );
+    // try/catch, not just the {error} result: an unexpected rejection (network
+    // throw, a client-plugin bug) would otherwise strand busy=true forever —
+    // and both Cancel and onOpenChange gate on busy, so the dialog would be
+    // permanently unclosable.
+    try {
+      const { error: err } = await deleteUser({ password });
+      if (err) {
+        // Wrong password, a fresh-session requirement, or a beforeDelete abort
+        // (e.g. Stripe cancellation failed) all surface here — the account is
+        // untouched, so let the user read why and retry.
+        setError(
+          err.message ?? "Couldn't delete your account. Please try again.",
+        );
+        setBusy(false);
+        return;
+      }
+    } catch {
+      setError("Couldn't delete your account. Please try again.");
       setBusy(false);
       return;
     }

@@ -43,32 +43,66 @@ interface StripeCancelEnv {
 }
 
 /**
- * Cancel every active/trialing Stripe subscription attached to this user
- * IMMEDIATELY, BEFORE the account rows vanish. Immediate cancellation (not
- * `cancel_at_period_end`): there is no account left to keep billing against, and
- * a deletion is not a refund request — the founding prepay forfeits its
- * remaining term, which is the user's own choice in deleting the account.
+ * Every subscription status that can still bill in the future. DELIBERATELY
+ * WIDER than worker/plan.ts's entitlement gate ('active','trialing') — those
+ * answer DIFFERENT questions: entitlement asks "is this user paid up right
+ * now?", deletion asks "could Stripe ever charge this user again?". A
+ * `past_due` sub mid-dunning (or an `unpaid`/`incomplete`/`paused` one) grants
+ * nothing but can still successfully charge later — deletion must kill it too.
+ * Don't "unify" this list with plan.ts's. Exported for the unit test.
+ */
+export const BILLABLE_SUBSCRIPTION_STATUSES = [
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "incomplete",
+  "paused",
+] as const;
+
+/**
+ * Stop ALL future Stripe billing for this user and erase their Stripe-side
+ * identity, BEFORE the account rows vanish: cancel every still-billable
+ * subscription IMMEDIATELY (not `cancel_at_period_end` — there is no account
+ * left to keep billing against, and a deletion is not a refund request; the
+ * founding prepay forfeits its remaining term, which is the user's own choice
+ * in deleting the account), then DELETE the Stripe Customer object, which (a)
+ * removes the user's email + payment metadata from Stripe (privacy erasure —
+ * the account deletion promise extends to the processor) and (b) hard-stops
+ * anything a missed subscription row could still bill.
  *
  * THROWS on any real Stripe failure so the caller aborts the WHOLE deletion — a
  * paying subscription must never outlive the account it was attached to (that
  * would keep billing a user who can no longer sign in). An already-cancelled /
- * missing subscription is treated as success (goal achieved). In dev
- * (no STRIPE_SECRET_KEY) there are no real subscriptions, so this is a clean
- * no-op skip.
+ * missing subscription or customer is treated as success (goal achieved). In
+ * dev (no STRIPE_SECRET_KEY) there is no Stripe state, so this is a clean
+ * no-op skip that never touches D1.
  */
 export async function cancelActiveSubscriptions(
   env: StripeCancelEnv,
   userId: string,
 ): Promise<void> {
   if (!env.STRIPE_SECRET_KEY) return;
-  const { results } = await env.DB.prepare(
-    `SELECT stripeSubscriptionId FROM subscription
-       WHERE referenceId = ?1 AND status IN ('active', 'trialing')
-       AND stripeSubscriptionId IS NOT NULL`,
-  )
-    .bind(userId)
-    .all<{ stripeSubscriptionId: string }>();
-  if (!results.length) return;
+  const statuses = BILLABLE_SUBSCRIPTION_STATUSES.map((s) => `'${s}'`).join(
+    ", ",
+  );
+  const [{ results }, customerRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT stripeSubscriptionId FROM subscription
+         WHERE referenceId = ?1 AND status IN (${statuses})
+         AND stripeSubscriptionId IS NOT NULL`,
+    )
+      .bind(userId)
+      .all<{ stripeSubscriptionId: string }>(),
+    // The @better-auth/stripe plugin stores the customer mapping on the user
+    // row (migration 0006's `user.stripeCustomerId`); no row value = the user
+    // never reached checkout, so there is nothing at Stripe to erase.
+    env.DB.prepare(`SELECT stripeCustomerId FROM user WHERE id = ?1`)
+      .bind(userId)
+      .first<{ stripeCustomerId: string | null }>(),
+  ]);
+  const customerId = customerRow?.stripeCustomerId ?? null;
+  if (!results.length && !customerId) return;
 
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   for (const { stripeSubscriptionId } of results) {
@@ -79,6 +113,25 @@ export async function cancelActiveSubscriptions(
       throw err;
     }
   }
+  if (customerId) {
+    try {
+      // Deleting the customer also cancels any subscription still attached to
+      // it, so this doubly guarantees "no future billing".
+      await stripe.customers.del(customerId);
+    } catch (err) {
+      if (isAlreadyCancelled(err)) return; // already gone = goal achieved
+      throw err;
+    }
+  }
+}
+
+/**
+ * The exact normalization POST /api/waitlist applies before inserting
+ * (worker/index.ts `handleWaitlist`), so the deletion below hits the same row
+ * the signup-era insert created. Exported for the unit test.
+ */
+export function normalizeWaitlistEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 /**
@@ -91,6 +144,9 @@ export async function cancelActiveSubscriptions(
  * - the mcp OAuth tables (migration 0004) DO declare `ON DELETE CASCADE`, so
  *   they may already be gone; deleting them by `userId` is idempotent and makes
  *   cleanup correct whether or not D1 enforced the cascade.
+ * - the `waitlist` row (migration 0005) is keyed on the EMAIL, not a user id —
+ *   a user who joined the waitlist before their invite still has one, and
+ *   "delete my account" is a privacy-erasure promise that covers it.
  *
  * Best-effort by design: it runs in `afterDelete`, when the identity rows are
  * already gone, so any leftover here is unreachable (nothing routes to a
@@ -99,11 +155,15 @@ export async function cancelActiveSubscriptions(
 export function deleteResidualUserRows(
   db: D1Database,
   userId: string,
+  email: string,
 ): Promise<D1Result[]> {
   return db.batch([
     db.prepare("DELETE FROM subscription WHERE referenceId = ?").bind(userId),
     db.prepare("DELETE FROM oauthAccessToken WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthConsent WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthApplication WHERE userId = ?").bind(userId),
+    db
+      .prepare("DELETE FROM waitlist WHERE email = ?")
+      .bind(normalizeWaitlistEmail(email)),
   ]);
 }
