@@ -243,6 +243,23 @@
   );
   mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
 }
+/* scroll-fade fallback suppression.
+   shadcn's `scroll-fade` utility (in shadcn/tailwind.css) is scroll-aware in
+   browsers with CSS scroll-driven animations. Where those are unsupported
+   (older Safari, Firefox by default) it falls back to a STATIC fade on both
+   edges — which would dim the top/bottom of a short, non-overflowing menu for
+   no reason. We treat the fade as pure progressive enhancement, so null the
+   mask entirely in the fallback path: unsupported browsers get exactly today's
+   plain-scroll behavior, no visual regression. */
+@supports not (animation-timeline: scroll()) {
+  .scroll-fade,
+  .scroll-fade-x,
+  .scroll-fade-y {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
 .node-deco-track {
   display: flex;
   align-items: center;

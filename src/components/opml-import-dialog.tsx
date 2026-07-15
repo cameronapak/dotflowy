@@ -418,7 +418,7 @@ function SummaryStage({
             lost, presentation may shift:
           </p>
           <ul
-            className="max-h-48 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground"
+            className="max-h-48 scroll-fade overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground"
             data-testid="opml-disclosures"
           >
             {lines.map((line) => (

@@ -141,7 +141,7 @@ export function ChangelogDialog() {
           </div>
         )}
 
-        <div className="flex max-h-[50vh] flex-col gap-5 overflow-y-auto pr-1">
+        <div className="flex max-h-[50vh] scroll-fade flex-col gap-5 overflow-y-auto pr-1">
           {releases.map((release) => (
             <ReleaseSection key={release.version} release={release} />
           ))}

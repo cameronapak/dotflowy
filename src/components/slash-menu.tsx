@@ -9,6 +9,7 @@ import { commandSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { SlashMenuList } from "./slash-menu-list";
+import { useClampedMenuPosition } from "./use-menu-position";
 
 /** The composed command list driving the `/` palette: plugin commands (Seam C,
  *  array order), then the core's (`data/core-commands.ts`) -- so the contextual
@@ -70,6 +71,14 @@ export function useSlashMenu({
   const [state, setState] = useState<SlashState | null>(null);
 
   const items = state ? filterCommands(node, state.query, commandFilter) : [];
+
+  // Keep the menu on screen: clamp the caret coords to the viewport (shift left
+  // near the right edge, flip above near the bottom). Re-measures on item count.
+  const menuPosition = useClampedMenuPosition(
+    state?.x ?? 0,
+    state?.y ?? 0,
+    items.length,
+  );
 
   const close = () => setState(null);
 
@@ -151,7 +160,8 @@ export function useSlashMenu({
         <SlashMenuList
           items={items}
           activeIndex={state.activeIndex}
-          style={{ position: "fixed", left: state.x, top: state.y + 6 }}
+          ref={menuPosition.ref}
+          style={menuPosition.style}
           onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
           onSelect={select}
         />,
