@@ -1,0 +1,27 @@
+# Self-serve account deletion
+
+The privacy policy (ticket #161) commits to "You can delete your account yourself, in the app," so deletion has to be a real button, not a support request. The account's data lives in three places — the D1 identity rows (Better Auth), the per-user outline Durable Object (ADR 0008), and Stripe (a subscription) — and a delete has to take all three down **atomically enough** that we never leave a paying subscription attached to a dead account, or an orphaned outline nobody can reach. This ADR records how the one button coordinates the three.
+
+## The flow
+
+"Delete account" in the header More menu opens a password-gated confirmation (`delete-account-dialog.tsx`). Confirmation is **re-entering the password** — `authClient.deleteUser({ password })` — not an email round-trip: email verification is off for beta (ADR 0011), and email+password is the only signup path so every account (including Google-linked ones) has a password to prove ownership with. On success the client `hardReset("/")`s, the same auth-boundary teardown sign-out uses (a full navigation destroys every data-layer singleton and the sync socket), landing on the signed-out screen.
+
+Server-side, Better Auth's built-in `user.deleteUser` owns the lifecycle; we hang the extra teardown off its hooks (`worker/auth.ts`, with the guard + Stripe logic factored into `worker/account-deletion.ts`):
+
+- **`beforeDelete(user)`** — runs while the account still exists, in this order:
+  1. **Owner guard.** Refuse the `OWNER_USER_ID` account (`isOwnerAccount`). It maps to the constant `'default'` DO (the owner-continuity bridge, ADR 0011) holding pre-auth/shared data — wiping that is an operator decision, not a button. A `throw` here aborts with nothing destroyed.
+  2. **Cancel Stripe** (`cancelActiveSubscriptions`) — immediately, and **throw on failure** so the whole deletion aborts. This is the crux (below).
+  3. **Wipe the outline DO** — `stub.wipe()` → `ctx.storage.deleteAll()`, which on a SQLite-backed DO erases both the SQL tables and the KV storage atomically. The stub is resolved from the authenticated `user.id` (never client input — the ADR 0014 trust boundary), and it also closes any live sync sockets.
+- **`afterDelete(user)`** — the identity rows are gone; clean up the rows core deletion doesn't (`deleteResidualUserRows`): the `subscription` row (no FK, so it would orphan) and the mcp OAuth rows (they cascade, but deleting by `userId` is idempotent belt-and-suspenders). Best-effort — any leftover is unreachable, so it never fails an already-done deletion.
+
+## The two decisions worth recording
+
+**Stripe cancellation failure fails the whole deletion.** Cancel happens in `beforeDelete` and throws on any real Stripe error, so a Stripe outage means the account survives and the user retries — the opposite of the tempting "delete anyway, sort billing out later," which strands an auto-renewing subscription (the founding plan renews at year 3) billing a card for an account that can no longer sign in. An _already_-cancelled/missing subscription is treated as success (the goal is "not billing," and it's met). Cancellation is **immediate**, not `cancel_at_period_end`: there's no account left to keep billing against, and deletion is not a refund request — the founding prepay forfeits its remaining term, which is the user's own choice in deleting.
+
+**The wiped DO stays empty and inert — no resurrection.** `deleteAll()` takes the `seeded` flag and the schema version with it, but that's fine: a deleted `user.id` is never routed to again (Better Auth mints fresh ids, so a re-signup with the same email gets a _different_ DO), and `ensureSeeded` (worker/index.ts) re-imports legacy D1 rows **only** for the `'default'` owner DO — which the owner guard refuses to delete. This was the specific worry worth checking (the task flagged it): the seed-if-empty bootstrap (`bootstrapOutline`) would re-seed welcome bullets if the _same_ account reached an empty DO, but a deleted account never does.
+
+## Consequences / rejected
+
+- **DO wipe in `beforeDelete`, not `afterDelete`.** If the core user-row delete then failed, we'd have wiped a still-alive account's outline — recoverable (they're signed in; the outline re-seeds). The inverse (wipe in `afterDelete`, fails) orphans data we _promised_ to delete — a privacy regression. So the irreversible wipe goes last-in-`beforeDelete`, after Stripe has committed.
+- **Not e2e-tested.** `seedOutline` mocks `/api/auth`, so the real deleteUser path is unreachable in Playwright; the owner guard + the Stripe dev-skip are unit-tested (`worker/account-deletion.test.ts`) and the full flow is verified by hand against the dev loop.
+- **`USER_OUTLINE` + `OWNER_USER_ID` are now on `AuthEnv`** (they were only on the Worker's `Env`), because the delete hook, living inside `createAuth`, needs the DO namespace and the owner id.
