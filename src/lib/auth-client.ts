@@ -25,6 +25,7 @@ export const {
   requestPasswordReset,
   resetPassword,
   subscription,
+  deleteUser,
 } = authClient;
 
 /** The one fetch-failed message every auth surface shows, so a copy edit
