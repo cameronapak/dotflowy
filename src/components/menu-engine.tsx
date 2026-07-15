@@ -13,6 +13,7 @@ import { menuSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { MenuList } from "./menu-list";
+import { useClampedMenuPosition } from "./use-menu-position";
 
 /**
  * The generic caret-menu engine (ADR 0001 Seam H). One per focused bullet --
@@ -77,6 +78,14 @@ export function useMenus({
   // "Open" only counts when there's something to show (or the spec opts into an
   // empty state), so a brand-new `#tag`'s Enter is never swallowed.
   const isOpen = open !== null && (entries.length > 0 || !!spec?.openWhenEmpty);
+
+  // Keep the menu on screen: clamp the caret coords to the viewport (shift left
+  // near the right edge, flip above near the bottom). Re-measures on entry count.
+  const menuPosition = useClampedMenuPosition(
+    open?.x ?? 0,
+    open?.y ?? 0,
+    entries.length,
+  );
 
   const close = () => setOpen(null);
 
@@ -174,8 +183,8 @@ export function useMenus({
             entries={entries}
             activeIndex={open.activeIndex}
             emptyLabel={spec?.emptyLabel}
-            x={open.x}
-            y={open.y}
+            ref={menuPosition.ref}
+            style={menuPosition.style}
             onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
             onSelect={pick}
           />,

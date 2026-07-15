@@ -42,44 +42,49 @@ export function SlashMenuList({
     <div
       ref={ref}
       role="listbox"
-      className="fixed z-50 max-h-72 w-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+      className="fixed z-50 w-64 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
       style={style}
     >
-      {items.length === 0 ? (
-        <div className="px-2 py-1.5 text-sm text-muted-foreground">
-          No commands
-        </div>
-      ) : (
-        items.map((item, i) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="option"
-              aria-selected={i === activeIndex}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-                i === activeIndex && "bg-accent text-accent-foreground",
-              )}
-              // mousedown (not click) so the contentEditable keeps focus.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onSelect(i);
-              }}
-              onMouseEnter={() => onHover(i)}
-            >
-              <Icon className="size-4 shrink-0 opacity-70" />
-              <span className="flex flex-col">
-                <span className="font-medium">{item.label}</span>
-                <span className="text-xs text-muted-foreground">
-                  {item.description}
+      {/* Scroll + fade live on an inner div with NO background, so the mask
+          dissolves content into the card's bg-popover (matching the Cmd+K
+          list), not into the darker editor background behind the card. */}
+      <div className="max-h-72 scroll-fade overflow-y-auto p-1">
+        {items.length === 0 ? (
+          <div className="px-2 py-1.5 text-sm text-muted-foreground">
+            No commands
+          </div>
+        ) : (
+          items.map((item, i) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="option"
+                aria-selected={i === activeIndex}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
+                  i === activeIndex && "bg-accent text-accent-foreground",
+                )}
+                // mousedown (not click) so the contentEditable keeps focus.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onSelect(i);
+                }}
+                onMouseEnter={() => onHover(i)}
+              >
+                <Icon className="size-4 shrink-0 opacity-70" />
+                <span className="flex flex-col">
+                  <span className="font-medium">{item.label}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {item.description}
+                  </span>
                 </span>
-              </span>
-            </button>
-          );
-        })
-      )}
+              </button>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

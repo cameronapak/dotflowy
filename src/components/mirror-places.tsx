@@ -136,7 +136,7 @@ function MirrorPlacesInner({
             {title}
           </DialogDescription>
         </DialogHeader>
-        <ul className="max-h-[60vh] min-w-0 overflow-y-auto overscroll-contain px-2 pb-2">
+        <ul className="max-h-[60vh] min-w-0 scroll-fade overflow-y-auto overscroll-contain px-2 pb-2">
           {places.map((place) => (
             <PlaceRow
               key={place.node.id}

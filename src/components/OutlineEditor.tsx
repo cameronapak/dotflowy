@@ -2091,7 +2091,7 @@ function BreadcrumbTrail({
   return (
     <nav
       ref={navRef}
-      className="breadcrumb"
+      className="breadcrumb scroll-fade-x"
       aria-label="Breadcrumb"
       data-compact={isMobile ? "" : undefined}
     >

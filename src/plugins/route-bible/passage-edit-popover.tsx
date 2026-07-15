@@ -270,7 +270,7 @@ export function BiblePassageEditPopover({
         <div
           id={suggestionsId}
           role="listbox"
-          className="flex max-h-36 flex-col gap-0.5 overflow-auto rounded-md border border-border/70 bg-muted/30 p-1"
+          className="flex max-h-36 scroll-fade flex-col gap-0.5 overflow-auto rounded-md border border-border/70 bg-muted/30 p-1"
           data-bible-passage-suggestions
         >
           {suggestions.map((suggestion, index) => (

@@ -172,7 +172,7 @@ export function MobileActionsBar({
           // instead of clipping. Buttons are shrink-0, so they keep their 44px
           // targets and the strip scrolls rather than squashing; justify-start (the
           // flex default) keeps the leftmost button reachable when it does scroll.
-          "flex max-w-full items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
+          "flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
           // Frosted-glass material: translucent, blurred, hairline edge + soft
           // shadow (depth from shadow, not a hard border) — the iOS accessory
           // pill's grammar, resolved through our own theme tokens so it adapts to

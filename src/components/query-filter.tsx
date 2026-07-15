@@ -376,32 +376,37 @@ function SuggestionPopover({
   return createPortal(
     <div
       data-filter-popover
-      className="fixed z-50 max-h-80 origin-top overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-md"
+      className="fixed z-50 origin-top overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
       style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
       // A press anywhere in the popover must not blur the input (the rename input
       // stops its own mousedown so it can still take focus).
       onMouseDown={(e) => e.preventDefault()}
     >
-      {showSaved ? (
-        <SavedQueriesSection anchorRef={anchorRef} onPick={onPickSaved} />
-      ) : null}
-      <ul
-        id={LISTBOX_ID}
-        role="listbox"
-        aria-label="Filter suggestions"
-        data-filter-suggestions
-        className="p-1"
-      >
-        {suggestions.map((s, i) => (
-          <SuggestionRow
-            key={s.id}
-            suggestion={s}
-            id={optionId(i)}
-            active={i === activeIndex}
-            onPick={onPick}
-          />
-        ))}
-      </ul>
+      {/* Scroll + fade live on an inner div with NO background, so the mask
+          dissolves content into the card's bg-popover (matching the Cmd+K
+          list), not into the darker background behind the card. */}
+      <div className="max-h-80 scroll-fade overflow-y-auto">
+        {showSaved ? (
+          <SavedQueriesSection anchorRef={anchorRef} onPick={onPickSaved} />
+        ) : null}
+        <ul
+          id={LISTBOX_ID}
+          role="listbox"
+          aria-label="Filter suggestions"
+          data-filter-suggestions
+          className="p-1"
+        >
+          {suggestions.map((s, i) => (
+            <SuggestionRow
+              key={s.id}
+              suggestion={s}
+              id={optionId(i)}
+              active={i === activeIndex}
+              onPick={onPick}
+            />
+          ))}
+        </ul>
+      </div>
     </div>,
     document.body,
   );

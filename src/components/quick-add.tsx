@@ -1063,7 +1063,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
           </div>
 
           {captures.length > 0 && (
-            <div className="min-h-0 flex-1 overflow-y-auto border-t px-1 py-1">
+            <div className="min-h-0 flex-1 scroll-fade overflow-y-auto border-t px-1 py-1">
               <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
                 Captured this session
               </div>
