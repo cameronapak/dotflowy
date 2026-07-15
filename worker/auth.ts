@@ -26,6 +26,7 @@ import {
   isOwnerAccount,
 } from "./account-deletion";
 import { sendEmail } from "./email";
+import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
 /** The slice of the Worker env Better Auth needs. */
@@ -239,25 +240,68 @@ export function createAuth(
     // Invite-only alpha: /sign-up/email is the ONLY account-creation path (the
     // mcp plugin's dynamic registration creates OAuth clients, not users), so
     // gating it here closes signup entirely. Server-side on purpose — hiding
-    // the signup UI wouldn't stop a direct POST to the endpoint. An unset
-    // INVITE_CODES fails CLOSED: no codes, no signups; sign-in is untouched.
+    // the signup UI wouldn't stop a direct POST to the endpoint.
+    //
+    // A signup is accepted when the supplied code is EITHER:
+    //  (a) a per-email, single-use invite bound to this exact email (#251 —
+    //      minted from the waitlist, redeemed here), OR
+    //  (b) in the shared INVITE_CODES secret (kept as an admin/testing backdoor).
+    // An unset INVITE_CODES and no matching per-email invite fails CLOSED: no
+    // codes, no signups; sign-in is untouched.
+    //
+    // Redemption is split across before/after ON PURPOSE. `before` only
+    // VALIDATES (a read) so a valid code isn't burned when account creation then
+    // fails downstream (duplicate email, weak password). `after` stamps the code
+    // redeemed — but only on a real success (the endpoint sets `returned` to an
+    // APIError on failure), via a conditional UPDATE that can't double-burn. The
+    // email uniqueness of the user table already stops two accounts sharing one
+    // email-bound code, so this is belt-and-braces.
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/sign-up/email") return;
-        const codes = (env.INVITE_CODES ?? "")
-          .split(",")
-          .map((c) => c.trim())
-          .filter(Boolean);
         const supplied =
           typeof ctx.body?.inviteCode === "string"
             ? ctx.body.inviteCode.trim()
             : "";
-        if (!supplied || !codes.includes(supplied)) {
-          throw new APIError("FORBIDDEN", {
-            message:
-              "Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.",
-          });
+        const email =
+          typeof ctx.body?.email === "string"
+            ? normalizeEmail(ctx.body.email)
+            : "";
+        // (a) A per-email single-use invite bound to this address.
+        if (
+          supplied &&
+          email &&
+          (await isRedeemableInvite(env, email, supplied))
+        ) {
+          return; // valid; the after-hook stamps it once the account exists
         }
+        // (b) The shared INVITE_CODES backdoor.
+        const codes = (env.INVITE_CODES ?? "")
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean);
+        if (supplied && codes.includes(supplied)) return;
+        throw new APIError("FORBIDDEN", {
+          message:
+            "Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.",
+        });
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/sign-up/email") return;
+        // Only burn the code on a genuine account creation. On failure the
+        // endpoint's result — surfaced here as `ctx.context.returned` — is an
+        // APIError, so we leave the invite unredeemed and reusable.
+        if (ctx.context.returned instanceof APIError) return;
+        const supplied =
+          typeof ctx.body?.inviteCode === "string"
+            ? ctx.body.inviteCode.trim()
+            : "";
+        const email =
+          typeof ctx.body?.email === "string"
+            ? normalizeEmail(ctx.body.email)
+            : "";
+        // No-op when `supplied` was the INVITE_CODES backdoor (no invites row).
+        if (supplied && email) await redeemInvite(env, email, supplied);
       }),
     },
     // Billing (issue #162): the @better-auth/stripe plugin owns the whole

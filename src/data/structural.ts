@@ -1,14 +1,42 @@
 import { createTransaction, getActiveTransaction } from "@tanstack/react-db";
 import { Effect } from "effect";
+import { toast } from "sonner";
 
 import type { ChangeOp } from "./realtime";
 import type { Node } from "./schema";
 
 import { persistBatchE } from "./api";
 import { nodesCollection, waitForSeqE } from "./collection";
-import { runPromise } from "./nodes-client-effect";
+import { NodesLimitError, runPromise } from "./nodes-client-effect";
 import { chainDisagreements } from "./sibling-chain";
 import { buildTreeIndex, childrenOf } from "./tree";
+
+/**
+ * Send one structural batch and hold until its echo — the shared mutationFn body
+ * for every structural path below. On the free-tier node ceiling (#170) it
+ * surfaces one upgrade toast, then RE-THROWS so the batch still rolls back
+ * (the optimistic insert reverts, so the outline never visibly grows past cap).
+ * A fixed toast `id` de-dupes a burst of blocked inserts into one notice.
+ */
+async function persistStructuralBatch(ops: ChangeOp[]): Promise<void> {
+  try {
+    await runPromise(
+      persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
+    );
+  } catch (err) {
+    if (err instanceof NodesLimitError) {
+      toast.error(
+        `Free plan limit reached (${err.limit.toLocaleString()} bullets)`,
+        {
+          id: "node-limit",
+          description:
+            "Upgrade to Unlimited to keep adding. Your existing outline stays fully editable.",
+        },
+      );
+    }
+    throw err;
+  }
+}
 
 /**
  * The single choke point for STRUCTURAL outline edits — any mutation that
@@ -74,12 +102,10 @@ export function runStructuralTracked<T>(body: () => T): {
       // P1 (atomic, writeSem-serialized send) → P2 (hold optimistic until the
       // echo) as ONE Effect program, bridged once here at the async mutationFn
       // seam (ADR 0021). waitForSeqE never fails, so the only rejection — which
-      // rolls the transaction back — comes from the batch send. A chunked
-      // >500-op batch replies with its FINAL seq (worker/outline-do.ts), so
-      // waiting on it spans the whole multi-frame echo.
-      await runPromise(
-        persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
-      );
+      // rolls the transaction back — comes from the batch send (incl. the free
+      // node-ceiling 403, which also toasts). A chunked >500-op batch replies
+      // with its FINAL seq (worker/outline-do.ts), so the wait spans every frame.
+      await persistStructuralBatch(ops);
     },
   });
   tx.mutate(() => {
@@ -121,9 +147,7 @@ export async function runStructuralSliced(
     mutationFn: async ({ transaction }) => {
       const ops = transaction.mutations.map(toChangeOp);
       if (ops.length === 0) return;
-      await runPromise(
-        persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
-      );
+      await persistStructuralBatch(ops);
     },
   });
   try {

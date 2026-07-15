@@ -36,11 +36,19 @@ import type { AuthEnv } from "./auth";
 import type { Node } from "./wire";
 
 import { createAuth } from "./auth";
+import {
+  mintInvites,
+  normalizeEmail,
+  pendingWaitlistEmails,
+  type InviteBatchResult,
+} from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
+import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
+  AdminInvitePostBody,
   KvClaimBody,
   KvDeleteBody,
   KvUpsertBody,
@@ -237,6 +245,15 @@ class RouteNotFound extends Data.TaggedError("RouteNotFound")<{
   path: string;
 }> {}
 
+/**
+ * A free-tier outline is at its node ceiling and the write would grow it past
+ * the cap (#170). Mapped to a 403 whose body names the reason + limit so the
+ * client can surface an upgrade prompt (mirroring the protected-node rejection).
+ * Never raised for edits/moves/deletes, and never for a paid user — see
+ * batchExceedsNodeLimit / the DO's applyBatchGated.
+ */
+class NodeLimitExceeded extends Data.TaggedError("NodeLimitExceeded")<{}> {}
+
 // --- ensureSeededE ----------------------------------------------------------
 
 /**
@@ -353,7 +370,9 @@ function decodeBody<S extends Schema.Top>(
 function handleNodes(
   request: Request,
   stub: DurableObjectStub<UserOutlineDO>,
-): Effect.Effect<Response, BadRequest> {
+  env: Env,
+  billingUserId: string,
+): Effect.Effect<Response, BadRequest | NodeLimitExceeded> {
   return Effect.gen(function* () {
     switch (request.method) {
       case "GET":
@@ -364,13 +383,44 @@ function handleNodes(
         // ops and persists as ONE DO frame (one seq, one broadcast). Reply with
         // that seq so the client can hold its optimistic overlay until the frame
         // echoes back — closing the half-applied / reverted-state window.
+        //
+        // Free-tier node ceiling (#170): resolve the caller's limit and let the
+        // DO reject a batch that would grow the outline past it (null seq → 403).
+        // A pure-delete batch can never grow the outline, so skip the plan query
+        // (deletes are never blocked) — most structural edits (moves) DO touch
+        // existing nodes, but the DO's per-op growth count makes that safe.
+        //
+        // getPlan takes the BILLING id (`session.user.id`), NOT the DO-routing id:
+        // the subscription table is keyed on the raw Better Auth `user.id`, but
+        // resolveUserId collapses the OWNER to the constant 'default' DO — so
+        // querying the resolved id would miss the owner's comp row and wrongly
+        // read `free`. Same split the MCP branch makes (getPlan(token.userId) with
+        // a separately-resolved DO stub).
         if (ops) {
-          const seq = yield* Effect.promise(() => stub.applyBatch(ops));
+          const growable = ops.some((o) => o.op !== "delete");
+          const limit = growable
+            ? nodeLimitForPlan(
+                yield* Effect.promise(() => getPlan(billingUserId, env)),
+              )
+            : null;
+          const seq = yield* Effect.promise(() =>
+            stub.applyBatchGated(ops, limit),
+          );
+          if (seq === null) return yield* Effect.fail(new NodeLimitExceeded());
           return json({ seq });
         }
         // Legacy upsert path: the first-run seed and any pre-batch client. Kept
-        // for back-compat during rollout.
-        if (nodes?.length) yield* Effect.promise(() => stub.upsertNodes(nodes));
+        // for back-compat during rollout — gated too, so a raw POST can't slip
+        // past the cap the batch path enforces.
+        if (nodes?.length) {
+          const limit = nodeLimitForPlan(
+            yield* Effect.promise(() => getPlan(billingUserId, env)),
+          );
+          const applied = yield* Effect.promise(() =>
+            stub.upsertNodesGated(nodes, limit),
+          );
+          if (!applied) return yield* Effect.fail(new NodeLimitExceeded());
+        }
         return json({ ok: true });
       }
       case "PATCH": {
@@ -513,6 +563,40 @@ function handleWaitlist(
   });
 }
 
+/** Default number of pending waitlist rows a batch invites when neither
+ *  explicit emails nor `all` is given. Kept small so a bare call is safe. */
+const INVITE_BATCH_DEFAULT = 25;
+const INVITE_BATCH_MAX = 500;
+
+/**
+ * Resolve the target addresses for an admin invite batch, then mint + email a
+ * per-email single-use code for each (#251). Explicit `emails` win; otherwise it
+ * pulls pending (not-yet-invited) waitlist rows — every row with `all`, else the
+ * oldest `limit`. Runs on the Worker because mintInvites sends through the
+ * `send_email` binding, which only exists here.
+ */
+async function runInviteBatch(
+  env: Env,
+  body: { emails?: readonly string[]; all?: boolean; limit?: number },
+  origin: string,
+): Promise<InviteBatchResult & { count: number }> {
+  const signupUrl = `${origin}/`;
+  let targets: string[];
+  if (body.emails && body.emails.length > 0) {
+    targets = body.emails.map(normalizeEmail).filter(isPlausibleEmail);
+  } else {
+    const limit = body.all
+      ? null
+      : Math.max(
+          1,
+          Math.min(body.limit ?? INVITE_BATCH_DEFAULT, INVITE_BATCH_MAX),
+        );
+    targets = await pendingWaitlistEmails(env, limit);
+  }
+  const result = await mintInvites(env, targets, signupUrl);
+  return { ...result, count: result.invited.length };
+}
+
 // --- Main API pipeline ------------------------------------------------------
 
 /**
@@ -529,7 +613,11 @@ function handleApiRequest(
   executionCtx: ExecutionContext,
 ): Effect.Effect<
   Response,
-  UnknownCollection | UpgradeRequired | RouteNotFound | BadRequest
+  | UnknownCollection
+  | UpgradeRequired
+  | RouteNotFound
+  | BadRequest
+  | NodeLimitExceeded
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -563,6 +651,31 @@ function handleApiRequest(
         return json({ entries: results });
       }
       return yield* handleWaitlist(request, env);
+    }
+
+    // Admin-only: mint + email per-email single-use invite codes (#251). Sits
+    // before the generic session gate so it can 404 (not 401) for non-admins —
+    // the admin surface shouldn't advertise itself, same as the waitlist GET.
+    // Session + ADMIN_EMAILS gated; driven by scripts/invite.ts. Lives on the
+    // Worker because the send needs the `send_email` binding, which only exists
+    // here.
+    if (url.pathname === "/api/admin/invite") {
+      // Admin-gate FIRST, then method-check: a non-admin gets the same 404 for
+      // any method, so a wrong-method probe can't confirm the route exists (the
+      // 405 is only for authenticated admins). Mirrors the waitlist GET.
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminInvitePostBody);
+      return json(
+        yield* Effect.promise(() => runInviteBatch(env, body, url.origin)),
+      );
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
@@ -601,7 +714,14 @@ function handleApiRequest(
       const origin = yield* Effect.promise(() =>
         resolveMcpOrigin(env, clientId),
       );
-      return yield* handleMcp(request, mcpStub, origin);
+      // MCP (agent access) is a paid capability (#152/#170). Resolve the plan
+      // from the token's `userId` — the Better Auth id the subscription table is
+      // keyed on (never the resolved DO id, which collapses the owner to
+      // 'default'). A free token gets a clean in-protocol error on tool calls
+      // (handleMcp), not a 500. An operator comps themselves with a manual
+      // subscription row (getPlan treats it as paid).
+      const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
+      return yield* handleMcp(request, mcpStub, origin, mcpPlan !== "free");
     }
 
     // Identity = the validated session's stable user id. No session → 401.
@@ -656,7 +776,9 @@ function handleApiRequest(
 
     if (url.pathname === "/api/nodes") {
       yield* maybeSeed;
-      return yield* handleNodes(request, stub);
+      // `stub` routes on the resolved `userId` (owner → 'default'); the plan
+      // lookup takes the raw billing id (`session.user.id`) — see handleNodes.
+      return yield* handleNodes(request, stub, env, session.user.id);
     }
 
     if (url.pathname === "/api/kv") {
@@ -721,6 +843,13 @@ const handler = {
         ),
         Effect.catchTag("RouteNotFound", () =>
           Effect.succeed(json({ error: "not found" }, 404)),
+        ),
+        // 403 with a machine-readable body the client keys on to show an upgrade
+        // prompt (src/data/nodes-client-effect.ts NodesLimitError).
+        Effect.catchTag("NodeLimitExceeded", () =>
+          Effect.succeed(
+            json({ error: "node_limit", limit: FREE_NODE_LIMIT }, 403),
+          ),
         ),
       ),
     ).catch((err) => {
