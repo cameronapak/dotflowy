@@ -943,6 +943,33 @@ describe("daily planning", () => {
     expect(updated(plan.ops)).toHaveLength(0);
   });
 
+  test("a later day lands AHEAD of a trailing non-scaffold sibling under its week (finding 9)", () => {
+    // The week holds a day plus a stray bullet (outdented under it, decision 9,
+    // no daily-index mapping). A newer day chains after the last DAY, NOT past
+    // the trailing bullet at the absolute tail — the shared placement decision.
+    const { nodes, rev } = seededWeek("2026-W29", [
+      makeNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
+      makeNode({
+        id: "note",
+        text: "stray",
+        parentId: "wk",
+        prevSiblingId: "d13",
+      }),
+    ]);
+    rev.set("d13", "2026-07-13"); // `note` intentionally has no mapping
+    const plan = planEnsureDaily(index(nodes), {
+      dateKey: "2026-07-16",
+      ...scaffold(rev, { dayId: "d16" }),
+      timestamp: T,
+    });
+    const inserts = inserted(plan.ops);
+    expect(inserts.map((n) => n.id)).toEqual(["d16"]);
+    expect(inserts[0]!.prevSiblingId).toBe("d13"); // after the last DAY
+    // The trailing bullet is repointed to follow the new day (not left dangling).
+    const repointed = updated(plan.ops).find((n) => n.id === "note");
+    expect(repointed?.prevSiblingId).toBe("d16");
+  });
+
   test("an out-of-order EARLIER day inserts BEFORE its later sibling (ascending)", () => {
     // Week 29 already holds 07-16; ensuring 07-13 must land before it — retiring
     // the old "past day lands on top" caveat (decision 4).

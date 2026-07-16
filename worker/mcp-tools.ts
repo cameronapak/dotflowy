@@ -19,13 +19,10 @@ import { Data, Effect, Schema } from "effect";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import {
-  dayKeyToWeekKey,
-  monthKeyToYearKey,
-  monthLabel,
+  PROTECTED_SCAFFOLD_KINDS,
+  dayKeyToScaffoldChain,
   scaffoldKeyKind,
-  weekKeyToMonthKey,
-  weekLabel,
-  yearLabel,
+  scaffoldLabel,
 } from "../src/data/date-links";
 import { exportOpml } from "../src/data/opml-export";
 import {
@@ -38,6 +35,7 @@ import { redactSpoilers } from "../src/data/spoiler";
 import { childrenOf, createId } from "../src/data/tree";
 import {
   DAILY_CONTAINER_TEXT,
+  type DailyScaffold,
   type TreeIndex,
   buildTreeIndex,
   flattenSubtree,
@@ -192,34 +190,44 @@ const loadDailyReverseMap = (
 const claimDailyScaffold = (
   store: OutlineStore,
   dateKey: string,
-): Effect.Effect<
-  {
-    containerId: string;
-    yearId: string;
-    monthId: string;
-    weekId: string;
-    dayId: string;
-    keyByNodeId: ReadonlyMap<string, string>;
-  },
-  ToolError
-> =>
+): Effect.Effect<DailyScaffold, ToolError> =>
   Effect.gen(function* () {
-    const weekKey = dayKeyToWeekKey(dateKey);
-    const monthKey = weekKey ? weekKeyToMonthKey(weekKey) : null;
-    const yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
-    if (!weekKey || !monthKey || !yearKey) {
+    const chain = dayKeyToScaffoldChain(dateKey);
+    if (!chain) {
       return yield* Effect.fail(
         new ToolError({
           reason: `invalid date "${dateKey}" — can't place it on the calendar`,
         }),
       );
     }
-    const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId());
-    const yearId = yield* claimDailyId(store, yearKey, createId());
-    const monthId = yield* claimDailyId(store, monthKey, createId());
-    const weekId = yield* claimDailyId(store, weekKey, createId());
-    const dayId = yield* claimDailyId(store, dateKey, createId());
-    const keyByNodeId = yield* loadDailyReverseMap(store);
+    // Container + day claims and the reverse-map fetch are independent, so run
+    // them CONCURRENTLY (finding 6/8b: was 6 sequential RPCs). Each claim is a
+    // per-key atomic `getOrCreateKv` on a FRESH candidate id, and nothing reads
+    // another claim's result, so the batch is race-safe.
+    const [containerId, dayId, keyByNodeId] = yield* Effect.all(
+      [
+        claimDailyId(store, CONTAINER_KEY, createId()),
+        claimDailyId(store, dateKey, createId()),
+        loadDailyReverseMap(store),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    // The Y/M/W scaffold is claimed ONLY when the day node is absent (finding 6,
+    // mirroring `planEnsureDaily`'s early-return): an existing (pre-migration
+    // flat) day is reused verbatim and never gets a parallel scaffold, so no
+    // dangling kv mappings. One index read decides.
+    const index = yield* loadIndex(store);
+    if (index.byId.has(dayId)) return { containerId, dayId, keyByNodeId };
+
+    const [yearId, monthId, weekId] = yield* Effect.all(
+      [
+        claimDailyId(store, chain.yearKey, createId()),
+        claimDailyId(store, chain.monthKey, createId()),
+        claimDailyId(store, chain.weekKey, createId()),
+      ],
+      { concurrency: "unbounded" },
+    );
     return { containerId, yearId, monthId, weekId, dayId, keyByNodeId };
   });
 
@@ -250,15 +258,20 @@ const resolveDateKey = (
 /** The human label for a PROTECTED scaffold node (container/year/month/week), or
  *  null when the key is a day or unknown (not protected). */
 const protectedScaffoldLabel = (key: string): string | null => {
-  switch (scaffoldKeyKind(key)) {
+  const kind = scaffoldKeyKind(key);
+  // Which kinds are protected is the shared source of truth (finding 10b), so
+  // the client and Worker can't drift on it. The label derives from the shared
+  // `scaffoldLabel` (10c); the phrasing stays Worker-local.
+  if (!kind || !PROTECTED_SCAFFOLD_KINDS.has(kind)) return null;
+  switch (kind) {
     case "container":
       return `the "${DAILY_CONTAINER_TEXT}" container`;
     case "year":
-      return `the "${yearLabel(key)}" calendar year`;
+      return `the "${scaffoldLabel(key)}" calendar year`;
     case "month":
-      return `the "${monthLabel(key)}" calendar month`;
+      return `the "${scaffoldLabel(key)}" calendar month`;
     case "week":
-      return `the "${weekLabel(key)}" calendar week`;
+      return `the "${scaffoldLabel(key)}" calendar week`;
     default:
       return null; // day (content) or unknown
   }

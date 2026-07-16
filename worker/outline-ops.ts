@@ -22,14 +22,9 @@ import type { NodeKind } from "../src/data/schema";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import {
-  compareScaffoldKeys,
-  dayKeyToWeekKey,
-  monthKeyToYearKey,
-  monthLabel,
-  scaffoldKeyKind,
-  weekKeyToMonthKey,
-  weekLabel,
-  yearLabel,
+  dayKeyToScaffoldChain,
+  scaffoldLabel,
+  sortedInsertAfterId,
 } from "../src/data/date-links";
 import { redactSpoilers } from "../src/data/spoiler";
 import {
@@ -801,9 +796,12 @@ export function isValidDateKey(dateKey: string): boolean {
  */
 export interface DailyScaffold {
   containerId: string;
-  yearId: string;
-  monthId: string;
-  weekId: string;
+  /** The Y/M/W ids are claimed ONLY for a genuinely NEW day (mcp-tools.ts
+   *  `claimDailyScaffold`); an existing day reuses its place and `planEnsureDaily`
+   *  early-returns without them, so they're honestly optional (finding 6). */
+  yearId?: string;
+  monthId?: string;
+  weekId?: string;
   dayId: string;
   keyByNodeId: ReadonlyMap<string, string>;
 }
@@ -811,11 +809,13 @@ export interface DailyScaffold {
 /**
  * The sorted-insertion point for a new scaffold node keyed `newKey` among
  * `parentId`'s current children: the predecessor to chain from (null = head) and
- * the follower to repoint (null = tail). Chronological ascending via
- * `compareScaffoldKeys`, comparing ONLY same-kind siblings (resolved through the
- * reverse map) — so a container that still holds pre-migration flat day nodes,
- * or any sibling with no mapping, can't tear the year chain (the client migrates
- * those stragglers later, decision 8). Reads `index` only.
+ * the follower to repoint (null = tail). Derives the position from the ONE shared
+ * `sortedInsertAfterId` (date-links.ts), so the Worker and the client can't
+ * diverge on the same siblings (finding 9) — greatest same-kind predecessor,
+ * comparing ONLY same-kind siblings (resolved through the reverse map), so a
+ * container that still holds pre-migration flat day nodes, or any sibling with no
+ * mapping, can't tear the year chain (the client migrates those stragglers later,
+ * decision 8). Reads `index` only.
  */
 function planSortedInsert(
   index: TreeIndex,
@@ -823,20 +823,18 @@ function planSortedInsert(
   newKey: string,
   keyByNodeId: ReadonlyMap<string, string>,
 ): { prevSiblingId: string | null; follower: Node | null } {
-  const kind = scaffoldKeyKind(newKey);
-  let prev: string | null = null;
-  for (const sib of childrenOf(index, parentId)) {
-    const sibKey = keyByNodeId.get(sib.id);
-    if (
-      sibKey &&
-      scaffoldKeyKind(sibKey) === kind &&
-      compareScaffoldKeys(newKey, sibKey) < 0
-    ) {
-      return { prevSiblingId: prev, follower: sib };
-    }
-    prev = sib.id;
+  const siblings = childrenOf(index, parentId);
+  const afterId = sortedInsertAfterId(
+    siblings.map((s) => ({ id: s.id, key: keyByNodeId.get(s.id) ?? null })),
+    newKey,
+  );
+  if (afterId === null) {
+    return { prevSiblingId: null, follower: siblings[0] ?? null };
   }
-  return { prevSiblingId: prev, follower: null };
+  const i = siblings.findIndex((s) => s.id === afterId);
+  const follower =
+    i !== -1 && i + 1 < siblings.length ? siblings[i + 1]! : null;
+  return { prevSiblingId: afterId, follower };
 }
 
 /** Emit a sorted-inserted scaffold/day node under `parentId` at its
@@ -929,16 +927,15 @@ export function planEnsureDaily(
     return { ops };
   }
 
-  // A new day: derive its calendar chain. A validated dateKey always resolves.
-  const weekKey = dayKeyToWeekKey(dateKey);
-  const monthKey = weekKey ? weekKeyToMonthKey(weekKey) : null;
-  const yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
+  // A new day: derive its calendar chain (the ONE Thursday-rule waterfall).
+  const chain = dayKeyToScaffoldChain(dateKey);
 
-  // Defensive fallback (unreachable for a validated dateKey): a key that can't
-  // be placed on the calendar skips the Y/M/W scaffold and lands the day
-  // directly under the container, so the planner stays TOTAL and never emits a
-  // partial chain.
-  if (!weekKey || !monthKey || !yearKey) {
+  // Defensive fallback (unreachable for a validated dateKey with claimed ids): a
+  // key that can't be placed on the calendar — or a caller that didn't claim the
+  // Y/M/W ids (only happens off the new-day path, where they're always present) —
+  // skips the scaffold and lands the day directly under the container, so the
+  // planner stays TOTAL and never emits a partial chain.
+  if (!chain || !yearId || !monthId || !weekId) {
     emitSortedInsert(ops, index, {
       id: dayId,
       parentId: containerId,
@@ -957,17 +954,22 @@ export function planEnsureDaily(
     [
       {
         id: yearId,
-        key: yearKey,
+        key: chain.yearKey,
         parentId: containerId,
-        text: yearLabel(yearKey),
+        text: scaffoldLabel(chain.yearKey),
       },
       {
         id: monthId,
-        key: monthKey,
+        key: chain.monthKey,
         parentId: yearId,
-        text: monthLabel(monthKey),
+        text: scaffoldLabel(chain.monthKey),
       },
-      { id: weekId, key: weekKey, parentId: monthId, text: weekLabel(weekKey) },
+      {
+        id: weekId,
+        key: chain.weekKey,
+        parentId: monthId,
+        text: scaffoldLabel(chain.weekKey),
+      },
     ];
   for (const level of levels) {
     if (index.byId.has(level.id)) continue;
@@ -1094,11 +1096,11 @@ export function planMirrorToDaily(
   // (an existing day is checked directly, also catching a mirror-onto-itself).
   const cycleParent = index.byId.has(args.dayId)
     ? args.dayId
-    : index.byId.has(args.weekId)
+    : args.weekId && index.byId.has(args.weekId)
       ? args.weekId
-      : index.byId.has(args.monthId)
+      : args.monthId && index.byId.has(args.monthId)
         ? args.monthId
-        : index.byId.has(args.yearId)
+        : args.yearId && index.byId.has(args.yearId)
           ? args.yearId
           : args.containerId;
   if (wouldMirrorCycle(index, trueSourceId, cycleParent)) {

@@ -104,6 +104,10 @@ describe("planDailyMigration", () => {
   /** Build a keyOf() over an explicit id -> key map. */
   const keyOf = (map: Record<string, string>) => (id: string) =>
     map[id] ?? null;
+  /** The daily-index DAY rows (the migration's candidate source), derived from
+   *  the id -> key map so a test declares the mappings once. */
+  const dayRows = (map: Record<string, string>) =>
+    Object.entries(map).map(([nodeId, key]) => ({ key, nodeId }));
 
   test("flat days -> needed, ascending days, parents-first scaffold keys", () => {
     const nodes = [
@@ -118,7 +122,12 @@ describe("planDailyMigration", () => {
       d2: "2026-07-08",
       d3: "2025-12-30",
     };
-    const plan = planDailyMigration(buildTreeIndex(nodes), "c", keyOf(map));
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
 
     expect(plan.needed).toBe(true);
     // Days ascending by date.
@@ -158,7 +167,12 @@ describe("planDailyMigration", () => {
       makeNode({ id: "d1", parentId: "w" }),
     ];
     const map = { c: "container", y: "2026", w: "2026-W29", d1: "2026-07-16" };
-    const plan = planDailyMigration(buildTreeIndex(nodes), "c", keyOf(map));
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
     expect(plan.needed).toBe(false);
     // Still lists the day (a re-parent no-op) so a half-migrated tree heals.
     expect(plan.days.map((d) => d.dayKey)).toEqual(["2026-07-16"]);
@@ -169,10 +183,65 @@ describe("planDailyMigration", () => {
     const plan = planDailyMigration(
       buildTreeIndex(nodes),
       "c",
+      dayRows({ c: "container" }),
       keyOf({ c: "container" }),
     );
     expect(plan.needed).toBe(false);
     expect(plan.days).toEqual([]);
     expect(plan.scaffoldKeys).toEqual([]);
+  });
+
+  test("a user-relocated day (parked under a normal bullet) is left alone (finding 1)", () => {
+    // The user dragged a mapped day out of the Daily scaffold, under a plain
+    // note. It must NOT migrate -- only days still inside the scaffold do.
+    const nodes = [
+      makeNode({ id: "c", text: "Daily" }),
+      makeNode({ id: "note", text: "Project" }), // a normal top-level bullet
+      makeNode({ id: "moved", parentId: "note" }), // 2026-07-16, relocated here
+      makeNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat
+    ];
+    const map = {
+      c: "container",
+      moved: "2026-07-16",
+      flat: "2026-07-08",
+      // `note` has no mapping -> keyOf returns null -> not a scaffold parent.
+    };
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
+    expect(plan.needed).toBe(true); // the flat day still triggers it
+    // Only the in-scaffold flat day is planned; the relocated one is skipped.
+    expect(plan.days.map((d) => d.nodeId)).toEqual(["flat"]);
+  });
+
+  test("a day already nested under a week is in scope (no-op move heals re-entry)", () => {
+    const nodes = [
+      makeNode({ id: "c", text: "Daily" }),
+      makeNode({ id: "y", parentId: "c" }),
+      makeNode({ id: "m", parentId: "y" }),
+      makeNode({ id: "w", parentId: "m" }),
+      makeNode({ id: "nested", parentId: "w" }), // 2026-07-16, correctly placed
+      makeNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat
+    ];
+    const map = {
+      c: "container",
+      y: "2026",
+      m: "2026-07",
+      w: "2026-W29",
+      nested: "2026-07-16",
+      flat: "2026-07-08",
+    };
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
+    expect(plan.needed).toBe(true);
+    // Both days are in scope; the already-nested one rides along as a no-op move.
+    expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["flat", "nested"]);
   });
 });

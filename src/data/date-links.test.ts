@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   DATE_LINK_PATTERN,
+  PROTECTED_SCAFFOLD_KINDS,
   addDays,
   compareScaffoldKeys,
   dateSuggestions,
+  dayKeyToScaffoldChain,
   dayKeyToWeekKey,
   flattenDateLinks,
   formatDateLabel,
@@ -15,6 +17,9 @@ import {
   parentScaffoldKey,
   parseDateLink,
   scaffoldKeyKind,
+  scaffoldLabel,
+  type ScaffoldSibling,
+  sortedInsertAfterId,
   weekKeyToDayRange,
   weekKeyToMonthKey,
   weekLabel,
@@ -339,5 +344,101 @@ describe("display helpers", () => {
       sunday: "2026-01-04",
     });
     expect(weekKeyToDayRange("2025-W53")).toBeNull();
+  });
+});
+
+describe("dayKeyToScaffoldChain (the one Thursday-rule waterfall)", () => {
+  test("walks day -> week -> month -> year", () => {
+    expect(dayKeyToScaffoldChain("2026-07-16")).toEqual({
+      weekKey: "2026-W29",
+      monthKey: "2026-07",
+      yearKey: "2026",
+    });
+  });
+
+  test("a straddle day is owned WHOLE by its Thursday's month/year", () => {
+    // 2026-06-29 (June) -> W27 whose Thursday (Jul 2) is July 2026.
+    expect(dayKeyToScaffoldChain("2026-06-29")).toEqual({
+      weekKey: "2026-W27",
+      monthKey: "2026-07",
+      yearKey: "2026",
+    });
+  });
+
+  test("null on a malformed / non-calendar day key", () => {
+    expect(dayKeyToScaffoldChain("2026-13-45")).toBeNull();
+    expect(dayKeyToScaffoldChain("garbage")).toBeNull();
+  });
+});
+
+describe("scaffoldLabel + PROTECTED_SCAFFOLD_KINDS", () => {
+  test("scaffoldLabel dispatches on kind, raw key otherwise", () => {
+    expect(scaffoldLabel("2026")).toBe("2026");
+    expect(scaffoldLabel("2026-07")).toBe("July");
+    expect(scaffoldLabel("2026-W29")).toBe("Week 29");
+    // A day / container / unknown key falls through to itself (text owned else).
+    expect(scaffoldLabel("2026-07-16")).toBe("2026-07-16");
+    expect(scaffoldLabel("container")).toBe("container");
+  });
+
+  test("PROTECTED_SCAFFOLD_KINDS is container + Y/M/W, never day", () => {
+    expect(PROTECTED_SCAFFOLD_KINDS.has("container")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("year")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("month")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("week")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("day")).toBe(false);
+  });
+});
+
+describe("sortedInsertAfterId (shared placement, client + Worker)", () => {
+  test("empty list -> head (null)", () => {
+    expect(sortedInsertAfterId([], "2026-07-16")).toBeNull();
+  });
+
+  test("middle insert lands after the greatest earlier same-kind sibling", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "d1", key: "2026-07-01" },
+      { id: "d2", key: "2026-07-08" },
+      { id: "d3", key: "2026-07-20" },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-07-16")).toBe("d2");
+  });
+
+  test("a new greatest key lands AHEAD of a trailing non-scaffold sibling", () => {
+    // The Worker used to append past trailing bullets at the absolute tail; the
+    // shared function chains after the last DAY, before the bullet (finding 9).
+    const siblings: ScaffoldSibling[] = [
+      { id: "d1", key: "2026-07-01" },
+      { id: "d2", key: "2026-07-08" },
+      { id: "bullet", key: null },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-07-20")).toBe("d2");
+  });
+
+  test("robust to an UNSORTED same-kind list (best-effort during migration)", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "d3", key: "2026-07-20" },
+      { id: "d1", key: "2026-07-01" },
+      { id: "d2", key: "2026-07-08" },
+    ];
+    // Predecessor is the greatest key strictly < newKey, wherever it sits.
+    expect(sortedInsertAfterId(siblings, "2026-07-16")).toBe("d2");
+  });
+
+  test("smaller than every same-kind sibling, a bullet leads -> after the bullet", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "bullet", key: null },
+      { id: "d2", key: "2026-07-08" },
+      { id: "d3", key: "2026-07-16" },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-07-01")).toBe("bullet");
+  });
+
+  test("only same-kind siblings count (a week among months appends)", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "m1", key: "2026-01" },
+      { id: "m2", key: "2026-07" },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-W29")).toBe("m2");
   });
 });

@@ -3,7 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Effect, Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
-import { localDateKey, scaffoldKeyKind } from "../../data/date-links";
+import { localDateKey } from "../../data/date-links";
 import {
   kvDelete,
   kvFetch,
@@ -141,9 +141,9 @@ export function formatDayBadge(key: string, today = localDateKey()): string {
 
 // Reads the module `rows` cache (below), NOT `dailyIndexCollection.toArray`:
 // the protection predicate runs during render (useIsProtected's synchronous
-// getSnapshot), and the cache is the render-safe path useDailyDate has always
-// used. The cache is rebuilt synchronously on every collection change
-// (includeInitialState), so event-time callers read the same freshness.
+// getSnapshot), and the cache is the render-safe path `useScaffoldKey` uses. The
+// cache is rebuilt synchronously on every collection change (includeInitialState),
+// so event-time callers read the same freshness.
 function findRow(pred: (r: DailyRow) => boolean): DailyRow | undefined {
   return getRows().find(pred);
 }
@@ -153,24 +153,22 @@ export function getContainerId(): string | null {
   return findRow((r) => r.key === CONTAINER_KEY)?.nodeId ?? null;
 }
 
-/** The node id mapped to a given date key, or null. */
-export function getDayId(key: string): string | null {
-  return findRow((r) => r.key === key)?.nodeId ?? null;
-}
-
 /** The node id mapped to ANY scaffold key -- container / year / month / week /
  *  day (issue #271). The generic reverse of {@link setMapping}, used by the
- *  Daily > Y > M > W > D get-or-create cascade. Aliases {@link getDayId}'s key
- *  match; named for the scaffold callers so intent reads clearly. */
+ *  Daily > Y > M > W > D get-or-create cascade AND to look up a day note by its
+ *  date key. */
 export function getMappedId(key: string): string | null {
   return findRow((r) => r.key === key)?.nodeId ?? null;
 }
 
 /** The daily-index key a node maps to (container / year / month / week / day),
- *  or null when it isn't a scaffold node (issue #271). Drives the scaffold
- *  protection predicate and the reactive badge lookups. */
+ *  or null when it isn't a scaffold node (issue #271). O(1) off the persistent
+ *  reverse map (finding 7): the scaffold protection predicate and every badge
+ *  read call this per row, so a linear scan would be O(nodes x dailyRows) on
+ *  every render. */
 export function getKeyForNode(nodeId: string): string | null {
-  return findRow((r) => r.nodeId === nodeId)?.key ?? null;
+  ensureStarted();
+  return keyByNodeId.get(nodeId) ?? null;
 }
 
 /** Upsert a `key -> nodeId` mapping (used when (re)creating a container/day). */
@@ -230,33 +228,21 @@ export async function claimMapping(
   return { winner: row.nodeId, won: row.nodeId === candidate };
 }
 
-/** True iff `nodeId` is the daily container -- the protection predicate (Seam:
- *  protected nodes). A synchronous read; only ever called on the delete path. */
-export function isContainerNode(nodeId: string): boolean {
-  return getContainerId() === nodeId;
-}
-
-/** The date key a node maps to if it's a *day* note (not a scaffold node), else
- *  null. The synchronous reverse of {@link getDayId} -- used by the search-alias
- *  seam (Seam J), which runs outside any hook context. Scaffold keys
- *  (year/month/week, issue #271) now share the index, so this filters to the
- *  `day` kind rather than merely excluding the container. */
-export function getDayKey(nodeId: string): string | null {
-  return (
-    findRow((r) => r.nodeId === nodeId && scaffoldKeyKind(r.key) === "day")
-      ?.key ?? null
-  );
-}
-
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
 
 const EMPTY: DailyRow[] = [];
 let rows: DailyRow[] = EMPTY;
+/** Persistent nodeId -> key reverse map, rebuilt in lockstep with `rows`, so
+ *  {@link getKeyForNode} is O(1) (finding 7 -- the Worker's `keyByNodeId` twin). */
+let keyByNodeId = new Map<string, string>();
 const listeners = new Set<() => void>();
 let started = false;
 
 function rebuild() {
   rows = dailyIndexCollection.toArray;
+  const next = new Map<string, string>();
+  for (const r of rows) next.set(r.nodeId, r.key);
+  keyByNodeId = next;
   for (const l of listeners) l();
 }
 
@@ -291,32 +277,42 @@ export function preloadDailyIndex(): void {
   ensureStarted();
 }
 
+/** Every daily-index mapping (container / year / month / week / day), for the
+ *  migration planner's candidate scan (finding 7 -- it filters to day-kind). A
+ *  snapshot read off the module cache; safe outside a hook. */
+export function getDailyRows(): DailyRow[] {
+  return getRows();
+}
+
+/**
+ * Await the daily index's readiness AND pull the freshest cross-device state
+ * before a get-or-create computes placement (finding 4). Two hazards this closes:
+ *  - COLD LOAD: `preloadDailyIndex` only STARTS the fetch, so an early daily
+ *    touch could see zero mappings -- the migration gate skips (needed=false)
+ *    and sorted insertion misplaces. `toArrayWhenReady` blocks until the first
+ *    fetch lands.
+ *  - CROSS-DEVICE: kv writes are never broadcast (the DO's kv path has no
+ *    changelog), so a day created on another device syncs its NODE but not its
+ *    MAPPING until a refetch -- leaving `getKeyForNode(sibling) === null` and
+ *    sorted insertion silently skipping it. `utils.refetch()` re-pulls the kv.
+ * A new-day creation is rare (~once/day), so one kv GET on that path is cheap.
+ */
+export async function refreshDailyIndex(): Promise<void> {
+  ensureStarted();
+  await dailyIndexCollection.toArrayWhenReady().catch(() => {});
+  await dailyIndexCollection.utils.refetch().catch(() => {});
+}
+
 function getRows(): DailyRow[] {
   ensureStarted();
   return rows;
 }
 
 /**
- * The date key this node maps to if it's a *day* note (not the container), else
- * null. Reactive -- the date badge subscribes through this so it appears the
- * moment a day is created. Prerender returns null (empty server snapshot).
- */
-export function useDailyDate(nodeId: string): string | null {
-  const getSnapshot = useCallback(() => {
-    const row = getRows().find(
-      (r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY,
-    );
-    return row ? row.key : null;
-  }, [nodeId]);
-  return useSyncExternalStore(subscribeDailyIndex, getSnapshot, () => null);
-}
-
-/**
  * The scaffold key this node maps to (year / month / week / day -- NOT the
- * container), else null (issue #271). Reactive twin of {@link useDailyDate},
- * generalized across the calendar hierarchy: the badge component reads this once
- * and dispatches on {@link scaffoldKeyKind}, so a day pill and a week badge both
- * appear the moment their node is minted. Prerender returns null.
+ * container), else null (issue #271). Reactive: the badge component reads this
+ * once and dispatches on {@link scaffoldKeyKind}, so a day pill and a week badge
+ * both appear the moment their node is minted. Prerender returns null.
  */
 export function useScaffoldKey(nodeId: string): string | null {
   const getSnapshot = useCallback(() => {

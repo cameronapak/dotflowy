@@ -516,9 +516,9 @@ function subscribeProtection(onChange: () => void): () => void {
  *  painted every mount lock-less and flipped a frame later -- a layout shift on
  *  every scroll-driven row mount in the windowed list, even with the data long
  *  since local. Safe to read in render because a plugin's `protects` reads its
- *  module row cache (daily-index.ts `getRows`), the same render path
- *  `useDailyDate` has always used -- not the lazy collection directly. Server
- *  snapshot is `false` (prerender-safe, like `useDailyDate`). */
+ *  module row cache (daily-index.ts `getKeyForNode`), the same render path
+ *  `useScaffoldKey` uses -- not the lazy collection directly. Server snapshot is
+ *  `false` (prerender-safe, like `useScaffoldKey`). */
 export function useIsProtected(nodeId: string): boolean {
   const getSnapshot = useCallback(() => isProtected(nodeId), [nodeId]);
   return useSyncExternalStore(subscribeProtection, getSnapshot, () => false);

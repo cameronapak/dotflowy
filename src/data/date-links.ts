@@ -204,8 +204,10 @@ export type ScaffoldKind = "year" | "month" | "week" | "day" | "container";
 
 /** Parse a `YYYY-MM-DD` key to its UTC midnight Date, or null on a malformed OR
  *  non-calendar key (the constructor round-trip rejects `2026-13-45`). UTC on
- *  purpose: scaffold math is calendar arithmetic, not a local wall clock. */
-function dayKeyToUtc(dayKey: string): Date | null {
+ *  purpose: scaffold math is calendar arithmetic, not a local wall clock.
+ *  Exported so callers that format a day key (the week-range badge) parse it
+ *  ONCE here rather than re-deriving the regex round-trip. */
+export function dayKeyToUtc(dayKey: string): Date | null {
   const m = KEY_RE.exec(dayKey);
   if (!m) return null;
   const y = Number(m[1]);
@@ -392,4 +394,108 @@ export function weekKeyToDayRange(
     monday: utcDayKey(new Date(thursday.getTime() - 3 * MS_PER_DAY)),
     sunday: utcDayKey(new Date(thursday.getTime() + 3 * MS_PER_DAY)),
   };
+}
+
+/** The full week/month/year chain a day key nests under (issue #271): the single
+ *  Thursday-rule waterfall `day -> week -> month -> year`, or null when the day
+ *  key can't be placed on the calendar. One home for what the client cascade, the
+ *  migration plan, and both Worker planners were each open-coding. */
+export interface ScaffoldChain {
+  weekKey: string;
+  monthKey: string;
+  yearKey: string;
+}
+export function dayKeyToScaffoldChain(dayKey: string): ScaffoldChain | null {
+  const weekKey = dayKeyToWeekKey(dayKey);
+  const monthKey = weekKey ? weekKeyToMonthKey(weekKey) : null;
+  const yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
+  if (!weekKey || !monthKey || !yearKey) return null;
+  return { weekKey, monthKey, yearKey };
+}
+
+/**
+ * The scaffold kinds that are PROTECTED and, equivalently, the kinds a daily day
+ * may legitimately nest under (issue #271, decision 6): the container plus every
+ * intermediate calendar level. A `day` is CONTENT — never in this set. Both the
+ * client `protects` predicate and the Worker's guard derive "is this protected"
+ * from this one set, and the migration derives "is this day still inside the
+ * scaffold" (vs relocated by the user) from it too, so the three can't drift.
+ */
+export const PROTECTED_SCAFFOLD_KINDS: ReadonlySet<ScaffoldKind> =
+  new Set<ScaffoldKind>(["container", "year", "month", "week"]);
+
+/** The canonical display text for a scaffold node: "2026" / "July" / "Week 29".
+ *  Falls back to the raw key for a day / container / unknown (their text is
+ *  owned elsewhere -- the full date, the container name). ONE dispatch, consumed
+ *  by both the client cascade and the Worker's level emission. */
+export function scaffoldLabel(key: string): string {
+  switch (scaffoldKeyKind(key)) {
+    case "year":
+      return yearLabel(key);
+    case "month":
+      return monthLabel(key);
+    case "week":
+      return weekLabel(key);
+    default:
+      return key;
+  }
+}
+
+/** A sibling as the placement logic sees it: its node id plus the daily-index
+ *  key it maps to (null for a non-scaffold node -- e.g. a bullet outdented under
+ *  a week, decision 9). */
+export interface ScaffoldSibling {
+  id: string;
+  key: string | null;
+}
+
+/**
+ * The id of the sibling AFTER which a fresh scaffold/day node keyed `newKey`
+ * should be spliced to keep its SAME-KIND siblings in chronological ascending
+ * order (issue #271, decision 4), or `null` to make it the first child. Only
+ * same-kind siblings are compared, so non-scaffold children (an outdented
+ * bullet) are skipped and never reordered.
+ *
+ * The ONE placement decision, shared by BOTH sides of the trust boundary (the
+ * client cascade + the Worker's `planEnsureDaily`), so they can't diverge on the
+ * same input. Robust to an unsorted list (best-effort during migration): picks
+ * the greatest same-kind key strictly less than `newKey` as the predecessor;
+ * when `newKey` precedes every same-kind sibling, lands immediately before the
+ * earliest one; when there is no same-kind sibling at all, appends after the last
+ * sibling. When same-kind siblings DO exist, a new greatest key chains after the
+ * latest same-kind sibling — so it lands ahead of any trailing non-scaffold
+ * children, never past them at the absolute tail.
+ */
+export function sortedInsertAfterId(
+  siblings: ReadonlyArray<ScaffoldSibling>,
+  newKey: string,
+): string | null {
+  const kind = scaffoldKeyKind(newKey);
+  const sameKind = siblings.filter(
+    (s): s is { id: string; key: string } =>
+      s.key !== null && scaffoldKeyKind(s.key) === kind,
+  );
+  if (sameKind.length === 0) {
+    return siblings.length ? siblings[siblings.length - 1]!.id : null;
+  }
+
+  // Predecessor: the same-kind sibling with the greatest key strictly < newKey.
+  let predecessor: { id: string; key: string } | null = null;
+  for (const s of sameKind) {
+    if (compareScaffoldKeys(s.key, newKey) < 0) {
+      if (!predecessor || compareScaffoldKeys(s.key, predecessor.key) > 0) {
+        predecessor = s;
+      }
+    }
+  }
+  if (predecessor) return predecessor.id;
+
+  // newKey precedes every same-kind sibling: splice it in immediately before the
+  // earliest one (i.e. after whatever node currently precedes it in the list).
+  let earliest = sameKind[0]!;
+  for (const s of sameKind) {
+    if (compareScaffoldKeys(s.key, earliest.key) < 0) earliest = s;
+  }
+  const idx = siblings.findIndex((s) => s.id === earliest.id);
+  return idx > 0 ? siblings[idx - 1]!.id : null;
 }
