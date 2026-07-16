@@ -2,6 +2,8 @@ import type { ComponentType, CSSProperties, Ref } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { useMenuActiveItem } from "./use-menu-active-item";
+
 /** The minimal item shape this list renders: an id, the two text lines, and a
  *  leading icon. `CommandSpec` satisfies it, and so do the synthetic core items
  *  the node-selection actions menu builds (ADR 0018) -- both reuse this one menu
@@ -38,6 +40,12 @@ export function SlashMenuList({
   /** Attach the floating element (e.g. floating-ui's `refs.setFloating`). */
   ref?: Ref<HTMLDivElement>;
 }) {
+  const { itemRef, onItemPointerMove } = useMenuActiveItem({
+    activeIndex,
+    itemCount: items.length,
+    onHover,
+  });
+
   return (
     <div
       ref={ref}
@@ -59,11 +67,15 @@ export function SlashMenuList({
             return (
               <button
                 key={item.id}
+                ref={itemRef(i)}
                 type="button"
                 role="option"
                 aria-selected={i === activeIndex}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
+                  // scroll-my-10 clears the scroll-fade mask (min(12%, 40px)):
+                  // `block: "nearest"` would otherwise park the active item
+                  // flush against the edge, where the fade dims the highlight.
+                  "flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
                   i === activeIndex && "bg-accent text-accent-foreground",
                 )}
                 // mousedown (not click) so the contentEditable keeps focus.
@@ -71,7 +83,7 @@ export function SlashMenuList({
                   e.preventDefault();
                   onSelect(i);
                 }}
-                onMouseEnter={() => onHover(i)}
+                onPointerMove={onItemPointerMove(i)}
               >
                 <Icon className="size-4 shrink-0 opacity-70" />
                 <span className="flex flex-col">
