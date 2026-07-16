@@ -79,7 +79,10 @@ export function SlashMenuList({
                 role="option"
                 aria-selected={i === activeIndex}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
+                  // scroll-my-10 clears the scroll-fade mask (min(12%, 40px)):
+                  // `block: "nearest"` would otherwise park the active item
+                  // flush against the edge, where the fade dims the highlight.
+                  "flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
                   i === activeIndex && "bg-accent text-accent-foreground",
                 )}
                 // mousedown (not click) so the contentEditable keeps focus.
