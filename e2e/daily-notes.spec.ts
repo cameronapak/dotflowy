@@ -1,5 +1,14 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import {
+  dayKeyToWeekKey,
+  localDateKey,
+  monthKeyToYearKey,
+  monthLabel,
+  weekKeyToMonthKey,
+  weekLabel,
+  yearLabel,
+} from "../src/data/date-links";
 import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // Cmd on macOS, Control elsewhere.
@@ -13,6 +22,31 @@ const todayButton = (page: Page) =>
 // A daily node's id is a generated UUID, so locate rows by their visible text.
 const rowWithText = (page: Page, t: string) =>
   page.locator("li[data-node-id] > .outline-row", { hasText: t });
+
+// Escape a literal string for use inside a RegExp.
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// The `<li>` whose OWN `.node-text` equals `t` exactly. The rows are a flat
+// windowed list (ADR 0019) -- one `.node-text` per `<li>`, no DOM nesting -- so a
+// full-string regex match distinguishes a scaffold node (text "2026" / "July" /
+// "Week 29") from a day note whose full-date text merely CONTAINS "2026"/"July".
+const rowLi = (page: Page, t: string): Locator =>
+  page.locator("li[data-node-id]").filter({
+    has: page.locator(".node-text", { hasText: new RegExp(`^${esc(t)}$`) }),
+  });
+
+const nodeIdOf = (li: Locator) => li.getAttribute("data-node-id");
+
+// Today's scaffold chain keys, derived the same way the app does (ADR 0052): the
+// day's ISO week (Thursday rule) owns the month + year. Computed, never hardcoded,
+// so the chain is correct whichever calendar day the suite runs on.
+function todayChain() {
+  const dayKey = localDateKey();
+  const weekKey = dayKeyToWeekKey(dayKey)!;
+  const monthKey = weekKeyToMonthKey(weekKey)!;
+  const yearKey = monthKeyToYearKey(monthKey)!;
+  return { dayKey, weekKey, monthKey, yearKey };
+}
 
 async function load(page: Page, tree: SeedNode[] = STANDARD_TREE) {
   await seedOutline(page, tree);
@@ -727,5 +761,229 @@ test.describe("daily notes", () => {
 
     await goHome(page);
     await expect(page.locator("[data-daily-date]")).toHaveCount(1);
+  });
+
+  // --- calendar hierarchy: Daily > Year > Month > Week > Day (ADR 0052) -------
+
+  test("visiting today materializes the full Daily > Year > Month > Week > Day chain", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    const { weekKey, monthKey, yearKey } = todayChain();
+
+    // Container (top level -- no data-parent-id).
+    const containerLi = rowLi(page, "Daily");
+    await expect(containerLi).toBeVisible();
+    const containerId = await nodeIdOf(containerLi);
+
+    // Year "2026" nests under the container, with its canonical label as text.
+    const yearLi = rowLi(page, yearLabel(yearKey));
+    await expect(yearLi).toBeVisible();
+    await expect(yearLi).toHaveAttribute("data-parent-id", containerId!);
+    const yearId = await nodeIdOf(yearLi);
+
+    // Month "July" nests under the year.
+    const monthLi = rowLi(page, monthLabel(monthKey));
+    await expect(monthLi).toBeVisible();
+    await expect(monthLi).toHaveAttribute("data-parent-id", yearId!);
+    const monthId = await nodeIdOf(monthLi);
+
+    // Week "Week 29" nests under the month AND carries its own Seam-F badge
+    // (a date range with a "This week" prefix), present only on week rows.
+    const weekLi = rowLi(page, weekLabel(weekKey));
+    await expect(weekLi).toBeVisible();
+    await expect(weekLi).toHaveAttribute("data-parent-id", monthId!);
+    const weekBadge = weekLi.locator("[data-daily-week]");
+    await expect(weekBadge).toBeVisible();
+    await expect(weekBadge).toContainText("This week");
+    await expect(weekBadge).toHaveAttribute("data-daily-this-week", "");
+    const weekId = await nodeIdOf(weekLi);
+
+    // Today's day note is the leaf, nested under the week (not the container).
+    const dayLi = page.locator("li[data-node-id]").filter({
+      has: page.locator("[data-daily-today]"),
+    });
+    await expect(dayLi).toHaveAttribute("data-parent-id", weekId!);
+  });
+
+  test("days sort chronologically ascending under their week (sorted insertion, not append)", async ({
+    page,
+  }) => {
+    // Two days in the SAME ISO week (2030-W10): created LATER-first via date
+    // chips, so a passing order proves sorted INSERTION, not head/tail append.
+    const EARLY = "2030-03-05";
+    const LATE = "2030-03-07";
+    await seedOutline(page, [
+      {
+        id: "chips",
+        parentId: null,
+        prevSiblingId: null,
+        text: `[[${LATE}]] [[${EARLY}]]`,
+      },
+    ]);
+    await page.goto("/");
+    await expect(
+      page.locator('li[data-node-id="chips"] > .outline-row .node-text'),
+    ).toBeVisible();
+
+    const chip = (key: string) =>
+      page.locator(`li[data-node-id="chips"] [data-date-link="${key}"]`);
+
+    // Create the LATER day first...
+    await chip(LATE).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+    // ...then the EARLIER day.
+    await chip(EARLY).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    const earlyLi = page.locator(
+      `li[data-node-id]:has([data-daily-date="${EARLY}"])`,
+    );
+    const lateLi = page.locator(
+      `li[data-node-id]:has([data-daily-date="${LATE}"])`,
+    );
+    await expect(earlyLi).toBeVisible();
+    await expect(lateLi).toBeVisible();
+
+    // Both are day-children of the same Week 10 node.
+    const earlyParent = await earlyLi.getAttribute("data-parent-id");
+    const lateParent = await lateLi.getAttribute("data-parent-id");
+    expect(earlyParent).not.toBeNull();
+    expect(earlyParent).toBe(lateParent);
+    await expect(
+      page.locator(`li[data-node-id="${earlyParent}"] [data-daily-week]`),
+    ).toBeVisible();
+
+    // Despite being created SECOND, the earlier date renders FIRST in document
+    // order (ascending), i.e. sorted insertion put it above the later one.
+    const rowIndex = (key: string) =>
+      page.evaluate((k) => {
+        const rows = Array.from(document.querySelectorAll("li[data-node-id]"));
+        return rows.findIndex((r) =>
+          r.querySelector(`[data-daily-date="${k}"]`),
+        );
+      }, key);
+    const earlyIdx = await rowIndex(EARLY);
+    const lateIdx = await rowIndex(LATE);
+    expect(earlyIdx).toBeGreaterThan(-1);
+    expect(lateIdx).toBeGreaterThan(earlyIdx);
+  });
+
+  test("scaffold year + week nodes are protected: deleting them is rejected with a shake", async ({
+    page,
+  }) => {
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    const { weekKey, yearKey } = todayChain();
+
+    // Both the year and the week scaffold nodes carry the container's protection
+    // (removeNode cascades, so an unprotected delete would take the days with it).
+    for (const label of [yearLabel(yearKey), weekLabel(weekKey)]) {
+      const li = rowLi(page, label);
+      await expect(li).toBeVisible();
+      const row = li.locator(".outline-row").first();
+
+      // Always-on lock signifier.
+      await expect(row.locator(".protected-lock")).toBeVisible();
+
+      // Force-delete (Mod+Shift+Backspace -> the onDeleteNode funnel) is refused:
+      // the row shakes (one-shot reject class) and stays present.
+      await row.locator(".node-text").click();
+      await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+      await expect(row).toHaveClass(/node-rejected/);
+      await expect(li).toBeVisible();
+      await expect(page.getByText(/can't be deleted/i)).toBeVisible();
+
+      // The class clears when the shake ends, so the next iteration can re-trigger.
+      await expect(row).not.toHaveClass(/node-rejected/, { timeout: 4000 });
+    }
+  });
+
+  test("the first daily touch migrates flat pre-hierarchy days under their weeks (one-time, ADR 0052)", async ({
+    page,
+  }) => {
+    // A legacy account: every day sits FLAT, directly under the container, with
+    // matching daily-index kv rows. Two days in different ISO weeks of one month.
+    const A = "2022-05-10"; // 2022-W19
+    const B = "2022-05-17"; // 2022-W20
+    await seedOutline(
+      page,
+      [
+        { id: "keep", parentId: null, prevSiblingId: null, text: "Keep" },
+        {
+          id: "mig-container",
+          parentId: null,
+          prevSiblingId: "keep",
+          text: "Daily",
+        },
+        {
+          id: "mig-a",
+          parentId: "mig-container",
+          prevSiblingId: null,
+          text: "Day A",
+        },
+        {
+          id: "mig-b",
+          parentId: "mig-container",
+          prevSiblingId: "mig-a",
+          text: "Day B",
+        },
+      ],
+      {
+        kv: {
+          "daily-index": [
+            {
+              key: "container",
+              value: { key: "container", nodeId: "mig-container" },
+            },
+            { key: A, value: { key: A, nodeId: "mig-a" } },
+            { key: B, value: { key: B, nodeId: "mig-b" } },
+          ],
+        },
+      },
+    );
+    await page.goto("/");
+    await expect(rowWithText(page, "Daily")).toBeVisible();
+
+    // Pre-migration: both days are DIRECT children of the container (flat).
+    await expect(page.locator('li[data-node-id="mig-a"]')).toHaveAttribute(
+      "data-parent-id",
+      "mig-container",
+    );
+    await expect(page.locator('li[data-node-id="mig-b"]')).toHaveAttribute(
+      "data-parent-id",
+      "mig-container",
+    );
+
+    // Touch a daily surface -> the automatic one-time migration runs and toasts.
+    await todayButton(page).click();
+    await expect(
+      page.getByText("Organized your daily notes by week"),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    // Each formerly-flat day now nests under its own week node (a row bearing the
+    // Seam-F week badge) -- no longer a direct child of the container.
+    for (const id of ["mig-a", "mig-b"]) {
+      const li = page.locator(`li[data-node-id="${id}"]`);
+      const parent = await li.getAttribute("data-parent-id");
+      expect(parent).not.toBeNull();
+      expect(parent).not.toBe("mig-container");
+      await expect(
+        page.locator(`li[data-node-id="${parent}"] [data-daily-week]`),
+      ).toBeVisible();
+    }
   });
 });

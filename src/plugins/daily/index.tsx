@@ -37,26 +37,42 @@ import {
   resyncNodes,
   waitForNode,
 } from "../../data/collection";
-import { DATE_LINK_PATTERN, parseDateLink } from "../../data/date-links";
+import {
+  DATE_LINK_PATTERN,
+  dayKeyToWeekKey,
+  monthKeyToYearKey,
+  monthLabel,
+  parentScaffoldKey,
+  parseDateLink,
+  scaffoldKeyKind,
+  weekKeyToMonthKey,
+  weekLabel,
+  yearLabel,
+} from "../../data/date-links";
 import { isMirrorsEnabled } from "../../data/flags";
-import { capture, drop } from "../../data/history";
+import { RESTORE_SLICE_OPS, capture, drop } from "../../data/history";
 import {
   appendChild,
   insertChildAtStart,
+  insertSibling,
   mirrorManyNodes,
   mirrorNode,
   moveManyNodes,
   moveNode,
   setText,
 } from "../../data/mutations";
-import { runStructural } from "../../data/structural";
+import { runStructural, runStructuralSliced } from "../../data/structural";
 import {
   buildTreeIndex,
   childrenOf,
   createId,
   type TreeIndex,
 } from "../../data/tree";
-import { definePlugin, type PluginContext } from "../types";
+import {
+  definePlugin,
+  type NodeProtection,
+  type PluginContext,
+} from "../types";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
@@ -66,16 +82,23 @@ import {
   formatDayText,
   getContainerId,
   getDayId,
-  getDayKey,
-  isContainerNode,
+  getKeyForNode,
+  getMappedId,
   localDateKey,
   preloadDailyIndex,
   setMapping,
   subscribeDailyIndex,
-  useDailyDate,
+  useScaffoldKey,
 } from "./daily-index";
 import { DateLinkChip } from "./date-chip";
 import { useDailyNavigationPending, withDailyNavigation } from "./pending";
+import {
+  type DailyMigrationPlan,
+  formatWeekRange,
+  formatWeekRelative,
+  planDailyMigration,
+  sortedInsertAfterId,
+} from "./scaffold";
 
 // --- get-or-create ----------------------------------------------------------
 
@@ -129,17 +152,124 @@ async function ensureContainer(index: TreeIndex): Promise<string | null> {
   return ok ? winner : null;
 }
 
+// --- scaffold cascade (issue #271): Daily > YYYY > Month > Week > Day --------
+
+/** The protection descriptor for a year / month / week scaffold node (issue
+ *  #271, decision 6): the same four rules as the container, with the canonical
+ *  name restored on blank. `noun` reads into the toast copy ("This week ..."). */
+function scaffoldProtection(
+  noun: "year" | "month" | "week",
+  name: string,
+): NodeProtection {
+  return {
+    reason: `This ${noun} groups your daily notes and can't be deleted.`,
+    blankReason: `This daily ${noun} needs its name.`,
+    taskReason: `A daily ${noun} can't be a to-do.`,
+    completeReason: `A daily ${noun} can't be completed.`,
+    canonicalText: name,
+  };
+}
+
+/** The display label for a scaffold node's text: "2026" / "July" / "Week 29".
+ *  Falls back to the raw key for a non-scaffold key (defensive). */
+function scaffoldLabel(key: string): string {
+  switch (scaffoldKeyKind(key)) {
+    case "year":
+      return yearLabel(key);
+    case "month":
+      return monthLabel(key);
+    case "week":
+      return weekLabel(key);
+    default:
+      return key;
+  }
+}
+
 /**
- * The note for `key`, created as the FIRST child of the container (newest day
- * on top) if missing. Text seeds to the full date; the badge shows the relative
- * label. The atomic claim makes "create today" idempotent across devices: a
- * loser reuses the winner's node instead of minting a duplicate. v1 caveat:
- * creating an out-of-order past day (via a future picker) still lands on top --
- * acceptable until the picker ships its own ordering.
+ * Splice a scaffold / day node (id `id`, text `text`) under `parentNodeId` at
+ * its chronological slot (decision 4), relinking the sibling chain. Rebuilds the
+ * index from the LIVE collection so successive splices in one batch read each
+ * other's optimistic writes (the in-place-index caveat) -- the same discipline
+ * `moveManyNodes` follows. Must run inside `runStructural` (ADR 0009).
+ */
+function insertScaffoldNode(
+  parentNodeId: string,
+  key: string,
+  text: string,
+  id: string,
+): void {
+  const index = buildTreeIndex(nodesCollection.toArray);
+  const siblings = childrenOf(index, parentNodeId).map((n) => ({
+    id: n.id,
+    key: getKeyForNode(n.id),
+  }));
+  const afterId = sortedInsertAfterId(siblings, key);
+  if (afterId === null) {
+    insertChildAtStart(index, parentNodeId, false, text, id);
+  } else {
+    insertSibling(index, parentNodeId, afterId, false, text, null, id);
+  }
+}
+
+/**
+ * Get-or-create ONE scaffold node (year / month / week) under `parentNodeId`,
+ * claim-first and idempotent like the container/day (two devices can't each mint
+ * one). Returns the authoritative node id, or null on a claim+materialize
+ * failure. The label seeds the node's text; identity is the daily-index key.
+ */
+async function ensureScaffoldNode(
+  key: string,
+  parentNodeId: string,
+): Promise<string | null> {
+  const existing = getMappedId(key);
+  if (existing && hasNode(existing)) return existing;
+  const candidate = createId();
+  const { winner, won } = await claimMapping(key, candidate);
+  const ok = await ensureNodeExists(
+    winner,
+    () =>
+      runStructural(() =>
+        insertScaffoldNode(parentNodeId, key, scaffoldLabel(key), winner),
+      ),
+    !won,
+  );
+  setMapping(key, winner);
+  return ok ? winner : null;
+}
+
+/**
+ * Ensure the year > month > week scaffold for `dayKey` exists under the
+ * container, returning the WEEK node id the day should nest under (decision 5,
+ * lazy + seed-free -- each level is minted only when the first day in it is
+ * created). The Thursday rule owns the straddle: `weekKeyToMonthKey` /
+ * `monthKeyToYearKey` decide the owning month and year. A non-calendar key falls
+ * back to the container itself (defensive; callers pass valid day keys).
+ */
+async function ensureDayParent(
+  dayKey: string,
+  containerId: string,
+): Promise<string | null> {
+  const weekKey = dayKeyToWeekKey(dayKey);
+  const monthKey = weekKey ? weekKeyToMonthKey(weekKey) : null;
+  const yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
+  if (!weekKey || !monthKey || !yearKey) return containerId;
+  const yearId = await ensureScaffoldNode(yearKey, containerId);
+  if (!yearId) return null;
+  const monthId = await ensureScaffoldNode(monthKey, yearId);
+  if (!monthId) return null;
+  return ensureScaffoldNode(weekKey, monthId);
+}
+
+/**
+ * The note for `key`, created at its chronological slot under its WEEK
+ * (`parentId`) if missing (decision 4, ascending -- replacing the old
+ * newest-first head insertion). Text seeds to the full date; the badge shows the
+ * relative label. The atomic claim makes "create today" idempotent across
+ * devices: a loser reuses the winner's node instead of minting a duplicate.
  */
 async function ensureDay(
   key: string,
-  containerId: string,
+  parentId: string,
   index: TreeIndex,
   seedEntryLine: boolean,
 ): Promise<string | null> {
@@ -165,13 +295,7 @@ async function ensureDay(
     winner,
     () =>
       runStructural(() => {
-        insertChildAtStart(
-          index,
-          containerId,
-          false,
-          formatDayText(key),
-          winner,
-        );
+        insertScaffoldNode(parentId, key, formatDayText(key), winner);
         // Fresh day: when a write-intent surface asked, seed the entry line in
         // the SAME batch as the day node (correct-by-construction, no sibling
         // fan). Otherwise the day is a bare title-only note.
@@ -189,6 +313,122 @@ function hasChildInLiveCollection(parentId: string): boolean {
   return nodesCollection.toArray.some((n) => n.parentId === parentId);
 }
 
+// --- one-time flat -> nested migration (issue #271, decision 8) --------------
+
+// Legacy accounts have every day sitting DIRECTLY under the "Daily" container.
+// The first daily-note touch after ship nests them into Daily > Y > M > W and
+// sorts ascending -- ONE undoable batch, derivable entirely from the daily index
+// (every day key -> nodeId is known). Automatic, no prompt (a declined prompt
+// would leave a permanently half-structured container). Idempotent: it re-detects
+// flat days each session and no-ops a fully-nested outline; a brand-new empty
+// account has no days, so it never runs.
+
+/** In-flight / completed migration for this session. Non-null once a needed run
+ *  starts, so concurrent daily touches share it; reset to null on failure so the
+ *  next touch retries. A successful run leaves the resolved promise, and the
+ *  post-migration outline is no longer flat, so it never re-runs. */
+let dailyMigration: Promise<void> | null = null;
+
+/** Run the migration ONCE per session if any legacy flat day exists. Cheap when
+ *  not needed (a filter over live nodes on daily interactions only), so it's
+ *  safe to call on every get-or-create; the flat scan is the guard. */
+async function ensureDailyMigrated(containerId: string): Promise<void> {
+  if (dailyMigration) return dailyMigration;
+  const plan = planDailyMigration(
+    buildTreeIndex(nodesCollection.toArray),
+    containerId,
+    getKeyForNode,
+  );
+  if (!plan.needed) return;
+  dailyMigration = runDailyMigration(containerId, plan).catch((err) => {
+    dailyMigration = null; // let the next daily touch retry a failed run
+    console.warn("daily: scaffold migration failed", err);
+  });
+  return dailyMigration;
+}
+
+/** Move a day node to its chronological slot under `weekId` -- one `moveNode`
+ *  against a freshly rebuilt index (the in-place-index caveat). Already-correct
+ *  placement is a harmless no-op. Runs inside the migration's `runStructural`. */
+function moveDaySorted(dayNodeId: string, weekId: string): void {
+  const index = buildTreeIndex(nodesCollection.toArray);
+  const dayKey = getKeyForNode(dayNodeId);
+  if (!dayKey) return;
+  const siblings = childrenOf(index, weekId)
+    .filter((n) => n.id !== dayNodeId)
+    .map((n) => ({ id: n.id, key: getKeyForNode(n.id) }));
+  moveNode(index, dayNodeId, weekId, sortedInsertAfterId(siblings, dayKey));
+}
+
+/**
+ * Execute a needed {@link DailyMigrationPlan}. Two phases so the whole thing is
+ * ONE undoable batch (async claims can't live inside the synchronous
+ * `runStructural` body):
+ *   1. Resolve every scaffold node id up front via atomic claims (get-or-create,
+ *      so a node another device already made is reused, not duplicated).
+ *   2. Materialize the missing scaffold nodes (parents-first) and reparent every
+ *      day under its week, all chronologically sorted, in one structural batch --
+ *      `capture()` snapshots the pre-migration tree so a single Cmd+Z reverts it.
+ *      Streams through `runStructuralSliced` when large (RESTORE_SLICE_OPS).
+ */
+async function runDailyMigration(
+  containerId: string,
+  plan: DailyMigrationPlan,
+): Promise<void> {
+  // Phase 1: claim ids for every needed scaffold key, recording which must be
+  // materialized (this device won and the node isn't present yet).
+  const keymap = new Map<string, string>();
+  const toCreate = new Set<string>();
+  for (const key of plan.scaffoldKeys) {
+    const existing = getMappedId(key);
+    if (existing && hasNode(existing)) {
+      keymap.set(key, existing);
+      continue;
+    }
+    const candidate = createId();
+    const { winner, won } = await claimMapping(key, candidate);
+    setMapping(key, winner);
+    keymap.set(key, winner);
+    if (!hasNode(winner)) {
+      if (!won) {
+        resyncNodes();
+        await waitForNode(winner, 1500).catch(() => {});
+      }
+      if (!hasNode(winner)) toCreate.add(key);
+    }
+  }
+
+  // Phase 2: build the synchronous steps (parents-first creates, then day moves).
+  const steps: Array<() => void> = [];
+  for (const key of plan.scaffoldKeys) {
+    if (!toCreate.has(key)) continue;
+    const id = keymap.get(key)!;
+    const parentKey = parentScaffoldKey(key);
+    const parentId = parentKey ? keymap.get(parentKey) : containerId;
+    if (!parentId) continue; // parent claim failed -> skip (retry next touch)
+    steps.push(() => insertScaffoldNode(parentId, key, scaffoldLabel(key), id));
+  }
+  for (const { nodeId, weekKey } of plan.days) {
+    const weekId = keymap.get(weekKey);
+    if (!weekId) continue;
+    steps.push(() => moveDaySorted(nodeId, weekId));
+  }
+  if (steps.length === 0) return;
+
+  // One undo point: snapshot the whole pre-migration tree, then apply.
+  const captureStep = () =>
+    capture(buildTreeIndex(nodesCollection.toArray), containerId);
+  if (steps.length < RESTORE_SLICE_OPS) {
+    runStructural(() => {
+      captureStep();
+      for (const step of steps) step();
+    });
+  } else {
+    await runStructuralSliced([captureStep, ...steps]);
+  }
+  toast.success("Organized your daily notes by week");
+}
+
 /** Ensure the container + the day exist and return the day's node id (no nav).
  *  Takes just the tree index (not a `PluginContext`) so the Today button, the
  *  `/` command, AND the Cmd+K virtual action (Seam J -- which has no
@@ -202,7 +442,12 @@ async function getOrCreateDay(
   const run = async () => {
     const containerId = await ensureContainer(index);
     if (!containerId) return null;
-    return ensureDay(key, containerId, index, opts?.seedEntryLine ?? false);
+    // Nest any legacy flat days before placing this one (issue #271) -- so the
+    // new day lands in the migrated scaffold, not beside a half-migrated shape.
+    await ensureDailyMigrated(containerId);
+    const parentId = await ensureDayParent(key, containerId);
+    if (!parentId) return null;
+    return ensureDay(key, parentId, index, opts?.seedEntryLine ?? false);
   };
   // `trackNavigation: false` skips the shared nav-pending signal (ADR 0049): a
   // background quick-add born resolves today's note WITHOUT spinning the
@@ -292,16 +537,37 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
 // `mt-1` to land on the text baseline, while `.zoomed-title` is flex-centered
 // so it needs none. Same size in both: a small pill reads as a label beside the
 // big title, consistent with the row.
-function DailyBadge({
+// One reactive read of the node's scaffold key, dispatched by kind (issue #271):
+// a DAY renders the relative pill, a WEEK renders the date-range badge, and a
+// year/month renders nothing (their node text -- "2026" / "July" -- is the
+// label). Reading the key once here keeps the per-row hook count at one.
+function ScaffoldBadge({
   nodeId,
   placement,
 }: {
   nodeId: string;
   placement: "row" | "title";
 }) {
-  const key = useDailyDate(nodeId);
+  const key = useScaffoldKey(nodeId);
   if (!key) return null;
-  const isToday = key === localDateKey();
+  switch (scaffoldKeyKind(key)) {
+    case "day":
+      return <DailyBadge dayKey={key} placement={placement} />;
+    case "week":
+      return <WeekBadge weekKey={key} placement={placement} />;
+    default:
+      return null;
+  }
+}
+
+function DailyBadge({
+  dayKey,
+  placement,
+}: {
+  dayKey: string;
+  placement: "row" | "title";
+}) {
+  const isToday = dayKey === localDateKey();
   return (
     <Badge
       variant={isToday ? "default" : "secondary"}
@@ -312,11 +578,43 @@ function DailyBadge({
         placement === "title" && "mt-2",
         isToday ? "border-transparent" : "border-border",
       ])}
-      data-daily-date={key}
+      data-daily-date={dayKey}
       data-daily-today={isToday ? "" : undefined}
     >
       {isToday && <SunIcon className="shrink-0" />}
-      {formatDayBadge(key)}
+      {formatDayBadge(dayKey)}
+    </Badge>
+  );
+}
+
+// The week node's badge (Seam F, issue #271): the date range ("Jul 13 – 19")
+// with a "This week" / "Last week" relative prefix. "Now" derives from
+// localDateKey (local midnight), so it agrees with the day pill. Shares the day
+// badge's `[data-daily-date]` optical-alignment rule via `data-daily-week`.
+function WeekBadge({
+  weekKey,
+  placement,
+}: {
+  weekKey: string;
+  placement: "row" | "title";
+}) {
+  const relative = formatWeekRelative(weekKey);
+  const thisWeek = relative === "This week";
+  const label = relative
+    ? `${relative} · ${formatWeekRange(weekKey)}`
+    : formatWeekRange(weekKey);
+  return (
+    <Badge
+      variant={thisWeek ? "default" : "secondary"}
+      className={cn([
+        "shrink-0 border!",
+        placement === "title" && "mt-2",
+        thisWeek ? "border-transparent" : "border-border",
+      ])}
+      data-daily-week={weekKey}
+      data-daily-this-week={thisWeek ? "" : undefined}
+    >
+      {label}
     </Badge>
   );
 }
@@ -372,18 +670,20 @@ export default definePlugin({
     },
   ],
 
-  // Seam F (row): the relative date pill, between the bullet dot and the text.
-  // Renders only on a day note (useDailyDate returns null otherwise).
+  // Seam F (row + title): the scaffold badge, between the bullet dot and the
+  // text. A day note gets the relative pill, a week node the date range; a
+  // year/month renders nothing (ScaffoldBadge returns null). Registered in BOTH
+  // render paths so it shows on the list bullet AND the zoomed page title.
   slots: [
     {
-      id: "daily-date-badge",
+      id: "daily-scaffold-badge",
       position: "row:before-text",
-      render: (node) => <DailyBadge nodeId={node.id} placement="row" />,
+      render: (node) => <ScaffoldBadge nodeId={node.id} placement="row" />,
     },
     {
-      id: "daily-date-badge-title",
+      id: "daily-scaffold-badge-title",
       position: "title:before-text",
-      render: (node) => <DailyBadge nodeId={node.id} placement="title" />,
+      render: (node) => <ScaffoldBadge nodeId={node.id} placement="title" />,
     },
   ],
 
@@ -512,26 +812,40 @@ export default definePlugin({
     },
   ],
 
-  // Protected nodes: the container can't be deleted -- it guards every day note
-  // and everything written under them (removeNode cascades the subtree). The
-  // descriptor carries the rejected-delete toast copy and the name to restore if
-  // the row is blanked (it can't be left nameless).
-  protects: (nodeId) =>
-    isContainerNode(nodeId)
-      ? {
+  // Protected nodes: the container AND every scaffold node (year / month / week)
+  // can't be deleted -- removeNode cascades, so an unprotected week delete would
+  // take its days (and everything written under them) with it (issue #271,
+  // decision 6). Day notes stay deletable (they hold the user's own content).
+  // Each descriptor carries the rejected-action toast copy and the canonical
+  // name to restore if the row is blanked (a scaffold node can't be nameless).
+  protects: (nodeId) => {
+    const key = getKeyForNode(nodeId);
+    if (!key) return false;
+    switch (scaffoldKeyKind(key)) {
+      case "container":
+        return {
           reason:
             "The Daily list can't be deleted. It holds all your daily notes.",
           blankReason: "The Daily list needs a name.",
           taskReason: "The Daily list can't be a to-do.",
           completeReason: "The Daily list can't be completed.",
           canonicalText: DAILY_CONTAINER_TEXT,
-        }
-      : false,
+        };
+      case "year":
+        return scaffoldProtection("year", yearLabel(key));
+      case "month":
+        return scaffoldProtection("month", monthLabel(key));
+      case "week":
+        return scaffoldProtection("week", weekLabel(key));
+      default:
+        return false; // day notes + non-scaffold nodes stay editable/deletable
+    }
+  },
 
-  // `isContainerNode` reads the daily index, which loads async -- so the
-  // container's lock must re-render when the `container -> nodeId` mapping
-  // resolves. Without this the core's `useIsProtected` only re-evaluates on an
-  // unrelated re-render (e.g. zoom), so the lock appears late.
+  // `getKeyForNode` reads the daily index, which loads async -- so a scaffold
+  // node's lock must re-render when its `key -> nodeId` mapping resolves. Without
+  // this the core's `useIsProtected` only re-evaluates on an unrelated re-render
+  // (e.g. zoom), so the lock appears late.
   protectsChanged: subscribeDailyIndex,
 
   // Start the daily-index kv fetch at editor mount, so the date badges and the
@@ -541,20 +855,41 @@ export default definePlugin({
   preload: preloadDailyIndex,
 
   // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
-  // switcher and the /move picker, even though the node's text is the full date.
-  // Matched (a second Fuse key) but never highlighted -- the row still shows the
-  // date text. "Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping.
+  // switcher and the /move picker, even though the node's text is the full date
+  // ("Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping) -- and
+  // WEEK nodes by "This week"/"Last week" (+ their "Week 29" label), so Cmd+K
+  // jumps to the current week (issue #271, decision 7). Matched (a second Fuse
+  // key) but never highlighted -- the row still shows the node text.
   searchAliases: (node) => {
-    const key = getDayKey(node.id);
-    return key ? [formatDayBadge(key)] : [];
+    const key = getKeyForNode(node.id);
+    if (!key) return [];
+    switch (scaffoldKeyKind(key)) {
+      case "day":
+        return [formatDayBadge(key)];
+      case "week": {
+        const relative = formatWeekRelative(key);
+        return relative ? [relative, weekLabel(key)] : [weekLabel(key)];
+      }
+      default:
+        return [];
+    }
   },
 
   // Seam J: a parenthetical suffix on the picker row so a day note reads
-  // "Tuesday, June 23, 2026 (Today)" -- relative labels only (a date would just
-  // echo the text). Display-only; the alias above is what actually matches.
+  // "Tuesday, June 23, 2026 (Today)" and a week node "Week 29 (This week)" --
+  // relative labels only (a date/range would just echo the text/badge).
+  // Display-only; the aliases above are what actually match.
   searchAnnotation: (node) => {
-    const key = getDayKey(node.id);
-    return key ? formatDayRelative(key) : null;
+    const key = getKeyForNode(node.id);
+    if (!key) return null;
+    switch (scaffoldKeyKind(key)) {
+      case "day":
+        return formatDayRelative(key);
+      case "week":
+        return formatWeekRelative(key);
+      default:
+        return null;
+    }
   },
 
   // Seam (ADR 0049): quick-add captures default to today's note. LAZY -- the

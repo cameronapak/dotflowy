@@ -3,7 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Effect, Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
-import { localDateKey } from "../../data/date-links";
+import { localDateKey, scaffoldKeyKind } from "../../data/date-links";
 import {
   kvDelete,
   kvFetch,
@@ -158,6 +158,21 @@ export function getDayId(key: string): string | null {
   return findRow((r) => r.key === key)?.nodeId ?? null;
 }
 
+/** The node id mapped to ANY scaffold key -- container / year / month / week /
+ *  day (issue #271). The generic reverse of {@link setMapping}, used by the
+ *  Daily > Y > M > W > D get-or-create cascade. Aliases {@link getDayId}'s key
+ *  match; named for the scaffold callers so intent reads clearly. */
+export function getMappedId(key: string): string | null {
+  return findRow((r) => r.key === key)?.nodeId ?? null;
+}
+
+/** The daily-index key a node maps to (container / year / month / week / day),
+ *  or null when it isn't a scaffold node (issue #271). Drives the scaffold
+ *  protection predicate and the reactive badge lookups. */
+export function getKeyForNode(nodeId: string): string | null {
+  return findRow((r) => r.nodeId === nodeId)?.key ?? null;
+}
+
 /** Upsert a `key -> nodeId` mapping (used when (re)creating a container/day). */
 export function setMapping(key: string, nodeId: string): void {
   if (dailyIndexCollection.toArray.some((r) => r.key === key)) {
@@ -221,12 +236,15 @@ export function isContainerNode(nodeId: string): boolean {
   return getContainerId() === nodeId;
 }
 
-/** The date key a node maps to if it's a *day* note (not the container), else
+/** The date key a node maps to if it's a *day* note (not a scaffold node), else
  *  null. The synchronous reverse of {@link getDayId} -- used by the search-alias
- *  seam (Seam J), which runs outside any hook context. */
+ *  seam (Seam J), which runs outside any hook context. Scaffold keys
+ *  (year/month/week, issue #271) now share the index, so this filters to the
+ *  `day` kind rather than merely excluding the container. */
 export function getDayKey(nodeId: string): string | null {
   return (
-    findRow((r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY)?.key ?? null
+    findRow((r) => r.nodeId === nodeId && scaffoldKeyKind(r.key) === "day")
+      ?.key ?? null
   );
 }
 
@@ -284,6 +302,23 @@ function getRows(): DailyRow[] {
  * moment a day is created. Prerender returns null (empty server snapshot).
  */
 export function useDailyDate(nodeId: string): string | null {
+  const getSnapshot = useCallback(() => {
+    const row = getRows().find(
+      (r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY,
+    );
+    return row ? row.key : null;
+  }, [nodeId]);
+  return useSyncExternalStore(subscribeDailyIndex, getSnapshot, () => null);
+}
+
+/**
+ * The scaffold key this node maps to (year / month / week / day -- NOT the
+ * container), else null (issue #271). Reactive twin of {@link useDailyDate},
+ * generalized across the calendar hierarchy: the badge component reads this once
+ * and dispatches on {@link scaffoldKeyKind}, so a day pill and a week badge both
+ * appear the moment their node is minted. Prerender returns null.
+ */
+export function useScaffoldKey(nodeId: string): string | null {
   const getSnapshot = useCallback(() => {
     const row = getRows().find(
       (r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY,

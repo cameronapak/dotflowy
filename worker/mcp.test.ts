@@ -462,22 +462,37 @@ describe("MCP tools", () => {
     expect(toolText(json)).toContain("nothing to change");
   });
 
-  test("add_to_today creates the Daily container, the day, and the entry on first use", async () => {
+  test("add_to_today builds the Daily > Year > Month > Week > Day chain and files the entry on first use", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_to_today", {
       text: "captured",
       date: "2026-07-03",
     });
     expect(json.result?.isError).toBeUndefined();
+    // Every calendar level is claimed in the kv index (issue #271).
     expect(fake.kv.get("container")).toBeDefined();
+    expect(fake.kv.get("2026")).toBeDefined();
+    expect(fake.kv.get("2026-07")).toBeDefined();
+    expect(fake.kv.get("2026-W27")).toBeDefined();
     expect(fake.kv.get("2026-07-03")).toBeDefined();
     const containerId = fake.kv.get("container")!.nodeId;
+    const yearId = fake.kv.get("2026")!.nodeId;
+    const monthId = fake.kv.get("2026-07")!.nodeId;
+    const weekId = fake.kv.get("2026-W27")!.nodeId;
     const dayId = fake.kv.get("2026-07-03")!.nodeId;
+    // Daily > 2026 > July > Week 27 > day, each a child of the one above.
     expect(fake.nodes.get(containerId)?.text).toBe("Daily");
-    expect(fake.nodes.get(dayId)?.parentId).toBe(containerId);
+    expect(fake.nodes.get(yearId)?.parentId).toBe(containerId);
+    expect(fake.nodes.get(yearId)?.text).toBe("2026");
+    expect(fake.nodes.get(monthId)?.parentId).toBe(yearId);
+    expect(fake.nodes.get(monthId)?.text).toBe("July");
+    expect(fake.nodes.get(weekId)?.parentId).toBe(monthId);
+    expect(fake.nodes.get(weekId)?.text).toBe("Week 27");
+    expect(fake.nodes.get(dayId)?.parentId).toBe(weekId);
+    // The captured entry hangs under the day, not the scaffold.
     const entry = [...fake.nodes.values()].find((n) => n.text === "captured");
     expect(entry?.parentId).toBe(dayId);
-    // One structural mutation = ONE batch (ADR 0009).
+    // The whole chain + entry lands as ONE batch (ADR 0009).
     expect(fake.batches).toHaveLength(1);
   });
 
@@ -577,6 +592,48 @@ describe("MCP tools", () => {
       collapsed: true,
     });
     expect(collapse.result?.isError).toBeUndefined();
+  });
+
+  test("the calendar scaffold nodes (year/month/week) are protected like the container (#271)", async () => {
+    const fake = makeStore(fixture());
+    await callTool(fake.store, "add_to_today", {
+      text: "x",
+      date: "2026-07-03",
+    });
+    // Every intermediate scaffold node: delete cascades, so all four rules apply.
+    for (const key of ["2026", "2026-07", "2026-W27"]) {
+      const nodeId = fake.kv.get(key)!.nodeId;
+
+      const del = await callTool(fake.store, "delete_node", { nodeId });
+      expect(del.result?.isError).toBe(true);
+      expect(fake.nodes.has(nodeId)).toBe(true);
+
+      const blank = await callTool(fake.store, "update_node", {
+        nodeId,
+        text: "  ",
+      });
+      expect(blank.result?.isError).toBe(true);
+
+      const task = await callTool(fake.store, "update_node", {
+        nodeId,
+        isTask: true,
+      });
+      expect(task.result?.isError).toBe(true);
+
+      const complete = await callTool(fake.store, "update_node", {
+        nodeId,
+        completed: true,
+      });
+      expect(complete.result?.isError).toBe(true);
+    }
+
+    // A DAY node is CONTENT, not scaffold — it stays freely editable + deletable.
+    const dayId = fake.kv.get("2026-07-03")!.nodeId;
+    const rename = await callTool(fake.store, "update_node", {
+      nodeId: dayId,
+      completed: true,
+    });
+    expect(rename.result?.isError).toBeUndefined();
   });
 
   test("deleting an ancestor of surviving mirrors is refused (ADR 0022 v1 protects)", async () => {
