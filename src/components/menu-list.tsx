@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 
 import type { MenuEntry } from "../plugins/types";
 
+import { useMenuActiveItem } from "./use-menu-active-item";
+
 export function MenuList({
   entries,
   activeIndex,
@@ -23,6 +25,12 @@ export function MenuList({
   style?: CSSProperties;
   ref?: Ref<HTMLDivElement>;
 }) {
+  const { itemRef, onItemPointerMove } = useMenuActiveItem({
+    activeIndex,
+    itemCount: entries.length,
+    onHover,
+  });
+
   return (
     <div
       ref={ref}
@@ -42,11 +50,13 @@ export function MenuList({
           entries.map((entry, i) => (
             <button
               key={entry.key}
+              ref={itemRef(i)}
               type="button"
               role="option"
               aria-selected={i === activeIndex}
               className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
+                // scroll-my-10 clears the scroll-fade mask -- see SlashMenuList.
+                "flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
                 i === activeIndex && "bg-accent text-accent-foreground",
               )}
               // mousedown (not click) so the contentEditable keeps focus.
@@ -54,7 +64,7 @@ export function MenuList({
                 e.preventDefault();
                 onSelect(i);
               }}
-              onMouseEnter={() => onHover(i)}
+              onPointerMove={onItemPointerMove(i)}
             >
               {entry.render(i === activeIndex)}
             </button>

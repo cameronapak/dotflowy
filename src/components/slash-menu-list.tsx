@@ -1,12 +1,8 @@
-import {
-  useEffect,
-  useRef,
-  type ComponentType,
-  type CSSProperties,
-  type Ref,
-} from "react";
+import type { ComponentType, CSSProperties, Ref } from "react";
 
 import { cn } from "@/lib/utils";
+
+import { useMenuActiveItem } from "./use-menu-active-item";
 
 /** The minimal item shape this list renders: an id, the two text lines, and a
  *  leading icon. `CommandSpec` satisfies it, and so do the synthetic core items
@@ -44,14 +40,11 @@ export function SlashMenuList({
   /** Attach the floating element (e.g. floating-ui's `refs.setFloating`). */
   ref?: Ref<HTMLDivElement>;
 }) {
-  const activeItemRef = useRef<HTMLButtonElement | null>(null);
-
-  // Keyboard nav walks past the visible window (the list scrolls at max-h-72),
-  // so follow the highlight. `items.length` is a dep because a refiltered list
-  // can leave the container scrolled while `activeIndex` stays 0.
-  useEffect(() => {
-    activeItemRef.current?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, items.length]);
+  const { itemRef, onItemPointerMove } = useMenuActiveItem({
+    activeIndex,
+    itemCount: items.length,
+    onHover,
+  });
 
   return (
     <div
@@ -74,7 +67,7 @@ export function SlashMenuList({
             return (
               <button
                 key={item.id}
-                ref={i === activeIndex ? activeItemRef : null}
+                ref={itemRef(i)}
                 type="button"
                 role="option"
                 aria-selected={i === activeIndex}
@@ -90,7 +83,7 @@ export function SlashMenuList({
                   e.preventDefault();
                   onSelect(i);
                 }}
-                onMouseEnter={() => onHover(i)}
+                onPointerMove={onItemPointerMove(i)}
               >
                 <Icon className="size-4 shrink-0 opacity-70" />
                 <span className="flex flex-col">
