@@ -19,7 +19,9 @@ status: accepted
 
 3. **Touch targets (global).** On coarse pointers the bullet's tappable box grows (it was 16px wide;
    the `touch-hitbox` only ever expanded it _vertically_ to 44px) and rows gain vertical padding, so
-   zoom taps and caret taps stop missing on mobile.
+   zoom taps and caret taps stop missing on mobile. **The task checkbox reaches the same ~24px on
+   coarse (amended later),** but by widening its `touch-hitbox` `::before` 4px per side rather than
+   growing the box — see _Why the checkbox widens its hitbox instead of its box_ below.
 
 4. **Right-edge chevron + tap-to-edit (coarse pointer, added later).** A second increment, modelled on
    Workflowy mobile: on coarse pointers the collapse chevron moves from the left gutter to the row's
@@ -56,6 +58,27 @@ and the text caret (right), 6px away on each side; a 44px-_wide_ target overlaps
 them for taps (the existing CSS comment documents exactly this). Phase 1 grows the bullet to a
 pragmatic ~24px on coarse pointers — a large improvement over 16px with zero overlap risk — and
 leaves full-width tap routing (e.g. a coarse-pointer row-left hit region) to a later pass.
+
+**Why the checkbox widens its hitbox instead of its box (amended).** The original increment grew the
+bullet only; the task checkbox was left at 16px on coarse, and the omission went unnoticed because
+shadcn's vendored `ui/checkbox.tsx` shipped an undocumented `after:-inset-x-3 after:-inset-y-2` that
+silently inflated it to 40×32. That ::after was **the bug**: the checkbox has exactly 6px of
+clearance to the text on its right and 6px to the bullet on its left, so a 12px-per-side arm
+overshot by 6px and sat on the first characters of the text — a fine-pointer drag-select starting
+there toggled the task instead of placing a caret. It is deleted, and the primitive carries a
+comment so a re-sync can't restore it.
+
+The checkbox then reaches 24px the way the chevron does: the width opt-in the `touch-hitbox` comment
+already permits, `left/right: -4px` on its `::before`, coarse-only. It does **not** copy the bullet's
+`width: 24px`, because the two controls are not alike — the bullet's box is invisible (only a 9px dot
+draws inside it), so growing it is free, whereas the checkbox's box **is** the drawn control. Growing
+that would fatten the glyph, drop the check's fill ratio from 87% to 58%, shift the text 8px right
+(it floats), and pull in the K 4.25 → 8.25 change with its specificity trap. Inflating the ::before
+costs no layout and no pixels, and **K stays 4.25 on coarse** precisely because the box never moves.
+4px per side is the ceiling — it leaves 2px of daylight on both sides, so the boxes still cannot
+overlap and refight for taps. Applies to both render paths (the zoomed title's checkbox floats in the
+same `.row-body` with the same 6px gap). Guarded in `e2e/todos.spec.ts` (fine pointer: the text's
+first character hit-tests to the text) and `e2e/mobile-touch-rows.spec.ts` (coarse: the 24px target).
 
 **Why the chevron goes right on touch (increment 4), and how.** Two reasons it belongs on the right,
 both Workflowy-mobile-proven: (a) it frees the left gutter to a single, unambiguous thumb target —

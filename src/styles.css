@@ -682,6 +682,33 @@ h2 span.protected-lock {
   }
 
   /*
+   * Checkbox: the same ~24px coarse target as the bullet, but bought with the
+   * touch-hitbox width opt-in rather than by growing the box (ADR 0029). The
+   * bullet's box is invisible -- only the 9px dot shows -- so growing it 16->24
+   * is free. The checkbox's box IS the drawn control, so growing it would fatten
+   * the glyph, shrink the check's fill ratio, shove the text over (it floats),
+   * and drag in the K 4.25->8.25 specificity trap. Inflating the ::before
+   * instead costs no layout and no pixels, and K stays 4.25 because the box
+   * never moves.
+   *
+   * 4px per side is the ceiling: the checkbox has exactly 6px of clearance to
+   * the text (`.row-body > :not(.node-text)`'s margin-right) and 6px to the
+   * bullet (`.outline-row`'s gap), so this keeps 2px of daylight on both sides
+   * and the boxes still can't overlap. Coarse-only on purpose -- on a fine
+   * pointer this arm would sit under a drag-select starting at the text's first
+   * character, which is the bug that removed the vendored ::after (checkbox.tsx).
+   *
+   * Deliberately NOT scoped to `.outline-row`: a task renders in both paths, and
+   * the zoomed title's checkbox sits in the same `.row-body` float with the same
+   * 6px gap, so it wants the same target. Only the ::before moves, so the title's
+   * own `size-5` + `mt-2` are untouched.
+   */
+  .checkbox.touch-hitbox::before {
+    left: -4px;
+    right: -4px;
+  }
+
+  /*
    * Right-edge chevron (ADR 0029, Workflowy-mobile parity). CSS-only relocation:
    * the same absolutely-positioned .collapse-toggle flips from the left gutter
    * (left:-15px) to the row's right edge. Because <li> is width:100% with depth
@@ -770,9 +797,10 @@ h2 span.protected-lock {
 
 /* The list row is `align-items: flex-start`, so the checkbox needs a nudge onto
    the first text line. It rides the shared 16px-glyph rule above (bullet /
-   checkbox / provenance, K=6.75px) so it scales with the reading size; the
+   checkbox / provenance, K=4.25px) so it scales with the reading size; the
    zoomed title is flex-centered and keeps its own `h2.zoomed-title .checkbox`
-   rule. */
+   rule. Unlike the bullet, K does NOT change on coarse -- the checkbox's box
+   stays 16px there and only its touch-hitbox ::before widens. */
 
 /* The mirror badge is a 20px (`h-5`) bordered pill; K=5.25px aligns it to the
    text optical center while scaling with the reading size (ADR 0029). */
