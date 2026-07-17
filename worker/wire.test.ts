@@ -14,6 +14,7 @@ import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
 
 import {
+  AdminRestorePostBody,
   KvClaimBody,
   KvDeleteBody,
   KvUpsertBody,
@@ -161,5 +162,34 @@ describe("WaitlistPostBody (POST /api/waitlist)", () => {
   it("rejects a missing or non-string email", () => {
     rejects(WaitlistPostBody, {});
     rejects(WaitlistPostBody, { email: 42 });
+  });
+});
+
+describe("AdminRestorePostBody (POST /api/admin/restore)", () => {
+  it("accepts an email + ISO restore time", () => {
+    accepts(AdminRestorePostBody, {
+      email: "a@b.com",
+      at: "2026-07-16T12:00:00Z",
+    });
+  });
+
+  it("accepts a userId + epoch-ms restore time", () => {
+    accepts(AdminRestorePostBody, { userId: "usr_1", at: 1_752_000_000_000 });
+  });
+
+  it("accepts a raw bookmark (the undo path)", () => {
+    accepts(AdminRestorePostBody, { userId: "usr_1", bookmark: "bk-abc" });
+  });
+
+  it("accepts an empty body (the exactly-one-of rules are enforced in the route, not the schema)", () => {
+    accepts(AdminRestorePostBody, {});
+  });
+
+  it("rejects a non-string/number at", () => {
+    rejects(AdminRestorePostBody, { userId: "usr_1", at: { when: 1 } });
+  });
+
+  it("rejects a non-string email", () => {
+    rejects(AdminRestorePostBody, { email: 42 });
   });
 });

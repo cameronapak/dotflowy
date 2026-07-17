@@ -14,6 +14,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
+import { Route as AdminRestoreRouteImport } from './routes/admin.restore'
 
 const TodayRoute = TodayRouteImport.update({
   id: '/today',
@@ -40,12 +41,18 @@ const AdminWaitlistRoute = AdminWaitlistRouteImport.update({
   path: '/admin/waitlist',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRestoreRoute = AdminRestoreRouteImport.update({
+  id: '/admin/restore',
+  path: '/admin/restore',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
   '/reset-password': typeof ResetPasswordRoute
   '/today': typeof TodayRoute
+  '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/$nodeId': typeof NodeIdRoute
   '/reset-password': typeof ResetPasswordRoute
   '/today': typeof TodayRoute
+  '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRoutesById {
@@ -61,19 +69,33 @@ export interface FileRoutesById {
   '/$nodeId': typeof NodeIdRoute
   '/reset-password': typeof ResetPasswordRoute
   '/today': typeof TodayRoute
+  '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$nodeId' | '/reset-password' | '/today' | '/admin/waitlist'
+  fullPaths:
+    | '/'
+    | '/$nodeId'
+    | '/reset-password'
+    | '/today'
+    | '/admin/restore'
+    | '/admin/waitlist'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$nodeId' | '/reset-password' | '/today' | '/admin/waitlist'
+  to:
+    | '/'
+    | '/$nodeId'
+    | '/reset-password'
+    | '/today'
+    | '/admin/restore'
+    | '/admin/waitlist'
   id:
     | '__root__'
     | '/'
     | '/$nodeId'
     | '/reset-password'
     | '/today'
+    | '/admin/restore'
     | '/admin/waitlist'
   fileRoutesById: FileRoutesById
 }
@@ -82,6 +104,7 @@ export interface RootRouteChildren {
   NodeIdRoute: typeof NodeIdRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TodayRoute: typeof TodayRoute
+  AdminRestoreRoute: typeof AdminRestoreRoute
   AdminWaitlistRoute: typeof AdminWaitlistRoute
 }
 
@@ -122,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminWaitlistRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/restore': {
+      id: '/admin/restore'
+      path: '/admin/restore'
+      fullPath: '/admin/restore'
+      preLoaderRoute: typeof AdminRestoreRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -130,6 +160,7 @@ const rootRouteChildren: RootRouteChildren = {
   NodeIdRoute: NodeIdRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TodayRoute: TodayRoute,
+  AdminRestoreRoute: AdminRestoreRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,
 }
 export const routeTree = rootRouteImport

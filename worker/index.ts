@@ -45,10 +45,12 @@ import {
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
+import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
   AdminInvitePostBody,
+  AdminRestorePostBody,
   KvClaimBody,
   KvDeleteBody,
   KvUpsertBody,
@@ -597,6 +599,50 @@ async function runInviteBatch(
   return { ...result, count: result.invited.length };
 }
 
+// --- Admin restore (PITR) ----------------------------------------------------
+
+/**
+ * Resolve the target user id for an admin restore from EXACTLY one of `userId`
+ * / `email`. The DO is keyed by the stable `user.id` (a DO name is permanent —
+ * never key it off an email); an `email` is only a lookup into D1's identity
+ * `user` table (case-insensitive, forgiving of how it was entered). Fails with a
+ * typed `BadRequest` on both-or-neither, or an email with no account — mapped to
+ * a clean 400, never a DO round-trip.
+ */
+function resolveRestoreUserId(
+  env: Env,
+  body: { userId?: string; email?: string },
+): Effect.Effect<string, BadRequest> {
+  return Effect.gen(function* () {
+    const userId = body.userId?.trim();
+    const email = body.email?.trim();
+    if (userId && email) {
+      return yield* Effect.fail(
+        new BadRequest({
+          reason: "provide either a user id or an email, not both",
+        }),
+      );
+    }
+    if (userId) return userId;
+    if (!email) {
+      return yield* Effect.fail(
+        new BadRequest({ reason: "a user id or an email is required" }),
+      );
+    }
+    const row = yield* Effect.promise(() =>
+      env.DB.prepare('SELECT id FROM "user" WHERE lower(email) = lower(?)')
+        .bind(email)
+        .first<{ id: string }>(),
+    );
+    if (!row) {
+      return yield* Effect.fail(
+        new BadRequest({ reason: `no user with email ${email}` }),
+      );
+    }
+    return row.id;
+  });
+}
+
 // --- Main API pipeline ------------------------------------------------------
 
 /**
@@ -676,6 +722,47 @@ function handleApiRequest(
       return json(
         yield* Effect.promise(() => runInviteBatch(env, body, url.origin)),
       );
+    }
+
+    // Admin-only: restore ONE user's outline to a point in the DO's free 30-day
+    // Point-in-Time Recovery window (#220). Same 404-not-401 admin gate as the
+    // waitlist/invite routes (the surface shouldn't advertise itself). Isolation
+    // is by construction: the route addresses one DO by the target's user id, so
+    // no other user is ever touched. The route resolves the id (never the email)
+    // and routes through resolveUserId, so restoring the OWNER hits the 'default'
+    // DO. PITR is unavailable in local dev — see docs/runbooks/restore-user-pitr.md.
+    if (url.pathname === "/api/admin/restore") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminRestorePostBody);
+
+      // Identity: EXACTLY one of userId / email. The DO is keyed by the stable
+      // user id, never the email (a DO name is permanent) — an email only looks
+      // one up in D1's identity table.
+      const targetUserId = yield* resolveRestoreUserId(env, body);
+
+      // Where in time (pure, unit-tested): a timestamp within the 30-day window
+      // or a raw bookmark (the undo path). A bad shape is a clean 400 here, not a
+      // 500 from getBookmarkForTime deep in the DO.
+      const target = resolveRestorePoint(body, Date.now());
+      if (!target.ok) {
+        return yield* Effect.fail(new BadRequest({ reason: target.reason }));
+      }
+
+      const restoreStub = env.USER_OUTLINE.get(
+        env.USER_OUTLINE.idFromName(resolveUserId(targetUserId, env)),
+      );
+      const result = yield* Effect.promise(() =>
+        restoreStub.restoreToTime(target.point),
+      );
+      return json(result);
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the

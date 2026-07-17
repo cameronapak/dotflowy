@@ -86,3 +86,16 @@ export const AdminInvitePostBody = Schema.Struct({
   all: Schema.optional(Schema.Boolean),
   limit: Schema.optional(Schema.Number),
 });
+
+/** POST /api/admin/restore — restore one user's outline to a point in time via
+ *  the DO's 30-day PITR (#220). Admin-gated in the route (session + ADMIN_EMAILS).
+ *  Identify the user by `email` OR `userId`; restore to a time (`at`, epoch ms or
+ *  ISO string) OR a raw `bookmark` (the undo path). The schema only guards shape —
+ *  the exactly-one-of rules and the 30-day window are validated in the route
+ *  (resolveRestorePoint) and mapped to a clean 400. */
+export const AdminRestorePostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  at: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+  bookmark: Schema.optional(Schema.String),
+});
