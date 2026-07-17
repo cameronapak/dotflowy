@@ -244,4 +244,38 @@ describe("planDailyMigration", () => {
     // Both days are in scope; the already-nested one rides along as a no-op move.
     expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["flat", "nested"]);
   });
+
+  test("a day under a scaffold subtree relocated OUTSIDE Daily is left alone (finding 5)", () => {
+    // The user dragged a whole year/week subtree (protection blocks delete/blank,
+    // NOT move) out of the Daily container, under a plain note. The day still
+    // maps to its week key AND its immediate parent is still a mapped scaffold
+    // node -- so the old immediate-parent-only check would wrongly yank it back.
+    // Full-ancestry scope (finding 5) leaves it alone: its chain never reaches
+    // the container.
+    const nodes = [
+      makeNode({ id: "c", text: "Daily" }),
+      makeNode({ id: "note", text: "Archive" }), // a normal top-level bullet
+      makeNode({ id: "y", parentId: "note" }), // year, relocated OUT of Daily
+      makeNode({ id: "w", parentId: "y" }), // week, under the relocated year
+      makeNode({ id: "moved", parentId: "w" }), // 2026-07-16, under the moved week
+      makeNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat -> triggers
+    ];
+    const map = {
+      c: "container",
+      y: "2026",
+      w: "2026-W29",
+      moved: "2026-07-16",
+      flat: "2026-07-08",
+    };
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
+    expect(plan.needed).toBe(true); // the flat day still triggers it
+    // Only the in-scaffold flat day migrates; the day under the relocated
+    // subtree is out of scope because its ancestry never reaches the container.
+    expect(plan.days.map((d) => d.nodeId)).toEqual(["flat"]);
+  });
 });

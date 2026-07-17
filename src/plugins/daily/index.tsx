@@ -88,6 +88,7 @@ import {
   type DailyMigrationPlan,
   formatWeekRange,
   formatWeekRelative,
+  inScaffoldScope,
   planDailyMigration,
   sortedInsertAfterId,
 } from "./scaffold";
@@ -287,11 +288,18 @@ function hasChildInLiveCollection(parentId: string): boolean {
  *  post-migration outline is no longer flat, so it never re-runs. */
 let dailyMigration: Promise<void> | null = null;
 
-/** Run the migration ONCE per session if any legacy flat day exists. The probe
- *  is cheap and NOT cached-false on purpose (finding 7): undo/remote re-flatten
- *  can make a fully-nested outline flat again, so a `not needed` result must be
- *  re-derivable. It's cheap because `planDailyMigration` scans only the mapped
- *  DAY ROWS (not the whole outline) with an O(1) `getKeyForNode`. */
+/** Run the migration ONCE per session if any legacy flat day exists.
+ *
+ *  The `not needed` result is NOT cached (a no-op run never sets
+ *  `dailyMigration`): an outline that's still flat on this touch -- because the
+ *  index hadn't loaded on an earlier one -- re-probes and migrates on the next.
+ *  The probe is cheap because `planDailyMigration` scans only the mapped DAY
+ *  ROWS (not the whole outline) with an O(1) `getKeyForNode`.
+ *
+ *  A SUCCESSFUL run, by contrast, IS cached for the rest of the session (the
+ *  resolved promise stays non-null). So undoing the auto-migration and
+ *  re-entering `/today` does NOT re-migrate -- deliberate: re-doing an explicit
+ *  Cmd+Z is hostile. (Reappears next session if the outline is still flat.) */
 async function ensureDailyMigrated(containerId: string): Promise<void> {
   if (dailyMigration) return dailyMigration;
   const plan = planDailyMigration(
@@ -310,11 +318,21 @@ async function ensureDailyMigrated(containerId: string): Promise<void> {
 
 /** Move a day node to its chronological slot under `weekId` -- one `moveNode`
  *  against a freshly rebuilt index (the in-place-index caveat). Already-correct
- *  placement is a harmless no-op. Runs inside the migration's `runStructural`. */
-function moveDaySorted(dayNodeId: string, weekId: string): void {
+ *  placement is a harmless no-op. Runs inside the migration's `runStructural`.
+ *  Revalidates at apply time (finding 4): the plan was computed before the async
+ *  claims, so it skips a day that vanished or that the user relocated OUT of the
+ *  Daily scaffold in that window rather than reversing the move. */
+function moveDaySorted(
+  dayNodeId: string,
+  weekId: string,
+  containerId: string,
+): void {
   const index = buildTreeIndex(nodesCollection.toArray);
+  const day = index.byId.get(dayNodeId);
+  if (!day) return; // deleted between plan and apply
   const dayKey = getKeyForNode(dayNodeId);
   if (!dayKey) return;
+  if (!inScaffoldScope(index, day, containerId, getKeyForNode)) return;
   const siblings = childrenOf(index, weekId)
     .filter((n) => n.id !== dayNodeId)
     .map((n) => ({ id: n.id, key: getKeyForNode(n.id) }));
@@ -366,15 +384,19 @@ async function runDailyMigration(
     const parentKey = parentScaffoldKey(key);
     const parentId = parentKey ? keymap.get(parentKey) : containerId;
     if (!parentId) continue; // parent claim failed -> skip (retry next touch)
-    createSteps.push(() =>
-      insertScaffoldNode(parentId, key, scaffoldLabel(key), id),
-    );
+    createSteps.push(() => {
+      // Revalidate at apply time (finding 4): a resync between the async claims
+      // and this synchronous batch may have already materialized the node under
+      // `id` (its mapping now resolves), so re-inserting would duplicate it.
+      if (hasNode(id)) return;
+      insertScaffoldNode(parentId, key, scaffoldLabel(key), id);
+    });
   }
   const moveSteps: Array<() => void> = [];
   for (const { nodeId, weekKey } of plan.days) {
     const weekId = keymap.get(weekKey);
     if (!weekId) continue;
-    moveSteps.push(() => moveDaySorted(nodeId, weekId));
+    moveSteps.push(() => moveDaySorted(nodeId, weekId, containerId));
   }
   const steps = [...createSteps, ...moveSteps];
   if (steps.length === 0) return;

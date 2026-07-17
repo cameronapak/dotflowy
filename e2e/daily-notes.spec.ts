@@ -917,6 +917,10 @@ test.describe("daily notes", () => {
     // matching daily-index kv rows. Two days in different ISO weeks of one month.
     const A = "2022-05-10"; // 2022-W19
     const B = "2022-05-17"; // 2022-W20
+    // today, seeded FLAT but WITH a child so the first daily touch neither
+    // creates nor seeds it (present + childful). The migration is then the ONLY
+    // structural batch, so the single undo below cleanly reverts it (finding 8).
+    const TODAY = todayChain().dayKey;
     await seedOutline(
       page,
       [
@@ -939,6 +943,18 @@ test.describe("daily notes", () => {
           prevSiblingId: "mig-a",
           text: "Day B",
         },
+        {
+          id: "mig-today",
+          parentId: "mig-container",
+          prevSiblingId: "mig-b",
+          text: "Today (flat)",
+        },
+        {
+          id: "mig-today-child",
+          parentId: "mig-today",
+          prevSiblingId: null,
+          text: "existing child",
+        },
       ],
       {
         kv: {
@@ -949,6 +965,7 @@ test.describe("daily notes", () => {
             },
             { key: A, value: { key: A, nodeId: "mig-a" } },
             { key: B, value: { key: B, nodeId: "mig-b" } },
+            { key: TODAY, value: { key: TODAY, nodeId: "mig-today" } },
           ],
         },
       },
@@ -984,6 +1001,38 @@ test.describe("daily notes", () => {
       await expect(
         page.locator(`li[data-node-id="${parent}"] [data-daily-week]`),
       ).toBeVisible();
+    }
+
+    // One-time contract (finding 8): re-touching a daily surface must NOT
+    // re-migrate. Wait for the first toast to clear, re-enter, and assert no
+    // second "Organized..." toast fires (today is pre-seeded + childful, so the
+    // re-entry creates nothing -- a migration is the only thing that could toast).
+    await expect(
+      page.getByText("Organized your daily notes by week"),
+    ).toBeHidden({ timeout: 10_000 });
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+    await expect(
+      page.getByText("Organized your daily notes by week"),
+    ).toBeHidden();
+
+    // The migration is ONE undo point (one capture(), one runStructural batch --
+    // ADR 0009/0052): a single Cmd+Z restores every flat day as a direct child of
+    // the container. today is pre-seeded, so the migration is the ONLY structural
+    // batch on the stack and the re-entry above added none.
+    const keepText = page.locator(
+      'li[data-node-id="keep"] > .outline-row .node-text',
+    );
+    await keepText.click();
+    await expect(keepText).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+z");
+    for (const id of ["mig-a", "mig-b"]) {
+      await expect(page.locator(`li[data-node-id="${id}"]`)).toHaveAttribute(
+        "data-parent-id",
+        "mig-container",
+        { timeout: 10_000 },
+      );
     }
   });
 });

@@ -190,7 +190,7 @@ const loadDailyReverseMap = (
 const claimDailyScaffold = (
   store: OutlineStore,
   dateKey: string,
-): Effect.Effect<DailyScaffold, ToolError> =>
+): Effect.Effect<DailyScaffold & { index: TreeIndex }, ToolError> =>
   Effect.gen(function* () {
     const chain = dayKeyToScaffoldChain(dateKey);
     if (!chain) {
@@ -216,9 +216,13 @@ const claimDailyScaffold = (
     // The Y/M/W scaffold is claimed ONLY when the day node is absent (finding 6,
     // mirroring `planEnsureDaily`'s early-return): an existing (pre-migration
     // flat) day is reused verbatim and never gets a parallel scaffold, so no
-    // dangling kv mappings. One index read decides.
+    // dangling kv mappings. One index read decides -- and it's RETURNED so the
+    // caller reuses it (finding 6): nothing between here and the caller's plan
+    // mutates nodes (only kv claims), so a second `loadIndex` would rebuild the
+    // identical tree.
     const index = yield* loadIndex(store);
-    if (index.byId.has(dayId)) return { containerId, dayId, keyByNodeId };
+    if (index.byId.has(dayId))
+      return { containerId, dayId, keyByNodeId, index };
 
     const [yearId, monthId, weekId] = yield* Effect.all(
       [
@@ -228,7 +232,7 @@ const claimDailyScaffold = (
       ],
       { concurrency: "unbounded" },
     );
-    return { containerId, yearId, monthId, weekId, dayId, keyByNodeId };
+    return { containerId, yearId, monthId, weekId, dayId, keyByNodeId, index };
   });
 
 /** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. The
@@ -767,7 +771,9 @@ export const tools: ReadonlyArray<ToolDef> = [
             );
           }
           const scaffold = yield* claimDailyScaffold(store, dateKey);
-          const index = yield* loadIndex(store);
+          // Reuse the index claimDailyScaffold already built -- only kv claims ran
+          // since, so a reload would rebuild the identical tree (finding 6).
+          const index = scaffold.index;
           const plan = yield* unwrap(
             planAddSubtreeToDaily(index, {
               nodes: input.nodes,
@@ -909,7 +915,9 @@ export const tools: ReadonlyArray<ToolDef> = [
       Effect.gen(function* () {
         const dateKey = yield* resolveDateKey(input.date);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
-        const index = yield* loadIndex(store);
+        // Reuse the index claimDailyScaffold already built -- only kv claims ran
+        // since, so a reload would rebuild the identical tree (finding 6).
+        const index = scaffold.index;
         const timestamp = yield* clock;
         const plan = planAddToDaily(index, {
           dateKey,
@@ -961,7 +969,9 @@ export const tools: ReadonlyArray<ToolDef> = [
       Effect.gen(function* () {
         const dateKey = yield* resolveDateKey(input.date);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
-        const index = yield* loadIndex(store);
+        // Reuse the index claimDailyScaffold already built -- only kv claims ran
+        // since, so a reload would rebuild the identical tree (finding 6).
+        const index = scaffold.index;
         const timestamp = yield* clock;
         const plan = yield* unwrap(
           planMirrorToDaily(index, {
@@ -1042,7 +1052,9 @@ export const tools: ReadonlyArray<ToolDef> = [
             });
           }
           const scaffold = yield* claimDailyScaffold(store, dateKey);
-          const index = yield* loadIndex(store);
+          // Reuse the index claimDailyScaffold already built -- only kv claims ran
+          // since, so a reload would rebuild the identical tree (finding 6).
+          const index = scaffold.index;
           const ensure = planEnsureDaily(index, {
             dateKey,
             ...scaffold,

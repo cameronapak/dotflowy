@@ -299,8 +299,15 @@ export function getDailyRows(): DailyRow[] {
  */
 export async function refreshDailyIndex(): Promise<void> {
   ensureStarted();
-  await dailyIndexCollection.toArrayWhenReady().catch(() => {});
-  await dailyIndexCollection.utils.refetch().catch(() => {});
+  // Best-effort: a network failure here must NOT block day creation (the caller
+  // proceeds with whatever mappings it has), but a silent swallow hid the cause
+  // of a misplaced day (finding 2) -- so warn, don't rethrow.
+  await dailyIndexCollection
+    .toArrayWhenReady()
+    .catch((err) => console.warn("daily: index readiness failed", err));
+  await dailyIndexCollection.utils
+    .refetch()
+    .catch((err) => console.warn("daily: index refetch failed", err));
 }
 
 function getRows(): DailyRow[] {
@@ -316,10 +323,10 @@ function getRows(): DailyRow[] {
  */
 export function useScaffoldKey(nodeId: string): string | null {
   const getSnapshot = useCallback(() => {
-    const row = getRows().find(
-      (r) => r.nodeId === nodeId && r.key !== CONTAINER_KEY,
-    );
-    return row ? row.key : null;
+    // O(1) off the reverse map (finding 7) -- this runs per rendered node, so a
+    // linear `rows.find` here was O(nodes x dailyRows) every render.
+    const key = getKeyForNode(nodeId);
+    return key === null || key === CONTAINER_KEY ? null : key;
   }, [nodeId]);
   return useSyncExternalStore(subscribeDailyIndex, getSnapshot, () => null);
 }

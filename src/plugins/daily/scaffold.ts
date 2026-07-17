@@ -124,6 +124,34 @@ export interface DailyMigrationPlan {
  * normal bullet) is left alone (finding 1). Already-nested days stay in `days`
  * (a re-parent no-op) so a half-migrated tree heals on re-entry.
  */
+/** True when every ancestor from `day`'s parent up to (and reaching) the Daily
+ *  `containerId` is a protected scaffold node or the container itself. Walking
+ *  the FULL chain -- not just the immediate parent -- is what keeps a day whose
+ *  scaffold subtree the user relocated OUTSIDE Daily out of migration scope
+ *  (finding 5): protection blocks delete/blank, not move, so a whole week can be
+ *  dragged elsewhere; its days still map to scaffold keys, but their chain no
+ *  longer reaches `containerId`. Also leaves a day filed under a user's own
+ *  (non-scaffold) bullet inside Daily alone. A cycle guard bounds the walk. */
+export function inScaffoldScope(
+  index: TreeIndex,
+  day: { id: string; parentId?: string | null },
+  containerId: string,
+  keyOf: (nodeId: string) => string | null,
+): boolean {
+  const seen = new Set<string>([day.id]);
+  let parentId = day.parentId;
+  while (parentId) {
+    if (parentId === containerId) return true;
+    if (seen.has(parentId)) return false; // cycle guard
+    seen.add(parentId);
+    const key = keyOf(parentId);
+    const kind = key ? scaffoldKeyKind(key) : null;
+    if (kind === null || !PROTECTED_SCAFFOLD_KINDS.has(kind)) return false;
+    parentId = index.byId.get(parentId)?.parentId ?? null;
+  }
+  return false;
+}
+
 export function planDailyMigration(
   index: TreeIndex,
   containerId: string,
@@ -140,14 +168,10 @@ export function planDailyMigration(
     if (scaffoldKeyKind(row.key) !== "day") continue;
     const node = index.byId.get(row.nodeId);
     if (!node) continue; // a mapping pointing at a node not in the tree
-    // In scope only when the day still lives inside the Daily scaffold; a day
-    // the user moved under a non-scaffold parent is out of scope (finding 1).
-    const parentKey = node.parentId ? keyOf(node.parentId) : null;
-    const parentKind = parentKey ? scaffoldKeyKind(parentKey) : null;
-    const parentInScaffold =
-      node.parentId === containerId ||
-      (parentKind !== null && PROTECTED_SCAFFOLD_KINDS.has(parentKind));
-    if (!parentInScaffold) continue;
+    // In scope only when the day's WHOLE ancestor chain stays inside the Daily
+    // scaffold and reaches the container -- a day (or a whole scaffold subtree)
+    // the user relocated elsewhere is left alone (finding 1 + finding 5).
+    if (!inScaffoldScope(index, node, containerId, keyOf)) continue;
     const chain = dayKeyToScaffoldChain(row.key);
     if (!chain) continue;
     days.push({ nodeId: node.id, dayKey: row.key, weekKey: chain.weekKey });
