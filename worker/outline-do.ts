@@ -8,6 +8,7 @@ import type {
   Node,
   ServerMessage,
 } from "../src/data/wire-schema";
+import type { RestorePoint } from "./restore";
 
 import { planChangeFrames } from "./changelog";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
@@ -82,6 +83,12 @@ interface HelloMessage {
 /** How many recent change frames the DO retains for reconnect replay. A client
  *  offline past this many edits falls back to a full snapshot. */
 const CHANGELOG_KEEP = 1000;
+
+/** Delay before `ctx.abort()` fires the armed point-in-time restore. The restore
+ *  is already persisted by `onNextSessionRestoreBookmark`, so this only has to
+ *  outlast the RPC response leaving the DO — a botched abort still applies on the
+ *  next natural restart. See `restoreToTime`. */
+const RESTORE_ABORT_DELAY_MS = 1000;
 
 function rowToNode(r: NodeRow): Node {
   return {
@@ -775,5 +782,50 @@ export class UserOutlineDO extends DurableObject<Env> {
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
     );
+  }
+
+  // --- operator restore (Point-in-Time Recovery, ticket #220) ----------------
+
+  /**
+   * Roll this DO's entire storage back to a point within Cloudflare's free
+   * 30-day PITR window, driven by an admin-gated Worker route. Isolation is by
+   * construction: DO = user, so restoring one object never touches another.
+   *
+   * Sequencing is the load-bearing subtlety. `ctx.abort()` restarts the object
+   * IMMEDIATELY — calling it inline would kill this RPC's in-flight reply and the
+   * operator would never receive `previousBookmark`, the handle that makes a bad
+   * restore itself reversible (pass it back as `{ kind: "bookmark" }` to undo).
+   * So we: capture the pre-recovery bookmark ("now"), resolve the target, ARM the
+   * restore (`onNextSessionRestoreBookmark`, which persists across the restart),
+   * return the two bookmarks, and only THEN — after the response has left the DO —
+   * `ctx.abort()`. Because the restore is already armed and durable, a lost abort
+   * timer (eviction) still applies on the next natural restart; the delay only
+   * makes the rollback prompt for any live tabs.
+   *
+   * Live clients reconnect after the abort with their last-applied seq, which now
+   * sits ABOVE the restored DO's seq (time went backwards). The DO's handshake
+   * (`initialFrame`) already answers a `since > seq` cursor with a full snapshot,
+   * not a resume, and the client's `resetAppliedSeq` drops its cursor to match —
+   * so a restore can't leave a live tab on a broken resume (ADR 0008). No client
+   * change needed; see docs/runbooks/restore-user-pitr.md.
+   */
+  async restoreToTime(
+    point: RestorePoint,
+  ): Promise<{ previousBookmark: string; targetBookmark: string }> {
+    // The pre-recovery handle FIRST — this is "now", the undo target.
+    const previousBookmark = await this.ctx.storage.getCurrentBookmark();
+    const targetBookmark =
+      point.kind === "bookmark"
+        ? point.bookmark
+        : await this.ctx.storage.getBookmarkForTime(point.at);
+    await this.ctx.storage.onNextSessionRestoreBookmark(targetBookmark);
+    setTimeout(() => {
+      try {
+        this.ctx.abort("point-in-time restore");
+      } catch {
+        // Already torn down / restarted — the armed restore still applies.
+      }
+    }, RESTORE_ABORT_DELAY_MS);
+    return { previousBookmark, targetBookmark };
   }
 }
