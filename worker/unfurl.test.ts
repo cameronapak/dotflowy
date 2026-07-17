@@ -70,6 +70,21 @@ describe("isAllowedUnfurlTarget (SSRF guard)", () => {
     expect(isAllowedUnfurlTarget("http://[fd00::1]/")).toBe(false);
   });
 
+  it("blocks IPv4-mapped IPv6 that smuggles a private target (#232)", () => {
+    // WHATWG canonicalizes the dotted form to hex, so both spellings resolve to
+    // the same host the guard sees — assert the raw inputs anyway.
+    expect(isAllowedUnfurlTarget("http://[::ffff:127.0.0.1]/")).toBe(false);
+    expect(isAllowedUnfurlTarget("http://[::ffff:7f00:1]/")).toBe(false); // canonical hex
+    expect(isAllowedUnfurlTarget("http://[::ffff:10.0.0.1]/")).toBe(false);
+    expect(isAllowedUnfurlTarget("http://[::ffff:169.254.169.254]/")).toBe(
+      false,
+    ); // mapped cloud metadata
+  });
+
+  it("still allows an IPv4-mapped IPv6 pointing at a public address", () => {
+    expect(isAllowedUnfurlTarget("http://[::ffff:8.8.8.8]/")).toBe(true);
+  });
+
   it("rejects unparseable input", () => {
     expect(isAllowedUnfurlTarget("not a url")).toBe(false);
     expect(isAllowedUnfurlTarget("")).toBe(false);
