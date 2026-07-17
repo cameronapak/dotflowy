@@ -76,9 +76,17 @@ that would fatten the glyph, drop the check's fill ratio from 87% to 58%, shift 
 (it floats), and pull in the K 4.25 → 8.25 change with its specificity trap. Inflating the ::before
 costs no layout and no pixels, and **K stays 4.25 on coarse** precisely because the box never moves.
 4px per side is the ceiling — it leaves 2px of daylight on both sides, so the boxes still cannot
-overlap and refight for taps. Applies to both render paths (the zoomed title's checkbox floats in the
-same `.row-body` with the same 6px gap). Guarded in `e2e/todos.spec.ts` (fine pointer: the text's
-first character hit-tests to the text) and `e2e/mobile-touch-rows.spec.ts` (coarse: the 24px target).
+overlap and refight for taps.
+
+The rule is **deliberately unscoped**, because a task checkbox renders in **three** surfaces, not two:
+the list row, the zoomed title, and quick-add's mini-editor (ADR 0049, which renders the same
+`title:before-text` slots). Each earns its 6px of clearance from a **different declaration** —
+`.row-body > :not(.node-text)`'s `margin-right` for the first two, `.quick-add-editor`'s
+`gap: 0.375rem` for the third — so **all three are load-bearing for the 4px arm**: drop any one below
+4px and that surface re-creates this bug locally. That coupling is the price of one unscoped rule; the
+alternative (three scoped rules) trades it for three places to forget. Guarded in `e2e/todos.spec.ts`
+(fine pointer: the text's first character hit-tests to the text) and `e2e/mobile-touch-rows.spec.ts`
+(coarse: the 24px target) — **both on the row only**; the title and quick-add ride the shared selector.
 
 **Why the chevron goes right on touch (increment 4), and how.** Two reasons it belongs on the right,
 both Workflowy-mobile-proven: (a) it frees the left gutter to a single, unambiguous thumb target —

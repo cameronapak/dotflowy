@@ -128,8 +128,8 @@ test.describe("todos plugin", () => {
     // only has 6px of clearance to the text, so that arm overshoots by 6px and
     // hit-tests ABOVE the static text span (it's positioned, the span isn't) --
     // clicking the first character toggled the task instead of placing a caret.
-    // Asserts the countable invariant, not a wall clock: what does the browser
-    // say is under the text's first character?
+    // Asserted by asking the browser what it would actually hit, rather than by
+    // reading back the CSS we just wrote.
     await load(page);
     // The first character's own rect. NOT `.node-text`'s box: the checkbox
     // `float: left`s inside `.row-body`, so it's out of flow and the span's box

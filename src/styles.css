@@ -691,17 +691,23 @@ h2 span.protected-lock {
    * instead costs no layout and no pixels, and K stays 4.25 because the box
    * never moves.
    *
-   * 4px per side is the ceiling: the checkbox has exactly 6px of clearance to
-   * the text (`.row-body > :not(.node-text)`'s margin-right) and 6px to the
-   * bullet (`.outline-row`'s gap), so this keeps 2px of daylight on both sides
-   * and the boxes still can't overlap. Coarse-only on purpose -- on a fine
-   * pointer this arm would sit under a drag-select starting at the text's first
-   * character, which is the bug that removed the vendored ::after (checkbox.tsx).
+   * 4px per side is the ceiling, and 6px is what it's measured against: the
+   * checkbox has 6px of clearance to the text and 6px to the bullet
+   * (`.outline-row`'s gap), so this keeps 2px of daylight on both sides and the
+   * boxes still can't overlap. Coarse-only on purpose -- on a fine pointer this
+   * arm would sit under a drag-select starting at the text's first character,
+   * which is the bug that removed the vendored ::after (checkbox.tsx).
    *
-   * Deliberately NOT scoped to `.outline-row`: a task renders in both paths, and
-   * the zoomed title's checkbox sits in the same `.row-body` float with the same
-   * 6px gap, so it wants the same target. Only the ::before moves, so the title's
-   * own `size-5` + `mt-2` are untouched.
+   * Deliberately NOT scoped to `.outline-row`: a task checkbox renders in THREE
+   * places, and all three want the target. Each reaches its 6px by a DIFFERENT
+   * declaration, so all three are load-bearing for the 4px arm -- shrink any one
+   * below 4px and that surface's checkbox starts eating the first character of
+   * its own text, which is this PR's bug in a new costume:
+   *   1. the list row      -- `.row-body > :not(.node-text)`'s `margin-right: 6px`
+   *   2. the zoomed title  -- the same `.row-body` float (its `me-1` loses to it)
+   *   3. quick-add (0049)  -- `.quick-add-editor`'s `gap: 0.375rem` (= 6px)
+   * Only the ::before moves, so each surface's own box size and nudge (the
+   * title's `size-5` + `mt-2`, quick-add's flex centring) are untouched.
    */
   .checkbox.touch-hitbox::before {
     left: -4px;
@@ -982,7 +988,11 @@ h2.zoomed-title .row-body > .title-pilcrow {
 /* Once BORN, the node's before-text slots (Seam F -- the todos checkbox) render
    inline ahead of the text, mirroring the list row / zoomed title. Lay the
    surface out as a flex row so the checkbox sits beside the text and the
-   contentEditable takes the remaining width (ADR 0049 inline-decoration flow). */
+   contentEditable takes the remaining width (ADR 0049 inline-decoration flow).
+   The 6px gap is load-bearing, not just rhythm: it's the clearance the coarse
+   checkbox tap target's 4px arm is sized against (ADR 0029 -- see the
+   `.checkbox.touch-hitbox::before` note). Below 4px the checkbox starts eating
+   clicks meant for the capture text. Keep it in step with the list row's 6px. */
 .quick-add-editor {
   display: flex;
   align-items: center;
