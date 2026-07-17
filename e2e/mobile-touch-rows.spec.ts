@@ -159,4 +159,54 @@ test.describe("coarse-pointer rows: right chevron + tap-to-edit", () => {
     });
     expect(inSpan).toBe(true);
   });
+
+  test("the task checkbox reaches a ~24px target without overlapping neighbours", async ({
+    page,
+  }) => {
+    // ADR 0029 (amended): the checkbox reaches the bullet's ~24px coarse target
+    // by widening its touch-hitbox ::before 4px per side, NOT by growing the box
+    // -- its box is the drawn control, unlike the bullet's invisible one. So the
+    // guard is two-sided: the TARGET grew, the BOX did not.
+    await seedOutline(page, [
+      ...STANDARD_TREE,
+      {
+        id: "task",
+        parentId: null,
+        prevSiblingId: "charlie",
+        text: "buy milk",
+        isTask: true,
+      },
+    ]);
+    await page.goto("/");
+    await expect(text(page, "task")).toBeVisible();
+
+    const m = await page.evaluate(() => {
+      const li = document.querySelector('li[data-node-id="task"]')!;
+      const box = li.querySelector(".checkbox")! as HTMLElement;
+      const before = getComputedStyle(box, "::before");
+      const r = box.getBoundingClientRect();
+      const span = li.querySelector(".node-text")! as HTMLElement;
+      const range = document.createRange();
+      range.setStart(span.firstChild!, 0);
+      range.setEnd(span.firstChild!, 1);
+      return {
+        boxWidth: r.width,
+        left: parseFloat(before.left),
+        right: parseFloat(before.right),
+        gapToText: range.getBoundingClientRect().left - r.right,
+      };
+    });
+
+    // The drawn control is untouched at 16px (growing it would drop the check's
+    // fill ratio and shove the floated text right).
+    expect(m.boxWidth).toBeCloseTo(16, 0);
+    // ...but the target is 16 + 4 + 4 = 24px.
+    expect(m.left).toBeCloseTo(-4, 1);
+    expect(m.right).toBeCloseTo(-4, 1);
+    // The arm must stay inside the gap to the text, or it re-creates the overlap
+    // the vendored ::after caused. Asserted against the measured arm rather than
+    // a hardcoded 6, so it states the actual invariant (and a subpixel gap can't
+    // flake it): whatever the arm is, the gap must clear it.
+    expect(m.gapToText).toBeGreaterThan(Math.abs(m.right));
+  });
 });

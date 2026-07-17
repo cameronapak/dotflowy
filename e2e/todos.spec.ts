@@ -119,4 +119,49 @@ test.describe("todos plugin", () => {
     await page.keyboard.press("Enter");
     await expect(checkbox(page, "b")).toHaveCount(0);
   });
+
+  test("the checkbox hitbox does not reach into the text (ADR 0029)", async ({
+    page,
+  }) => {
+    // Regression guard: shadcn's vendored ui/checkbox.tsx ships an invisible
+    // `after:-inset-x-3` that inflates the 16px box to 40px wide. The checkbox
+    // only has 6px of clearance to the text, so that arm overshoots by 6px and
+    // hit-tests ABOVE the static text span (it's positioned, the span isn't) --
+    // clicking the first character toggled the task instead of placing a caret.
+    // Asserted by asking the browser what it would actually hit, rather than by
+    // reading back the CSS we just wrote.
+    await load(page);
+    // The first character's own rect. NOT `.node-text`'s box: the checkbox
+    // `float: left`s inside `.row-body`, so it's out of flow and the span's box
+    // starts UNDERNEATH it -- only the text visually flows around it. A click at
+    // the span's own x=0 legitimately hits the checkbox and proves nothing.
+    const hit = await page.evaluate(() => {
+      const li = document.querySelector('li[data-node-id="c"]')!;
+      const span = li.querySelector(".node-text")! as HTMLElement;
+      const range = document.createRange();
+      range.setStart(span.firstChild!, 0);
+      range.setEnd(span.firstChild!, 1);
+      const r = range.getBoundingClientRect();
+      const x = r.left + 1;
+      const y = r.top + r.height / 2;
+      const el = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        insideText: !!el?.closest(".node-text"),
+        onCheckbox: !!el?.closest(".checkbox"),
+      };
+    });
+    expect(hit.onCheckbox).toBe(false);
+    expect(hit.insideText).toBe(true);
+
+    // And the click that follows from it places a caret rather than completing.
+    await page.mouse.click(hit.x, hit.y);
+    await expect(text(page, "c")).not.toHaveAttribute("data-completed", "true");
+    const caretInText = await text(page, "c").evaluate((el) => {
+      const sel = window.getSelection();
+      return !!sel && sel.rangeCount > 0 && el.contains(sel.anchorNode);
+    });
+    expect(caretInText).toBe(true);
+  });
 });
