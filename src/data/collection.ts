@@ -1,5 +1,7 @@
+import type { Socket } from "effect/unstable/socket";
+
 import { createCollection } from "@tanstack/react-db";
-import { type Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
+import { Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
 
 import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
 import type { Node } from "./schema";
@@ -13,6 +15,7 @@ import { appRuntime } from "./runtime";
 import { persistOrNotify } from "./save-failure";
 import { nodeSchema } from "./schema";
 import { chainDisagreements } from "./sibling-chain";
+import { decideSyncRecovery, notifySyncInterrupted } from "./sync-supervision";
 import { buildTreeIndex, childrenOf, now } from "./tree";
 
 /**
@@ -500,18 +503,64 @@ export const nodesCollection = createCollection({
         appRuntime.runFork(resync);
       };
 
-      const fiber = appRuntime.runFork(
-        Stream.runForEach(events, (event: SyncEvent) =>
-          Effect.sync(() => {
-            if (event._tag === "InitialError") {
-              initialError = event.error;
-              ensureReady();
-            } else {
-              applyMessage(event.message);
+      // Drain the event stream once. A throw inside `applyMessage` (schema drift,
+      // a future wire change) surfaces here as a DIE — without supervision it
+      // kills the consumer permanently while the socket still looks connected
+      // (issue #234). `drainOnce` folding is otherwise unchanged from before.
+      const drainOnce = Stream.runForEach(events, (event: SyncEvent) =>
+        Effect.sync(() => {
+          if (event._tag === "InitialError") {
+            initialError = event.error;
+            ensureReady();
+          } else {
+            applyMessage(event.message);
+          }
+        }),
+      );
+
+      // Supervise the drain inside ONE outer fiber so cleanup's interrupt still
+      // tears everything down (the socket's scope finalizer closes the WS). On a
+      // genuine defect we log the cause and re-establish (a fresh snapshot heals a
+      // transient one-frame glitch) up to a bounded budget; when it exhausts we
+      // flip a visible "reload" notice instead of dying silently. The policy —
+      // and crucially the interrupt-vs-fault split, so an intentional teardown is
+      // NOT treated as a failure — lives in `decideSyncRecovery`. See ADR 0053.
+      const superviseDrain = (
+        recoveriesUsed: number,
+      ): Effect.Effect<void, never, Socket.WebSocketConstructor> =>
+        drainOnce.pipe(
+          Effect.catchCause((cause) => {
+            const decision = decideSyncRecovery(cause, recoveriesUsed);
+            switch (decision._tag) {
+              case "Stop":
+                // Intentional interrupt (cleanup / account switch). Re-raise the
+                // cause so the fiber terminates as interrupted rather than
+                // swallowing it — no recovery, no toast.
+                return Effect.failCause(cause);
+              case "GiveUp":
+                console.error(
+                  "[sync] consumer fiber gave up after retries",
+                  Cause.pretty(cause),
+                );
+                return Effect.sync(notifySyncInterrupted);
+              case "Reestablish":
+                console.error(
+                  "[sync] consumer fiber failed; re-establishing",
+                  Cause.pretty(cause),
+                );
+                // Force the next connection to ignore the cursor (fresh snapshot),
+                // back off, then re-open the stream on the SAME fiber.
+                return resync.pipe(
+                  Effect.andThen(Effect.sleep(decision.delay)),
+                  Effect.andThen(
+                    Effect.suspend(() => superviseDrain(recoveriesUsed + 1)),
+                  ),
+                );
             }
           }),
-        ),
-      );
+        );
+
+      const fiber = appRuntime.runFork(superviseDrain(0));
 
       return () => {
         resyncFn = null;
