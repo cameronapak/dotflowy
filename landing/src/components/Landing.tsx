@@ -1,13 +1,7 @@
 import type { VariantProps } from "class-variance-authority";
 
 import { Star } from "lucide-react";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Logo } from "@/components/Logo";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -17,11 +11,6 @@ import { cn } from "@/lib/utils";
 // (matches the README's GitHub badges).
 const APP_URL = "https://app.dotflowy.com";
 const GITHUB_URL = "https://github.com/cameronapak/dotflowy";
-// The waitlist endpoint lives on the app Worker, which allows dotflowy.com
-// (and localhost:3100 for dev) cross-origin. Overridable for local testing.
-const API_URL =
-  (import.meta.env as Record<string, string | undefined>).VITE_API_URL ??
-  APP_URL;
 
 /** A link styled as a button. Links are `<a>` elements (correct semantics),
  * not Base UI Buttons rendering an anchor. */
@@ -84,73 +73,6 @@ function Nav() {
   );
 }
 
-/** Email capture into the app Worker's public POST /api/waitlist (invite-only
- * alpha: the waitlist is the front door). Duplicate emails are a silent ok
- * server-side, so the success state is honest either way. */
-function WaitlistForm() {
-  const [email, setEmail] = useState("");
-  const [state, setState] = useState<"idle" | "busy" | "done" | "error">(
-    "idle",
-  );
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const addr = email.trim();
-    if (!addr) return;
-    setState("busy");
-    try {
-      const res = await fetch(`${API_URL}/api/waitlist`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: addr, source: "landing" }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      setState("done");
-    } catch {
-      setState("error");
-    }
-  }
-
-  if (state === "done") {
-    return (
-      <p className="flex h-11 items-center font-mono text-sm text-foreground">
-        You're on the list. We'll email you an invite.
-      </p>
-    );
-  }
-
-  return (
-    <form onSubmit={submit} className="flex max-w-md flex-col gap-2">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          aria-label="Email address"
-          className="h-11 w-full rounded-lg border border-border bg-background px-3.5 text-[15px] outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
-        <button
-          type="submit"
-          disabled={state === "busy"}
-          className={cn(
-            buttonVariants({ size: "lg" }),
-            "h-11 shrink-0 px-5 text-[15px]",
-          )}
-        >
-          {state === "busy" ? "Joining…" : "Join the waitlist"}
-        </button>
-      </div>
-      {state === "error" && (
-        <p className="text-sm text-destructive">
-          Couldn't join the waitlist. Try again.
-        </p>
-      )}
-    </form>
-  );
-}
-
 // One bullet per stage of the job: capture, retrieve, shape.
 const POINTS = [
   "Capture a thought in one keystroke, before it slips away.",
@@ -184,10 +106,12 @@ function Hero() {
         Open source. Real-time sync. Export everything, anytime.
       </p>
 
-      <div id="waitlist" className="mt-10 scroll-mt-20">
-        <WaitlistForm />
+      <div className="mt-10">
+        <LinkButton href={APP_URL} size="lg" className="h-11 px-5 text-[15px]">
+          Start free
+        </LinkButton>
         <p className="mt-3 font-mono text-xs text-muted-foreground">
-          In private alpha · have an invite?{" "}
+          Signups are open · already have an account?{" "}
           <a
             href={APP_URL}
             className="underline underline-offset-2 hover:text-foreground"
@@ -384,8 +308,7 @@ function PricingCard({ tier }: { tier: Tier }) {
 }
 
 /** Pricing. Three tiers, one emphasized (Unlimited), Founding as the distinct
- * limited offer. Checkout is invite-gated during beta, so every card's action is
- * the same honest one: join the waitlist. */
+ * limited offer. Signups are open, so the page's single action is: start free. */
 function Pricing() {
   return (
     <section className="border-t border-border/60">
@@ -409,16 +332,11 @@ function Pricing() {
         </div>
 
         <Reveal delay={TIERS.length * 70} className="mt-8">
-          <LinkButton
-            href="#waitlist"
-            size="lg"
-            className="h-11 px-5 text-[15px]"
-          >
-            Join the waitlist
+          <LinkButton href={APP_URL} size="lg" className="h-11 px-5 text-[15px]">
+            Start free
           </LinkButton>
           <p className="mt-3 font-mono text-xs text-muted-foreground">
-            Dotflowy is in invite beta — join the waitlist and we'll send you an
-            invite.
+            Signups are open — start free and upgrade when you outgrow it.
           </p>
         </Reveal>
       </div>
