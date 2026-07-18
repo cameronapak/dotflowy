@@ -1,5 +1,25 @@
 # dotflowy
 
+## 1.7.0
+
+### Minor Changes
+
+- 8e46728: Signup can now open to the public with Cloudflare Turnstile and email verification. A new `SIGNUP_OPEN` switch (fail-closed, ships unset) skips the invite requirement when set to "true"; the Turnstile captcha plugin gates signup and password reset when `TURNSTILE_SECRET_KEY` is configured; and email verification is now required, so invited users confirm their address before their first sign-in (existing accounts are grandfathered verified).
+- 251b9bd: Launch-day waitlist announcement. A new admin-only `POST /api/admin/announce` endpoint (same shape and admin gate as `/api/admin/invite`) emails the "Dotflowy is open" blast to waitlist rows through the one email seam, and `bun run announce` drives it in resumable batches. A `notifiedAt` stamp on the waitlist row (migration 0009) makes the send at-most-once, so the script is safe to re-run without double-sending.
+
+### Patch Changes
+
+- dec36b2: Breadcrumbs read as text, not source: a bullet titled `**Sprint goals**` now
+  shows up in the trail as "Sprint goals" instead of wearing its asterisks. Inline
+  code loses its backticks in every label surface too, so the command palette and
+  mirror-place lists read the same way.
+- 90ff11b: Signup and password reset now ask you to confirm the password, so a typo can't quietly lock you out of a brand-new or reset account.
+- dec36b2: The "What's new" dialog reads cleanly: entries render their bold and code
+  formatting instead of printing the raw asterisks and backticks, every entry's
+  text starts at the same place regardless of whether it is labelled Added, Fixed,
+  or Changed, and release notes no longer inherit the hard line wraps of the file
+  they were written in.
+
 ## 1.6.0
 
 ### Minor Changes
