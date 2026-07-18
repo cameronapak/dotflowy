@@ -15,7 +15,11 @@ import { appRuntime } from "./runtime";
 import { persistOrNotify } from "./save-failure";
 import { nodeSchema } from "./schema";
 import { chainDisagreements } from "./sibling-chain";
-import { decideSyncRecovery, notifySyncInterrupted } from "./sync-supervision";
+import {
+  decideSyncRecovery,
+  nextStreak,
+  notifySyncInterrupted,
+} from "./sync-supervision";
 import { buildTreeIndex, childrenOf, now } from "./tree";
 
 /**
@@ -525,12 +529,22 @@ export const nodesCollection = createCollection({
       // flip a visible "reload" notice instead of dying silently. The policy —
       // and crucially the interrupt-vs-fault split, so an intentional teardown is
       // NOT treated as a failure — lives in `decideSyncRecovery`. See ADR 0053.
+      //
+      // The budget is a STREAK, not a lifetime count: `lastFailureAt` lives here
+      // (the impure wiring layer; the policy stays clock-free) and `nextStreak`
+      // resets the count when a failure lands long after the previous one — a
+      // tab open for days must not flip the give-up toast on its 4th ever
+      // transient glitch when each recovery held.
+      let lastFailureAt: number | null = null;
       const superviseDrain = (
         recoveriesUsed: number,
       ): Effect.Effect<void, never, Socket.WebSocketConstructor> =>
         drainOnce.pipe(
           Effect.catchCause((cause) => {
-            const decision = decideSyncRecovery(cause, recoveriesUsed);
+            const failedAt = Date.now();
+            const streak = nextStreak(lastFailureAt, failedAt, recoveriesUsed);
+            lastFailureAt = failedAt;
+            const decision = decideSyncRecovery(cause, streak);
             switch (decision._tag) {
               case "Stop":
                 // Intentional interrupt (cleanup / account switch). Re-raise the
@@ -553,7 +567,7 @@ export const nodesCollection = createCollection({
                 return resync.pipe(
                   Effect.andThen(Effect.sleep(decision.delay)),
                   Effect.andThen(
-                    Effect.suspend(() => superviseDrain(recoveriesUsed + 1)),
+                    Effect.suspend(() => superviseDrain(streak + 1)),
                   ),
                 );
             }

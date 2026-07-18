@@ -24,6 +24,14 @@ import { toast } from "sonner";
  *  frame (one that re-poisons every snapshot) can't hot-loop snapshot fetches. */
 export const SYNC_RECOVERY_BUDGET = 3;
 
+/** A failure arriving this long after the previous one is a NEW streak, not a
+ *  continuation: the intervening recovery evidently held, so its spent budget
+ *  is forgiven. Without this the counter is lifetime — a tab open for days
+ *  would flip the give-up toast on its 4th ever transient glitch even though
+ *  each recovered fine. Mirrors the transport's reset-after-stable
+ *  (`STABLE_AFTER`, realtime.ts) one layer up. */
+export const SYNC_STREAK_RESET_AFTER = Duration.seconds(60);
+
 /** Backoff floor + cap between re-establish attempts (jitter-free; the failure is
  *  rare and self-inflicted, so plain exponential is enough — no thundering herd). */
 const RECOVERY_BASE = Duration.millis(500);
@@ -68,6 +76,25 @@ export function decideSyncRecovery(
     Duration.toMillis(RECOVERY_BASE) * 2 ** recoveriesUsed,
   );
   return { _tag: "Reestablish", delay: Duration.millis(ms) };
+}
+
+/**
+ * Whether a fresh failure continues the current streak or starts a new one.
+ * Pure companion to `decideSyncRecovery` (which stays clock-free): the impure
+ * wiring in collection.ts records `lastFailureAt` and passes `Date.now()` here.
+ * A failure more than `resetAfterMs` after the previous one means the last
+ * re-establish evidently held — the streak resets to 0 and the budget is
+ * forgiven. `null` (no prior failure) keeps `used` as-is (it's 0 on the first
+ * failure anyway).
+ */
+export function nextStreak(
+  lastFailureAt: number | null,
+  now: number,
+  used: number,
+  resetAfterMs: number = Duration.toMillis(SYNC_STREAK_RESET_AFTER),
+): number {
+  if (lastFailureAt === null) return used;
+  return now - lastFailureAt > resetAfterMs ? 0 : used;
 }
 
 /**

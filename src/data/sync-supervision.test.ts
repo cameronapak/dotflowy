@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Cause, Duration } from "effect";
 
-import { decideSyncRecovery, SYNC_RECOVERY_BUDGET } from "./sync-supervision";
+import {
+  decideSyncRecovery,
+  nextStreak,
+  SYNC_RECOVERY_BUDGET,
+  SYNC_STREAK_RESET_AFTER,
+} from "./sync-supervision";
 
 // The supervision policy for the inbound-sync consumer fiber (#234). Pins the
 // two things easy to get wrong: an intentional interrupt must NEVER be treated
@@ -68,5 +73,67 @@ describe("decideSyncRecovery", () => {
     expect(decideSyncRecovery(cause, 0, 0)._tag).toBe("GiveUp");
     expect(decideSyncRecovery(cause, 0, 1)._tag).toBe("Reestablish");
     expect(decideSyncRecovery(cause, 1, 1)._tag).toBe("GiveUp");
+  });
+});
+
+// The streak reset (the impure wiring in collection.ts records `lastFailureAt`
+// and calls this with `Date.now()`). Without it the budget is a LIFETIME count:
+// a tab open for days would flip the give-up toast on its 4th ever transient
+// glitch even though every recovery held.
+
+describe("nextStreak", () => {
+  const RESET = Duration.toMillis(SYNC_STREAK_RESET_AFTER);
+
+  test("first failure (no prior) keeps the count as-is", () => {
+    expect(nextStreak(null, 1_000_000, 0)).toBe(0);
+  });
+
+  test("a failure within the window CONTINUES the streak", () => {
+    const t0 = 1_000_000;
+    expect(nextStreak(t0, t0 + 1, 2)).toBe(2);
+    expect(nextStreak(t0, t0 + RESET, 2)).toBe(2); // boundary: exactly the window
+  });
+
+  test("a failure after the window RESETS the streak to 0", () => {
+    const t0 = 1_000_000;
+    expect(nextStreak(t0, t0 + RESET + 1, 2)).toBe(0);
+    expect(nextStreak(t0, t0 + 10 * RESET, SYNC_RECOVERY_BUDGET)).toBe(0);
+  });
+
+  test("separated glitches never exhaust the budget (the day-old-tab scenario)", () => {
+    // 10 transient glitches, each a stable stretch apart: every one is decided
+    // at streak 0 -> Reestablish, never GiveUp.
+    const cause = Cause.die(new Error("transient"));
+    let last: number | null = null;
+    let used = 0;
+    let now = 0;
+    for (let i = 0; i < 10; i++) {
+      now += RESET + 5_000; // well past the window each time
+      const streak = nextStreak(last, now, used);
+      last = now;
+      expect(decideSyncRecovery(cause, streak)._tag).toBe("Reestablish");
+      used = streak + 1;
+    }
+  });
+
+  test("rapid-fire failures still exhaust the budget (poison frame)", () => {
+    const cause = Cause.die(new Error("poison"));
+    let last: number | null = null;
+    let used = 0;
+    let now = 1_000_000;
+    const decisions: string[] = [];
+    for (let i = 0; i <= SYNC_RECOVERY_BUDGET; i++) {
+      now += 500; // immediate re-failure, inside the window
+      const streak = nextStreak(last, now, used);
+      last = now;
+      decisions.push(decideSyncRecovery(cause, streak)._tag);
+      used = streak + 1;
+    }
+    expect(decisions).toEqual([
+      "Reestablish",
+      "Reestablish",
+      "Reestablish",
+      "GiveUp",
+    ]);
   });
 });

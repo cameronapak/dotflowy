@@ -49,6 +49,15 @@ the failure-handling policy out as a pure, unit-tested function.
   (`notifySyncInterrupted`, same sonner mechanism as the #230 save-failure
   notice). The session can no longer die silently.
 
+The budget counts a **streak, not a lifetime**: the wiring layer records
+`lastFailureAt` and runs it through `nextStreak` (pure, unit-tested; the clock
+stays out of `decideSyncRecovery`). A failure landing more than
+`SYNC_STREAK_RESET_AFTER` (60s) after the previous one starts a fresh streak at
+0 — the intervening recovery evidently held, so its spent budget is forgiven.
+This mirrors the transport's reset-after-stable (`STABLE_AFTER`, ADR 0013) one
+layer up. Without it, a tab open for days would flip the give-up toast on its
+4th _ever_ transient glitch, even though each recovered fine.
+
 The recovery loop lives on the same fiber that cleanup interrupts, so
 `Fiber.interrupt(fiber)` still tears everything down — whether it's mid-drain,
 mid-backoff, or mid-reestablish. Additive only: `applyMessage`, the wire
@@ -62,8 +71,15 @@ protocol, and the cleanup/interrupt path are unchanged.
   loop.
 - **Interruption is explicitly excluded from the fault path.** `catchCause` sees
   interrupts too; the `hasInterruptsOnly` gate is load-bearing. An intentional
-  teardown never triggers a re-establish or the toast. This is the one thing the
-  unit tests pin hardest.
+  teardown _effectively_ never triggers a re-establish or the toast — the only
+  exception is an astronomically narrow race where a defect lands at the same
+  moment as the teardown interrupt on the final budget-exhausting drain: the
+  combined Die+Interrupt cause fails `hasInterruptsOnly`, decides GiveUp, and
+  the toast's `Effect.sync` runs before the interrupt wins. Accepted: the
+  outcome is one stray (dismissible) toast during a teardown that required a
+  real defect to coincide, and closing the window would cost an uninterruptible
+  region around the whole handler. This is the one thing the unit tests pin
+  hardest (the deterministic split, not the race).
 - **The policy is pure and testable.** The interrupt-vs-fault split, the budget
   boundary, and the backoff schedule are covered by `sync-supervision.test.ts`
   without driving the socket. The Effect wiring (catchCause + re-establish on the
@@ -73,6 +89,12 @@ protocol, and the cleanup/interrupt path are unchanged.
   and socket. The previous run's scope (and its WS) already finalized when the
   drain failed, so there's no double-subscribe — the socket's own scope finalizer
   is what closes the old WS, exactly as ADR 0013 intends.
+- **After GiveUp, `resyncNodes()` becomes a silent no-op.** The producer is dead
+  (its last run's scope finalized with the failed drain) and the module-level
+  `resyncFn` forks `resync` against orphaned refs no loop is watching. Harmless —
+  the persistent toast already says reload, which rebuilds everything — but
+  recorded so nobody expects the daily loser-path's resync to revive a
+  given-up session.
 
 ## Alternatives considered
 
