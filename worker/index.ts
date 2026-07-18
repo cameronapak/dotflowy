@@ -37,6 +37,15 @@ import type { Node } from "./wire";
 
 import { createAuth } from "./auth";
 import {
+  OutlineSnapshotSchema,
+  SNAPSHOT_VERSION,
+  backupKey,
+  backupKeyForDate,
+  backupPrefix,
+  backupTargets,
+  isBackupDateKey,
+} from "./backup";
+import {
   mintInvites,
   normalizeEmail,
   pendingWaitlistEmails,
@@ -51,6 +60,7 @@ import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
   AdminInvitePostBody,
   AdminRestorePostBody,
+  AdminSnapshotRestorePostBody,
   KvClaimBody,
   KvDeleteBody,
   KvUpsertBody,
@@ -87,6 +97,11 @@ interface Env extends AuthEnv {
   /** Owner key the legacy D1 rows are scoped under, read once during the
    *  one-time import into the owner's DO. Defaults to 'owner'. */
   APP_OWNER?: string;
+  /** Off-site outline backups (#221): the daily cron sweep writes one JSON
+   *  snapshot per user DO here (`backups/<doName>/<YYYY-MM-DD>.json`); the
+   *  admin restore-snapshot route reads them back. Lifecycle expiry is set on
+   *  the bucket itself — see docs/runbooks/offsite-backup-r2.md. */
+  BACKUPS: R2Bucket;
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
   UNFURL_LIMIT: RateLimit;
   /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
@@ -765,6 +780,111 @@ function handleApiRequest(
       return json(result);
     }
 
+    // Admin-only: list one user's off-site snapshots in R2 (#221) — what dates
+    // are available to restore-snapshot below. Same 404-not-401 admin gate.
+    if (url.pathname === "/api/admin/backups") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "GET") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const targetUserId = yield* resolveRestoreUserId(env, {
+        userId: url.searchParams.get("userId") ?? undefined,
+        email: url.searchParams.get("email") ?? undefined,
+      });
+      const doName = resolveUserId(targetUserId, env);
+      // R2 list caps at 1000 objects per call; follow the cursor so the
+      // listing stays complete even if the lifecycle expiry was never applied
+      // (list order is lexicographic-ascending = oldest date first, so a
+      // truncated single call would hide exactly the recent, useful dates).
+      const backups: { key: string; size: number; uploaded: string }[] = [];
+      let cursor: string | undefined;
+      do {
+        const listed: R2Objects = yield* Effect.promise(() =>
+          env.BACKUPS.list({ prefix: backupPrefix(doName), cursor }),
+        );
+        for (const o of listed.objects) {
+          backups.push({
+            key: o.key,
+            size: o.size,
+            uploaded: o.uploaded.toISOString(),
+          });
+        }
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+      return json({ doName, backups });
+    }
+
+    // Admin-only: restore ONE user's outline from an off-site R2 snapshot
+    // (#221) — the deep path pairing the daily export sweep, for losses older
+    // than PITR's 30-day window. DESTRUCTIVE (truncate + reseed), but the DO
+    // returns the pre-restore bookmark, so the undo path is the PITR route
+    // above with that bookmark. Same identity resolution and 404-not-401 admin
+    // gate as the PITR restore; the snapshot is schema-validated before it can
+    // reach the DO's SQLite (ADR 0014 — R2 content is still a trust boundary).
+    if (url.pathname === "/api/admin/restore-snapshot") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminSnapshotRestorePostBody);
+      if (!isBackupDateKey(body.date)) {
+        return yield* Effect.fail(
+          new BadRequest({ reason: "date must be YYYY-MM-DD" }),
+        );
+      }
+      const targetUserId = yield* resolveRestoreUserId(env, body);
+      const doName = resolveUserId(targetUserId, env);
+      // String concatenation, never Date.parse: a calendar-invalid shape like
+      // 2026-02-31 must land as a clean "no backup" 400, not a NaN→RangeError
+      // defect (a 500) from re-deriving the key through a Date round-trip.
+      const key = backupKeyForDate(doName, body.date);
+      const object = yield* Effect.promise(() => env.BACKUPS.get(key));
+      if (!object) {
+        return yield* Effect.fail(
+          new BadRequest({ reason: `no backup at ${key}` }),
+        );
+      }
+      const raw = yield* Effect.tryPromise({
+        try: () => object.json(),
+        catch: () => new BadRequest({ reason: "snapshot is not valid JSON" }),
+      });
+      const snapshot = yield* Schema.decodeUnknownEffect(OutlineSnapshotSchema)(
+        raw,
+      ).pipe(
+        Effect.mapError(
+          (issue) =>
+            new BadRequest({ reason: `snapshot rejected: ${issue.message}` }),
+        ),
+      );
+      if (snapshot.version !== SNAPSHOT_VERSION) {
+        return yield* Effect.fail(
+          new BadRequest({
+            reason: `unknown snapshot version ${snapshot.version}`,
+          }),
+        );
+      }
+      const snapshotStub = env.USER_OUTLINE.get(
+        env.USER_OUTLINE.idFromName(doName),
+      );
+      const result = yield* Effect.promise(() =>
+        snapshotStub.restoreSnapshot({
+          nodes: snapshot.nodes,
+          kv: snapshot.kv,
+        }),
+      );
+      return json({ key, ...result });
+    }
+
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
     // mcp plugin, stored in D1), not the session cookie, so it's gated here —
     // before the cookie-session check below. Same identity model though: the
@@ -881,7 +1001,56 @@ function handleApiRequest(
   });
 }
 
+// --- Off-site backup sweep (#221) -------------------------------------------
+
+/**
+ * Export every user's outline to R2, one JSON snapshot per Durable Object per
+ * UTC day (a same-day re-run overwrites — idempotent). Driven by the D1 `user`
+ * table (the authoritative id set — deliberately not the eventually-consistent
+ * DO enumeration API, per the #155 research), with the owner mapped to the
+ * 'default' DO via `backupTargets`. Per-user failures are contained: one
+ * broken DO must not starve every user after it of their daily backup, so
+ * each export is try/caught, reported to Sentry, and the sweep moves on.
+ */
+async function runBackupSweep(env: Env, now: number): Promise<void> {
+  const { results } = await env.DB.prepare('SELECT id FROM "user"').all<{
+    id: string;
+  }>();
+  const targets = backupTargets(
+    results.map((r) => r.id),
+    (id) => resolveUserId(id, env),
+  );
+  let failed = 0;
+  for (const doName of targets) {
+    try {
+      const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(doName));
+      const snapshot = await stub.exportSnapshot();
+      await env.BACKUPS.put(backupKey(doName, now), JSON.stringify(snapshot), {
+        httpMetadata: { contentType: "application/json" },
+      });
+    } catch (err) {
+      failed++;
+      console.error(`backup sweep: export failed for DO ${doName}`, err);
+      Sentry.captureException(err);
+    }
+  }
+  console.log(
+    `backup sweep: ${targets.length - failed}/${targets.length} DOs exported`,
+  );
+}
+
 const handler = {
+  // Daily off-site backup sweep (#221) — the cron trigger in wrangler.jsonc.
+  // AWAITED, not waitUntil: cron handlers get 15 min of wall clock (ample for
+  // a per-user export loop at beta scale), and a detached waitUntil promise
+  // would put a sweep-level failure (e.g. the D1 user query) outside Sentry's
+  // withSentry catch/flush window — the nightly backup could silently stop.
+  // Awaiting keeps a total failure loud; per-user failures are contained
+  // inside runBackupSweep.
+  async scheduled(event: ScheduledController, env: Env): Promise<void> {
+    await runBackupSweep(env, event.scheduledTime);
+  },
+
   async fetch(
     request: Request,
     env: Env,

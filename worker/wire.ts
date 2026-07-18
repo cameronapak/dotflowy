@@ -99,3 +99,13 @@ export const AdminRestorePostBody = Schema.Struct({
   at: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   bookmark: Schema.optional(Schema.String),
 });
+
+/** Restore one user from an R2 snapshot (#221): the target (exactly one of
+ *  userId/email, enforced in the route like the PITR restore) plus the UTC
+ *  calendar date of the backup object to load (shape-checked in the route via
+ *  `isBackupDateKey` — pure, worker/backup.ts). */
+export const AdminSnapshotRestorePostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  date: Schema.String,
+});
