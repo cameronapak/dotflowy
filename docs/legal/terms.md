@@ -26,7 +26,7 @@ You can export your entire outline at any time, in OPML or Markdown, on any plan
 
 Payments are processed by Stripe. We never see or store your card number.
 
-- **Free** — the full outliner, capped at 2,000 total live nodes. Going over the cap never locks you out: you keep full access to your existing notes and export always works.
+- **Free** — the full outliner, capped at 10,000 total live nodes. Going over the cap never locks you out: you keep full access to your existing notes and export always works.
 - **Paid** — unlimited nodes plus AI agent (MCP) access: **$5/month** or **$48/year**.
 - **Founding** — **$99 for 3 years** of the paid plan, limited to 50 seats. **Plain disclosure: the founding plan is a fixed 3-year term, not a lifetime deal, and it auto-renews at the end of year 3 at the then-current annual price unless you cancel first.** We'll remind you before that renewal.
 
