@@ -640,8 +640,11 @@ export interface CaptureDestination {
   label: string;
   /** Get-or-create (SEED-FREE) the node new captures append into as its LAST
    *  child -- invoked LAZILY at born-on-first-keystroke, never on open. Returns
-   *  the parent node id, or null for the top level / on failure. Async: it may
-   *  round-trip the daily atomic claim. */
+   *  the parent node id, or null for the TOP LEVEL. REJECTS on failure (F2): a
+   *  provider that named a destination but couldn't mint it is a failure, NOT
+   *  "top level" -- quick-add's startBorn catches the rejection, creates nothing,
+   *  keeps the draft, and toasts once (returning null here would silently misfile
+   *  the capture at the outline root). Async: it may round-trip the daily claim. */
   resolve(): Promise<string | null>;
 }
 

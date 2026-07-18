@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 
-import { NodesLimitError } from "./nodes-client-effect";
+import { isNodesLimitError } from "./nodes-client-effect";
 
 /**
  * The shared "your write didn't land" signal for the core outline path (#230).
@@ -22,7 +22,7 @@ import { NodesLimitError } from "./nodes-client-effect";
  *    not N stacked toasts. Sonner de-dupes on the id.
  */
 export function notifySaveFailed(err: unknown): void {
-  if (err instanceof NodesLimitError) return;
+  if (isNodesLimitError(err)) return;
   toast.error("Couldn't save your changes", {
     id: "save-failed",
     description:

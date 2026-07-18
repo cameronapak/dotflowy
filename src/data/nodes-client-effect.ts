@@ -75,6 +75,13 @@ export class NodesLimitError extends Data.TaggedError("NodesLimitError")<{
   }
 }
 
+/** Was this the free-tier node-ceiling refusal (#170)? The cap has its own
+ *  upgrade toast (structural.ts), so failure funnels use this to SKIP a generic
+ *  "couldn't save/open" notice and avoid double-toasting the same event. */
+export function isNodesLimitError(err: unknown): err is NodesLimitError {
+  return err instanceof NodesLimitError;
+}
+
 export type NodesError =
   | NodesTransportError
   | NodesResponseError

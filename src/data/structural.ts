@@ -93,6 +93,9 @@ export function runStructuralTracked<T>(body: () => T): {
   // Join the outer transaction so the whole flow is ONE frame; never open a
   // second (which would re-tear the very thing we're fixing). The outer
   // transaction owns persistence, so there is nothing separate to track.
+  // CONSTRAINT: this `persisted` resolves INSTANTLY (carries no durability
+  // guarantee), so a persist-gated flow (e.g. daily #233's materializeNewDay,
+  // which navigates only after `persisted`) must NEVER run nested.
   if (getActiveTransaction())
     return { result: body(), persisted: Promise.resolve() };
 
