@@ -118,7 +118,7 @@ bun run cf:dev             # build + wrangler dev
 
 # ship it
 wrangler secret put BETTER_AUTH_SECRET   # once: the auth signing secret
-wrangler secret put INVITE_CODES         # comma-separated invite codes (unset = signup closed)
+wrangler secret put INVITE_CODES         # optional: invite codes (a signup backdoor; see Auth below)
 bun run db:migrate:remote  # before the first deploy
 bun run deploy             # build + wrangler deploy
 ```
@@ -127,7 +127,7 @@ The local invite code is **`dev-invite`** if you'd rather sign up your own accou
 
 `build:cf` copies the TanStack Start shell (`_shell.html`) to `index.html` so the root and client routes (e.g. `/<nodeId>` zoom views) resolve through the SPA fallback.
 
-**Auth.** Identity is **Better Auth** (email + password), sessions in D1. Signup is **invite-only during alpha**: creating an account requires a code from the `INVITE_CODES` secret (comma-separated; unset = signup closed), and the public `POST /api/waitlist` collects emails from anyone who wants in (viewable by admins — the `ADMIN_EMAILS` var — at `/admin/waitlist`). The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/adr/0011-the-auth-gate.md).
+**Auth.** Identity is **Better Auth** (email + password, with email verification), sessions in D1. Signup is **open** — `SIGNUP_OPEN="true"`, human-gated by **Cloudflare Turnstile** (`TURNSTILE_SECRET_KEY` + the public `TURNSTILE_SITE_KEY`). Leave `SIGNUP_OPEN` unset to fall back to invite-only, where an account needs a code from the `INVITE_CODES` secret or a per-email invite; both stay valid as backdoors in every state, and the public `POST /api/waitlist` still collects emails (viewable by admins — the `ADMIN_EMAILS` var — at `/admin/waitlist`). The static shell is public so the login screen loads; only `/api/nodes` + `/api/kv` require a session. Set `BETTER_AUTH_SECRET` (`wrangler secret put`) in prod and `.dev.vars` locally — without it the Worker fails closed. To carry a pre-auth outline (the constant `'default'` DO) into your real account, set the `OWNER_USER_ID` secret to your `user.id` after signing up. See [the auth gate](docs/adr/0011-the-auth-gate.md).
 
 ## How it works
 
