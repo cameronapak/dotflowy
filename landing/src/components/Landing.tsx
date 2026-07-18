@@ -217,6 +217,18 @@ function Footer() {
           >
             GitHub
           </a>
+          <a
+            href={`${APP_URL}/terms`}
+            className="transition-colors hover:text-foreground"
+          >
+            Terms
+          </a>
+          <a
+            href={`${APP_URL}/privacy`}
+            className="transition-colors hover:text-foreground"
+          >
+            Privacy
+          </a>
           <span className="text-muted-foreground/70">© {year}</span>
         </nav>
       </div>
