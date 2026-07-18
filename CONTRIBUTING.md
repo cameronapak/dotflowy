@@ -28,9 +28,10 @@ bun install
 bun run setup    # copies .dev.vars, generates BETTER_AUTH_SECRET, applies local D1 schema
 ```
 
-`setup` is idempotent — safe to re-run any time. Signup is invite-gated (alpha):
-the local invite code is **`dev-invite`**, the code to use when creating a
-local account by hand. No codes = signup closed.
+`setup` is idempotent — safe to re-run any time. Production signup is open, but
+the local default keeps it invite-gated: the local invite code is
+**`dev-invite`**, the code to use when creating a local account by hand. Set
+`SIGNUP_OPEN=true` in `.dev.vars` to mirror prod's open signup locally.
 
 ### Worktrees provision themselves
 

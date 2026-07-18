@@ -332,7 +332,11 @@ function Pricing() {
         </div>
 
         <Reveal delay={TIERS.length * 70} className="mt-8">
-          <LinkButton href={APP_URL} size="lg" className="h-11 px-5 text-[15px]">
+          <LinkButton
+            href={APP_URL}
+            size="lg"
+            className="h-11 px-5 text-[15px]"
+          >
             Start free
           </LinkButton>
           <p className="mt-3 font-mono text-xs text-muted-foreground">

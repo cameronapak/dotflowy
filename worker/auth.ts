@@ -367,7 +367,7 @@ export function createAuth(
         if (matchesSharedInviteCode(supplied, env.INVITE_CODES)) return;
         throw new APIError("FORBIDDEN", {
           message:
-            "Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.",
+            "Signups aren't open right now. Ask for an invite code, or join the waitlist.",
         });
       }),
       after: createAuthMiddleware(async (ctx) => {

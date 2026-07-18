@@ -4,15 +4,17 @@
 # Better Auth signing secret. Generate one: `openssl rand -base64 32`
 BETTER_AUTH_SECRET=replace-me
 
-# Comma-separated invite codes gating signup (alpha is invite-only). Unset or
-# empty = signup closed. In prod: `wrangler secret put INVITE_CODES`.
+# Comma-separated invite codes. When signup isn't open (SIGNUP_OPEN below unset,
+# the local default) a code is REQUIRED to create an account; when signup IS open
+# they still work as a backdoor. Unset + not open = signup closed. The local code
+# is `dev-invite`. In prod: `wrangler secret put INVITE_CODES`.
 INVITE_CODES=dev-invite
 
-# Open-signup switch (#293). Unset or anything-but-"true" = signup stays
-# invite-only (today's behavior). Exactly "true" OPENS self-serve signup: the
-# invite requirement is skipped (Turnstile below still gates it). Ships UNSET in
-# prod (flipping it on is a runbook step). In prod set via `wrangler secret put
-# SIGNUP_OPEN` (or a wrangler.jsonc var — it isn't sensitive).
+# Open-signup switch (#293). Exactly "true" OPENS self-serve signup — the invite
+# requirement is skipped (Turnstile below still gates it). This is prod's current
+# setting. Unset or anything-but-"true" = signup stays invite-only (the local
+# default here). In prod set via `wrangler secret put SIGNUP_OPEN` (or a
+# wrangler.jsonc var — it isn't sensitive).
 # SIGNUP_OPEN=true
 
 # Cloudflare Turnstile (#293). BOTH keys must be set to exercise the real

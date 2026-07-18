@@ -16,7 +16,7 @@ const MESSAGES: Record<string, string> = {
   // A Google identity with no Dotflowy account hit the server-side signup
   // gate (worker/auth.ts `disableSignUp` — the OAuth face of the invite gate).
   signup_disabled:
-    "That Google account isn't connected to a Dotflowy account yet. Dotflowy is invite-only right now — sign up with an invite code, then connect Google from the More menu.",
+    "That Google account isn't connected to a Dotflowy account yet. Sign up with your email first, then connect Google from the More menu.",
   // An email+password account exists at this address but isn't linked, and
   // implicit linking refused (unverified local email). The fix is the
   // explicit, authenticated path.
