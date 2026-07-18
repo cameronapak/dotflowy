@@ -350,7 +350,7 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   /** Total live node rows (the cap counts every node — bullets, tasks, mirrors,
    *  containers). A single indexed COUNT: sub-millisecond even at 17k rows, so no
-   *  maintained counter is worth its drift/backfill risk at a 2,000-node cap. */
+   *  maintained counter is worth its drift/backfill risk at a 10,000-node cap. */
   private nodeCount(): number {
     const row = this.sql
       .exec<{ n: number }>("SELECT COUNT(*) AS n FROM nodes")
