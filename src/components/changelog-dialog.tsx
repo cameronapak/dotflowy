@@ -115,8 +115,9 @@ function ReleaseSection({ release }: { release: Release }) {
       </div>
       {/* One shared badge column, not per-row `flex`: "Changed"/"Added"/"Fixed"
           are different widths, so a flex row starts each summary at its own x
-          and the paragraphs stagger. `subgrid` sizes the column once, to the
-          widest badge in the release, and every summary hangs off that edge. */}
+          and the paragraphs stagger. A fixed 76px label column (wide enough for
+          every badge) plus `subgrid` on each row means all summaries hang off
+          the same left edge. */}
       <ul className="grid grid-cols-[76px_1fr] gap-x-2 gap-y-2">
         {release.entries.map((entry, i) => (
           <li

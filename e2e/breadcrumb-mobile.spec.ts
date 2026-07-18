@@ -107,7 +107,12 @@ test("a crumb flattens inline markup to its reading text", async ({ page }) => {
   await page.goto("/leaf");
 
   const crumb = page.locator("nav.breadcrumb .crumb-link").first();
+  // EXACT textContent, not `toHaveText` (which whitespace-normalizes): a
+  // stripped run must not leave a doubled space where its markup used to be.
   await expect(crumb).toHaveText("Sprint goals code hot old docs");
+  expect(await crumb.evaluate((el) => el.textContent)).toBe(
+    "Sprint goals code hot old docs",
+  );
 
   // Display-only: the crumb still navigates by the real node id.
   await crumb.click();

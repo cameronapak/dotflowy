@@ -20,8 +20,14 @@
 
 /** Backtick before asterisk mirrors the editor's own precedence (code 10 <
  *  emphasis 30, ADR 0025): a code span shields its interior, so `` `**x**` ``
- *  keeps its asterisks. */
-const INLINE_PATTERN = /`([^`\n]+)`|\*\*([^*\n]+)\*\*/g;
+ *  keeps its asterisks.
+ *
+ *  Built per-call, never a module singleton: a `g`-flagged RegExp carries
+ *  `lastIndex` across calls, so a shared instance would skip runs on a second
+ *  pass (the `emphasis.ts` / `code.ts` rule). */
+function inlineRegex(): RegExp {
+  return /`([^`\n]+)`|\*\*([^*\n]+)\*\*/g;
+}
 
 export type InlineSegment =
   | { kind: "text"; value: string }
@@ -40,9 +46,9 @@ export function parseInlineMarkdown(summary: string): InlineSegment[] {
   const segments: InlineSegment[] = [];
   let cursor = 0;
 
-  INLINE_PATTERN.lastIndex = 0;
+  const pattern = inlineRegex();
   let match: RegExpExecArray | null;
-  while ((match = INLINE_PATTERN.exec(summary)) !== null) {
+  while ((match = pattern.exec(summary)) !== null) {
     if (match.index > cursor) {
       segments.push({
         kind: "text",
