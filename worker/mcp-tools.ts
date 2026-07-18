@@ -18,6 +18,12 @@ import { Data, Effect, Schema } from "effect";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
+import {
+  PROTECTED_SCAFFOLD_KINDS,
+  dayKeyToScaffoldChain,
+  scaffoldKeyKind,
+  scaffoldLabel,
+} from "../src/data/date-links";
 import { exportOpml } from "../src/data/opml-export";
 import {
   OPML_MCP_MAX_NODES,
@@ -29,6 +35,7 @@ import { redactSpoilers } from "../src/data/spoiler";
 import { childrenOf, createId } from "../src/data/tree";
 import {
   DAILY_CONTAINER_TEXT,
+  type DailyScaffold,
   type TreeIndex,
   buildTreeIndex,
   flattenSubtree,
@@ -156,18 +163,76 @@ const claimDailyId = (
     return row.nodeId;
   });
 
-/** The daily container's node id, if one has been claimed (no side effects). */
-const containerIdOf = (store: OutlineStore): Effect.Effect<string | null> =>
+/** The daily-index reverse map (nodeId -> scaffold key) — powers both the
+ *  chronological-ascending sibling insertion in `planEnsureDaily` and the
+ *  server-side protection guards (which resolve a node id to its scaffold kind).
+ *  A read, no side effects. */
+const loadDailyReverseMap = (
+  store: OutlineStore,
+): Effect.Effect<ReadonlyMap<string, string>> =>
   Effect.gen(function* () {
     const rows = yield* Effect.promise(() =>
       Promise.resolve(store.getKv(KV_DAILY)),
     );
+    const map = new Map<string, string>();
     for (const raw of rows) {
       const row = Schema.decodeUnknownOption(DailyRowSchema)(raw);
-      if (row._tag === "Some" && row.value.key === CONTAINER_KEY)
-        return row.value.nodeId;
+      if (row._tag === "Some") map.set(row.value.nodeId, row.value.key);
     }
-    return null;
+    return map;
+  });
+
+/** The claimed ids of the whole `Daily > YYYY > Month > Week > Day` chain plus
+ *  the reverse map — the DO-side twin of the client's ensure cascade (issue
+ *  #271). Each level is claimed atomically PER LEVEL through `getOrCreateKv`, so
+ *  two concurrent agents converge on ONE node per level; `planEnsureDaily` then
+ *  materializes whichever rows are missing and sorts them into place. */
+const claimDailyScaffold = (
+  store: OutlineStore,
+  dateKey: string,
+): Effect.Effect<DailyScaffold & { index: TreeIndex }, ToolError> =>
+  Effect.gen(function* () {
+    const chain = dayKeyToScaffoldChain(dateKey);
+    if (!chain) {
+      return yield* Effect.fail(
+        new ToolError({
+          reason: `invalid date "${dateKey}" — can't place it on the calendar`,
+        }),
+      );
+    }
+    // Container + day claims and the reverse-map fetch are independent, so run
+    // them CONCURRENTLY (finding 6/8b: was 6 sequential RPCs). Each claim is a
+    // per-key atomic `getOrCreateKv` on a FRESH candidate id, and nothing reads
+    // another claim's result, so the batch is race-safe.
+    const [containerId, dayId, keyByNodeId] = yield* Effect.all(
+      [
+        claimDailyId(store, CONTAINER_KEY, createId()),
+        claimDailyId(store, dateKey, createId()),
+        loadDailyReverseMap(store),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    // The Y/M/W scaffold is claimed ONLY when the day node is absent (finding 6,
+    // mirroring `planEnsureDaily`'s early-return): an existing (pre-migration
+    // flat) day is reused verbatim and never gets a parallel scaffold, so no
+    // dangling kv mappings. One index read decides -- and it's RETURNED so the
+    // caller reuses it (finding 6): nothing between here and the caller's plan
+    // mutates nodes (only kv claims), so a second `loadIndex` would rebuild the
+    // identical tree.
+    const index = yield* loadIndex(store);
+    if (index.byId.has(dayId))
+      return { containerId, dayId, keyByNodeId, index };
+
+    const [yearId, monthId, weekId] = yield* Effect.all(
+      [
+        claimDailyId(store, chain.yearKey, createId()),
+        claimDailyId(store, chain.monthKey, createId()),
+        claimDailyId(store, chain.weekKey, createId()),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return { containerId, yearId, monthId, weekId, dayId, keyByNodeId, index };
   });
 
 /** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. The
@@ -187,32 +252,68 @@ const resolveDateKey = (
         );
 
 // --- Protection (ADR 0015, server-enforced) -----------------------------------
+// The daily container AND every intermediate calendar scaffold node (year,
+// month, week) are protected: no delete / blank / to-do / complete (issue #271
+// decision 6). Deleting any of them cascades — an unprotected week delete would
+// take its days with it. Days themselves are content, so they stay editable and
+// deletable. A node's protection is resolved from the daily-index reverse map:
+// its key's `scaffoldKeyKind` tells container/year/month/week apart from day.
 
-const guardContainerDelete = (
-  containerId: string | null,
+/** The human label for a PROTECTED scaffold node (container/year/month/week), or
+ *  null when the key is a day or unknown (not protected). */
+const protectedScaffoldLabel = (key: string): string | null => {
+  const kind = scaffoldKeyKind(key);
+  // Which kinds are protected is the shared source of truth (finding 10b), so
+  // the client and Worker can't drift on it. The label derives from the shared
+  // `scaffoldLabel` (10c); the phrasing stays Worker-local.
+  if (!kind || !PROTECTED_SCAFFOLD_KINDS.has(kind)) return null;
+  switch (kind) {
+    case "container":
+      return `the "${DAILY_CONTAINER_TEXT}" container`;
+    case "year":
+      return `the "${scaffoldLabel(key)}" calendar year`;
+    case "month":
+      return `the "${scaffoldLabel(key)}" calendar month`;
+    case "week":
+      return `the "${scaffoldLabel(key)}" calendar week`;
+    default:
+      return null; // day (content) or unknown
+  }
+};
+
+const guardScaffoldDelete = (
+  keyByNodeId: ReadonlyMap<string, string>,
   deletedIds: ReadonlyArray<string>,
-): Effect.Effect<void, ToolError> =>
-  containerId && deletedIds.includes(containerId)
-    ? Effect.fail(
+): Effect.Effect<void, ToolError> => {
+  for (const id of deletedIds) {
+    const key = keyByNodeId.get(id);
+    const label = key ? protectedScaffoldLabel(key) : null;
+    if (label)
+      return Effect.fail(
         new ToolError({
-          reason: `the "${DAILY_CONTAINER_TEXT}" container is protected and can't be deleted`,
+          reason: `${label} is protected and can't be deleted (it holds your daily notes)`,
         }),
-      )
-    : Effect.void;
+      );
+  }
+  return Effect.void;
+};
 
-const guardContainerUpdate = (
+const guardScaffoldUpdate = (
   index: TreeIndex,
-  containerId: string | null,
+  keyByNodeId: ReadonlyMap<string, string>,
   nodeId: string,
   changes: { text?: string; isTask?: boolean; completed?: boolean },
 ): Effect.Effect<void, ToolError> => {
-  if (!containerId) return Effect.void;
   if (!index.byId.has(nodeId)) return Effect.void;
-  if (trueSourceOf(index, nodeId) !== containerId && nodeId !== containerId)
-    return Effect.void;
+  // A content edit follows the mirror's true source; check both the raw id and
+  // its source so a mirror of a scaffold node is guarded too.
+  const key =
+    keyByNodeId.get(trueSourceOf(index, nodeId)) ?? keyByNodeId.get(nodeId);
+  const label = key ? protectedScaffoldLabel(key) : null;
+  if (!label) return Effect.void;
   const violation =
     changes.text !== undefined && !changes.text.trim()
-      ? "blanked (it's how daily notes are found)"
+      ? "blanked (it's how your daily notes are found)"
       : changes.isTask
         ? "made a to-do"
         : changes.completed
@@ -221,7 +322,7 @@ const guardContainerUpdate = (
   return violation
     ? Effect.fail(
         new ToolError({
-          reason: `the "${DAILY_CONTAINER_TEXT}" container is protected and can't be ${violation}`,
+          reason: `${label} is protected and can't be ${violation}`,
         }),
       )
     : Effect.void;
@@ -669,19 +770,15 @@ export const tools: ReadonlyArray<ToolDef> = [
               new ToolError({ reason: sizeError.message }),
             );
           }
-          const containerId = yield* claimDailyId(
-            store,
-            CONTAINER_KEY,
-            createId(),
-          );
-          const dayId = yield* claimDailyId(store, dateKey, createId());
-          const index = yield* loadIndex(store);
+          const scaffold = yield* claimDailyScaffold(store, dateKey);
+          // Reuse the index claimDailyScaffold already built -- only kv claims ran
+          // since, so a reload would rebuild the identical tree (finding 6).
+          const index = scaffold.index;
           const plan = yield* unwrap(
             planAddSubtreeToDaily(index, {
               nodes: input.nodes,
               dateKey,
-              containerId,
-              dayId,
+              ...scaffold,
               origin,
               timestamp,
               newId: createId,
@@ -689,7 +786,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             }),
           );
           yield* commit(store, plan.ops);
-          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
+          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
         }
 
         // Parent (or top-level) path.
@@ -743,8 +840,8 @@ export const tools: ReadonlyArray<ToolDef> = [
           );
         }
         const index = yield* loadIndex(store);
-        const containerId = yield* containerIdOf(store);
-        yield* guardContainerUpdate(index, containerId, input.nodeId, changes);
+        const scaffold = yield* loadDailyReverseMap(store);
+        yield* guardScaffoldUpdate(index, scaffold, input.nodeId, changes);
         const timestamp = yield* clock;
         const plan = yield* unwrap(
           planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }),
@@ -762,12 +859,12 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof DeleteNodeInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
-        const containerId = yield* containerIdOf(store);
+        const scaffold = yield* loadDailyReverseMap(store);
         const timestamp = yield* clock;
         const plan = yield* unwrap(
           planDeleteNode(index, input.nodeId, timestamp),
         );
-        yield* guardContainerDelete(containerId, plan.deletedIds);
+        yield* guardScaffoldDelete(scaffold, plan.deletedIds);
         yield* commit(store, plan.ops);
         return `Deleted ${plan.deletedIds.length} node(s) (node ${input.nodeId} and its subtree).`;
       }),
@@ -817,18 +914,14 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof AddToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
         const dateKey = yield* resolveDateKey(input.date);
-        const containerId = yield* claimDailyId(
-          store,
-          CONTAINER_KEY,
-          createId(),
-        );
-        const dayId = yield* claimDailyId(store, dateKey, createId());
-        const index = yield* loadIndex(store);
+        const scaffold = yield* claimDailyScaffold(store, dateKey);
+        // Reuse the index claimDailyScaffold already built -- only kv claims ran
+        // since, so a reload would rebuild the identical tree (finding 6).
+        const index = scaffold.index;
         const timestamp = yield* clock;
         const plan = planAddToDaily(index, {
           dateKey,
-          containerId,
-          dayId,
+          ...scaffold,
           newNodeId: createId(),
           text: input.text,
           isTask: input.isTask ?? false,
@@ -837,7 +930,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           timestamp,
         });
         yield* commit(store, plan.ops);
-        return `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${dayId}).`;
+        return `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`;
       }),
   },
   {
@@ -875,19 +968,15 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
         const dateKey = yield* resolveDateKey(input.date);
-        const containerId = yield* claimDailyId(
-          store,
-          CONTAINER_KEY,
-          createId(),
-        );
-        const dayId = yield* claimDailyId(store, dateKey, createId());
-        const index = yield* loadIndex(store);
+        const scaffold = yield* claimDailyScaffold(store, dateKey);
+        // Reuse the index claimDailyScaffold already built -- only kv claims ran
+        // since, so a reload would rebuild the identical tree (finding 6).
+        const index = scaffold.index;
         const timestamp = yield* clock;
         const plan = yield* unwrap(
           planMirrorToDaily(index, {
             dateKey,
-            containerId,
-            dayId,
+            ...scaffold,
             sourceId: input.nodeId,
             mirrorId: createId(),
             origin,
@@ -895,7 +984,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           }),
         );
         yield* commit(store, plan.ops);
-        return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${dayId}).`;
+        return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`;
       }),
   },
   {
@@ -962,28 +1051,24 @@ export const tools: ReadonlyArray<ToolDef> = [
               dryRun: true,
             });
           }
-          const containerId = yield* claimDailyId(
-            store,
-            CONTAINER_KEY,
-            createId(),
-          );
-          const dayId = yield* claimDailyId(store, dateKey, createId());
-          const index = yield* loadIndex(store);
+          const scaffold = yield* claimDailyScaffold(store, dateKey);
+          // Reuse the index claimDailyScaffold already built -- only kv claims ran
+          // since, so a reload would rebuild the identical tree (finding 6).
+          const index = scaffold.index;
           const ensure = planEnsureDaily(index, {
             dateKey,
-            containerId,
-            dayId,
+            ...scaffold,
             timestamp,
           });
-          const siblings = index.byId.has(dayId)
-            ? childrenOf(index, dayId)
+          const siblings = index.byId.has(scaffold.dayId)
+            ? childrenOf(index, scaffold.dayId)
             : [];
           const firstPrev = siblings.length
             ? siblings[siblings.length - 1]!.id
             : null;
           const plan = yield* unwrap(
             planOpmlImport(forest, {
-              parentId: dayId,
+              parentId: scaffold.dayId,
               firstPrev,
               origin,
               timestamp,
@@ -996,7 +1081,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             report,
             rootIds: plan.rootIds,
             rootTexts,
-            landing: `onto ${formatDayText(dateKey)} (daily note id: ${dayId})`,
+            landing: `onto ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId})`,
             dryRun: false,
           });
         }

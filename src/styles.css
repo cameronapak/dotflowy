@@ -815,8 +815,10 @@ h2 span.protected-lock {
 }
 
 /* The daily date badge is a 20px (`h-5`) pill; K=6.25px aligns it to the text
-   optical center while scaling with the reading size (ADR 0029). */
-.outline-row [data-daily-date] {
+   optical center while scaling with the reading size (ADR 0029). The week badge
+   (issue #271) is the same pill, so it shares the nudge. */
+.outline-row [data-daily-date],
+.outline-row [data-daily-week] {
   margin-top: calc(var(--reading-line-box) / 2 - 6.25px);
 }
 

@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
+import { weekLabel } from "../src/data/date-links";
 import { exportOpml } from "../src/data/opml-export";
 import { makeNode } from "../src/data/tree";
 import {
@@ -59,6 +60,32 @@ function fixture(): Node[] {
 
 function index(nodes: Node[]) {
   return buildTreeIndex(nodes);
+}
+
+/** Scaffold ids for the daily planners (issue #271): one distinct node id per
+ *  calendar level, plus the daily-index reverse map (nodeId -> scaffold key)
+ *  that drives sorted sibling insertion. An empty map = a fresh Daily subtree
+ *  with no siblings to order against. Override individual ids to match an
+ *  existing-node fixture. */
+function scaffold(
+  keyByNodeId: ReadonlyMap<string, string> = new Map(),
+  ids: Partial<{
+    containerId: string;
+    yearId: string;
+    monthId: string;
+    weekId: string;
+    dayId: string;
+  }> = {},
+) {
+  return {
+    containerId: "cont",
+    yearId: "yr",
+    monthId: "mo",
+    weekId: "wk",
+    dayId: "day",
+    ...ids,
+    keyByNodeId,
+  };
 }
 
 function inserted(ops: ChangeOp[]): Node[] {
@@ -341,8 +368,7 @@ describe("kind at the write planners", () => {
   test("planAddToDaily carries kind onto the captured node", () => {
     const plan = planAddToDaily(index([]), {
       dateKey: "2026-07-10",
-      containerId: "c",
-      dayId: "d",
+      ...scaffold(),
       newNodeId: "n",
       text: "prose",
       isTask: false,
@@ -814,8 +840,7 @@ describe("planAddSubtree", () => {
     const plan = planAddSubtreeToDaily(index(nodes), {
       nodes: [{ text: "one" }, { text: "two" }],
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(),
       timestamp: T,
       newId: idFactory(),
       maxNodes: 500,
@@ -832,16 +857,18 @@ describe("planAddSubtree", () => {
     const plan = planAddSubtreeToDaily(index(fixture()), {
       nodes: [{ text: "one" }],
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(),
       timestamp: T,
       newId: idFactory(),
       maxNodes: 500,
     });
     if (plan instanceof Error) throw plan;
     const ids = inserted(plan.ops).map((n) => n.id);
-    // container + day (materialized) + the one forest node
+    // container + year + month + week + day (materialized) + the forest node
     expect(ids).toContain("cont");
+    expect(ids).toContain("yr");
+    expect(ids).toContain("mo");
+    expect(ids).toContain("wk");
     expect(ids).toContain("day");
     const entry = inserted(plan.ops).find(
       (n) => n.parentId === "day" && n.id.startsWith("n"),
@@ -851,85 +878,223 @@ describe("planAddSubtree", () => {
 });
 
 describe("daily planning", () => {
-  test("materializes both container and day on first use", () => {
+  /** A seeded `Daily > 2026 > July > Week N` chain (ids cont/yr/mo/wk) plus its
+   *  reverse map, ready for a same-week day insert. `weekLabel` keeps the seeded
+   *  week text honest against the scaffold key. */
+  function seededWeek(weekKey: string, extraDays: Node[] = []) {
+    const nodes = [
+      ...fixture(),
+      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
+      makeNode({ id: "yr", text: "2026", parentId: "cont" }),
+      makeNode({ id: "mo", text: "July", parentId: "yr" }),
+      makeNode({ id: "wk", text: weekLabel(weekKey), parentId: "mo" }),
+      ...extraDays,
+    ];
+    const rev = new Map<string, string>([
+      ["cont", "container"],
+      ["yr", "2026"],
+      ["mo", "2026-07"],
+      ["wk", weekKey],
+    ]);
+    return { nodes, rev };
+  }
+
+  test("first use builds the whole Daily > Year > Month > Week > Day chain", () => {
     const plan = planEnsureDaily(index(fixture()), {
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(),
       timestamp: T,
     });
     const nodes = inserted(plan.ops);
-    expect(nodes.map((n) => n.id)).toEqual(["cont", "day"]);
-    const [container, day] = nodes as [Node, Node];
-    expect(container.parentId).toBeNull();
-    expect(container.prevSiblingId).toBe("b");
-    expect(container.text).toBe(DAILY_CONTAINER_TEXT);
-    expect(day.parentId).toBe("cont");
-    expect(day.prevSiblingId).toBeNull();
-    expect(day.text).toBe("Friday, July 3, 2026");
+    // Top-down emission order, one node per level.
+    expect(nodes.map((n) => n.id)).toEqual(["cont", "yr", "mo", "wk", "day"]);
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    expect(byId.get("cont")!.parentId).toBeNull();
+    expect(byId.get("cont")!.prevSiblingId).toBe("b");
+    expect(byId.get("cont")!.text).toBe(DAILY_CONTAINER_TEXT);
+    expect(byId.get("yr")!.parentId).toBe("cont");
+    expect(byId.get("yr")!.text).toBe("2026");
+    expect(byId.get("mo")!.parentId).toBe("yr");
+    expect(byId.get("mo")!.text).toBe("July");
+    expect(byId.get("wk")!.parentId).toBe("mo");
+    expect(byId.get("wk")!.text).toBe("Week 27");
+    expect(byId.get("day")!.parentId).toBe("wk");
+    expect(byId.get("day")!.prevSiblingId).toBeNull();
+    expect(byId.get("day")!.text).toBe("Friday, July 3, 2026");
   });
 
-  test("a new day goes on TOP of an existing container, pushing the old head down", () => {
-    const nodes = [
-      ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({
-        id: "old-day",
-        text: "Thursday, July 2, 2026",
-        parentId: "cont",
-      }),
-    ];
+  test("a second day in the same week reuses year/month/week, only minting the day", () => {
+    // 2026-07-13 and 2026-07-16 are both ISO Week 29.
+    const { nodes, rev } = seededWeek("2026-W29", [
+      makeNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
+    ]);
+    rev.set("d13", "2026-07-13");
     const plan = planEnsureDaily(index(nodes), {
-      dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      dateKey: "2026-07-16",
+      ...scaffold(rev, { dayId: "d16" }),
       timestamp: T,
     });
-    expect(inserted(plan.ops).map((n) => n.id)).toEqual(["day"]);
-    const repointed = updated(plan.ops)[0]!;
-    expect(repointed.id).toBe("old-day");
-    expect(repointed.prevSiblingId).toBe("day");
+    const inserts = inserted(plan.ops);
+    // ONLY the day is minted; the existing Y/M/W are reused.
+    expect(inserts.map((n) => n.id)).toEqual(["d16"]);
+    expect(inserts[0]!.parentId).toBe("wk");
+    // 07-16 sorts AFTER 07-13, so it chains from it (nothing to repoint).
+    expect(inserts[0]!.prevSiblingId).toBe("d13");
+    expect(updated(plan.ops)).toHaveLength(0);
   });
 
-  test("heals a blank existing day text and otherwise no-ops", () => {
+  test("a later day lands AHEAD of a trailing non-scaffold sibling under its week (finding 9)", () => {
+    // The week holds a day plus a stray bullet (outdented under it, decision 9,
+    // no daily-index mapping). A newer day chains after the last DAY, NOT past
+    // the trailing bullet at the absolute tail — the shared placement decision.
+    const { nodes, rev } = seededWeek("2026-W29", [
+      makeNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
+      makeNode({
+        id: "note",
+        text: "stray",
+        parentId: "wk",
+        prevSiblingId: "d13",
+      }),
+    ]);
+    rev.set("d13", "2026-07-13"); // `note` intentionally has no mapping
+    const plan = planEnsureDaily(index(nodes), {
+      dateKey: "2026-07-16",
+      ...scaffold(rev, { dayId: "d16" }),
+      timestamp: T,
+    });
+    const inserts = inserted(plan.ops);
+    expect(inserts.map((n) => n.id)).toEqual(["d16"]);
+    expect(inserts[0]!.prevSiblingId).toBe("d13"); // after the last DAY
+    // The trailing bullet is repointed to follow the new day (not left dangling).
+    const repointed = updated(plan.ops).find((n) => n.id === "note");
+    expect(repointed?.prevSiblingId).toBe("d16");
+  });
+
+  test("an out-of-order EARLIER day inserts BEFORE its later sibling (ascending)", () => {
+    // Week 29 already holds 07-16; ensuring 07-13 must land before it — retiring
+    // the old "past day lands on top" caveat (decision 4).
+    const { nodes, rev } = seededWeek("2026-W29", [
+      makeNode({ id: "d16", text: "Thursday, July 16, 2026", parentId: "wk" }),
+    ]);
+    rev.set("d16", "2026-07-16");
+    const plan = planEnsureDaily(index(nodes), {
+      dateKey: "2026-07-13",
+      ...scaffold(rev, { dayId: "d13" }),
+      timestamp: T,
+    });
+    const inserts = inserted(plan.ops);
+    expect(inserts.map((n) => n.id)).toEqual(["d13"]);
+    expect(inserts[0]!.prevSiblingId).toBeNull(); // new head of the week
+    // The later day is repointed to follow the earlier one.
+    const repointed = updated(plan.ops)[0]!;
+    expect(repointed.id).toBe("d16");
+    expect(repointed.prevSiblingId).toBe("d13");
+  });
+
+  test("years sort ascending under the container; a later year appends after an earlier one", () => {
+    const nodes = [
+      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT }),
+      makeNode({ id: "yr25", text: "2025", parentId: "cont" }),
+    ];
+    const rev = new Map<string, string>([
+      ["cont", "container"],
+      ["yr25", "2025"],
+    ]);
+    const plan = planEnsureDaily(index(nodes), {
+      dateKey: "2026-07-03",
+      ...scaffold(rev),
+      timestamp: T,
+    });
+    const byId = new Map(inserted(plan.ops).map((n) => [n.id, n]));
+    expect(byId.get("yr")!.parentId).toBe("cont");
+    expect(byId.get("yr")!.prevSiblingId).toBe("yr25"); // 2026 after 2025
+    expect(updated(plan.ops)).toHaveLength(0); // appended, nothing repointed
+  });
+
+  test("the Thursday rule places a late-December day in the NEXT ISO year", () => {
+    // 2025-12-29 (a Monday) is ISO 2026-W01: its Thursday is Jan 1, 2026, so the
+    // whole straddle week lives under YEAR 2026 > January > Week 1.
+    const plan = planEnsureDaily(index(fixture()), {
+      dateKey: "2025-12-29",
+      ...scaffold(),
+      timestamp: T,
+    });
+    const byId = new Map(inserted(plan.ops).map((n) => [n.id, n]));
+    expect(byId.get("yr")!.text).toBe("2026");
+    expect(byId.get("mo")!.text).toBe("January");
+    expect(byId.get("wk")!.text).toBe("Week 1");
+    expect(byId.get("day")!.parentId).toBe("wk");
+    expect(byId.get("day")!.text).toBe("Monday, December 29, 2025");
+  });
+
+  test("an existing (pre-migration flat) day is reused verbatim, NEVER re-scaffolded", () => {
+    // A flat day directly under the container (the old shape). Ensuring it again
+    // must not mint a parallel Y/M/W scaffold — the client migrates it later.
     const nodes = [
       ...fixture(),
       makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "day", text: "  ", parentId: "cont" }),
+      makeNode({ id: "flat", text: "Friday, July 3, 2026", parentId: "cont" }),
     ];
+    const rev = new Map<string, string>([
+      ["cont", "container"],
+      ["flat", "2026-07-03"],
+    ]);
     const plan = planEnsureDaily(index(nodes), {
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(rev, { dayId: "flat" }),
+      timestamp: T,
+    });
+    expect(plan.ops).toHaveLength(0); // present + titled -> no-op, no scaffold
+  });
+
+  test("heals a blank existing day's text without re-scaffolding", () => {
+    const { nodes, rev } = seededWeek("2026-W27", [
+      makeNode({ id: "day", text: "  ", parentId: "wk" }),
+    ]);
+    rev.set("day", "2026-07-03");
+    const plan = planEnsureDaily(index(nodes), {
+      dateKey: "2026-07-03",
+      ...scaffold(rev),
       timestamp: T,
     });
     expect(plan.ops).toHaveLength(1);
     expect(updated(plan.ops)[0]!.text).toBe("Friday, July 3, 2026");
-
-    const healthy = nodes.map((n) =>
-      n.id === "day" ? { ...n, text: "Friday, July 3, 2026" } : n,
-    );
-    expect(
-      planEnsureDaily(index(healthy), {
-        dateKey: "2026-07-03",
-        containerId: "cont",
-        dayId: "day",
-        timestamp: T,
-      }).ops,
-    ).toHaveLength(0);
   });
 
-  test("planAddToDaily appends after an existing day's last child", () => {
-    const nodes = [
-      ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "cont" }),
+  test("self-heals a claimed chain whose node creation was lost", () => {
+    // Every kv key is claimed (present in the reverse map) but NONE of the nodes
+    // exist in the tree — a crash between the atomic claims and the applyBatch.
+    // The next ensure re-materializes the whole chain.
+    const rev = new Map<string, string>([
+      ["cont", "container"],
+      ["yr", "2026"],
+      ["mo", "2026-07"],
+      ["wk", "2026-W27"],
+      ["day", "2026-07-03"],
+    ]);
+    const plan = planEnsureDaily(index(fixture()), {
+      dateKey: "2026-07-03",
+      ...scaffold(rev),
+      timestamp: T,
+    });
+    expect(inserted(plan.ops).map((n) => n.id)).toEqual([
+      "cont",
+      "yr",
+      "mo",
+      "wk",
+      "day",
+    ]);
+  });
+
+  test("planAddToDaily appends day content under the day, after its last child", () => {
+    const { nodes, rev } = seededWeek("2026-W27", [
+      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
       makeNode({ id: "entry1", text: "existing", parentId: "day" }),
-    ];
+    ]);
+    rev.set("day", "2026-07-03");
     const plan = planAddToDaily(index(nodes), {
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(rev),
       newNodeId: "entry2",
       text: "captured",
       isTask: true,
@@ -942,15 +1107,13 @@ describe("daily planning", () => {
   });
 
   test("planMirrorToDaily refuses mirroring the container onto its own day", () => {
-    const nodes = [
-      ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "cont" }),
-    ];
+    const { nodes, rev } = seededWeek("2026-W27", [
+      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
+    ]);
+    rev.set("day", "2026-07-03");
     const plan = planMirrorToDaily(index(nodes), {
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(rev),
       sourceId: "cont",
       mirrorId: "mm",
       timestamp: T,
@@ -958,19 +1121,17 @@ describe("daily planning", () => {
     expect(plan).toBeInstanceOf(MirrorCycle);
   });
 
-  test("planMirrorToDaily refuses mirroring the container onto a not-yet-created day", () => {
-    // Regression: a fresh day isn't in the snapshot, so walking up from its id
-    // finds nothing — the guard must fall back to the container it will hang
-    // under, or it builds a self-cycle (day under container, mirror->container
-    // under day).
+  test("planMirrorToDaily refuses mirroring an ancestor onto a not-yet-created day", () => {
+    // A fresh day/week/month/year aren't in the snapshot, so the cycle guard must
+    // fall back to the deepest EXISTING prospective parent (here the container),
+    // or it builds a self-cycle (mirror -> container landing under the container).
     const nodes = [
       ...fixture(),
       makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
     ];
     const plan = planMirrorToDaily(index(nodes), {
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day", // not present in the snapshot
+      ...scaffold(), // yr/mo/wk/day all absent from the snapshot
       sourceId: "cont",
       mirrorId: "mm",
       timestamp: T,
@@ -979,15 +1140,13 @@ describe("daily planning", () => {
   });
 
   test("planMirrorToDaily mirrors an outside node onto the day", () => {
-    const nodes = [
-      ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "cont" }),
-    ];
+    const { nodes, rev } = seededWeek("2026-W27", [
+      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
+    ]);
+    rev.set("day", "2026-07-03");
     const plan = planMirrorToDaily(index(nodes), {
       dateKey: "2026-07-03",
-      containerId: "cont",
-      dayId: "day",
+      ...scaffold(rev),
       sourceId: "a1",
       mirrorId: "mm",
       timestamp: T,

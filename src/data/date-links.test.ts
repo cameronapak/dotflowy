@@ -2,13 +2,28 @@ import { describe, expect, test } from "bun:test";
 
 import {
   DATE_LINK_PATTERN,
+  PROTECTED_SCAFFOLD_KINDS,
   addDays,
+  compareScaffoldKeys,
   dateSuggestions,
+  dayKeyToScaffoldChain,
+  dayKeyToWeekKey,
   flattenDateLinks,
   formatDateLabel,
   isValidDateKey,
   localDateKey,
+  monthKeyToYearKey,
+  monthLabel,
+  parentScaffoldKey,
   parseDateLink,
+  scaffoldKeyKind,
+  scaffoldLabel,
+  type ScaffoldSibling,
+  sortedInsertAfterId,
+  weekKeyToDayRange,
+  weekKeyToMonthKey,
+  weekLabel,
+  yearLabel,
 } from "./date-links";
 import { NODE_LINK_PATTERN } from "./node-links";
 
@@ -168,5 +183,262 @@ describe("dateSuggestions", () => {
   test("empty or non-date-ish queries return nothing", () => {
     expect(dateSuggestions("", today)).toEqual([]);
     expect(dateSuggestions("groceries", today)).toEqual([]);
+  });
+});
+
+// --- Daily calendar scaffold (issue #271) -----------------------------------
+// Ground truth is hand-verified by day-of-week arithmetic (Jan 1 2026 is a
+// Thursday; 2026 has 365 days; each result was cross-checked by calculation).
+
+describe("dayKeyToWeekKey (ISO 8601, Thursday-decides)", () => {
+  test("Jan 1 2026 is a Thursday -> its own W01", () => {
+    expect(dayKeyToWeekKey("2026-01-01")).toBe("2026-W01");
+  });
+
+  test("a late-Dec Monday joins the NEXT year's W01 (crosses the year)", () => {
+    // 2025-12-29 is a Monday whose week's Thursday is 2026-01-01.
+    expect(dayKeyToWeekKey("2025-12-29")).toBe("2026-W01");
+  });
+
+  test("a late-Dec Sunday stays in the OLD year's last week (W52)", () => {
+    // 2025-12-28 is a Sunday whose week's Thursday is 2025-12-25.
+    expect(dayKeyToWeekKey("2025-12-28")).toBe("2025-W52");
+  });
+
+  test("2026 is a 53-week ISO year (Dec 31 2026 is a Thursday -> W53)", () => {
+    expect(dayKeyToWeekKey("2026-12-31")).toBe("2026-W53");
+  });
+
+  test("the issue's straddle week (Jun 29 - Jul 5 2026) is W27", () => {
+    expect(dayKeyToWeekKey("2026-06-29")).toBe("2026-W27"); // Monday
+    expect(dayKeyToWeekKey("2026-07-05")).toBe("2026-W27"); // Sunday, same week
+  });
+
+  test("null on a malformed / non-calendar day key", () => {
+    expect(dayKeyToWeekKey("2026-13-45")).toBeNull();
+    expect(dayKeyToWeekKey("garbage")).toBeNull();
+  });
+});
+
+describe("weekKeyToMonthKey (the Thursday rule owns the straddle)", () => {
+  test("the Jun-29..Jul-5 straddle week is owned WHOLE by July", () => {
+    // Thursday 2026-07-02 -> July, even though 3 of its days are in June.
+    expect(weekKeyToMonthKey("2026-W27")).toBe("2026-07");
+  });
+
+  test("a year-crossing week is owned by the Thursday's month/year", () => {
+    expect(weekKeyToMonthKey("2026-W01")).toBe("2026-01"); // Thu 2026-01-01
+    expect(weekKeyToMonthKey("2025-W52")).toBe("2025-12"); // Thu 2025-12-25
+  });
+
+  test("null on a nonexistent week (W53 in a 52-week year rolls out)", () => {
+    expect(weekKeyToMonthKey("2025-W53")).toBeNull(); // 2025 has 52 ISO weeks
+    expect(weekKeyToMonthKey("2026-W00")).toBeNull();
+    expect(weekKeyToMonthKey("2026-07")).toBeNull(); // not a week key
+  });
+});
+
+describe("monthKeyToYearKey", () => {
+  test("strips to the year", () => {
+    expect(monthKeyToYearKey("2026-07")).toBe("2026");
+  });
+
+  test("null on malformed / out-of-range", () => {
+    expect(monthKeyToYearKey("2026-13")).toBeNull();
+    expect(monthKeyToYearKey("2026-00")).toBeNull();
+    expect(monthKeyToYearKey("2026")).toBeNull();
+  });
+});
+
+describe("scaffoldKeyKind", () => {
+  test("classifies each valid shape", () => {
+    expect(scaffoldKeyKind("2026")).toBe("year");
+    expect(scaffoldKeyKind("2026-07")).toBe("month");
+    expect(scaffoldKeyKind("2026-W29")).toBe("week");
+    expect(scaffoldKeyKind("2026-07-16")).toBe("day");
+    expect(scaffoldKeyKind("container")).toBe("container");
+  });
+
+  test("null for shape-shaped-but-invalid and unknown strings", () => {
+    expect(scaffoldKeyKind("2026-13-01")).toBeNull(); // bad day
+    expect(scaffoldKeyKind("2026-13")).toBeNull(); // bad month
+    expect(scaffoldKeyKind("2026-W99")).toBeNull(); // bad week
+    expect(scaffoldKeyKind("hello")).toBeNull();
+    expect(scaffoldKeyKind("")).toBeNull();
+  });
+});
+
+describe("parentScaffoldKey (the Daily > Y > M > W > D climb)", () => {
+  test("walks a straddle day all the way to its year", () => {
+    // 2026-06-29 (June) -> W27 -> July (Thursday rule) -> 2026.
+    const week = parentScaffoldKey("2026-06-29");
+    expect(week).toBe("2026-W27");
+    const month = parentScaffoldKey(week!);
+    expect(month).toBe("2026-07");
+    const year = parentScaffoldKey(month!);
+    expect(year).toBe("2026");
+    expect(parentScaffoldKey(year!)).toBeNull();
+  });
+
+  test("year is the top; container and unknown have no parent", () => {
+    expect(parentScaffoldKey("2026")).toBeNull();
+    expect(parentScaffoldKey("container")).toBeNull();
+    expect(parentScaffoldKey("nonsense")).toBeNull();
+  });
+});
+
+describe("compareScaffoldKeys (chronological ascending)", () => {
+  test("weeks order across a year boundary (2025-W52 < 2026-W01)", () => {
+    expect(compareScaffoldKeys("2025-W52", "2026-W01")).toBeLessThan(0);
+    expect(compareScaffoldKeys("2026-W01", "2025-W52")).toBeGreaterThan(0);
+  });
+
+  test("weeks order within a year by number, not by string", () => {
+    expect(compareScaffoldKeys("2026-W02", "2026-W29")).toBeLessThan(0);
+    expect(compareScaffoldKeys("2026-W29", "2026-W29")).toBe(0);
+  });
+
+  test("years, months, and days order chronologically", () => {
+    expect(compareScaffoldKeys("2025", "2026")).toBeLessThan(0);
+    expect(compareScaffoldKeys("2026-01", "2026-12")).toBeLessThan(0);
+    expect(compareScaffoldKeys("2026-07-08", "2026-07-16")).toBeLessThan(0);
+  });
+
+  test("a real sibling list sorts ascending", () => {
+    const weeks = ["2026-W29", "2025-W52", "2026-W01", "2026-W02"];
+    expect([...weeks].sort(compareScaffoldKeys)).toEqual([
+      "2025-W52",
+      "2026-W01",
+      "2026-W02",
+      "2026-W29",
+    ]);
+  });
+});
+
+describe("display helpers", () => {
+  test("yearLabel is the key", () => {
+    expect(yearLabel("2026")).toBe("2026");
+  });
+
+  test("monthLabel is the en-US month name", () => {
+    expect(monthLabel("2026-07")).toBe("July");
+    expect(monthLabel("2026-01")).toBe("January");
+    expect(monthLabel("2026-13")).toBe("2026-13"); // falls back to the key
+  });
+
+  test("weekLabel is 'Week N' with no leading zero", () => {
+    expect(weekLabel("2026-W29")).toBe("Week 29");
+    expect(weekLabel("2026-W01")).toBe("Week 1");
+    expect(weekLabel("2026-W99")).toBe("2026-W99"); // nonexistent -> raw key
+  });
+
+  test("weekKeyToDayRange gives the Monday and Sunday day-keys", () => {
+    // 2026-W29 has Thursday 2026-07-16 -> Mon 2026-07-13, Sun 2026-07-19.
+    expect(weekKeyToDayRange("2026-W29")).toEqual({
+      monday: "2026-07-13",
+      sunday: "2026-07-19",
+    });
+    // A year-crossing week's range spans the boundary.
+    expect(weekKeyToDayRange("2026-W01")).toEqual({
+      monday: "2025-12-29",
+      sunday: "2026-01-04",
+    });
+    expect(weekKeyToDayRange("2025-W53")).toBeNull();
+  });
+});
+
+describe("dayKeyToScaffoldChain (the one Thursday-rule waterfall)", () => {
+  test("walks day -> week -> month -> year", () => {
+    expect(dayKeyToScaffoldChain("2026-07-16")).toEqual({
+      weekKey: "2026-W29",
+      monthKey: "2026-07",
+      yearKey: "2026",
+    });
+  });
+
+  test("a straddle day is owned WHOLE by its Thursday's month/year", () => {
+    // 2026-06-29 (June) -> W27 whose Thursday (Jul 2) is July 2026.
+    expect(dayKeyToScaffoldChain("2026-06-29")).toEqual({
+      weekKey: "2026-W27",
+      monthKey: "2026-07",
+      yearKey: "2026",
+    });
+  });
+
+  test("null on a malformed / non-calendar day key", () => {
+    expect(dayKeyToScaffoldChain("2026-13-45")).toBeNull();
+    expect(dayKeyToScaffoldChain("garbage")).toBeNull();
+  });
+});
+
+describe("scaffoldLabel + PROTECTED_SCAFFOLD_KINDS", () => {
+  test("scaffoldLabel dispatches on kind, raw key otherwise", () => {
+    expect(scaffoldLabel("2026")).toBe("2026");
+    expect(scaffoldLabel("2026-07")).toBe("July");
+    expect(scaffoldLabel("2026-W29")).toBe("Week 29");
+    // A day / container / unknown key falls through to itself (text owned else).
+    expect(scaffoldLabel("2026-07-16")).toBe("2026-07-16");
+    expect(scaffoldLabel("container")).toBe("container");
+  });
+
+  test("PROTECTED_SCAFFOLD_KINDS is container + Y/M/W, never day", () => {
+    expect(PROTECTED_SCAFFOLD_KINDS.has("container")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("year")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("month")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("week")).toBe(true);
+    expect(PROTECTED_SCAFFOLD_KINDS.has("day")).toBe(false);
+  });
+});
+
+describe("sortedInsertAfterId (shared placement, client + Worker)", () => {
+  test("empty list -> head (null)", () => {
+    expect(sortedInsertAfterId([], "2026-07-16")).toBeNull();
+  });
+
+  test("middle insert lands after the greatest earlier same-kind sibling", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "d1", key: "2026-07-01" },
+      { id: "d2", key: "2026-07-08" },
+      { id: "d3", key: "2026-07-20" },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-07-16")).toBe("d2");
+  });
+
+  test("a new greatest key lands AHEAD of a trailing non-scaffold sibling", () => {
+    // The Worker used to append past trailing bullets at the absolute tail; the
+    // shared function chains after the last DAY, before the bullet (finding 9).
+    const siblings: ScaffoldSibling[] = [
+      { id: "d1", key: "2026-07-01" },
+      { id: "d2", key: "2026-07-08" },
+      { id: "bullet", key: null },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-07-20")).toBe("d2");
+  });
+
+  test("robust to an UNSORTED same-kind list (best-effort during migration)", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "d3", key: "2026-07-20" },
+      { id: "d1", key: "2026-07-01" },
+      { id: "d2", key: "2026-07-08" },
+    ];
+    // Predecessor is the greatest key strictly < newKey, wherever it sits.
+    expect(sortedInsertAfterId(siblings, "2026-07-16")).toBe("d2");
+  });
+
+  test("smaller than every same-kind sibling, a bullet leads -> after the bullet", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "bullet", key: null },
+      { id: "d2", key: "2026-07-08" },
+      { id: "d3", key: "2026-07-16" },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-07-01")).toBe("bullet");
+  });
+
+  test("only same-kind siblings count (a week among months appends)", () => {
+    const siblings: ScaffoldSibling[] = [
+      { id: "m1", key: "2026-01" },
+      { id: "m2", key: "2026-07" },
+    ];
+    expect(sortedInsertAfterId(siblings, "2026-W29")).toBe("m2");
   });
 });

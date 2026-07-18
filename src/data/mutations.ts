@@ -39,6 +39,10 @@ function update(nodeId: string, patch: Partial<Node>) {
  * `text` seeds the new node's text -- used by the Enter-mid-bullet split, where
  * everything right of the caret moves into this new sibling.
  *
+ * `id` lets a caller supply the node id up front (the daily plugin mints it
+ * before an atomic claim, then splices the winner in at a sorted slot); defaults
+ * to a fresh id.
+ *
  * Returns the new node's id so the editor can focus it.
  */
 export function insertSibling(
@@ -48,8 +52,8 @@ export function insertSibling(
   isTask = false,
   text = "",
   kind: NodeKind = null,
+  id = createId(),
 ): string {
-  const id = createId();
   const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.

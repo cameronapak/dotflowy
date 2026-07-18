@@ -21,6 +21,11 @@ import { Data } from "effect";
 import type { NodeKind } from "../src/data/schema";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
+import {
+  dayKeyToScaffoldChain,
+  scaffoldLabel,
+  sortedInsertAfterId,
+} from "../src/data/date-links";
 import { redactSpoilers } from "../src/data/spoiler";
 import {
   type TreeIndex,
@@ -704,13 +709,24 @@ export function planAddSubtree(
 
 // --- Daily-note planning ------------------------------------------------------
 // The daily plugin's identity model, server-side: the `daily-index` kv
-// side-collection maps `container` -> the "Daily" container node and a local
-// `YYYY-MM-DD` key -> that day's note. The MCP handler CLAIMS both ids through
-// the DO's atomic `getOrCreateKv` first (same race-killer the client uses —
-// daily-index.ts `claimMapping`), then this planner materializes whichever node
-// rows are missing: container appended at the end of the top level, day
-// inserted as the container's FIRST child (newest on top), both exactly like
-// the client's ensureContainer/ensureDay.
+// side-collection maps `container` -> the "Daily" container node and every
+// scaffold key -> its node. Since issue #271 a day no longer hangs directly off
+// the container: it lives in a calendar hierarchy `Daily > YYYY > Month > Week >
+// Day` (year "2026", month "July", week "Week 29" — ISO 8601, Monday start,
+// atomic weeks whose Thursday decides the owning month AND year). The scaffold
+// keys join the same kv beside `container`, bare + shape-disambiguated
+// (`2026`, `2026-07`, `2026-W29`, `2026-07-16`); all the calendar math lives in
+// the dependency-free `src/data/date-links.ts` (imported above), so this Worker
+// twin and the client can't drift.
+//
+// The MCP handler CLAIMS every level's id through the DO's atomic `getOrCreateKv`
+// first (same race-killer the client uses — daily-index.ts `claimMapping` /
+// `claimDailyScaffold` in mcp-tools.ts), then this planner materializes whichever
+// node rows are missing, TOP-DOWN, each sorted-inserted chronologically ascending
+// among its siblings. Because the claims are idempotent, a level whose prior
+// creation was lost (a crash between claim and commit) self-heals here on the
+// next ensure. Ordering compares scaffold keys via the daily-index reverse map
+// (`keyByNodeId`), exactly like the client's sorted insertion.
 
 /** Canonical container text — keep in sync with the daily plugin's
  *  `DAILY_CONTAINER_TEXT` (cosmetic; identity is the kv mapping). */
@@ -771,60 +787,211 @@ export function isValidDateKey(dateKey: string): boolean {
 }
 
 /**
- * Materialize the daily container and/or day node the kv claims settled on,
- * for whichever of the two isn't in the snapshot yet. Also heals a blank
- * existing day's text (client `ensureDay` parity). Returns ops only — the
- * caller stacks its own add/mirror ops on top and commits ONE batch.
+ * The claimed calendar-scaffold node ids plus the daily-index reverse map
+ * (nodeId -> scaffold key), threaded into every daily planner (issue #271). The
+ * MCP handler claims each id atomically via `getOrCreateKv` (mcp-tools.ts
+ * `claimDailyScaffold`) BEFORE planning, so concurrent agents converge on ONE
+ * node per level; the reverse map drives the chronological-ascending sibling
+ * insertion (`planSortedInsert`).
+ */
+export interface DailyScaffold {
+  containerId: string;
+  /** The Y/M/W ids are claimed ONLY for a genuinely NEW day (mcp-tools.ts
+   *  `claimDailyScaffold`); an existing day reuses its place and `planEnsureDaily`
+   *  early-returns without them, so they're honestly optional (finding 6). */
+  yearId?: string;
+  monthId?: string;
+  weekId?: string;
+  dayId: string;
+  keyByNodeId: ReadonlyMap<string, string>;
+}
+
+/**
+ * The sorted-insertion point for a new scaffold node keyed `newKey` among
+ * `parentId`'s current children: the predecessor to chain from (null = head) and
+ * the follower to repoint (null = tail). Derives the position from the ONE shared
+ * `sortedInsertAfterId` (date-links.ts), so the Worker and the client can't
+ * diverge on the same siblings (finding 9) — greatest same-kind predecessor,
+ * comparing ONLY same-kind siblings (resolved through the reverse map), so a
+ * container that still holds pre-migration flat day nodes, or any sibling with no
+ * mapping, can't tear the year chain (the client migrates those stragglers later,
+ * decision 8). Reads `index` only.
+ */
+function planSortedInsert(
+  index: TreeIndex,
+  parentId: string,
+  newKey: string,
+  keyByNodeId: ReadonlyMap<string, string>,
+): { prevSiblingId: string | null; follower: Node | null } {
+  const siblings = childrenOf(index, parentId);
+  const afterId = sortedInsertAfterId(
+    siblings.map((s) => ({ id: s.id, key: keyByNodeId.get(s.id) ?? null })),
+    newKey,
+  );
+  if (afterId === null) {
+    return { prevSiblingId: null, follower: siblings[0] ?? null };
+  }
+  const i = siblings.findIndex((s) => s.id === afterId);
+  const follower =
+    i !== -1 && i + 1 < siblings.length ? siblings[i + 1]! : null;
+  return { prevSiblingId: afterId, follower };
+}
+
+/** Emit a sorted-inserted scaffold/day node under `parentId` at its
+ *  chronological position, plus the follower repoint. Appends onto `ops`. */
+function emitSortedInsert(
+  ops: ChangeOp[],
+  index: TreeIndex,
+  args: {
+    id: string;
+    parentId: string;
+    key: string;
+    text: string;
+    keyByNodeId: ReadonlyMap<string, string>;
+    timestamp: number;
+  },
+): void {
+  const { prevSiblingId, follower } = planSortedInsert(
+    index,
+    args.parentId,
+    args.key,
+    args.keyByNodeId,
+  );
+  ops.push({
+    op: "insert",
+    value: newNode({
+      id: args.id,
+      parentId: args.parentId,
+      prevSiblingId,
+      text: args.text,
+      timestamp: args.timestamp,
+    }),
+  });
+  if (follower)
+    ops.push(updateOp(follower, { prevSiblingId: args.id }, args.timestamp));
+}
+
+/**
+ * Materialize whichever nodes of the `Daily > YYYY > Month > Week > Day` chain
+ * are needed to place `dateKey`'s day, each sorted-inserted chronologically
+ * ascending among its siblings (issue #271). Returns ops only — the caller
+ * stacks its own add/mirror ops on top and commits ONE batch.
+ *
+ * An EXISTING day is reused verbatim (only a blank title is healed) and NEVER
+ * re-scaffolded — a pre-migration flat day stays where it is until the client
+ * migrates it (decision 8). Only a brand-new day builds the chain down to its
+ * week. The Y/M/W levels are created only when missing, so a second day in the
+ * same week reuses the existing year/month/week. Idempotent + self-healing: the
+ * kv claims are permanent, so a chain whose node creation was lost (a crash
+ * between claim and commit) fully re-materializes here on the next ensure.
  */
 export function planEnsureDaily(
   index: TreeIndex,
-  args: {
-    dateKey: string;
-    containerId: string;
-    dayId: string;
-    timestamp: number;
-  },
+  args: { dateKey: string; timestamp: number } & DailyScaffold,
 ): { ops: ChangeOp[] } {
+  const {
+    dateKey,
+    containerId,
+    yearId,
+    monthId,
+    weekId,
+    dayId,
+    keyByNodeId,
+    timestamp,
+  } = args;
   const ops: ChangeOp[] = [];
-  const containerExists = index.byId.has(args.containerId);
-  if (!containerExists) {
+
+  // The container: the protected root, appended at the end of the top level.
+  if (!index.byId.has(containerId)) {
     const tops = childrenOf(index, null);
     const last = tops.length ? tops[tops.length - 1]! : null;
     ops.push({
       op: "insert",
       value: newNode({
-        id: args.containerId,
+        id: containerId,
         parentId: null,
         prevSiblingId: last ? last.id : null,
         text: DAILY_CONTAINER_TEXT,
-        timestamp: args.timestamp,
+        timestamp,
       }),
     });
   }
 
-  const day = index.byId.get(args.dayId);
-  if (!day) {
-    const head = containerExists
-      ? (childrenOf(index, args.containerId)[0] ?? null)
-      : null;
-    ops.push({
-      op: "insert",
-      value: newNode({
-        id: args.dayId,
-        parentId: args.containerId,
-        prevSiblingId: null,
-        text: formatDayText(args.dateKey),
-        timestamp: args.timestamp,
-      }),
-    });
-    if (head)
-      ops.push(updateOp(head, { prevSiblingId: args.dayId }, args.timestamp));
-  } else if (!day.text.trim()) {
-    ops.push(
-      updateOp(day, { text: formatDayText(args.dateKey) }, args.timestamp),
-    );
+  // An existing day: reuse as-is (heal a blank title only), no scaffold.
+  const existingDay = index.byId.get(dayId);
+  if (existingDay) {
+    if (!existingDay.text.trim())
+      ops.push(
+        updateOp(existingDay, { text: formatDayText(dateKey) }, timestamp),
+      );
+    return { ops };
   }
 
+  // A new day: derive its calendar chain (the ONE Thursday-rule waterfall).
+  const chain = dayKeyToScaffoldChain(dateKey);
+
+  // Defensive fallback (unreachable for a validated dateKey with claimed ids): a
+  // key that can't be placed on the calendar — or a caller that didn't claim the
+  // Y/M/W ids (only happens off the new-day path, where they're always present) —
+  // skips the scaffold and lands the day directly under the container, so the
+  // planner stays TOTAL and never emits a partial chain.
+  if (!chain || !yearId || !monthId || !weekId) {
+    emitSortedInsert(ops, index, {
+      id: dayId,
+      parentId: containerId,
+      key: dateKey,
+      text: formatDayText(dateKey),
+      keyByNodeId,
+      timestamp,
+    });
+    return { ops };
+  }
+
+  // Year > Month > Week: mint whichever level is missing, each sorted ascending
+  // among its siblings. A just-created parent has no existing children (it isn't
+  // in `index`), so its child lands as the head — correct by construction.
+  const levels: { id: string; key: string; parentId: string; text: string }[] =
+    [
+      {
+        id: yearId,
+        key: chain.yearKey,
+        parentId: containerId,
+        text: scaffoldLabel(chain.yearKey),
+      },
+      {
+        id: monthId,
+        key: chain.monthKey,
+        parentId: yearId,
+        text: scaffoldLabel(chain.monthKey),
+      },
+      {
+        id: weekId,
+        key: chain.weekKey,
+        parentId: monthId,
+        text: scaffoldLabel(chain.weekKey),
+      },
+    ];
+  for (const level of levels) {
+    if (index.byId.has(level.id)) continue;
+    emitSortedInsert(ops, index, {
+      id: level.id,
+      parentId: level.parentId,
+      key: level.key,
+      text: level.text,
+      keyByNodeId,
+      timestamp,
+    });
+  }
+
+  // The day, under its week, sorted chronologically ascending.
+  emitSortedInsert(ops, index, {
+    id: dayId,
+    parentId: weekId,
+    key: dateKey,
+    text: formatDayText(dateKey),
+    keyByNodeId,
+    timestamp,
+  });
   return { ops };
 }
 
@@ -834,15 +1001,13 @@ export function planAddToDaily(
   index: TreeIndex,
   args: {
     dateKey: string;
-    containerId: string;
-    dayId: string;
     newNodeId: string;
     text: string;
     isTask: boolean;
     kind?: NodeKind;
     origin?: string | null;
     timestamp: number;
-  },
+  } & DailyScaffold,
 ): { ops: ChangeOp[]; nodeId: string } {
   const { ops } = planEnsureDaily(index, args);
   // A pre-existing day may have children; a just-planned one can't.
@@ -875,13 +1040,11 @@ export function planAddSubtreeToDaily(
   args: {
     nodes: readonly SubtreeInput[];
     dateKey: string;
-    containerId: string;
-    dayId: string;
     origin?: string | null;
     timestamp: number;
     newId: () => string;
     maxNodes: number;
-  },
+  } & DailyScaffold,
 ): { ops: ChangeOp[]; rootIds: string[] } | EmptyForest | BatchTooLarge {
   const tooBig = guardForestSize(args.nodes, args.maxNodes);
   if (tooBig) return tooBig;
@@ -910,13 +1073,11 @@ export function planMirrorToDaily(
   index: TreeIndex,
   args: {
     dateKey: string;
-    containerId: string;
-    dayId: string;
     sourceId: string;
     mirrorId: string;
     origin?: string | null;
     timestamp: number;
-  },
+  } & DailyScaffold,
 ):
   | { ops: ChangeOp[]; nodeId: string; sourceId: string }
   | NodeNotFound
@@ -925,15 +1086,23 @@ export function planMirrorToDaily(
   if (!source) return new NodeNotFound({ nodeId: args.sourceId });
 
   const trueSourceId = trueSourceOf(index, args.sourceId);
-  // Cycle guard: the mirror lands under the day, which is (or will become) a
-  // child of the container. If the day isn't in the snapshot yet, walking up
-  // from its id finds nothing — so check against the container it will hang
-  // under, otherwise mirroring the container onto a fresh day slips through and
-  // builds a self-cycle (day under container, mirror->container under day). An
-  // existing day is checked directly (also catches mirroring the day onto itself).
+  // Cycle guard: the mirror lands under the day, which is (or will become) the
+  // leaf of the container -> year -> month -> week -> day chain. Any of those
+  // ancestors may not be in the snapshot yet, so `wouldMirrorCycle` (which walks
+  // the LIVE index) must run against the DEEPEST prospective parent that already
+  // exists — otherwise mirroring the container (or an intermediate scaffold node)
+  // onto a fresh day slips through and builds a self-cycle. Walking day -> week
+  // -> month -> year -> container to the first existing node catches every case
+  // (an existing day is checked directly, also catching a mirror-onto-itself).
   const cycleParent = index.byId.has(args.dayId)
     ? args.dayId
-    : args.containerId;
+    : args.weekId && index.byId.has(args.weekId)
+      ? args.weekId
+      : args.monthId && index.byId.has(args.monthId)
+        ? args.monthId
+        : args.yearId && index.byId.has(args.yearId)
+          ? args.yearId
+          : args.containerId;
   if (wouldMirrorCycle(index, trueSourceId, cycleParent)) {
     return new MirrorCycle({ sourceId: trueSourceId });
   }

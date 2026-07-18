@@ -3,7 +3,6 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { nodesCollection } from "../data/collection";
-import { buildTreeIndex } from "../data/tree";
 import { subscribeTree } from "../data/tree-store";
 import { getOrCreateDay } from "../plugins/daily";
 import { localDateKey } from "../plugins/daily/daily-index";
@@ -29,10 +28,9 @@ function TodayRedirect() {
     void (async () => {
       try {
         await nodesCollection.toArrayWhenReady();
-        const index = buildTreeIndex(nodesCollection.toArray);
         // /today is a write-intent surface (ADR 0041): seed an empty entry line
         // so the caret has somewhere to land, and focus=last puts it there.
-        const dayId = await getOrCreateDay(localDateKey(), index, {
+        const dayId = await getOrCreateDay(localDateKey(), {
           seedEntryLine: true,
         });
         if (dayId) {
