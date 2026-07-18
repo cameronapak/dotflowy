@@ -58,7 +58,12 @@ import {
   moveNode,
   setText,
 } from "../../data/mutations";
-import { runStructural, runStructuralSliced } from "../../data/structural";
+import { isNodesLimitError } from "../../data/nodes-client-effect";
+import {
+  runStructural,
+  runStructuralSliced,
+  runStructuralTracked,
+} from "../../data/structural";
 import { buildTreeIndex, childrenOf, createId } from "../../data/tree";
 import {
   definePlugin,
@@ -187,6 +192,15 @@ function healExistingDay(
   }
 }
 
+/** Outcome of a day get-or-create. `id` non-null = the durable day node. `id`
+ *  null = the create failed and rolled back; `cause` is the persist rejection
+ *  (null on the echo-missing tail) so callers can distinguish the free-tier
+ *  ceiling (#170, `isNodesLimitError` -- its upgrade toast ALREADY fired, F3)
+ *  and quick-add's Seam-L rejection can rethrow the REAL NodesLimitError.
+ *  Contained to this module; {@link getOrCreateDay} translates it back to
+ *  `string | null` for external callers. */
+type NewDayResult = { id: string } | { id: null; cause: unknown };
+
 /**
  * Materialize a genuinely NEW day and whichever calendar levels above it are
  * missing, in ONE structural batch (ADR 0009). Called only when the day node is
@@ -204,7 +218,7 @@ async function materializeNewDay(
   day: { id: string; won: boolean; present: boolean },
   key: string,
   seedEntryLine: boolean,
-): Promise<string | null> {
+): Promise<NewDayResult> {
   // The day is absent -> derive + claim its Y/M/W chain (concurrently). A
   // non-calendar key (defensive) lands the day directly under the container.
   const chain = dayKeyToScaffoldChain(key);
@@ -225,7 +239,7 @@ async function materializeNewDay(
   if (claimed.some((c) => !c.won && !c.present)) resyncNodes();
 
   const parentId = chain && week ? week.id : container.id;
-  runStructural(() => {
+  const { persisted } = runStructuralTracked(() => {
     // Container: appended at the end of the top level (special, not sorted).
     if (!hasNode(container.id)) {
       const tops = childrenOf(buildTreeIndex(nodesCollection.toArray), null);
@@ -263,7 +277,27 @@ async function materializeNewDay(
     if (seedEntryLine && !hasChildInLiveCollection(day.id))
       appendChild(day.id, null, "");
   });
-  return hasNode(day.id) ? day.id : null;
+  // Phantom-success guard (#233): the optimistic overlay makes `hasNode(day.id)`
+  // true the instant the batch applies, so returning the id off it would let a
+  // caller `setMapping` + navigate to a day that VANISHES on a failed send. Gate
+  // the ok-return on the batch's durable echo (the OPML-import discipline, ADR
+  // 0037). Two null paths, both reported honestly:
+  //   1. PERSIST REJECTED -> the send failed and the overlay rolled back, so
+  //      nothing landed. `cause` carries the rejection so each caller can make
+  //      its OWN cap-vs-generic toast call (F3) and quick-add's Seam-L rejection
+  //      can rethrow a real NodesLimitError.
+  //   2. ECHO MISSING -> persist resolved but waitForSeqE COMPLETES on its 8s
+  //      timeout without failing (collection.ts), so `hasNode(day.id)` can be
+  //      false though the POST committed. `resyncNodes()` self-heals (the durable
+  //      mapping makes the next attempt succeed); a null `cause` = non-cap (F4).
+  try {
+    await persisted;
+  } catch (err) {
+    return { id: null, cause: err };
+  }
+  if (hasNode(day.id)) return { id: day.id };
+  resyncNodes();
+  return { id: null, cause: null };
 }
 
 /** Does `parentId` have any child in the LIVE nodes collection? Used for the
@@ -444,16 +478,37 @@ async function runDailyMigration(
   toast.success("Organized your daily notes by week");
 }
 
-/** Ensure the container + the day exist and return the day's node id (no nav).
- *  Reads the LIVE collection throughout (not a passed index) so the Today button,
- *  the `/` command, AND the Cmd+K virtual action (Seam J -- which has no
- *  `PluginContext`) all reuse the exact same get-or-create (ADR 0001).
- *  Async: it may round-trip the atomic claims before the node ids are settled. */
-async function getOrCreateDay(
+/** In-flight NEW-day creates, keyed by date key (F1). A create's optimistic
+ *  rows + mapping exist the instant its batch applies, but its DURABILITY isn't
+ *  confirmed until the echo lands -- so a concurrent caller for the SAME key
+ *  reading those optimistic rows would return a phantom id (the #233 defect,
+ *  re-openable because quick-add borns with `trackNavigation:false` and
+ *  `withDailyNavigation` is a counter, not a mutex). A same-key second caller
+ *  JOINS the entry here instead of re-running the fast path. Only the CREATE
+ *  path registers, so an already-durable day never touches this map. The map
+ *  caches the RAW {@link NewDayResult} -- never a toast-translated chain -- so
+ *  every joiner evaluates its OWN toast/rejection decision on the shared result
+ *  (a baked-in side effect would inherit the ORIGINATOR's copy/suppression). */
+const inFlightDays = new Map<string, Promise<NewDayResult>>();
+
+/** The shared get-or-create body: readiness + claims + migration + heal-or-
+ *  create, single-flighted per key. Returns the RAW {@link NewDayResult} and
+ *  performs NO toasting -- callers ({@link getOrCreateDay}, the Seam-L
+ *  `captureDestination.resolve`) each translate per their own surface. */
+async function getOrCreateDayResult(
   key: string,
   opts?: { seedEntryLine?: boolean; trackNavigation?: boolean },
-): Promise<string | null> {
-  const run = async () => {
+): Promise<NewDayResult> {
+  const run = async (): Promise<NewDayResult> => {
+    // Single-flight join, checked FIRST (F1): while a same-key create is in
+    // flight, the claims + `day.present` fast path below read the creator's
+    // OPTIMISTIC rows (the claim already set the mapping, the batch already
+    // applied locally) -- durability pending -- so they'd return a phantom via
+    // healExistingDay without ever reaching the create path's check. The present
+    // fast path cannot be trusted while a create is in flight; join it instead.
+    // With nothing in flight, the genuinely-durable fast path runs untouched.
+    const joined = inFlightDays.get(key);
+    if (joined) return joined;
     // Freshest cross-device mappings before placement OR the migration plan
     // (finding 4): a cold load hasn't fetched the index yet, and remote-created
     // days' MAPPINGS aren't broadcast -- either leaves sorted insertion / the
@@ -473,9 +528,26 @@ async function getOrCreateDay(
     // placement is the migration's job (finding 3).
     if (day.present) {
       healExistingDay(day.id, key, opts?.seedEntryLine ?? false);
-      return day.id;
+      return { id: day.id };
     }
-    return materializeNewDay(container, day, key, opts?.seedEntryLine ?? false);
+    // Re-check at the create seam (F1): a caller that entered run() BEFORE this
+    // create registered (the top check saw nothing) can land here after its own
+    // claims -- join rather than double-create. Registered synchronously (no
+    // await between the materializeNewDay call and the `set`), deleted in
+    // `finally`. A joiner inherits this create's seed decision.
+    const inFlight = inFlightDays.get(key);
+    if (inFlight) return inFlight;
+    const creating = materializeNewDay(
+      container,
+      day,
+      key,
+      opts?.seedEntryLine ?? false,
+    );
+    inFlightDays.set(key, creating);
+    void creating.finally(() => {
+      if (inFlightDays.get(key) === creating) inFlightDays.delete(key);
+    });
+    return creating;
   };
   // `trackNavigation: false` skips the shared nav-pending signal (ADR 0049): a
   // background quick-add born resolves today's note WITHOUT spinning the
@@ -483,16 +555,40 @@ async function getOrCreateDay(
   return opts?.trackNavigation === false ? run() : withDailyNavigation(run);
 }
 
+/** Ensure the container + the day exist and return the day's node id (no nav).
+ *  Reads the LIVE collection throughout (not a passed index) so the Today button,
+ *  the `/` command, AND the Cmd+K virtual action (Seam J -- which has no
+ *  `PluginContext`) all reuse the exact same get-or-create (ADR 0001).
+ *  Async: it may round-trip the atomic claims before the node ids are settled.
+ *  On a failed create THIS caller decides its own toast (F3): the cap skips the
+ *  generic notice (the upgrade toast already fired), everything else shows the
+ *  caller's `failureToast` copy -- per-caller even across an in-flight join. */
+async function getOrCreateDay(
+  key: string,
+  opts?: {
+    seedEntryLine?: boolean;
+    trackNavigation?: boolean;
+    /** Copy for the generic "couldn't open" toast when the create fails for a
+     *  NON-cap reason. Default: today's-note copy. */
+    failureToast?: string;
+  },
+): Promise<string | null> {
+  const result = await getOrCreateDayResult(key, opts);
+  if (result.id !== null) return result.id;
+  if (!isNodesLimitError(result.cause))
+    toast.error(opts?.failureToast ?? "Couldn't open today's daily note");
+  return null;
+}
+
 export { getOrCreateDay };
 
 /** get-or-create the day, then zoom to it -- a date-chip click (a reference,
  *  seed-free; the Today button navigates the route with focus=last instead). */
 async function goToDate(key: string, ctx: PluginContext): Promise<void> {
-  const dayId = await getOrCreateDay(key);
-  if (!dayId) {
-    toast.error("Couldn't open that daily note");
-    return;
-  }
+  const dayId = await getOrCreateDay(key, {
+    failureToast: "Couldn't open that daily note",
+  });
+  if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
   ctx.nav.zoom(dayId);
 }
 
@@ -534,10 +630,7 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
             const dayId = await getOrCreateDay(localDateKey(), {
               seedEntryLine: true,
             });
-            if (!dayId) {
-              toast.error("Couldn't open today's daily note");
-              return;
-            }
+            if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
             navigate({
               to: "/$nodeId",
               params: { nodeId: dayId },
@@ -731,16 +824,15 @@ export default definePlugin({
       available: () => true,
       run: async (nodeId, ctx) => {
         const todayId = await getOrCreateDay(localDateKey());
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         if (todayId === nodeId) return; // can't move today's note under itself
-        const kids = childrenOf(ctx.tree, todayId);
-        const after = kids.length ? kids[kids.length - 1]!.id : null;
+        // Reuse moveManyNodes (F5): it rebuilds the index per move and appends
+        // as today's last child -- identical to the old hand-rolled block and the
+        // runMany twin below. Capture the FRESH index (today may have just been
+        // created), so undo restores the move without deleting the new day note.
         const moved = runStructural(() => {
-          capture(ctx.tree, nodeId);
-          return moveNode(ctx.tree, nodeId, todayId, after);
+          capture(buildTreeIndex(nodesCollection.toArray), nodeId);
+          return moveManyNodes(todayId, [nodeId]);
         });
         // No-op move (already last child of today) still captured an undo
         // point; drop it so Cmd+Z isn't a dead step and redo history survives.
@@ -761,10 +853,7 @@ export default definePlugin({
       // deleting the new day note.
       runMany: async (ids, ctx) => {
         const todayId = await getOrCreateDay(localDateKey());
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         const targets = ids.filter((id) => id !== todayId);
         if (targets.length === 0) return;
         const moved = runStructural(() => {
@@ -794,10 +883,7 @@ export default definePlugin({
       available: () => isMirrorsEnabled(),
       run: async (nodeId, ctx) => {
         const todayId = await getOrCreateDay(localDateKey());
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         // Rebuild fresh: today may have just been created, so ctx.tree is stale
         // (no `after`, no cycle context). Capture AFTER, so undo removes the
         // mirror but keeps the new day note (mirrors the runMany path below).
@@ -820,10 +906,7 @@ export default definePlugin({
       // undo removes the mirrors without deleting the freshly created day note.
       runMany: async (ids, ctx) => {
         const todayId = await getOrCreateDay(localDateKey());
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         const made = runStructural(() => {
           capture(buildTreeIndex(nodesCollection.toArray), ids[0]!);
           return mirrorManyNodes(todayId, ids);
@@ -932,10 +1015,21 @@ export default definePlugin({
   // open never mints today's note. Core resolves this without importing daily.
   captureDestination: () => ({
     label: "Today",
-    resolve: () =>
-      getOrCreateDay(localDateKey(), {
+    // REJECT on a failed create rather than returning null (F2): null is the
+    // Seam-L value for "top level", so a swallowed failure would silently misfile
+    // the capture at the outline root. Consumes the RAW result (no daily toast --
+    // quick-add's startBorn owns the failure toast + keeps the draft, ADR 0049)
+    // and rethrows the REAL NodesLimitError on a cap hit, so quick-add can skip
+    // its generic toast (the upgrade one already fired) via the shared
+    // data-layer `isNodesLimitError` -- no core-imports-daily leak.
+    resolve: async () => {
+      const result = await getOrCreateDayResult(localDateKey(), {
         trackNavigation: false,
-      }),
+      });
+      if (result.id !== null) return result.id;
+      if (isNodesLimitError(result.cause)) throw result.cause;
+      throw new Error("daily: couldn't open today's note for quick-add");
+    },
   }),
 
   // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
@@ -958,9 +1052,11 @@ export default definePlugin({
         // line and land the caret on it via focus=last.
         run: () =>
           void getOrCreateDay(key, { seedEntryLine: true })
+            // getOrCreateDay owns the generic failure toast now (F3); this only
+            // navigates on success. The catch is defensive (a synchronous body
+            // throw), mutually exclusive with the internal toast, so no double.
             .then((id) => {
               if (id) ctx.goTo(id, { focus: "last" });
-              else toast.error("Couldn't open today's daily note");
             })
             .catch(() => toast.error("Couldn't open today's daily note")),
       },
