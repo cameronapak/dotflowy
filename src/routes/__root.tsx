@@ -122,10 +122,11 @@ export const Route = createRootRoute({
 
 /** Routes that render for a VISITOR — outside the AuthGate (which would swap
  *  them for the login screen) and outside the editor chrome, whose dialogs
- *  assume a signed-in data layer. Today just the password-reset landing page
- *  (its visitor has no session — revokeSessionsOnPasswordReset killed them);
- *  a future signed-out landing (e.g. email verification) is added HERE. */
-const PUBLIC_ROUTES = new Set(["/reset-password"]);
+ *  assume a signed-in data layer. The password-reset landing page (its visitor
+ *  has no session — revokeSessionsOnPasswordReset killed them) and the legal
+ *  pages (public by definition, and linked from the signup screen where there
+ *  is no session yet); a future signed-out landing is added HERE. */
+const PUBLIC_ROUTES = new Set(["/reset-password", "/terms", "/privacy"]);
 
 function RootComponent() {
   // Trailing-slash-tolerant: the router matches `/reset-password/` to the

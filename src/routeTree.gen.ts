@@ -10,8 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TodayRouteImport } from './routes/today'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
@@ -22,6 +24,11 @@ const TodayRoute = TodayRouteImport.update({
   path: '/today',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -30,6 +37,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NodeIdRoute = NodeIdRouteImport.update({
@@ -56,8 +68,10 @@ const AdminRestoreRoute = AdminRestoreRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
@@ -65,8 +79,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
@@ -75,8 +91,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
@@ -86,8 +104,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/$nodeId'
+    | '/privacy'
     | '/reset-password'
     | '/settings'
+    | '/terms'
     | '/today'
     | '/admin/restore'
     | '/admin/waitlist'
@@ -95,8 +115,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/$nodeId'
+    | '/privacy'
     | '/reset-password'
     | '/settings'
+    | '/terms'
     | '/today'
     | '/admin/restore'
     | '/admin/waitlist'
@@ -104,8 +126,10 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/$nodeId'
+    | '/privacy'
     | '/reset-password'
     | '/settings'
+    | '/terms'
     | '/today'
     | '/admin/restore'
     | '/admin/waitlist'
@@ -114,8 +138,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NodeIdRoute: typeof NodeIdRoute
+  PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
+  TermsRoute: typeof TermsRoute
   TodayRoute: typeof TodayRoute
   AdminRestoreRoute: typeof AdminRestoreRoute
   AdminWaitlistRoute: typeof AdminWaitlistRoute
@@ -130,6 +156,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TodayRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -142,6 +175,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$nodeId': {
@@ -178,8 +218,10 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NodeIdRoute: NodeIdRoute,
+  PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  TermsRoute: TermsRoute,
   TodayRoute: TodayRoute,
   AdminRestoreRoute: AdminRestoreRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,

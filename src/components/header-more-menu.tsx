@@ -3,11 +3,13 @@ import {
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CircleCheckIcon,
+  FileTextIcon,
   FocusIcon,
   LogOutIcon,
   MessageSquareWarningIcon,
   MoreHorizontalIcon,
   SettingsIcon,
+  ShieldCheckIcon,
   SparklesIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -256,6 +258,24 @@ export function HeaderMoreMenu() {
         >
           <GitHubIcon />
           GitHub
+        </DropdownMenuItem>
+
+        {/* Legal pages (#285/#286): read-only links, so they live with the
+            other link items (What's new, GitHub) rather than /settings. */}
+        <DropdownMenuItem
+          onClick={() => window.open("/terms", "_blank", "noopener,noreferrer")}
+        >
+          <FileTextIcon />
+          Terms
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() =>
+            window.open("/privacy", "_blank", "noopener,noreferrer")
+          }
+        >
+          <ShieldCheckIcon />
+          Privacy Policy
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
