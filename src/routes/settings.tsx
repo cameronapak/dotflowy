@@ -14,7 +14,7 @@ import {
   SunIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
@@ -221,6 +221,48 @@ function activeSub(subs: SubRow[]): SubRow | null {
   );
 }
 
+type SubState = "loading" | "error" | "ready";
+
+interface Subscriptions {
+  state: SubState;
+  subs: SubRow[];
+  reload: () => void;
+}
+
+/** ONE `subscription.list()` fetch for the whole page (both Plan & billing and
+ *  the Connections nudge read it) — lifted to SettingsPage so the endpoint isn't
+ *  hit twice on mount, and the two sections can't disagree about the plan. */
+function useSubscriptions(): Subscriptions {
+  const [state, setState] = useState<SubState>("loading");
+  const [subs, setSubs] = useState<SubRow[]>([]);
+
+  const reload = useCallback(() => {
+    let cancelled = false;
+    setState("loading");
+    subscription.list().then(
+      ({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          setState("error");
+          return;
+        }
+        setSubs((data ?? []) as SubRow[]);
+        setState("ready");
+      },
+      () => {
+        if (!cancelled) setState("error");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => reload(), [reload]);
+
+  return { state, subs, reload };
+}
+
 function UsageMeter() {
   const { count, ready } = useNodeCount();
   const pct = Math.min(100, Math.round((count / FREE_NODE_LIMIT) * 100));
@@ -302,29 +344,8 @@ function UpgradeCard({
   );
 }
 
-function PlanBilling() {
-  const [state, setState] = useState<"loading" | "error" | "ready">("loading");
-  const [subs, setSubs] = useState<SubRow[]>([]);
+function PlanBilling({ state, subs, reload }: Subscriptions) {
   const [busy, setBusy] = useState(false);
-
-  async function load() {
-    setState("loading");
-    try {
-      const { data, error } = await subscription.list();
-      if (error) {
-        setState("error");
-        return;
-      }
-      setSubs((data ?? []) as SubRow[]);
-      setState("ready");
-    } catch {
-      setState("error");
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   async function upgrade(plan: "unlimited" | "founding", annual: boolean) {
     if (busy) return;
@@ -401,7 +422,7 @@ function PlanBilling() {
         <p className="text-muted-foreground">
           We couldn't load your plan right now.
         </p>
-        <Button variant="outline" size="sm" onClick={() => void load()}>
+        <Button variant="outline" size="sm" onClick={reload}>
           Try again
         </Button>
       </div>
@@ -581,33 +602,11 @@ function AccountSection() {
   );
 }
 
-function ConnectionsSection() {
+/** `plan` is null until the shared subscription fetch resolves (or if it failed);
+ *  the free-tier nudge only shows once we KNOW the account is free. */
+function ConnectionsSection({ plan }: { plan: PlanName | null }) {
   const [connectOpen, setConnectOpen] = useState(false);
-  const [state, setState] = useState<"loading" | "error" | "ready">("loading");
-  const [plan, setPlan] = useState<PlanName>("free");
-
-  useEffect(() => {
-    let cancelled = false;
-    subscription.list().then(
-      ({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          setState("error");
-          return;
-        }
-        setPlan(resolvePlanFromSubs((data ?? []) as SubRow[]));
-        setState("ready");
-      },
-      () => {
-        if (!cancelled) setState("error");
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const free = state === "ready" && plan === "free";
+  const free = plan === "free";
 
   return (
     <Section
@@ -738,6 +737,14 @@ function AppearanceSection() {
 }
 
 function SettingsPage() {
+  // One subscription fetch for the whole page; Plan & billing and the
+  // Connections nudge both read it (no double request, no divergent state).
+  const subscriptions = useSubscriptions();
+  const plan =
+    subscriptions.state === "ready"
+      ? resolvePlanFromSubs(subscriptions.subs)
+      : null;
+
   return (
     <main className="min-h-dvh bg-background">
       {/* Minimal page header: back to the outline + title. The outline's own
@@ -763,11 +770,11 @@ function SettingsPage() {
           title="Plan & billing"
           description="Your plan, usage, and payment."
         >
-          <PlanBilling />
+          <PlanBilling {...subscriptions} />
         </Section>
 
         <AccountSection />
-        <ConnectionsSection />
+        <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />
       </div>
