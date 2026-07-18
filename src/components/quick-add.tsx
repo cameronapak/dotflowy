@@ -82,6 +82,7 @@ import {
   setText,
   toggleCompleted,
 } from "../data/mutations";
+import { isNodesLimitError } from "../data/nodes-client-effect";
 import { appRuntime } from "../data/runtime";
 import { runStructural } from "../data/structural";
 import {
@@ -709,17 +710,22 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       // The destination provider (Seam L) REJECTS when it named a target it
       // couldn't mint (F2) -- a failure, NOT the legit `null` = "top level". Abort
       // the born: create NOTHING, keep the draft text + the overlay so nothing is
-      // lost, and surface it once. Returning null below releases the cached
-      // promise, so a later keystroke retries. An untouched draft that never typed
-      // won't reach here (born fires only on non-empty input).
+      // lost, and surface it once -- unless the rejection is the free-tier cap
+      // (`isNodesLimitError`), whose dedicated upgrade toast already fired
+      // (persistStructuralBatch), so the generic notice would double-toast.
+      // Returning null below releases the cached promise, so a later keystroke
+      // retries. An untouched draft that never typed won't reach here (born
+      // fires only on non-empty input).
       let resolved: string | null;
       try {
         resolved = await d.resolveParent();
-      } catch {
-        toast.error(`Couldn't open ${destRef.current.label}`, {
-          id: "quick-add-destination-failed",
-          description: "Check your connection and try again.",
-        });
+      } catch (err) {
+        if (!isNodesLimitError(err)) {
+          toast.error(`Couldn't open ${destRef.current.label}`, {
+            id: "quick-add-destination-failed",
+            description: "Check your connection and try again.",
+          });
+        }
         return null;
       }
       if (d.text.trim() === "") return null; // empty -> no node

@@ -192,13 +192,14 @@ function healExistingDay(
   }
 }
 
-/** Outcome of a NEW-day create. `id` non-null = the durable day node. `id` null
- *  = the create failed and rolled back; `capped` distinguishes the free-tier
- *  ceiling (#170, its upgrade toast ALREADY fired -- callers skip the generic
- *  one, F3) from every other failure (which wants the generic toast). Contained
- *  to {@link materializeNewDay} <-> {@link getOrCreateDay}; the latter translates
- *  it back to `string | null` for external callers. */
-type NewDayResult = { id: string } | { id: null; capped: boolean };
+/** Outcome of a day get-or-create. `id` non-null = the durable day node. `id`
+ *  null = the create failed and rolled back; `cause` is the persist rejection
+ *  (null on the echo-missing tail) so callers can distinguish the free-tier
+ *  ceiling (#170, `isNodesLimitError` -- its upgrade toast ALREADY fired, F3)
+ *  and quick-add's Seam-L rejection can rethrow the REAL NodesLimitError.
+ *  Contained to this module; {@link getOrCreateDay} translates it back to
+ *  `string | null` for external callers. */
+type NewDayResult = { id: string } | { id: null; cause: unknown };
 
 /**
  * Materialize a genuinely NEW day and whichever calendar levels above it are
@@ -282,20 +283,21 @@ async function materializeNewDay(
   // the ok-return on the batch's durable echo (the OPML-import discipline, ADR
   // 0037). Two null paths, both reported honestly:
   //   1. PERSIST REJECTED -> the send failed and the overlay rolled back, so
-  //      nothing landed. `capped` = the free-tier ceiling (its upgrade toast
-  //      already fired, so the caller skips the generic one -- F3).
+  //      nothing landed. `cause` carries the rejection so each caller can make
+  //      its OWN cap-vs-generic toast call (F3) and quick-add's Seam-L rejection
+  //      can rethrow a real NodesLimitError.
   //   2. ECHO MISSING -> persist resolved but waitForSeqE COMPLETES on its 8s
   //      timeout without failing (collection.ts), so `hasNode(day.id)` can be
   //      false though the POST committed. `resyncNodes()` self-heals (the durable
-  //      mapping makes the next attempt succeed); report a non-cap failure (F4).
+  //      mapping makes the next attempt succeed); a null `cause` = non-cap (F4).
   try {
     await persisted;
   } catch (err) {
-    return { id: null, capped: isNodesLimitError(err) };
+    return { id: null, cause: err };
   }
   if (hasNode(day.id)) return { id: day.id };
   resyncNodes();
-  return { id: null, capped: false };
+  return { id: null, cause: null };
 }
 
 /** Does `parentId` have any child in the LIVE nodes collection? Used for the
@@ -483,27 +485,21 @@ async function runDailyMigration(
  *  re-openable because quick-add borns with `trackNavigation:false` and
  *  `withDailyNavigation` is a counter, not a mutex). A same-key second caller
  *  JOINS the entry here instead of re-running the fast path. Only the CREATE
- *  path registers, so an already-durable day never touches this map. */
-const inFlightDays = new Map<string, Promise<string | null>>();
+ *  path registers, so an already-durable day never touches this map. The map
+ *  caches the RAW {@link NewDayResult} -- never a toast-translated chain -- so
+ *  every joiner evaluates its OWN toast/rejection decision on the shared result
+ *  (a baked-in side effect would inherit the ORIGINATOR's copy/suppression). */
+const inFlightDays = new Map<string, Promise<NewDayResult>>();
 
-/** Ensure the container + the day exist and return the day's node id (no nav).
- *  Reads the LIVE collection throughout (not a passed index) so the Today button,
- *  the `/` command, AND the Cmd+K virtual action (Seam J -- which has no
- *  `PluginContext`) all reuse the exact same get-or-create (ADR 0001).
- *  Async: it may round-trip the atomic claims before the node ids are settled. */
-async function getOrCreateDay(
+/** The shared get-or-create body: readiness + claims + migration + heal-or-
+ *  create, single-flighted per key. Returns the RAW {@link NewDayResult} and
+ *  performs NO toasting -- callers ({@link getOrCreateDay}, the Seam-L
+ *  `captureDestination.resolve`) each translate per their own surface. */
+async function getOrCreateDayResult(
   key: string,
-  opts?: {
-    seedEntryLine?: boolean;
-    trackNavigation?: boolean;
-    /** Copy for the generic "couldn't open" toast when a NEW-day CREATE fails
-     *  for a NON-cap reason (F3 -- the cap already toasted its upgrade notice, so
-     *  this funnel skips it). `null` SUPPRESSES the toast (quick-add owns its own
-     *  failure toast via startBorn, ADR 0049). Default: today's-note copy. */
-    failureToast?: string | null;
-  },
-): Promise<string | null> {
-  const run = async () => {
+  opts?: { seedEntryLine?: boolean; trackNavigation?: boolean },
+): Promise<NewDayResult> {
+  const run = async (): Promise<NewDayResult> => {
     // Single-flight join, checked FIRST (F1): while a same-key create is in
     // flight, the claims + `day.present` fast path below read the creator's
     // OPTIMISTIC rows (the claim already set the mapping, the batch already
@@ -532,7 +528,7 @@ async function getOrCreateDay(
     // placement is the migration's job (finding 3).
     if (day.present) {
       healExistingDay(day.id, key, opts?.seedEntryLine ?? false);
-      return day.id;
+      return { id: day.id };
     }
     // Re-check at the create seam (F1): a caller that entered run() BEFORE this
     // create registered (the top check saw nothing) can land here after its own
@@ -546,15 +542,7 @@ async function getOrCreateDay(
       day,
       key,
       opts?.seedEntryLine ?? false,
-    ).then((result) => {
-      if (result.id !== null) return result.id;
-      // Translate NewDayResult -> string|null for external callers, owning the
-      // generic toast HERE so every caller drops its duplicate (F3). The cap
-      // case already showed its upgrade toast; `null` copy suppresses (quick-add).
-      if (!result.capped && opts?.failureToast !== null)
-        toast.error(opts?.failureToast ?? "Couldn't open today's daily note");
-      return null;
-    });
+    );
     inFlightDays.set(key, creating);
     void creating.finally(() => {
       if (inFlightDays.get(key) === creating) inFlightDays.delete(key);
@@ -565,6 +553,31 @@ async function getOrCreateDay(
   // background quick-add born resolves today's note WITHOUT spinning the
   // unrelated header "Today" button, which is reserved for an actual navigation.
   return opts?.trackNavigation === false ? run() : withDailyNavigation(run);
+}
+
+/** Ensure the container + the day exist and return the day's node id (no nav).
+ *  Reads the LIVE collection throughout (not a passed index) so the Today button,
+ *  the `/` command, AND the Cmd+K virtual action (Seam J -- which has no
+ *  `PluginContext`) all reuse the exact same get-or-create (ADR 0001).
+ *  Async: it may round-trip the atomic claims before the node ids are settled.
+ *  On a failed create THIS caller decides its own toast (F3): the cap skips the
+ *  generic notice (the upgrade toast already fired), everything else shows the
+ *  caller's `failureToast` copy -- per-caller even across an in-flight join. */
+async function getOrCreateDay(
+  key: string,
+  opts?: {
+    seedEntryLine?: boolean;
+    trackNavigation?: boolean;
+    /** Copy for the generic "couldn't open" toast when the create fails for a
+     *  NON-cap reason. Default: today's-note copy. */
+    failureToast?: string;
+  },
+): Promise<string | null> {
+  const result = await getOrCreateDayResult(key, opts);
+  if (result.id !== null) return result.id;
+  if (!isNodesLimitError(result.cause))
+    toast.error(opts?.failureToast ?? "Couldn't open today's daily note");
+  return null;
 }
 
 export { getOrCreateDay };
@@ -1004,17 +1017,18 @@ export default definePlugin({
     label: "Today",
     // REJECT on a failed create rather than returning null (F2): null is the
     // Seam-L value for "top level", so a swallowed failure would silently misfile
-    // the capture at the outline root. `failureToast: null` suppresses daily's
-    // own generic toast -- quick-add's startBorn owns the failure toast + keeps
-    // the draft (ADR 0049). A durable id passes straight through.
+    // the capture at the outline root. Consumes the RAW result (no daily toast --
+    // quick-add's startBorn owns the failure toast + keeps the draft, ADR 0049)
+    // and rethrows the REAL NodesLimitError on a cap hit, so quick-add can skip
+    // its generic toast (the upgrade one already fired) via the shared
+    // data-layer `isNodesLimitError` -- no core-imports-daily leak.
     resolve: async () => {
-      const id = await getOrCreateDay(localDateKey(), {
+      const result = await getOrCreateDayResult(localDateKey(), {
         trackNavigation: false,
-        failureToast: null,
       });
-      if (id === null)
-        throw new Error("daily: couldn't open today's note for quick-add");
-      return id;
+      if (result.id !== null) return result.id;
+      if (isNodesLimitError(result.cause)) throw result.cause;
+      throw new Error("daily: couldn't open today's note for quick-add");
     },
   }),
 
