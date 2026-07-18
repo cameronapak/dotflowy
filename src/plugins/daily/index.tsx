@@ -58,7 +58,11 @@ import {
   moveNode,
   setText,
 } from "../../data/mutations";
-import { runStructural, runStructuralSliced } from "../../data/structural";
+import {
+  runStructural,
+  runStructuralSliced,
+  runStructuralTracked,
+} from "../../data/structural";
 import { buildTreeIndex, childrenOf, createId } from "../../data/tree";
 import {
   definePlugin,
@@ -225,7 +229,7 @@ async function materializeNewDay(
   if (claimed.some((c) => !c.won && !c.present)) resyncNodes();
 
   const parentId = chain && week ? week.id : container.id;
-  runStructural(() => {
+  const { persisted } = runStructuralTracked(() => {
     // Container: appended at the end of the top level (special, not sorted).
     if (!hasNode(container.id)) {
       const tops = childrenOf(buildTreeIndex(nodesCollection.toArray), null);
@@ -263,6 +267,19 @@ async function materializeNewDay(
     if (seedEntryLine && !hasChildInLiveCollection(day.id))
       appendChild(day.id, null, "");
   });
+  // Phantom-success guard (#233): the optimistic overlay makes `hasNode(day.id)`
+  // true the instant the batch applies, so returning here unconditionally would
+  // let a caller `setMapping` + navigate to a day that VANISHES when the send
+  // fails and rolls back. Gate the ok-return on the batch's durable echo (the
+  // OPML-import discipline, ADR 0037): a rejected persist means nothing landed,
+  // so return null and let the caller surface its "couldn't open" toast. The
+  // already-exists path (healExistingDay) stays synchronous -- its node is
+  // already durable, so there is nothing to wait on.
+  try {
+    await persisted;
+  } catch {
+    return null;
+  }
   return hasNode(day.id) ? day.id : null;
 }
 
@@ -736,11 +753,17 @@ export default definePlugin({
           return;
         }
         if (todayId === nodeId) return; // can't move today's note under itself
-        const kids = childrenOf(ctx.tree, todayId);
+        // Rebuild fresh: today may have just been created, so ctx.tree is stale
+        // (no new day, no `after`) and reading its siblings would wire the move
+        // against a stale head -- a sibling fan (#233). Read the live collection
+        // instead, mirroring the runMany + mirror-to-today paths. Capture AFTER,
+        // so undo restores the move without deleting the fresh day note.
+        const index = buildTreeIndex(nodesCollection.toArray);
+        const kids = childrenOf(index, todayId);
         const after = kids.length ? kids[kids.length - 1]!.id : null;
         const moved = runStructural(() => {
-          capture(ctx.tree, nodeId);
-          return moveNode(ctx.tree, nodeId, todayId, after);
+          capture(index, nodeId);
+          return moveNode(index, nodeId, todayId, after);
         });
         // No-op move (already last child of today) still captured an undo
         // point; drop it so Cmd+Z isn't a dead step and redo history survives.
