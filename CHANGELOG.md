@@ -1,5 +1,28 @@
 # dotflowy
 
+## 1.6.0
+
+### Minor Changes
+
+- f468f05: You can now delete your account yourself, from the header More menu. Deletion is
+  permanent and immediate: it cancels any active subscription, erases your outline,
+  removes your account, and signs you out. Export your outline as OPML first if you
+  want a copy.
+- 298afc7: Read the Terms of Service and Privacy Policy in the app at /terms and /privacy, linked from the signup screen and the More menu.
+- b9e1c5d: New Settings page: plan & billing, account, connections, data, and appearance in
+  one place. Free accounts see their node usage and can upgrade to Unlimited ($5/mo
+  or $48/yr) or Founding ($99 / 3 years); paid accounts can manage or cancel their
+  subscription. Reach it from the header More menu — which is now slimmer, since
+  theme, text size, import/export, connect apps, and account controls all moved to
+  Settings.
+
+### Patch Changes
+
+- a28b60a: Opening or filing into a daily note is more reliable: creating today's note now waits for the write to durably land before navigating, so a failed save shows a clear message instead of dropping you on a note that vanishes, and "Send to Today" no longer misfiles a node when today's note was just created. Quick-add now keeps your draft and shows an error if today's note can't be opened (instead of silently filing the capture at the top level), and hitting the free-plan limit while opening a daily note shows only the upgrade notice, not a second generic error.
+- 12b66cb: Harden and unit-test the Worker's auth/identity gates: the DO tenant-isolation key (`resolveUserId`), admin allowlist, invite-code backdoor, and email shape check are now a pure, tested module; `BETTER_AUTH_SECRET` is asserted at startup (fail-closed, not silently insecure); admin access can now be pinned to a stable `user.id` (`ADMIN_USER_IDS`) instead of an unverified email; and the SSRF unfurl guard now blocks IPv4-mapped IPv6 loopback/private targets.
+- 0d0a93d: Supervise the live-sync consumer so a bad inbound frame can no longer silently kill sync: the fiber now logs the failure and re-establishes (fetching a fresh snapshot) up to a bounded budget, then shows a persistent "Sync interrupted — reload" notice instead of dying quietly while the connection still looks alive.
+- 0eede6b: Surface a toast when an outline write fails and rolls back, instead of the edit vanishing silently.
+
 ## 1.5.0
 
 ### Minor Changes
