@@ -43,28 +43,30 @@ export interface AnnounceBatchResult {
 export function announceEmail(signupUrl: string) {
   return {
     subject: "Dotflowy is open",
-    text: `You joined the Dotflowy waitlist a while back — thanks for waiting.
+    text: `You joined the Dotflowy waitlist a while back. Thanks for waiting.
 
-Signup is open now, and you don't need an invite code anymore. Come in: ${signupUrl}
+Signup's open now, no invite code needed: ${signupUrl}
 
-The free plan is the whole outliner: up to 10,000 live nodes, and export is always free. Going over the cap never locks you out.
+The free plan is the whole outliner: up to 10,000 live nodes, export always free, and going over the cap never locks you out.
 
-If you want more, unlimited nodes plus agents is $5/mo or $48/yr.
+If you want more, unlimited nodes plus agents is $5/mo or $48/yr. There's also a founding plan, $99 for 3 years, capped at 50 seats. It auto-renews after year three unless you cancel. Not a lifetime deal.
 
-There's also a founding plan — $99 for 3 years, capped at 50 seats. Being straight with you: it's a fixed-term subscription that auto-renews after year three unless you cancel. Not a lifetime deal, just a long runway at a fixed price.
+Your account's ready when you are: ${signupUrl}
 
-Either way, your account's ready when you are: ${signupUrl}
+— from Cam Pak
+dotflowy.com
 
-— The Dotflowy team`,
+(Written by Claude to be organized well, content and heart from Cam.)`,
     html: `<div style="font-family: system-ui, -apple-system, sans-serif; max-width: 32rem; margin: 0 auto; padding: 24px; color: #111; line-height: 1.5;">
   <h1 style="font-size: 18px; font-weight: 600;">Dotflowy is open</h1>
-  <p style="font-size: 14px; color: #444;">You joined the Dotflowy waitlist a while back — thanks for waiting. Signup is open now, and you don't need an invite code anymore.</p>
+  <p style="font-size: 14px; color: #444;">You joined the Dotflowy waitlist a while back. Thanks for waiting.</p>
+  <p style="font-size: 14px; color: #444;">Signup's open now, no invite code needed.</p>
   <p style="margin: 20px 0;"><a href="${signupUrl}" style="display: inline-block; background: #111; color: #fff; text-decoration: none; font-size: 14px; padding: 10px 16px; border-radius: 6px;">Create your account</a></p>
-  <p style="font-size: 14px; color: #444;">The free plan is the whole outliner: up to 10,000 live nodes, and export is always free. Going over the cap never locks you out.</p>
-  <p style="font-size: 14px; color: #444;">If you want more, unlimited nodes plus agents is <strong>$5/mo</strong> or <strong>$48/yr</strong>.</p>
-  <p style="font-size: 14px; color: #444;">There's also a founding plan — <strong>$99 for 3 years</strong>, capped at 50 seats. Being straight with you: it's a fixed-term subscription that auto-renews after year three unless you cancel. Not a lifetime deal, just a long runway at a fixed price.</p>
-  <p style="font-size: 13px; color: #666;">Your account's ready when you are — <a href="${signupUrl}" style="color: #111;">${signupUrl}</a>.</p>
-  <p style="font-size: 13px; color: #666;">— The Dotflowy team</p>
+  <p style="font-size: 14px; color: #444;">The free plan is the whole outliner: up to 10,000 live nodes, export always free, and going over the cap never locks you out.</p>
+  <p style="font-size: 14px; color: #444;">If you want more, unlimited nodes plus agents is <strong>$5/mo</strong> or <strong>$48/yr</strong>. There's also a founding plan, <strong>$99 for 3 years</strong>, capped at 50 seats. It auto-renews after year three unless you cancel. Not a lifetime deal.</p>
+  <p style="font-size: 14px; color: #444;">Your account's ready when you are: <a href="${signupUrl}" style="color: #111;">${signupUrl}</a></p>
+  <p style="font-size: 13px; color: #666; margin-bottom: 4px;">— from Cam Pak<br>dotflowy.com</p>
+  <p style="font-size: 12px; color: #999;">(Written by Claude to be organized well, content and heart from Cam.)</p>
 </div>`,
   };
 }
