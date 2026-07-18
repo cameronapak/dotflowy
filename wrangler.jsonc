@@ -73,6 +73,22 @@
   },
   // SQLite-backed DO storage requires `new_sqlite_classes` (not new_classes).
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }],
+  // Off-site outline backups (#221): the daily cron sweep exports every user
+  // DO's snapshot into this bucket (`backups/<doName>/<YYYY-MM-DD>.json`).
+  // Create the bucket + its lifecycle expiry once before the first deploy —
+  // see docs/runbooks/offsite-backup-r2.md. Local dev simulates R2 on disk.
+  "r2_buckets": [
+    {
+      "binding": "BACKUPS",
+      "bucket_name": "dotflowy-backups",
+    },
+  ],
+  // Daily backup sweep (09:00 UTC ≈ overnight US). The scheduled handler in
+  // worker/index.ts runs runBackupSweep; test locally with
+  // `wrangler dev --test-scheduled` + GET /__scheduled.
+  "triggers": {
+    "crons": ["0 9 * * *"],
+  },
   // Per-user rate limit for the link-title unfurl endpoint (ADR 0016). The
   // endpoint fetches user-supplied URLs server-side; keyed on user.id, it caps
   // the scanner-abuse vector the auth gate alone leaves open. period must be

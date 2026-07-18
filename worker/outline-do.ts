@@ -8,8 +8,10 @@ import type {
   Node,
   ServerMessage,
 } from "../src/data/wire-schema";
+import type { OutlineSnapshot, SnapshotKvRow } from "./backup";
 import type { RestorePoint } from "./restore";
 
+import { SNAPSHOT_VERSION } from "./backup";
 import { planChangeFrames } from "./changelog";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
@@ -827,5 +829,84 @@ export class UserOutlineDO extends DurableObject<Env> {
       }
     }, RESTORE_ABORT_DELAY_MS);
     return { previousBookmark, targetBookmark };
+  }
+
+  // --- off-site backup: R2 export / snapshot restore (ticket #221) -----------
+
+  /**
+   * The whole outline as one portable JSON value: every node plus every kv row
+   * with its `value` left as the RAW stored TEXT (parsed by nobody on the way
+   * out, inserted verbatim on the way back), so a snapshot round-trips the kv
+   * table byte-for-byte. Read by the daily cron sweep in worker/index.ts and
+   * written to R2 keyed `backups/<doName>/<YYYY-MM-DD>.json`.
+   */
+  exportSnapshot(): OutlineSnapshot {
+    return {
+      version: SNAPSHOT_VERSION,
+      exportedAt: Date.now(),
+      seq: this.currentSeq(),
+      nodes: this.getNodes(),
+      kv: this.readRows<SnapshotKvRow>(
+        "SELECT collection, key, value, updatedAt FROM kv",
+      ),
+    };
+  }
+
+  /**
+   * Replace this DO's entire contents with a snapshot: truncate nodes + kv +
+   * changelog and reinsert, all in ONE transactionSync (a mid-restore fault
+   * rolls the whole thing back, never a half-restored outline). The seq is
+   * BUMPED (not reset) and the changelog emptied, so every reconnecting client
+   * fails the resume check and falls back to a full snapshot — a reset-to-0 seq
+   * would let a client whose cursor is coincidentally 0 "resume" its stale
+   * view. The deferred abort then kicks live sockets into that reconnect (the
+   * `restoreToTime` pattern; the data is already committed, so a lost abort
+   * only delays the refresh until the next natural restart).
+   *
+   * `seeded` is stamped so the legacy D1 import (`ensureSeeded`, 'default' DO
+   * only) can never run again on top of restored data. Returns the
+   * pre-restore bookmark: the undo path is the existing PITR restore
+   * (`/api/admin/restore`) with that bookmark. Best-effort null where PITR
+   * doesn't exist (local dev) — the restore itself is plain SQL and works
+   * everywhere.
+   */
+  async restoreSnapshot(data: {
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): Promise<{ previousBookmark: string | null; nodes: number; kv: number }> {
+    let previousBookmark: string | null = null;
+    try {
+      previousBookmark = await this.ctx.storage.getCurrentBookmark();
+    } catch {
+      // PITR (and its bookmarks) don't exist in local dev; a sync throw from a
+      // missing API must not block the restore itself, which is plain SQL.
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM nodes");
+      this.sql.exec("DELETE FROM kv");
+      this.sql.exec("DELETE FROM changelog");
+      for (const n of data.nodes) this.putNode(n);
+      for (const r of data.kv) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          r.collection,
+          r.key,
+          r.value,
+          r.updatedAt,
+        );
+      }
+      this.setSeq(this.currentSeq() + 1);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+      );
+    });
+    setTimeout(() => {
+      try {
+        this.ctx.abort("snapshot restore");
+      } catch {
+        // Already torn down — clients re-snapshot on their next reconnect.
+      }
+    }, RESTORE_ABORT_DELAY_MS);
+    return { previousBookmark, nodes: data.nodes.length, kv: data.kv.length };
   }
 }
