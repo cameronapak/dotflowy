@@ -10,6 +10,7 @@ import { isMirrorsEnabled } from "./flags";
 import { runPromise } from "./nodes-client-effect";
 import { makeSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
+import { persistOrNotify } from "./save-failure";
 import { nodeSchema } from "./schema";
 import { chainDisagreements } from "./sibling-chain";
 import { buildTreeIndex, childrenOf, now } from "./tree";
@@ -518,21 +519,32 @@ export const nodesCollection = createCollection({
       };
     },
   },
+  // Each handler THROWS on a failed write so TanStack DB rolls the optimistic
+  // edit back; `persistOrNotify` surfaces that rollback to the user (#230) and
+  // re-throws — the throw is load-bearing (swallowing it would drop the failure
+  // AND the rollback). A no-op toast for the node-limit case, already toasted
+  // upstream.
   onInsert: async ({ transaction }) => {
-    await createNodes(transaction.mutations.map((m) => m.modified as Node));
+    await persistOrNotify(
+      createNodes(transaction.mutations.map((m) => m.modified as Node)),
+    );
     return { refetch: false };
   },
   onUpdate: async ({ transaction }) => {
-    await updateNodes(
-      transaction.mutations.map((m) => ({
-        id: m.key as string,
-        changes: m.changes as Partial<Node>,
-      })),
+    await persistOrNotify(
+      updateNodes(
+        transaction.mutations.map((m) => ({
+          id: m.key as string,
+          changes: m.changes as Partial<Node>,
+        })),
+      ),
     );
     return { refetch: false };
   },
   onDelete: async ({ transaction }) => {
-    await deleteNodes(transaction.mutations.map((m) => m.key as string));
+    await persistOrNotify(
+      deleteNodes(transaction.mutations.map((m) => m.key as string)),
+    );
     return { refetch: false };
   },
 });

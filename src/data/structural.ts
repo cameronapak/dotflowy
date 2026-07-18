@@ -8,6 +8,7 @@ import type { Node } from "./schema";
 import { persistBatchE } from "./api";
 import { nodesCollection, waitForSeqE } from "./collection";
 import { NodesLimitError, runPromise } from "./nodes-client-effect";
+import { notifySaveFailed } from "./save-failure";
 import { chainDisagreements } from "./sibling-chain";
 import { buildTreeIndex, childrenOf } from "./tree";
 
@@ -65,10 +66,13 @@ async function persistStructuralBatch(ops: ChangeOp[]): Promise<void> {
  */
 export function runStructural<T>(body: () => T): T {
   const { result, persisted } = runStructuralTracked(body);
-  // Nobody consumes the outcome here — a failed batch already rolls the
-  // transaction back — so mark the derived promise handled to avoid an
-  // unhandled-rejection report for every offline structural write.
-  persisted.catch(() => {});
+  // Nobody awaits the outcome here — a failed batch already rolls the
+  // transaction back — but the edit vanishing silently is the #230 bug. Surface
+  // the rollback with the shared save-failure toast (which skips the node-limit
+  // case, already toasted by persistStructuralBatch, to avoid a double notice).
+  // This also marks the derived promise handled, so an offline structural write
+  // never trips an unhandled-rejection report.
+  persisted.catch(notifySaveFailed);
   return result;
 }
 

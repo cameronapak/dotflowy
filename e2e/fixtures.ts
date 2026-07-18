@@ -111,6 +111,13 @@ export async function seedOutline(
      *  the field AND keeps every other spec free of an update toast; pass a
      *  version different from package.json's to exercise the stale-tab path. */
     serverVersion?: string;
+    /** Force every structural-batch POST (`body.ops`) to fail with a 500 before
+     *  it mutates the store, so a spec can drive the save-failure rollback +
+     *  toast path (#230). Reads and the legacy seed POST are untouched, so the
+     *  seeded outline still loads normally. A received 500 resolves the fetch
+     *  (not a transport error), so the client's retry policy doesn't kick in —
+     *  the failure lands immediately. */
+    failStructuralWrites?: boolean;
   } = {},
 ): Promise<void> {
   const echoDelayMs = opts.echoDelayMs ?? 0;
@@ -189,6 +196,16 @@ export async function seedOutline(
           // Atomic structural batch: apply every op, commit ONE frame, reply with
           // its seq (mirrors the DO's applyBatch -> { seq }).
           if (body.ops) {
+            // Injected failure (#230): reject the batch BEFORE touching the
+            // store, so the optimistic overlay rolls back and the save-failure
+            // toast fires.
+            if (opts.failStructuralWrites) {
+              return route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "boom" }),
+              });
+            }
             for (const op of body.ops) {
               if (op.op === "delete") store.delete(op.key);
               else store.set(op.value.id, op.value);
