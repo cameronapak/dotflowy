@@ -31,9 +31,19 @@ describe("parseFragment", () => {
     });
   });
 
-  test("keeps a multi-line summary verbatim", () => {
+  test("keeps a blank line -- a real paragraph break", () => {
     const parsed = parseFragment(fragment("patch", "One.\n\nTwo."));
     expect(parsed).toEqual({ bump: "patch", summary: "One.\n\nTwo." });
+  });
+
+  test("reflows a hard-wrapped paragraph -- a source wrap is not a line break", () => {
+    const parsed = parseFragment(
+      fragment("patch", "A summary wrapped\nat eighty columns\nby the editor."),
+    );
+    expect(parsed).toEqual({
+      bump: "patch",
+      summary: "A summary wrapped at eighty columns by the editor.",
+    });
   });
 
   test("an empty changeset is null, not an error -- it is the chore: escape hatch", () => {
