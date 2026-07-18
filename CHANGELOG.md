@@ -1,5 +1,24 @@
 # dotflowy
 
+## 1.4.0
+
+### Minor Changes
+
+- f032a3b: Daily notes now organize themselves into a calendar: Daily > Year > Month > Week > Day, with ISO weeks (Monday start, a straddle week lives whole under the month owning its Thursday), everything sorted chronologically, and a week badge plus Cmd+K "This week" jump. Existing daily notes reorganize automatically the first time you touch them — one Cmd+Z undoes it.
+- bc79155: Enforce free-tier entitlements: a free outline is capped at 10,000 live nodes (the DO refuses batches that would grow it past the cap, with an in-app upgrade toast; edits, moves, and deletes are never blocked and an over-cap outline is never locked), and MCP agent access now requires a paid plan (a free token can still handshake and list tools but every tool call is refused with an upgrade message). Paid plans are unlimited on both.
+- 9d6c1aa: Waitlist members can now be turned into invited signups with per-email,
+  single-use invite codes. An admin mints and emails them from the waitlist
+  (`bun run invite`), and a code only works for the address it was sent to, once.
+
+### Patch Changes
+
+- 520ed5b: Your outline can now be restored to any point in the last 30 days. If an outline
+  is lost or corrupted, an operator can roll one user's data back through the
+  Durable Object's built-in point-in-time recovery — isolated to that user, and
+  itself reversible with an undo bookmark.
+- 49d5d78: The `/` command palette and the `#` / `[[` caret pickers now scroll the highlighted item into view, so arrowing past the visible window no longer walks the selection off-screen. Hovering still picks the item under your cursor, but a scrolling list can no longer steal the highlight out from under the arrow keys. Thanks to Dylan Shade (@dpshde) for the fix.
+- 4450c9f: Clicking or drag-selecting the first characters of a to-do's text no longer completes it by accident. The checkbox had an invisible hit area reaching 12px past itself on every side — far enough to sit on top of the text beside it — so a click meant to place a caret landed on the checkbox instead. Its target is now the checkbox itself, and on touch it stays a comfortable 24px wide without growing the box or crowding the text.
+
 ## 1.3.1
 
 ### Patch Changes
