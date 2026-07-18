@@ -20,7 +20,7 @@ export const PAID_PLANS = ["unlimited", "founding"] as const;
 /** Free tier ceiling: total LIVE nodes a free outline may hold (#152/#170).
  *  Generous by design — the funnel, not a wall; over-cap never locks (edits,
  *  moves, deletes always apply — see `batchExceedsNodeLimit`). Paid = no cap. */
-export const FREE_NODE_LIMIT = 2000;
+export const FREE_NODE_LIMIT = 10000;
 
 /** The node ceiling a plan enforces: free is capped, paid is unlimited (`null`,
  *  which every gate below reads as "never reject"). */
