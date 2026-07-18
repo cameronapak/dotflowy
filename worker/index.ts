@@ -40,6 +40,7 @@ import {
   OutlineSnapshotSchema,
   SNAPSHOT_VERSION,
   backupKey,
+  backupKeyForDate,
   backupPrefix,
   backupTargets,
   isBackupDateKey,
@@ -796,17 +797,26 @@ function handleApiRequest(
         email: url.searchParams.get("email") ?? undefined,
       });
       const doName = resolveUserId(targetUserId, env);
-      const listed = yield* Effect.promise(() =>
-        env.BACKUPS.list({ prefix: backupPrefix(doName) }),
-      );
-      return json({
-        doName,
-        backups: listed.objects.map((o) => ({
-          key: o.key,
-          size: o.size,
-          uploaded: o.uploaded.toISOString(),
-        })),
-      });
+      // R2 list caps at 1000 objects per call; follow the cursor so the
+      // listing stays complete even if the lifecycle expiry was never applied
+      // (list order is lexicographic-ascending = oldest date first, so a
+      // truncated single call would hide exactly the recent, useful dates).
+      const backups: { key: string; size: number; uploaded: string }[] = [];
+      let cursor: string | undefined;
+      do {
+        const listed: R2Objects = yield* Effect.promise(() =>
+          env.BACKUPS.list({ prefix: backupPrefix(doName), cursor }),
+        );
+        for (const o of listed.objects) {
+          backups.push({
+            key: o.key,
+            size: o.size,
+            uploaded: o.uploaded.toISOString(),
+          });
+        }
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+      return json({ doName, backups });
     }
 
     // Admin-only: restore ONE user's outline from an off-site R2 snapshot
@@ -834,7 +844,10 @@ function handleApiRequest(
       }
       const targetUserId = yield* resolveRestoreUserId(env, body);
       const doName = resolveUserId(targetUserId, env);
-      const key = backupKey(doName, Date.parse(`${body.date}T00:00:00Z`));
+      // String concatenation, never Date.parse: a calendar-invalid shape like
+      // 2026-02-31 must land as a clean "no backup" 400, not a NaN→RangeError
+      // defect (a 500) from re-deriving the key through a Date round-trip.
+      const key = backupKeyForDate(doName, body.date);
       const object = yield* Effect.promise(() => env.BACKUPS.get(key));
       if (!object) {
         return yield* Effect.fail(
@@ -1005,7 +1018,7 @@ async function runBackupSweep(env: Env, now: number): Promise<void> {
   }>();
   const targets = backupTargets(
     results.map((r) => r.id),
-    env.OWNER_USER_ID,
+    (id) => resolveUserId(id, env),
   );
   let failed = 0;
   for (const doName of targets) {
@@ -1028,14 +1041,14 @@ async function runBackupSweep(env: Env, now: number): Promise<void> {
 
 const handler = {
   // Daily off-site backup sweep (#221) — the cron trigger in wrangler.jsonc.
-  // waitUntil keeps the sweep alive past the handler return (cron handlers get
-  // 15 min of wall clock, ample for a per-user export loop at beta scale).
-  async scheduled(
-    event: ScheduledController,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<void> {
-    ctx.waitUntil(runBackupSweep(env, event.scheduledTime));
+  // AWAITED, not waitUntil: cron handlers get 15 min of wall clock (ample for
+  // a per-user export loop at beta scale), and a detached waitUntil promise
+  // would put a sweep-level failure (e.g. the D1 user query) outside Sentry's
+  // withSentry catch/flush window — the nightly backup could silently stop.
+  // Awaiting keeps a total failure loud; per-user failures are contained
+  // inside runBackupSweep.
+  async scheduled(event: ScheduledController, env: Env): Promise<void> {
+    await runBackupSweep(env, event.scheduledTime);
   },
 
   async fetch(

@@ -15,6 +15,7 @@ import {
   OutlineSnapshotSchema,
   SNAPSHOT_VERSION,
   backupKey,
+  backupKeyForDate,
   backupPrefix,
   backupTargets,
   isBackupDateKey,
@@ -63,6 +64,17 @@ describe("backup keys", () => {
     expect(backupPrefix("u1")).toBe("backups/u1/");
   });
 
+  it("computes a restore key from a date string with no Date round-trip", () => {
+    // The route builds keys this way so a calendar-invalid shape (2026-02-31)
+    // lands as a clean "no backup" miss, never a NaN→RangeError defect.
+    expect(backupKeyForDate("u1", "2026-07-17")).toBe(
+      "backups/u1/2026-07-17.json",
+    );
+    expect(backupKeyForDate("u1", "2026-02-31")).toBe(
+      "backups/u1/2026-02-31.json",
+    );
+  });
+
   it("accepts sweep-shaped dates and rejects path fragments", () => {
     expect(isBackupDateKey("2026-07-17")).toBe(true);
     expect(isBackupDateKey("2026-7-17")).toBe(false);
@@ -72,18 +84,22 @@ describe("backup keys", () => {
 });
 
 describe("backupTargets", () => {
-  it("maps the owner to the 'default' DO and dedupes", () => {
-    expect(backupTargets(["u1", "owner", "u2"], "owner")).toEqual([
+  // The resolver stands in for resolveUserId — the sweep injects the real one
+  // so the owner→'default' mapping lives in exactly one place.
+  const resolve = (id: string) => (id === "owner" ? "default" : id);
+
+  it("maps ids through the resolver and dedupes", () => {
+    expect(backupTargets(["u1", "owner", "u2"], resolve)).toEqual([
       "u1",
       "default",
       "u2",
     ]);
     // A stray literal 'default' row must not double-export the owner DO.
-    expect(backupTargets(["owner", "default"], "owner")).toEqual(["default"]);
+    expect(backupTargets(["owner", "default"], resolve)).toEqual(["default"]);
   });
 
-  it("passes ids through untouched when no owner bridge is set", () => {
-    expect(backupTargets(["u1", "u2"], undefined)).toEqual(["u1", "u2"]);
+  it("passes ids through an identity resolver untouched", () => {
+    expect(backupTargets(["u1", "u2"], (id) => id)).toEqual(["u1", "u2"]);
   });
 });
 

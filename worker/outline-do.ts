@@ -821,14 +821,24 @@ export class UserOutlineDO extends DurableObject<Env> {
         ? point.bookmark
         : await this.ctx.storage.getBookmarkForTime(point.at);
     await this.ctx.storage.onNextSessionRestoreBookmark(targetBookmark);
+    this.deferredAbort("point-in-time restore");
+    return { previousBookmark, targetBookmark };
+  }
+
+  /** Restart the DO shortly after the current RPC reply has left, kicking
+   *  every live socket into a reconnect. Shared by both restore paths — the
+   *  delay-then-abort choreography (and its lost-abort tolerance) must stay
+   *  identical between them. A lost abort is harmless in both: the PITR
+   *  restore is armed durably and applies on the next natural restart, and
+   *  the snapshot restore's data is already committed. */
+  private deferredAbort(reason: string): void {
     setTimeout(() => {
       try {
-        this.ctx.abort("point-in-time restore");
+        this.ctx.abort(reason);
       } catch {
-        // Already torn down / restarted — the armed restore still applies.
+        // Already torn down / restarted.
       }
     }, RESTORE_ABORT_DELAY_MS);
-    return { previousBookmark, targetBookmark };
   }
 
   // --- off-site backup: R2 export / snapshot restore (ticket #221) -----------
@@ -900,13 +910,7 @@ export class UserOutlineDO extends DurableObject<Env> {
         "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
       );
     });
-    setTimeout(() => {
-      try {
-        this.ctx.abort("snapshot restore");
-      } catch {
-        // Already torn down — clients re-snapshot on their next reconnect.
-      }
-    }, RESTORE_ABORT_DELAY_MS);
+    this.deferredAbort("snapshot restore");
     return { previousBookmark, nodes: data.nodes.length, kv: data.kv.length };
   }
 }

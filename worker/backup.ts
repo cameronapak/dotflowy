@@ -66,23 +66,31 @@ export function backupPrefix(doName: string): string {
   return `backups/${doName}/`;
 }
 
+/** The key for an already-shape-checked `YYYY-MM-DD` date string. Pure string
+ *  concatenation on purpose: routing a date the operator typed through
+ *  `Date.parse` would turn a calendar-invalid shape like `2026-02-31` into
+ *  `new Date(NaN).toISOString()` — a thrown RangeError (a 500) instead of the
+ *  clean "no backup at <key>" 400 the restore route answers with. */
+export function backupKeyForDate(doName: string, date: string): string {
+  return `${backupPrefix(doName)}${date}.json`;
+}
+
 export function backupKey(doName: string, at: number): string {
-  return `${backupPrefix(doName)}${utcDateKey(at)}.json`;
+  return backupKeyForDate(doName, utcDateKey(at));
 }
 
 /**
- * The DO names one sweep must export: every D1 user id, with the owner's
- * account mapped to the constant `'default'` DO (the same mapping
- * `resolveUserId` applies on the request path), deduped in case a stray D1 row
- * ever carries the literal name. D1's `user` table is the authoritative id set
- * — deliberately NOT the eventually-consistent DO enumeration API (#155).
+ * The DO names one sweep must export: every D1 user id mapped through the
+ * caller-supplied resolver — the SAME `resolveUserId` the request path and the
+ * restore route use, injected so the owner→'default' mapping lives in exactly
+ * one place and the sweep's keys can never drift from the keys a restore
+ * computes. Deduped in case a stray D1 row ever collides with a resolved
+ * name. D1's `user` table is the authoritative id set — deliberately NOT the
+ * eventually-consistent DO enumeration API (#155).
  */
 export function backupTargets(
   userIds: readonly string[],
-  ownerUserId: string | undefined,
+  resolveDoName: (userId: string) => string,
 ): string[] {
-  const names = userIds.map((id) =>
-    ownerUserId && id === ownerUserId ? "default" : id,
-  );
-  return [...new Set(names)];
+  return [...new Set(userIds.map(resolveDoName))];
 }

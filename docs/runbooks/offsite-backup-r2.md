@@ -79,6 +79,29 @@ Prefer the PITR restore whenever the loss is inside the 30-day window (finer
 granularity — any minute, not one snapshot per day); use this path for older
 losses or anything that outlived the PITR window.
 
+### Known limits (accepted for beta)
+
+- **Coordinate with the user before restoring.** The restored data is live at
+  commit, but stale tabs stay connected for ~1s until the deferred abort — an
+  edit the user makes in that window lands ON TOP of the restored outline and
+  persists (unlike the PITR path, where the restart wipes it). Restore while
+  the user isn't actively editing.
+- **The restore bypasses the free-tier node cap** (like the PITR restore — an
+  operator escape hatch). Restoring a large snapshot into a free account can
+  leave it over the cap: nothing locks (edits/deletes still work, per #170),
+  but net-growth writes 403 until the user prunes or upgrades. Say so when you
+  hand the account back.
+- **One snapshot = one RPC message**, capped at 32 MiB serialized. An outline
+  past that ceiling fails its nightly export (caught + reported to Sentry every
+  night — watch for a recurring `backup sweep: export failed for DO …`) and a
+  chunked export path would need building. Far above today's outlines; the
+  Sentry noise is the tripwire.
+- **Old snapshots must keep decoding.** The restore path validates against the
+  shared `NodeSchema`; when a new required `Node` field lands, the snapshot
+  boundary needs a backfill (or a `SNAPSHOT_VERSION` bump) or every pre-change
+  snapshot in the 90-day depth becomes unrestorable — this is on the
+  new-`Node`-field checklist in AGENTS.md.
+
 ## Local dev / verification
 
 Everything except PITR bookmarks works locally (miniflare simulates R2 on disk,
