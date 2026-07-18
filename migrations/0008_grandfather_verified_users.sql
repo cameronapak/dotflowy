@@ -1,0 +1,11 @@
+-- Grandfather existing users as email-verified (#293). Email verification is
+-- now REQUIRED (worker/auth.ts requireEmailVerification: true), which blocks
+-- sign-in for any account whose `emailVerified` is 0. Every alpha account was
+-- created before verification existed and was never sent a confirmation email,
+-- so a one-time backfill marks them all verified — otherwise the whole existing
+-- user base would be locked out on deploy. New signups start unverified (the
+-- app default) and verify through the emailed link.
+--
+-- Idempotent: the WHERE clause makes a re-run a no-op. `emailVerified` is
+-- `integer NOT NULL` in migration 0003; 1 = verified.
+UPDATE "user" SET "emailVerified" = 1 WHERE "emailVerified" = 0;

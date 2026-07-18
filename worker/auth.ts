@@ -15,7 +15,7 @@
 import { stripe } from "@better-auth/stripe";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { mcp } from "better-auth/plugins";
+import { captcha, mcp } from "better-auth/plugins";
 import Stripe from "stripe";
 
 import type { UserOutlineDO } from "./outline-do";
@@ -26,7 +26,7 @@ import {
   isOwnerAccount,
 } from "./account-deletion";
 import { sendEmail } from "./email";
-import { matchesSharedInviteCode } from "./identity";
+import { isSignupOpen, matchesSharedInviteCode } from "./identity";
 import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
@@ -46,6 +46,16 @@ export interface AuthEnv {
    *  or empty = signup CLOSED — nobody can create an account. Rotate the
    *  secret to revoke every outstanding code at once. */
   INVITE_CODES?: string;
+  /** Open-signup switch (#293). The literal "true" skips the invite requirement
+   *  on /sign-up/email (Turnstile still gates it); unset/anything-else keeps
+   *  signup invite-only. Fail-closed — see isSignupOpen. Ships UNSET. */
+  SIGNUP_OPEN?: string;
+  /** Cloudflare Turnstile SECRET key (#293). When set, the captcha plugin is
+   *  registered and enforces a Turnstile token on /sign-up/email +
+   *  /request-password-reset. Unset = the plugin isn't registered (local dev
+   *  and any deploy without a key work exactly as before — the optional-secrets
+   *  pattern shared with Google/Stripe). Set via `wrangler secret put`. */
+  TURNSTILE_SECRET_KEY?: string;
   /** Google OAuth client for "Sign in with Google". Both unset = the provider
    *  simply isn't registered (sign-in button errors with provider-not-found;
    *  local dev works fine without them). Set via `wrangler secret put`. */
@@ -101,6 +111,22 @@ function resetPasswordEmail(url: string) {
   };
 }
 
+/** The email-verification message (HTML + text; both always sent, same posture
+ *  as the reset email). Confirms the address a signup used before the account
+ *  can sign in (#293). */
+function verifyEmail(url: string) {
+  return {
+    subject: "Confirm your Dotflowy email",
+    text: `Confirm your email to finish setting up Dotflowy:\n\n${url}\n\nIf you didn't create a Dotflowy account, you can ignore this email.`,
+    html: `<div style="font-family: system-ui, -apple-system, sans-serif; max-width: 28rem; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 18px; font-weight: 600;">Confirm your email</h1>
+  <p style="font-size: 14px; color: #444; line-height: 1.5;">One more step to finish setting up your Dotflowy account.</p>
+  <p style="margin: 24px 0;"><a href="${url}" style="display: inline-block; background: #111; color: #fff; text-decoration: none; font-size: 14px; padding: 10px 16px; border-radius: 6px;">Confirm email</a></p>
+  <p style="font-size: 13px; color: #666; line-height: 1.5;">If you didn't create a Dotflowy account, ignore this email.</p>
+</div>`,
+  };
+}
+
 export function createAuth(
   env: AuthEnv,
   requestOrigin?: string,
@@ -128,12 +154,13 @@ export function createAuth(
     baseURL: env.BETTER_AUTH_URL ?? requestOrigin,
     emailAndPassword: {
       enabled: true,
-      // Deliberately OFF for beta even though email is wired now: signup is
-      // already invite-gated, so verification adds friction without closing a
-      // real hole (a reset email always goes to the account's stored address,
-      // so an unverified signup can't hijack anything). Revisit when signup
-      // opens up (docs/adr/0011-the-auth-gate.md).
-      requireEmailVerification: false,
+      // ON now that signup can open up (#293). With open signup an unverified
+      // address is a real hole (anyone could sign up as anyone), so an account
+      // can't create a session until its email is confirmed. Existing alpha
+      // accounts are grandfathered verified by migration 0008 so none is locked
+      // out. Flipping this on ALSO makes implicit Google linking start working
+      // for verified accounts (see the accountLinking note below and ADR 0011).
+      requireEmailVerification: true,
       // The delivery function password reset was missing until #169. Better
       // Auth AWAITS this callback (no backgroundTasks handler configured), so
       // it must return fast and uniformly: the send rides ctx.waitUntil —
@@ -153,6 +180,24 @@ export function createAuth(
       // A reset is the "my password leaked" move: kill every existing session
       // so a stolen one dies with the old password.
       revokeSessionsOnPasswordReset: true,
+    },
+    // Email verification (#293). `sendOnSignUp` is left at its default
+    // (undefined = follow requireEmailVerification), so a verification email
+    // goes out on every signup now that verification is required. Delivery
+    // rides the ONE email seam (worker/email.ts) on ctx.waitUntil — same
+    // reasoning as sendResetPassword above: Better Auth awaits this callback,
+    // so registering the send (not awaiting it) keeps the response fast and the
+    // isolate alive until the send finishes (a bare dangling promise would die
+    // with the isolate). sendEmail itself never throws.
+    emailVerification: {
+      sendVerificationEmail: async ({ user, url }) => {
+        const send = sendEmail(env, {
+          to: user.email,
+          ...verifyEmail(url),
+        });
+        if (executionCtx) executionCtx.waitUntil(send);
+        else await send;
+      },
     },
     // Self-serve account deletion (ticket #224 / docs/adr/0051). Confirmed
     // client-side by re-entering the password (`authClient.deleteUser({password})`)
@@ -228,16 +273,22 @@ export function createAuth(
           }
         : undefined,
     // Account-linking policy (how an existing email+password user gets Google
-    // on the same account — same `user.id`, hence the same outline DO):
-    // EXPLICIT linking only, via `linkSocial` while signed in (the "Connect
-    // Google" menu item). Implicit linking on a signed-out Google sign-in is
-    // left at Better Auth's default, which refuses to link into a local
-    // account whose email is unverified — ours all are (no verification
-    // email yet) — because an attacker who pre-registered the victim's email
-    // could otherwise capture the victim's Google identity. That refusal
-    // surfaces as ?error=account_not_linked and the AuthScreen points at the
-    // explicit path. (Don't "fix" it with `requireLocalEmailVerified: false`:
-    // deprecated, and the gate becomes unconditional next minor.)
+    // on the same account — same `user.id`, hence the same outline DO). EXPLICIT
+    // linking via `linkSocial` while signed in (the "Connect Google" menu item)
+    // always works. IMPLICIT linking on a signed-out Google sign-in is left at
+    // Better Auth's default: it refuses to link into a local account whose email
+    // is UNVERIFIED (`requireLocalEmailVerified` defaults true), because an
+    // attacker who pre-registered the victim's email could otherwise capture the
+    // victim's Google identity. Now that verification is ON (#293) and existing
+    // accounts are grandfathered verified (migration 0008), a VERIFIED account's
+    // signed-out Google sign-in links implicitly — the gate lifts for exactly
+    // the accounts we can trust, no code change (verified from source: a
+    // trustedProviders match + `emailVerified` true satisfies both clauses of
+    // link-account.mjs's refusal check). A still-unverified brand-new signup
+    // remains refused until it confirms — surfaces as ?error=account_not_linked,
+    // which the AuthScreen points at the explicit path. (Don't reach for the
+    // deprecated `requireLocalEmailVerified: false`; it becomes unconditional
+    // next minor.)
     account: {
       accountLinking: {
         // Google reports emailVerified, so this is belt-and-braces today; it
@@ -256,10 +307,18 @@ export function createAuth(
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
     trustedOrigins: ["http://localhost:3000", "http://localhost:3210"],
-    // Invite-only alpha: /sign-up/email is the ONLY account-creation path (the
-    // mcp plugin's dynamic registration creates OAuth clients, not users), so
-    // gating it here closes signup entirely. Server-side on purpose — hiding
-    // the signup UI wouldn't stop a direct POST to the endpoint.
+    // Signup gate: /sign-up/email is the ONLY account-creation path (the mcp
+    // plugin's dynamic registration creates OAuth clients, not users), so gating
+    // it here controls signup entirely. Server-side on purpose — hiding the
+    // signup UI wouldn't stop a direct POST to the endpoint.
+    //
+    // Three states (#293), all decided here except the captcha:
+    //  - OPEN (SIGNUP_OPEN === "true"): the invite requirement is SKIPPED. The
+    //    Turnstile plugin (registered below) still gates the endpoint, so signup
+    //    is human-verified, not code-gated. A supplied invite is still redeemed
+    //    harmlessly by the after-hook.
+    //  - INVITE (default): the request must carry a valid code (below).
+    //  - CLOSED: the invite state with no codes configured — fails closed.
     //
     // A signup is accepted when the supplied code is EITHER:
     //  (a) a per-email, single-use invite bound to this exact email (#251 —
@@ -278,6 +337,10 @@ export function createAuth(
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/sign-up/email") return;
+        // Open signup: no invite required (Turnstile already gated this request
+        // in the captcha plugin's onRequest). Accept and let the after-hook
+        // redeem any invite that happened to ride along.
+        if (isSignupOpen(env)) return;
         const supplied =
           typeof ctx.body?.inviteCode === "string"
             ? ctx.body.inviteCode.trim()
@@ -343,6 +406,25 @@ export function createAuth(
     // after-hook plus AuthScreen's explicit authorize-redirect fallback).
     // See docs/adr/0026-agent-native-mcp-server.md.
     plugins: [
+      // Cloudflare Turnstile (#293), registered ONLY when the secret is set —
+      // the optional-secrets pattern (Google/Stripe): no key locally or on a
+      // fork = the plugin isn't registered = signup/reset behave exactly as
+      // before. It gates EXACTLY /sign-up/email and /request-password-reset (the
+      // real client endpoint; /forget-password is its legacy alias) — NOT
+      // sign-in, which must stay token-free so the MCP OAuth resume path and
+      // Better Auth's own rate limiting carry the brute-force load. The client
+      // sends the token in the `x-captcha-response` header (the plugin's
+      // onRequest reads exactly that). Fails closed: a missing/invalid token is
+      // a 400 before the endpoint runs.
+      ...(env.TURNSTILE_SECRET_KEY
+        ? [
+            captcha({
+              provider: "cloudflare-turnstile",
+              secretKey: env.TURNSTILE_SECRET_KEY,
+              endpoints: ["/sign-up/email", "/request-password-reset"],
+            }),
+          ]
+        : []),
       mcp({ loginPage: "/" }),
       stripe({
         stripeClient: new Stripe(

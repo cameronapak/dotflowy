@@ -15,6 +15,12 @@ export interface IdentityEnv {
   /** The owner's Better Auth `user.id`; collapses that one account to the
    *  constant 'default' DO. See resolveUserId. */
   OWNER_USER_ID?: string;
+  /** Signup mode (#293). The string "true" (exactly) OPENS self-serve signup —
+   *  the invite requirement is skipped (Turnstile still gates it). Unset, empty,
+   *  or anything else keeps signup INVITE-ONLY. Fail-closed by construction:
+   *  only the literal "true" opens the door, so a typo/garbage value stays gated.
+   *  Ships UNSET (deploy keeps signup gated; flipping it on is a runbook step). */
+  SIGNUP_OPEN?: string;
   /** Comma-separated Better Auth `user.id`s allowed on admin surfaces — the
    *  PINNED admin identity (item 3, #232). When non-empty this is the sole
    *  admin check and ADMIN_EMAILS is ignored. */
@@ -73,6 +79,17 @@ export function isAdminSession(
   if (ids.length > 0) return ids.includes(session.user.id);
   const emails = splitList(env.ADMIN_EMAILS).map((e) => e.toLowerCase());
   return emails.includes(session.user.email.toLowerCase());
+}
+
+/**
+ * Is self-serve signup OPEN (#293)? Fail-closed: ONLY the exact string "true"
+ * opens it — unset, empty, "TRUE", "1", "yes", or any other value keeps signup
+ * invite-gated. When open, the /sign-up/email invite requirement is skipped
+ * (Turnstile still enforces the captcha); when closed, today's behaviour holds.
+ * A supplied invite code is still validated/redeemed harmlessly either way.
+ */
+export function isSignupOpen(env: { SIGNUP_OPEN?: string }): boolean {
+  return env.SIGNUP_OPEN === "true";
 }
 
 /** Good-enough shape check for an address someone wants an invite sent to.
