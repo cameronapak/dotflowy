@@ -96,9 +96,32 @@ export function parseFragment(source: string): ChangelogEntry | null | Error {
     );
   }
 
-  const summary = source.slice(match[0].length).trim();
+  const summary = reflow(source.slice(match[0].length).trim());
   if (!summary) return new Error(`${bump} fragment has an empty summary`);
   return { bump, summary };
+}
+
+/**
+ * Reflow a hand-authored fragment into reader-facing prose.
+ *
+ * Fragments are markdown, hard-wrapped at ~80 columns by editors and by
+ * `bunx changeset` alike. A wrap in the SOURCE is not a line break in the
+ * READER's view — left as-is it renders as a ragged column of orphaned words,
+ * because the dialog preserves newlines. A BLANK line is a real paragraph
+ * break and survives, which is why the dialog keeps `whitespace-pre-line`.
+ */
+function reflow(summary: string): string {
+  return summary
+    .split(/\n{2,}/)
+    .map((paragraph) =>
+      paragraph
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(" "),
+    )
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**

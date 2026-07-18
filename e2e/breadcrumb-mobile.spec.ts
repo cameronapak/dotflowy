@@ -84,3 +84,37 @@ test("desktop trail keeps first + last-two crumbs around the …", async ({
     page.getByRole("button", { name: "Show hidden breadcrumbs" }),
   ).toBeVisible();
 });
+
+// #279: a crumb shows a node's plain READING text, never its markdown source.
+// Every other display-only label surface (switcher titles, mirror-place labels)
+// already reads through `flattenNodeText`; the trail was the one holdout, so a
+// node titled `**Sprint goals**` wore its asterisks here.
+//
+// Asserted across the WHOLE inline grammar on purpose, not just the four forms
+// the issue lists: a renderer covering bold/italic/strike/code alone would still
+// leak a highlight's colour emoji and a link's URL into the trail.
+test("a crumb flattens inline markup to its reading text", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await seedOutline(page, [
+    {
+      id: "marked",
+      parentId: null,
+      prevSiblingId: null,
+      text: "**Sprint goals** `code` ==🔴hot== ~~old~~ [docs](https://x.com)",
+    },
+    { id: "leaf", parentId: "marked", prevSiblingId: null, text: "Leaf" },
+  ]);
+  await page.goto("/leaf");
+
+  const crumb = page.locator("nav.breadcrumb .crumb-link").first();
+  // EXACT textContent, not `toHaveText` (which whitespace-normalizes): a
+  // stripped run must not leave a doubled space where its markup used to be.
+  await expect(crumb).toHaveText("Sprint goals code hot old docs");
+  expect(await crumb.evaluate((el) => el.textContent)).toBe(
+    "Sprint goals code hot old docs",
+  );
+
+  // Display-only: the crumb still navigates by the real node id.
+  await crumb.click();
+  await expect(page).toHaveURL(/\/marked$/);
+});

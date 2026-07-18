@@ -8,6 +8,7 @@ import {
   useUnseenReleaseCount,
 } from "../data/changelog-cursor";
 import { hasBreaking, RELEASES_URL, releases } from "../data/changelog-data";
+import { parseInlineMarkdown } from "../data/changelog-markdown";
 import { setChangelogOpener } from "./changelog-opener";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -66,6 +67,43 @@ function formatDate(date: string): string {
   });
 }
 
+/**
+ * A fragment's inline markdown, read rather than printed.
+ *
+ * React nodes, never `dangerouslySetInnerHTML`: the archive is first-party, but
+ * a summary is still text flowing from a file into the DOM, and the segment
+ * shape means it can never be anything but text. Bold lands on the foreground
+ * colour so it actually reads as emphasis against the muted paragraph.
+ */
+function InlineMarkdown({ source }: { source: string }) {
+  return (
+    <>
+      {parseInlineMarkdown(source).map((segment, i) => {
+        if (segment.kind === "strong") {
+          return (
+            <strong key={i} className="font-medium text-foreground">
+              {segment.value}
+            </strong>
+          );
+        }
+        if (segment.kind === "code") {
+          return (
+            <code
+              key={i}
+              // No vertical padding: a chip on one line of a wrapped paragraph
+              // would otherwise make that line taller than its neighbours.
+              className="rounded bg-muted px-1 font-mono text-[0.9em] text-foreground"
+            >
+              {segment.value}
+            </code>
+          );
+        }
+        return <span key={i}>{segment.value}</span>;
+      })}
+    </>
+  );
+}
+
 function ReleaseSection({ release }: { release: Release }) {
   return (
     <section className="flex flex-col gap-2" data-testid="changelog-release">
@@ -75,14 +113,25 @@ function ReleaseSection({ release }: { release: Release }) {
           {formatDate(release.date)}
         </time>
       </div>
-      <ul className="flex flex-col gap-2">
+      {/* One shared badge column, not per-row `flex`: "Changed"/"Added"/"Fixed"
+          are different widths, so a flex row starts each summary at its own x
+          and the paragraphs stagger. A fixed 76px label column (wide enough for
+          every badge) plus `subgrid` on each row means all summaries hang off
+          the same left edge. */}
+      <ul className="grid grid-cols-[76px_1fr] gap-x-2 gap-y-2">
         {release.entries.map((entry, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm">
-            <Badge variant={BUMP_VARIANT[entry.bump]} className="mt-0.5">
+          <li
+            key={i}
+            className="col-span-2 grid grid-cols-subgrid items-start text-sm"
+          >
+            <Badge
+              variant={BUMP_VARIANT[entry.bump]}
+              className="mt-0.5 justify-center"
+            >
               {BUMP_LABEL[entry.bump]}
             </Badge>
-            <span className="min-w-0 flex-1 whitespace-pre-line text-muted-foreground">
-              {entry.summary}
+            <span className="min-w-0 whitespace-pre-line text-muted-foreground">
+              <InlineMarkdown source={entry.summary} />
             </span>
           </li>
         ))}

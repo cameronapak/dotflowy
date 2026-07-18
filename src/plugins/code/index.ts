@@ -5,11 +5,13 @@
 // use (ADR 0025 / ADR 0005). Dogfoods Seam A's fold, no interaction.
 
 import { mdPunct } from "../../components/inline-code";
+import { CODE_RUN_PATTERN } from "../../data/code";
 import { isRevealed } from "../token-kit";
 import { definePlugin, type El } from "../types";
 
-// Single-line, non-empty, no nested backtick.
-const CODE_RUN = "`[^`\\n]+`";
+// Single-line, non-empty, no nested backtick. The shape lives in the pure layer
+// (`src/data/code.ts`) so display-only flatteners share it; this plugin owns
+// precedence + render (the `emphasis.ts` split).
 
 const CODE_CLASS =
   "rounded-[4px] border border-border/60 bg-muted px-0.5 py-0.5 font-mono text-[0.85em] text-foreground";
@@ -52,7 +54,7 @@ export default definePlugin({
   tokens: [
     {
       id: "code-run",
-      pattern: CODE_RUN,
+      pattern: CODE_RUN_PATTERN,
       // Between links (0) and tags (20): a `#tag` inside a code run stays code.
       precedence: 10,
       folds: true,

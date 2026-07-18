@@ -52,6 +52,7 @@ import {
   toggleCollapsed,
   toggleCompleted,
 } from "../data/mutations";
+import { flattenNodeText } from "../data/node-links";
 import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
@@ -2153,10 +2154,36 @@ function Crumb({
         className="crumb-link"
         onClick={() => onNavigate(ancestor.id, rootId)}
       >
-        {ancestor.text || "Untitled"}
+        {crumbLabel(ancestor)}
       </button>
     </span>
   );
+}
+
+/**
+ * A crumb's display text: the node's PLAIN READING TEXT, never its source (#279).
+ *
+ * `flattenNodeText` is the same funnel the switcher titles and mirror-place
+ * labels read through, and `inline-text.ts` names breadcrumb crumbs in its own
+ * list of consumers — this surface was simply never wired to it, so a node
+ * titled `**Sprint goals**` wore its asterisks in the trail.
+ *
+ * Flattening rather than RENDERING the markup is the deliberate call. A crumb is
+ * 12px wayfinding chrome that ellipsis-truncates; bold and code chips inside it
+ * compete with the trail's own hierarchy. More decisively, a title can hold the
+ * whole inline grammar — `[[node-links]]`, date tokens, `==highlights==` with a
+ * leading colour emoji, `||spoilers||` — so a renderer covering only the four
+ * forms #279 lists would leave the rest raw: the same bug, in a new coat. This
+ * one call covers all of it, and a link folds to its label rather than its URL.
+ *
+ * `getTreeIndex()` (not `useTreeIndex()`) on purpose: node-link resolution needs
+ * the index, but SUBSCRIBING the trail to it would re-render every crumb on
+ * every keystroke anywhere in the outline. The trail's nodes already arrive from
+ * `useTrail`, so the read is fresh whenever a crumb's own text changes. Same
+ * pattern as `NodeDecorations`.
+ */
+function crumbLabel(ancestor: Node): string {
+  return flattenNodeText(getTreeIndex(), ancestor.text).trim() || "Untitled";
 }
 
 /**
@@ -2205,7 +2232,7 @@ function CollapsedCrumbs({
               onClick={() => onNavigate(ancestor.id, rootId)}
             >
               <span className="min-w-0 flex-1 truncate">
-                {ancestor.text || "Untitled"}
+                {crumbLabel(ancestor)}
               </span>
             </DropdownMenuItem>
           ))}
