@@ -5,9 +5,11 @@ import {
   CircleCheckIcon,
   ClipboardCopyIcon,
   DownloadIcon,
+  FileTextIcon,
   FileUpIcon,
   FocusIcon,
   LinkIcon,
+  ShieldCheckIcon,
   LogOutIcon,
   MonitorIcon,
   MessageSquareWarningIcon,
@@ -295,6 +297,24 @@ export function HeaderMoreMenu() {
           >
             <GitHubIcon />
             GitHub
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() =>
+              window.open("/terms", "_blank", "noopener,noreferrer")
+            }
+          >
+            <FileTextIcon />
+            Terms
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() =>
+              window.open("/privacy", "_blank", "noopener,noreferrer")
+            }
+          >
+            <ShieldCheckIcon />
+            Privacy Policy
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />

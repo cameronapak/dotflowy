@@ -279,6 +279,26 @@ export function AuthScreen() {
                     ? "Sign up"
                     : "Sign in"}
             </Button>
+
+            {isSignup && (
+              <p className="text-center text-xs text-muted-foreground">
+                By signing up you agree to our{" "}
+                <a
+                  href="/terms"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  Terms
+                </a>{" "}
+                and{" "}
+                <a
+                  href="/privacy"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </p>
+            )}
           </form>
         )}
 
