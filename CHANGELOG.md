@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.5.0
+
+### Minor Changes
+
+- a741fe4: Every outline is now backed up off-site daily: an automatic sweep exports each account's full outline to separate storage (kept ~90 days), and an operator can restore any account from any day's snapshot — covering losses older than the existing 30-day point-in-time recovery window.
+
 ## 1.4.0
 
 ### Minor Changes
