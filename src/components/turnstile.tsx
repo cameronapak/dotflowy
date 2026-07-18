@@ -41,7 +41,8 @@ const SCRIPT_SRC =
 /** Load the Turnstile script once, shared across every widget instance. */
 let scriptPromise: Promise<void> | null = null;
 function loadTurnstileScript(): Promise<void> {
-  if (typeof window === "undefined") return Promise.reject();
+  if (typeof window === "undefined")
+    return Promise.reject(new Error("Turnstile requires a browser"));
   if (window.turnstile) return Promise.resolve();
   if (scriptPromise) return scriptPromise;
   scriptPromise = new Promise<void>((resolve, reject) => {

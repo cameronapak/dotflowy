@@ -46,9 +46,8 @@ export interface AuthEnv {
    *  or empty = signup CLOSED — nobody can create an account. Rotate the
    *  secret to revoke every outstanding code at once. */
   INVITE_CODES?: string;
-  /** Open-signup switch (#293). The literal "true" skips the invite requirement
-   *  on /sign-up/email (Turnstile still gates it); unset/anything-else keeps
-   *  signup invite-only. Fail-closed — see isSignupOpen. Ships UNSET. */
+  /** Open-signup switch (#293) — semantics documented on IdentityEnv
+   *  (worker/identity.ts), decided by the pure `isSignupOpen` gate. */
   SIGNUP_OPEN?: string;
   /** Cloudflare Turnstile SECRET key (#293). When set, the captcha plugin is
    *  registered and enforces a Turnstile token on /sign-up/email +
@@ -198,6 +197,13 @@ export function createAuth(
         if (executionCtx) executionCtx.waitUntil(send);
         else await send;
       },
+      // Auto-resend when an UNVERIFIED account signs in with the CORRECT
+      // password (verified from source: sign-in.mjs checks the password BEFORE
+      // this branch, so it can't be used to spam arbitrary addresses; without
+      // this flag Better Auth 1.6.23 just throws EMAIL_NOT_VERIFIED with no
+      // resend). Lets the AuthScreen say "we sent you a fresh link" instead of
+      // needing a separate resend button.
+      sendOnSignIn: true,
     },
     // Self-serve account deletion (ticket #224 / docs/adr/0051). Confirmed
     // client-side by re-entering the password (`authClient.deleteUser({password})`)

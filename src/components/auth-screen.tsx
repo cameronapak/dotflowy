@@ -43,6 +43,9 @@ export function AuthScreen() {
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Non-error status line (e.g. "account created, confirm your email"). Shown
+  // where the error would show, in muted styling instead of destructive.
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Alpha is invite-only (the gate is server-side in worker/auth.ts); people
   // without a code leave their email on the waitlist instead.
@@ -68,6 +71,23 @@ export function AuthScreen() {
   // when the deploy configured a site key.
   const captchaMode = isSignup || isForgot;
   const captchaRequired = captchaMode && turnstileSiteKey !== null;
+
+  // Shared Turnstile plumbing for the two gated submits (signup + forgot):
+  // block until solved, ship the token in the header the captcha plugin reads,
+  // and re-challenge after a failed attempt (tokens are single-use).
+  function captchaBlocked(): boolean {
+    if (captchaRequired && !captchaToken) {
+      setError("Please complete the verification.");
+      return true;
+    }
+    return false;
+  }
+  function captchaHeaders(): Record<string, string> | undefined {
+    return captchaToken ? { "x-captcha-response": captchaToken } : undefined;
+  }
+  function resetCaptcha() {
+    turnstileRef.current?.reset();
+  }
 
   // A failed Google round trip lands back here with ?error=… — show it where
   // a form error would show. Only a truthy result sets state, so Strict
@@ -127,32 +147,26 @@ export function AuthScreen() {
 
   async function onForgot() {
     setError(null);
-    if (captchaRequired && !captchaToken) {
-      setError("Please complete the verification.");
-      return;
-    }
+    if (captchaBlocked()) return;
     setBusy(true);
     try {
       // The emailed link round-trips through /api/auth/reset-password/:token,
       // which validates and redirects to this page with ?token= (or ?error=).
+      const headers = captchaHeaders();
       const res = await requestPasswordReset({
         email,
         redirectTo: `${window.location.origin}/reset-password`,
-        // The Turnstile token rides in the header the captcha plugin reads.
-        fetchOptions: captchaToken
-          ? { headers: { "x-captcha-response": captchaToken } }
-          : undefined,
+        fetchOptions: headers ? { headers } : undefined,
       });
       if (res.error) {
         setError(res.error.message ?? "Something went wrong. Try again.");
-        // Token spent (single-use) — re-challenge for a retry.
-        turnstileRef.current?.reset();
+        resetCaptcha();
       } else {
         setResetSent(true);
       }
     } catch {
       setError(NETWORK_ERROR_MESSAGE);
-      turnstileRef.current?.reset();
+      resetCaptcha();
     }
     setBusy(false);
   }
@@ -164,11 +178,10 @@ export function AuthScreen() {
       return;
     }
     setError(null);
-    // Signup is Turnstile-gated when a site key is configured; sign-in never is.
-    if (isSignup && captchaRequired && !captchaToken) {
-      setError("Please complete the verification.");
-      return;
-    }
+    setNotice(null);
+    // Signup is Turnstile-gated when a site key is configured; sign-in never is
+    // (captchaRequired is false outside signup/forgot by construction).
+    if (captchaBlocked()) return;
     setBusy(true);
     const oauthQuery = pendingOAuthQuery();
     // Resume the OAuth flow with a TOP-LEVEL navigation once a session exists.
@@ -199,14 +212,12 @@ export function AuthScreen() {
       //
       // On signup a Turnstile token (when configured) rides in the
       // x-captcha-response header the captcha plugin reads. Sign-in is never
-      // captcha-gated, so it carries no header.
-      const fetchOptions =
-        isSignup && captchaToken
-          ? {
-              disableSignal: true,
-              headers: { "x-captcha-response": captchaToken },
-            }
-          : { disableSignal: true };
+      // captcha-gated and its token is always null (cleared on mode switch),
+      // so it carries no header.
+      const headers = captchaHeaders();
+      const fetchOptions = headers
+        ? { disableSignal: true, headers }
+        : { disableSignal: true };
       const res = isSignup
         ? await signUp.email({ ...signupBody, fetchOptions })
         : await signIn.email({ email, password, fetchOptions });
@@ -215,9 +226,34 @@ export function AuthScreen() {
       // that fetch couldn't follow cross-origin) means the session was set —
       // resume the authorize flow.
       if (res.error && (res.error.status ?? 500) >= 400) {
-        setError(res.error.message ?? "Something went wrong. Try again.");
+        if (!isSignup && res.error.code === "EMAIL_NOT_VERIFIED") {
+          // Unverified sign-in with the CORRECT password: the server just
+          // auto-resent the confirmation link (emailVerification.sendOnSignIn,
+          // worker/auth.ts) — say so instead of surfacing the raw error.
+          setNotice(
+            "Your email isn't confirmed yet. We just sent you a fresh confirmation link — check your inbox, then sign in.",
+          );
+        } else {
+          setError(res.error.message ?? "Something went wrong. Try again.");
+        }
         // A spent/failed Turnstile token can't be reused — re-challenge.
-        if (isSignup) turnstileRef.current?.reset();
+        if (isSignup) resetCaptcha();
+      } else if (isSignup && res.data?.token === null) {
+        // Signup succeeded but created NO session (token null =
+        // requireEmailVerification is on): the account exists, the
+        // verification email is out, and hard-navigating would just dump the
+        // user on a bare sign-in form with no explanation. Stay put — which
+        // also keeps any MCP OAuth query in the URL intact, so after
+        // confirming, the normal sign-in path resumes the authorize flow —
+        // flip to sign-in mode with the email prefilled, and say what to do
+        // next. Guarded on token === null specifically so that if
+        // verification is ever turned off (token present), the success
+        // branches below keep working unchanged.
+        setMode("signin");
+        setNotice(
+          "Account created. Check your inbox to confirm your email, then sign in.",
+        );
+        setCaptchaToken(null);
       } else if (oauthQuery) {
         resumeAuthorize();
         return;
@@ -333,7 +369,7 @@ export function AuthScreen() {
               />
             )}
 
-            {captchaMode && turnstileSiteKey && (
+            {captchaRequired && turnstileSiteKey && (
               <Turnstile
                 ref={turnstileRef}
                 siteKey={turnstileSiteKey}
@@ -342,6 +378,9 @@ export function AuthScreen() {
             )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {notice && (
+              <p className="text-sm text-muted-foreground">{notice}</p>
+            )}
 
             <Button type="submit" className="w-full" disabled={busy}>
               {busy
@@ -383,6 +422,7 @@ export function AuthScreen() {
               onClick={() => {
                 setMode("forgot");
                 setError(null);
+                setNotice(null);
                 setResetSent(false);
                 setCaptchaToken(null);
               }}
@@ -422,6 +462,7 @@ export function AuthScreen() {
               onClick={() => {
                 setMode("signin");
                 setError(null);
+                setNotice(null);
                 setResetSent(false);
                 setCaptchaToken(null);
               }}
@@ -437,6 +478,7 @@ export function AuthScreen() {
                 onClick={() => {
                   setMode(isSignup ? "signin" : "signup");
                   setError(null);
+                  setNotice(null);
                   setCaptchaToken(null);
                 }}
               >

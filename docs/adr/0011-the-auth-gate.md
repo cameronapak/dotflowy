@@ -85,8 +85,19 @@ rides the same `ctx.waitUntil` + `worker/email.ts` seam as the reset mail (same 
 timing reasoning). **Existing alpha accounts are grandfathered verified** by a one-time
 `UPDATE "user" SET emailVerified = 1` (migration 0008) so none is locked out on deploy; new signups
 verify through the emailed link. `bun run seed:user` flips the local dev account verified directly in
-D1 (no inbox to click) so it stays immediately sign-in-able. Turning verification on is also what
-makes implicit Google linking start working for verified accounts (see above).
+D1 (no inbox to click) so it stays immediately sign-in-able. Two client-facing consequences the
+AuthScreen handles: (1) **a successful signup returns `token: null` and NO session**, so the screen
+does NOT hard-navigate on that shape — it flips to sign-in mode with a "check your inbox, then sign
+in" notice (guarded on `token === null` specifically, so turning verification off restores the old
+navigate-on-success flow untouched; staying put also keeps an MCP OAuth `?client_id…` query in the
+URL, so a signup mid-OAuth-hop resumes through the normal sign-in path after confirming); (2) an
+unverified sign-in with the **correct password** gets `EMAIL_NOT_VERIFIED`, which the screen renders
+as a friendly "we just sent you a fresh link" notice — true because `emailVerification.sendOnSignIn:
+true` is set (verified from the Better Auth 1.6.23 source, `api/routes/sign-in.mjs`: WITHOUT that
+flag it just throws with no resend; WITH it, the resend fires only after the password check passes,
+so it can't be used to spam arbitrary addresses — which is why no separate "resend" button exists).
+Turning verification on is also what makes implicit Google linking start working for verified
+accounts (see above).
 
 **Don't:** key the DO off the email (permanent-name orphaning — use `user.id`); make `createAuth` a
 module singleton (the D1 binding is request-scoped); gate the static shell (the login screen must
