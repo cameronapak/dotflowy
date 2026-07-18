@@ -34,9 +34,17 @@
     // routing path and lets the asset/SPA fallback flow through env.ASSETS.
     "run_worker_first": true,
   },
-  // Non-secret config. ADMIN_EMAILS gates the admin surfaces (the waitlist
-  // view at /admin/waitlist); knowing the email grants nothing — admin still
-  // requires signing IN as that account. Unset = no admins (fail-closed).
+  // Non-secret config. Admin surfaces (the waitlist view /admin/waitlist, the
+  // restore + invite endpoints) are gated by isAdminSession (worker/identity.ts):
+  // knowing the value grants nothing — admin still requires signing IN as that
+  // account. Fail-closed: neither var set = no admins.
+  //
+  // ADMIN_USER_IDS (the pinned identity, #232) takes precedence: set it to the
+  // admin's Better Auth `user.id` (from the D1 `user` table) to CLOSE the
+  // register-the-admin-email-first path — when set, ADMIN_EMAILS is ignored.
+  // Left unset for now so ADMIN_EMAILS keeps working; flip it on once the id is
+  // confirmed (a wrong id locks admin until this line is fixed).
+  //   "ADMIN_USER_IDS": "<owner user.id>",
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
     // Public Sentry DSN (#227) — errors-only monitoring for the Worker + DO.

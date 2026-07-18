@@ -43,6 +43,23 @@ function isPrivateIpv4(host: string): boolean {
   );
 }
 
+/** Decode an IPv4-mapped IPv6 host (`::ffff:127.0.0.1` or its canonicalized hex
+ *  form `::ffff:7f00:1`) to its dotted IPv4 string, else null. WHATWG `new URL`
+ *  canonicalizes the dotted form to hex, so the hex tail is what the guard
+ *  actually sees — both are handled. Lets isPrivateIpv4 catch a loopback/private
+ *  target smuggled through the v6 mapping (#232, item 4). */
+function mappedIpv4(host: string): string | null {
+  const m = /^::ffff:(.+)$/i.exec(host);
+  if (!m) return null;
+  const tail = m[1]!;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(tail)) return tail; // dotted
+  const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(tail); // h:h (two 16-bit groups)
+  if (!hex) return null;
+  const hi = parseInt(hex[1]!, 16);
+  const lo = parseInt(hex[2]!, 16);
+  return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+}
+
 /** The SSRF target guard: a fully-formed http(s) URL whose host isn't an obvious
  *  internal destination. Re-run on every redirect hop -- a 302 to an internal
  *  target is the classic redirect bounce. A blocked target yields `{title:null}`
@@ -67,6 +84,8 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
   )
     return false; // IPv6 link-local / ULA
   if (isPrivateIpv4(host)) return false;
+  const mapped = mappedIpv4(host); // IPv4-mapped IPv6 smuggling a private target
+  if (mapped && isPrivateIpv4(mapped)) return false;
   return true;
 }
 

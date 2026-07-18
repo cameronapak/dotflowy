@@ -46,6 +46,12 @@ import {
   isBackupDateKey,
 } from "./backup";
 import {
+  OWNER_DO_ID,
+  isAdminSession,
+  isPlausibleEmail,
+  resolveUserId,
+} from "./identity";
+import {
   mintInvites,
   normalizeEmail,
   pendingWaitlistEmails,
@@ -106,10 +112,15 @@ interface Env extends AuthEnv {
   UNFURL_LIMIT: RateLimit;
   /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
   WAITLIST_LIMIT: RateLimit;
-  /** Comma-separated emails allowed on admin surfaces (the waitlist view).
-   *  Fail-closed: unset = no admins. Email is fine HERE (unlike DO keying) —
-   *  it's an allowlist entry, not a permanent storage key; if the admin's
-   *  email changes, update the var in wrangler.jsonc. */
+  /** Comma-separated Better Auth `user.id`s allowed on admin surfaces — the
+   *  PINNED admin identity (#232). When set, this is the sole admin check and
+   *  ADMIN_EMAILS is ignored, closing the register-the-admin-email-first path
+   *  (email is unverified during beta; a `user.id` can't be forged). Fail-closed.
+   *  See isAdminSession in worker/identity.ts. */
+  ADMIN_USER_IDS?: string;
+  /** Legacy comma-separated admin email allowlist. Honored ONLY as a fallback
+   *  when ADMIN_USER_IDS is empty (so an older deploy keeps working). Prefer
+   *  ADMIN_USER_IDS. Fail-closed: neither set = no admins. */
   ADMIN_EMAILS?: string;
 }
 
@@ -136,28 +147,6 @@ const KV_COLLECTIONS = new Set([
   "changelog",
   "saved-queries",
 ]);
-
-/**
- * The Durable Object name for the signed-in user's outline.
- *
- * LOCKED DECISION: a DO name is permanent and cannot be renamed, so it must
- * never be an email or any value that can change — keying by email would orphan
- * a user's whole outline on an email or auth-provider change. We key by the
- * session's stable `user.id`. Do NOT key this off the email.
- *
- * The one exception is the owner-continuity bridge: the pre-auth outline lives
- * in the constant 'default' DO (seeded from legacy D1). Setting OWNER_USER_ID to
- * the owner's `user.id` maps that one account back to 'default', carrying their
- * existing data over with zero copy. Removable once that data is wherever it
- * belongs.
- */
-const OWNER_DO_ID = "default";
-
-function resolveUserId(sessionUserId: string, env: Env): string {
-  if (env.OWNER_USER_ID && sessionUserId === env.OWNER_USER_ID)
-    return OWNER_DO_ID;
-  return sessionUserId;
-}
 
 /**
  * The provenance stamp for an MCP write: the human-facing name of the OAuth
@@ -509,25 +498,6 @@ function waitlistCorsHeaders(request: Request): Record<string, string> {
   return origin && WAITLIST_ALLOWED_ORIGINS.has(origin)
     ? { "access-control-allow-origin": origin, vary: "Origin" }
     : {};
-}
-
-/** Good-enough shape check for an address someone wants an invite sent to.
- *  Deliverability is unknowable here; this only rejects obvious junk. */
-function isPlausibleEmail(email: string): boolean {
-  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-/** Is this session's email on the ADMIN_EMAILS allowlist? Fail-closed. */
-function isAdminSession(
-  session: { user: { email: string } } | null,
-  env: Env,
-): boolean {
-  if (!session) return false;
-  const admins = (env.ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return admins.includes(session.user.email.toLowerCase());
 }
 
 /**

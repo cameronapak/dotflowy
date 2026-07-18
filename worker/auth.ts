@@ -26,6 +26,7 @@ import {
   isOwnerAccount,
 } from "./account-deletion";
 import { sendEmail } from "./email";
+import { matchesSharedInviteCode } from "./identity";
 import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
@@ -105,6 +106,17 @@ export function createAuth(
   requestOrigin?: string,
   executionCtx?: ExecutionContext,
 ) {
+  // Fail closed, explicitly (#232). The secret signs sessions + reset tokens;
+  // it's optional-typed only because the binding is absent in some tooling.
+  // "Better Auth fails closed without it" was an unverified claim — assert it
+  // here so a misconfigured deploy 500s loudly at construction instead of
+  // silently signing with a missing/empty secret. `bun run setup` writes it to
+  // .dev.vars; prod sets it via `wrangler secret put BETTER_AUTH_SECRET`.
+  if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.trim() === "") {
+    throw new Error(
+      "BETTER_AUTH_SECRET is required (unset or empty). Set it via `wrangler secret put BETTER_AUTH_SECRET` in prod, or run `bun run setup` locally.",
+    );
+  }
   return betterAuth({
     // Better Auth accepts a D1 binding directly (kysely under the hood).
     database: env.DB,
@@ -283,11 +295,7 @@ export function createAuth(
           return; // valid; the after-hook stamps it once the account exists
         }
         // (b) The shared INVITE_CODES backdoor.
-        const codes = (env.INVITE_CODES ?? "")
-          .split(",")
-          .map((c) => c.trim())
-          .filter(Boolean);
-        if (supplied && codes.includes(supplied)) return;
+        if (matchesSharedInviteCode(supplied, env.INVITE_CODES)) return;
         throw new APIError("FORBIDDEN", {
           message:
             "Dotflowy is invite-only during alpha. Ask for an invite code, or join the waitlist.",
