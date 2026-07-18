@@ -47,6 +47,18 @@
   //   "ADMIN_USER_IDS": "<owner user.id>",
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
+    // Open-signup switch (#293). UNSET on purpose — signup stays invite-only on
+    // deploy. Flipping self-serve signup on is a deliberate runbook step: set
+    // this to the literal "true" (only that value opens it; fail-closed) once
+    // Turnstile is configured below. The Turnstile SECRET is a `wrangler secret
+    // put TURNSTILE_SECRET_KEY`, not a var.
+    //   "SIGNUP_OPEN": "true",
+    // Cloudflare Turnstile SITE key (#293) — PUBLIC (ships to the browser), so a
+    // var, not a secret. Surfaced to the SPA via GET /api/auth-config. Set it to
+    // the widget's site key from the Cloudflare dashboard (Turnstile → your
+    // widget). Unset = no widget renders; pair it with the secret so the server
+    // actually enforces the token.
+    //   "TURNSTILE_SITE_KEY": "0x...",
     // Public Sentry DSN (#227) — errors-only monitoring for the Worker + DO.
     // Public-by-design (it also ships in the client bundle), so a var, not a
     // secret. Unset in a fork => Sentry stays dormant. See worker/sentry.ts.

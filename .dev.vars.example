@@ -8,6 +8,23 @@ BETTER_AUTH_SECRET=replace-me
 # empty = signup closed. In prod: `wrangler secret put INVITE_CODES`.
 INVITE_CODES=dev-invite
 
+# Open-signup switch (#293). Unset or anything-but-"true" = signup stays
+# invite-only (today's behavior). Exactly "true" OPENS self-serve signup: the
+# invite requirement is skipped (Turnstile below still gates it). Ships UNSET in
+# prod (flipping it on is a runbook step). In prod set via `wrangler secret put
+# SIGNUP_OPEN` (or a wrangler.jsonc var — it isn't sensitive).
+# SIGNUP_OPEN=true
+
+# Cloudflare Turnstile (#293). BOTH keys must be set to exercise the real
+# captcha locally; unset = the captcha plugin isn't registered and no widget
+# renders (signup/reset behave exactly as before). The values below are
+# Cloudflare's documented ALWAYS-PASS test pair — safe for local dev only.
+#   Site key (public, ships to the browser; served via GET /api/auth-config):
+# TURNSTILE_SITE_KEY=1x00000000000000000000AA
+#   Secret key (server; registers + enforces the plugin). In prod:
+#   `wrangler secret put TURNSTILE_SECRET_KEY`.
+# TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
 # Optional: Stripe billing (issue #172). Unset = the app runs fine and only the
 # billing endpoints fail. Test-mode key from the Stripe dashboard; the webhook
 # secret is printed by `stripe listen` (see "Testing Stripe billing locally" in

@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test";
 import {
   isAdminSession,
   isPlausibleEmail,
+  isSignupOpen,
   matchesSharedInviteCode,
   resolveUserId,
 } from "./identity";
@@ -126,6 +127,22 @@ describe("isPlausibleEmail", () => {
     expect(isPlausibleEmail("a @b.com")).toBe(false); // whitespace
     expect(isPlausibleEmail("a@b.com ")).toBe(false); // trailing space
     expect(isPlausibleEmail(`${"a".repeat(250)}@b.com`)).toBe(false); // > 254
+  });
+});
+
+describe("isSignupOpen (the SIGNUP_OPEN gate)", () => {
+  it("opens ONLY on the exact string 'true'", () => {
+    expect(isSignupOpen({ SIGNUP_OPEN: "true" })).toBe(true);
+  });
+
+  it("stays closed (fail-closed) when unset, empty, or any other value", () => {
+    expect(isSignupOpen({})).toBe(false);
+    expect(isSignupOpen({ SIGNUP_OPEN: "" })).toBe(false);
+    expect(isSignupOpen({ SIGNUP_OPEN: "TRUE" })).toBe(false);
+    expect(isSignupOpen({ SIGNUP_OPEN: "True" })).toBe(false);
+    expect(isSignupOpen({ SIGNUP_OPEN: "1" })).toBe(false);
+    expect(isSignupOpen({ SIGNUP_OPEN: "yes" })).toBe(false);
+    expect(isSignupOpen({ SIGNUP_OPEN: " true " })).toBe(false);
   });
 });
 

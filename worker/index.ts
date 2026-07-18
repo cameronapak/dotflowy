@@ -49,6 +49,7 @@ import {
   OWNER_DO_ID,
   isAdminSession,
   isPlausibleEmail,
+  isSignupOpen,
   resolveUserId,
 } from "./identity";
 import {
@@ -122,6 +123,12 @@ interface Env extends AuthEnv {
    *  when ADMIN_USER_IDS is empty (so an older deploy keeps working). Prefer
    *  ADMIN_USER_IDS. Fail-closed: neither set = no admins. */
   ADMIN_EMAILS?: string;
+  /** Cloudflare Turnstile SITE key (#293) — PUBLIC (it ships to the browser), so
+   *  a wrangler.jsonc var, not a secret. Surfaced to the SPA via
+   *  GET /api/auth-config so the AuthScreen can render the widget. Unset = no
+   *  key = no widget in the client (and the plugin is unregistered server-side
+   *  when TURNSTILE_SECRET_KEY is also unset — dev/no-key parity). */
+  TURNSTILE_SITE_KEY?: string;
 }
 
 /** A legacy D1 node row (booleans as 0/1). Only read during the one-time import
@@ -659,6 +666,19 @@ function handleApiRequest(
     // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
     if (url.pathname.startsWith("/api/auth/")) {
       return yield* Effect.promise(() => auth.handler(request));
+    }
+
+    // Public signup config (#293): the SPA reads whether signup is OPEN (hide
+    // the invite field) and the PUBLIC Turnstile site key (render the widget).
+    // No session, no DO — dumb + static, like the OAuth discovery routes. Sits
+    // before the session gate on purpose (the signed-out AuthScreen fetches it).
+    // A missing key returns null so the client renders no widget, which matches
+    // the server registering no captcha plugin — dev/no-key parity.
+    if (url.pathname === "/api/auth-config") {
+      return json({
+        signupOpen: isSignupOpen(env),
+        turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? null,
+      });
     }
 
     // Alpha waitlist: POST is PUBLIC (submitters have no account yet) — must

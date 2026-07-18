@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
   hardReset,
@@ -8,6 +8,7 @@ import {
   signUp,
 } from "../lib/auth-client";
 import { consumeOAuthCallbackError } from "./oauth-callback-error";
+import { Turnstile, type TurnstileHandle } from "./turnstile";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -42,6 +43,9 @@ export function AuthScreen() {
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Non-error status line (e.g. "account created, confirm your email"). Shown
+  // where the error would show, in muted styling instead of destructive.
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Alpha is invite-only (the gate is server-side in worker/auth.ts); people
   // without a code leave their email on the waitlist instead.
@@ -50,9 +54,40 @@ export function AuthScreen() {
   // email has an account (non-enumerable, same posture as the waitlist), so
   // this is the only success signal there is.
   const [resetSent, setResetSent] = useState(false);
+  // Signup config from the public GET /api/auth-config (#293): whether signup
+  // is OPEN (hide the invite field) and the PUBLIC Turnstile site key (render
+  // the widget). null until loaded; default to the gated shape so we never
+  // flash an open form for a gated deploy.
+  const [signupOpen, setSignupOpen] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
+  // The solved Turnstile token, sent in the x-captcha-response header. Cleared
+  // on mode switch and on submit failure (tokens are single-use).
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileHandle>(null);
 
   const isSignup = mode === "signup";
   const isForgot = mode === "forgot";
+  // Turnstile guards signup + password reset (never sign-in). Only relevant
+  // when the deploy configured a site key.
+  const captchaMode = isSignup || isForgot;
+  const captchaRequired = captchaMode && turnstileSiteKey !== null;
+
+  // Shared Turnstile plumbing for the two gated submits (signup + forgot):
+  // block until solved, ship the token in the header the captcha plugin reads,
+  // and re-challenge after a failed attempt (tokens are single-use).
+  function captchaBlocked(): boolean {
+    if (captchaRequired && !captchaToken) {
+      setError("Please complete the verification.");
+      return true;
+    }
+    return false;
+  }
+  function captchaHeaders(): Record<string, string> | undefined {
+    return captchaToken ? { "x-captcha-response": captchaToken } : undefined;
+  }
+  function resetCaptcha() {
+    turnstileRef.current?.reset();
+  }
 
   // A failed Google round trip lands back here with ?error=… — show it where
   // a form error would show. Only a truthy result sets state, so Strict
@@ -60,6 +95,25 @@ export function AuthScreen() {
   useEffect(() => {
     const message = consumeOAuthCallbackError();
     if (message) setError(message);
+  }, []);
+
+  // Load the public signup config once. On failure we keep the gated defaults
+  // (invite required, no widget) — the safe fallback if the endpoint is down.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auth-config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then(
+        (cfg: { signupOpen?: boolean; turnstileSiteKey?: string } | null) => {
+          if (cancelled || !cfg) return;
+          setSignupOpen(Boolean(cfg.signupOpen));
+          setTurnstileSiteKey(cfg.turnstileSiteKey ?? null);
+        },
+      )
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function onGoogle() {
@@ -93,21 +147,26 @@ export function AuthScreen() {
 
   async function onForgot() {
     setError(null);
+    if (captchaBlocked()) return;
     setBusy(true);
     try {
       // The emailed link round-trips through /api/auth/reset-password/:token,
       // which validates and redirects to this page with ?token= (or ?error=).
+      const headers = captchaHeaders();
       const res = await requestPasswordReset({
         email,
         redirectTo: `${window.location.origin}/reset-password`,
+        fetchOptions: headers ? { headers } : undefined,
       });
       if (res.error) {
         setError(res.error.message ?? "Something went wrong. Try again.");
+        resetCaptcha();
       } else {
         setResetSent(true);
       }
     } catch {
       setError(NETWORK_ERROR_MESSAGE);
+      resetCaptcha();
     }
     setBusy(false);
   }
@@ -119,6 +178,10 @@ export function AuthScreen() {
       return;
     }
     setError(null);
+    setNotice(null);
+    // Signup is Turnstile-gated when a site key is configured; sign-in never is
+    // (captchaRequired is false outside signup/forgot by construction).
+    if (captchaBlocked()) return;
     setBusy(true);
     const oauthQuery = pendingOAuthQuery();
     // Resume the OAuth flow with a TOP-LEVEL navigation once a session exists.
@@ -146,7 +209,15 @@ export function AuthScreen() {
       // mount the whole editor (collections, /api/sync socket) against the
       // previous occupant's still-live singletons before the navigation
       // commits. Errors never fire the signal, so that path is unaffected.
-      const fetchOptions = { disableSignal: true };
+      //
+      // On signup a Turnstile token (when configured) rides in the
+      // x-captcha-response header the captcha plugin reads. Sign-in is never
+      // captcha-gated and its token is always null (cleared on mode switch),
+      // so it carries no header.
+      const headers = captchaHeaders();
+      const fetchOptions = headers
+        ? { disableSignal: true, headers }
+        : { disableSignal: true };
       const res = isSignup
         ? await signUp.email({ ...signupBody, fetchOptions })
         : await signIn.email({ email, password, fetchOptions });
@@ -155,7 +226,34 @@ export function AuthScreen() {
       // that fetch couldn't follow cross-origin) means the session was set —
       // resume the authorize flow.
       if (res.error && (res.error.status ?? 500) >= 400) {
-        setError(res.error.message ?? "Something went wrong. Try again.");
+        if (!isSignup && res.error.code === "EMAIL_NOT_VERIFIED") {
+          // Unverified sign-in with the CORRECT password: the server just
+          // auto-resent the confirmation link (emailVerification.sendOnSignIn,
+          // worker/auth.ts) — say so instead of surfacing the raw error.
+          setNotice(
+            "Your email isn't confirmed yet. We just sent you a fresh confirmation link — check your inbox, then sign in.",
+          );
+        } else {
+          setError(res.error.message ?? "Something went wrong. Try again.");
+        }
+        // A spent/failed Turnstile token can't be reused — re-challenge.
+        if (isSignup) resetCaptcha();
+      } else if (isSignup && res.data?.token === null) {
+        // Signup succeeded but created NO session (token null =
+        // requireEmailVerification is on): the account exists, the
+        // verification email is out, and hard-navigating would just dump the
+        // user on a bare sign-in form with no explanation. Stay put — which
+        // also keeps any MCP OAuth query in the URL intact, so after
+        // confirming, the normal sign-in path resumes the authorize flow —
+        // flip to sign-in mode with the email prefilled, and say what to do
+        // next. Guarded on token === null specifically so that if
+        // verification is ever turned off (token present), the success
+        // branches below keep working unchanged.
+        setMode("signin");
+        setNotice(
+          "Account created. Check your inbox to confirm your email, then sign in.",
+        );
+        setCaptchaToken(null);
       } else if (oauthQuery) {
         resumeAuthorize();
         return;
@@ -257,7 +355,10 @@ export function AuthScreen() {
                 onChange={(e) => setPassword(e.target.value)}
               />
             )}
-            {isSignup && (
+            {/* Invite code only while signup is gated. When SIGNUP_OPEN is on,
+                the server skips the invite requirement, so the field would be
+                dead chrome (any code entered is still redeemed harmlessly). */}
+            {isSignup && !signupOpen && (
               <Input
                 type="text"
                 placeholder="Invite code"
@@ -268,7 +369,18 @@ export function AuthScreen() {
               />
             )}
 
+            {captchaRequired && turnstileSiteKey && (
+              <Turnstile
+                ref={turnstileRef}
+                siteKey={turnstileSiteKey}
+                onToken={setCaptchaToken}
+              />
+            )}
+
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {notice && (
+              <p className="text-sm text-muted-foreground">{notice}</p>
+            )}
 
             <Button type="submit" className="w-full" disabled={busy}>
               {busy
@@ -310,7 +422,9 @@ export function AuthScreen() {
               onClick={() => {
                 setMode("forgot");
                 setError(null);
+                setNotice(null);
                 setResetSent(false);
+                setCaptchaToken(null);
               }}
             >
               Forgot password?
@@ -348,7 +462,9 @@ export function AuthScreen() {
               onClick={() => {
                 setMode("signin");
                 setError(null);
+                setNotice(null);
                 setResetSent(false);
+                setCaptchaToken(null);
               }}
             >
               Back to sign in
@@ -362,15 +478,23 @@ export function AuthScreen() {
                 onClick={() => {
                   setMode(isSignup ? "signin" : "signup");
                   setError(null);
+                  setNotice(null);
+                  setCaptchaToken(null);
                 }}
               >
-                {isSignup ? "Sign in" : "Have an invite?"}
+                {isSignup
+                  ? "Sign in"
+                  : signupOpen
+                    ? "Sign up"
+                    : "Have an invite?"}
               </button>
             </>
           )}
         </p>
 
-        {isSignup && (
+        {/* The waitlist is the path for people WITHOUT an invite — irrelevant
+            once signup is open to everyone. */}
+        {isSignup && !signupOpen && (
           <p className="mt-2 text-center text-sm text-muted-foreground">
             {waitlist === "done" ? (
               "You're on the list! An invite will land in your inbox when Dotflowy is ready."
