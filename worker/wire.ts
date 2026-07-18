@@ -87,6 +87,17 @@ export const AdminInvitePostBody = Schema.Struct({
   limit: Schema.optional(Schema.Number),
 });
 
+/** POST /api/admin/announce — email the launch "Dotflowy is open" blast (#294).
+ *  Same shape + admin gate as /api/admin/invite. Provide `emails` to announce to
+ *  specific addresses, or `all`/`limit` to pull not-yet-notified waitlist rows.
+ *  The schema only guards shape; targeting + idempotent stamping live in the
+ *  route (runAnnounceBatch -> sendAnnouncements). */
+export const AdminAnnouncePostBody = Schema.Struct({
+  emails: Schema.optional(Schema.Array(Schema.String)),
+  all: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(Schema.Number),
+});
+
 /** POST /api/admin/restore — restore one user's outline to a point in time via
  *  the DO's 30-day PITR (#220). Admin-gated in the route (session + ADMIN_EMAILS).
  *  Identify the user by `email` OR `userId`; restore to a time (`at`, epoch ms or

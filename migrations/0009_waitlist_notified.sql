@@ -1,0 +1,16 @@
+-- Launch-day announcement stamp (map #151 / ticket #294). The waitlist (0005)
+-- collects interest; when signup opens to the public, the admin-only
+-- POST /api/admin/announce (driven by scripts/announce.ts) emails every waiter
+-- the "Dotflowy is open" blast through the ONE email seam (worker/email.ts).
+--
+-- `notifiedAt` mirrors the `redeemedAt` single-use pattern on `invites` (0007):
+-- NULL until the announcement is sent, then stamped once. The send is claimed by
+-- a conditional UPDATE (... WHERE notifiedAt IS NULL) so only the winning writer
+-- sends — a re-run or concurrent batch sees the row already stamped and skips it,
+-- which is what makes `bun run announce` safe to re-run without double-sending.
+--
+-- Nullable with no default, so the column adds cleanly to existing rows (every
+-- current waiter starts un-notified). Account deletion still scrubs the whole
+-- waitlist row by email (worker/account-deletion.ts), so this column carries no
+-- PII beyond a timestamp and needs no separate cleanup.
+ALTER TABLE waitlist ADD COLUMN notifiedAt INTEGER;

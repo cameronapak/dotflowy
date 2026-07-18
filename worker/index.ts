@@ -35,6 +35,11 @@ import { Data, Effect, Schema } from "effect";
 import type { AuthEnv } from "./auth";
 import type { Node } from "./wire";
 
+import {
+  pendingAnnounceEmails,
+  sendAnnouncements,
+  type AnnounceBatchResult,
+} from "./announce";
 import { createAuth } from "./auth";
 import {
   OutlineSnapshotSchema,
@@ -65,6 +70,7 @@ import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitle } from "./unfurl";
 import {
+  AdminAnnouncePostBody,
   AdminInvitePostBody,
   AdminRestorePostBody,
   AdminSnapshotRestorePostBody,
@@ -591,6 +597,43 @@ async function runInviteBatch(
   return { ...result, count: result.invited.length };
 }
 
+/** Default number of pending waitlist rows a batch announces to when neither
+ *  explicit emails nor `all` is given. Kept small so a bare call is safe. */
+const ANNOUNCE_BATCH_DEFAULT = 25;
+const ANNOUNCE_BATCH_MAX = 500;
+
+/** The public site where signup is now open (#294). The launch blast points at
+ *  the marketing origin, NOT the app origin the invite email uses — signup
+ *  graduated to public here. Pinned, not derived from url.origin. */
+const ANNOUNCE_SIGNUP_URL = "https://dotflowy.com";
+
+/**
+ * Resolve the target addresses for an admin announcement batch, then email + stamp
+ * each (#294). Explicit `emails` win; otherwise it pulls not-yet-notified waitlist
+ * rows — every row with `all`, else the oldest `limit`. Runs on the Worker because
+ * sendAnnouncements sends through the `send_email` binding, which only exists here.
+ * The `notifiedAt` stamp (migration 0009) makes a re-run safe to re-send.
+ */
+async function runAnnounceBatch(
+  env: Env,
+  body: { emails?: readonly string[]; all?: boolean; limit?: number },
+): Promise<AnnounceBatchResult & { count: number }> {
+  let targets: string[];
+  if (body.emails && body.emails.length > 0) {
+    targets = body.emails.map(normalizeEmail).filter(isPlausibleEmail);
+  } else {
+    const limit = body.all
+      ? null
+      : Math.max(
+          1,
+          Math.min(body.limit ?? ANNOUNCE_BATCH_DEFAULT, ANNOUNCE_BATCH_MAX),
+        );
+    targets = await pendingAnnounceEmails(env, limit);
+  }
+  const result = await sendAnnouncements(env, targets, ANNOUNCE_SIGNUP_URL);
+  return { ...result, count: result.notified.length };
+}
+
 // --- Admin restore (PITR) ----------------------------------------------------
 
 /**
@@ -727,6 +770,25 @@ function handleApiRequest(
       return json(
         yield* Effect.promise(() => runInviteBatch(env, body, url.origin)),
       );
+    }
+
+    // Admin-only: email the launch "Dotflowy is open" blast to the waitlist
+    // (#294). Same 404-not-401 admin gate + method order as /api/admin/invite —
+    // the surface shouldn't advertise itself. Driven by scripts/announce.ts.
+    // Lives on the Worker because the send needs the `send_email` binding; the
+    // `notifiedAt` stamp (migration 0009) makes it safe to re-run.
+    if (url.pathname === "/api/admin/announce") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminAnnouncePostBody);
+      return json(yield* Effect.promise(() => runAnnounceBatch(env, body)));
     }
 
     // Admin-only: restore ONE user's outline to a point in the DO's free 30-day
