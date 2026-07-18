@@ -1,25 +1,15 @@
+import { useNavigate } from "@tanstack/react-router";
 import {
-  ALargeSmallIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CircleCheckIcon,
-  ClipboardCopyIcon,
-  DownloadIcon,
-  FileUpIcon,
   FocusIcon,
-  LinkIcon,
   LogOutIcon,
-  MonitorIcon,
   MessageSquareWarningIcon,
-  MoonIcon,
   MoreHorizontalIcon,
-  PlugZapIcon,
+  SettingsIcon,
   SparklesIcon,
-  SunIcon,
-  SunMoonIcon,
-  Trash2Icon,
 } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
@@ -35,27 +25,17 @@ import { runStructural } from "../data/structural";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
-import { connectGoogle, signOutAndReload } from "../lib/auth-client";
+import { signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
-import { DeleteAccountDialog } from "./delete-account-dialog";
-import { McpConnectDialog } from "./mcp-connect-dialog";
-import { openOpmlImport } from "./opml-import-opener";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
-import { useTextSize, type TextSize } from "./text-size-provider";
-import { useTheme } from "./theme-provider";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
@@ -187,235 +167,135 @@ export function setViewCollapsed(collapsed: boolean) {
 }
 
 /**
- * Header overflow ("More") menu. Holds the secondary, set-once controls --
- * theme, text size (ADR 0029), show-completed, sign out -- so the header bar
- * keeps only the primary, frequently reached actions (search, the contextual
- * bookmark star, plugin header slots).
+ * Header overflow ("More") menu. Since #171 the plan/billing, account (Connect
+ * Google, Delete account), connections (MCP), data (import/export/copy), and
+ * appearance (theme, text size) controls all live on the dedicated `/settings`
+ * page -- so this menu is now just the outline-view actions (collapse/expand,
+ * show completed, spotlight), the read-only links (What's new, Report a bug,
+ * GitHub), and the two entry points that belong on every screen: Settings (top)
+ * and Sign out (bottom).
  *
  * This is the static v1 of the header-action overflow: the pinned/overflow
  * split is a fixed default. User-customizable pinning (Chrome-extension style)
  * is the planned v2 and will land with its own ADR + a per-user pin collection.
- *
- * Each control is re-expressed in its native menu idiom (theme = radio submenu,
- * show-completed = checkbox item) so its on/off state still reads from inside
- * the menu, not just as a bar button.
  */
 export function HeaderMoreMenu() {
-  const { theme, setTheme } = useTheme();
-  const { textSize, setTextSize } = useTextSize();
+  const navigate = useNavigate();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
   // Unread-changelog signal (ADR 0046): a quiet dot on this trigger replaces the
   // old loud header CTA. Presence IS the signal; opening the dialog marks
   // everything read, so both the dot and the item emphasis clear themselves.
   const unseen = useUnseenReleaseCount();
-  // The connect dialog is a sibling of the menu (not nested in its content) so
-  // it survives the menu closing on item select.
-  const [connectOpen, setConnectOpen] = useState(false);
-  // Same sibling pattern for the destructive delete-account confirmation.
-  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title={unseen > 0 ? "More — what's new" : "More"}
-              className="relative"
-            >
-              <MoreHorizontalIcon />
-              {unseen > 0 && (
-                <span
-                  data-changelog-dot=""
-                  aria-hidden="true"
-                  className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-background"
-                />
-              )}
-              <span className="sr-only">
-                More actions{unseen > 0 ? " (new releases available)" : ""}
-              </span>
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="end" className="min-w-44">
-          <DropdownMenuItem onClick={copyOutlineAsMarkdown}>
-            <ClipboardCopyIcon />
-            Copy as Markdown
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={() => openOpmlImport()}>
-            <FileUpIcon />
-            Import OPML…
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={exportOutlineAsOpml}>
-            <DownloadIcon />
-            Export OPML
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={() => setConnectOpen(true)}>
-            <PlugZapIcon />
-            Connect apps (MCP)
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={() => openFeedbackReport()}>
-            <MessageSquareWarningIcon />
-            Report a bug
-          </DropdownMenuItem>
-
-          {/* The permanent home for the changelog (ADR 0046). While releases
-              are unread, it's emphasized -- bolder text + a solid count pill --
-              so the eye lands here once the trigger's dot draws the menu open. */}
-          <DropdownMenuItem
-            onClick={() => openChangelog()}
-            data-unseen={unseen > 0 ? "" : undefined}
-            className={unseen > 0 ? "font-medium" : undefined}
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title={unseen > 0 ? "More — what's new" : "More"}
+            className="relative"
           >
-            <SparklesIcon />
-            What's new
+            <MoreHorizontalIcon />
             {unseen > 0 && (
-              // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
-              // `focus:**:text-accent-foreground` recolors EVERY descendant on
-              // hover, which would flip this number to near-white on the near-
-              // white pill (an unreadable white circle). The bang shields it so
-              // the chip stays legible at rest and on hover, both themes.
-              <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground! tabular-nums">
-                {unseen}
-              </span>
+              <span
+                data-changelog-dot=""
+                aria-hidden="true"
+                className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-background"
+              />
             )}
-          </DropdownMenuItem>
+            <span className="sr-only">
+              More actions{unseen > 0 ? " (new releases available)" : ""}
+            </span>
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
+          <SettingsIcon />
+          Settings
+        </DropdownMenuItem>
 
-          <DropdownMenuItem
-            onClick={() =>
-              window.open(
-                "https://git.new/dotflowy",
-                "_blank",
-                "noopener,noreferrer",
-              )
-            }
-          >
-            <GitHubIcon />
-            GitHub
-          </DropdownMenuItem>
+        {/* The permanent home for the changelog (ADR 0046). While releases
+            are unread, it's emphasized -- bolder text + a solid count pill --
+            so the eye lands here once the trigger's dot draws the menu open. */}
+        <DropdownMenuItem
+          onClick={() => openChangelog()}
+          data-unseen={unseen > 0 ? "" : undefined}
+          className={unseen > 0 ? "font-medium" : undefined}
+        >
+          <SparklesIcon />
+          What's new
+          {unseen > 0 && (
+            // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
+            // `focus:**:text-accent-foreground` recolors EVERY descendant on
+            // hover, which would flip this number to near-white on the near-
+            // white pill (an unreadable white circle). The bang shields it so
+            // the chip stays legible at rest and on hover, both themes.
+            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground! tabular-nums">
+              {unseen}
+            </span>
+          )}
+        </DropdownMenuItem>
 
-          <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => openFeedbackReport()}>
+          <MessageSquareWarningIcon />
+          Report a bug
+        </DropdownMenuItem>
 
-          <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
-            <ChevronsDownUpIcon />
-            Collapse all
-          </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() =>
+            window.open(
+              "https://git.new/dotflowy",
+              "_blank",
+              "noopener,noreferrer",
+            )
+          }
+        >
+          <GitHubIcon />
+          GitHub
+        </DropdownMenuItem>
 
-          <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
-            <ChevronsUpDownIcon />
-            Expand all
-          </DropdownMenuItem>
+        <DropdownMenuSeparator />
 
-          <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
+          <ChevronsDownUpIcon />
+          Collapse all
+        </DropdownMenuItem>
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <SunMoonIcon />
-              Theme
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup
-                value={theme}
-                onValueChange={(value) =>
-                  setTheme(value as "light" | "dark" | "system")
-                }
-              >
-                <DropdownMenuRadioItem value="light">
-                  <SunIcon />
-                  Light
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="dark">
-                  <MoonIcon />
-                  Dark
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="system">
-                  <MonitorIcon />
-                  System
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+        <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
+          <ChevronsUpDownIcon />
+          Expand all
+        </DropdownMenuItem>
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <ALargeSmallIcon />
-              Text size
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup
-                value={textSize}
-                onValueChange={(value) => setTextSize(value as TextSize)}
-              >
-                <DropdownMenuRadioItem value="small">
-                  Small
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="default">
-                  Default
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="large">
-                  Large
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+        <DropdownMenuCheckboxItem
+          checked={showCompleted}
+          onCheckedChange={setShowCompleted}
+        >
+          <CircleCheckIcon />
+          Show completed
+        </DropdownMenuCheckboxItem>
 
-          <DropdownMenuCheckboxItem
-            checked={showCompleted}
-            onCheckedChange={setShowCompleted}
-          >
-            <CircleCheckIcon />
-            Show completed
-          </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={spotlight}
+          onCheckedChange={setSpotlightEnabled}
+        >
+          <FocusIcon />
+          Spotlight mode
+        </DropdownMenuCheckboxItem>
 
-          <DropdownMenuCheckboxItem
-            checked={spotlight}
-            onCheckedChange={setSpotlightEnabled}
-          >
-            <FocusIcon />
-            Spotlight mode
-          </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
 
-          <DropdownMenuSeparator />
-
-          {/* Explicit Google account linking — the only way an existing
-              email+password account gains Google sign-in (worker/auth.ts has
-              the policy). Idempotent: re-connecting an already-linked Google
-              account just refreshes its tokens and lands back here. */}
-          <DropdownMenuItem onClick={() => connectGoogle()}>
-            <LinkIcon />
-            Connect Google
-          </DropdownMenuItem>
-
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => signOutAndReload()}
-          >
-            <LogOutIcon />
-            Sign out
-          </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
-
-          {/* Self-serve account deletion (ticket #224). Opens a password-gated
-              confirmation; the dialog owns the destructive flow. */}
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2Icon />
-            Delete account
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
-      <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} />
-    </>
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() => signOutAndReload()}
+        >
+          <LogOutIcon />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
