@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a> · invite-gated alpha
+  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a>
 </p>
 
 ---
