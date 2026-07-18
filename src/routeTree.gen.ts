@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TodayRouteImport } from './routes/today'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
@@ -26,6 +27,11 @@ const TodayRoute = TodayRouteImport.update({
 const TermsRoute = TermsRouteImport.update({
   id: '/terms',
   path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/$nodeId': typeof NodeIdRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/restore': typeof AdminRestoreRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/$nodeId': typeof NodeIdRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/restore': typeof AdminRestoreRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/$nodeId': typeof NodeIdRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/restore': typeof AdminRestoreRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/$nodeId'
     | '/privacy'
     | '/reset-password'
+    | '/settings'
     | '/terms'
     | '/today'
     | '/admin/restore'
@@ -107,6 +117,7 @@ export interface FileRouteTypes {
     | '/$nodeId'
     | '/privacy'
     | '/reset-password'
+    | '/settings'
     | '/terms'
     | '/today'
     | '/admin/restore'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/$nodeId'
     | '/privacy'
     | '/reset-password'
+    | '/settings'
     | '/terms'
     | '/today'
     | '/admin/restore'
@@ -128,6 +140,7 @@ export interface RootRouteChildren {
   NodeIdRoute: typeof NodeIdRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SettingsRoute: typeof SettingsRoute
   TermsRoute: typeof TermsRoute
   TodayRoute: typeof TodayRoute
   AdminRestoreRoute: typeof AdminRestoreRoute
@@ -148,6 +161,13 @@ declare module '@tanstack/react-router' {
       path: '/terms'
       fullPath: '/terms'
       preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -200,6 +220,7 @@ const rootRouteChildren: RootRouteChildren = {
   NodeIdRoute: NodeIdRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SettingsRoute: SettingsRoute,
   TermsRoute: TermsRoute,
   TodayRoute: TodayRoute,
   AdminRestoreRoute: AdminRestoreRoute,

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { ChangeOp } from "./realtime";
 import type { Node } from "./schema";
 
+import { openSettings } from "../components/settings-nav";
 import { persistBatchE } from "./api";
 import { nodesCollection, waitForSeqE } from "./collection";
 import { NodesLimitError, runPromise } from "./nodes-client-effect";
@@ -32,6 +33,13 @@ async function persistStructuralBatch(ops: ChangeOp[]): Promise<void> {
           id: "node-limit",
           description:
             "Upgrade to Unlimited to keep adding. Your existing outline stays fully editable.",
+          // SPA-navigate to /settings' plan & billing (never a hard reload,
+          // which would tear down the data layer to change routes). No-op until
+          // the SettingsNavRegistrar mounts (it always is, in __root).
+          action: {
+            label: "Upgrade",
+            onClick: () => openSettings(),
+          },
         },
       );
     }

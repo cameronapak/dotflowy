@@ -99,8 +99,8 @@ export function DeleteAccountDialog({
 
         <p className="text-sm text-muted-foreground">
           Want a copy first? Close this and use{" "}
-          <span className="font-medium text-foreground">Export OPML</span> in
-          the More menu to download your outline.
+          <span className="font-medium text-foreground">Export OPML</span> under
+          Data in Settings to download your outline.
         </p>
 
         <form onSubmit={onConfirm} className="flex flex-col gap-3">

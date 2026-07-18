@@ -21,6 +21,7 @@ import { NodeSwitcher } from "../components/node-switcher";
 import { OAuthCallbackErrorToast } from "../components/oauth-callback-error";
 import { OpmlImportDialog } from "../components/opml-import-dialog";
 import { QuickAdd } from "../components/quick-add";
+import { SettingsNavRegistrar } from "../components/settings-nav-registrar";
 import { ShowCompletedProvider } from "../components/show-completed-provider";
 import { SpotlightController } from "../components/spotlight-mode";
 import { TextSizeProvider } from "../components/text-size-provider";
@@ -148,6 +149,9 @@ function RootComponent() {
                 <Outlet />
                 <NodeSwitcher />
                 <QuickAdd />
+                {/* Registers openSettings() so the node-limit toast's "Upgrade"
+                    action can SPA-navigate to /settings from non-React code. */}
+                <SettingsNavRegistrar />
                 <MoveDialog />
                 <OpmlImportDialog />
                 <DeleteConfirmDialog />

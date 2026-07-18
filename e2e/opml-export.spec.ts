@@ -108,12 +108,19 @@ async function capturedDownload(page: Page): Promise<CapturedDownload> {
 const nodeText = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
+// Run "Export OPML" via Cmd+K. The More menu's Export OPML moved to /settings
+// with #171 (a WHOLE-outline export there), but the CONTEXTUAL export (zoom
+// root included) lives on in the Cmd+K global action — same `exportOutlineAsOpml`
+// that reads `getViewRootId()` — so the zoomed-subtree cases still exercise it.
 async function runMenuExport(page: Page) {
-  await page.getByRole("button", { name: /more/i }).click();
-  await page.getByRole("menuitem", { name: /Export OPML/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  const input = page.getByPlaceholder(/Search nodes and actions/);
+  await expect(input).toBeVisible();
+  await input.fill("export opml");
+  await page.getByRole("option", { name: /Export OPML/ }).click();
 }
 
-test.describe("OPML export (More menu + Cmd+K)", () => {
+test.describe("OPML export (Cmd+K + Settings)", () => {
   test("zoomed export: subtree only, root as top-level outline, dialect attrs, no ownerEmail", async ({
     page,
   }) => {

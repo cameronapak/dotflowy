@@ -31,14 +31,19 @@ async function load(page: Page) {
   await expect(text(page, "alpha")).toBeVisible();
 }
 
-// Open the More menu, click "Import OPML…", and answer the native file picker.
+// Run "Import OPML…" via Cmd+K (the More menu's import moved to /settings with
+// #171; the Cmd+K global action is the same `openOpmlImport()` opener), then
+// answer the native file picker.
 async function pickFile(
   page: Page,
   files: Parameters<FileChooser["setFiles"]>[0],
 ) {
-  await page.getByRole("button", { name: /more/i }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  const input = page.getByPlaceholder(/Search nodes and actions/);
+  await expect(input).toBeVisible();
+  await input.fill("import opml");
   const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("menuitem", { name: /Import OPML/ }).click();
+  await page.getByRole("option", { name: /Import OPML/ }).click();
   const chooser = await chooserPromise;
   await chooser.setFiles(files);
 }
