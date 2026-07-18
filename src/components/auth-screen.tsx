@@ -41,6 +41,13 @@ export function AuthScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Signup only: a second field so a mistyped password is caught before an
+  // account is created (nobody can recover a password they never meant to set).
+  const [confirmPassword, setConfirmPassword] = useState("");
+  // Gate the mismatch message so it doesn't fire on the first keystroke — shown
+  // once the field has been blurred or a submit was attempted.
+  const [confirmTouched, setConfirmTouched] = useState(false);
+  const confirmRef = useRef<HTMLInputElement>(null);
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   // Non-error status line (e.g. "account created, confirm your email"). Shown
@@ -67,6 +74,13 @@ export function AuthScreen() {
 
   const isSignup = mode === "signup";
   const isForgot = mode === "forgot";
+  // Only compare once both fields have content, so the message never shows on
+  // the very first character typed into the confirm field.
+  const passwordsMismatch =
+    password.length > 0 &&
+    confirmPassword.length > 0 &&
+    password !== confirmPassword;
+  const showConfirmError = isSignup && confirmTouched && passwordsMismatch;
   // Turnstile guards signup + password reset (never sign-in). Only relevant
   // when the deploy configured a site key.
   const captchaMode = isSignup || isForgot;
@@ -179,6 +193,14 @@ export function AuthScreen() {
     }
     setError(null);
     setNotice(null);
+    // Signup: block a mismatched confirmation before we hit the network. The
+    // field-level message (below the input) carries the explanation, so this
+    // only flips it on and moves focus there.
+    if (isSignup && password !== confirmPassword) {
+      setConfirmTouched(true);
+      confirmRef.current?.focus();
+      return;
+    }
     // Signup is Turnstile-gated when a site key is configured; sign-in never is
     // (captchaRequired is false outside signup/forgot by construction).
     if (captchaBlocked()) return;
@@ -254,6 +276,8 @@ export function AuthScreen() {
           "Account created. Check your inbox to confirm your email, then sign in.",
         );
         setCaptchaToken(null);
+        setConfirmPassword("");
+        setConfirmTouched(false);
       } else if (oauthQuery) {
         resumeAuthorize();
         return;
@@ -354,6 +378,27 @@ export function AuthScreen() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+            )}
+            {isSignup && (
+              <>
+                <Input
+                  ref={confirmRef}
+                  type="password"
+                  placeholder="Confirm password"
+                  autoComplete="new-password"
+                  required
+                  minLength={8}
+                  aria-invalid={showConfirmError || undefined}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onBlur={() => setConfirmTouched(true)}
+                />
+                {showConfirmError && (
+                  <p className="text-sm text-destructive">
+                    Passwords don't match.
+                  </p>
+                )}
+              </>
             )}
             {/* Invite code only while signup is gated. When SIGNUP_OPEN is on,
                 the server skips the invite requirement, so the field would be
@@ -480,6 +525,8 @@ export function AuthScreen() {
                   setError(null);
                   setNotice(null);
                   setCaptchaToken(null);
+                  setConfirmPassword("");
+                  setConfirmTouched(false);
                 }}
               >
                 {isSignup

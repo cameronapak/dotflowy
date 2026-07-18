@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -37,16 +37,35 @@ export const Route = createFileRoute("/reset-password")({
 function ResetPassword() {
   const { token, error: linkError } = Route.useSearch();
   const [password, setPassword] = useState("");
+  // A confirmation field so a mistyped new password can't lock the user out.
+  const [confirmPassword, setConfirmPassword] = useState("");
+  // Gate the mismatch message: shown after the field is blurred or on submit,
+  // not on the first keystroke.
+  const [confirmTouched, setConfirmTouched] = useState(false);
+  const confirmRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
   const invalidLink = !token || Boolean(linkError);
+  // Only compare once both fields have content.
+  const passwordsMismatch =
+    password.length > 0 &&
+    confirmPassword.length > 0 &&
+    password !== confirmPassword;
+  const showConfirmError = confirmTouched && passwordsMismatch;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!token) return;
     setError(null);
+    // Block a mismatched confirmation before hitting the network; the
+    // field-level message explains, so this just surfaces it and moves focus.
+    if (password !== confirmPassword) {
+      setConfirmTouched(true);
+      confirmRef.current?.focus();
+      return;
+    }
     setBusy(true);
     try {
       const res = await resetPassword({ newPassword: password, token });
@@ -101,6 +120,21 @@ function ResetPassword() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+            <Input
+              ref={confirmRef}
+              type="password"
+              placeholder="Confirm new password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              aria-invalid={showConfirmError || undefined}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onBlur={() => setConfirmTouched(true)}
+            />
+            {showConfirmError && (
+              <p className="text-sm text-destructive">Passwords don't match.</p>
+            )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
