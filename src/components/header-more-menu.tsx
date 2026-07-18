@@ -17,6 +17,7 @@ import {
   SparklesIcon,
   SunIcon,
   SunMoonIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -36,6 +37,7 @@ import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { connectGoogle, signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
+import { DeleteAccountDialog } from "./delete-account-dialog";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import { openOpmlImport } from "./opml-import-opener";
 import { useShowCompleted } from "./show-completed-provider";
@@ -210,6 +212,8 @@ export function HeaderMoreMenu() {
   // The connect dialog is a sibling of the menu (not nested in its content) so
   // it survives the menu closing on item select.
   const [connectOpen, setConnectOpen] = useState(false);
+  // Same sibling pattern for the destructive delete-account confirmation.
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
     <>
@@ -396,9 +400,22 @@ export function HeaderMoreMenu() {
             <LogOutIcon />
             Sign out
           </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          {/* Self-serve account deletion (ticket #224). Opens a password-gated
+              confirmation; the dialog owns the destructive flow. */}
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2Icon />
+            Delete account
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} />
     </>
   );
 }

@@ -18,6 +18,13 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
 import Stripe from "stripe";
 
+import type { UserOutlineDO } from "./outline-do";
+
+import {
+  cancelActiveSubscriptions,
+  deleteResidualUserRows,
+  isOwnerAccount,
+} from "./account-deletion";
 import { sendEmail } from "./email";
 import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
@@ -51,6 +58,16 @@ export interface AuthEnv {
    *  dashboard endpoint in prod, `stripe listen` locally. Unset = webhook
    *  signature verification fails closed. */
   STRIPE_WEBHOOK_SECRET?: string;
+  /** The per-user outline Durable Object namespace. Self-serve account deletion
+   *  (ticket #224) reaches the caller's DO through this to wipe their outline as
+   *  part of the delete lifecycle — the same binding worker/index.ts routes
+   *  /api/nodes through, resolved here from the authenticated session's user.id
+   *  (never a client-supplied id; the DO trust boundary, ADR 0014). */
+  USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>;
+  /** The owner's Better Auth `user.id`. When set, that one account routes to the
+   *  constant 'default' DO (worker/index.ts resolveUserId); self-serve deletion
+   *  refuses it (docs/adr/0051). */
+  OWNER_USER_ID?: string;
 }
 
 /**
@@ -124,6 +141,60 @@ export function createAuth(
       // A reset is the "my password leaked" move: kill every existing session
       // so a stolen one dies with the old password.
       revokeSessionsOnPasswordReset: true,
+    },
+    // Self-serve account deletion (ticket #224 / docs/adr/0051). Confirmed
+    // client-side by re-entering the password (`authClient.deleteUser({password})`)
+    // — every account has one (email+password is the only signup path), so the
+    // password path always works even for Google-linked accounts. Email
+    // verification is deliberately NOT wired (`sendDeleteAccountVerification`
+    // absent): verification is off for beta (ADR 0011), and the fresh-password
+    // check already proves it's the account owner at the keyboard.
+    user: {
+      deleteUser: {
+        enabled: true,
+        // beforeDelete runs while the account still exists and BEFORE Better
+        // Auth reports success — the property the teardown needs: the endpoint
+        // must never answer "deleted" unless Stripe is already cancelled and
+        // the outline is already wiped (afterDelete also has env + user, but a
+        // failure there happens AFTER the success response — too late to keep
+        // the promise). A throw here ABORTS the deletion with nothing
+        // destroyed — exactly what we want if Stripe cancellation fails (a
+        // paying subscription must never outlive its account). Order matters:
+        // guard → Stripe (external, must succeed) → DO wipe (irreversible,
+        // last).
+        beforeDelete: async (user) => {
+          if (isOwnerAccount(user.id, env.OWNER_USER_ID)) {
+            throw new APIError("FORBIDDEN", {
+              message:
+                "This account can't be deleted from the app. Contact support.",
+            });
+          }
+          // Throws on a real Stripe failure → deletion aborts, DO untouched.
+          // Also clears the D1 subscription row (here in beforeDelete, not the
+          // best-effort afterDelete sweep: deleteUser doesn't cascade the
+          // Stripe plugin's table, and a failed afterDelete would orphan it).
+          await cancelActiveSubscriptions(env, user.id);
+          // Non-owner, so resolveUserId(user.id) === user.id: the caller's own
+          // DO, resolved from the authenticated user.id (never client input).
+          const stub = env.USER_OUTLINE.get(
+            env.USER_OUTLINE.idFromName(user.id),
+          );
+          await stub.wipe();
+        },
+        // afterDelete runs once the identity rows are gone. Better Auth's core
+        // deletes user/session/account; the mcp OAuth rows and the email-keyed
+        // waitlist + invites rows are cleaned here. Best-effort AND non-fatal
+        // (ADR 0051): the account is already deleted, so a failure here must
+        // be logged (Workers Logs + Sentry pick up console.error), never
+        // surfaced as an error on a deletion that already happened.
+        afterDelete: async (user) => {
+          try {
+            await deleteResidualUserRows(env.DB, user.id, user.email);
+          } catch (err) {
+            console.error("account-deletion residual-row scrub failed", err);
+          }
+        },
+      },
     },
     // "Sign in with Google" — sign-IN only. `disableSignUp: true` is the same
     // invite gate as the /sign-up/email hook, expressed for OAuth: a Google

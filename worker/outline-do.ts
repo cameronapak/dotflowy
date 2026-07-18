@@ -758,6 +758,43 @@ export class UserOutlineDO extends DurableObject<Env> {
     return row ? JSON.parse(row.value) : value;
   }
 
+  // --- account deletion ------------------------------------------------------
+
+  /**
+   * Permanently erase this user's outline + side-collections and drop every
+   * live sync socket. Called from the self-serve account-deletion lifecycle
+   * (worker/auth.ts `user.deleteUser.beforeDelete`) AFTER the user's Stripe
+   * subscription is cancelled and BEFORE Better Auth removes the D1 identity
+   * rows, so a deletion always takes the DO with it (ticket #224).
+   *
+   * `deleteAll()` on a SQLite-backed DO wipes BOTH the SQL tables and the KV
+   * storage in one atomic operation — nodes, kv side-collections, changelog,
+   * seq cursor, the `seeded` flag, and the schema version all go. The DO is
+   * never routed to again (the caller's `user.id` is gone and Better Auth mints
+   * fresh ids, so a re-signup with the same email gets a DIFFERENT DO), and
+   * `ensureSeeded` (worker/index.ts) re-imports legacy D1 rows ONLY for the
+   * 'default' owner DO — which self-serve deletion refuses. So a wiped DO stays
+   * empty and inert; nothing resurrects it. Note the constructor does NOT
+   * re-run on a live, non-evicted instance reached post-wipe: its `migrate()`
+   * only runs at construction, so a straggler request against this same
+   * instance throws on the dropped tables (safe — no data can materialize; a
+   * fresh instance after eviction re-creates empty tables).
+   *
+   * Closing the sockets first tells any live tab's sync stream to drop; the
+   * client also hard-navigates away at the auth boundary, so this is belt-and-
+   * suspenders, not the only teardown.
+   */
+  async wipe(): Promise<void> {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1000, "account deleted");
+      } catch {
+        // already gone
+      }
+    }
+    await this.ctx.storage.deleteAll();
+  }
+
   // --- one-time import from the legacy D1 tables -----------------------------
 
   isSeeded(): boolean {
