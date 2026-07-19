@@ -41,7 +41,7 @@ What works:
 
 - Nested bullets with inline editing; collapse / expand subtrees (hover chevron in the gutter)
 - Zoom into any bullet as a temporary root (click its dot), with a breadcrumb trail back out
-- Three node kinds: bullet, task (a checkbox marks complete; a "show completed" toggle hides done items), and paragraph (reads as prose behind a pilcrow)
+- Three node kinds: bullet, task (a checkbox marks complete; a "show completed" toggle hides done items), and paragraph (reads as prose behind a paragraph glyph)
 - Drag the bullet dot to reorder **and** reparent in one drop (mouse + touch)
 - Markdown-style rich text: `inline code`, **bold** / _italic_ / strikethrough / underline, highlights (six colors), `[links](https://…)` that fold to a clean label (pasted URLs unfurl their title), and `||spoilers||` — hidden from humans until the caret enters, redacted from AI agents
 - Clicking a `#tag` filters the outline in place; right-click a tag to color it

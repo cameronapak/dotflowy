@@ -13,7 +13,7 @@ Which of the mutually exclusive presentations a node has: bullet, task, or parag
 _Avoid_: type, mode, style
 
 **Paragraph**:
-A node that reads as prose rather than a list item — a pilcrow (¶) stands where a bullet shows its dot, carrying the same zoom and drag affordance. Full tree citizen: children, collapse, zoom, complete.
+A node that reads as prose rather than a list item — a paragraph glyph (an align-left mark) stands where a bullet shows its dot, carrying the same zoom and drag affordance. Full tree citizen: children, collapse, zoom, complete.
 _Avoid_: text node, block, prose node
 
 **Completed**:

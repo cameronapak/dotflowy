@@ -1,7 +1,7 @@
 import {
+  AlignLeftIcon,
   CopyPlusIcon,
   CornerUpRightIcon,
-  PilcrowIcon,
   Trash2Icon,
 } from "lucide-react";
 
@@ -13,8 +13,8 @@ import { setKind } from "./mutations";
 import { runStructural } from "./structural";
 
 /**
- * `/paragraph` is CORE, not a plugin (ADR 0045): the pilcrow is core's own glyph
- * on core's own field, the same way fade-inheritance reads `completed`. A
+ * `/paragraph` is CORE, not a plugin (ADR 0045): the paragraph glyph is core's
+ * own glyph on core's own field, the same way fade-inheritance reads `completed`. A
  * `paragraphs/` plugin that couldn't own its signifier would be a folder with one
  * command in it.
  *
@@ -30,8 +30,8 @@ export const paragraphCommand: CommandSpec = {
   id: "paragraph",
   label: "Paragraph",
   description: "Turn into a paragraph",
-  icon: PilcrowIcon,
-  keywords: ["paragraph", "prose", "text", "pilcrow", "note", "into"],
+  icon: AlignLeftIcon,
+  keywords: ["paragraph", "prose", "text", "note", "into"],
   available: (node) => node.kind !== "paragraph",
   run: (id, ctx) => ctx.mutations.onSetKind(id, "paragraph"),
   // Node multi-selection: convert every selected root in ONE batch -- a single

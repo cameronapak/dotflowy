@@ -770,7 +770,7 @@ export function setIsTask(nodeId: string, isTask: boolean) {
 }
 
 /**
- * Make a node a paragraph (a pilcrow where the dot would be) or, with `null`,
+ * Make a node a paragraph (a paragraph glyph where the dot would be) or, with `null`,
  * a plain bullet. The other half of the exclusivity invariant: a paragraph is
  * never a task, so this clears `isTask`. See ADR 0045.
  *

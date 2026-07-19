@@ -55,7 +55,7 @@ export const nodeSchema = Schema.Struct({
   // (the provenance plugin's origin marker) -- never a semantic branch.
   origin: Schema.NullOr(Schema.String),
   // Node kind (ADR 0045). `null` = a bullet or a task, decided by `isTask`;
-  // `"paragraph"` = prose, drawn with a pilcrow where the bullet dot would be.
+  // `"paragraph"` = prose, drawn with a paragraph glyph where the bullet dot would be.
   // The three kinds are mutually exclusive, but the TYPE cannot say so: `kind`
   // is additive precisely so `isTask` never had to migrate. Exclusivity is an
   // invariant of the mutation funnels instead (setKind clears `isTask`;

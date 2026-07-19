@@ -341,7 +341,7 @@ const optional = <S extends Schema.Top>(schema: S) =>
 const kindField = optional(
   Schema.Literal("paragraph").annotate({
     description:
-      "Create as a paragraph (prose, drawn with a pilcrow instead of a bullet) rather than a list item. Mutually exclusive with isTask, which it overrides.",
+      "Create as a paragraph (prose, drawn with a paragraph glyph instead of a bullet) rather than a list item. Mutually exclusive with isTask, which it overrides.",
   }),
 );
 

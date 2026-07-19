@@ -601,19 +601,19 @@ h2 span.protected-lock {
 }
 
 /*
- * A paragraph's glyph (ADR 0045): the pilcrow standing exactly where the dot
- * would, inside the same 16px `.bullet` button. The button carries the optical
- * alignment (`.outline-row .bullet` margin-top) and the flex centering, so the
- * pilcrow's box center lands on the dot's -- the K constant needs no companion.
- * Colors mirror `.bullet-dot`'s three states, in `color` rather than
+ * A paragraph's glyph (ADR 0045): the align-left mark standing exactly where the
+ * dot would, inside the same 16px `.bullet` button. The button carries the
+ * optical alignment (`.outline-row .bullet` margin-top) and the flex centering,
+ * so the glyph's box center lands on the dot's -- the K constant needs no
+ * companion. Colors mirror `.bullet-dot`'s three states, in `color` rather than
  * `background-color` since the glyph is a `currentColor` SVG.
  */
-.bullet-pilcrow {
-  @apply flex items-center justify-center text-accent-foreground/70;
+.bullet-paragraph {
+  @apply flex items-center justify-center text-accent-foreground/30;
   transition: color 0.15s ease;
 }
 
-.bullet:hover .bullet-pilcrow {
+.bullet:hover .bullet-paragraph {
   @apply text-primary;
 }
 
@@ -626,8 +626,12 @@ h2 span.protected-lock {
   @apply bg-muted-foreground/50;
 }
 
-.outline-list:focus-within .outline-row:not(:focus-within) .bullet-pilcrow {
-  @apply text-muted-foreground/50;
+.outline-list:focus-within .outline-row:not(:focus-within) .bullet-paragraph {
+  @apply text-muted-foreground/20;
+}
+
+.outline-list:focus-within .outline-row:focus-within .bullet-paragraph {
+  @apply text-muted-foreground/40;
 }
 
 /*
@@ -673,10 +677,11 @@ h2 span.protected-lock {
     width: 9px;
     height: 9px;
   }
-  /* The dot grows with the box on coarse; the pilcrow grows with it too, so the
-     two kinds keep the same visual weight side by side. The box stays centered,
-     so the coarse K above still lands both glyphs on the text optical center. */
-  .bullet-pilcrow svg {
+  /* The dot grows with the box on coarse; the paragraph glyph grows with it too,
+     so the two kinds keep the same visual weight side by side. The box stays
+     centered, so the coarse K above still lands both glyphs on the text optical
+     center. */
+  .bullet-paragraph svg {
     width: 17px;
     height: 17px;
   }
@@ -822,10 +827,10 @@ h2 span.protected-lock {
   margin-top: calc(var(--reading-line-box) / 2 - 6.25px);
 }
 
-/* A zoomed paragraph's pilcrow (ADR 0045). Deliberately inert -- there is no
+/* A zoomed paragraph's glyph (ADR 0045). Deliberately inert -- there is no
    zoom target on the title -- and sized to the same 20px box as the title
    checkbox so it inherits that control's proven optical nudge below. */
-.title-pilcrow {
+.title-paragraph {
   @apply flex size-5 items-center justify-center text-muted-foreground;
   pointer-events: none;
 }
@@ -836,12 +841,12 @@ h2.zoomed-title {
   }
 
   & .checkbox,
-  & .title-pilcrow {
+  & .title-paragraph {
     @apply mt-2;
   }
 }
 
-/* Unlike every other before-text decoration, the title pilcrow does NOT float:
+/* Unlike every other before-text decoration, the title paragraph glyph does NOT float:
    a paragraph is prose, so all of its lines must share one left edge rather
    than the first one alone being shortened. It's a HANGING mark, outdented into
    the left margin -- the wrapped-title-flows-under-its-icons behavior that float
@@ -851,14 +856,14 @@ h2.zoomed-title {
    is less than the mark's own 20px box -- a hanging mark would clip off the
    viewport's left edge. So the mark sits INSIDE a gutter carved from the text
    column, centered on the bullet column (8px lead + an 8px half-glyph). */
-h2.zoomed-title:has(.title-pilcrow) {
+h2.zoomed-title:has(.title-paragraph) {
   position: relative;
   padding-inline-start: 30px;
 }
 
 /* Overrides the float and the `position: relative` further down; needs the
    `.row-body >` child selector to out-specify the latter. */
-h2.zoomed-title .row-body > .title-pilcrow {
+h2.zoomed-title .row-body > .title-paragraph {
   position: absolute;
   inset-inline-start: 6px;
   float: none;
@@ -873,11 +878,11 @@ h2.zoomed-title .row-body > .title-pilcrow {
    box, making that 8px lead the gap between the mark and the text it marks.
    Breakpoint: below `md` the padding is too tight for the outdent (measured). */
 @media (min-width: 768px) {
-  h2.zoomed-title:has(.title-pilcrow) {
+  h2.zoomed-title:has(.title-paragraph) {
     padding-inline-start: 8px;
   }
 
-  h2.zoomed-title .row-body > .title-pilcrow {
+  h2.zoomed-title .row-body > .title-paragraph {
     inset-inline-start: -20px;
   }
 }

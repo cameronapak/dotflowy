@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Paragraph nodes (ADR 0045): a third kind alongside bullet and task, signified
-// by a pilcrow standing exactly where the bullet dot would -- same button, same
+// by a paragraph glyph standing exactly where the bullet dot would -- same button, same
 // zoom click, same drag. Kinds are mutually exclusive; `completed` is not a kind.
 //
 // The markdown round-trip and the MCP/OPML boundary are pure and unit-tested
@@ -36,8 +36,8 @@ const text = (page: Page, id: string) =>
   row(page, id).locator("> .outline-row .node-text");
 const dot = (page: Page, id: string) =>
   row(page, id).locator("> .outline-row .bullet-dot");
-const pilcrow = (page: Page, id: string) =>
-  row(page, id).locator("> .outline-row .bullet-pilcrow");
+const paragraphGlyph = (page: Page, id: string) =>
+  row(page, id).locator("> .outline-row .bullet-paragraph");
 const checkbox = (page: Page, id: string) =>
   row(page, id).locator("> .outline-row .checkbox");
 
@@ -57,23 +57,23 @@ async function runSlash(page: Page, command: string) {
 }
 
 test.describe("paragraph nodes", () => {
-  test("the pilcrow replaces the dot, and only for a paragraph", async ({
+  test("the paragraph glyph replaces the dot, and only for a paragraph", async ({
     page,
   }) => {
     await load(page);
-    await expect(pilcrow(page, "p")).toBeVisible();
+    await expect(paragraphGlyph(page, "p")).toBeVisible();
     await expect(dot(page, "p")).toHaveCount(0);
     await expect(dot(page, "a")).toBeVisible();
-    await expect(pilcrow(page, "a")).toHaveCount(0);
+    await expect(paragraphGlyph(page, "a")).toHaveCount(0);
     // A paragraph is never a task, so it never wears a checkbox.
     await expect(checkbox(page, "p")).toHaveCount(0);
   });
 
-  test("the pilcrow sits on the dot's optical center, in the dot's column", async ({
+  test("the paragraph glyph sits on the dot's optical center, in the dot's column", async ({
     page,
   }) => {
     // ADR 0029's K-constants live on `.outline-row .bullet` (the 16px button),
-    // and the pilcrow is centered inside that same button -- so it must land on
+    // and the paragraph glyph is centered inside that same button -- so it must land on
     // exactly the same baseline as a sibling row's dot. Numeric, not eyeballed:
     // a glyph swap that shifted the box would show up here.
     await load(page);
@@ -98,34 +98,35 @@ test.describe("paragraph nodes", () => {
       return {
         dotOffset:
           centerY(li("a").querySelector(".bullet-dot")!) - textCenterY("a"),
-        pilcrowOffset:
-          centerY(li("p").querySelector(".bullet-pilcrow")!) - textCenterY("p"),
+        paragraphOffset:
+          centerY(li("p").querySelector(".bullet-paragraph")!) -
+          textCenterY("p"),
         dotX: centerX(li("a").querySelector(".bullet")!),
-        pilcrowX: centerX(li("p").querySelector(".bullet")!),
+        paragraphX: centerX(li("p").querySelector(".bullet")!),
       };
     });
     // Same vertical relationship to its own text as the dot has to its own.
-    expect(Math.abs(m.pilcrowOffset - m.dotOffset)).toBeLessThan(1);
+    expect(Math.abs(m.paragraphOffset - m.dotOffset)).toBeLessThan(1);
     // ...and the same column: the glyph swap must not move the button.
-    expect(Math.abs(m.pilcrowX - m.dotX)).toBeLessThan(0.5);
+    expect(Math.abs(m.paragraphX - m.dotX)).toBeLessThan(0.5);
   });
 
-  test("the pilcrow still zooms on click, exactly like the dot", async ({
+  test("the paragraph glyph still zooms on click, exactly like the dot", async ({
     page,
   }) => {
     await load(page);
-    await pilcrow(page, "p").click();
+    await paragraphGlyph(page, "p").click();
     await expect(page).toHaveURL(/\/p$/);
     await expect(page.locator("h2.zoomed-title .node-text")).toHaveText(
       "prose",
     );
   });
 
-  test("a zoomed paragraph shows a muted, inert pilcrow in the title", async ({
+  test("a zoomed paragraph shows a muted, inert paragraph glyph in the title", async ({
     page,
   }) => {
     await load(page, "/p", page.locator("h2.zoomed-title .node-text"));
-    const mark = page.locator("h2.zoomed-title .title-pilcrow");
+    const mark = page.locator("h2.zoomed-title .title-paragraph");
     await expect(mark).toBeVisible();
     await expect(mark).toHaveCSS("pointer-events", "none");
 
@@ -155,7 +156,9 @@ test.describe("paragraph nodes", () => {
     await page.setViewportSize({ width: 900, height: 700 });
     await page.goto("/a");
     await expect(titleText).toHaveText("alpha");
-    await expect(page.locator("h2.zoomed-title .title-pilcrow")).toHaveCount(0);
+    await expect(page.locator("h2.zoomed-title .title-paragraph")).toHaveCount(
+      0,
+    );
     expect((await titleText.boundingBox())!.x).toBe(proseX);
   });
 
@@ -165,10 +168,10 @@ test.describe("paragraph nodes", () => {
     await load(page);
     await text(page, "e").click();
     await runSlash(page, "paragraph");
-    await expect(pilcrow(page, "e")).toBeVisible();
+    await expect(paragraphGlyph(page, "e")).toBeVisible();
 
     await runSlash(page, "bullet");
-    await expect(pilcrow(page, "e")).toHaveCount(0);
+    await expect(paragraphGlyph(page, "e")).toHaveCount(0);
     await expect(dot(page, "e")).toBeVisible();
   });
 
@@ -179,21 +182,21 @@ test.describe("paragraph nodes", () => {
     await expect(checkbox(page, "et")).toBeVisible();
     await text(page, "et").click();
     await runSlash(page, "paragraph");
-    await expect(pilcrow(page, "et")).toBeVisible();
+    await expect(paragraphGlyph(page, "et")).toBeVisible();
     await expect(checkbox(page, "et")).toHaveCount(0);
   });
 
-  test("`/todo` on a paragraph clears the pilcrow (the other direction)", async ({
+  test("`/todo` on a paragraph clears the paragraph glyph (the other direction)", async ({
     page,
   }) => {
     await load(page);
     await text(page, "e").click();
     await runSlash(page, "paragraph");
-    await expect(pilcrow(page, "e")).toBeVisible();
+    await expect(paragraphGlyph(page, "e")).toBeVisible();
 
     await runSlash(page, "todo");
     await expect(checkbox(page, "e")).toBeVisible();
-    await expect(pilcrow(page, "e")).toHaveCount(0);
+    await expect(paragraphGlyph(page, "e")).toHaveCount(0);
   });
 
   test("the `[]` autoformat converts a paragraph into a task", async ({
@@ -202,11 +205,11 @@ test.describe("paragraph nodes", () => {
     await load(page);
     await text(page, "e").click();
     await runSlash(page, "paragraph");
-    await expect(pilcrow(page, "e")).toBeVisible();
+    await expect(paragraphGlyph(page, "e")).toBeVisible();
 
     await page.keyboard.type("[]");
     await expect(checkbox(page, "e")).toBeVisible();
-    await expect(pilcrow(page, "e")).toHaveCount(0);
+    await expect(paragraphGlyph(page, "e")).toHaveCount(0);
   });
 
   test("Enter at the end of a paragraph makes another paragraph", async ({
@@ -216,12 +219,12 @@ test.describe("paragraph nodes", () => {
     await text(page, "e").click();
     await runSlash(page, "paragraph");
     // Two paragraphs now: the seeded "prose" and the converted "e".
-    await expect(page.locator(".outline-row .bullet-pilcrow")).toHaveCount(2);
+    await expect(page.locator(".outline-row .bullet-paragraph")).toHaveCount(2);
 
     // "e" is empty and childless, so the caret is at its end: Enter adds a
     // sibling, which inherits the kind exactly as `isTask` already does.
     await page.keyboard.press("Enter");
-    await expect(page.locator(".outline-row .bullet-pilcrow")).toHaveCount(3);
+    await expect(page.locator(".outline-row .bullet-paragraph")).toHaveCount(3);
   });
 
   test("a paragraph is completable — `completed` is orthogonal to kind", async ({
@@ -232,7 +235,7 @@ test.describe("paragraph nodes", () => {
     await page.keyboard.press(`${MOD}+Enter`);
     await expect(text(page, "p")).toHaveAttribute("data-completed", "true");
     // Still a paragraph, still no checkbox.
-    await expect(pilcrow(page, "p")).toBeVisible();
+    await expect(paragraphGlyph(page, "p")).toBeVisible();
     await expect(checkbox(page, "p")).toHaveCount(0);
   });
 });

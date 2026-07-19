@@ -1195,7 +1195,7 @@ describe("reads", () => {
 
   test("kind outranks isTask on the agent read path, as it does in the renderer", () => {
     // The illegal pair a raw PATCH or a stale client can still write. The app
-    // draws a pilcrow and no checkbox; the agent must not be told `- [ ]`.
+    // draws a paragraph glyph and no checkbox; the agent must not be told `- [ ]`.
     const nodes = [
       makeNode({ id: "p", text: "prose", isTask: true, kind: "paragraph" }),
     ];

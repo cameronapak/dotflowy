@@ -103,7 +103,7 @@ import {
   useViewFilter,
 } from "../plugins/registry";
 import { Backlinks } from "./backlinks";
-import { TitlePilcrow } from "./bullet-glyph";
+import { TitleParagraphGlyph } from "./bullet-glyph";
 import {
   caretFromPoint,
   placeCaretAtEnd,
@@ -1817,7 +1817,7 @@ function ZoomedTitle({
       // since the title has nothing to zoom into (ADR 0045).
       id: "core:paragraph-mark",
       position: "title:before-text",
-      render: () => <TitlePilcrow kind={node.kind} />,
+      render: () => <TitleParagraphGlyph kind={node.kind} />,
     },
     {
       id: "core:protected-lock",

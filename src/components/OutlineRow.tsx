@@ -417,7 +417,7 @@ function RowChrome({
           onClick={() => commands.onBulletClick(content.id)}
           title="Zoom in"
         >
-          {/* Dot or pilcrow, per the CONTENT's kind (ADR 0045). */}
+          {/* Dot or paragraph glyph, per the CONTENT's kind (ADR 0045). */}
           <BulletGlyph
             kind={content.kind}
             completed={content.completed}

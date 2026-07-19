@@ -24,7 +24,7 @@ export interface NodeCommands {
   onToggleCompleted: (id: string, completed: boolean) => void;
   // Set whether a bullet is a task (checkbox shown/hidden). Clears `kind`.
   onSetTask: (id: string, isTask: boolean) => void;
-  // Set the node's kind: "paragraph" (pilcrow, prose) or null (plain bullet).
+  // Set the node's kind: "paragraph" (paragraph glyph, prose) or null (plain bullet).
   // Clears `isTask` -- the kinds are mutually exclusive (ADR 0045).
   onSetKind: (id: string, kind: NodeKind) => void;
   // Open the `/move` destination picker for this bullet.

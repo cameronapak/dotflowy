@@ -2,6 +2,8 @@
 
 Status: accepted (2026-07-10) — design settled, implementation not started.
 
+> **Amended 2026-07-18:** the paragraph glyph is now lucide `AlignLeft`, not `Pilcrow` — the pilcrow read visually unbalanced and too harsh in color. The decision below (kind as an additive field, the glyph as the dot) is unchanged; only the glyph and its muted color changed. References to "the pilcrow" throughout read as "the paragraph glyph."
+
 A **paragraph** is a third node kind alongside bullet and task: a node that reads as prose. A
 pilcrow (`Pilcrow` from lucide, ¶) renders where the bullet dot would, muted, same position. Kinds
 are **mutually exclusive** — a node is exactly one of bullet | task | paragraph; converting is
