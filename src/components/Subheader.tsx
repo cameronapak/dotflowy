@@ -2,6 +2,7 @@ import { motion, useReducedMotion } from "motion/react";
 import {
   Fragment,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -30,6 +31,20 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
   const shellRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [height, setHeight] = useState(0);
+  // The band mounts with `open=false, height=0`, then the layout effects below
+  // measure and flip it to full height in the SAME pre-paint commit. Without
+  // this guard that flip animates 0->full every time the editor remounts (a day
+  // switch remounts the whole editor, subheader included) — the band visibly
+  // "reopens" and shoves the outline down. So: SNAP on the initial mount (paint
+  // the measured height with no animation), and only animate open/close changes
+  // that happen AFTER first paint — e.g. the `?q=` filter bar appearing while
+  // the user stays on a page. `hasPaintedRef` flips in a post-paint `useEffect`;
+  // a ref (not state) is right because the value is only read at the NEXT render,
+  // which a real open/close change already triggers.
+  const hasPaintedRef = useRef(false);
+  useEffect(() => {
+    hasPaintedRef.current = true;
+  }, []);
 
   // Kept as useCallback (not redundant despite React Compiler): it's a
   // dependency of the useLayoutEffects below, so oxlint's exhaustive-deps gate
@@ -74,7 +89,11 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
           ? { height: open ? "auto" : 0 }
           : { height: open ? height : 0, opacity: open ? 1 : 0 }
       }
-      transition={{ duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }}
+      transition={
+        hasPaintedRef.current
+          ? { duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }
+          : { duration: 0 }
+      }
       className="overflow-hidden bg-background"
       aria-hidden={!open}
     >

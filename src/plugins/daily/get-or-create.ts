@@ -515,12 +515,21 @@ export async function getOrCreateDay(
   return null;
 }
 
-/** get-or-create the day, then zoom to it -- a date-chip click (a reference,
- *  seed-free; the Today button navigates the route with focus=last instead). */
-export async function goToDate(key: string, ctx: PluginContext): Promise<void> {
+/** get-or-create the day, then navigate to it -- a date-chip click (a reference,
+ *  seed-free; the Today button navigates the route with focus=last instead).
+ *  `morph` (default true) picks the nav: a date chip is an element in the
+ *  outgoing view, so it MORPHS into the new title (`ctx.nav.zoom`); the week
+ *  strip's pill isn't -- its layoutId pill already IS the transition -- so it
+ *  passes `morph: false` for a PLAIN swap (ADR 0054). */
+export async function goToDate(
+  key: string,
+  ctx: PluginContext,
+  opts?: { morph?: boolean },
+): Promise<void> {
   const dayId = await getOrCreateDay(key, {
     failureToast: "Couldn't open that daily note",
   });
   if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
-  ctx.nav.zoom(dayId);
+  if (opts?.morph === false) ctx.nav.open(dayId);
+  else ctx.nav.zoom(dayId);
 }

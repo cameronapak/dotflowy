@@ -138,12 +138,20 @@ test.describe("week calendar strip (ADR 0054)", () => {
     await clientNavigate(page, "/the-day");
     await expect(strip(page)).toBeVisible();
 
-    // Click the neighbour day pill -> zoom to its node.
+    // Click the neighbour day pill -> navigate to its node.
     await pill(page, OTHER).click();
     await expect(page).toHaveURL(/\/other-day$/);
-    // The strip now selects the newly-zoomed day.
+    // The strip now selects the newly-navigated day.
     await expect(pill(page, OTHER)).toHaveAttribute("data-selected", "");
     await expect(pill(page, DAY)).not.toHaveAttribute("data-selected");
+
+    // The subheader band stays OPEN across the day switch. The editor (and its
+    // subheader) remounts per day, but the band snaps to its measured height on
+    // mount instead of re-animating from 0 (ADR 0054 decision 4). Countable DOM
+    // read -- the strip's box height is non-zero -- not a wall-clock threshold.
+    const box = await strip(page).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThan(0);
   });
 
   test("clicking an un-minted day creates it WITHOUT seeding a child (seed-free)", async ({

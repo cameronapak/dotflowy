@@ -34,14 +34,28 @@ cut.
    of week truth.
 
 4. **Most of the source component was cut.** Kept: the seven-pill week row,
-   the spring-animated selection pill, chevron paging. Cut: the grabber
-   handle, the week→month morph/grid, drag-and-swipe paging, and the blur
-   dissolve (paging gets a quiet fade/slide, instant under
-   `prefers-reduced-motion`). Cutting ~60% is why it's a **purpose-built
-   rewrite inside `src/plugins/daily/`** (with MIT attribution) rather than a
-   shadcn vendor into `ui/` + `kit.ts` — vendoring would ship dead month-grid
-   code and kit ceremony for a single consumer. Styling is dotflowy theme
-   tokens, not the upstream palette.
+   the selection pill, chevron paging. Cut: the grabber handle, the week→month
+   morph/grid, drag-and-swipe paging, and the blur dissolve. Cutting ~60% is
+   why it's a **purpose-built rewrite inside `src/plugins/daily/`** (with MIT
+   attribution) rather than a shadcn vendor into `ui/` + `kit.ts` — vendoring
+   would ship dead month-grid code and kit ceremony for a single consumer.
+   Styling is dotflowy theme tokens, not the upstream palette.
+
+   **Motion grammar (revised after an animation review):** the strip's chrome
+   is **stationary** across a day switch. The selection pill is the **sole
+   moving element** — a `layoutId` sliding from the old day to the new one, a
+   **tween** on the house curve (`cubic-bezier(0.32, 0.72, 0, 1)`, the zoom
+   morph's curve in `styles.css`), not a spring (dotflowy doesn't use springs,
+   and the underdamped spring overshot). The week row has **no entrance
+   animation** — paging swaps it instantly (the month label + `W29` badge carry
+   the change), and a same-week switch is silent chrome. **Navigation from the
+   strip is plain, not the zoom morph** (`ctx.nav.open` / `goToDate(…, {morph:
+false})`): the clicked day isn't rendered in the outgoing view, so there's
+   no element to morph FROM — the pill slide IS the transition, and a zoom
+   morph would stack a redundant title pop-in over it. Reduced motion snaps the
+   pill and the subheader height, as before. The subheader itself **snaps to
+   full height on mount** (it only animates open/close changes made after first
+   paint), so the per-day-switch editor remount can't make the band re-open.
 
 5. **Orientation chrome:** a quiet month+year label ("July 2026", the visible
    ISO week's majority month — Thursday's month) plus a `W29` ISO week badge.

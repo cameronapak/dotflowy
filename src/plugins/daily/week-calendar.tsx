@@ -4,9 +4,12 @@
 // Adapted from iconiqui's week-calendar
 // (https://iconiqui.com/display-and-content/week-calendar), MIT licensed. This is
 // a purpose-built rewrite, not a vendored copy: only the seven-pill week row, the
-// spring-animated selection pill, and chevron paging are kept -- the grabber
+// tween-animated selection pill, and chevron paging are kept -- the grabber
 // handle, the week->month morph/grid, drag/swipe gestures, and the blur dissolve
-// are deliberately cut (ADR 0054, decision 4). Styled with dotflowy theme tokens
+// are deliberately cut (ADR 0054, decision 4). The chrome stays STATIONARY across
+// day switches: the pill (the sole mover) tweens with the house curve, the week
+// row has no entrance animation, and paging swaps instantly. Styled with dotflowy
+// theme tokens
 // (bg-muted / text-muted-foreground / primary / border), never the upstream
 // palette. ISO (Monday-start) week truth stays in date-links.ts -- this file adds
 // no parallel week math.
@@ -203,18 +206,12 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
         </button>
       </div>
 
-      {/* The seven day pills. Keyed on the visible week so paging remounts them
-          with a quiet fade/slide-in (instant under reduced motion); a same-week
-          day switch keeps the key, so only the layoutId pill springs across. */}
-      <motion.ul
-        key={visibleWeek}
-        initial={reduceMotion ? false : { opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={
-          reduceMotion ? { duration: 0 } : { duration: 0.15, ease: "easeOut" }
-        }
-        className="grid grid-cols-7 gap-1"
-      >
+      {/* The seven day pills. No entrance animation (ADR 0054, decision 4):
+          paging swaps the row instantly -- the month label and W-number badge
+          carry the week change -- and a same-week day switch is silent chrome.
+          The ONLY thing that moves is the layoutId selection pill, which tweens
+          from the old day to the new one. */}
+      <ul className="grid grid-cols-7 gap-1">
         {days.map((key, i) => {
           const selected = key === dayKey;
           const isToday = key === today;
@@ -233,9 +230,14 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                   // Clicking the already-selected day is a no-op (ADR 0054).
                   if (key === dayKey) return;
                   const ctx = getCtx();
-                  // Seed-free get-or-create + zoom -- the date-chip semantics
-                  // (ADR 0038/0041): no seeded entry line, no ?focus=last.
-                  ctx.run(Effect.promise(() => goToDate(key, ctx)));
+                  // Seed-free get-or-create (the date-chip semantics, ADR
+                  // 0038/0041: no seeded entry line, no ?focus=last), but a
+                  // PLAIN navigation (`morph: false`) -- the layoutId pill IS
+                  // the transition, so a zoom morph would stack a redundant
+                  // title pop-in over it (ADR 0054).
+                  ctx.run(
+                    Effect.promise(() => goToDate(key, ctx, { morph: false })),
+                  );
                 }}
                 className={cn(
                   "relative flex w-full flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-xs transition-colors",
@@ -246,9 +248,12 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
-                {/* The spring-animated selection highlight (motion layoutId): it
-                    slides from the old day to the new one on a same-week switch
-                    (the key is unchanged), and snaps under reduced motion. */}
+                {/* The selection highlight (motion layoutId): it slides from the
+                    old day to the new one on a day switch, and snaps under
+                    reduced motion. A tween on the house curve (the same
+                    cubic-bezier the zoom morph uses in styles.css), not a spring
+                    -- dotflowy doesn't use springs, and the underdamped spring
+                    overshot. This pill is the sole moving element in the strip. */}
                 {selected ? (
                   reduceMotion ? (
                     <span
@@ -260,11 +265,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                       aria-hidden="true"
                       layoutId="week-calendar-selected"
                       className="absolute inset-0 rounded-md bg-primary"
-                      transition={{
-                        type: "spring",
-                        stiffness: 500,
-                        damping: 34,
-                      }}
+                      transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
                     />
                   )
                 ) : null}
@@ -288,7 +289,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
             </li>
           );
         })}
-      </motion.ul>
+      </ul>
     </nav>
   );
 }
