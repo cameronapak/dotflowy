@@ -19,11 +19,86 @@
  * inbox to click, so after signup it flips `emailVerified` directly in the
  * local D1 (wrangler d1 execute --local, same state dir bun run dev uses) —
  * keeping the dev account immediately sign-in-able.
+ *
+ * Invite code: the signup gate (worker/auth.ts hooks.before) accepts only a
+ * code that's in the local `.dev.vars` `INVITE_CODES` secret (or SIGNUP_OPEN).
+ * Rather than hardcode `dev-invite` — which only works when .dev.vars still
+ * carries that default — this reads the local `.dev.vars` and derives the code
+ * from it, so the seed works on any box whatever its INVITE_CODES value is.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 const API = "http://localhost:8787";
 const EMAIL = "dev@dotflowy.local";
 const PASSWORD = "dotflowy-dev";
-const INVITE = "dev-invite";
+
+// Resolve .dev.vars from the checkout this script lives in (not cwd, not a
+// hardcoded absolute path) — `import.meta.dir` is `<root>/scripts`, matching
+// scripts/setup.ts, so it points at this worktree's own .dev.vars.
+const DEV_VARS = resolve(import.meta.dir, "..", ".dev.vars");
+
+/**
+ * Parse a `.dev.vars` (dotenv-style `KEY=VALUE`) into a map. Blank lines and
+ * `#` comments are ignored; a single layer of surrounding single/double quotes
+ * is stripped. Deliberately tiny — no dependency, no `export`/interpolation
+ * handling `.dev.vars` doesn't use.
+ */
+function parseDevVars(path: string): Record<string, string> {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * The first invite code from a comma-separated INVITE_CODES value. Mirrors
+ * `splitList` in worker/identity.ts EXACTLY (`split(",")` -> trim -> drop
+ * empties) so the code this script picks is one the signup gate will accept.
+ */
+function firstInviteCode(inviteCodes: string | undefined): string | undefined {
+  return (inviteCodes ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)[0];
+}
+
+/**
+ * Decide how to authorize the signup from the local `.dev.vars`, matching the
+ * worker/auth.ts hooks.before gate:
+ *  - INVITE_CODES set   -> send its first code as `inviteCode`.
+ *  - else SIGNUP_OPEN === "true" -> open signup, no invite required.
+ *  - neither            -> CLOSED; the gate would 403. Return null so the
+ *    caller can bail BEFORE the request with an actionable message.
+ */
+function resolveInvite(
+  env: Record<string, string>,
+): { inviteCode?: string } | null {
+  const code = firstInviteCode(env.INVITE_CODES);
+  if (code) return { inviteCode: code };
+  if (env.SIGNUP_OPEN === "true") return {};
+  return null;
+}
 
 /**
  * Mark the dev account verified in the local D1 so it can sign in. Best-effort:
@@ -54,6 +129,19 @@ function markVerified(): void {
 }
 
 async function main(): Promise<void> {
+  // Derive the signup authorization from the local .dev.vars BEFORE hitting the
+  // network — if signup is closed here, a request would just 403.
+  const invite = resolveInvite(parseDevVars(DEV_VARS));
+  if (invite === null) {
+    console.error(
+      `Signup is closed in ${DEV_VARS}: no INVITE_CODES and SIGNUP_OPEN isn't "true".\n` +
+        `Fix one of:\n` +
+        `  - add INVITE_CODES=dev-invite to .dev.vars (the documented local default), or\n` +
+        `  - set SIGNUP_OPEN=true in .dev.vars to open self-serve signup.`,
+    );
+    process.exit(1);
+  }
+
   // Preflight: make sure the Worker is actually up before attempting the
   // real sign-up POST, so a connection-refused doesn't read as an auth error.
   try {
@@ -74,11 +162,13 @@ async function main(): Promise<void> {
       // isn't registered.
       "x-captcha-response": "seed-user-dummy-token",
     },
+    // `inviteCode` is omitted entirely under open signup (invite = {}); the gate
+    // skips the invite check, and the after-hook has nothing to redeem.
     body: JSON.stringify({
       name: "Dev",
       email: EMAIL,
       password: PASSWORD,
-      inviteCode: INVITE,
+      ...invite,
     }),
   });
 
