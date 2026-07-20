@@ -41,6 +41,7 @@ import {
   shiftWeekKey,
   weekKeyToDays,
   weekKeyToMonthKey,
+  weekKeyWeekNumber,
 } from "../../data/date-links";
 import { getTreeIndex, subscribeTree } from "../../data/tree-store";
 import {
@@ -99,15 +100,16 @@ function useDaysWithContent(dayKeys: string[]): ReadonlySet<string> {
 }
 
 /** The ISO week-number badge for a week key: `2026-W29` -> `W29` (no leading
- *  zero). Display-only string formatting; the week itself is ISO truth from
- *  date-links. Empty on a malformed key (never reached -- the caller guards). */
+ *  zero). Display-only string formatting; the week number itself is ISO truth
+ *  from date-links. Empty on a malformed key (never reached -- the caller
+ *  guards). */
 function weekNumberBadge(weekKey: string): string {
-  const m = /-W(\d{2})$/.exec(weekKey);
-  return m ? `W${Number(m[1])}` : "";
+  const num = weekKeyWeekNumber(weekKey);
+  return num ? `W${Number(num)}` : "";
 }
 
 export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
-  const params = useParams({ strict: false }) as { nodeId?: string };
+  const params = useParams({ strict: false });
   const rootId = params.nodeId ?? null;
   // Reactive: the zoom root's scaffold key (null unless it maps to a scaffold
   // node). The strip only shows for a DAY -- week/month/year/container pages and

@@ -78,6 +78,8 @@ false})`): the clicked day isn't rendered in the outgoing view, so there's
 - `goToDate` gained a second in-plugin caller, and the strip↔`index.tsx`
   import cycle it forced was real — so the whole get-or-create engine
   (`getOrCreateDay`/`goToDate` + the scaffold cascade/migration) moved to
-  `get-or-create.ts`, a byte-identical extraction (verified against the old
-  bodies in review); `index.tsx` keeps only the `protects` seam and re-exports
-  `getOrCreateDay` for `routes/today.tsx`.
+  `get-or-create.ts`, a behavior-identical extraction (verified against the old
+  bodies in review) save for the one deliberate addition: `goToDate` gained the
+  `morph` option the strip needs for its plain (non-morph) navigation.
+  `index.tsx` keeps only the `protects` seam and re-exports `getOrCreateDay` for
+  `routes/today.tsx`.

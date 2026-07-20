@@ -382,6 +382,13 @@ export function weekLabel(weekKey: string): string {
   return `Week ${Number(m[2])}`;
 }
 
+/** The two-digit ISO week part of a week key: `2026-W29` -> `"29"`. The single
+ *  source for pulling the week number out of a week key (callers add their own
+ *  `W`/label chrome). Empty string on a malformed key. */
+export function weekKeyWeekNumber(weekKey: string): string {
+  return WEEK_KEY_RE.exec(weekKey)?.[2] ?? "";
+}
+
 /** The Monday and Sunday day-keys bounding an ISO week (for the badge to format
  *  a range). `2026-W29` -> `{ monday: "2026-07-13", sunday: "2026-07-19" }`.
  *  Null on a malformed / nonexistent week key. */

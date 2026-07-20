@@ -24,6 +24,7 @@ import {
   weekKeyToDayRange,
   weekKeyToDays,
   weekKeyToMonthKey,
+  weekKeyWeekNumber,
   weekLabel,
   yearLabel,
 } from "./date-links";
@@ -389,7 +390,7 @@ describe("weekKeyToDays / shiftWeekKey (ADR 0054 week strip)", () => {
   });
 
   test("shiftWeekKey crosses a year boundary correctly", () => {
-    // 2026-W01 back one week is the last week of 2025 (a 53-week ISO year).
+    // 2026-W01 back one week is the last week of 2025 (a 52-week ISO year, so W52).
     expect(shiftWeekKey("2026-W01", -1)).toBe("2025-W52");
     // Forward from the last full week of December 2026 into 2027's W01.
     expect(shiftWeekKey("2026-W53", 1)).toBe("2027-W01");
@@ -397,6 +398,14 @@ describe("weekKeyToDays / shiftWeekKey (ADR 0054 week strip)", () => {
 
   test("shiftWeekKey is null on a malformed week", () => {
     expect(shiftWeekKey("nope", 1)).toBeNull();
+  });
+
+  test("weekKeyWeekNumber pulls the two-digit week part", () => {
+    expect(weekKeyWeekNumber("2026-W29")).toBe("29");
+    expect(weekKeyWeekNumber("2026-W01")).toBe("01");
+    expect(weekKeyWeekNumber("2026-W53")).toBe("53");
+    expect(weekKeyWeekNumber("2026-07-16")).toBe("");
+    expect(weekKeyWeekNumber("nope")).toBe("");
   });
 });
 
