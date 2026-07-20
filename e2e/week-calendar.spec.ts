@@ -51,6 +51,30 @@ const strip = (page: Page) => page.getByTestId("week-calendar");
 const pill = (page: Page, key: string) =>
   page.locator(`[data-testid="week-calendar"] [data-day-key="${key}"]`);
 
+/** Sample the subheader band (the motion.div wrapping the strip) height on every
+ *  animation frame for `ms`, skipping frames where the strip is absent. Returns
+ *  the trajectory so the caller can assert it snapped (flat) vs eased (a ramp).
+ *  Starts immediately, so install it right before the action being measured. */
+function sampleBandHeights(page: Page, ms = 400): Promise<number[]> {
+  return page.evaluate(
+    (dur) =>
+      new Promise<number[]>((resolve) => {
+        const heights: number[] = [];
+        const start = performance.now();
+        const tick = () => {
+          const el = document.querySelector('[data-testid="week-calendar"]');
+          const band = el?.closest<HTMLElement>(".overflow-hidden") ?? null;
+          if (band)
+            heights.push(Math.round(band.getBoundingClientRect().height));
+          if (performance.now() - start < dur) requestAnimationFrame(tick);
+          else resolve(heights);
+        };
+        requestAnimationFrame(tick);
+      }),
+    ms,
+  );
+}
+
 test.describe("week calendar strip (ADR 0054)", () => {
   test("shows on a day node, and NOT on a non-daily node or a week scaffold node", async ({
     page,
@@ -138,6 +162,17 @@ test.describe("week calendar strip (ADR 0054)", () => {
     await clientNavigate(page, "/the-day");
     await expect(strip(page)).toBeVisible();
 
+    // The subheader band must SNAP across the day switch, not re-open. The
+    // editor (and its subheader) remounts per day; the band measures and paints
+    // its full height on mount with NO animation (ADR 0054 decision 4, the
+    // double-rAF mount-snap guard). Install the frame sampler, THEN click, so it
+    // captures the whole remount. Countable DOM read: the height trajectory is
+    // flat -- max minus min is ~0. With the bug (the band easing 0->full over
+    // SUBHEADER_EXPAND_MS) this ramp is ~90px, so the delta is the signal, not a
+    // wall-clock threshold. A plain settled `height > 0` check missed it (the
+    // band was non-zero the whole time it was mid-reopen).
+    const heights = sampleBandHeights(page);
+
     // Click the neighbour day pill -> navigate to its node.
     await pill(page, OTHER).click();
     await expect(page).toHaveURL(/\/other-day$/);
@@ -145,13 +180,12 @@ test.describe("week calendar strip (ADR 0054)", () => {
     await expect(pill(page, OTHER)).toHaveAttribute("data-selected", "");
     await expect(pill(page, DAY)).not.toHaveAttribute("data-selected");
 
-    // The subheader band stays OPEN across the day switch. The editor (and its
-    // subheader) remounts per day, but the band snaps to its measured height on
-    // mount instead of re-animating from 0 (ADR 0054 decision 4). Countable DOM
-    // read -- the strip's box height is non-zero -- not a wall-clock threshold.
-    const box = await strip(page).boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThan(0);
+    const samples = await heights;
+    expect(samples.length).toBeGreaterThan(0);
+    const min = Math.min(...samples);
+    const max = Math.max(...samples);
+    expect(max).toBeGreaterThan(0); // the band stayed open (never collapsed)
+    expect(max - min).toBeLessThan(12); // and it snapped -- no 0->full ramp
   });
 
   test("clicking an un-minted day creates it WITHOUT seeding a child (seed-free)", async ({
