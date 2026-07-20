@@ -61,6 +61,9 @@ cut.
 - The seam-F subheader table in `AGENTS.md` gains its first plugin owner.
 - The strip lives in ONE render path (chrome), so the bullet/title/mini-editor
   duality trap does not apply.
-- `goToDate` gains a second in-plugin caller; if that forces an import cycle
-  with the plugin's `index.tsx`, the nav helper moves to its own module —
-  semantics stay identical.
+- `goToDate` gained a second in-plugin caller, and the strip↔`index.tsx`
+  import cycle it forced was real — so the whole get-or-create engine
+  (`getOrCreateDay`/`goToDate` + the scaffold cascade/migration) moved to
+  `get-or-create.ts`, a byte-identical extraction (verified against the old
+  bodies in review); `index.tsx` keeps only the `protects` seam and re-exports
+  `getOrCreateDay` for `routes/today.tsx`.
