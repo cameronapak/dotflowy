@@ -495,6 +495,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       mutations: commands,
       nav: {
         zoom: (id) => navigateZoom(id, id),
+        // Plain navigation: no `view-transition` opts and no `pivotId` state, so
+        // the incoming title carries no stale morph name and the mount focus
+        // effect (which keys off pivotId) leaves the caret alone. The content
+        // just swaps. See ADR 0054 (the week strip's pill IS the transition).
+        open: (id) => navigate({ to: "/$nodeId", params: { nodeId: id } }),
       },
       openOverlay: (node) => setOverlayNode(node),
       openPanel: (node) => setPanelNode(node),
@@ -515,7 +520,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         set.add(fiber);
       },
     }),
-    [commands, navigateZoom],
+    [commands, navigateZoom, navigate],
   );
 
   // Interrupt any still-running plugin fibers when the editor unmounts (ADR 0039).

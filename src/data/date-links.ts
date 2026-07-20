@@ -382,6 +382,13 @@ export function weekLabel(weekKey: string): string {
   return `Week ${Number(m[2])}`;
 }
 
+/** The two-digit ISO week part of a week key: `2026-W29` -> `"29"`. The single
+ *  source for pulling the week number out of a week key (callers add their own
+ *  `W`/label chrome). Empty string on a malformed key. */
+export function weekKeyWeekNumber(weekKey: string): string {
+  return WEEK_KEY_RE.exec(weekKey)?.[2] ?? "";
+}
+
 /** The Monday and Sunday day-keys bounding an ISO week (for the badge to format
  *  a range). `2026-W29` -> `{ monday: "2026-07-13", sunday: "2026-07-19" }`.
  *  Null on a malformed / nonexistent week key. */
@@ -394,6 +401,32 @@ export function weekKeyToDayRange(
     monday: utcDayKey(new Date(thursday.getTime() - 3 * MS_PER_DAY)),
     sunday: utcDayKey(new Date(thursday.getTime() + 3 * MS_PER_DAY)),
   };
+}
+
+/** The seven day-keys of an ISO week, Monday..Sunday in order (the week strip's
+ *  source of days -- ADR 0054). `2026-W29` -> `["2026-07-13", ..., "2026-07-19"]`.
+ *  Null on a malformed / nonexistent week key. Derives from {@link
+ *  weekKeyToDayRange} so the strip and the hierarchy agree on the week's bounds. */
+export function weekKeyToDays(weekKey: string): string[] | null {
+  const range = weekKeyToDayRange(weekKey);
+  if (!range) return null;
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) days.push(addDays(range.monday, i));
+  return days;
+}
+
+/** The week key `deltaWeeks` ISO weeks away (the strip's chevron paging -- ADR
+ *  0054). `shiftWeekKey("2026-W29", 1)` -> `"2026-W30"`, `-1` -> `"2026-W28"`.
+ *  Rides the shared ISO math (Monday of the week + whole-day arithmetic + the
+ *  Thursday rule) so paging can never straddle two week nodes. Null on a
+ *  malformed / nonexistent week key. */
+export function shiftWeekKey(
+  weekKey: string,
+  deltaWeeks: number,
+): string | null {
+  const range = weekKeyToDayRange(weekKey);
+  if (!range) return null;
+  return dayKeyToWeekKey(addDays(range.monday, deltaWeeks * 7));
 }
 
 /** The full week/month/year chain a day key nests under (issue #271): the single

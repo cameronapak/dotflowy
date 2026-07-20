@@ -20,8 +20,11 @@ import {
   scaffoldLabel,
   type ScaffoldSibling,
   sortedInsertAfterId,
+  shiftWeekKey,
   weekKeyToDayRange,
+  weekKeyToDays,
   weekKeyToMonthKey,
+  weekKeyWeekNumber,
   weekLabel,
   yearLabel,
 } from "./date-links";
@@ -344,6 +347,65 @@ describe("display helpers", () => {
       sunday: "2026-01-04",
     });
     expect(weekKeyToDayRange("2025-W53")).toBeNull();
+  });
+});
+
+describe("weekKeyToDays / shiftWeekKey (ADR 0054 week strip)", () => {
+  test("weekKeyToDays lists Monday..Sunday in order", () => {
+    expect(weekKeyToDays("2026-W29")).toEqual([
+      "2026-07-13",
+      "2026-07-14",
+      "2026-07-15",
+      "2026-07-16",
+      "2026-07-17",
+      "2026-07-18",
+      "2026-07-19",
+    ]);
+    // Every day round-trips to the SAME week (no straddle).
+    for (const day of weekKeyToDays("2026-W29")!) {
+      expect(dayKeyToWeekKey(day)).toBe("2026-W29");
+    }
+  });
+
+  test("weekKeyToDays spans a year boundary intact", () => {
+    expect(weekKeyToDays("2026-W01")).toEqual([
+      "2025-12-29",
+      "2025-12-30",
+      "2025-12-31",
+      "2026-01-01",
+      "2026-01-02",
+      "2026-01-03",
+      "2026-01-04",
+    ]);
+  });
+
+  test("weekKeyToDays is null on a nonexistent week", () => {
+    expect(weekKeyToDays("2025-W53")).toBeNull();
+  });
+
+  test("shiftWeekKey pages forward and back by whole weeks", () => {
+    expect(shiftWeekKey("2026-W29", 1)).toBe("2026-W30");
+    expect(shiftWeekKey("2026-W29", -1)).toBe("2026-W28");
+    expect(shiftWeekKey("2026-W29", 0)).toBe("2026-W29");
+  });
+
+  test("shiftWeekKey crosses a year boundary correctly", () => {
+    // 2026-W01 back one week is the last week of 2025 (a 52-week ISO year, so W52).
+    expect(shiftWeekKey("2026-W01", -1)).toBe("2025-W52");
+    // Forward from the last full week of December 2026 into 2027's W01.
+    expect(shiftWeekKey("2026-W53", 1)).toBe("2027-W01");
+  });
+
+  test("shiftWeekKey is null on a malformed week", () => {
+    expect(shiftWeekKey("nope", 1)).toBeNull();
+  });
+
+  test("weekKeyWeekNumber pulls the two-digit week part", () => {
+    expect(weekKeyWeekNumber("2026-W29")).toBe("29");
+    expect(weekKeyWeekNumber("2026-W01")).toBe("01");
+    expect(weekKeyWeekNumber("2026-W53")).toBe("53");
+    expect(weekKeyWeekNumber("2026-07-16")).toBe("");
+    expect(weekKeyWeekNumber("nope")).toBe("");
   });
 });
 

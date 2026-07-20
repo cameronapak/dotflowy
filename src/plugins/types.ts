@@ -156,8 +156,16 @@ export interface PluginContext {
   mutations: NodeCommands;
   /** A small navigation surface over the URL-driven view. */
   nav: {
-    /** Zoom a node to the temporary root. */
+    /** Zoom a node to the temporary root, with the shared-element morph
+     *  (`view-transition-name`). Use for a "travel into this node" gesture where
+     *  the clicked element becomes the new page title. */
     zoom: (id: string) => void;
+    /** Make a node the view root by PLAIN navigation -- no morph, no pivot, no
+     *  focus theft; the content below just swaps. Use when the destination
+     *  isn't rendered in the outgoing view (so there's no element to morph
+     *  FROM), or when a separate element already carries the motion (the week
+     *  strip's layoutId pill IS the transition -- ADR 0054). */
+    open: (id: string) => void;
   };
   /** Show (or dismiss, with null) a self-managing overlay -- a portaled popover
    *  the plugin owns (e.g. the tag color picker). A thin generic host: the core

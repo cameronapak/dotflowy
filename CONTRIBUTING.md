@@ -77,7 +77,9 @@ still exist if you want the two servers in separate terminals with isolated logs
 
 `bun run seed:user` creates a ready-to-use dev account
 (`dev@dotflowy.local` / `dotflowy-dev`) through the real sign-up endpoint —
-run it once the Worker is up and sign in with those credentials. Prefer your
+run it once the Worker is up and sign in with those credentials. It reads the
+invite code from your local `.dev.vars` `INVITE_CODES` (or skips it when
+`SIGNUP_OPEN=true`), so it works whatever your invite value is. Prefer your
 own account? Sign up by hand with invite code `dev-invite`.
 
 ### Production-like loop (one server)

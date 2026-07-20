@@ -973,7 +973,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     (): PluginContext => ({
       tree: getTreeIndex(),
       mutations: commands,
-      nav: { zoom: () => {} },
+      nav: { zoom: () => {}, open: () => {} },
       openOverlay: () => {},
       openPanel: () => {},
       run: (effect) => {
