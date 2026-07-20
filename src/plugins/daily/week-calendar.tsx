@@ -20,7 +20,7 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -121,8 +121,10 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
   const reduceMotion = useReducedMotion();
   // Ephemeral paging offset from the zoomed day's week (ADR 0054, decision 5):
   // reset whenever the zoomed day changes so the strip re-centers on route change.
+  // Layout effect: the strip stays mounted across day switches, so the reset must
+  // land before paint or a paged offset flashes the wrong week on day switch.
   const [offset, setOffset] = useState(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     setOffset(0);
   }, [dayKey]);
 
