@@ -1,6 +1,6 @@
 import type { VariantProps } from "class-variance-authority";
 
-import { Star } from "lucide-react";
+import { Play, Star } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Logo } from "@/components/Logo";
@@ -54,8 +54,8 @@ function Dot({ className }: { className?: string }) {
 
 function Nav() {
   return (
-    <header className="border-b border-border/60">
-      <div className="mx-auto flex h-14 w-full max-w-2xl items-center justify-between px-6">
+    <header>
+      <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
         <a href="/" className="flex items-center">
           <Logo className="h-5 w-auto" />
         </a>
@@ -80,44 +80,140 @@ const POINTS = [
   "Shape ideas like they're physical — drag, nest, zoom into anything.",
 ];
 
+const VIDEO_ID = "S07dI6pIr_Q";
+const YT_ORIGINS = [
+  "https://www.youtube-nocookie.com",
+  "https://www.google.com",
+];
+
+/** YouTube facade: the self-hosted poster + a play button, and nothing from
+ * YouTube until the visitor clicks — then the real iframe drops in with
+ * autoplay, so one click still starts playback. Hover/focus preconnects to
+ * the player origins so the handshake is done by click time. */
+function DemoVideo() {
+  const [playing, setPlaying] = useState(false);
+  const warmed = useRef(false);
+
+  const warm = () => {
+    if (warmed.current) return;
+    warmed.current = true;
+    for (const href of YT_ORIGINS) {
+      const link = document.createElement("link");
+      link.rel = "preconnect";
+      link.href = href;
+      document.head.append(link);
+    }
+  };
+
+  return (
+    <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_16px_40px_-12px_rgb(0_0_0/0.12)] dark:shadow-none">
+      {playing ? (
+        <iframe
+          className="absolute inset-0 size-full"
+          src={`https://www.youtube-nocookie.com/embed/${VIDEO_ID}?autoplay=1&rel=0`}
+          title="Dotflowy demo video"
+          allow="autoplay; encrypted-media; picture-in-picture"
+          allowFullScreen
+        />
+      ) : (
+        <button
+          type="button"
+          aria-label="Play the demo video"
+          onClick={() => {
+            warm();
+            setPlaying(true);
+          }}
+          onPointerEnter={warm}
+          onFocus={warm}
+          className="group absolute inset-0 block size-full cursor-pointer"
+        >
+          <img
+            src="/hero.png"
+            alt="The Dotflowy outline — daily notes nested under weeks and months, with tags, to-dos, and links"
+            width={1920}
+            height={1080}
+            loading="eager"
+            fetchPriority="high"
+            className="size-full object-cover object-top"
+          />
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="flex size-16 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform duration-200 group-hover:scale-105 motion-reduce:transition-none">
+              {/* Optical centering: the triangle reads centered nudged right */}
+              <Play className="ml-1 size-6 fill-current" />
+            </span>
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The hero is set like an outline: the H1 is the root bullet, the sub-copy
+ * and CTA its children on a dotted indent guide, and the screenshot below is
+ * the zoomed node. The guide line is the page's signature — the product's own
+ * structure, not decoration. */
 function Hero() {
   return (
-    <section className="mx-auto w-full max-w-2xl px-6 pt-20 pb-24 sm:pt-28">
-      <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
-        Room to <span className="text-brand-blue">think</span>.
-      </h1>
-      <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-        Get everything out of your head, shape it when you're ready, and find it
-        when it matters. Dotflowy is a calm, fast outliner that keeps up with
-        the way you think.
-      </p>
+    <section className="pt-14 pb-24 sm:pt-20">
+      <div className="mx-auto w-full max-w-2xl px-6">
+        <div className="relative pl-7 sm:pl-9">
+          {/* The root bullet — the same solid dot the app draws on every row. */}
+          <span
+            aria-hidden
+            className="absolute top-[0.42em] left-0 size-3 rounded-full bg-foreground text-5xl sm:size-3.5 sm:text-6xl"
+          />
+          {/* The indent guide, dotted like the wordmark's namesake. */}
+          <span
+            aria-hidden
+            className="absolute top-[1.6em] bottom-1 left-[5px] w-0 border-l-2 border-dotted border-border text-5xl sm:left-[6px] sm:text-6xl"
+          />
+          <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
+            Room to <span className="text-brand-blue">think</span>.
+          </h1>
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
+            Get everything out of your head, shape it when you're ready, and
+            find it when it matters — in a calm, fast outliner that keeps up
+            with the way you think.
+          </p>
+          <div className="mt-9">
+            <LinkButton
+              href={APP_URL}
+              size="lg"
+              className="h-11 px-5 text-[15px]"
+            >
+              Start free
+            </LinkButton>
+            <p className="mt-3 font-mono text-xs text-muted-foreground">
+              Signups are open · already have an account?{" "}
+              <a
+                href={APP_URL}
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                Sign in
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
 
-      <ul className="mt-8 space-y-2.5 text-[15px] text-muted-foreground">
-        {POINTS.map((p) => (
-          <li key={p} className="flex items-start gap-2.5">
-            {/* mt centers the dot on the first text line when a bullet wraps */}
-            <Dot className="mt-2" />
-            {p}
-          </li>
-        ))}
-      </ul>
+      {/* The zoomed node: the app itself, breaking out of the text column.
+       * 16:9 so the exported poster's crop is unambiguous. */}
+      <Reveal delay={120} className="mx-auto mt-14 w-full max-w-5xl px-6">
+        <DemoVideo />
+      </Reveal>
 
-      <p className="mt-6 font-mono text-xs text-muted-foreground">
-        Open source. Real-time sync. Export everything, anytime.
-      </p>
-
-      <div className="mt-10">
-        <LinkButton href={APP_URL} size="lg" className="h-11 px-5 text-[15px]">
-          Start free
-        </LinkButton>
-        <p className="mt-3 font-mono text-xs text-muted-foreground">
-          Signups are open · already have an account?{" "}
-          <a
-            href={APP_URL}
-            className="underline underline-offset-2 hover:text-foreground"
-          >
-            Sign in
-          </a>
+      <div className="mx-auto w-full max-w-5xl px-6">
+        <ul className="mt-10 grid gap-6 text-[15px] text-muted-foreground sm:grid-cols-3">
+          {POINTS.map((p) => (
+            <li key={p} className="flex items-start gap-2.5">
+              {/* mt centers the dot on the first text line when a bullet wraps */}
+              <Dot className="mt-2" />
+              {p}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-8 font-mono text-xs text-muted-foreground">
+          Open source. Real-time sync. Export everything, anytime.
         </p>
       </div>
     </section>
