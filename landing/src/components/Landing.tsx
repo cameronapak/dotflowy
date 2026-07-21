@@ -128,10 +128,10 @@ function DemoVideo() {
           className="group absolute inset-0 block size-full cursor-pointer"
         >
           <img
-            src="/hero.png"
-            alt="The Dotflowy outline — daily notes nested under weeks and months, with tags, to-dos, and links"
-            width={1920}
-            height={1080}
+            src="/hero.jpg"
+            alt="Demo video preview — the Dotflowy outline with daily notes, formatting, tags, and to-dos"
+            width={1280}
+            height={720}
             loading="eager"
             fetchPriority="high"
             className="size-full object-cover object-top"
