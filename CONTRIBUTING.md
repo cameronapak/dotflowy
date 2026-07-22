@@ -3,8 +3,9 @@
 Thanks for hacking on Dotflowy. This is the practical "get it running and ship a
 change" guide. Two companion docs go deeper:
 
-- **[`README.md`](./README.md)** — what Dotflowy is, the data model, the sync
-  design, and the project layout. Read it first.
+- **[`README.md`](./README.md)** — what Dotflowy is, at a glance. Read it
+  first, then **[`docs/architecture.md`](./docs/architecture.md)** for the data
+  model, the sync design, and the project layout.
 - **[`AGENTS.md`](./AGENTS.md)** (symlinked as `CLAUDE.md`) — the per-feature
   rules and gotchas. It's written for coding agents but it's the canonical
   reference for _why_ the code is shaped the way it is. Read the section that
@@ -219,7 +220,7 @@ Rules of thumb, expanded in `AGENTS.md`:
 
 ## Deploying
 
-Covered in [`README.md`](./README.md#deploy). The short version: `wrangler login`,
+Covered in [`docs/deploying.md`](./docs/deploying.md). The short version: `wrangler login`,
 set the prod secret once (`wrangler secret put BETTER_AUTH_SECRET`), run
 `bun run db:migrate:remote` **before** the first `bun run deploy`, then
 `bun run deploy`. Deploys ship whatever's checked out — prefer merging to `main`

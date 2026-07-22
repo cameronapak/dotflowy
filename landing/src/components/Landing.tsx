@@ -7,8 +7,7 @@ import { Logo } from "@/components/Logo";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
-// Single source of truth for the outbound links. Handle is `cameronapak`
-// (matches the README's GitHub badges).
+// Single source of truth for the outbound links. Handle is `cameronapak`.
 const APP_URL = "https://app.dotflowy.com";
 const GITHUB_URL = "https://github.com/cameronapak/dotflowy";
 const GITHUB_API = "https://api.github.com/repos/cameronapak/dotflowy";
