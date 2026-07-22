@@ -85,7 +85,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 Guidance for coding agents working in this repo. `CLAUDE.md` is a symlink to this file.
 
-`README.md` covers the data model, persistence, backend-swap path, and project layout — read it first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose _why_ isn't visible in the code live as numbered ADRs in [`docs/adr/`](./docs/adr/) — read the one a rule below points at.
+`README.md` is a short human-facing introduction; the data model, persistence, backend-swap path, and project layout live in [`docs/architecture.md`](./docs/architecture.md) — read that first and don't duplicate it here. This file is the non-obvious operational stuff: commands, gotchas, and the one rule per feature. The few decisions whose _why_ isn't visible in the code live as numbered ADRs in [`docs/adr/`](./docs/adr/) — read the one a rule below points at.
 
 ## Local setup
 
