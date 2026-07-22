@@ -2,7 +2,6 @@
 @import "shadcn/tailwind.css";
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -11,7 +10,8 @@
  * is the mirror-blue (`--brand-blue` = the app's `--mirror-source`), used sparingly
  * and SOLID. This site follows suit: buttons stay grayscale (the app's real button
  * color), and blue appears only on interactive text (the hero accent word, links,
- * the live caret). No gradient, no `background-clip:text`. See PRODUCT.md principle 6. */
+ * the live caret). No gradient, no `background-clip:text`. See PRODUCT.md principle 6.
+ * Typeface is Geist only — no mono on the marketing surface. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -41,7 +41,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --font-mono: var(--font-sans);
 }
 
 :root {
