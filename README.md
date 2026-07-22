@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://app.dotflowy.com"><strong>app.dotflowy.com</strong></a>
+  <a href="https://dotflowy.com"><strong>dotflowy.com</strong></a>
 </p>
 
 ---
