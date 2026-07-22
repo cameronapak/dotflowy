@@ -537,3 +537,13 @@ No profiling framework; these existing hooks are the toolkit:
 ## Verifying UI changes
 
 Screenshots **cannot capture view-transition overlays** (they show the settled DOM, so a morph always looks "done"). Verify transitions by instrumenting `document.startViewTransition` and asserting on which element holds `view-transition-name`.
+
+## Learned User Preferences
+
+- Landing/marketing typography is Geist only — do not use `font-mono` or load Geist Mono on the landing surface.
+- When migrating icons, prefer free MIT Hugeicons (`@hugeicons/react` + `@hugeicons/core-free-icons`) with default stroke; rewriting call sites is fine.
+- Keep "Workflowy alternative" out of the landing footer brand row and H1; put that SEO phrase in the meta description and quiet on-page body copy (e.g. trust line), not the hero.
+
+## Learned Workspace Facts
+
+- Marketing site lives in the separate `landing/` package (`dotflowy-landing`) at dotflowy.com; the app SPA is at app.dotflowy.com.

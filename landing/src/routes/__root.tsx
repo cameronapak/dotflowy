@@ -9,11 +9,11 @@ import {
 
 import "../styles.css";
 
-// The hero leads with the job ("room to think"); the meta description is a
+// The hero leads with the job ("free up your mind"); the meta description is a
 // SEARCH surface, so the category + "Workflowy alternative" keywords live
 // here on purpose (OSS/comparison is a channel, not the pitch — see
 // .agents/product-marketing.md).
-const TITLE = "Dotflowy — room to think";
+const TITLE = "Dotflowy — free up your mind";
 const DESCRIPTION =
   "Get everything out of your head, shape it when you're ready, and find it when it matters. A calm, fast, open-source outliner — a Workflowy alternative your AI agents can edit too.";
 const URL = "https://dotflowy.com";

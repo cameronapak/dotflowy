@@ -11,6 +11,26 @@ import { cn } from "@/lib/utils";
 // (matches the README's GitHub badges).
 const APP_URL = "https://app.dotflowy.com";
 const GITHUB_URL = "https://github.com/cameronapak/dotflowy";
+const GITHUB_API = "https://api.github.com/repos/cameronapak/dotflowy";
+
+function useGithubStars() {
+  const [stars, setStars] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(GITHUB_API)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { stargazers_count?: number } | null) => {
+        if (!cancelled && typeof data?.stargazers_count === "number") {
+          setStars(data.stargazers_count);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return stars;
+}
 
 /** A link styled as a button. Links are `<a>` elements (correct semantics),
  * not Base UI Buttons rendering an anchor. */
@@ -53,6 +73,7 @@ function Dot({ className }: { className?: string }) {
 }
 
 function Nav() {
+  const stars = useGithubStars();
   return (
     <header>
       <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
@@ -60,11 +81,27 @@ function Nav() {
           <Logo className="h-5 w-auto" />
         </a>
         <nav className="flex items-center gap-1 sm:gap-2">
-          <LinkButton href={GITHUB_URL} external variant="ghost" size="sm">
+          <LinkButton
+            href={GITHUB_URL}
+            external
+            variant="ghost"
+            size="sm"
+            className="min-h-10 min-w-10 gap-1.5 px-2.5 sm:min-w-0 sm:pr-2.5 sm:pl-2"
+          >
             <Star className="size-4" />
-            <span className="hidden sm:inline">GitHub</span>
+            <span className="hidden sm:inline">Star on GitHub</span>
+            {stars != null && (
+              <span className="text-muted-foreground tabular-nums">
+                {stars.toLocaleString()}
+              </span>
+            )}
           </LinkButton>
-          <LinkButton href={APP_URL} variant="outline" size="sm">
+          <LinkButton
+            href={APP_URL}
+            variant="outline"
+            size="sm"
+            className="min-h-10 px-3"
+          >
             Sign in
           </LinkButton>
         </nav>
@@ -75,9 +112,9 @@ function Nav() {
 
 // One bullet per stage of the job: capture, retrieve, shape.
 const POINTS = [
-  "Capture a thought in one keystroke, before it slips away.",
-  "Find it again with tags, filters, and instant search.",
-  "Shape ideas like they're physical — drag, nest, zoom into anything.",
+  "Quick capture without leaving what you're doing.",
+  "Find it later with tags, filters, and Cmd+K.",
+  "Drag, nest, zoom, mirror. Thoughts you can move.",
 ];
 
 const VIDEO_ID = "S07dI6pIr_Q";
@@ -106,7 +143,7 @@ function DemoVideo() {
   };
 
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_16px_40px_-12px_rgb(0_0_0/0.12)] dark:shadow-none">
+    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-card shadow-[0_16px_40px_-12px_rgb(0_0_0/0.12)] outline outline-1 outline-black/10 dark:shadow-none dark:outline-white/10">
       {playing ? (
         <iframe
           className="absolute inset-0 size-full"
@@ -128,16 +165,16 @@ function DemoVideo() {
           className="group absolute inset-0 block size-full cursor-pointer"
         >
           <img
-            src="/hero.png"
-            alt="The Dotflowy outline — daily notes nested under weeks and months, with tags, to-dos, and links"
-            width={1920}
-            height={1080}
+            src="/demo-thumb.jpg"
+            alt="Dotflowy demo — overview of the outliner"
+            width={1280}
+            height={720}
             loading="eager"
             fetchPriority="high"
-            className="size-full object-cover object-top"
+            className="size-full object-cover object-center"
           />
           <span className="absolute inset-0 flex items-center justify-center">
-            <span className="flex size-16 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform duration-200 group-hover:scale-105 motion-reduce:transition-none">
+            <span className="flex size-16 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform duration-200 group-hover:scale-105 group-active:scale-[0.96] motion-reduce:transition-none">
               {/* Optical centering: the triangle reads centered nudged right */}
               <Play className="ml-1 size-6 fill-current" />
             </span>
@@ -149,9 +186,7 @@ function DemoVideo() {
 }
 
 /** The hero is set like an outline: the H1 is the root bullet, the sub-copy
- * and CTA its children on a dotted indent guide, and the screenshot below is
- * the zoomed node. The guide line is the page's signature — the product's own
- * structure, not decoration. */
+ * and CTA its children, and the screenshot below is the zoomed node. */
 function Hero() {
   return (
     <section className="pt-14 pb-24 sm:pt-20">
@@ -162,18 +197,11 @@ function Hero() {
             aria-hidden
             className="absolute top-[0.42em] left-0 size-3 rounded-full bg-foreground text-5xl sm:size-3.5 sm:text-6xl"
           />
-          {/* The indent guide, dotted like the wordmark's namesake. */}
-          <span
-            aria-hidden
-            className="absolute top-[1.6em] bottom-1 left-[5px] w-0 border-l-2 border-dotted border-border text-5xl sm:left-[6px] sm:text-6xl"
-          />
           <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
-            Room to <span className="text-brand-blue">think</span>.
+            Free up your mind.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-            Get everything out of your head, shape it when you're ready, and
-            find it when it matters — in a calm, fast outliner that keeps up
-            with the way you think.
+            Get your thoughts and tasks out. Organize them later, or don't.
           </p>
           <div className="mt-9">
             <LinkButton
@@ -183,8 +211,8 @@ function Hero() {
             >
               Start free
             </LinkButton>
-            <p className="mt-3 font-mono text-xs text-muted-foreground">
-              Signups are open · already have an account?{" "}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Already have an account?{" "}
               <a
                 href={APP_URL}
                 className="underline underline-offset-2 hover:text-foreground"
@@ -202,8 +230,8 @@ function Hero() {
         <DemoVideo />
       </Reveal>
 
-      <div className="mx-auto w-full max-w-5xl px-6">
-        <ul className="mt-10 grid gap-6 text-[15px] text-muted-foreground sm:grid-cols-3">
+      <div className="mx-auto w-full max-w-2xl px-6">
+        <ul className="mt-10 grid gap-6 text-[15px] text-muted-foreground">
           {POINTS.map((p) => (
             <li key={p} className="flex items-start gap-2.5">
               {/* mt centers the dot on the first text line when a bullet wraps */}
@@ -212,9 +240,44 @@ function Hero() {
             </li>
           ))}
         </ul>
-        <p className="mt-8 font-mono text-xs text-muted-foreground">
-          Open source. Real-time sync. Export everything, anytime.
+        <p className="mt-8 text-xs text-muted-foreground">
+          Open source Workflowy alternative. Real-time sync. Export anytime.
         </p>
+      </div>
+    </section>
+  );
+}
+
+/** Differentiated beats from the product demo — one idea each, no feature dump. */
+const BEATS = [
+  {
+    title: "Hide what AI shouldn't see.",
+    body: "Wrap text in a spoiler. You can still find it. Agents see it redacted.",
+  },
+  {
+    title: "One thought, many places.",
+    body: "Mirror a bullet into today, a project, or a week. Edit it once and it updates everywhere it lives.",
+  },
+  {
+    title: "When it's too much, spotlight one line.",
+    body: "Cmd+K, turn on Spotlight. The rest of the outline dims so you can finish the thought in front of you.",
+  },
+];
+
+function OnlyHere() {
+  return (
+    <section className="border-t border-border/60">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-14 px-6 py-20 sm:py-24">
+        {BEATS.map((beat, i) => (
+          <Reveal key={beat.title} delay={i * 80}>
+            <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
+              {beat.title}
+            </h2>
+            <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-pretty text-muted-foreground">
+              {beat.body}
+            </p>
+          </Reveal>
+        ))}
       </div>
     </section>
   );
@@ -301,12 +364,12 @@ const TIERS: Tier[] = [
         $0
       </span>
     ),
-    tagline: "The full outliner, forever.",
+    tagline: "Keep every thought. Pay nothing.",
     features: [
-      "Everything in the editor — daily notes, tags, filters, real-time sync.",
-      "Up to 10,000 nodes.",
-      "Export everything, anytime — OPML and Markdown.",
-      "Hit the cap and nothing locks: keep reading, editing, and exporting. You just can't add new nodes until you upgrade.",
+      "The full editor: daily notes, tags, filters, real-time sync.",
+      "10,000 nodes to fill (Workflowy's free plan allows only 100 new nodes a month).",
+      "Import from Workflowy (OPML), or export as OPML or Markdown. Your outline stays yours.",
+      "Hit the cap and nothing locks. Keep reading, editing, and exporting. Upgrade only when you need more room.",
     ],
   },
   {
@@ -319,21 +382,21 @@ const TIERS: Tier[] = [
           $5
         </span>
         <span className="ml-1.5 text-sm text-muted-foreground">/mo</span>
-        <p className="mt-1.5 font-mono text-xs text-muted-foreground">
-          or $48/yr — that's $4/mo, billed yearly
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          or $48/yr. That's $4/mo, billed yearly.
         </p>
       </div>
     ),
-    tagline: "For everything you're building.",
+    tagline: "When your outline outgrows Free.",
     features: [
       "Everything in Free.",
-      "Unlimited nodes.",
-      "AI agents — connect Claude and other agents to your outline over MCP.",
+      "Unlimited nodes. No ceiling on how much you hold.",
+      "AI agents: connect Claude and others to your outline over MCP.",
     ],
   },
   {
     name: "Founding",
-    label: "Limited — 50 seats",
+    label: "Limited · 50 seats",
     distinct: true,
     price: (
       <div>
@@ -343,14 +406,19 @@ const TIERS: Tier[] = [
         <span className="ml-1.5 text-sm text-muted-foreground">
           for 3 years
         </span>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          ≈ <span className="tabular-nums">$2.75</span>/mo. Save{" "}
+          <span className="tabular-nums">$81</span> vs Unlimited at{" "}
+          <span className="tabular-nums">$5</span>/mo.
+        </p>
       </div>
     ),
-    tagline: "Back Dotflowy early, lock in three years.",
+    tagline: "Back Dotflowy early. Lock in three years.",
     features: [
       "Everything in Unlimited.",
-      "One payment covers three full years.",
+      "One payment covers three full years of Unlimited.",
     ],
-    note: "Renews after 3 years unless you cancel — cancel anytime.",
+    note: "Renews after 3 years unless you cancel. Cancel anytime.",
   },
 ];
 
@@ -368,7 +436,7 @@ function PricingCard({ tier }: { tier: Tier }) {
       {tier.label && (
         <p
           className={cn(
-            "font-mono text-[11px] font-medium tracking-wider uppercase",
+            "text-[11px] font-medium tracking-wider uppercase",
             tier.accent ? "text-brand-blue" : "text-muted-foreground",
           )}
         >
@@ -395,7 +463,7 @@ function PricingCard({ tier }: { tier: Tier }) {
         ))}
       </ul>
       {tier.note && (
-        <p className="mt-5 border-t border-border/60 pt-4 font-mono text-xs leading-relaxed text-muted-foreground">
+        <p className="mt-5 border-t border-border/60 pt-4 text-xs leading-relaxed text-muted-foreground">
           {tier.note}
         </p>
       )}
@@ -414,8 +482,9 @@ function Pricing() {
             Honest pricing.
           </h2>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-pretty text-muted-foreground">
-            Start free. Upgrade when you outgrow it. Your outline is always
-            yours to export — OPML or Markdown, on any plan.
+            Start free with room to spare. Upgrade only when you outgrow it.
+            Import from Workflowy, or export as OPML or Markdown on any plan.
+            Your outline stays yours.
           </p>
         </Reveal>
 
@@ -435,9 +504,6 @@ function Pricing() {
           >
             Start free
           </LinkButton>
-          <p className="mt-3 font-mono text-xs text-muted-foreground">
-            Signups are open — start free and upgrade when you outgrow it.
-          </p>
         </Reveal>
       </div>
     </section>
@@ -449,11 +515,8 @@ function Footer() {
   return (
     <footer className="border-t border-border/60">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2.5 text-sm">
+        <div className="flex items-center text-sm">
           <Logo className="h-4 w-auto" />
-          <span className="font-mono text-muted-foreground">
-            — an open-source Workflowy alternative
-          </span>
         </div>
         <nav className="flex items-center gap-5 text-sm text-muted-foreground">
           <a href={APP_URL} className="transition-colors hover:text-foreground">
@@ -479,7 +542,6 @@ function Footer() {
           >
             Privacy
           </a>
-          <span className="text-muted-foreground/70">© {year}</span>
         </nav>
       </div>
       <div className="mx-auto w-full max-w-2xl px-6 pb-6">
@@ -495,6 +557,11 @@ function Footer() {
             height={50}
           />
         </a>
+      </div>
+      <div className="mx-auto w-full max-w-2xl px-6 pb-6">
+        <p className="text-xs text-muted-foreground/70">
+          FAITH TOOLS SOFTWARE SOLUTIONS, LLC © {year}
+        </p>
       </div>
       {/* Nominative-fair-use disclaimer: naming Workflowy is lawful, but state
        * plainly that we're independent and unaffiliated. */}
@@ -515,6 +582,7 @@ export function Landing() {
       <Nav />
       <main className="flex-1">
         <Hero />
+        <OnlyHere />
         <Pricing />
       </main>
       <Footer />
