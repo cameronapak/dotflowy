@@ -543,6 +543,9 @@ Screenshots **cannot capture view-transition overlays** (they show the settled D
 - Landing/marketing typography is Geist only — do not use `font-mono` or load Geist Mono on the landing surface.
 - When migrating icons, prefer free MIT Hugeicons (`@hugeicons/react` + `@hugeicons/core-free-icons`) with default stroke; rewriting call sites is fine.
 - Keep "Workflowy alternative" out of the landing footer brand row and H1; put that SEO phrase in the meta description and quiet on-page body copy (e.g. trust line), not the hero.
+- Landing accents should match the app palette — do not introduce colors (e.g. blue accent) that aren't used in the Dotflowy app.
+- On the landing page, keep feature/list bullets vertical even on desktop — no horizontal bullet rows.
+- Landing import copy should mention Workflowy import alongside OPML (most visitors don't know what OPML is).
 
 ## Learned Workspace Facts
 

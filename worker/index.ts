@@ -68,7 +68,7 @@ import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
-import { isHttpUrlString, unfurlTitle } from "./unfurl";
+import { isHttpUrlString, unfurlTitleE } from "./unfurl";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
@@ -995,7 +995,7 @@ function handleApiRequest(
     // a bare-url link can upgrade its label. DO-independent, so it runs before
     // the per-user stub is resolved. The ONLY 400 is a missing / non-http(s)
     // `url` param; every other "no title" reason (blocked target, non-HTML,
-    // unreachable, timeout) is a 200 `{title:null}` from unfurlTitle. Per-user
+    // unreachable, timeout) is a 200 `{title:null}` from unfurlTitleE. Per-user
     // rate-limited (the fetch is an authenticated SSRF surface).
     if (url.pathname === "/api/unfurl") {
       const target = url.searchParams.get("url");
@@ -1008,7 +1008,7 @@ function handleApiRequest(
         env.UNFURL_LIMIT.limit({ key: userId }),
       );
       if (!success) return json({ error: "rate limited" }, 429);
-      return json({ title: yield* Effect.promise(() => unfurlTitle(target)) });
+      return json({ title: yield* unfurlTitleE(target) });
     }
 
     const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId));

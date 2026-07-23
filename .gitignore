@@ -21,3 +21,6 @@ dist
 
 # Playwright artifacts
 test-results/
+
+# Cursor continual-learning hook state (local index, not shared)
+.cursor/hooks/state/continual-learning*.json
