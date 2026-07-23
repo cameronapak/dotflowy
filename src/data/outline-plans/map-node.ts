@@ -1,4 +1,4 @@
-import type { OutlineNode } from "./types.js";
+import type { OutlineNode } from "./types";
 
 /**
  * Loose Lunora / TanStack row shape. Codegen Doc types currently erase

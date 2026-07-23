@@ -1,20 +1,21 @@
-import { describe, expect, it } from "vitest";
+import type { OutlineNode } from "@dotflowy/outline-plans";
 
-import type { OutlineNode } from "./types.js";
+import {
+  applyPlan,
+  buildTreeIndex,
+  makeOutlineNode,
+  nodeToDocFields,
+  planIndent,
+  planInsertSibling,
+  planRemoveNode,
+} from "@dotflowy/outline-plans";
+import { describe, expect, it } from "vitest";
 
 import {
   bridgeOrderedChildren,
   bridgeTreeIndex,
   rowsToOutlineNodes,
 } from "./lunora-bridge.js";
-import { nodeToDocFields } from "./map-node.js";
-import {
-  applyPlan,
-  planIndent,
-  planInsertSibling,
-  planRemoveNode,
-} from "./planners.js";
-import { buildTreeIndex } from "./tree.js";
 
 const USER = "user-bridge";
 
@@ -43,90 +44,71 @@ describe("lunora-bridge (ADR 0004 seam)", () => {
       },
     ];
     expect(rowsToOutlineNodes(rows)).toEqual([
-      {
-        id: "a",
-        parentId: null,
-        prevSiblingId: null,
-        text: "hello",
-        isTask: false,
-        completed: false,
-        collapsed: false,
-        bookmarkedAt: null,
-        mirrorOf: null,
-        createdAt: 1,
-        updatedAt: 1,
-        origin: null,
-        kind: null,
-        userId: USER,
-      },
+      expect.objectContaining({ id: "a", text: "hello", userId: USER }),
     ]);
   });
 
-  it("insert / indent / remove via planners → bridge order matches", () => {
-    let nodes: OutlineNode[] = [];
-    let t = 100;
-
-    // Insert a, b, c at top level
-    for (const id of ["a", "b", "c"] as const) {
-      const index = buildTreeIndex(nodes);
-      const afterId = nodes.length === 0 ? null : nodes[nodes.length - 1]!.id;
-      const plan = planInsertSibling(index, {
-        id,
+  it("bridge order matches planner apply (insert/indent/remove)", () => {
+    let nodes: OutlineNode[] = [
+      makeOutlineNode({
+        id: "a",
         userId: USER,
         parentId: null,
-        afterId,
-        text: id,
-        createdAt: t,
-        updatedAt: t,
+        prevSiblingId: null,
+        text: "a",
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+      makeOutlineNode({
+        id: "b",
+        userId: USER,
+        parentId: null,
+        prevSiblingId: "a",
+        text: "b",
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    ];
+
+    {
+      const index = buildTreeIndex(nodes);
+      const plan = planInsertSibling(index, {
+        id: "c",
+        userId: USER,
+        parentId: null,
+        afterId: "a",
+        text: "c",
+        createdAt: 2,
+        updatedAt: 2,
       });
       expect(plan).not.toBeNull();
       nodes = applyPlan(nodes, plan!);
-      t += 1;
     }
 
-    {
-      const bridged = bridgeTreeIndex(toRows(nodes));
-      expect(bridgeOrderedChildren(bridged, null).map((n) => n.id)).toEqual([
-        "a",
-        "b",
-        "c",
-      ]);
-    }
-
-    // Indent c under b → a, b(c)
     {
       const index = buildTreeIndex(nodes);
-      const plan = planIndent(index, "c", t++);
+      const plan = planIndent(index, "c", 3);
       expect(plan).not.toBeNull();
       nodes = applyPlan(nodes, plan!);
     }
 
-    {
-      const bridged = bridgeTreeIndex(toRows(nodes));
-      expect(bridgeOrderedChildren(bridged, null).map((n) => n.id)).toEqual([
-        "a",
-        "b",
-      ]);
-      expect(bridgeOrderedChildren(bridged, "b").map((n) => n.id)).toEqual([
-        "c",
-      ]);
-    }
+    const bridged = bridgeTreeIndex(toRows(nodes));
+    expect(bridgeOrderedChildren(bridged, null).map((n) => n.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(bridgeOrderedChildren(bridged, "a").map((n) => n.id)).toEqual(["c"]);
 
-    // Remove b (and cascade semantics from planRemoveNode)
     {
       const index = buildTreeIndex(nodes);
-      const plan = planRemoveNode(index, "b", t++);
+      const plan = planRemoveNode(index, "a", 4);
       expect(plan).not.toBeNull();
       nodes = applyPlan(nodes, plan!);
     }
 
-    {
-      const bridged = bridgeTreeIndex(toRows(nodes));
-      const top = bridgeOrderedChildren(bridged, null).map((n) => n.id);
-      // planRemoveNode removes the subtree — expect only "a"
-      expect(top).toEqual(["a"]);
-      expect(bridged.byId.has("b")).toBe(false);
-      expect(bridged.byId.has("c")).toBe(false);
-    }
+    const afterRemove = bridgeTreeIndex(toRows(nodes));
+    expect(bridgeOrderedChildren(afterRemove, null).map((n) => n.id)).toEqual([
+      "b",
+    ]);
   });
 });

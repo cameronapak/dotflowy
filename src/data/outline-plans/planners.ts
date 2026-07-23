@@ -1,7 +1,16 @@
-import type { OutlineNode, OutlinePlan } from "./types.js";
+import type { TreeIndex } from "../tree";
+import type { OutlineNode, OutlinePlan } from "./types";
 
-import { childrenOf, makeNode, type TreeIndex } from "./tree.js";
-import { emptyPlan } from "./types.js";
+import { childrenOf, makeNode } from "../tree";
+import { emptyPlan } from "./types";
+
+/** Dotflowy `makeNode` + Lunora shard `userId`. */
+export function makeOutlineNode(
+  partial: Partial<OutlineNode> & Pick<OutlineNode, "id" | "userId">,
+): OutlineNode {
+  const { userId, ...rest } = partial;
+  return { ...makeNode({ id: partial.id, ...rest }), userId };
+}
 
 /**
  * Mid-list insert: new node after `afterId` under `parentId`, repointing the
@@ -36,7 +45,7 @@ export function planInsertSibling(
 
   const plan = emptyPlan();
   plan.inserts.push(
-    makeNode({
+    makeOutlineNode({
       id: args.id,
       userId: args.userId,
       parentId: args.parentId,

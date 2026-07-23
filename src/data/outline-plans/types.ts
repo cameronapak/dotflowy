@@ -1,25 +1,15 @@
 /**
- * Pure outline node used by planners. `id` maps to Lunora `_id` at the
- * mutator boundary via `clientId` on insert.
+ * Shared outline plan types for Lunora mutators + client optimism.
+ * Converges on Dotflowy `Node` (wire-schema / schema) — `userId` is the
+ * Lunora shard key only (not on the custom-DO `Node` wire type).
  */
-export type OutlineNode = {
-  id: string;
-  parentId: string | null;
-  prevSiblingId: string | null;
-  text: string;
-  isTask: boolean;
-  completed: boolean;
-  collapsed: boolean;
-  bookmarkedAt: number | null;
-  mirrorOf: string | null;
-  createdAt: number;
-  updatedAt: number;
-  origin: string | null;
-  kind: "paragraph" | null;
-  userId: string;
-};
 
-export type NodeKind = "paragraph" | null;
+import type { Node } from "../schema";
+
+/** Planner node = Dotflowy Node + Lunora shard `userId`. */
+export type OutlineNode = Node & { userId: string };
+
+export type NodeKind = Node["kind"];
 
 export type PlanPatch = {
   id: string;

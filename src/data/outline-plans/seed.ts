@@ -8,8 +8,10 @@
  * overlays converge.
  */
 
-import { makeNode } from "./tree.js";
-import { emptyPlan, type OutlineNode, type OutlinePlan } from "./types.js";
+import type { OutlineNode, OutlinePlan } from "./types";
+
+import { makeNode } from "../tree";
+import { emptyPlan } from "./types";
 
 export const DEMO_SEED_TEXTS = [
   "Welcome to the Lunora outline spike",
@@ -65,17 +67,17 @@ export function planSeedIfEmpty(
   for (let i = 0; i < texts.length; i++) {
     const id = ids[i]!;
     const t = args.createdAt + i;
-    plan.inserts.push(
-      makeNode({
+    plan.inserts.push({
+      ...makeNode({
         id,
-        userId: args.userId,
         parentId: null,
         prevSiblingId: prev,
         text: texts[i]!,
         createdAt: t,
         updatedAt: t,
       }),
-    );
+      userId: args.userId,
+    });
     prev = id;
   }
   return plan;

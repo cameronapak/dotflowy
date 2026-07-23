@@ -1,7 +1,3 @@
-import { defineMutator, v } from "lunorash/server";
-
-import type { Id } from "./_generated/dataModel.js";
-
 import {
   buildTreeIndex,
   docToNode,
@@ -14,7 +10,10 @@ import {
   planSetText,
   type OutlineNode,
   type OutlinePlan,
-} from "../src/outline/index.js";
+} from "@dotflowy/outline-plans";
+import { defineMutator, v } from "lunorash/server";
+
+import type { Id } from "./_generated/dataModel.js";
 
 /** Minimal mutator ctx — defineMutator's ServerContext is the base MutationCtx. */
 type MutatorDb = {

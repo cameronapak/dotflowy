@@ -2,15 +2,16 @@
  * ADR 0004 handoff seam — build Dotflowy-shaped `TreeIndex` / ordered children
  * from Lunora collection rows (`wholeOutline`). Feed `tree-store` later; do
  * **not** port OutlineEditor / virtualizer into this spike.
- *
- * Same spine as production `src/data/tree.ts` (`childrenByParent` id arrays +
- * `byId`), minus mirrors/links/tagCorpus (not in spike schema yet).
  */
 
-import type { OutlineNode } from "./types.js";
+import type { OutlineNode, TreeIndex } from "@dotflowy/outline-plans";
 
-import { rowToNode, type NodeDocLike } from "./map-node.js";
-import { buildTreeIndex, childrenOf, type TreeIndex } from "./tree.js";
+import {
+  buildTreeIndex,
+  childrenOf,
+  rowToNode,
+  type NodeDocLike,
+} from "@dotflowy/outline-plans";
 
 /** Map collection / query rows → planner nodes. */
 export function rowsToOutlineNodes(rows: Iterable<NodeDocLike>): OutlineNode[] {
@@ -29,5 +30,5 @@ export function bridgeOrderedChildren(
   index: TreeIndex,
   parentId: string | null,
 ): OutlineNode[] {
-  return childrenOf(index, parentId);
+  return childrenOf(index, parentId) as OutlineNode[];
 }

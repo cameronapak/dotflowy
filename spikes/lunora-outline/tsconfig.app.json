@@ -20,7 +20,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@dotflowy/outline-plans": ["../../src/data/outline-plans/index.ts"],
+      "@dotflowy/outline-plans/*": ["../../src/data/outline-plans/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "lunora"]
 }
