@@ -90,7 +90,16 @@ test.describe("Lunora structural (flag ON)", () => {
     await text(page, "bravo").click();
     await page.keyboard.type(" /delete");
     await expect(page.getByRole("listbox")).toBeVisible();
+    // Await the remove mutator before reload — fire-and-forget watermark can
+    // race page.reload() and resurrect the leaf from the mock store.
+    const removed = page.waitForResponse(
+      (r) =>
+        r.url().includes("/_lunora/rpc") &&
+        r.request().method() === "POST" &&
+        (r.request().postData() ?? "").includes("mutators:removeNode"),
+    );
     await page.keyboard.press("Enter");
+    await removed;
 
     await expect(row(page, "bravo")).toHaveCount(0);
     await expect(text(page, "alpha")).toBeVisible();

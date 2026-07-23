@@ -45,10 +45,13 @@ bunx playwright test e2e/lunora-*.spec.ts --workers=1
 E2E_LUNORA=1 E2E_PORT=3231 bunx playwright test e2e --workers=1
 ```
 
-**Last broader matrix:** first full run **350 passed / 15 failed / 4 skipped**.
-Focused regression re-run after product fixes + classic-wire skips:
-**18 passed / 9 skipped / 0 failed**. Big-delete, sliced history restore, and
-mirror-instance delete are green; the nine skips are classic-transport-only.
+**Last broader matrix** (`E2E_LUNORA=1 E2E_PORT=3231 bunx playwright test e2e --workers=1`):
+**355 passed / 1 flaked / 13 skipped**. Flake was `lunora-structural` `/delete`
+reload racing fire-and-forget watermark — hardened to await `mutators:removeNode`
+(repeat-each green). Prior full run before fixes: **350 / 15 / 4**.
+
+Product fixes that cleared the 15: Lunora big-delete → `mutators.removeMany`;
+keymap delete passes `instanceId` (mirror instance, not source).
 
 | Spec / area                                           | Under `E2E_LUNORA=1`                                          |
 | ----------------------------------------------------- | ------------------------------------------------------------- |
