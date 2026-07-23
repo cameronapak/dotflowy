@@ -14,11 +14,16 @@ import {
   buildTreeIndex,
   nodeToRow,
   planIndent,
+  planIndentMany,
   planInsertChildAtStart,
   planInsertSibling,
+  planMaterializeDailyNodes,
   planMirrorNode,
+  planMoveMany,
   planMoveNode,
   planOutdent,
+  planOutdentMany,
+  planRemoveMany,
   planRemoveNode,
   planRestoreNodes,
   planSeedIfEmpty,
@@ -136,11 +141,21 @@ function bindOutlineMutators(
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),
-      indent: defineMutator<{ id: string; userId: string; updatedAt: number }>({
+      indent: defineMutator<{
+        id: string;
+        userId: string;
+        updatedAt: number;
+        resolveMirror?: boolean;
+      }>({
         serverRef: "mutators:indent",
         apply: (_ctx, args) => {
           const index = buildTreeIndex(snapshotNodes(collection));
-          const plan = planIndent(index, args.id, args.updatedAt);
+          const plan = planIndent(
+            index,
+            args.id,
+            args.updatedAt,
+            args.resolveMirror ?? false,
+          );
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),
@@ -301,6 +316,89 @@ function bindOutlineMutators(
         apply: (_ctx, args) => {
           const index = buildTreeIndex(snapshotNodes(collection));
           const plan = planMirrorNode(index, args);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      removeMany: defineMutator<{
+        userId: string;
+        nodeIds: string[];
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:removeMany",
+        apply: (_ctx, args) => {
+          const plan = planRemoveMany(
+            snapshotNodes(collection),
+            args.nodeIds,
+            args.updatedAt,
+          );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      moveMany: defineMutator<{
+        userId: string;
+        targetId: string | null;
+        nodeIds: string[];
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:moveMany",
+        apply: (_ctx, args) => {
+          const plan = planMoveMany(snapshotNodes(collection), {
+            targetId: args.targetId,
+            nodeIds: args.nodeIds,
+            updatedAt: args.updatedAt,
+          });
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      indentMany: defineMutator<{
+        userId: string;
+        nodeIds: string[];
+        updatedAt: number;
+        resolveMirror?: boolean;
+      }>({
+        serverRef: "mutators:indentMany",
+        apply: (_ctx, args) => {
+          const plan = planIndentMany(
+            snapshotNodes(collection),
+            args.nodeIds,
+            args.updatedAt,
+            args.resolveMirror ?? false,
+          );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      outdentMany: defineMutator<{
+        userId: string;
+        nodeIds: string[];
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:outdentMany",
+        apply: (_ctx, args) => {
+          const plan = planOutdentMany(
+            snapshotNodes(collection),
+            args.nodeIds,
+            args.updatedAt,
+          );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      materializeDailyNodes: defineMutator<{
+        userId: string;
+        inserts: Array<{
+          id: string;
+          parentId: string | null;
+          afterId: string | null;
+          text: string;
+        }>;
+        createdAt: number;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:materializeDailyNodes",
+        apply: (_ctx, args) => {
+          const plan = planMaterializeDailyNodes(
+            snapshotNodes(collection),
+            args,
+          );
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),

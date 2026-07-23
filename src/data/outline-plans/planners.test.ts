@@ -10,9 +10,14 @@ import {
   planIndent,
   planInsertChildAtStart,
   planInsertSibling,
+  planIndentMany,
+  planMaterializeDailyNodes,
   planMirrorNode,
+  planMoveMany,
   planMoveNode,
   planOutdent,
+  planOutdentMany,
+  planRemoveMany,
   planRemoveNode,
   planRestoreNodes,
   planSetBookmarkedAt,
@@ -513,5 +518,166 @@ describe("planMirrorNode", () => {
     });
     expect(plan).not.toBeNull();
     expect(plan!.inserts[0]!.parentId).toBe("other");
+  });
+});
+
+describe("planIndent resolveMirror", () => {
+  it("parents into the SOURCE when prev sibling is a mirror", () => {
+    let nodes = seedFlat(["src", "m", "x"]);
+    // Turn m into a mirror of src (same sibling chain position).
+    nodes = nodes.map((n) =>
+      n.id === "m" ? { ...n, mirrorOf: "src", text: "src" } : n,
+    );
+    const plan = planIndent(buildTreeIndex(nodes), "x", 10, true);
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(nodes.find((n) => n.id === "x")!.parentId).toBe("src");
+    expect(assertChainOk(nodes, "src")).toEqual(["x"]);
+  });
+
+  it("refuses a cycle when mirror prev sibling resolves into self", () => {
+    let nodes = seedFlat(["x", "m"]);
+    nodes = nodes.map((n) =>
+      n.id === "m" ? { ...n, mirrorOf: "x", text: "x" } : n,
+    );
+    // Indenting nothing after m that would cycle — indent m under x is fine.
+    // Cycle: indent a node whose prev sibling mirrors THAT node.
+    nodes = seedFlat(["a", "m", "b"]);
+    nodes = nodes.map((n) =>
+      n.id === "m" ? { ...n, mirrorOf: "b", text: "b" } : n,
+    );
+    // Indent b under m → would parent b under b (trueSourceOf m = b).
+    expect(planIndent(buildTreeIndex(nodes), "b", 10, true)).toBeNull();
+  });
+});
+
+describe("multi-select planners (ADR 0018)", () => {
+  it("planRemoveMany deletes contiguous siblings without tearing the chain", () => {
+    let nodes = seedFlat(["a", "b", "c", "d"]);
+    const plan = planRemoveMany(nodes, ["b", "c"], 10);
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, null)).toEqual(["a", "d"]);
+  });
+
+  it("planMoveMany preserves order under the target", () => {
+    let nodes = seedFlat(["t", "a", "b", "c"]);
+    const plan = planMoveMany(nodes, {
+      targetId: "t",
+      nodeIds: ["a", "b"],
+      updatedAt: 10,
+    });
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, null)).toEqual(["t", "c"]);
+    expect(assertChainOk(nodes, "t")).toEqual(["a", "b"]);
+  });
+
+  it("planIndentMany indents a run under the previous sibling", () => {
+    let nodes = seedFlat(["a", "b", "c", "d"]);
+    const plan = planIndentMany(nodes, ["b", "c"], 10);
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, null)).toEqual(["a", "d"]);
+    expect(assertChainOk(nodes, "a")).toEqual(["b", "c"]);
+  });
+
+  it("planIndentMany resolveMirror parents into the SOURCE", () => {
+    let nodes = seedFlat(["src", "m", "b", "c"]);
+    nodes = nodes.map((n) =>
+      n.id === "m" ? { ...n, mirrorOf: "src", text: "src" } : n,
+    );
+    const plan = planIndentMany(nodes, ["b", "c"], 10, true);
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, "src")).toEqual(["b", "c"]);
+  });
+
+  it("planOutdentMany lifts a run after the former parent", () => {
+    let nodes = seedFlat(["p", "z"]);
+    nodes = [
+      ...nodes,
+      makeOutlineNode({
+        id: "a",
+        userId: USER,
+        parentId: "p",
+        prevSiblingId: null,
+        text: "a",
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+      makeOutlineNode({
+        id: "b",
+        userId: USER,
+        parentId: "p",
+        prevSiblingId: "a",
+        text: "b",
+        createdAt: 2,
+        updatedAt: 2,
+      }),
+    ];
+    const plan = planOutdentMany(nodes, ["a", "b"], 10);
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, null)).toEqual(["p", "a", "b", "z"]);
+  });
+});
+
+describe("planMaterializeDailyNodes", () => {
+  it("inserts scaffold + day + seed in chain order", () => {
+    let nodes: OutlineNode[] = [];
+    const plan = planMaterializeDailyNodes(nodes, {
+      userId: USER,
+      inserts: [
+        { id: "container", parentId: null, afterId: null, text: "Daily" },
+        {
+          id: "year",
+          parentId: "container",
+          afterId: null,
+          text: "2026",
+        },
+        { id: "day", parentId: "year", afterId: null, text: "Tuesday" },
+        { id: "seed", parentId: "day", afterId: null, text: "" },
+      ],
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, null)).toEqual(["container"]);
+    expect(assertChainOk(nodes, "container")).toEqual(["year"]);
+    expect(assertChainOk(nodes, "year")).toEqual(["day"]);
+    expect(assertChainOk(nodes, "day")).toEqual(["seed"]);
+  });
+
+  it("skips ids already present", () => {
+    let nodes = [
+      makeOutlineNode({
+        id: "container",
+        userId: USER,
+        parentId: null,
+        prevSiblingId: null,
+        text: "Daily",
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    ];
+    const plan = planMaterializeDailyNodes(nodes, {
+      userId: USER,
+      inserts: [
+        { id: "container", parentId: null, afterId: null, text: "Daily" },
+        {
+          id: "day",
+          parentId: "container",
+          afterId: null,
+          text: "Tue",
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, "container")).toEqual(["day"]);
   });
 });

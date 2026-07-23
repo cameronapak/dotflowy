@@ -2,7 +2,13 @@ import type { Node } from "../schema";
 import type { TreeIndex } from "../tree";
 import type { OutlineNode, OutlinePlan, PlanPatch } from "./types";
 
-import { childrenOf, makeNode, trueSourceOf, wouldMirrorCycle } from "../tree";
+import {
+  buildTreeIndex,
+  childrenOf,
+  makeNode,
+  trueSourceOf,
+  wouldMirrorCycle,
+} from "../tree";
 import { emptyPlan } from "./types";
 
 /** Dotflowy `makeNode` + Lunora shard `userId`. */
@@ -71,11 +77,17 @@ export function planInsertSibling(
 
 /**
  * Indent: become last child of previous sibling. Port of Dotflowy `indent`.
+ *
+ * `resolveMirror` (ADR 0022): when the previous sibling is a mirror, parent into
+ * its SOURCE (`trueSourceOf`) so the node windows into every instance — matching
+ * classic `mutations.indent(…, resolveMirror)`. Collapse still targets the
+ * visible instance.
  */
 export function planIndent(
   index: TreeIndex,
   nodeId: string,
   updatedAt: number,
+  resolveMirror = false,
 ): OutlinePlan | null {
   const node = index.byId.get(nodeId);
   if (!node || !node.prevSiblingId) return null;
@@ -83,12 +95,25 @@ export function planIndent(
   const newParent = index.byId.get(node.prevSiblingId);
   if (!newParent) return null;
 
+  const newParentContentId = resolveMirror
+    ? trueSourceOf(index, newParent.id)
+    : newParent.id;
+
+  if (resolveMirror) {
+    let cursor: Node | undefined = index.byId.get(newParentContentId);
+    let guard = index.byId.size + 1;
+    while (cursor && guard-- > 0) {
+      if (cursor.id === nodeId) return null;
+      cursor = cursor.parentId ? index.byId.get(cursor.parentId) : undefined;
+    }
+  }
+
   const oldSiblings = childrenOf(index, node.parentId);
   const i = oldSiblings.findIndex((n) => n.id === nodeId);
   const oldNext =
     i !== -1 && i + 1 < oldSiblings.length ? oldSiblings[i + 1]! : null;
 
-  const newSiblings = childrenOf(index, newParent.id);
+  const newSiblings = childrenOf(index, newParentContentId);
   const lastExisting =
     newSiblings.length > 0 ? newSiblings[newSiblings.length - 1]! : null;
 
@@ -96,7 +121,7 @@ export function planIndent(
   plan.patches.push({
     id: nodeId,
     fields: {
-      parentId: newParent.id,
+      parentId: newParentContentId,
       prevSiblingId: lastExisting ? lastExisting.id : null,
       updatedAt,
     },
@@ -584,4 +609,208 @@ export function applyPlan(
   }
 
   return [...byId.values()];
+}
+
+/** True when a plan would change the outline. */
+function planHasWork(plan: OutlinePlan): boolean {
+  return (
+    plan.deletes.length > 0 ||
+    plan.patches.length > 0 ||
+    plan.inserts.length > 0
+  );
+}
+
+/**
+ * Diff `before` → `after` into one OutlinePlan. Used by multi-step planners that
+ * rebuild a working copy between sibling ops (ADR 0018), then emit a single
+ * watermarked mutator plan.
+ */
+function planFromWorkingCopy(
+  before: readonly OutlineNode[],
+  after: readonly OutlineNode[],
+): OutlinePlan | null {
+  const plan = planRestoreNodes(before, after);
+  return planHasWork(plan) ? plan : null;
+}
+
+/**
+ * Delete several roots (+ subtrees) in one plan. Rebuilds the working index
+ * between each remove so contiguous-sibling deletes don't tear the chain
+ * (port of `removeManyNodes`).
+ */
+export function planRemoveMany(
+  nodes: readonly OutlineNode[],
+  ids: readonly string[],
+  updatedAt: number,
+): OutlinePlan | null {
+  if (ids.length === 0) return null;
+  let working = [...nodes];
+  for (const id of ids) {
+    const step = planRemoveNode(buildTreeIndex(working), id, updatedAt);
+    if (!step) continue;
+    working = applyPlan(working, step);
+  }
+  return planFromWorkingCopy(nodes, working);
+}
+
+/**
+ * Move several nodes to be last children of `targetId`, preserving order.
+ * Rebuilds between each move (port of `moveManyNodes`).
+ */
+export function planMoveMany(
+  nodes: readonly OutlineNode[],
+  args: {
+    targetId: string | null;
+    nodeIds: readonly string[];
+    updatedAt: number;
+  },
+): OutlinePlan | null {
+  if (args.nodeIds.length === 0) return null;
+  let working = [...nodes];
+  const firstSiblings = childrenOf(buildTreeIndex(working), args.targetId);
+  let after: string | null = firstSiblings.length
+    ? firstSiblings[firstSiblings.length - 1]!.id
+    : null;
+  for (const id of args.nodeIds) {
+    const step = planMoveNode(buildTreeIndex(working), {
+      id,
+      newParentId: args.targetId,
+      afterSiblingId: after,
+      updatedAt: args.updatedAt,
+    });
+    if (!step) continue;
+    working = applyPlan(working, step);
+    after = id;
+  }
+  return planFromWorkingCopy(nodes, working);
+}
+
+/**
+ * Indent a contiguous sibling run under the first root's previous sibling
+ * (port of `indentManyNodes`). `resolveMirror` parents into the SOURCE when
+ * that previous sibling is a mirror instance.
+ */
+export function planIndentMany(
+  nodes: readonly OutlineNode[],
+  rootIds: readonly string[],
+  updatedAt: number,
+  resolveMirror = false,
+): OutlinePlan | null {
+  if (rootIds.length === 0) return null;
+  let working = [...nodes];
+  const index = buildTreeIndex(working);
+  const targetId = index.byId.get(rootIds[0]!)?.prevSiblingId;
+  if (!targetId) return null;
+
+  if (index.byId.get(targetId)?.collapsed) {
+    const expand = planSetCollapsed(
+      buildTreeIndex(working),
+      targetId,
+      false,
+      updatedAt,
+    );
+    if (expand) working = applyPlan(working, expand);
+  }
+
+  const live = buildTreeIndex(working);
+  const target = resolveMirror ? trueSourceOf(live, targetId) : targetId;
+
+  if (resolveMirror && target !== targetId) {
+    const selected = new Set(rootIds);
+    let cursor: string | null = target;
+    let guard = live.byId.size + 1;
+    while (cursor && guard-- > 0) {
+      if (selected.has(cursor)) return null;
+      cursor = live.byId.get(cursor)?.parentId ?? null;
+    }
+  }
+
+  // Inline move-many against `working` so the final diff includes expand +
+  // moves relative to the ORIGINAL `nodes` (not a post-expand base).
+  const firstSiblings = childrenOf(buildTreeIndex(working), target);
+  let after: string | null = firstSiblings.length
+    ? firstSiblings[firstSiblings.length - 1]!.id
+    : null;
+  for (const id of rootIds) {
+    const step = planMoveNode(buildTreeIndex(working), {
+      id,
+      newParentId: target,
+      afterSiblingId: after,
+      updatedAt,
+    });
+    if (!step) continue;
+    working = applyPlan(working, step);
+    after = id;
+  }
+  return planFromWorkingCopy(nodes, working);
+}
+
+/**
+ * Outdent a contiguous sibling run one level (port of `outdentManyNodes`).
+ * Rebuilds between each move so order is preserved after the former parent.
+ */
+export function planOutdentMany(
+  nodes: readonly OutlineNode[],
+  rootIds: readonly string[],
+  updatedAt: number,
+): OutlinePlan | null {
+  if (rootIds.length === 0) return null;
+  let working = [...nodes];
+  const start = buildTreeIndex(working);
+  const oldParentId = start.byId.get(rootIds[0]!)?.parentId;
+  if (!oldParentId) return null;
+  const newParentId = start.byId.get(oldParentId)?.parentId ?? null;
+
+  let after: string = oldParentId;
+  for (const id of rootIds) {
+    const step = planMoveNode(buildTreeIndex(working), {
+      id,
+      newParentId,
+      afterSiblingId: after,
+      updatedAt,
+    });
+    if (!step) continue;
+    working = applyPlan(working, step);
+    after = id;
+  }
+  return planFromWorkingCopy(nodes, working);
+}
+
+/**
+ * Daily scaffold + day (+ optional seed) inserts in ONE plan after kv claims
+ * settle client-side. Each entry is already placed (`afterId` = predecessor, or
+ * null for head). Skips ids already present. Port of `materializeNewDay`'s
+ * node half — kv `claimMapping` stays on `/api/kv` (phase 2b).
+ */
+export function planMaterializeDailyNodes(
+  nodes: readonly OutlineNode[],
+  args: {
+    userId: string;
+    inserts: readonly {
+      id: string;
+      parentId: string | null;
+      afterId: string | null;
+      text: string;
+    }[];
+    createdAt: number;
+    updatedAt: number;
+  },
+): OutlinePlan | null {
+  if (args.inserts.length === 0) return null;
+  let working = [...nodes];
+  for (const ins of args.inserts) {
+    if (working.some((n) => n.id === ins.id)) continue;
+    const step = planInsertSibling(buildTreeIndex(working), {
+      id: ins.id,
+      userId: args.userId,
+      parentId: ins.parentId,
+      afterId: ins.afterId,
+      text: ins.text,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!step) return null;
+    working = applyPlan(working, step);
+  }
+  return planFromWorkingCopy(nodes, working);
 }

@@ -2,6 +2,13 @@ import { nodesCollection } from "./collection";
 import { isLunoraSyncEnabled } from "./flags";
 import { getLunoraOutlineContext, trackLunoraMutation } from "./lunora-sync";
 import {
+  planIndent,
+  planIndentMany,
+  planMoveMany,
+  planOutdentMany,
+  rowToNode,
+} from "./outline-plans";
+import {
   type Node,
   type NodeKind,
   type TreeIndex,
@@ -338,15 +345,18 @@ export function indent(
   const node = index.byId.get(nodeId);
   if (!node || !node.prevSiblingId) return false;
 
-  // ADR 0055 dogfood: skip mirror-resolution path (mirrors still on custom DO).
-  if (isLunoraSyncEnabled() && !resolveMirror) {
+  if (isLunoraSyncEnabled()) {
     const lunora = getLunoraOutlineContext();
     if (lunora) {
+      const updatedAt = now();
+      // Match classic false on no-op / mirror cycle (ADR 0022).
+      if (!planIndent(index, nodeId, updatedAt, resolveMirror)) return false;
       trackLunoraMutation(
         lunora.store.mutators.indent({
           id: nodeId,
           userId: lunora.userId,
-          updatedAt: now(),
+          updatedAt,
+          resolveMirror,
         }),
       );
       return true;
@@ -769,6 +779,31 @@ export function moveNode(
  * moves land as ONE atomic batch (ADR 0009).
  */
 export function moveManyNodes(targetId: string | null, ids: string[]): number {
+  if (ids.length === 0) return 0;
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      const updatedAt = now();
+      const nodes = lunora.store.collection.toArray.map(rowToNode);
+      const plan = planMoveMany(nodes, {
+        targetId,
+        nodeIds: ids,
+        updatedAt,
+      });
+      if (!plan) return 0;
+      trackLunoraMutation(
+        lunora.store.mutators.moveMany({
+          userId: lunora.userId,
+          targetId,
+          nodeIds: [...ids],
+          updatedAt,
+        }),
+      );
+      return ids.length;
+    }
+  }
+
   let moved = 0;
   // `after` walks forward: start at the target's current last child, then each
   // successful move becomes the predecessor of the next.
@@ -803,6 +838,26 @@ export function indentManyNodes(
   resolveMirror = false,
 ): number {
   if (rootIds.length === 0) return 0;
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      const updatedAt = now();
+      const nodes = lunora.store.collection.toArray.map(rowToNode);
+      const plan = planIndentMany(nodes, rootIds, updatedAt, resolveMirror);
+      if (!plan) return 0;
+      trackLunoraMutation(
+        lunora.store.mutators.indentMany({
+          userId: lunora.userId,
+          nodeIds: [...rootIds],
+          updatedAt,
+          resolveMirror,
+        }),
+      );
+      return rootIds.length;
+    }
+  }
+
   const index = buildTreeIndex(nodesCollection.toArray);
   // The run is contiguous, so the first root's prev sibling sits OUTSIDE it --
   // the node everything indents under. Absent => first child => can't indent.
@@ -842,6 +897,25 @@ export function indentManyNodes(
  */
 export function outdentManyNodes(rootIds: string[]): number {
   if (rootIds.length === 0) return 0;
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      const updatedAt = now();
+      const nodes = lunora.store.collection.toArray.map(rowToNode);
+      const plan = planOutdentMany(nodes, rootIds, updatedAt);
+      if (!plan) return 0;
+      trackLunoraMutation(
+        lunora.store.mutators.outdentMany({
+          userId: lunora.userId,
+          nodeIds: [...rootIds],
+          updatedAt,
+        }),
+      );
+      return rootIds.length;
+    }
+  }
+
   const start = buildTreeIndex(nodesCollection.toArray);
   const oldParentId = start.byId.get(rootIds[0]!)?.parentId;
   if (!oldParentId) return 0; // already top-level -> can't outdent
@@ -930,6 +1004,22 @@ export function removeNode(index: TreeIndex, nodeId: string): string | null {
  * Focus handling is the caller's (computed before deletion).
  */
 export function removeManyNodes(ids: string[]): void {
+  if (ids.length === 0) return;
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      trackLunoraMutation(
+        lunora.store.mutators.removeMany({
+          userId: lunora.userId,
+          nodeIds: [...ids],
+          updatedAt: now(),
+        }),
+      );
+      return;
+    }
+  }
+
   for (const id of ids) {
     removeNode(buildTreeIndex(nodesCollection.toArray), id);
   }

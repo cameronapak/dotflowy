@@ -7,11 +7,16 @@ import {
   docToNode,
   nodeToInsertFields,
   planIndent,
+  planIndentMany,
   planInsertChildAtStart,
   planInsertSibling,
+  planMaterializeDailyNodes,
   planMirrorNode,
+  planMoveMany,
   planMoveNode,
   planOutdent,
+  planOutdentMany,
+  planRemoveMany,
   planRemoveNode,
   planRestoreNodes,
   planSeedIfEmpty,
@@ -224,12 +229,22 @@ export const seedIfEmpty = defineMutator({
 });
 
 export const indent = defineMutator({
-  args: { id: idArg, userId: userIdArg, updatedAt: tsArg },
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    updatedAt: tsArg,
+    resolveMirror: v.optional(v.boolean()),
+  },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
-    const plan = planIndent(index, args.id, args.updatedAt);
+    const plan = planIndent(
+      index,
+      args.id,
+      args.updatedAt,
+      args.resolveMirror ?? false,
+    );
     if (!plan) throw new Error("indent: no-op or missing node");
     await commitPlan(mctx, plan);
   },
@@ -460,5 +475,118 @@ export const mirrorNode = defineMutator({
     if (!plan) throw new Error("mirrorNode: missing source/target or cycle");
     await commitPlan(mctx, plan);
     return { id: args.id };
+  },
+});
+
+/** Multi-select delete — one watermark (ADR 0018). */
+export const removeMany = defineMutator({
+  args: {
+    userId: userIdArg,
+    nodeIds: v.array(idArg),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes = await loadNodes(mctx);
+    const plan = planRemoveMany(nodes, args.nodeIds, args.updatedAt);
+    if (!plan) throw new Error("removeMany: no-op");
+    await commitPlan(mctx, plan);
+  },
+});
+
+/** Multi-select move / Send-to-Today — one watermark (ADR 0018). */
+export const moveMany = defineMutator({
+  args: {
+    userId: userIdArg,
+    targetId: v.string().nullable(),
+    nodeIds: v.array(idArg),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes = await loadNodes(mctx);
+    const plan = planMoveMany(nodes, {
+      targetId: args.targetId,
+      nodeIds: args.nodeIds,
+      updatedAt: args.updatedAt,
+    });
+    if (!plan) throw new Error("moveMany: no-op");
+    await commitPlan(mctx, plan);
+  },
+});
+
+/** Multi-select Tab indent — one watermark (ADR 0018). */
+export const indentMany = defineMutator({
+  args: {
+    userId: userIdArg,
+    nodeIds: v.array(idArg),
+    updatedAt: tsArg,
+    resolveMirror: v.optional(v.boolean()),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes = await loadNodes(mctx);
+    const plan = planIndentMany(
+      nodes,
+      args.nodeIds,
+      args.updatedAt,
+      args.resolveMirror ?? false,
+    );
+    if (!plan) throw new Error("indentMany: no-op");
+    await commitPlan(mctx, plan);
+  },
+});
+
+/** Multi-select Shift+Tab outdent — one watermark (ADR 0018). */
+export const outdentMany = defineMutator({
+  args: {
+    userId: userIdArg,
+    nodeIds: v.array(idArg),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes = await loadNodes(mctx);
+    const plan = planOutdentMany(nodes, args.nodeIds, args.updatedAt);
+    if (!plan) throw new Error("outdentMany: no-op");
+    await commitPlan(mctx, plan);
+  },
+});
+
+/**
+ * Daily get-or-create node half — scaffold + day (+ optional seed) after the
+ * client has claimed ids via `/api/kv` (phase 2b keeps kv on the custom DO).
+ */
+export const materializeDailyNodes = defineMutator({
+  args: {
+    userId: userIdArg,
+    inserts: v.array(
+      v.object({
+        id: idArg,
+        parentId: v.string().nullable(),
+        afterId: v.string().nullable(),
+        text: v.string(),
+      }),
+    ),
+    createdAt: tsArg,
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes = await loadNodes(mctx);
+    const plan = planMaterializeDailyNodes(nodes, {
+      userId: args.userId,
+      inserts: args.inserts,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!plan) throw new Error("materializeDailyNodes: no-op or invalid");
+    await commitPlan(mctx, plan);
+    return { count: args.inserts.length };
   },
 });
