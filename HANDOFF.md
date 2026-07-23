@@ -37,11 +37,13 @@ pnpm build
 pnpm dev   # smoke; note printed Local port
 ```
 
-### Manual checklist (still required)
+### Manual checklist — PASS (2026-07-23)
 
-- [ ] Two tabs, same user: live convergence without refresh
-- [ ] Hard reload restores outline (incl. seeded demo bullets)
-- [ ] Optional: second user cannot see first user’s outline
+Verified on `http://localhost:5175/` (Vite fell through 5173→5174→5175):
+
+- [x] Two tabs, same user: live convergence without refresh (~2.5s)
+- [x] Hard reload restores outline from shape seed
+- [x] Cross-user: second account sees only its own seed, not first user’s bullets
 
 ## API surprises vs docs
 
@@ -54,11 +56,11 @@ pnpm dev   # smoke; note printed Local port
 
 **Standards** — process-clean for a spike. Merge-to-`main` gates: delete this `HANDOFF.md`; add changeset (`bunx changeset --empty` if spike isn't product news). Mild smells addressed in Phase 1: `docToNode`≈`rowToNode` dup → shared helper; leftover Vite assets/CSS trimmed.
 
-**Spec** — required implementation met. Must-prove #1 automated (planner tests). #2–#5 wired; still need human 2-tab / hard-reload / cross-user pass (README checklist). Bridge order covered by unit test.
+**Spec** — required implementation met. Must-prove #1 automated; #2–#5 wired + **manual PASS** (see checklist above). Bridge order covered by unit test.
 
 ## Next
 
-- Manual 2-tab + hard-reload (+ optional second browser / second user) against exit criteria
+- Finish Phase 1 commits (shared map / seed / bridge / trim) — in flight; fill commit hashes above
 - Before any PR to `main`: delete `HANDOFF.md` + empty changeset
 - Phase 2+: richer editor / migrate product — out of scope here
 
