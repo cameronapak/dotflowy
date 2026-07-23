@@ -18,8 +18,11 @@ import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
+import { isLunoraSyncEnabled } from "../data/flags";
 import { capture } from "../data/history";
 import { flattenInline } from "../data/inline-text";
+import { migrateClassicToLunora } from "../data/lunora-migrate";
+import { getLunoraOutlineContext } from "../data/lunora-sync";
 import { outlineToMarkdown } from "../data/markdown";
 import { toggleCollapsed } from "../data/mutations";
 import { exportOpml } from "../data/opml-export";
@@ -40,6 +43,34 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+
+async function runMigrateToLunora() {
+  const lunora = getLunoraOutlineContext();
+  if (!lunora) {
+    toast.error("Enable lunora-sync flag first, then reload");
+    return;
+  }
+  const result = await migrateClassicToLunora(lunora.store, lunora.userId);
+  switch (result.status) {
+    case "migrated":
+      toast.success(
+        `Migrated ${result.nodes} nodes (+ ${result.kv} kv) to Lunora`,
+      );
+      break;
+    case "skipped-nonempty":
+      toast.message(
+        `Lunora already has ${result.nodes} nodes — skipped (safe default)`,
+      );
+      break;
+    case "skipped-empty-source":
+      toast.message("Classic outline is empty — nothing to migrate");
+      break;
+    case "failed":
+      toast.error("Migrate failed — see console");
+      console.error("[lunora-migrate]", result.error);
+      break;
+  }
+}
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -305,6 +336,13 @@ export function HeaderMoreMenu() {
           <FocusIcon />
           Spotlight mode
         </DropdownMenuCheckboxItem>
+
+        {isLunoraSyncEnabled() && (
+          <DropdownMenuItem onClick={() => void runMigrateToLunora()}>
+            <SparklesIcon />
+            Migrate to Lunora
+          </DropdownMenuItem>
+        )}
 
         <DropdownMenuSeparator />
 
