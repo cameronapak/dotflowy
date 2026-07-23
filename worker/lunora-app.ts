@@ -19,6 +19,12 @@ export type LunoraEnv = AuthEnv & {
   SHARD: ShardNamespaceLike;
   /** Optional Studio / admin bearer (unset = admin routes stay closed). */
   LUNORA_ADMIN_TOKEN?: string;
+  /**
+   * When `"1"` / `"true"`, MCP outline tools read/write the Lunora SHARD
+   * (mutators:applyChangeOps + queries:listNodes) instead of UserOutlineDO.
+   * Default unset/off — mirrors client `dotflowy:flag:lunora-sync` for local/dev.
+   */
+  LUNORA_OUTLINE?: string;
 };
 
 // defineApp requires `Record<string, unknown>`; AuthEnv is a closed interface.

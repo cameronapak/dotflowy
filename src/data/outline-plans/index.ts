@@ -35,6 +35,9 @@ export {
   applyPlan,
 } from "./planners";
 
+export { planFromChangeOps } from "./change-ops";
+export type { ChangeOpLike } from "./change-ops";
+
 export {
   rowToNode,
   docToNode,

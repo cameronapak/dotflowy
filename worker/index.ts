@@ -63,6 +63,10 @@ import {
   type InviteBatchResult,
 } from "./invites";
 import { lunoraApp, ShardDO, type LunoraEnv } from "./lunora-app";
+import {
+  createLunoraOutlineStore,
+  isLunoraOutlineEnabled,
+} from "./lunora-mcp-store";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -967,10 +971,6 @@ function handleApiRequest(
           },
         });
       }
-      const mcpUserId = resolveUserId(token.userId, env);
-      const mcpStub = env.USER_OUTLINE.get(
-        env.USER_OUTLINE.idFromName(mcpUserId),
-      );
       // Provenance: which agent is calling. The bearer token's OAuth client maps
       // to a registered harness name; every node its write tools create is
       // stamped with it, so the editor can mark agent edits apart from the user's.
@@ -985,7 +985,15 @@ function handleApiRequest(
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
       const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
-      return yield* handleMcp(request, mcpStub, origin, mcpPlan !== "free");
+      // LUNORA_OUTLINE=1 → same shard as browser mutators (Better Auth userId).
+      // Default OFF keeps classic UserOutlineDO.applyBatch (resolveUserId /
+      // owner→'default' bridge unchanged).
+      const mcpStore = isLunoraOutlineEnabled(env)
+        ? createLunoraOutlineStore(env, token.userId)
+        : env.USER_OUTLINE.get(
+            env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
+          );
+      return yield* handleMcp(request, mcpStore, origin, mcpPlan !== "free");
     }
 
     // Identity = the validated session's stable user id. No session → 401.
