@@ -8,9 +8,9 @@
 
 Commits on `spike/lunora-outline` after scaffold `f953b17350`:
 
-1. `feat(spike): nodes schema, wholeOutline shape, auth shard gate`
-2. `feat(spike): pure outline planners + chain invariant tests`
-3. `feat(spike): structural mutators + minimal multi-tab outline UI` (pending this handoff update)
+1. `6a171ddf2f` `feat(spike): nodes schema, wholeOutline shape, auth shard gate`
+2. `c840ad1939` `feat(spike): pure outline planners + chain invariant tests`
+3. `d5d71189af` `feat(spike): structural mutators + minimal multi-tab outline UI`
 
 ## Sources of truth
 
