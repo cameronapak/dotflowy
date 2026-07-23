@@ -72,7 +72,10 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
     return false;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  const host = u.hostname.toLowerCase().replace(/^\[|]$/g, ""); // strip IPv6 brackets
+  const host = u.hostname
+    .toLowerCase()
+    .replace(/^\[|]$/g, "") // strip IPv6 brackets
+    .replace(/\.$/, ""); // strip a trailing dot so "foo.internal." can't slip the name checks
   if (!host) return false;
   if (host === "localhost" || host.endsWith(".localhost")) return false;
   if (host.endsWith(".local") || host.endsWith(".internal")) return false;
