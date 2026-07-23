@@ -3,7 +3,12 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { nodesCollection } from "../data/collection";
+import { isLunoraSyncEnabled } from "../data/flags";
 import { capture, drop } from "../data/history";
+import {
+  getLunoraOutlineContext,
+  trackLunoraMutation,
+} from "../data/lunora-sync";
 import { runStructuralSliced } from "../data/structural";
 import { now, planRemoveSubtrees } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
@@ -73,6 +78,36 @@ export function DeleteConfirmDialog() {
 
     // ONE undo point BEFORE the batch: a single Cmd+Z restores everything.
     capture(index, captureKey);
+
+    // Lunora: no classic `{ops}` batch — one `removeMany` mutator owns the
+    // subtree delete + watermark. Progress is optimistic (apply is sync).
+    if (isLunoraSyncEnabled()) {
+      const lunora = getLunoraOutlineContext();
+      if (!lunora) {
+        drop();
+        setStage({ kind: "error" });
+        return;
+      }
+      try {
+        setStage({ kind: "deleting", count, applied: count });
+        const tx = lunora.store.mutators.removeMany({
+          userId: lunora.userId,
+          nodeIds: [...rootIds],
+          updatedAt: now(),
+        });
+        trackLunoraMutation(tx);
+        await tx.isPersisted.promise;
+        setStage({ kind: "closed" });
+        toast.success(
+          `Deleted ${count.toLocaleString()} bullets. Cmd+Z restores them.`,
+        );
+      } catch {
+        drop();
+        setStage({ kind: "error" });
+      }
+      return;
+    }
+
     let applied = 0;
     const slices: Array<() => void> = [];
     if (plan.repoints.length > 0) {
