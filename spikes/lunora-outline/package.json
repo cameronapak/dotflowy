@@ -12,7 +12,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "codegen": "lunora codegen",
-    "deploy": "vite build && lunora deploy"
+    "deploy": "vite build && lunora deploy",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts"
   },
   "dependencies": {
     "@lunora/auth": "1.0.0-alpha.36",
