@@ -7,6 +7,8 @@ import { seedOutlineLunora, type SeedNode } from "./fixtures";
  * Uses `seedOutlineLunora` (mocks `/_lunora/*`). Classic suite stays on
  * `seedOutline` with the flag default OFF.
  *
+ * Run with the Lunora subset: `bunx playwright test e2e/lunora-*.spec.ts`
+ *
  * If this flakes locally (WS poke / watermark timing), keep the fixture and
  * treat this file as the path forward — do not rewrite the whole e2e suite yet.
  */
