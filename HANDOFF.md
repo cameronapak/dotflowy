@@ -79,13 +79,16 @@ E2E_LUNORA=1 E2E_PORT=3225 bunx playwright test \
 
 ## Dogfood migrate smoke — **FAIL / blocked**
 
-Attempted `bun run dev` + agent-browser (`dev@dotflowy.local` / seed:user):
+`vite.config.ts` now sets `ws: true` for both `/api` and `/_lunora`; the old string shorthand silently dropped WebSocket upgrades.
 
-1. Sign-in OK.
-2. With `dotflowy:flag:lunora-sync=on`, UI stuck on **"Loading outline"**; wrangler showed **no** `/_lunora/ws` upgrade (only stray `GET /_lunora/ 404`).
-3. Classic path for same account also showed **0 bullets** (empty shell) — unclear if seed/sync/email-verify quirk.
+Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 
-**Not a fixture issue** — live Worker Lunora handshake needs a follow-up spike before default-ON. Re-run dogfood after `/_lunora/ws` connects in `bun run dev`.
+1. Both direct Worker and Vite-proxied `/_lunora/health` return **503**.
+2. Cookie-less `/_lunora/ws` reaches Wrangler through both ports but returns **403**.
+3. Better Auth sign-in returns **200** and supplies a session cookie, but the cookie-authenticated WebSocket still returns **403** through both ports.
+4. Wrangler logs the Vite-proxied `GET /_lunora/ws`, so the proxy upgrade drop is fixed; Vite logs `EPIPE` because the raw probe closes after reading the response.
+
+**Not a fixture issue** — the remaining live Worker/Lunora authorization or health failure still blocks a successful subscription, so **"Loading outline" is not yet verified cleared**. Re-run browser dogfood after authenticated `/_lunora/ws` upgrades to **101** and health is available.
 
 ## Known gaps → flag-default-ON checklist
 
