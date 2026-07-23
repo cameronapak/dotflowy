@@ -93,20 +93,48 @@ Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 3. Browser smoke with `dotflowy:flag:lunora-sync=on` rendered the Lunora outline and **cleared "Loading outline"**.
 4. Fresh run: flag OFF classic source held 3 welcome nodes. Flag ON exposed `window.__dotflowyMigrateToLunora` as a function and cleared loading. After clearing prior local Lunora spike seed rows, the empty shard auto-imported the three classic nodes; the concurrent manual helper then safely returned `skipped-nonempty` with `nodes: 3`. A full reload retained all three classic titles. More menu also displayed its safe-skip toast against a nonempty shard.
 
-**Keep default OFF.** Migration + dual-path e2e are dogfood-verified; MCP live write still gates default ON.
+**Keep default OFF.** Migration + dual-path e2e + MCP Lunora live write are dogfood-verified; default ON still waits on optional browser re-check + broader recount.
 
-## Dogfood MCP with `LUNORA_OUTLINE=1` — **PARTIAL / auth-blocked**
+## Dogfood MCP with `LUNORA_OUTLINE=1` — **PASS (live write, 2026-07-23)**
 
-1. Local-only `.dev.vars` has `LUNORA_OUTLINE=1`; `bun run dev` was restarted and Wrangler listed `env.LUNORA_OUTLINE`.
-2. `POST http://localhost:8787/mcp` JSON-RPC `initialize` correctly returned `401` with local protected-resource metadata.
-3. Code path verified: `worker/index.ts` selects `createLunoraOutlineStore(env, token.userId)` when the flag is truthy; `worker/lunora-mcp-store.ts` dispatches writes to `mcp:applyChangeOps` on the authenticated user's `SHARD`.
-4. No local OAuth bearer was minted: the endpoint requires Better Auth MCP OAuth dynamic registration + PKCE, and MCP tool calls additionally require a paid entitlement. No existing local MCP test client/admin token shortcut was found. Therefore no authenticated live `tools/call` has run yet.
+1. Local-only `.dev.vars` has `LUNORA_OUTLINE=1`; `bun run dev` restarted; Wrangler lists `env.LUNORA_OUTLINE`.
+2. **Entitlement:** `bun run comp:dev-plan` hand-inserts an `active` `unlimited` row in local D1 for `dev@dotflowy.local` (`referenceId = VkBqJpDMdmTnAxjsqeOw4SH0cVST2weX`). Idempotent; no production gate changes.
+3. **Auth:** `bun run mint:mcp-token` runs dynamic registration + PKCE against `http://localhost:8787/api/auth/mcp/*` and prints a real bearer (`auth.api.getMcpSession`-valid).
+4. **Live write proof** (with `LUNORA_OUTLINE=1`, comped plan, minted bearer):
+
+```sh
+bun run comp:dev-plan
+TOKEN=$(bun run mint:mcp-token 2>/dev/null | rg '^access_token:' | cut -d' ' -f2)
+# tools/call add_node
+curl -s -X POST http://localhost:8787/mcp \
+  -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_node","arguments":{"text":"MCP-LUNORA-PASS-1784839995"}}}'
+# → {"result":{"content":[{"type":"text","text":"Added \"MCP-LUNORA-PASS-1784839995\" at the top level (id: d4659316-091a-462f-9274-0c8dc29aade5)."}]}}
+# tools/call search_nodes
+curl -s -X POST http://localhost:8787/mcp \
+  -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_nodes","arguments":{"query":"MCP-LUNORA-PASS-1784839995"}}}'
+# → {"result":{"content":[{"type":"text","text":"- \"MCP-LUNORA-PASS-1784839995\" (id: d4659316-091a-462f-9274-0c8dc29aade5)"}]}}
+# tools/call get_outline (Lunora shard via createLunoraOutlineStore → mcp:listNodes)
+curl -s -X POST http://localhost:8787/mcp \
+  -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_outline","arguments":{}}}'
+# → outline text includes the new bullet id d4659316-091a-462f-9274-0c8dc29aade5
+```
+
+5. Pre-comp control: same bearer without subscription row got JSON-RPC `-32001` upgrade required on `tools/call` (entitlement gate intact).
+6. Browser with `dotflowy:flag:lunora-sync=on` not re-run this slice — MCP readback confirms the Lunora SHARD mutation (same `userId` shard key as browser mutators). Optional follow-up: reload editor and confirm the marker bullet renders.
+
+**Scripts (committed):** `scripts/comp-dev-plan.ts`, `scripts/mint-mcp-token.ts` → `bun run comp:dev-plan`, `bun run mint:mcp-token`.
 
 ## Known gaps → flag-default-ON checklist
 
 1. ~~Dual-path fixture + representative classic subset~~ **DONE** (this slice)
 2. ~~Manual migration dogfood~~ **DONE** (2026-07-23)
-3. **MCP live write dogfood** with `LUNORA_OUTLINE=1` — mint local OAuth bearer for an entitled test user, then call a write tool and observe the Lunora editor update
+3. ~~**MCP live write dogfood** with `LUNORA_OUTLINE=1`~~ **DONE** (2026-07-23; see above)
 4. ~~Broader classic specs under `E2E_LUNORA=1`~~ **DONE** (transport-only skips; product gaps fixed)
 5. Optional: re-run full `E2E_LUNORA=1 bunx playwright test e2e` for a clean green count (expect ~359 pass / ~13 skip)
 6. Snapshot/R2/PITR still classic DO — out of scope
@@ -123,6 +151,6 @@ E2E_LUNORA=1 bunx playwright test <subset> --workers=1
 
 ## Next
 
-1. Mint an OAuth bearer for a locally entitled test user, exercise an MCP write with `LUNORA_OUTLINE=1`, and observe it in the Lunora editor.
+1. Optional: browser reload with `dotflowy:flag:lunora-sync=on` to visually confirm MCP-written bullets.
 2. Optional clean full-suite recount under `E2E_LUNORA=1`.
 3. Then consider default ON → PR; **delete `HANDOFF.md` in shipping PR.**

@@ -20,6 +20,8 @@
     "preview": "vite preview",
     "cf:dev": "bun scripts/cf-dev.ts",
     "seed:user": "bun scripts/seed-user.ts",
+    "comp:dev-plan": "bun scripts/comp-dev-plan.ts",
+    "mint:mcp-token": "bun scripts/mint-mcp-token.ts",
     "invite": "bun scripts/invite.ts",
     "announce": "bun scripts/announce.ts",
     "deploy": "bun run build:cf && wrangler deploy",
