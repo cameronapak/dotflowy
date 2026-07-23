@@ -7,6 +7,13 @@
   "durable_objects": {
     "bindings": [{ "name": "SHARD", "class_name": "ShardDO" }],
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lunora-outline-auth",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+    },
+  ],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ShardDO"] }],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
 }

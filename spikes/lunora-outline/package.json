@@ -15,9 +15,14 @@
     "deploy": "vite build && lunora deploy"
   },
   "dependencies": {
+    "@lunora/auth": "1.0.0-alpha.36",
     "@lunora/db": "1.0.0-alpha.27",
     "@lunora/ratelimit": "1.0.0-alpha.9",
     "@lunora/react": "1.0.0-alpha.31",
+    "@tanstack/db": "^0.6.16",
+    "@tanstack/offline-transactions": "^1.0.41",
+    "@tanstack/react-db": "^0.1.94",
+    "better-auth": "^1.6.24",
     "lunorash": "1.0.0-alpha.98",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
@@ -33,6 +38,7 @@
     "oxlint": "^1.74.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.5",
+    "vitest": "^4.1.10",
     "wrangler": "^4.100.0"
   },
   "packageManager": "pnpm@11.9.0"

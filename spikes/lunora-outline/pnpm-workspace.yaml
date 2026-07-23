@@ -26,3 +26,4 @@ minimumReleaseAgeExclude:
   - "@lunora/workflow@1.0.0-alpha.12"
   - lunorash@1.0.0-alpha.98
   - "@lunora/db@1.0.0-alpha.27"
+  - "@lunora/auth@1.0.0-alpha.36"
