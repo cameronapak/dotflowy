@@ -29,6 +29,7 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
+import { AccountPrefsController } from "../data/account-prefs";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -146,6 +147,7 @@ function RootComponent() {
         ) : (
           <TextSizeProvider>
             <AuthGate>
+              <AccountPrefsController />
               {/* ADR 0055: no-op when lunora-sync flag OFF (default). */}
               <LunoraSyncHost>
                 <ShowCompletedProvider>

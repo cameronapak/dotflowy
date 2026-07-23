@@ -47,7 +47,7 @@ import {
 async function runMigrateToLunora() {
   const lunora = getLunoraOutlineContext();
   if (!lunora) {
-    toast.error("Enable lunora-sync flag first, then reload");
+    toast.error("Turn on Lunora beta in Settings, then reload");
     return;
   }
   const result = await migrateClassicToLunora(lunora.store, lunora.userId);

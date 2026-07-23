@@ -65,7 +65,7 @@ import {
 import { lunoraApp, ShardDO, type LunoraEnv } from "./lunora-app";
 import {
   createLunoraOutlineStore,
-  isLunoraOutlineEnabled,
+  isLunoraOutlineEnabledForUser,
 } from "./lunora-mcp-store";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
@@ -168,6 +168,7 @@ const KV_COLLECTIONS = new Set([
   "daily-index",
   "changelog",
   "saved-queries",
+  "account-prefs",
 ]);
 
 /**
@@ -985,14 +986,17 @@ function handleApiRequest(
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
       const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
-      // LUNORA_OUTLINE unset → same shard as browser mutators (default ON).
-      // LUNORA_OUTLINE=0|false|off keeps classic UserOutlineDO.applyBatch
-      // (resolveUserId / owner→'default' bridge unchanged).
-      const mcpStore = isLunoraOutlineEnabled(env)
+      const classicStub = env.USER_OUTLINE.get(
+        env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
+      );
+      const useLunora = yield* Effect.promise(() =>
+        isLunoraOutlineEnabledForUser(env, () =>
+          classicStub.getKv("account-prefs"),
+        ),
+      );
+      const mcpStore = useLunora
         ? createLunoraOutlineStore(env, token.userId)
-        : env.USER_OUTLINE.get(
-            env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
-          );
+        : classicStub;
       return yield* handleMcp(request, mcpStore, origin, mcpPlan !== "free");
     }
 

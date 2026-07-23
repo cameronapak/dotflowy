@@ -25,8 +25,8 @@ Dotflowy’s hand-rolled per-user DO sync (`/api/sync` + client-planned `{ops}` 
 ## Identity / e2e / kv (locked)
 
 - **Identity:** product Better Auth stays the session authority (MCP OAuth, Stripe, invite/Turnstile). Lunora `resolveIdentity` reads that session — do **not** run a second `@lunora/auth` signup stack in the main app.
-- **e2e:** dual-path fixtures — `seedOutline` forces `lunora-sync=off` (classic `/api/sync` mock); `seedOutlineLunora` / `E2E_LUNORA=1` forces ON (`/_lunora/*` mock). Product defaults both client flag and Worker `LUNORA_OUTLINE` to ON; kill-switches stay for rollback.
-- **Kill-switch pairing:** the browser reads `isLunoraSyncEnabled()` (`dotflowy:flag:lunora-sync` / `?lunora-sync=`); Worker MCP reads `LUNORA_OUTLINE` (`isLunoraOutlineEnabled`). There is no cross-layer signal — flip **both** together (`lunora-sync=off` **and** `LUNORA_OUTLINE=0`) or MCP and the editor diverge on the same account.
+- **e2e:** dual-path fixtures — `seedOutline` forces `lunora-sync=off` (classic `/api/sync` mock); `seedOutlineLunora` / `E2E_LUNORA=1` forces ON (`/_lunora/*` mock). **Production defaults OFF** — classic DO is the default for browser and MCP until the user opts in via Settings (`account-prefs` / `lunora-beta`, synced across devices). Local dogfood can force ON with `LUNORA_OUTLINE=1` (Worker MCP) and `?lunora-sync=on` or localStorage (browser).
+- **Kill-switch pairing:** the browser reads `isLunoraSyncEnabled()` (`dotflowy:flag:lunora-sync`, mirrored from synced `account-prefs` on load); Worker MCP reads env force first, else the same preference on classic DO (`isLunoraOutlineEnabledForUser`). For local debugging divergence, flip env + client together (`LUNORA_OUTLINE=0` **and** `lunora-sync=off`, or force both ON).
 - **KV side-collections:** phase **2b** after nodes sync is on Lunora — do not block the collection swap on tag-colors/daily-index/saved-queries.
 
 ## Sequence (implementation order)

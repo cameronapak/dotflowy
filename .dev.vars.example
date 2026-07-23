@@ -34,10 +34,10 @@ INVITE_CODES=dev-invite
 # STRIPE_SECRET_KEY=sk_test_replace-me
 # STRIPE_WEBHOOK_SECRET=whsec_replace-me
 
-# Lunora MCP outline store (ADR 0055). Default ON when unset — /mcp tools use
-# the Lunora SHARD (mutators:applyChangeOps + queries:listNodes), same shard as
-# the browser. Set "0", "false", or "off" to route MCP through classic
-# UserOutlineDO (local debugging escape hatch). Explicit enable still works:
+# Lunora MCP outline store (ADR 0055). Optional **force** for local MCP/browser
+# dogfood — not the production default (users opt in via Settings).
+# LUNORA_OUTLINE=1 forces MCP onto the Lunora shard; 0|false|off forces classic
+# UserOutlineDO. Unset → per-user `account-prefs` / lunora-beta on classic DO.
 # LUNORA_OUTLINE=1
 
 # Optional: pin the OAuth issuer the MCP discovery metadata advertises (ADR

@@ -151,21 +151,57 @@ export function createLunoraOutlineStore(
   };
 }
 
-/**
- * True when Worker MCP should use the Lunora shard (default ON when unset).
- *
- * Kill-switch pairing (ADR 0055): MCP reads this env var; the browser reads
- * `isLunoraSyncEnabled()` (`dotflowy:flag:lunora-sync` / `?lunora-sync=`).
- * Flip BOTH together (`LUNORA_OUTLINE=0` AND client `lunora-sync=off`) or MCP
- * and the editor diverge on the same account.
- */
-export function isLunoraOutlineEnabled(env: {
-  LUNORA_OUTLINE?: string;
-}): boolean {
+export type LunoraOutlineEnv = { LUNORA_OUTLINE?: string };
+
+export const LUNORA_BETA_PREF_ID = "lunora-beta";
+
+/** Env force: ON, OFF, or unset (use synced account preference). */
+export function resolveLunoraOutlineEnvForce(
+  env: LunoraOutlineEnv,
+): boolean | null {
   const raw = env.LUNORA_OUTLINE?.trim().toLowerCase();
-  if (!raw) return true;
+  if (!raw) return null;
   if (raw === "0" || raw === "false" || raw === "off") return false;
-  return true;
+  if (raw === "1" || raw === "true" || raw === "on") return true;
+  return false;
+}
+
+/** Parse synced `account-prefs` rows for Lunora beta opt-in. */
+export function parseLunoraBetaPref(rows: unknown[]): boolean {
+  const row = rows.find(
+    (r) =>
+      r &&
+      typeof r === "object" &&
+      (r as { id?: string }).id === LUNORA_BETA_PREF_ID,
+  ) as { enabled?: unknown } | undefined;
+  return row?.enabled === true;
+}
+
+/**
+ * Sync helper: env force only. Unset env → false (classic DO default).
+ * MCP uses {@link isLunoraOutlineEnabledForUser} for preference lookup.
+ */
+export function isLunoraOutlineEnabledSync(env: LunoraOutlineEnv): boolean {
+  const forced = resolveLunoraOutlineEnvForce(env);
+  if (forced !== null) return forced;
+  return false;
+}
+
+/**
+ * Whether Worker MCP should use the Lunora shard for this user.
+ *
+ * Kill-switch pairing (ADR 0055): env force first; else synced
+ * `account-prefs` on classic DO; browser reads mirrored localStorage after
+ * {@link AccountPrefsController} sync.
+ */
+export async function isLunoraOutlineEnabledForUser(
+  env: LunoraOutlineEnv,
+  getAccountPrefs: () => Promise<unknown[]>,
+): Promise<boolean> {
+  const forced = resolveLunoraOutlineEnvForce(env);
+  if (forced !== null) return forced;
+  const rows = await getAccountPrefs();
+  return parseLunoraBetaPref(rows);
 }
 
 /** Permanently erase this user's Lunora shard — account deletion (ADR 0051). */

@@ -34,22 +34,21 @@ export function isMirrorsEnabled(): boolean {
 /** ADR 0055 Phase-2: outline sync via Lunora shapes/mutators instead of custom DO. */
 export const LUNORA_SYNC_FLAG_KEY = "dotflowy:flag:lunora-sync";
 
-// Default ON — outline sync rides Lunora (ADR 0055). localStorage `"off"` or
-// `?lunora-sync=off` is the rollback escape hatch (classic `/api/sync` path).
-const LUNORA_SYNC_DEFAULT = true;
+// Default OFF — Lunora is alpha; classic DO is production. Opt in via Settings
+// (synced `account-prefs`) or localStorage / URL for e2e and local dogfood.
+const LUNORA_SYNC_DEFAULT = false;
 
 /**
  * Whether outline sync rides Lunora (`/_lunora` + `@lunora/db`) instead of the
- * custom `/api/sync` + `nodesCollection` path (ADR 0055). Default ON.
+ * custom `/api/sync` + `nodesCollection` path (ADR 0055). Default OFF.
  *
- * Kill-switch pairing (ADR 0055): the browser reads this flag; Worker MCP reads
- * `LUNORA_OUTLINE` (`isLunoraOutlineEnabled` in worker/lunora-mcp-store.ts).
- * Flip BOTH together (`lunora-sync=off` AND `LUNORA_OUTLINE=0`) or MCP and the
- * editor diverge on the same account.
+ * Kill-switch pairing (ADR 0055): the browser reads this flag (mirrored from
+ * synced `account-prefs` on load); Worker MCP reads env force then the same
+ * preference on classic DO. Flip env + client together when debugging divergence.
  *
- * Disable: `localStorage.setItem("dotflowy:flag:lunora-sync", "off")` then reload,
- * or open with `?lunora-sync=off` (URL wins for that load; does not persist).
- * Enable: `"on"` in localStorage, or `?lunora-sync=on`.
+ * Enable: Settings beta toggle (persists + reload), `"on"` in localStorage, or
+ * `?lunora-sync=on`. Disable: Settings, `"off"` in localStorage, or
+ * `?lunora-sync=off` (URL wins for that load; does not persist).
  */
 export function isLunoraSyncEnabled(): boolean {
   if (typeof window === "undefined") return LUNORA_SYNC_DEFAULT;

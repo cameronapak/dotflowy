@@ -23,6 +23,8 @@ import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
+import { Switch } from "../components/ui/switch";
+import { setLunoraBetaEnabled, useLunoraBetaPref } from "../data/account-prefs";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { outlineToMarkdown } from "../data/markdown";
@@ -736,6 +738,37 @@ function AppearanceSection() {
   );
 }
 
+function BetaSection() {
+  const { ready, enabled } = useLunoraBetaPref();
+  return (
+    <Section
+      title="Beta"
+      description="Experimental features. Classic outline sync stays the default until you opt in."
+    >
+      <RowGroup>
+        <SettingRow
+          title="Lunora outline sync (beta)"
+          description={
+            <>
+              Try the experimental Lunora sync backend (alpha). Classic storage
+              remains the production default. May have bugs. Your choice syncs
+              across devices; turning it on or off reloads the app.
+            </>
+          }
+          action={
+            <Switch
+              checked={ready ? enabled : false}
+              disabled={!ready}
+              onCheckedChange={(checked) => setLunoraBetaEnabled(checked)}
+              aria-label="Lunora outline sync beta"
+            />
+          }
+        />
+      </RowGroup>
+    </Section>
+  );
+}
+
 function SettingsPage() {
   // One subscription fetch for the whole page; Plan & billing and the
   // Connections nudge both read it (no double request, no divergent state).
@@ -774,6 +807,7 @@ function SettingsPage() {
         </Section>
 
         <AccountSection />
+        <BetaSection />
         <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />

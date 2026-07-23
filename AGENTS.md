@@ -546,7 +546,13 @@ Screenshots **cannot capture view-transition overlays** (they show the settled D
 - Landing accents should match the app palette — do not introduce colors (e.g. blue accent) that aren't used in the Dotflowy app.
 - On the landing page, keep feature/list bullets vertical even on desktop — no horizontal bullet rows.
 - Landing import copy should mention Workflowy import alongside OPML (most visitors don't know what OPML is).
+- When grilling or design options are presented, pick the best reasonable option without waiting — favor robustness and best practices, balanced against not over-optimizing low-value work.
+- Prefer deepening Effect TS and XState usage where they fit.
+- In Cursor, prefer Cursor Auto or Cursor Grok 4.5 for implementation subagents.
+- Lunora sync must stay opt-in (user-facing beta/settings flag); do not force a production cutover while Lunora is alpha.
 
 ## Learned Workspace Facts
 
 - Marketing site lives in the separate `landing/` package (`dotflowy-landing`) at dotflowy.com; the app SPA is at app.dotflowy.com.
+- Lunora (`anolilab/lunora`) is the experimental outline-sync path behind client `dotflowy:flag:lunora-sync` and Worker `LUNORA_OUTLINE`; classic per-user DO remains the default.
+- Vite proxies for `/api` and `/_lunora` need explicit `ws: true` — string shorthand does not upgrade WebSockets and blocks Lunora dogfood on "Loading outline".
