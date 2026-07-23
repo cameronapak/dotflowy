@@ -27,5 +27,10 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["src/routeTree.gen.ts", "landing/src/routeTree.gen.ts"]
+  "ignorePatterns": [
+    "src/routeTree.gen.ts",
+    "landing/src/routeTree.gen.ts",
+    "lunora/_generated/**",
+    "spikes/**/lunora/_generated/**"
+  ]
 }

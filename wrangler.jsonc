@@ -88,11 +88,20 @@
   // One Durable Object per user: USER_OUTLINE holds the user's whole outline +
   // side-collections in colocated SQLite. The Worker routes each /api request to
   // the caller's DO. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
+  //
+  // SHARD = Lunora outline plane (ADR 0055 Phase-2 compose). Lives beside
+  // USER_OUTLINE until the collection cutover deletes the custom DO sync.
   "durable_objects": {
-    "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }],
+    "bindings": [
+      { "name": "USER_OUTLINE", "class_name": "UserOutlineDO" },
+      { "name": "SHARD", "class_name": "ShardDO" },
+    ],
   },
   // SQLite-backed DO storage requires `new_sqlite_classes` (not new_classes).
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["ShardDO"] },
+  ],
   // Off-site outline backups (#221): the daily cron sweep exports every user
   // DO's snapshot into this bucket (`backups/<doName>/<YYYY-MM-DD>.json`).
   // Create the bucket + its lifecycle expiry once before the first deploy —

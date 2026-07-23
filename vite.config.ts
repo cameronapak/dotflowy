@@ -34,6 +34,8 @@ export default defineConfig({
     // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
     proxy: {
       "/api": "http://localhost:8787",
+      // Lunora reserved paths (ADR 0055) — same Worker as /api during `bun run dev`.
+      "/_lunora": "http://localhost:8787",
     },
   },
   plugins: [

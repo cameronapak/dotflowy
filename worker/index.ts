@@ -32,7 +32,6 @@ import {
 } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
-import type { AuthEnv } from "./auth";
 import type { Node } from "./wire";
 
 import {
@@ -63,6 +62,7 @@ import {
   pendingWaitlistEmails,
   type InviteBatchResult,
 } from "./invites";
+import { lunoraApp, ShardDO, type LunoraEnv } from "./lunora-app";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -94,7 +94,12 @@ export const UserOutlineDO = Sentry.instrumentDurableObjectWithSentry(
 );
 type UserOutlineDO = BaseUserOutlineDO;
 
-interface Env extends AuthEnv {
+// Lunora ShardDO (ADR 0055) — re-export for wrangler `SHARD` binding.
+// TEMP: not Sentry-wrapped — Lunora's ShardDOState.sql typing doesn't satisfy
+// Sentry's DurableObjectState constraint (document in HANDOFF).
+export { ShardDO };
+
+interface Env extends LunoraEnv {
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
    *  sentry.ts (ticket #227, decided in #156). */
@@ -1125,6 +1130,13 @@ const handler = {
       return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(
         request,
       );
+    }
+
+    // Lunora reserved paths (ADR 0055 Phase-2 compose). Product Better Auth
+    // stays on `/api/auth/*`; Lunora has no dual signup here — identity is
+    // bridged from the product session inside `worker/lunora-app.ts`.
+    if (url.pathname === "/_lunora" || url.pathname.startsWith("/_lunora/")) {
+      return lunoraApp.fetch(request, env, ctx);
     }
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve

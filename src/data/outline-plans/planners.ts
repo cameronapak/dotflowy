@@ -8,8 +8,8 @@ import { emptyPlan } from "./types";
 export function makeOutlineNode(
   partial: Partial<OutlineNode> & Pick<OutlineNode, "id" | "userId">,
 ): OutlineNode {
-  const { userId, ...rest } = partial;
-  return { ...makeNode({ id: partial.id, ...rest }), userId };
+  const { userId, id, ...rest } = partial;
+  return { ...makeNode({ id, ...rest }), userId };
 }
 
 /**

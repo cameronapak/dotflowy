@@ -5,6 +5,9 @@
   "description": "A local-first outline editor built with TanStack Start and TanStack DB.",
   "license": "O'Saasy",
   "type": "module",
+  "imports": {
+    "#lunora/*": "./lunora/*"
+  },
   "scripts": {
     "setup": "bun scripts/setup.ts",
     "bootstrap": "bun scripts/bootstrap.ts",
@@ -34,12 +37,13 @@
     "typecheck": "tsc --noEmit",
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "test": "bun test src worker/",
+    "test": "bun test -- ./src ./worker",
     "test:e2e": "playwright test",
     "test:e2e:serial": "playwright test --workers=1",
     "test:e2e:ui": "playwright test --ui",
     "effect:src": "opensrc path Effect-TS/effect-smol",
-    "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol"
+    "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol",
+    "lunora:codegen": "lunora codegen"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -48,6 +52,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@icons-pack/react-simple-icons": "^13.13.0",
+    "@lunora/ratelimit": "1.0.0-alpha.9",
     "@rgrove/parse-xml": "^4",
     "@sentry/cloudflare": "^10.65.0",
     "@sentry/react": "^10.65.0",
@@ -68,6 +73,7 @@
     "fuse.js": "^7.4.2",
     "grab-bcv": "^0.1.5",
     "lucide-react": "^1.21.0",
+    "lunorash": "1.0.0-alpha.98",
     "motion": "^12.42.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

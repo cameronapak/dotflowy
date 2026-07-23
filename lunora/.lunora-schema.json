@@ -1,0 +1,98 @@
+{
+  "migrationIds": [],
+  "tables": {
+    "nodes": {
+      "fields": {
+        "parentId": {
+          "kind": "string",
+          "optional": false
+        },
+        "prevSiblingId": {
+          "kind": "string",
+          "optional": false
+        },
+        "text": {
+          "kind": "string",
+          "optional": false
+        },
+        "isTask": {
+          "kind": "boolean",
+          "optional": false
+        },
+        "completed": {
+          "kind": "boolean",
+          "optional": false
+        },
+        "collapsed": {
+          "kind": "boolean",
+          "optional": false
+        },
+        "bookmarkedAt": {
+          "kind": "number",
+          "optional": false
+        },
+        "mirrorOf": {
+          "kind": "string",
+          "optional": false
+        },
+        "createdAt": {
+          "kind": "number",
+          "optional": false
+        },
+        "updatedAt": {
+          "kind": "number",
+          "optional": false
+        },
+        "origin": {
+          "kind": "string",
+          "optional": false
+        },
+        "kind": {
+          "kind": "literal",
+          "optional": false
+        },
+        "userId": {
+          "kind": "string",
+          "optional": false
+        }
+      },
+      "indexes": {
+        "by_parent": {
+          "fields": ["parentId"],
+          "unique": false
+        }
+      },
+      "relations": {},
+      "shardMode": "shardBy:userId"
+    },
+    "ratelimit_buckets": {
+      "fields": {
+        "key": {
+          "kind": "string",
+          "optional": false
+        },
+        "value": {
+          "kind": "number",
+          "optional": false
+        },
+        "ts": {
+          "kind": "number",
+          "optional": false
+        },
+        "prev": {
+          "kind": "number",
+          "optional": true
+        }
+      },
+      "indexes": {
+        "by_key": {
+          "fields": ["key"],
+          "unique": false
+        }
+      },
+      "relations": {},
+      "shardMode": "root"
+    }
+  },
+  "version": 1
+}
