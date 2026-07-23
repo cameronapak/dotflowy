@@ -1,5 +1,6 @@
 import { nodesCollection } from "./collection";
 import { isLunoraSyncEnabled } from "./flags";
+import { getLiveNodes } from "./live-nodes";
 import { getLunoraOutlineContext, trackLunoraMutation } from "./lunora-sync";
 import {
   planIndent,
@@ -348,7 +349,9 @@ export function mirrorManyNodes(
 ): number {
   let made = 0;
   for (const id of ids) {
-    const index = buildTreeIndex(nodesCollection.toArray);
+    // Live store (classic or Lunora) — nodesCollection is empty when the
+    // Lunora flag is ON, so rebuilding from it would no-op every mirror.
+    const index = buildTreeIndex(getLiveNodes());
     if (mirrorNode(index, id, targetId)) made++;
   }
   return made;

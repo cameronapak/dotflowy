@@ -1611,11 +1611,20 @@ function useNodeCommands({
           // Delete the INSTANCE (position is local, ADR 0022): backspacing a
           // mirror's own row removes that mirror, never its source (which would
           // strand the other instances -- promote-on-source-delete is Stage 3).
-          // Address by the focused key; the keymap passes the content id in a
-          // mirror.
-          const activeKey = findFocusedId() ?? id;
-          const instanceId = instanceIdForKey(activeKey);
+          // Prefer the explicit target when it names a live node (Cmd+K / slash
+          // bind the id). Only fall back to focus when the caller passed a
+          // content id while a mirror INSTANCE holds focus (keymap).
           const idx = getTreeIndex();
+          const focused = findFocusedId();
+          const targetInstance = instanceIdForKey(id);
+          const focusedInstance = focused ? instanceIdForKey(focused) : null;
+          const activeKey =
+            focused && focusedInstance === targetInstance
+              ? focused
+              : idx.byId.has(id)
+                ? id
+                : (focused ?? id);
+          const instanceId = instanceIdForKey(activeKey);
           const mirrorsOn = isMirrorsEnabled();
           const contentId = mirrorsOn
             ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)

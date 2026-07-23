@@ -1,7 +1,7 @@
 import type { Node } from "./schema";
 
-import { nodesCollection } from "./collection";
 import { isMirrorsEnabled } from "./flags";
+import { getLiveNodes } from "./live-nodes";
 import { buildTreeIndex } from "./tree";
 import { getViewIsHidden, getViewRootId } from "./view-state";
 import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
@@ -16,16 +16,16 @@ import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
  *
  * Off the flag (the 99% path) a node id is unique, so we return it directly and
  * skip the rebuild entirely. With the flag on we build a fresh index from
- * `nodesCollection.toArray` -- synchronously current after `runStructural`, the
- * same technique the structural invariant check uses -- rather than
- * `getTreeIndex()`, whose change-notify can lag the optimistic apply.
+ * `getLiveNodes()` -- synchronously current after `runStructural` (classic
+ * `nodesCollection` or Lunora `wholeOutline`) -- rather than `getTreeIndex()`,
+ * whose change-notify can lag the optimistic apply.
  *
  * Lives here rather than beside its first caller because the markdown paste
  * (ADR 0044) needs it too, from a module the editor imports.
  */
 export function focusKeyFor(instanceId: string, activeKey: string): string {
   if (!isMirrorsEnabled()) return instanceId;
-  const index = buildTreeIndex(nodesCollection.toArray as Node[]);
+  const index = buildTreeIndex(getLiveNodes() as Node[]);
   const rows = buildVisibleRows(
     index,
     getViewRootId(),

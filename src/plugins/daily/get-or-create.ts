@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import type { PluginContext } from "../types";
 
 import { setRestoreProgress } from "../../components/history-restore";
-import { nodesCollection, resyncNodes } from "../../data/collection";
+import { resyncNodes } from "../../data/collection";
 import {
   dayKeyToScaffoldChain,
   parentScaffoldKey,
@@ -25,6 +25,7 @@ import {
 } from "../../data/date-links";
 import { isLunoraSyncEnabled } from "../../data/flags";
 import { RESTORE_SLICE_OPS, capture } from "../../data/history";
+import { getLiveNodes } from "../../data/live-nodes";
 import { getLunoraOutlineContext } from "../../data/lunora-sync";
 import {
   appendChild,
@@ -80,7 +81,7 @@ function liveOutlineNodes(): OutlineNode[] | null {
 function hasNode(id: string): boolean {
   const lunoraNodes = liveOutlineNodes();
   if (lunoraNodes) return lunoraNodes.some((n) => n.id === id);
-  return nodesCollection.toArray.some((n) => n.id === id);
+  return getLiveNodes().some((n) => n.id === id);
 }
 
 /** One atomic claim for a scaffold/day key: the authoritative id, whether this
@@ -113,7 +114,7 @@ function insertScaffoldNode(
   text: string,
   id: string,
 ): void {
-  const index = buildTreeIndex(nodesCollection.toArray);
+  const index = buildTreeIndex(getLiveNodes());
   const siblings = childrenOf(index, parentNodeId).map((n) => ({
     id: n.id,
     key: getKeyForNode(n.id),
@@ -139,7 +140,7 @@ function healExistingDay(
   const lunoraNodes = liveOutlineNodes();
   const node = lunoraNodes
     ? lunoraNodes.find((n) => n.id === dayId)
-    : nodesCollection.toArray.find((n) => n.id === dayId);
+    : getLiveNodes().find((n) => n.id === dayId);
   if (node && !node.text.trim()) setText(dayId, formatDayText(key));
   // Seeding is opt-in at the OPEN boundary (ADR 0041): only a write-intent
   // surface (/today, Today button, Cmd+K "Go to Today") asks for an empty line.
@@ -223,7 +224,7 @@ async function materializeNewDay(
   const { persisted } = runStructuralTracked(() => {
     // Container: appended at the end of the top level (special, not sorted).
     if (!hasNode(container.id)) {
-      const tops = childrenOf(buildTreeIndex(nodesCollection.toArray), null);
+      const tops = childrenOf(buildTreeIndex(getLiveNodes()), null);
       const after = tops.length ? tops[tops.length - 1]!.id : null;
       appendChild(null, after, DAILY_CONTAINER_TEXT, container.id);
     }
@@ -406,7 +407,7 @@ async function materializeNewDayLunora(args: {
 function hasChildInLiveCollection(parentId: string): boolean {
   const lunoraNodes = liveOutlineNodes();
   if (lunoraNodes) return lunoraNodes.some((n) => n.parentId === parentId);
-  return nodesCollection.toArray.some((n) => n.parentId === parentId);
+  return getLiveNodes().some((n) => n.parentId === parentId);
 }
 
 // --- one-time flat -> nested migration (issue #271, decision 8) --------------
@@ -440,7 +441,7 @@ let dailyMigration: Promise<void> | null = null;
 async function ensureDailyMigrated(containerId: string): Promise<void> {
   if (dailyMigration) return dailyMigration;
   const plan = planDailyMigration(
-    buildTreeIndex(nodesCollection.toArray),
+    buildTreeIndex(getLiveNodes()),
     containerId,
     getDailyRows(),
     getKeyForNode,
@@ -464,7 +465,7 @@ function moveDaySorted(
   weekId: string,
   containerId: string,
 ): void {
-  const index = buildTreeIndex(nodesCollection.toArray);
+  const index = buildTreeIndex(getLiveNodes());
   const day = index.byId.get(dayNodeId);
   if (!day) return; // deleted between plan and apply
   const dayKey = getKeyForNode(dayNodeId);
@@ -547,7 +548,7 @@ async function runDailyMigration(
 
   // One undo point: snapshot the whole pre-migration tree, then apply.
   const captureStep = () =>
-    capture(buildTreeIndex(nodesCollection.toArray), containerId);
+    capture(buildTreeIndex(getLiveNodes()), containerId);
   if (estimatedWrites < RESTORE_SLICE_OPS) {
     runStructural(() => {
       captureStep();
