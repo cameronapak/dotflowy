@@ -4,7 +4,7 @@
 
 ## Status
 
-Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live authenticated socket + loading smoke now pass; manual migration remains unverified and a few classic specs stay Lunora-incompatible (skipped).
+Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live authenticated socket, manual migration, and loading smoke pass; MCP's Lunora routing remains code-verified but needs an OAuth bearer + paid local entitlement for a live `tools/call`.
 
 ## Flag — Lunora outline sync (client)
 
@@ -26,12 +26,12 @@ Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live au
 
 ## Default-ON readiness — **NO**
 
-| Gate                            | Result                         |
-| ------------------------------- | ------------------------------ |
-| typecheck* / lint / bun test    | GREEN                          |
-| `e2e/lunora-*.spec.ts`          | GREEN (5/5)                    |
-| Classic subset `E2E_LUNORA=1`   | Mostly GREEN (see matrix)      |
-| Dogfood migrate (`bun run dev`) | **FAIL / blocked** (see below) |
+| Gate                            | Result                           |
+| ------------------------------- | -------------------------------- |
+| typecheck* / lint / bun test    | GREEN                            |
+| `e2e/lunora-*.spec.ts`          | GREEN (5/5)                      |
+| Classic subset `E2E_LUNORA=1`   | Mostly GREEN (see matrix)        |
+| Dogfood migrate (`bun run dev`) | **PASS** (2026-07-23; see below) |
 
 Keep default OFF.
 
@@ -77,7 +77,7 @@ E2E_LUNORA=1 E2E_PORT=3225 bunx playwright test \
 - Cmd+K: run action before close; `onDeleteNode` prefers explicit target id
 - markdown-paste Lunora `restoreNodes` path
 
-## Dogfood live smoke — **PASS (connection + loading)**
+## Dogfood live smoke — **PASS (connection + loading + migration)**
 
 `vite.config.ts` sets `ws: true` for both `/api` and `/_lunora`; the old string shorthand silently dropped WebSocket upgrades.
 
@@ -86,18 +86,25 @@ Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 1. Better Auth sign-in through Vite (`:3000`) returned **200** and set `better-auth.session_token`; `GET /api/auth/get-session` resolved user `VkBqJpDMdmTnAxjsqeOw4SH0cVST2weX`.
 2. Cookie-authenticated `/_lunora/ws?shard=<userId>` with `Origin: http://localhost:3000` returned **101** through both Vite (`:3000`) and direct Wrangler (`:8787`). The raw curl clients timed out after upgrading, as expected for an idle WebSocket.
 3. Browser smoke with `dotflowy:flag:lunora-sync=on` rendered the Lunora outline and **cleared "Loading outline"**.
-4. `window.__dotflowyMigrateToLunora` was absent during this smoke, so manual migrate was not run; the More-menu migration action was not exercised.
+4. Fresh run: flag OFF classic source held 3 welcome nodes. Flag ON exposed `window.__dotflowyMigrateToLunora` as a function and cleared loading. After clearing prior local Lunora spike seed rows, the empty shard auto-imported the three classic nodes; the concurrent manual helper then safely returned `skipped-nonempty` with `nodes: 3`. A full reload retained all three classic titles. More menu also displayed its safe-skip toast against a nonempty shard.
 
-**Keep default OFF.** The CSRF/CORS origin blocker is resolved; migration/MCP and broader dual-path coverage still gate default ON.
+**Keep default OFF.** Migration is now dogfood-verified, but MCP live writes and broader dual-path coverage still gate default ON.
+
+## Dogfood MCP with `LUNORA_OUTLINE=1` — **PARTIAL / auth-blocked**
+
+1. Local-only `.dev.vars` has `LUNORA_OUTLINE=1`; `bun run dev` was restarted and Wrangler listed `env.LUNORA_OUTLINE`.
+2. `POST http://localhost:8787/mcp` JSON-RPC `initialize` correctly returned `401` with local protected-resource metadata.
+3. Code path verified: `worker/index.ts` selects `createLunoraOutlineStore(env, token.userId)` when the flag is truthy; `worker/lunora-mcp-store.ts` dispatches writes to `mcp:applyChangeOps` on the authenticated user's `SHARD`.
+4. No local OAuth bearer was minted: the endpoint requires Better Auth MCP OAuth dynamic registration + PKCE, and MCP tool calls additionally require a paid entitlement. No existing local MCP test client/admin token shortcut was found. Therefore no authenticated live `tools/call` has run yet.
 
 ## Known gaps → flag-default-ON checklist
 
 1. ~~Dual-path fixture + representative classic subset~~ **DONE** (this slice)
-2. **Manual migration dogfood** — connection/loading pass; helper was absent in smoke, so migration remains unverified
-3. **MCP dogfood** with `LUNORA_OUTLINE=1`
+2. ~~Manual migration dogfood~~ **DONE** (2026-07-23)
+3. **MCP live write dogfood** with `LUNORA_OUTLINE=1` — mint local OAuth bearer for an entitled test user, then call a write tool and observe the Lunora editor update
 4. Remaining classic specs under `E2E_LUNORA=1` (full suite) — maximize; skip only transport-bound specs
 5. Snapshot/R2/PITR still classic DO — out of scope
-6. Flip client default ON + `.dev.vars.example` `LUNORA_OUTLINE=1` only after 2–4 green
+6. Flip client default ON + `.dev.vars.example` `LUNORA_OUTLINE=1` only after 3–4 green
 
 ## Gates
 
@@ -110,6 +117,6 @@ E2E_LUNORA=1 bunx playwright test <subset> --workers=1
 
 ## Next
 
-1. Run manual migrate smoke (console helper or More menu) now that `/_lunora/ws` upgrades.
+1. Mint an OAuth bearer for a locally entitled test user, exercise an MCP write with `LUNORA_OUTLINE=1`, and observe it in the Lunora editor.
 2. Broader `E2E_LUNORA=1` classic suite; document remaining fails.
 3. Then consider default ON → PR; **delete `HANDOFF.md` in shipping PR.**
