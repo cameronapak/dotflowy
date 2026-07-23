@@ -4,71 +4,60 @@
 
 ## Status
 
-`phase-2-cutover` — ADR 0055 accepted; spike Phase 0–1 proven. **No PR until Lunora cutover is complete and pre-existing tests are 100% green.**
+`phase-2-compose` — shared planners lifted; Lunora `SHARD` DO composed beside `UserOutlineDO`. Product `/api/*` + ASSETS + MCP unchanged. **No PR until collection cutover + gates green.**
 
-Commits (recent): through `40a5004bb2` (seed smoke) + upcoming ADR 0055 commit.
+## What landed (this slice)
+
+### A. Shared planners → `src/data/outline-plans/`
+
+- Pure `plan*` / `seed` / `map-node` / types; converges on Dotflowy `Node` + `tree.ts` / `sibling-chain.ts` (`OutlineNode = Node & { userId }`).
+- Unit tests: `src/data/outline-plans/*.test.ts` (`bun run test`).
+- Spike imports via Vite/vitest alias `@dotflowy/outline-plans` → `../../src/data/outline-plans` (see `spikes/lunora-outline/vite.config.ts`). Awkward bit: root `bun test` filter `src` used to also match `spikes/**/src/**` — script is now `bun test -- ./src ./worker`. Spike still runs `pnpm test` (vitest) in its directory.
+
+### B. Lunora compose in main Worker
+
+- Root deps: `lunorash@1.0.0-alpha.98`, `@lunora/ratelimit@1.0.0-alpha.9` (bun).
+- Schema/mutators: repo-root `lunora/` (nodes + `wholeOutline` + spike mutators + `hello` smoke mutator). Codegen: `bun run lunora:codegen`.
+- `wrangler.jsonc`: `SHARD` → `ShardDO` **alongside** `USER_OUTLINE`; migration tag `v2`.
+- `worker/lunora-app.ts`: `defineApp` + product Better Auth `resolveIdentity` bridge (no `@lunora/auth` dual signup).
+- `worker/index.ts`: `/_lunora` → `lunoraApp.fetch`; Vite proxies `/_lunora` → `:8787`.
+
+### Temporary escapes (typecheck)
+
+- `ShardDO` is **not** Sentry-wrapped — Lunora `ShardDOState.sql` typing doesn't satisfy Sentry's `DurableObjectState` constraint. Revisit when wrapping or types align.
 
 ## Sources of truth
 
-- **ADR 0055:** `docs/adr/0055-lunora-replaces-custom-outline-sync.md` (cutover sequence)
+- **ADR 0055:** `docs/adr/0055-lunora-replaces-custom-outline-sync.md`
 - Spike README: `spikes/lunora-outline/README.md`
-- ADRs: `0004`, `0008` (amended by 0055), `0009`, `0055`
+- Shared planners: `src/data/outline-plans/`
 - Research clone (machine-local): `/tmp/lunora-research` (`alpha` branch)
 
-## Tree state
-
-- `nodes` schema + `wholeOutline` shape + Better Auth via `defineApp().auth()` + `authorizeShard: identity.userId === shardKey`
-- Pure planners in `src/outline/` with vitest chain invariant
-- Dual mutator APIs: server `lunorash/server` defineMutator; client `@lunora/db/mutators` defineMutator+bindMutators (shared `plan*`)
-- Shared `rowToNode`/`docToNode` + `nodeToDocFields`/`nodeToRow`/`nodeToInsertFields` in `src/outline/map-node.ts`
-- Bridge: `src/outline/lunora-bridge.ts` — Lunora collection rows → Dotflowy-shaped `TreeIndex` / ordered children (ADR 0004 handoff; feed tree-store later; **no** OutlineEditor port)
-- Seed: `planSeedIfEmpty` + server `seedIfEmpty` mutator with fixed `DEMO_SEED_IDS`; DO watermark FIFO = multi-tab idempotency (second call no-ops)
-- Tiny list UI renders via bridge; email/password auth gate; empty copy distinguishes seed-pending vs truly empty
-- Scaffold cruft trimmed (unused Vite assets, App.css, welcome CSS, public/icons.svg)
-- `.dev.vars` gitignored (do not commit)
-
-## Phase 1 review
-
-- **Must-fix (done):** multi-tab both calling client `insertSibling` seed → duplicate chains. Replaced with server-authoritative `seedIfEmpty`.
-- **Should-fix (done):** unify outbound map; empty UI copy; HANDOFF commit list + status.
-
-## Verify
+## Compose smoke
 
 ```sh
-cd spikes/lunora-outline
-pnpm test
-pnpm build
-pnpm dev   # smoke; note printed Local port
+bun run lunora:codegen          # after lunora/ schema/mutator edits
+bun run typecheck
+bun run typecheck:worker
+bun run test                    # includes outline-plans; excludes spike vitest
+cd spikes/lunora-outline && pnpm test
+
+# Product path (custom DO still authoritative for OutlineEditor):
+bun run dev
+# Optional: curl Worker status once api is up
+# curl -sS http://localhost:8787/_lunora/status
 ```
 
-### Manual checklist — PASS (2026-07-23)
-
-Verified on `http://localhost:5175/` (Vite fell through 5173→5174→5175):
-
-- [x] Two tabs, same user: live convergence without refresh (~2.5s)
-- [x] Hard reload restores outline from shape seed
-- [x] Cross-user: second account sees only its own seed, not first user’s bullets
-- [x] Fresh-user `seedIfEmpty` smoke (`:5175`): signup → 4 demo bullets; reload stays 4; insert+reload keeps 5 (no double-seed) — after `e16cd6e845`
-
-## API surprises vs docs
-
-- Shape `where` deny is `{ OR: [] }`, not boolean `false` (typed `WhereInput`)
-- Codegen Doc/Insert types currently erase `.nullable()` (runtime still accepts null; cast at boundaries via `rowToNode`)
-- Advisor `table_without_insert` fires for mutator-only inserts (ignore for this spike)
-- Dual `defineMutator` APIs must not be mixed (server vs `@lunora/db/mutators`)
-
-## Code review (Phase 0)
-
-**Standards** — process-clean for a spike. Merge-to-`main` gates: delete this `HANDOFF.md`; add changeset (`bunx changeset --empty` if spike isn't product news). Mild smells addressed in Phase 1: `docToNode`≈`rowToNode` dup → shared helper; leftover Vite assets/CSS trimmed.
-
-**Spec** — required implementation met. Must-prove #1 automated; #2–#5 wired + **manual PASS** (see checklist above). Bridge order covered by unit test.
+Spike alone still: `cd spikes/lunora-outline && pnpm dev`.
 
 ## Next
 
-- Phase 2 sequence (ADR 0055): lift shared planners → integrate Lunora into main app → swap `nodesCollection` → migrate kv/MCP/data → delete custom DO sync → green gates → **then** PR
-- Delete this `HANDOFF.md` in the shipping PR (must never reach `main`)
-- Changeset at PR time (likely major communicative bump — readers relearn sync/infra story)
+1. **Flag-swap / collection cutover** — `nodesCollection` → `@lunora/db` shape collections; structural path → `bindMutators` (ADR 0055 seq step 4).
+2. Keep `seedOutline` e2e as-is until that swap.
+3. KV side-collections = phase **2b** (don't block on them).
+4. Then MCP remount / data migrate / delete `UserOutlineDO` custom sync → green gates → PR.
+5. Delete this `HANDOFF.md` in the shipping PR.
 
 ## Note
 
-Root Dotflowy = bun. Always `cd spikes/lunora-outline` before any `pnpm` command.
+Root Dotflowy = bun. Spike = pnpm only inside `spikes/lunora-outline`.

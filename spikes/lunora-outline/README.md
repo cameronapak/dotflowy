@@ -50,17 +50,27 @@ Cross-user: sign out → sign up as a different email → that session’s `auth
 5. Hard reload restores outline from shape seed — **manual**
 6. TreeIndex bridge order matches planner apply (insert/indent/remove) — **covered** (`lunora-bridge.test.ts`)
 
+## Shared planners (Phase-2 lift)
+
+Pure `plan*` / seed / map-node live in the **repo root** at
+[`src/data/outline-plans/`](../../src/data/outline-plans/) (Dotflowy `Node` +
+`tree.ts`). This spike imports them via the Vite/vitest alias
+`@dotflowy/outline-plans` (see `vite.config.ts` / `vitest.config.ts`).
+`src/outline/` is a thin re-export + the local `lunora-bridge` seam.
+
+Root also composes Lunora beside `UserOutlineDO` (`lunora/`, `worker/lunora-app.ts`)
+— see root `HANDOFF.md`. Keep running this spike with **pnpm from this directory**.
+
 ## Layout
 
 | Path                           | Role                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------- |
 | `lunora/schema.ts`             | `nodes` table (Dotflowy field parity), `.shardBy("userId")`             |
 | `lunora/shapes.ts`             | `wholeOutline` owner-gated shape                                        |
-| `lunora/mutators.ts`           | Server `defineMutator` (`lunorash/server`) — authoritative              |
-| `src/outline/`                 | Pure `plan*` + sibling-chain (shared)                                   |
-| `src/outline/map-node.ts`      | Shared `rowToNode` / `nodeToDocFields` (=`nodeToRow`) / insert fields   |
+| `lunora/mutators.ts`           | Server `defineMutator` — imports `@dotflowy/outline-plans`              |
+| `../../src/data/outline-plans` | Shared pure planners (canonical; `bun run test` at repo root)           |
+| `src/outline/`                 | Re-exports + `lunora-bridge`                                            |
 | `src/outline/lunora-bridge.ts` | ADR 0004 seam: Lunora rows → Dotflowy-shaped `TreeIndex`                |
-| `src/outline/seed.ts`          | `planSeedIfEmpty` + deterministic clientIds; DO FIFO idempotency        |
 | `src/outline-store.ts`         | Client `lunoraCollectionOptions` + `@lunora/db/mutators` `bindMutators` |
 | `src/App.tsx`                  | Auth gate + tiny outline list UI (renders via bridge)                   |
 
