@@ -4,28 +4,49 @@
 
 ## Status
 
-`scaffolded` — Phase 0 bootstrap done under `spikes/lunora-outline/`.
+`phase-0-implemented` — schema, planners+tests, structural mutators, minimal multi-tab UI.
+
+Commits on `spike/lunora-outline` after scaffold `f953b17350`:
+
+1. `feat(spike): nodes schema, wholeOutline shape, auth shard gate`
+2. `feat(spike): pure outline planners + chain invariant tests`
+3. `feat(spike): structural mutators + minimal multi-tab outline UI` (pending this handoff update)
 
 ## Sources of truth
 
-- Spike README: `spikes/lunora-outline/README.md`
+- Spike README: `spikes/lunora-outline/README.md` (run / demo / exit criteria)
 - ADRs: `docs/adr/0008-…`, `docs/adr/0009-…`
 - Research clone (machine-local): `/tmp/lunora-research` (`alpha` branch)
 
 ## Tree state
 
-- Vite + React Lunora scaffold via `pnpm dlx lunorash@alpha init … --vite react`
-- Demo schema: `lunora/schema.ts` (`messages` sharded by `channelId`) + ratelimit extension
-- Demo mutators: `lunora/messages.ts` (`list` query, `send` mutation)
-- `@lunora/db@1.0.0-alpha.27` added; outline shapes/mutators **not** written yet
+- `nodes` schema + `wholeOutline` shape + Better Auth via `defineApp().auth()` + `authorizeShard: identity.userId === shardKey`
+- Pure planners in `src/outline/` with vitest chain invariant
+- Dual mutator APIs: server `lunorash/server` defineMutator; client `@lunora/db/mutators` defineMutator+bindMutators (shared `plan*`)
+- Tiny list UI + email/password auth gate
 - `.dev.vars` gitignored (do not commit)
 
-## Next
+## Verify
 
-1. Schema + shapes for outline nodes (sibling chain)
-2. Structural mutators + watermark-aware optimistic overlay
-3. Client UI exercising live sync / two-tab convergence
-4. `authorizeShard: identity.userId === shardKey`
+```sh
+cd spikes/lunora-outline
+pnpm test
+pnpm build
+pnpm dev   # smoke; note printed Local port
+```
+
+## API surprises vs docs
+
+- Shape `where` deny is `{ OR: [] }`, not boolean `false` (typed `WhereInput`)
+- Codegen Doc/Insert types currently erase `.nullable()` (runtime still accepts null; cast at boundaries)
+- Advisor `table_without_insert` fires for mutator-only inserts (ignore for this spike)
+- Dual `defineMutator` APIs must not be mixed (server vs `@lunora/db/mutators`)
+
+## Next (post Phase 0)
+
+- Manual 2-tab + hard-reload checklist against exit criteria
+- Optional: seed helper / Studio path for faster demos
+- Phase 1+: richer editor / migrate product surfaces — out of scope here
 
 ## Note
 

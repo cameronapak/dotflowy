@@ -1,224 +1,297 @@
-import { useEffect, useState } from "react";
+import { useMutator } from "@lunora/react";
+import { useLiveQuery } from "@tanstack/react-db";
+import {
+  useMemo,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 
-type Theme = "dark" | "light";
+import { authClient } from "./auth-client.js";
+import { createOutlineStore, type NodeRow } from "./outline-store.js";
+import {
+  buildTreeIndex,
+  childrenOf,
+  orderSiblings,
+  type OutlineNode,
+} from "./outline/index.js";
+import { useLunoraClient } from "./use-lunora-client.js";
 
-export default function App() {
-  // Default to "dark" for a stable first paint, then reconcile to the OS
-  // preference; the toggle takes over after that.
-  const [theme, setTheme] = useState<Theme>("dark");
+function newId(): string {
+  return crypto.randomUUID();
+}
 
-  useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-color-scheme: light)").matches
-    ) {
-      setTheme("light");
-    }
-  }, []);
+function AuthGate({ children }: { children: (userId: string) => ReactNode }) {
+  const session = authClient.useSession();
+  const [email, setEmail] = useState("spike@dotflowy.local");
+  const [password, setPassword] = useState("spike-dev-password");
+  const [name, setName] = useState("Spike");
+  const [error, setError] = useState<string | null>(null);
 
-  const isLight = theme === "light";
+  if (session.isPending) {
+    return <main style={page}>Loading session…</main>;
+  }
+
+  const userId = session.data?.user?.id;
+  if (userId) {
+    return <>{children(userId)}</>;
+  }
+
+  const onSignIn = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    const result = await authClient.signIn.email({ email, password });
+    if (result.error) setError(result.error.message ?? "sign-in failed");
+  };
+
+  const onSignUp = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    const result = await authClient.signUp.email({ email, password, name });
+    if (result.error) setError(result.error.message ?? "sign-up failed");
+  };
 
   return (
-    <div className="lunora-welcome" data-theme={theme}>
-      <div className="lw-bg">
-        <div className="arc a1" />
-        <div className="arc a2" />
-        <div className="glow" />
-      </div>
-
-      <button
-        className="lw-toggle"
-        type="button"
-        aria-label="Toggle color theme"
-        onClick={() => setTheme(isLight ? "dark" : "light")}
-      >
-        {isLight ? (
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-          </svg>
-        ) : (
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
-          </svg>
-        )}
-        <span>{isLight ? "Ivory" : "Night"}</span>
-      </button>
-
-      <div className="lw-wrap">
-        <div className="brand">
-          <svg viewBox="0 0 543 446" role="img" aria-label="Lunora">
-            <path
-              d="M 259.500 10.552 C 220.080 15.859, 182.424 32.566, 152.500 58.025 C 110.179 94.031, 85.380 137.183, 77.518 188.500 C 75.410 202.255, 74.569 225.677, 75.796 236.466 C 76.757 244.917, 76.683 245.692, 74.518 249.966 C 63.118 272.466, 53.141 303.876, 51.382 322.799 L 50.718 329.943 71.960 320.471 C 83.643 315.262, 93.326 311, 93.478 311 C 93.630 311, 96.547 316.063, 99.959 322.250 C 103.371 328.438, 107.249 334.850, 108.577 336.500 L 110.990 339.500 110.981 336 C 110.977 334.075, 111.499 324.991, 112.143 315.813 L 113.312 299.127 121.406 293.336 C 132.495 285.403, 149.593 271.554, 161 261.268 C 171.556 251.748, 189.116 235, 188.540 235 C 188.337 235, 183.069 238.648, 176.835 243.106 C 142.318 267.789, 68.537 314, 63.646 314 C 61.843 314, 72.791 281.179, 80.905 262.259 C 92.233 235.845, 107.473 212.389, 132.106 183.453 L 138.451 176 148.268 176 C 176.192 176, 197.512 187.154, 212.868 209.797 C 216.470 215.108, 217.035 216.595, 216.477 219.297 C 211.386 243.968, 202.359 274.496, 193.797 296 C 183.898 320.861, 167.147 352.101, 152.395 373.215 L 147.004 380.930 152.891 385.830 C 161.400 392.911, 165.563 396, 166.594 395.998 C 167.092 395.998, 168.772 391.641, 170.327 386.317 C 176.279 365.934, 188.422 338.749, 200.942 317.778 C 223.060 280.731, 256.432 244.369, 294.500 215.836 C 309.956 204.252, 313.937 201.603, 314.719 202.385 C 315.116 202.783, 315.449 213.096, 315.460 225.304 C 315.474 241.855, 315.021 250.405, 313.680 258.924 C 307.009 301.272, 291.175 336.677, 263.112 372 C 255.259 381.883, 227.182 410.673, 218.516 417.727 L 213.532 421.783 223.439 424.880 C 281.705 443.093, 349.165 436.018, 398.616 406.508 C 446.728 377.797, 483.322 331.466, 497.366 281.481 C 503.381 260.075, 504.480 250.741, 504.491 221 C 504.501 191.997, 503.598 184.047, 497.987 163.732 C 484.768 115.871, 452.505 72.708, 407.718 42.964 C 381.051 25.254, 352.818 14.828, 319.695 10.460 C 305.932 8.645, 273.298 8.695, 259.500 10.552"
-              fill="currentColor"
-              fillRule="evenodd"
-            />
-          </svg>
-          <span className="word">Lunora</span>
-        </div>
-
-        <div className="grid">
-          <a className="card feature" href="https://lunora.sh/docs">
-            <div className="shot" aria-hidden="true">
-              <div className="top">
-                <span className="wm">
-                  <i /> Lunora
-                </span>
-                <span className="search" />
-                <span className="ver">v0.1</span>
-              </div>
-              <div className="body">
-                <div className="nav">
-                  <i style={{ width: "80%" }} />
-                  <i style={{ width: "60%" }} />
-                  <i style={{ width: "72%" }} />
-                  <i style={{ width: "50%" }} />
-                  <i style={{ width: "66%" }} />
-                  <i style={{ width: "44%" }} />
-                  <i style={{ width: "58%" }} />
-                </div>
-                <div className="doc">
-                  <span className="h" />
-                  <i style={{ width: "92%" }} />
-                  <i style={{ width: "88%" }} />
-                  <span className="accent" />
-                  <i style={{ width: "80%" }} />
-                  <i style={{ width: "90%" }} />
-                  <i style={{ width: "72%" }} />
-                  <i style={{ width: "84%" }} />
-                  <i style={{ width: "78%" }} />
-                </div>
-              </div>
-            </div>
-            <div className="info">
-              <span className="ic">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                >
-                  <path d="M4 5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-                  <path d="M14 3v5h5" />
-                </svg>
-              </span>
-              <h2>Documentation</h2>
-              <div className="row">
-                <p>
-                  Schemas, queries, live subscriptions, sharding, and edge
-                  deploy — start to finish. New here or coming from Convex or
-                  tRPC, you'll have a live app fast.
-                </p>
-                <span className="arrow">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </span>
-              </div>
-            </div>
-          </a>
-
-          <div className="stack">
-            <a className="card mini" href="https://lunora.sh/blog">
-              <div className="mc">
-                <span className="ic">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                  >
-                    <path d="M5 4h11a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1zM8 8h7M8 12h7M8 16h4" />
-                  </svg>
-                </span>
-                <h3>Blog</h3>
-                <p>Product updates, deep dives, and what's new in Lunora.</p>
-              </div>
-              <span className="arrow">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </span>
-            </a>
-            <a className="card mini" href="/_lunora">
-              <div className="mc">
-                <span className="ic">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="1" />
-                    <path d="M3 9h18M9 21V9" />
-                  </svg>
-                </span>
-                <h3>Lunora Studio</h3>
-                <p>Local admin for schema, data, logs, and advisors.</p>
-              </div>
-              <span className="arrow">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </span>
-            </a>
-            <a className="card mini" href="https://lunora.sh/packages">
-              <div className="mc">
-                <span className="ic">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                  >
-                    <path d="M12 2 3 7v10l9 5 9-5V7z" />
-                    <path d="M3 7l9 5 9-5M12 12v10" />
-                  </svg>
-                </span>
-                <h3>Cloudflare ecosystem</h3>
-                <p>Auth, mail, storage, AI, payments — one deploy.</p>
-              </div>
-              <span className="arrow">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </span>
-            </a>
-          </div>
-        </div>
-
-        <div className="lw-foot">Running on Lunora · Vite + React</div>
-      </div>
-    </div>
+    <main style={page}>
+      <h1>Lunora outline spike</h1>
+      <p style={{ color: "#666", maxWidth: 480 }}>
+        Sign up once, then open a second tab signed in as the same user to prove
+        live sync. Hard reload should restore the outline from the shape.
+      </p>
+      <form onSubmit={onSignIn} style={form}>
+        <h2>Sign in</h2>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="email"
+          type="email"
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="password"
+          type="password"
+        />
+        <button type="submit">Sign in</button>
+      </form>
+      <form onSubmit={onSignUp} style={form}>
+        <h2>Or sign up</h2>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="name"
+        />
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="email"
+          type="email"
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="password"
+          type="password"
+        />
+        <button type="submit">Sign up</button>
+      </form>
+      {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+    </main>
   );
 }
+
+function OutlineApp({ userId }: { userId: string }) {
+  const client = useLunoraClient();
+  const store = useMemo(
+    () => createOutlineStore(client, userId),
+    [client, userId],
+  );
+
+  const { data: rows } = useLiveQuery((q) => q.from({ n: store.collection }));
+
+  const nodes: OutlineNode[] = useMemo(() => {
+    const list = (rows as NodeRow[] | undefined) ?? [];
+    return list.map((row) => ({
+      id: row._id,
+      parentId: (row.parentId as string | null) ?? null,
+      prevSiblingId: (row.prevSiblingId as string | null) ?? null,
+      text: row.text,
+      isTask: row.isTask,
+      completed: row.completed,
+      collapsed: row.collapsed,
+      bookmarkedAt: (row.bookmarkedAt as number | null) ?? null,
+      mirrorOf: (row.mirrorOf as string | null) ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      origin: (row.origin as string | null) ?? null,
+      kind: row.kind === "paragraph" ? "paragraph" : null,
+      userId: row.userId,
+    }));
+  }, [rows]);
+
+  const orderedTop = useMemo(() => {
+    const index = buildTreeIndex(nodes);
+    return orderSiblings(childrenOf(index, null));
+  }, [nodes]);
+
+  const childrenByParent = useMemo(() => {
+    const index = buildTreeIndex(nodes);
+    const map = new Map<string, OutlineNode[]>();
+    for (const n of nodes) {
+      if (n.parentId === null) continue;
+      const kids = orderSiblings(childrenOf(index, n.parentId));
+      map.set(n.parentId, kids);
+    }
+    return map;
+  }, [nodes]);
+
+  const { mutate: insertSibling } = useMutator(store.mutators.insertSibling);
+  const { mutate: indent } = useMutator(store.mutators.indent);
+  const { mutate: outdent } = useMutator(store.mutators.outdent);
+  const { mutate: removeNode } = useMutator(store.mutators.removeNode);
+  const { mutate: setText } = useMutator(store.mutators.setText);
+
+  const [draft, setDraft] = useState("");
+  const [afterId, setAfterId] = useState<string | null>(null);
+
+  const addBullet = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = draft.trim() || "untitled";
+    const now = Date.now();
+    const id = newId();
+    setDraft("");
+    await insertSibling({
+      id,
+      userId,
+      parentId: null,
+      afterId,
+      text,
+      createdAt: now,
+      updatedAt: now,
+    });
+    setAfterId(id);
+  };
+
+  const renderRow = (node: OutlineNode, depth: number) => {
+    const kids = childrenByParent.get(node.id) ?? [];
+    return (
+      <li key={node.id} style={{ listStyle: "none", marginLeft: depth * 16 }}>
+        <div style={row}>
+          <input
+            value={node.text}
+            onChange={(e) => {
+              const text = e.target.value;
+              void setText({
+                id: node.id,
+                userId,
+                text,
+                updatedAt: Date.now(),
+              });
+            }}
+            style={{ flex: 1, font: "inherit", padding: 4 }}
+          />
+          <button
+            type="button"
+            title="Insert sibling below"
+            onClick={() => setAfterId(node.id)}
+          >
+            +after
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void indent({ id: node.id, userId, updatedAt: Date.now() })
+            }
+          >
+            indent
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void outdent({ id: node.id, userId, updatedAt: Date.now() })
+            }
+          >
+            outdent
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void removeNode({ id: node.id, userId, updatedAt: Date.now() })
+            }
+          >
+            delete
+          </button>
+        </div>
+        {kids.length > 0 ? (
+          <ul style={{ margin: 0, padding: 0 }}>
+            {kids.map((child) => renderRow(child, depth + 1))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  };
+
+  return (
+    <main style={page}>
+      <header style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <h1 style={{ margin: 0, fontSize: 20 }}>Outline spike</h1>
+        <span style={{ color: "#666", fontSize: 12 }}>user {userId}</span>
+        <button
+          type="button"
+          style={{ marginLeft: "auto" }}
+          onClick={() => void authClient.signOut()}
+        >
+          Sign out
+        </button>
+      </header>
+      <p style={{ color: "#666", fontSize: 13 }}>
+        Insert after: <code>{afterId ?? "(head)"}</code> · open a second tab to
+        watch live sync
+      </p>
+      <form onSubmit={addBullet} style={{ display: "flex", gap: 8 }}>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="New bullet text"
+          style={{ flex: 1, padding: 8 }}
+        />
+        <button type="submit">Insert</button>
+        <button type="button" onClick={() => setAfterId(null)}>
+          Insert at head
+        </button>
+      </form>
+      <ul style={{ marginTop: 16, padding: 0 }}>
+        {orderedTop.map((n) => renderRow(n, 0))}
+      </ul>
+      {orderedTop.length === 0 ? (
+        <p style={{ color: "#999" }}>Empty outline — insert a bullet.</p>
+      ) : null}
+    </main>
+  );
+}
+
+export default function App() {
+  return <AuthGate>{(userId) => <OutlineApp userId={userId} />}</AuthGate>;
+}
+
+const page: CSSProperties = {
+  maxWidth: 720,
+  margin: "2rem auto",
+  padding: 16,
+  fontFamily: "system-ui, sans-serif",
+};
+
+const form: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  maxWidth: 320,
+  marginBottom: 16,
+};
+
+const row: CSSProperties = {
+  display: "flex",
+  gap: 6,
+  alignItems: "center",
+  padding: "4px 0",
+};
