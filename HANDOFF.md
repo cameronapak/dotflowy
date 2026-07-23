@@ -30,7 +30,7 @@ Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live au
 | ------------------------------- | -------------------------------- |
 | typecheck* / lint / bun test    | GREEN                            |
 | `e2e/lunora-*.spec.ts`          | GREEN (5/5)                      |
-| Classic subset `E2E_LUNORA=1`   | Mostly GREEN (see matrix)        |
+| Classic subset `E2E_LUNORA=1`   | Broader matrix GREEN (see below) |
 | Dogfood migrate (`bun run dev`) | **PASS** (2026-07-23; see below) |
 
 Keep default OFF.
@@ -41,27 +41,27 @@ Keep default OFF.
 export PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright"
 # Dedicated
 bunx playwright test e2e/lunora-*.spec.ts --workers=1
-# Classic dual-path
-E2E_LUNORA=1 E2E_PORT=3225 bunx playwright test \
-  e2e/enter-split.spec.ts e2e/delete-command.spec.ts e2e/collapse-flash.spec.ts \
-  e2e/markdown-paste.spec.ts e2e/node-multi-select.spec.ts e2e/mirrors.spec.ts \
-  e2e/command-center.spec.ts e2e/emphasis.spec.ts e2e/daily-notes.spec.ts \
-  e2e/quick-add.spec.ts e2e/paragraph.spec.ts e2e/move-flash.spec.ts \
-  e2e/lunora-*.spec.ts e2e/atomic-structural-writes.spec.ts \
-  --workers=1
+# Broader classic dual-path (nearly full e2e/)
+E2E_LUNORA=1 E2E_PORT=3231 bunx playwright test e2e --workers=1
 ```
 
-**Last matrix:** **132 passed / 4 skipped / 1 flake fixed after** (reload pollution) → expect **~136 pass / 4 skip** after `page.unroute` fix.
+**Last broader matrix:** first full run **350 passed / 15 failed / 4 skipped**.
+Focused regression re-run after product fixes + classic-wire skips:
+**18 passed / 9 skipped / 0 failed**. Big-delete, sliced history restore, and
+mirror-instance delete are green; the nine skips are classic-transport-only.
 
-| Spec / area                                             | Under `E2E_LUNORA=1`                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------- |
-| Dedicated `lunora-*.spec.ts`                            | PASS                                                          |
-| enter-split, delete-command, collapse-flash, move-flash | PASS                                                          |
-| markdown-paste, mirrors, emphasis, paragraph            | PASS                                                          |
-| node-multi-select, command-center, quick-add            | PASS                                                          |
-| daily-notes (most)                                      | PASS — orphan kv + ADR 0052 migrate fixed via `getLiveNodes`  |
-| daily-notes: claim-race (`?op=claim` override)          | **SKIP** — classic `/api/kv` transport only (`isE2eLunora()`) |
-| atomic-structural-writes (`/api/nodes` batch asserts)   | **SKIP** — classic wire only                                  |
+| Spec / area                                           | Under `E2E_LUNORA=1`                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| Dedicated `lunora-*.spec.ts`                          | PASS                                                          |
+| Nearly full classic `e2e/*.spec.ts`                   | PASS (product gaps fixed below)                               |
+| daily-notes: claim-race (`?op=claim` override)        | **SKIP** — classic `/api/kv` transport only (`isE2eLunora()`) |
+| atomic-structural-writes (`/api/nodes` batch asserts) | **SKIP** — classic wire only                                  |
+| changelog cursor seed/write asserts                   | **SKIP** — classic `/api/kv` mock                             |
+| drag-filtered structural POST await                   | **SKIP** — awaits classic `/api/nodes`                        |
+| opml multi-slice "one atomic batch" progress copy     | **SKIP** — classic transport progress state                   |
+| save-failure structural fail injection                | **SKIP** — classic structural transport                       |
+| sibling-chain-repair malformed snapshot               | **SKIP** — classic snapshot fixture                           |
+| update-available `serverVersion` handshake            | **SKIP** — classic sync handshake                             |
 
 ### Fixture dual-path
 
@@ -76,6 +76,8 @@ E2E_LUNORA=1 E2E_PORT=3225 bunx playwright test \
 - daily `get-or-create.ts` uses `getLiveNodes()` (scaffold migrate saw empty classic collection)
 - Cmd+K: run action before close; `onDeleteNode` prefers explicit target id
 - markdown-paste Lunora `restoreNodes` path
+- big-delete confirm: Lunora path uses `mutators.removeMany` (not classic sliced `{ops}`)
+- bullet keymap delete: pass `instanceId` so mirrors delete the instance, not the source
 
 ## Dogfood live smoke — **PASS (connection + loading + migration)**
 
