@@ -33,8 +33,8 @@ afterEach(() => {
 });
 
 describe("isLunoraSyncEnabled", () => {
-  test("defaults OFF", () => {
-    expect(isLunoraSyncEnabled()).toBe(false);
+  test("defaults ON", () => {
+    expect(isLunoraSyncEnabled()).toBe(true);
   });
 
   test("localStorage on enables", () => {

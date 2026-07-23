@@ -4,27 +4,28 @@
 
 ## Status
 
-Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live authenticated socket, manual migration, and loading smoke pass; MCP's Lunora routing remains code-verified but needs an OAuth bearer + paid local entitlement for a live `tools/call`.
+Dual-path e2e + product fixes landed. **Client + Worker default ON** (2026-07-23). Live authenticated socket, manual migration, loading smoke, and MCP Lunora live write pass. Kill-switches remain for rollback.
 
 ## Flag — Lunora outline sync (client)
 
-|             |                                                                                                 |
-| ----------- | ----------------------------------------------------------------------------------------------- |
-| **Name**    | `dotflowy:flag:lunora-sync`                                                                     |
-| **Getter**  | `isLunoraSyncEnabled()` in `src/data/flags.ts`                                                  |
-| **Default** | **OFF** (do not flip until checklist below)                                                     |
-| **Enable**  | `localStorage.setItem("dotflowy:flag:lunora-sync", "on")` then reload, **or** `?lunora-sync=on` |
-| **Disable** | `"off"` in localStorage, or `?lunora-sync=off`                                                  |
+|             |                                                                                |
+| ----------- | ------------------------------------------------------------------------------ |
+| **Name**    | `dotflowy:flag:lunora-sync`                                                    |
+| **Getter**  | `isLunoraSyncEnabled()` in `src/data/flags.ts`                                 |
+| **Default** | **ON**                                                                         |
+| **Disable** | `"off"` in localStorage, or `?lunora-sync=off`                                 |
+| **Enable**  | `"on"` in localStorage, or `?lunora-sync=on` (explicit; default needs neither) |
 
 ## Flag — Lunora MCP store (Worker)
 
-|             |                                                                                          |
-| ----------- | ---------------------------------------------------------------------------------------- |
-| **Name**    | `LUNORA_OUTLINE`                                                                         |
-| **Default** | **OFF** (unset in `.dev.vars.example` still documents the opt-in; do not default to `1`) |
-| **Enable**  | `LUNORA_OUTLINE=1` in `.dev.vars`                                                        |
+|             |                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------- |
+| **Name**    | `LUNORA_OUTLINE`                                                                   |
+| **Default** | **ON** when unset — browser + MCP share one shard                                  |
+| **Disable** | `LUNORA_OUTLINE=0` / `false` / `off` in `.dev.vars` (local debugging escape hatch) |
+| **Enable**  | unset (default), or `LUNORA_OUTLINE=1` / `true` (explicit)                         |
 
-## Default-ON readiness — **NO**
+## Default-ON readiness — **YES**
 
 | Gate                            | Result                           |
 | ------------------------------- | -------------------------------- |
@@ -32,8 +33,9 @@ Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live au
 | `e2e/lunora-*.spec.ts`          | GREEN (5/5)                      |
 | Classic subset `E2E_LUNORA=1`   | Broader matrix GREEN (see below) |
 | Dogfood migrate (`bun run dev`) | **PASS** (2026-07-23; see below) |
+| MCP live write dogfood          | **PASS** (2026-07-23; see below) |
 
-Keep default OFF.
+**Shipped default ON** with kill-switches above. Classic e2e forces flag OFF in `seedOutline`.
 
 ## e2e Lunora run matrix (this slice)
 
@@ -95,7 +97,7 @@ Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 3. Browser smoke with `dotflowy:flag:lunora-sync=on` rendered the Lunora outline and **cleared "Loading outline"**.
 4. Fresh run: flag OFF classic source held 3 welcome nodes. Flag ON exposed `window.__dotflowyMigrateToLunora` as a function and cleared loading. After clearing prior local Lunora spike seed rows, the empty shard auto-imported the three classic nodes; the concurrent manual helper then safely returned `skipped-nonempty` with `nodes: 3`. A full reload retained all three classic titles. More menu also displayed its safe-skip toast against a nonempty shard.
 
-**Keep default OFF.** Migration + dual-path e2e + MCP Lunora live write are dogfood-verified; default ON still waits on optional browser re-check + broader recount.
+**Default ON.** Migration + dual-path e2e + MCP Lunora live write dogfood-verified.
 
 ## Dogfood MCP with `LUNORA_OUTLINE=1` — **PASS (live write, 2026-07-23)**
 
@@ -140,7 +142,7 @@ curl -s -X POST http://localhost:8787/mcp \
 4. ~~Broader classic specs under `E2E_LUNORA=1`~~ **DONE** (transport-only skips; product gaps fixed)
 5. Optional: re-run full `E2E_LUNORA=1 bunx playwright test e2e` for a clean green count (expect ~359 pass / ~13 skip)
 6. Snapshot/R2/PITR still classic DO — out of scope
-7. Flip client default ON + `.dev.vars.example` `LUNORA_OUTLINE=1` only after 3 green
+7. ~~Flip client default ON + Worker default ON + `.dev.vars.example`~~ **DONE** (2026-07-23)
 
 ## Gates
 
@@ -153,6 +155,6 @@ E2E_LUNORA=1 bunx playwright test <subset> --workers=1
 
 ## Next
 
-1. Optional: browser reload with `dotflowy:flag:lunora-sync=on` to visually confirm MCP-written bullets.
-2. Optional clean full-suite recount under `E2E_LUNORA=1`.
-3. Then consider default ON → PR; **delete `HANDOFF.md` in shipping PR.**
+1. Open PR from `spike/lunora-outline`; **delete `HANDOFF.md` in shipping PR.**
+2. Optional: browser reload to visually confirm MCP-written bullets render in the editor.
+3. Optional clean full-suite recount under `E2E_LUNORA=1`.

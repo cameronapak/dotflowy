@@ -25,7 +25,7 @@ Dotflowy’s hand-rolled per-user DO sync (`/api/sync` + client-planned `{ops}` 
 ## Identity / e2e / kv (locked)
 
 - **Identity:** product Better Auth stays the session authority (MCP OAuth, Stripe, invite/Turnstile). Lunora `resolveIdentity` reads that session — do **not** run a second `@lunora/auth` signup stack in the main app.
-- **e2e:** keep `seedOutline` (`/api/sync`+`/api/nodes`) until the collection swap; then replace with a Lunora-aware fixture (route-mock `/_lunora/*` first; real Miniflare only if the mock cannot prove watermark). Sync-contract specs that assert custom `seq` frames are rewritten, not preserved.
+- **e2e:** dual-path fixtures — `seedOutline` forces `lunora-sync=off` (classic `/api/sync` mock); `seedOutlineLunora` / `E2E_LUNORA=1` forces ON (`/_lunora/*` mock). Product defaults both client flag and Worker `LUNORA_OUTLINE` to ON; kill-switches stay for rollback.
 - **KV side-collections:** phase **2b** after nodes sync is on Lunora — do not block the collection swap on tag-colors/daily-index/saved-queries.
 
 ## Sequence (implementation order)

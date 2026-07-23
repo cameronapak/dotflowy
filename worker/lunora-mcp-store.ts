@@ -151,9 +151,12 @@ export function createLunoraOutlineStore(
   };
 }
 
-/** True when Worker MCP should use the Lunora shard (default OFF). */
+/** True when Worker MCP should use the Lunora shard (default ON when unset). */
 export function isLunoraOutlineEnabled(env: {
   LUNORA_OUTLINE?: string;
 }): boolean {
-  return env.LUNORA_OUTLINE === "1" || env.LUNORA_OUTLINE === "true";
+  const raw = env.LUNORA_OUTLINE?.trim().toLowerCase();
+  if (!raw) return true;
+  if (raw === "0" || raw === "false" || raw === "off") return false;
+  return true;
 }

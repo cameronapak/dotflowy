@@ -156,9 +156,11 @@ function toNode(n: SeedNode): ApiNode {
  * (every spec does) so the collection's first sync is mocked.
  *
  * Dual-path: pass `{ lunora: true }` or set `E2E_LUNORA=1` to route through
- * `seedOutlineLunora` (flag ON + `/_lunora/*` mock). Classic-only opts
- * (`echoDelayMs`, `echoChunks`, `postDelayMs`, `failStructuralWrites`,
- * `serverVersion`) are ignored on that path — those specs stay classic-only.
+ * `seedOutlineLunora` (flag ON + `/_lunora/*` mock). The classic path sets
+ * `dotflowy:flag:lunora-sync=off` so specs stay on `/api/sync` even though
+ * the product default is ON. Classic-only opts (`echoDelayMs`, `echoChunks`,
+ * `postDelayMs`, `failStructuralWrites`, `serverVersion`) are ignored on the
+ * Lunora path — those specs stay classic-only.
  */
 export async function seedOutline(
   page: Page,
@@ -198,6 +200,11 @@ export async function seedOutline(
   if (wantsLunoraSeed(opts)) {
     return seedOutlineLunora(page, nodes, { kv: opts.kv });
   }
+
+  // Product default is Lunora ON; classic e2e mocks `/api/sync` only.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("dotflowy:flag:lunora-sync", "off");
+  });
 
   const echoDelayMs = opts.echoDelayMs ?? 0;
   // Delay only the structural-batch POST *response* (not its echo). Opens a

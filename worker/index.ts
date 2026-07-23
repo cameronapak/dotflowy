@@ -985,9 +985,9 @@ function handleApiRequest(
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
       const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
-      // LUNORA_OUTLINE=1 → same shard as browser mutators (Better Auth userId).
-      // Default OFF keeps classic UserOutlineDO.applyBatch (resolveUserId /
-      // owner→'default' bridge unchanged).
+      // LUNORA_OUTLINE unset → same shard as browser mutators (default ON).
+      // LUNORA_OUTLINE=0|false|off keeps classic UserOutlineDO.applyBatch
+      // (resolveUserId / owner→'default' bridge unchanged).
       const mcpStore = isLunoraOutlineEnabled(env)
         ? createLunoraOutlineStore(env, token.userId)
         : env.USER_OUTLINE.get(

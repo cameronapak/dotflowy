@@ -34,10 +34,10 @@ INVITE_CODES=dev-invite
 # STRIPE_SECRET_KEY=sk_test_replace-me
 # STRIPE_WEBHOOK_SECRET=whsec_replace-me
 
-# Optional: MCP outline store = Lunora SHARD (ADR 0055). Exactly "1" or "true"
-# routes /mcp tools through mutators:applyChangeOps + queries:listNodes on the
-# same user shard as the browser flag. Unset = classic UserOutlineDO (default).
-# Local dogfood: set alongside client `dotflowy:flag:lunora-sync=on`.
+# Lunora MCP outline store (ADR 0055). Default ON when unset — /mcp tools use
+# the Lunora SHARD (mutators:applyChangeOps + queries:listNodes), same shard as
+# the browser. Set "0", "false", or "off" to route MCP through classic
+# UserOutlineDO (local debugging escape hatch). Explicit enable still works:
 # LUNORA_OUTLINE=1
 
 # Optional: pin the OAuth issuer the MCP discovery metadata advertises (ADR
