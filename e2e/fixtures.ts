@@ -3,10 +3,19 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import {
   applyPlan,
   buildTreeIndex,
+  planAppendChild,
+  planImportNodes,
   planIndent,
+  planIndentMany,
   planInsertChildAtStart,
   planInsertSibling,
+  planMaterializeDailyNodes,
+  planMirrorNode,
+  planMoveMany,
+  planMoveNode,
   planOutdent,
+  planOutdentMany,
+  planRemoveMany,
   planRemoveNode,
   planRestoreNodes,
   planSetBookmarkedAt,
@@ -20,6 +29,23 @@ import {
   type OutlinePlan,
 } from "../src/data/outline-plans";
 import { resolveDailyClaim } from "../src/plugins/daily/claim-mapping";
+
+/** True when this Playwright process targets the Lunora mock (`E2E_LUNORA=1`
+ *  or `seedOutline(..., { lunora: true })`). Specs that override classic
+ *  `/api/kv?op=claim` should skip under Lunora — shapes/mutators replace that
+ *  transport. */
+export function isE2eLunora(opts?: { lunora?: boolean }): boolean {
+  if (opts?.lunora === true) return true;
+  if (opts?.lunora === false) return false;
+  const env = process.env.E2E_LUNORA;
+  return env === "1" || env === "true";
+}
+
+/** Opt classic specs onto the Lunora mock: `seedOutline(..., { lunora: true })`
+ *  or `E2E_LUNORA=1 bunx playwright test …`. Default stays classic (`/api/sync`). */
+function wantsLunoraSeed(opts: { lunora?: boolean } | undefined): boolean {
+  return isE2eLunora(opts);
+}
 
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
@@ -108,6 +134,11 @@ function toNode(n: SeedNode): ApiNode {
  * The store is scoped to this test's `page`. Playwright gives each test its own
  * page/context, so two tests never share state. Register before `page.goto(...)`
  * (every spec does) so the collection's first sync is mocked.
+ *
+ * Dual-path: pass `{ lunora: true }` or set `E2E_LUNORA=1` to route through
+ * `seedOutlineLunora` (flag ON + `/_lunora/*` mock). Classic-only opts
+ * (`echoDelayMs`, `echoChunks`, `postDelayMs`, `failStructuralWrites`,
+ * `serverVersion`) are ignored on that path — those specs stay classic-only.
  */
 export async function seedOutline(
   page: Page,
@@ -139,8 +170,15 @@ export async function seedOutline(
      *  (not a transport error), so the client's retry policy doesn't kick in —
      *  the failure lands immediately. */
     failStructuralWrites?: boolean;
+    /** When true, use the Lunora `/_lunora/*` mock + enable the client flag.
+     *  Also enabled by `E2E_LUNORA=1` / `true` when this is unset. */
+    lunora?: boolean;
   } = {},
 ): Promise<void> {
+  if (wantsLunoraSeed(opts)) {
+    return seedOutlineLunora(page, nodes, { kv: opts.kv });
+  }
+
   const echoDelayMs = opts.echoDelayMs ?? 0;
   // Delay only the structural-batch POST *response* (not its echo). Opens a
   // window to prove the client serializes batches: a second batch must not be
@@ -431,13 +469,28 @@ type DailyIndexRow = {
   userId: string;
 };
 
+type TagColorRow = {
+  _id: string;
+  tag: string;
+  color: string;
+  userId: string;
+};
+
+type SavedQueryRow = {
+  _id: string;
+  name: string;
+  query: string;
+  createdAt: number;
+  userId: string;
+};
+
 /**
  * Seed an outline on the Lunora flag-ON path by mocking `/_lunora/ws` +
  * `/_lunora/rpc`. Structural mutators apply the same `outline-plans` pure
- * planners as production (insert/split/indent/delete/restore/…).
+ * planners as production (insert/split/indent/delete/restore/move/multi/…).
  *
- * Classic `seedOutline` stays the default for the existing suite (flag OFF).
- * Opt into Lunora per-spec via this helper — flag stays default OFF in app.
+ * Also reachable via `seedOutline(..., { lunora: true })` or `E2E_LUNORA=1`
+ * so classic specs can run against Lunora without rewriting call sites.
  * Auto-migrate is skipped by mocking GET `/api/nodes` → [].
  */
 export async function seedOutlineLunora(
@@ -445,10 +498,19 @@ export async function seedOutlineLunora(
   nodes: SeedNode[],
   opts: {
     userId?: string;
-    /** Pre-seed Lunora kv shapes (dailyIndex / tagColors / savedQueries). */
+    /** Pre-seed Lunora kv shapes from classic kv collection names
+     *  (`daily-index` / `tag-colors` / `saved-queries`). */
     kv?: Record<string, { key: string; value: unknown }[]>;
   } = {},
 ): Promise<void> {
+  // Drop prior Lunora mocks from earlier tests on this page — stacked
+  // `routeWebSocket` handlers can keep an old in-memory store alive across
+  // reload (delete "persists" then resurrects from the stale mock).
+  await page.unroute("**/_lunora/**");
+  await page.unroute("**/api/auth/get-session");
+  await page.unroute("**/api/nodes");
+  await page.unroute("**/api/kv");
+
   const userId = opts.userId ?? "test-user";
   const store = new Map<string, LunoraRow>();
   for (const n of nodes) store.set(n.id, toLunoraRow(n, userId));
@@ -467,9 +529,46 @@ export async function seedOutlineLunora(
     });
   }
 
+  const tagColors = new Map<string, TagColorRow>();
+  for (const r of opts.kv?.["tag-colors"] ?? []) {
+    const v = r.value as { tag?: string; color?: string };
+    const tag = String(v.tag ?? r.key);
+    tagColors.set(tag, {
+      _id: tag,
+      tag,
+      color: String(v.color ?? ""),
+      userId,
+    });
+  }
+
+  const savedQueries = new Map<string, SavedQueryRow>();
+  for (const r of opts.kv?.["saved-queries"] ?? []) {
+    const v = r.value as {
+      id?: string;
+      name?: string;
+      query?: string;
+      createdAt?: number;
+    };
+    const id = String(v.id ?? r.key);
+    savedQueries.set(id, {
+      _id: id,
+      name: String(v.name ?? ""),
+      query: String(v.query ?? ""),
+      createdAt: Number(v.createdAt ?? 0),
+      userId,
+    });
+  }
+
   let clientSeq = 0;
-  let checkpoint = 0;
   let pokeN = 0;
+  /** Per-shape poke cursor — a shared counter desyncs shapes and Lunora
+   *  drops the poke (`baseDiverged`) without firing `onCheckpoint`, which
+   *  wedges `isPersisted` (claimDaily / materializeDaily / seedIfEmpty). */
+  const shapeCheckpoints = new Map<string, number>();
+  /** Last keys we put into each shape — poke is a diff; without deletes for
+   *  removed keys the client view keeps stale rows (Cmd+K delete "works" then
+   *  the poke resurrects the bullet). */
+  const shapeKeys = new Map<string, Set<string>>();
   const sockets = new Set<WebSocketRoute>();
   const shapeSubs = new Map<string, { name: string }>();
 
@@ -488,12 +587,24 @@ export async function seedOutlineLunora(
   ) => {
     pokeN += 1;
     const pokeId = `p${pokeN}`;
-    checkpoint += 1;
+    const base = shapeCheckpoints.get(shapeId) ?? 0;
+    const next = base + 1;
+    shapeCheckpoints.set(shapeId, next);
+    const nextKeys = new Set(rows.map((r) => r._id));
+    const prevKeys = shapeKeys.get(shapeId) ?? new Set<string>();
+    const rowsPatch: Array<Record<string, unknown>> = [];
+    for (const key of prevKeys) {
+      if (!nextKeys.has(key)) rowsPatch.push({ op: "delete", key });
+    }
+    for (const r of rows) {
+      rowsPatch.push({ op: "put", key: r._id, value: r });
+    }
+    shapeKeys.set(shapeId, nextKeys);
     ws.send(
       JSON.stringify({
         type: "pokeStart",
         pokeId,
-        baseCheckpoint: checkpoint - 1,
+        baseCheckpoint: base,
         epoch: 1,
       }),
     );
@@ -503,50 +614,44 @@ export async function seedOutlineLunora(
         pokeId,
         shapeId,
         lastMutationId,
-        rowsPatch: rows.map((r) => ({
-          op: "put",
-          key: r._id,
-          value: r,
-        })),
+        rowsPatch,
       }),
     );
     ws.send(
       JSON.stringify({
         type: "pokeEnd",
         pokeId,
-        checkpoint,
+        checkpoint: next,
         epoch: 1,
       }),
     );
   };
 
+  const shapeRows = (
+    name: string,
+  ): Array<Record<string, unknown> & { _id: string }> => {
+    if (name === "wholeOutline") return [...store.values()];
+    if (name === "userDailyIndex") return [...dailyIndex.values()];
+    if (name === "userTagColors") return [...tagColors.values()];
+    if (name === "userSavedQueries") return [...savedQueries.values()];
+    return [];
+  };
+
   const seedShape = (ws: WebSocketRoute, shapeId: string, name: string) => {
-    if (name === "wholeOutline") {
-      sendPoke(ws, shapeId, [...store.values()], 0);
-      return;
-    }
-    if (name === "userDailyIndex") {
-      sendPoke(ws, shapeId, [...dailyIndex.values()], 0);
-      return;
-    }
-    // Empty tagColors / savedQueries.
-    sendPoke(ws, shapeId, [], 0);
+    sendPoke(ws, shapeId, shapeRows(name), 0);
   };
 
   const pokeSubscribed = (seq: number, shapes: ReadonlySet<string>) => {
     for (const ws of sockets) {
       for (const [shapeId, meta] of shapeSubs) {
         if (!shapes.has(meta.name)) continue;
-        if (meta.name === "wholeOutline") {
-          sendPoke(ws, shapeId, [...store.values()], seq);
-        } else if (meta.name === "userDailyIndex") {
-          sendPoke(ws, shapeId, [...dailyIndex.values()], seq);
-        }
+        sendPoke(ws, shapeId, shapeRows(meta.name), seq);
       }
     }
   };
 
   const liveIndex = () => buildTreeIndex([...store.values()].map(rowToOutline));
+  const liveNodes = () => [...store.values()].map(rowToOutline);
 
   await page.addInitScript(() => {
     window.localStorage.setItem("dotflowy:flag:lunora-sync", "on");
@@ -690,6 +795,21 @@ export async function seedOutlineLunora(
           }),
         );
         result = { id: id() };
+      } else if (path === "mutators:appendChild") {
+        commitOutlinePlan(
+          store,
+          planAppendChild(liveIndex(), {
+            id: id(),
+            userId,
+            parentId: (args.parentId as string | null) ?? null,
+            text: String(args.text ?? ""),
+            isTask: Boolean(args.isTask),
+            kind: args.kind === "paragraph" ? "paragraph" : null,
+            createdAt: Number(args.createdAt ?? 0),
+            updatedAt: updatedAt(),
+          }),
+        );
+        result = { id: id() };
       } else if (path === "mutators:splitNode") {
         const newId = String(args.newId ?? "");
         commitOutlinePlan(
@@ -726,13 +846,129 @@ export async function seedOutlineLunora(
           store,
           planRemoveNode(liveIndex(), id(), updatedAt()),
         );
+      } else if (path === "mutators:moveNode") {
+        commitOutlinePlan(
+          store,
+          planMoveNode(liveIndex(), {
+            id: id(),
+            newParentId: (args.newParentId as string | null) ?? null,
+            afterSiblingId: (args.afterSiblingId as string | null) ?? null,
+            updatedAt: updatedAt(),
+            expandIds: args.expandIds as string[] | undefined,
+          }),
+        );
       } else if (path === "mutators:restoreNodes") {
         const target = (args.nodes as OutlineNode[] | undefined) ?? [];
-        const current = [...store.values()].map(rowToOutline);
-        commitOutlinePlan(store, planRestoreNodes(current, target));
+        commitOutlinePlan(store, planRestoreNodes(liveNodes(), target));
         result = { ok: true };
+      } else if (path === "mutators:importNodes") {
+        const imported = (args.nodes as OutlineNode[] | undefined) ?? [];
+        commitOutlinePlan(store, planImportNodes(imported));
+        result = { count: imported.length };
+      } else if (path === "mutators:mirrorNode") {
+        commitOutlinePlan(
+          store,
+          planMirrorNode(liveIndex(), {
+            id: id(),
+            userId,
+            sourceId: String(args.sourceId ?? ""),
+            targetParentId: (args.targetParentId as string | null) ?? null,
+            createdAt: Number(args.createdAt ?? 0),
+            updatedAt: updatedAt(),
+          }),
+        );
+        result = { id: id() };
+      } else if (path === "mutators:removeMany") {
+        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
+        commitOutlinePlan(
+          store,
+          planRemoveMany(liveNodes(), nodeIds, updatedAt()),
+        );
+      } else if (path === "mutators:moveMany") {
+        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
+        commitOutlinePlan(
+          store,
+          planMoveMany(liveNodes(), {
+            targetId: (args.targetId as string | null) ?? null,
+            nodeIds,
+            updatedAt: updatedAt(),
+          }),
+        );
+      } else if (path === "mutators:indentMany") {
+        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
+        commitOutlinePlan(
+          store,
+          planIndentMany(
+            liveNodes(),
+            nodeIds,
+            updatedAt(),
+            Boolean(args.resolveMirror),
+          ),
+        );
+      } else if (path === "mutators:outdentMany") {
+        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
+        commitOutlinePlan(
+          store,
+          planOutdentMany(liveNodes(), nodeIds, updatedAt()),
+        );
+      } else if (path === "mutators:materializeDailyNodes") {
+        const inserts =
+          (args.inserts as
+            | {
+                id: string;
+                parentId: string | null;
+                afterId: string | null;
+                text: string;
+              }[]
+            | undefined) ?? [];
+        commitOutlinePlan(
+          store,
+          planMaterializeDailyNodes(liveNodes(), {
+            userId,
+            inserts,
+            createdAt: Number(args.createdAt ?? 0),
+            updatedAt: updatedAt(),
+          }),
+        );
+        result = { count: inserts.length };
       } else if (path === "mutators:seedIfEmpty") {
         result = { seeded: false };
+      } else if (path === "mutators:upsertTagColor") {
+        const tag = String(args.tag ?? "");
+        tagColors.set(tag, {
+          _id: tag,
+          tag,
+          color: String(args.color ?? ""),
+          userId,
+        });
+        pokeShapes = new Set(["userTagColors"]);
+      } else if (path === "mutators:deleteTagColor") {
+        tagColors.delete(String(args.tag ?? ""));
+        pokeShapes = new Set(["userTagColors"]);
+      } else if (path === "mutators:upsertSavedQuery") {
+        const sid = String(args.id ?? "");
+        savedQueries.set(sid, {
+          _id: sid,
+          name: String(args.name ?? ""),
+          query: String(args.query ?? ""),
+          createdAt: Number(args.createdAt ?? 0),
+          userId,
+        });
+        pokeShapes = new Set(["userSavedQueries"]);
+      } else if (path === "mutators:patchSavedQuery") {
+        const sid = String(args.id ?? "");
+        const cur = savedQueries.get(sid);
+        if (cur) {
+          savedQueries.set(sid, {
+            ...cur,
+            name: args.name !== undefined ? String(args.name) : cur.name,
+            query: args.query !== undefined ? String(args.query) : cur.query,
+          });
+        }
+        pokeShapes = new Set(["userSavedQueries"]);
+      } else if (path === "mutators:deleteSavedQuery") {
+        savedQueries.delete(String(args.id ?? ""));
+        pokeShapes = new Set(["userSavedQueries"]);
       } else if (path === "mutators:claimDailyMapping") {
         const key = String(args.key ?? "");
         const candidate = String(args.nodeId ?? "");
@@ -762,6 +998,11 @@ export async function seedOutlineLunora(
         pokeShapes = new Set(["userDailyIndex"]);
       }
       // Unknown mutators: accept so watermark chain doesn't wedge.
+
+      // Watermark is per-client on the shard (wholeOutline checkpoints gate
+      // isPersisted). Kv-only mutators must still advance wholeOutline or
+      // claimDailyMapping / materializeDailyNodes hang awaiting the poke.
+      pokeShapes.add("wholeOutline");
 
       await reply(route, { result, lastMutationId: seq });
       pokeSubscribed(seq, pokeShapes);
