@@ -34,11 +34,19 @@ export interface RegisteredLunoraFunction {
 export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
     "mutators:hello": lunora_mutators_0.hello as unknown as RegisteredLunoraFunction,
     "mutators:indent": lunora_mutators_0.indent as unknown as RegisteredLunoraFunction,
+    "mutators:insertChildAtStart": lunora_mutators_0.insertChildAtStart as unknown as RegisteredLunoraFunction,
     "mutators:insertSibling": lunora_mutators_0.insertSibling as unknown as RegisteredLunoraFunction,
+    "mutators:moveNode": lunora_mutators_0.moveNode as unknown as RegisteredLunoraFunction,
     "mutators:outdent": lunora_mutators_0.outdent as unknown as RegisteredLunoraFunction,
     "mutators:removeNode": lunora_mutators_0.removeNode as unknown as RegisteredLunoraFunction,
     "mutators:seedIfEmpty": lunora_mutators_0.seedIfEmpty as unknown as RegisteredLunoraFunction,
+    "mutators:setBookmarkedAt": lunora_mutators_0.setBookmarkedAt as unknown as RegisteredLunoraFunction,
+    "mutators:setCollapsed": lunora_mutators_0.setCollapsed as unknown as RegisteredLunoraFunction,
+    "mutators:setCompleted": lunora_mutators_0.setCompleted as unknown as RegisteredLunoraFunction,
+    "mutators:setIsTask": lunora_mutators_0.setIsTask as unknown as RegisteredLunoraFunction,
+    "mutators:setKind": lunora_mutators_0.setKind as unknown as RegisteredLunoraFunction,
     "mutators:setText": lunora_mutators_0.setText as unknown as RegisteredLunoraFunction,
+    "mutators:splitNode": lunora_mutators_0.splitNode as unknown as RegisteredLunoraFunction,
 };
 
 /**
@@ -56,7 +64,7 @@ export const LUNORA_SHAPES: Record<string, RegisteredShape> = {
  * ShardDO's `isCustomMutator` override routes through the client-watermark push
  * protocol (`x-lunora-client-id`/`x-lunora-client-seq` ordering).
  */
-export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:hello", "mutators:indent", "mutators:insertSibling", "mutators:outdent", "mutators:removeNode", "mutators:seedIfEmpty", "mutators:setText"]);
+export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:hello", "mutators:indent", "mutators:insertChildAtStart", "mutators:insertSibling", "mutators:moveNode", "mutators:outdent", "mutators:removeNode", "mutators:seedIfEmpty", "mutators:setBookmarkedAt", "mutators:setCollapsed", "mutators:setCompleted", "mutators:setIsTask", "mutators:setKind", "mutators:setText", "mutators:splitNode"]);
 
 /**
  * Connection-lifecycle manifest: the function paths the generated ShardDO

@@ -206,6 +206,27 @@ export function planRemoveNode(
   return plan;
 }
 
+/**
+ * Insert as FIRST child of `parentId` (push current head down). Port of
+ * Dotflowy `insertChildAtStart` / worker `planAddNode` position `'first'`.
+ * Same chain surgery as `planInsertSibling` with `afterId: null`.
+ */
+export function planInsertChildAtStart(
+  index: TreeIndex,
+  args: {
+    id: string;
+    userId: string;
+    parentId: string | null;
+    text: string;
+    isTask?: boolean;
+    kind?: "paragraph" | null;
+    createdAt: number;
+    updatedAt: number;
+  },
+): OutlinePlan | null {
+  return planInsertSibling(index, { ...args, afterId: null });
+}
+
 /** Field-only text update. */
 export function planSetText(
   index: TreeIndex,
@@ -216,6 +237,218 @@ export function planSetText(
   if (!index.byId.has(nodeId)) return null;
   const plan = emptyPlan();
   plan.patches.push({ id: nodeId, fields: { text, updatedAt } });
+  return plan;
+}
+
+export function planSetCompleted(
+  index: TreeIndex,
+  nodeId: string,
+  completed: boolean,
+  updatedAt: number,
+): OutlinePlan | null {
+  if (!index.byId.has(nodeId)) return null;
+  const plan = emptyPlan();
+  plan.patches.push({ id: nodeId, fields: { completed, updatedAt } });
+  return plan;
+}
+
+export function planSetCollapsed(
+  index: TreeIndex,
+  nodeId: string,
+  collapsed: boolean,
+  updatedAt: number,
+): OutlinePlan | null {
+  if (!index.byId.has(nodeId)) return null;
+  const plan = emptyPlan();
+  plan.patches.push({ id: nodeId, fields: { collapsed, updatedAt } });
+  return plan;
+}
+
+/**
+ * Make task / plain bullet. Clears `kind` (ADR 0045 exclusivity — mirrors
+ * `setIsTask` / worker `planUpdateNode`).
+ */
+export function planSetIsTask(
+  index: TreeIndex,
+  nodeId: string,
+  isTask: boolean,
+  updatedAt: number,
+): OutlinePlan | null {
+  if (!index.byId.has(nodeId)) return null;
+  const plan = emptyPlan();
+  plan.patches.push({ id: nodeId, fields: { isTask, kind: null, updatedAt } });
+  return plan;
+}
+
+/**
+ * Paragraph ↔ bullet. Always clears `isTask` (ADR 0045 — mirrors `setKind`).
+ */
+export function planSetKind(
+  index: TreeIndex,
+  nodeId: string,
+  kind: "paragraph" | null,
+  updatedAt: number,
+): OutlinePlan | null {
+  if (!index.byId.has(nodeId)) return null;
+  const plan = emptyPlan();
+  plan.patches.push({
+    id: nodeId,
+    fields: { kind, isTask: false, updatedAt },
+  });
+  return plan;
+}
+
+export function planSetBookmarkedAt(
+  index: TreeIndex,
+  nodeId: string,
+  bookmarkedAt: number | null,
+  updatedAt: number,
+): OutlinePlan | null {
+  if (!index.byId.has(nodeId)) return null;
+  const plan = emptyPlan();
+  plan.patches.push({ id: nodeId, fields: { bookmarkedAt, updatedAt } });
+  return plan;
+}
+
+/**
+ * Reparent + sibling-chain splice (port of Dotflowy `moveNode` /
+ * worker `applyMoveInPlace`). Optional `expandIds` uncollapse uncle/aunt on
+ * edge keyboard moves.
+ */
+export function planMoveNode(
+  index: TreeIndex,
+  args: {
+    id: string;
+    newParentId: string | null;
+    afterSiblingId: string | null;
+    updatedAt: number;
+    expandIds?: readonly string[];
+  },
+): OutlinePlan | null {
+  const node = index.byId.get(args.id);
+  if (!node) return null;
+  if (args.afterSiblingId === args.id || args.newParentId === args.id)
+    return null;
+
+  if (args.newParentId !== null) {
+    let cursor = index.byId.get(args.newParentId);
+    let guard = index.byId.size + 1;
+    while (cursor && guard-- > 0) {
+      if (cursor.id === args.id) return null;
+      cursor = cursor.parentId ? index.byId.get(cursor.parentId) : undefined;
+    }
+  }
+
+  if (
+    args.newParentId === node.parentId &&
+    (args.afterSiblingId ?? null) === (node.prevSiblingId ?? null)
+  ) {
+    if (!args.expandIds?.length) return null;
+    const plan = emptyPlan();
+    for (const expandId of args.expandIds) {
+      if (index.byId.has(expandId)) {
+        plan.patches.push({
+          id: expandId,
+          fields: { collapsed: false, updatedAt: args.updatedAt },
+        });
+      }
+    }
+    return plan.patches.length ? plan : null;
+  }
+
+  const oldSiblings = childrenOf(index, node.parentId);
+  const oi = oldSiblings.findIndex((n) => n.id === args.id);
+  const oldNext =
+    oi !== -1 && oi + 1 < oldSiblings.length ? oldSiblings[oi + 1]! : null;
+
+  const newSiblings = childrenOf(index, args.newParentId);
+  let newNext: { id: string } | null = null;
+  if (args.afterSiblingId === null) {
+    newNext = newSiblings[0] ?? null;
+  } else {
+    const ni = newSiblings.findIndex((n) => n.id === args.afterSiblingId);
+    newNext =
+      ni !== -1 && ni + 1 < newSiblings.length ? newSiblings[ni + 1]! : null;
+  }
+
+  const plan = emptyPlan();
+  if (args.expandIds) {
+    for (const expandId of args.expandIds) {
+      if (index.byId.has(expandId)) {
+        plan.patches.push({
+          id: expandId,
+          fields: { collapsed: false, updatedAt: args.updatedAt },
+        });
+      }
+    }
+  }
+  if (oldNext) {
+    plan.patches.push({
+      id: oldNext.id,
+      fields: {
+        prevSiblingId: node.prevSiblingId,
+        updatedAt: args.updatedAt,
+      },
+    });
+  }
+  plan.patches.push({
+    id: args.id,
+    fields: {
+      parentId: args.newParentId,
+      prevSiblingId: args.afterSiblingId,
+      updatedAt: args.updatedAt,
+    },
+  });
+  if (newNext && newNext.id !== args.id) {
+    plan.patches.push({
+      id: newNext.id,
+      fields: { prevSiblingId: args.id, updatedAt: args.updatedAt },
+    });
+  }
+  return plan;
+}
+
+/**
+ * Enter mid-split: setText(left) + insertSibling(right) in ONE plan so Lunora
+ * commits them under a single watermark (avoids two mutator round-trips).
+ */
+export function planSplitNode(
+  index: TreeIndex,
+  args: {
+    id: string;
+    userId: string;
+    parentId: string | null;
+    afterId: string;
+    newId: string;
+    leftText: string;
+    rightText: string;
+    isTask?: boolean;
+    kind?: "paragraph" | null;
+    createdAt: number;
+    updatedAt: number;
+  },
+): OutlinePlan | null {
+  if (!index.byId.has(args.id)) return null;
+  const insert = planInsertSibling(index, {
+    id: args.newId,
+    userId: args.userId,
+    parentId: args.parentId,
+    afterId: args.afterId,
+    text: args.rightText,
+    isTask: args.isTask,
+    kind: args.kind,
+    createdAt: args.createdAt,
+    updatedAt: args.updatedAt,
+  });
+  if (!insert) return null;
+
+  const plan = emptyPlan();
+  plan.inserts.push(...insert.inserts);
+  plan.patches.push(...insert.patches);
+  plan.patches.push({
+    id: args.id,
+    fields: { text: args.leftText, updatedAt: args.updatedAt },
+  });
   return plan;
 }
 

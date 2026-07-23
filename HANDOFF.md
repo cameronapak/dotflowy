@@ -32,6 +32,28 @@ Expect: empty Lunora shard seeds demo bullets via `seedIfEmpty`; Enter / Tab / S
 
 ## What landed (this slice)
 
+### Mutator/planner parity widen (flag ON)
+
+Dogfood surface expanded beyond the original 5 ops. Shared pure planners in
+`src/data/outline-plans/`; server `defineMutator` in `lunora/mutators.ts`;
+client `@lunora/db/mutators` in `src/data/lunora-outline-store.ts`;
+`mutations.ts` branches when `isLunoraSyncEnabled()`.
+
+| Mutator                             | Planner                  | Notes                                                   |
+| ----------------------------------- | ------------------------ | ------------------------------------------------------- |
+| `insertSibling`                     | `planInsertSibling`      | prior                                                   |
+| `insertChildAtStart`                | `planInsertChildAtStart` | Enter into expanded parent                              |
+| `splitNode`                         | `planSplitNode`          | Enter mid-split — ONE watermark (setText+insertSibling) |
+| `indent` / `outdent` / `removeNode` | prior                    | prior                                                   |
+| `moveNode`                          | `planMoveNode`           | Cmd+Shift+↑/↓ via moveUp/moveDown → moveNode            |
+| `setText`                           | `planSetText`            | prior                                                   |
+| `setCompleted`                      | `planSetCompleted`       | field toggle                                            |
+| `setCollapsed`                      | `planSetCollapsed`       | field toggle                                            |
+| `setIsTask`                         | `planSetIsTask`          | clears `kind` (ADR 0045)                                |
+| `setKind`                           | `planSetKind`            | clears `isTask` (ADR 0045)                              |
+| `setBookmarkedAt`                   | `planSetBookmarkedAt`    | bookmark pin/unpin                                      |
+| `seedIfEmpty` / `hello`             | prior                    | prior                                                   |
+
 ### Flag-swap architecture
 
 ```
@@ -43,7 +65,7 @@ Flag ON:
        ↓ subscribeChanges
   tree-store.resetTreeFromNodes (ADR 0004 feed)
        ↑
-  mutations (insertSibling/indent/outdent/removeNode/setText) → Lunora mutators
+  mutations (insert/indent/outdent/remove/move/split/field toggles) → Lunora mutators
   runStructural → body only (watermark hold is checkpoints, not waitForSeq)
 ```
 
@@ -57,7 +79,9 @@ Flag ON:
 | `src/components/lunora-sync-host.tsx` | AuthGate child; LunoraProvider when flag ON             |
 | `src/data/collection.ts`              | flag ON → skip `/api/sync` socket                       |
 | `src/data/structural.ts`              | flag ON → no `{ops}` / waitForSeq                       |
-| `src/data/mutations.ts`               | dogfood mutator surface (5 ops)                         |
+| `src/data/mutations.ts`               | Lunora mutator surface (insert/move/split/fields)       |
+| `src/data/outline-plans/`             | shared pure planners + unit tests                       |
+| `lunora/mutators.ts`                  | server `defineMutator` twin                             |
 
 ### Deps (root, bun)
 
@@ -73,8 +97,7 @@ Flag ON:
 
 ## Known gaps (flag ON)
 
-- **Not ported:** multi-select, daily get-or-create, mirrors, move up/down, drag, OPML, history restore, insertChildAtStart (Enter-into-open-parent), field toggles (completed/isTask/kind/bookmark), full plugin structural paths
-- **Enter mid-split** fires two mutators (insertSibling + setText), not one atomic batch
+- **Not ported:** multi-select batches, daily get-or-create, mirrors (`resolveMirror` path), drag-specific UX (moveNode mutator covers the fuse), OPML, history restore, full plugin structural paths
 - **e2e** still on old wire (`seedOutline`); flag must stay OFF for Playwright
 - **KV** side-collections still custom DO (phase 2b)
 - **No data migrate** from UserOutlineDO → Lunora shard yet (flag ON = empty/new Lunora outline)
@@ -85,14 +108,14 @@ Flag ON:
 ```sh
 bun run typecheck
 bun run typecheck:worker
-bun run test                    # includes flags + lunora-bridge tests
+bun run test                    # includes flags + lunora-bridge + outline-plans
 ```
 
 ## Next
 
-1. Widen mutator surface (insertChildAtStart, move, completed/isTask, …) or keep dogfood-only until cutover.
-2. Lunora-aware e2e fixture (mock `/_lunora` or Miniflare) — keep `seedOutline` until then.
-3. KV phase 2b; MCP remount; snapshot migrate; delete `UserOutlineDO` custom sync.
+1. Lunora-aware e2e fixture (mock `/_lunora` or Miniflare) — keep `seedOutline` until then.
+2. KV phase 2b; MCP remount; snapshot migrate; delete `UserOutlineDO` custom sync.
+3. Multi-select / daily / mirrors when cutover nears.
 4. Green gates → PR; **delete this `HANDOFF.md` in the shipping PR.**
 
 ## Note

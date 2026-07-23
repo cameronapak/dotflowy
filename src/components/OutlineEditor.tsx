@@ -49,6 +49,7 @@ import {
   setIsTask,
   setKind,
   setText,
+  splitNode,
   toggleCollapsed,
   toggleCompleted,
 } from "../data/mutations";
@@ -1472,6 +1473,20 @@ function useNodeCommands({
                   undefined,
                   content.kind,
                 );
+              } else if (!caretAtEnd) {
+                // Mid-split: one atomic Lunora mutator (or insertSibling+setText
+                // inside this runStructural batch on the custom-DO path).
+                // Mirror rows force caretAtEnd above, so this arm is never a mirror.
+                newId = splitNode(idx, {
+                  nodeId: contentId,
+                  parentId: instance.parentId,
+                  afterId: instanceId,
+                  leftText: before,
+                  rightText: after,
+                  isTask: content.isTask,
+                  kind: content.kind,
+                });
+                atStart = true;
               } else {
                 // New sibling beside the INSTANCE (position is local to where the row
                 // sits). Off-flag / mirror-free, instance === content === id, so this
@@ -1484,11 +1499,6 @@ function useNodeCommands({
                   isMirrorRow ? "" : after,
                   content.kind,
                 );
-                if (!caretAtEnd) {
-                  setText(contentId, before);
-                  // Caret sits before the moved text, where the split happened.
-                  atStart = true;
-                }
               }
               return { instanceId: newId, activeKey, atStart };
             },

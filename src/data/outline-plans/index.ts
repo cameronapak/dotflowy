@@ -10,10 +10,18 @@ export type { TreeIndex } from "../tree";
 export {
   makeOutlineNode,
   planInsertSibling,
+  planInsertChildAtStart,
   planIndent,
   planOutdent,
   planRemoveNode,
   planSetText,
+  planSetCompleted,
+  planSetCollapsed,
+  planSetIsTask,
+  planSetKind,
+  planSetBookmarkedAt,
+  planMoveNode,
+  planSplitNode,
   applyPlan,
 } from "./planners";
 

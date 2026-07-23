@@ -7,11 +7,19 @@ import {
   docToNode,
   nodeToInsertFields,
   planIndent,
+  planInsertChildAtStart,
   planInsertSibling,
+  planMoveNode,
   planOutdent,
   planRemoveNode,
   planSeedIfEmpty,
+  planSetBookmarkedAt,
+  planSetCollapsed,
+  planSetCompleted,
+  planSetIsTask,
+  planSetKind,
   planSetText,
+  planSplitNode,
   type OutlineNode,
   type OutlinePlan,
 } from "../src/data/outline-plans";
@@ -68,6 +76,7 @@ async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
 const userIdArg = v.string();
 const idArg = v.string();
 const tsArg = v.number();
+const kindArg = v.optional(v.literal("paragraph").nullable());
 
 /** Compose smoke mutator — proves codegen + SHARD wiring without dual auth UX. */
 export const hello = defineMutator({
@@ -87,7 +96,7 @@ export const insertSibling = defineMutator({
     afterId: v.string().nullable(),
     text: v.string(),
     isTask: v.optional(v.boolean()),
-    kind: v.optional(v.literal("paragraph").nullable()),
+    kind: kindArg,
     createdAt: tsArg,
     updatedAt: tsArg,
   },
@@ -109,6 +118,78 @@ export const insertSibling = defineMutator({
     if (!plan) throw new Error("insertSibling: invalid parent/afterId");
     await commitPlan(mctx, plan);
     return { id: args.id };
+  },
+});
+
+export const insertChildAtStart = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    parentId: v.string().nullable(),
+    text: v.string(),
+    isTask: v.optional(v.boolean()),
+    kind: kindArg,
+    createdAt: tsArg,
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planInsertChildAtStart(index, {
+      id: args.id,
+      userId: args.userId,
+      parentId: args.parentId,
+      text: args.text,
+      isTask: args.isTask,
+      kind: args.kind,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!plan) throw new Error("insertChildAtStart: invalid parent");
+    await commitPlan(mctx, plan);
+    return { id: args.id };
+  },
+});
+
+/**
+ * Enter mid-split: left text stays on `id`, right text lands in `newId` sibling
+ * — one DO transaction / watermark.
+ */
+export const splitNode = defineMutator({
+  args: {
+    id: idArg,
+    newId: idArg,
+    userId: userIdArg,
+    parentId: v.string().nullable(),
+    afterId: idArg,
+    leftText: v.string(),
+    rightText: v.string(),
+    isTask: v.optional(v.boolean()),
+    kind: kindArg,
+    createdAt: tsArg,
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planSplitNode(index, {
+      id: args.id,
+      newId: args.newId,
+      userId: args.userId,
+      parentId: args.parentId,
+      afterId: args.afterId,
+      leftText: args.leftText,
+      rightText: args.rightText,
+      isTask: args.isTask,
+      kind: args.kind,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!plan) throw new Error("splitNode: invalid id/parent/afterId");
+    await commitPlan(mctx, plan);
+    return { id: args.newId };
   },
 });
 
@@ -174,6 +255,31 @@ export const removeNode = defineMutator({
   },
 });
 
+export const moveNode = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    newParentId: v.string().nullable(),
+    afterSiblingId: v.string().nullable(),
+    updatedAt: tsArg,
+    expandIds: v.optional(v.array(v.string())),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planMoveNode(index, {
+      id: args.id,
+      newParentId: args.newParentId,
+      afterSiblingId: args.afterSiblingId,
+      updatedAt: args.updatedAt,
+      expandIds: args.expandIds,
+    });
+    if (!plan) throw new Error("moveNode: no-op or invalid");
+    await commitPlan(mctx, plan);
+  },
+});
+
 export const setText = defineMutator({
   args: { id: idArg, userId: userIdArg, text: v.string(), updatedAt: tsArg },
   server: async (ctx, args) => {
@@ -182,6 +288,106 @@ export const setText = defineMutator({
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetText(index, args.id, args.text, args.updatedAt);
     if (!plan) throw new Error("setText: missing node");
+    await commitPlan(mctx, plan);
+  },
+});
+
+export const setCompleted = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    completed: v.boolean(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planSetCompleted(
+      index,
+      args.id,
+      args.completed,
+      args.updatedAt,
+    );
+    if (!plan) throw new Error("setCompleted: missing node");
+    await commitPlan(mctx, plan);
+  },
+});
+
+export const setCollapsed = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    collapsed: v.boolean(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planSetCollapsed(
+      index,
+      args.id,
+      args.collapsed,
+      args.updatedAt,
+    );
+    if (!plan) throw new Error("setCollapsed: missing node");
+    await commitPlan(mctx, plan);
+  },
+});
+
+export const setIsTask = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    isTask: v.boolean(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planSetIsTask(index, args.id, args.isTask, args.updatedAt);
+    if (!plan) throw new Error("setIsTask: missing node");
+    await commitPlan(mctx, plan);
+  },
+});
+
+export const setKind = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    kind: v.literal("paragraph").nullable(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planSetKind(index, args.id, args.kind, args.updatedAt);
+    if (!plan) throw new Error("setKind: missing node");
+    await commitPlan(mctx, plan);
+  },
+});
+
+export const setBookmarkedAt = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    bookmarkedAt: v.number().nullable(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planSetBookmarkedAt(
+      index,
+      args.id,
+      args.bookmarkedAt,
+      args.updatedAt,
+    );
+    if (!plan) throw new Error("setBookmarkedAt: missing node");
     await commitPlan(mctx, plan);
   },
 });

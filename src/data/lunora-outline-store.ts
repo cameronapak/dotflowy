@@ -14,11 +14,19 @@ import {
   buildTreeIndex,
   nodeToRow,
   planIndent,
+  planInsertChildAtStart,
   planInsertSibling,
+  planMoveNode,
   planOutdent,
   planRemoveNode,
   planSeedIfEmpty,
+  planSetBookmarkedAt,
+  planSetCollapsed,
+  planSetCompleted,
+  planSetIsTask,
+  planSetKind,
   planSetText,
+  planSplitNode,
   rowToNode,
   type NodeDocLike,
   type OutlineNode,
@@ -89,6 +97,43 @@ function bindOutlineMutators(
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),
+      insertChildAtStart: defineMutator<{
+        id: string;
+        userId: string;
+        parentId: string | null;
+        text: string;
+        isTask?: boolean;
+        kind?: "paragraph" | null;
+        createdAt: number;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:insertChildAtStart",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planInsertChildAtStart(index, args);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      splitNode: defineMutator<{
+        id: string;
+        newId: string;
+        userId: string;
+        parentId: string | null;
+        afterId: string;
+        leftText: string;
+        rightText: string;
+        isTask?: boolean;
+        kind?: "paragraph" | null;
+        createdAt: number;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:splitNode",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planSplitNode(index, args);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
       indent: defineMutator<{ id: string; userId: string; updatedAt: number }>({
         serverRef: "mutators:indent",
         apply: (_ctx, args) => {
@@ -119,6 +164,21 @@ function bindOutlineMutators(
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),
+      moveNode: defineMutator<{
+        id: string;
+        userId: string;
+        newParentId: string | null;
+        afterSiblingId: string | null;
+        updatedAt: number;
+        expandIds?: string[];
+      }>({
+        serverRef: "mutators:moveNode",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planMoveNode(index, args);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
       setText: defineMutator<{
         id: string;
         userId: string;
@@ -129,6 +189,91 @@ function bindOutlineMutators(
         apply: (_ctx, args) => {
           const index = buildTreeIndex(snapshotNodes(collection));
           const plan = planSetText(index, args.id, args.text, args.updatedAt);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      setCompleted: defineMutator<{
+        id: string;
+        userId: string;
+        completed: boolean;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:setCompleted",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planSetCompleted(
+            index,
+            args.id,
+            args.completed,
+            args.updatedAt,
+          );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      setCollapsed: defineMutator<{
+        id: string;
+        userId: string;
+        collapsed: boolean;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:setCollapsed",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planSetCollapsed(
+            index,
+            args.id,
+            args.collapsed,
+            args.updatedAt,
+          );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      setIsTask: defineMutator<{
+        id: string;
+        userId: string;
+        isTask: boolean;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:setIsTask",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planSetIsTask(
+            index,
+            args.id,
+            args.isTask,
+            args.updatedAt,
+          );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      setKind: defineMutator<{
+        id: string;
+        userId: string;
+        kind: "paragraph" | null;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:setKind",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planSetKind(index, args.id, args.kind, args.updatedAt);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      setBookmarkedAt: defineMutator<{
+        id: string;
+        userId: string;
+        bookmarkedAt: number | null;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:setBookmarkedAt",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planSetBookmarkedAt(
+            index,
+            args.id,
+            args.bookmarkedAt,
+            args.updatedAt,
+          );
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),
