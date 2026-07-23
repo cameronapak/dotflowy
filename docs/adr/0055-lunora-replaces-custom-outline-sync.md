@@ -22,6 +22,12 @@ Dotflowy’s hand-rolled per-user DO sync (`/api/sync` + client-planned `{ops}` 
 | Big-bang rewrite in one commit                                               | Editor + e2e + MCP + backups all break together; no incremental proof.     |
 | Replace Better Auth / Stripe / unfurl with Lunora primitives in the same cut | Out of scope — remount HTTP; don’t re-litigate identity/billing.           |
 
+## Identity / e2e / kv (locked)
+
+- **Identity:** product Better Auth stays the session authority (MCP OAuth, Stripe, invite/Turnstile). Lunora `resolveIdentity` reads that session — do **not** run a second `@lunora/auth` signup stack in the main app.
+- **e2e:** keep `seedOutline` (`/api/sync`+`/api/nodes`) until the collection swap; then replace with a Lunora-aware fixture (route-mock `/_lunora/*` first; real Miniflare only if the mock cannot prove watermark). Sync-contract specs that assert custom `seq` frames are rewritten, not preserved.
+- **KV side-collections:** phase **2b** after nodes sync is on Lunora — do not block the collection swap on tag-colors/daily-index/saved-queries.
+
 ## Sequence (implementation order)
 
 1. Spike Phase 0–1 (done): prove mutators/shapes/watermark/bridge/`seedIfEmpty`.
