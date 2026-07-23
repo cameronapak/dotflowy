@@ -4,7 +4,7 @@
 
 ## Status
 
-Dual-path e2e + product fixes landed. Client flag **still default OFF**. Not ready to flip default ON — dogfood migrate blocked; a few classic specs stay Lunora-incompatible (skipped).
+Dual-path e2e + product fixes landed. Client flag **still default OFF**. Live authenticated socket + loading smoke now pass; manual migration remains unverified and a few classic specs stay Lunora-incompatible (skipped).
 
 ## Flag — Lunora outline sync (client)
 
@@ -77,23 +77,23 @@ E2E_LUNORA=1 E2E_PORT=3225 bunx playwright test \
 - Cmd+K: run action before close; `onDeleteNode` prefers explicit target id
 - markdown-paste Lunora `restoreNodes` path
 
-## Dogfood migrate smoke — **FAIL / blocked**
+## Dogfood live smoke — **PASS (connection + loading)**
 
-`vite.config.ts` now sets `ws: true` for both `/api` and `/_lunora`; the old string shorthand silently dropped WebSocket upgrades.
+`vite.config.ts` sets `ws: true` for both `/api` and `/_lunora`; the old string shorthand silently dropped WebSocket upgrades.
 
 Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 
-1. Both direct Worker and Vite-proxied `/_lunora/health` return **503**.
-2. Cookie-less `/_lunora/ws` reaches Wrangler through both ports but returns **403**.
-3. Better Auth sign-in returns **200** and supplies a session cookie, but the cookie-authenticated WebSocket still returns **403** through both ports.
-4. Wrangler logs the Vite-proxied `GET /_lunora/ws`, so the proxy upgrade drop is fixed; Vite logs `EPIPE` because the raw probe closes after reading the response.
+1. Better Auth sign-in through Vite (`:3000`) returned **200** and set `better-auth.session_token`; `GET /api/auth/get-session` resolved user `VkBqJpDMdmTnAxjsqeOw4SH0cVST2weX`.
+2. Cookie-authenticated `/_lunora/ws?shard=<userId>` with `Origin: http://localhost:3000` returned **101** through both Vite (`:3000`) and direct Wrangler (`:8787`). The raw curl clients timed out after upgrading, as expected for an idle WebSocket.
+3. Browser smoke with `dotflowy:flag:lunora-sync=on` rendered the Lunora outline and **cleared "Loading outline"**.
+4. `window.__dotflowyMigrateToLunora` was absent during this smoke, so manual migrate was not run; the More-menu migration action was not exercised.
 
-**Not a fixture issue** — the remaining live Worker/Lunora authorization or health failure still blocks a successful subscription, so **"Loading outline" is not yet verified cleared**. Re-run browser dogfood after authenticated `/_lunora/ws` upgrades to **101** and health is available.
+**Keep default OFF.** The CSRF/CORS origin blocker is resolved; migration/MCP and broader dual-path coverage still gate default ON.
 
 ## Known gaps → flag-default-ON checklist
 
 1. ~~Dual-path fixture + representative classic subset~~ **DONE** (this slice)
-2. **Dogfood migrate** live — still blocked (above)
+2. **Manual migration dogfood** — connection/loading pass; helper was absent in smoke, so migration remains unverified
 3. **MCP dogfood** with `LUNORA_OUTLINE=1`
 4. Remaining classic specs under `E2E_LUNORA=1` (full suite) — maximize; skip only transport-bound specs
 5. Snapshot/R2/PITR still classic DO — out of scope
@@ -110,6 +110,6 @@ E2E_LUNORA=1 bunx playwright test <subset> --workers=1
 
 ## Next
 
-1. Fix live `/_lunora/ws` dogfood hang; re-run migrate smoke → PASS in this file.
+1. Run manual migrate smoke (console helper or More menu) now that `/_lunora/ws` upgrades.
 2. Broader `E2E_LUNORA=1` classic suite; document remaining fails.
 3. Then consider default ON → PR; **delete `HANDOFF.md` in shipping PR.**
