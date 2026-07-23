@@ -22,6 +22,9 @@ export {
   planSetBookmarkedAt,
   planMoveNode,
   planSplitNode,
+  sameNodeFields,
+  planRestoreNodes,
+  planMirrorNode,
   applyPlan,
 } from "./planners";
 

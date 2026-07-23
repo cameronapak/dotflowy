@@ -9,9 +9,11 @@ import {
   planIndent,
   planInsertChildAtStart,
   planInsertSibling,
+  planMirrorNode,
   planMoveNode,
   planOutdent,
   planRemoveNode,
+  planRestoreNodes,
   planSeedIfEmpty,
   planSetBookmarkedAt,
   planSetCollapsed,
@@ -55,10 +57,10 @@ function assertOwner(ctx: MutatorCtx, userId: string): void {
 }
 
 async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
-  for (const node of plan.inserts) {
-    await ctx.db.insert("nodes", nodeToInsertFields(node), {
-      clientId: node.id,
-    });
+  // deletes → patches → inserts: restore-safe (a deleted id must be gone
+  // before a same-batch insert could reclaim it) and fine for structural ops.
+  for (const id of plan.deletes) {
+    await ctx.db.delete(id as Id<"nodes">);
   }
 
   for (const patch of plan.patches) {
@@ -68,8 +70,10 @@ async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
     );
   }
 
-  for (const id of plan.deletes) {
-    await ctx.db.delete(id as Id<"nodes">);
+  for (const node of plan.inserts) {
+    await ctx.db.insert("nodes", nodeToInsertFields(node), {
+      clientId: node.id,
+    });
   }
 }
 
@@ -389,5 +393,72 @@ export const setBookmarkedAt = defineMutator({
     );
     if (!plan) throw new Error("setBookmarkedAt: missing node");
     await commitPlan(mctx, plan);
+  },
+});
+
+const nodeSnapshotArg = v.object({
+  id: idArg,
+  userId: userIdArg,
+  parentId: v.string().nullable(),
+  prevSiblingId: v.string().nullable(),
+  text: v.string(),
+  isTask: v.boolean(),
+  completed: v.boolean(),
+  collapsed: v.boolean(),
+  bookmarkedAt: v.number().nullable(),
+  mirrorOf: v.string().nullable(),
+  createdAt: tsArg,
+  updatedAt: tsArg,
+  origin: v.string().nullable(),
+  kind: v.literal("paragraph").nullable(),
+});
+
+/**
+ * Undo/redo snapshot restore — one DO transaction / watermark for the whole
+ * diff (deletes + upserts), even when large. Client sends the target outline
+ * subset (full snapshots for touched + surviving ids via planRestoreNodes).
+ */
+export const restoreNodes = defineMutator({
+  args: {
+    userId: userIdArg,
+    /** Full target outline after restore (history snapshot + userId). */
+    nodes: v.array(nodeSnapshotArg),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const current = await loadNodes(mctx);
+    const target: OutlineNode[] = args.nodes.map((n) => ({
+      ...n,
+      kind: n.kind === "paragraph" ? "paragraph" : null,
+    }));
+    const plan = planRestoreNodes(current, target);
+    await commitPlan(mctx, plan);
+    return {
+      deletes: plan.deletes.length,
+      inserts: plan.inserts.length,
+      patches: plan.patches.length,
+    };
+  },
+});
+
+/** `/mirror` — last-child mirror of source under targetParentId (ADR 0022). */
+export const mirrorNode = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    sourceId: idArg,
+    targetParentId: v.string().nullable(),
+    createdAt: tsArg,
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planMirrorNode(index, args);
+    if (!plan) throw new Error("mirrorNode: missing source/target or cycle");
+    await commitPlan(mctx, plan);
+    return { id: args.id };
   },
 });

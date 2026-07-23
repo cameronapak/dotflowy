@@ -1,7 +1,8 @@
+import type { Node } from "../schema";
 import type { TreeIndex } from "../tree";
-import type { OutlineNode, OutlinePlan } from "./types";
+import type { OutlineNode, OutlinePlan, PlanPatch } from "./types";
 
-import { childrenOf, makeNode } from "../tree";
+import { childrenOf, makeNode, trueSourceOf, wouldMirrorCycle } from "../tree";
 import { emptyPlan } from "./types";
 
 /** Dotflowy `makeNode` + Lunora shard `userId`. */
@@ -452,6 +453,117 @@ export function planSplitNode(
   return plan;
 }
 
+/**
+ * Flat-record equality for restore diffs. Nodes are shallow; `userId` is
+ * Lunora-only and ignored so history snapshots (`Node`) compare cleanly.
+ */
+export function sameNodeFields(a: Node, b: Node): boolean {
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  for (const key of Object.keys(ra)) {
+    if (key === "userId") continue;
+    if (ra[key] !== rb[key]) return false;
+  }
+  for (const key of Object.keys(rb)) {
+    if (key === "userId") continue;
+    if (!(key in ra)) return false;
+  }
+  return true;
+}
+
+/** Full field snapshot for a restore patch (every Node field except `id`). */
+function restorePatchFields(node: OutlineNode): PlanPatch["fields"] {
+  return {
+    parentId: node.parentId,
+    prevSiblingId: node.prevSiblingId,
+    text: node.text,
+    isTask: node.isTask,
+    completed: node.completed,
+    collapsed: node.collapsed,
+    bookmarkedAt: node.bookmarkedAt,
+    mirrorOf: node.mirrorOf,
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+    origin: node.origin,
+    kind: node.kind,
+  };
+}
+
+/**
+ * Snapshot restore → one OutlinePlan (deletes + inserts + full-field patches).
+ * Port of `history.ts` planRestore diff — used by Lunora `restoreNodes` and
+ * unit-tested here so undo/redo doesn't invent a second planner.
+ */
+export function planRestoreNodes(
+  current: readonly OutlineNode[],
+  target: readonly OutlineNode[],
+): OutlinePlan {
+  const targetById = new Map(target.map((n) => [n.id, n]));
+  const currentById = new Map(current.map((n) => [n.id, n]));
+  const plan = emptyPlan();
+
+  for (const id of currentById.keys()) {
+    if (!targetById.has(id)) plan.deletes.push(id);
+  }
+
+  for (const [id, node] of targetById) {
+    const live = currentById.get(id);
+    if (!live) {
+      plan.inserts.push(node);
+    } else if (!sameNodeFields(live, node)) {
+      plan.patches.push({ id, fields: restorePatchFields(node) });
+    }
+  }
+
+  return plan;
+}
+
+/**
+ * Create a mirror of `sourceId` as last child of `targetParentId` (null =
+ * top level). Flattens to the TRUE source; resolves the destination through
+ * `trueSourceOf` (worker `planMirrorNode` / ADR 0022); refuses cycles.
+ */
+export function planMirrorNode(
+  index: TreeIndex,
+  args: {
+    id: string;
+    userId: string;
+    sourceId: string;
+    targetParentId: string | null;
+    createdAt: number;
+    updatedAt: number;
+  },
+): OutlinePlan | null {
+  if (!index.byId.has(args.sourceId)) return null;
+
+  let parentId: string | null = null;
+  if (args.targetParentId !== null) {
+    if (!index.byId.has(args.targetParentId)) return null;
+    parentId = trueSourceOf(index, args.targetParentId);
+  }
+
+  const trueSourceId = trueSourceOf(index, args.sourceId);
+  if (wouldMirrorCycle(index, trueSourceId, parentId)) return null;
+
+  const siblings = childrenOf(index, parentId);
+  const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
+
+  const plan = emptyPlan();
+  plan.inserts.push(
+    makeOutlineNode({
+      id: args.id,
+      userId: args.userId,
+      parentId,
+      prevSiblingId: after,
+      text: index.byId.get(trueSourceId)?.text ?? "",
+      mirrorOf: trueSourceId,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+    }),
+  );
+  return plan;
+}
+
 /** Apply a plan to an in-memory node list (for unit tests / working copies). */
 export function applyPlan(
   nodes: OutlineNode[],
@@ -459,6 +571,7 @@ export function applyPlan(
 ): OutlineNode[] {
   const byId = new Map(nodes.map((n) => [n.id, { ...n }]));
 
+  // deletes → patches → inserts (restore-safe; matches server commitPlan)
   for (const id of plan.deletes) byId.delete(id);
 
   for (const patch of plan.patches) {

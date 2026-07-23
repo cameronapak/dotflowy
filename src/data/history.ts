@@ -107,10 +107,15 @@ export const RESTORE_SLICE_OPS = 500;
  * slice, in order, inside ONE transaction -- a `runStructural` body for the
  * small case, one `runStructuralSliced` call for the big one -- or call
  * `revert` if the apply failed and rolled back.
+ *
+ * When Lunora sync is ON, prefer `targetNodes` + `restoreNodes` mutator (one
+ * watermark) over `slices` writing `nodesCollection`.
  */
 export interface RestorePlan {
   /** Total collection writes the restore will make. */
   opCount: number;
+  /** Full target outline (history snapshot) — Lunora `restoreNodes` input. */
+  targetNodes: readonly Node[];
   /** Apply closures in order; each makes at most RESTORE_SLICE_OPS writes. */
   slices: ReadonlyArray<() => void>;
   /** Writes applied so far -- the sliced path's progress read. */
@@ -189,6 +194,7 @@ function planRestore(
 
   return {
     opCount: deletes.length + upserts.length,
+    targetNodes: entry.nodes,
     slices,
     applied: () => applied,
     // Only focus if the focused node still exists in the restored state. The focus

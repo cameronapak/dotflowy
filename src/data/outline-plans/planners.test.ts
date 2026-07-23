@@ -10,9 +10,11 @@ import {
   planIndent,
   planInsertChildAtStart,
   planInsertSibling,
+  planMirrorNode,
   planMoveNode,
   planOutdent,
   planRemoveNode,
+  planRestoreNodes,
   planSetBookmarkedAt,
   planSetCollapsed,
   planSetCompleted,
@@ -361,5 +363,155 @@ describe("planSplitNode", () => {
     expect(nodes.find((n) => n.id === "a")!.text).toBe("alpha");
     expect(nodes.find((n) => n.id === "a2")!.text).toBe("bravo");
     expect(nodes.find((n) => n.id === "b")!.prevSiblingId).toBe("a2");
+  });
+});
+
+describe("planRestoreNodes", () => {
+  it("deletes added, inserts removed, patches changed", () => {
+    const current = seedFlat(["a", "b", "c"]);
+    const target = seedFlat(["a", "b"]).map((n) =>
+      n.id === "a" ? { ...n, text: "alpha" } : n,
+    );
+    target.push(
+      makeOutlineNode({
+        id: "d",
+        userId: USER,
+        parentId: null,
+        prevSiblingId: "b",
+        text: "d",
+        createdAt: 9,
+        updatedAt: 9,
+      }),
+    );
+    const plan = planRestoreNodes(current, target);
+    expect(plan.deletes).toEqual(["c"]);
+    expect(plan.inserts.map((n) => n.id)).toEqual(["d"]);
+    expect(plan.patches).toEqual([
+      expect.objectContaining({
+        id: "a",
+        fields: expect.objectContaining({ text: "alpha" }),
+      }),
+    ]);
+    const next = applyPlan(current, plan);
+    expect(assertChainOk(next, null)).toEqual(["a", "b", "d"]);
+    expect(next.find((n) => n.id === "a")!.text).toBe("alpha");
+  });
+
+  it("no-ops when current already matches target", () => {
+    const nodes = seedFlat(["a", "b"]);
+    const plan = planRestoreNodes(
+      nodes,
+      nodes.map((n) => ({ ...n })),
+    );
+    expect(plan.deletes).toEqual([]);
+    expect(plan.inserts).toEqual([]);
+    expect(plan.patches).toEqual([]);
+  });
+});
+
+describe("planMirrorNode", () => {
+  it("appends a flattened mirror as last child", () => {
+    let nodes = seedFlat(["src", "dest"]);
+    nodes = [
+      ...nodes,
+      makeOutlineNode({
+        id: "child",
+        userId: USER,
+        parentId: "src",
+        prevSiblingId: null,
+        text: "child",
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    ];
+    const plan = planMirrorNode(buildTreeIndex(nodes), {
+      id: "m1",
+      userId: USER,
+      sourceId: "src",
+      targetParentId: "dest",
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.inserts).toHaveLength(1);
+    expect(plan!.inserts[0]!.mirrorOf).toBe("src");
+    expect(plan!.inserts[0]!.parentId).toBe("dest");
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, "dest")).toEqual(["m1"]);
+  });
+
+  it("flattens mirror-of-mirror to the true source", () => {
+    let nodes = seedFlat(["src", "dest"]);
+    {
+      const plan = planMirrorNode(buildTreeIndex(nodes), {
+        id: "m1",
+        userId: USER,
+        sourceId: "src",
+        targetParentId: null,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      nodes = applyPlan(nodes, plan!);
+    }
+    const plan = planMirrorNode(buildTreeIndex(nodes), {
+      id: "m2",
+      userId: USER,
+      sourceId: "m1",
+      targetParentId: "dest",
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.inserts[0]!.mirrorOf).toBe("src");
+  });
+
+  it("refuses a cycle (mirror into own subtree)", () => {
+    let nodes = seedFlat(["src"]);
+    nodes = [
+      ...nodes,
+      makeOutlineNode({
+        id: "child",
+        userId: USER,
+        parentId: "src",
+        prevSiblingId: null,
+        text: "child",
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    ];
+    const plan = planMirrorNode(buildTreeIndex(nodes), {
+      id: "m1",
+      userId: USER,
+      sourceId: "src",
+      targetParentId: "child",
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    expect(plan).toBeNull();
+  });
+
+  it("parents under the true source when target is a mirror instance", () => {
+    let nodes = seedFlat(["src", "other"]);
+    {
+      const plan = planMirrorNode(buildTreeIndex(nodes), {
+        id: "mDest",
+        userId: USER,
+        sourceId: "other",
+        targetParentId: null,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      nodes = applyPlan(nodes, plan!);
+    }
+    const plan = planMirrorNode(buildTreeIndex(nodes), {
+      id: "m1",
+      userId: USER,
+      sourceId: "src",
+      targetParentId: "mDest",
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.inserts[0]!.parentId).toBe("other");
   });
 });

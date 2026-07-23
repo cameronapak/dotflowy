@@ -256,9 +256,33 @@ export function mirrorNode(
   const trueSourceId = trueSourceOf(index, sourceId);
   if (wouldMirrorCycle(index, trueSourceId, targetId)) return null;
 
+  const id = createId();
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      // Resolve destination + cycle on the server planner (trueSourceOf parent).
+      // Pre-check above matches the legacy client path for early no-op.
+      const t = now();
+      const resolvedParent =
+        targetId !== null ? trueSourceOf(index, targetId) : null;
+      if (wouldMirrorCycle(index, trueSourceId, resolvedParent)) return null;
+      trackLunoraMutation(
+        lunora.store.mutators.mirrorNode({
+          id,
+          userId: lunora.userId,
+          sourceId,
+          targetParentId: targetId,
+          createdAt: t,
+          updatedAt: t,
+        }),
+      );
+      return id;
+    }
+  }
+
   const siblings = childrenOf(index, targetId);
   const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
-  const id = createId();
   nodesCollection.insert(
     makeNode({
       id,

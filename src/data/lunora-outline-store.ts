@@ -16,9 +16,11 @@ import {
   planIndent,
   planInsertChildAtStart,
   planInsertSibling,
+  planMirrorNode,
   planMoveNode,
   planOutdent,
   planRemoveNode,
+  planRestoreNodes,
   planSeedIfEmpty,
   planSetBookmarkedAt,
   planSetCollapsed,
@@ -274,6 +276,31 @@ function bindOutlineMutators(
             args.bookmarkedAt,
             args.updatedAt,
           );
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      restoreNodes: defineMutator<{
+        userId: string;
+        nodes: OutlineNode[];
+      }>({
+        serverRef: "mutators:restoreNodes",
+        apply: (_ctx, args) => {
+          const plan = planRestoreNodes(snapshotNodes(collection), args.nodes);
+          applyPlanToCollection(collection, plan);
+        },
+      }),
+      mirrorNode: defineMutator<{
+        id: string;
+        userId: string;
+        sourceId: string;
+        targetParentId: string | null;
+        createdAt: number;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:mirrorNode",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planMirrorNode(index, args);
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),

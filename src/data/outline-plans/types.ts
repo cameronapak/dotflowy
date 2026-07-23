@@ -24,6 +24,7 @@ export type PlanPatch = {
       | "collapsed"
       | "bookmarkedAt"
       | "mirrorOf"
+      | "createdAt"
       | "updatedAt"
       | "origin"
       | "kind"

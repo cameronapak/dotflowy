@@ -2,12 +2,19 @@ import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import type { OutlineNode } from "../data/outline-plans";
+
+import { isLunoraSyncEnabled } from "../data/flags";
 import {
   RESTORE_SLICE_OPS,
   redo,
   undo,
   type RestorePlan,
 } from "../data/history";
+import {
+  getLunoraOutlineContext,
+  trackLunoraMutation,
+} from "../data/lunora-sync";
 import { runStructural, runStructuralSliced } from "../data/structural";
 import { getTreeIndex } from "../data/tree-store";
 import {
@@ -28,6 +35,10 @@ import {
  * paths keep the wire guarantees: ONE batch POST → one DO `applyBatch` → one
  * echo-hold.
  *
+ * Lunora flag ON: one `restoreNodes` mutator (full target snapshot → server
+ * re-diffs via `planRestoreNodes`) — single watermark even for large diffs;
+ * modal still shows while awaiting persistence.
+ *
  * `setPendingFocus` is only honored on the sync path: during a sliced restore
  * the modal owns focus, and by the time the batch commits the tree-change
  * effect window `FocusPass` consumes has passed — a pending focus set then
@@ -41,6 +52,29 @@ export function runHistoryRestore(
 ): void {
   const plan = (kind === "undo" ? undo : redo)(getTreeIndex(), focusId);
   if (!plan) return;
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      const nodes: OutlineNode[] = plan.targetNodes.map((n) => ({
+        ...n,
+        userId: lunora.userId,
+      }));
+      if (plan.opCount < RESTORE_SLICE_OPS) {
+        trackLunoraMutation(
+          lunora.store.mutators.restoreNodes({
+            userId: lunora.userId,
+            nodes,
+          }),
+        );
+        if (plan.focusId) setPendingFocus(plan.focusId);
+        return;
+      }
+      void runLunoraRestore(kind, plan, nodes, lunora.userId);
+      return;
+    }
+  }
+
   if (plan.opCount < RESTORE_SLICE_OPS) {
     runStructural(() => {
       for (const slice of plan.slices) slice();
@@ -49,6 +83,44 @@ export function runHistoryRestore(
     return;
   }
   void runSliced(kind, plan);
+}
+
+async function runLunoraRestore(
+  kind: "undo" | "redo",
+  plan: RestorePlan,
+  nodes: OutlineNode[],
+  userId: string,
+) {
+  const lunora = getLunoraOutlineContext();
+  if (!lunora) {
+    plan.revert();
+    return;
+  }
+  const label = kind === "undo" ? "Undoing" : "Redoing";
+  openRestoreProgress?.({
+    kind: "restoring",
+    label,
+    total: plan.opCount,
+    applied: 0,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    const tx = lunora.store.mutators.restoreNodes({ userId, nodes });
+    // Optimistic apply already flipped the collection; show full progress.
+    openRestoreProgress?.({
+      kind: "restoring",
+      label,
+      total: plan.opCount,
+      applied: plan.opCount,
+    });
+    await tx.isPersisted.promise;
+    openRestoreProgress?.({ kind: "closed" });
+    toast.success(kind === "undo" ? "Undo complete." : "Redo complete.");
+  } catch {
+    plan.revert();
+    openRestoreProgress?.({ kind: "closed" });
+    toast.error(`${label} failed. Nothing was changed.`);
+  }
 }
 
 async function runSliced(kind: "undo" | "redo", plan: RestorePlan) {
