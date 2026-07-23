@@ -110,31 +110,34 @@ function readCappedTextE(res: Response): Effect.Effect<string, unknown> {
  *  twitter:title, then the `<title>` element (og/twitter are usually the clean
  *  page-intended title; raw `<title>` is often cluttered). Adapted from
  *  tldraw/cloudflare-workers-unfurl (MIT). */
-function extractTitleE(html: string): Effect.Effect<string | null> {
-  return Effect.promise(async () => {
-    let titleText = "";
-    let ogTitle: string | null = null;
-    let twitterTitle: string | null = null;
+function extractTitleE(html: string): Effect.Effect<string | null, unknown> {
+  return Effect.tryPromise({
+    try: async () => {
+      let titleText = "";
+      let ogTitle: string | null = null;
+      let twitterTitle: string | null = null;
 
-    await new HTMLRewriter()
-      .on("title", {
-        text(t) {
-          titleText += t.text;
-        },
-      })
-      .on("meta", {
-        element(el) {
-          const property = el.getAttribute("property");
-          const name = el.getAttribute("name");
-          if (property === "og:title") ogTitle = el.getAttribute("content");
-          else if (name === "twitter:title")
-            twitterTitle = el.getAttribute("content");
-        },
-      })
-      .transform(new Response(html))
-      .arrayBuffer();
+      await new HTMLRewriter()
+        .on("title", {
+          text(t) {
+            titleText += t.text;
+          },
+        })
+        .on("meta", {
+          element(el) {
+            const property = el.getAttribute("property");
+            const name = el.getAttribute("name");
+            if (property === "og:title") ogTitle = el.getAttribute("content");
+            else if (name === "twitter:title")
+              twitterTitle = el.getAttribute("content");
+          },
+        })
+        .transform(new Response(html))
+        .arrayBuffer();
 
-    return ogTitle ?? twitterTitle ?? (titleText || null);
+      return ogTitle ?? twitterTitle ?? (titleText || null);
+    },
+    catch: (cause) => cause,
   });
 }
 
