@@ -1,0 +1,39 @@
+{
+  "name": "lunora-outline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#lunora/*": "./lunora/*"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "codegen": "lunora codegen",
+    "deploy": "vite build && lunora deploy"
+  },
+  "dependencies": {
+    "@lunora/db": "1.0.0-alpha.27",
+    "@lunora/ratelimit": "1.0.0-alpha.9",
+    "@lunora/react": "1.0.0-alpha.31",
+    "lunorash": "1.0.0-alpha.98",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260611.1",
+    "@lunora/studio": "1.0.0-alpha.58",
+    "@lunora/vite": "1.0.0-alpha.78",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "oxlint": "^1.74.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.5",
+    "wrangler": "^4.100.0"
+  },
+  "packageManager": "pnpm@11.9.0"
+}
