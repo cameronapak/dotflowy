@@ -59,7 +59,9 @@ Pure `plan*` / seed / map-node live in the **repo root** at
 `src/outline/` is a thin re-export + the local `lunora-bridge` seam.
 
 Root also composes Lunora beside `UserOutlineDO` (`lunora/`, `worker/lunora-app.ts`)
-— see root `HANDOFF.md`. Keep running this spike with **pnpm from this directory**.
+and has a **default-OFF** product flag-swap (`dotflowy:flag:lunora-sync` /
+`isLunoraSyncEnabled()`) — see root `HANDOFF.md`. Keep running this spike with
+**pnpm from this directory**.
 
 ## Layout
 

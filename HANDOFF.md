@@ -4,59 +4,96 @@
 
 ## Status
 
-`phase-2-compose` — shared planners lifted; Lunora `SHARD` DO composed beside `UserOutlineDO`. Product `/api/*` + ASSETS + MCP unchanged. **No PR until collection cutover + gates green.**
+`phase-2-flag-swap` — outline sync can ride Lunora shapes/mutators behind a **default-OFF** flag. Custom `/api/sync` + `nodesCollection` + `runStructural` remain the default path (Playwright + normal `bun run dev`). **No PR until remaining gaps close + e2e green on Lunora (or still on old wire by design).**
+
+## Flag — Lunora outline sync
+
+|             |                                                                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Name**    | `dotflowy:flag:lunora-sync`                                                                                                             |
+| **Getter**  | `isLunoraSyncEnabled()` in `src/data/flags.ts`                                                                                          |
+| **Default** | **OFF**                                                                                                                                 |
+| **Enable**  | `localStorage.setItem("dotflowy:flag:lunora-sync", "on")` then reload, **or** `?lunora-sync=on` (URL wins for that load; not persisted) |
+| **Disable** | `"off"` in localStorage, or `?lunora-sync=off`                                                                                          |
+
+### Smoke (flag ON)
+
+```sh
+bun run lunora:codegen          # after lunora/ edits
+bun run dev                     # vite :3000 + wrangler :8787
+# sign in (seed:user if needed)
+# DevTools:
+localStorage.setItem("dotflowy:flag:lunora-sync", "on")
+location.reload()
+# Or open http://localhost:3000/?lunora-sync=on
+```
+
+Expect: empty Lunora shard seeds demo bullets via `seedIfEmpty`; Enter / Tab / Shift+Tab / Backspace / typing use Lunora mutators + watermark checkpoints; Network shows `/_lunora/*` (not `/api/sync` for outline). Second tab same user → live converge.
 
 ## What landed (this slice)
 
-### A. Shared planners → `src/data/outline-plans/`
+### Flag-swap architecture
 
-- Pure `plan*` / `seed` / `map-node` / types; converges on Dotflowy `Node` + `tree.ts` / `sibling-chain.ts` (`OutlineNode = Node & { userId }`).
-- Unit tests: `src/data/outline-plans/*.test.ts` (`bun run test`).
-- Spike imports via Vite/vitest alias `@dotflowy/outline-plans` → `../../src/data/outline-plans` (see `spikes/lunora-outline/vite.config.ts`). Awkward bit: root `bun test` filter `src` used to also match `spikes/**/src/**` — script is now `bun test -- ./src ./worker`. Spike still runs `pnpm test` (vitest) in its directory.
+```
+Flag OFF (default):
+  OutlineEditor → mutations/runStructural → nodesCollection → /api/sync + UserOutlineDO
 
-### B. Lunora compose in main Worker
-
-- Root deps: `lunorash@1.0.0-alpha.98`, `@lunora/ratelimit@1.0.0-alpha.9` (bun).
-- Schema/mutators: repo-root `lunora/` (nodes + `wholeOutline` + spike mutators + `hello` smoke mutator). Codegen: `bun run lunora:codegen`.
-- `wrangler.jsonc`: `SHARD` → `ShardDO` **alongside** `USER_OUTLINE`; migration tag `v2`.
-- `worker/lunora-app.ts`: `defineApp` + product Better Auth `resolveIdentity` bridge (no `@lunora/auth` dual signup).
-- `worker/index.ts`: `/_lunora` → `lunoraApp.fetch`; Vite proxies `/_lunora` → `:8787`.
-
-### Temporary escapes (typecheck)
-
-- `ShardDO` is **not** Sentry-wrapped — Lunora `ShardDOState.sql` typing doesn't satisfy Sentry's `DurableObjectState` constraint. Revisit when wrapping or types align.
-
-## Sources of truth
-
-- **ADR 0055:** `docs/adr/0055-lunora-replaces-custom-outline-sync.md`
-- Spike README: `spikes/lunora-outline/README.md`
-- Shared planners: `src/data/outline-plans/`
-- Research clone (machine-local): `/tmp/lunora-research` (`alpha` branch)
-
-## Compose smoke
-
-```sh
-bun run lunora:codegen          # after lunora/ schema/mutator edits
-bun run typecheck
-bun run typecheck:worker
-bun run test                    # includes outline-plans; excludes spike vitest
-cd spikes/lunora-outline && pnpm test
-
-# Product path (custom DO still authoritative for OutlineEditor):
-bun run dev
-# Optional: curl Worker status once api is up
-# curl -sS http://localhost:8787/_lunora/status
+Flag ON:
+  LunoraSyncHost → createOutlineStore(wholeOutline + bindMutators)
+       ↓ subscribeChanges
+  tree-store.resetTreeFromNodes (ADR 0004 feed)
+       ↑
+  mutations (insertSibling/indent/outdent/removeNode/setText) → Lunora mutators
+  runStructural → body only (watermark hold is checkpoints, not waitForSeq)
 ```
 
-Spike alone still: `cd spikes/lunora-outline && pnpm dev`.
+| File                                  | Role                                                    |
+| ------------------------------------- | ------------------------------------------------------- |
+| `src/data/flags.ts`                   | `isLunoraSyncEnabled()`                                 |
+| `src/data/lunora-client.ts`           | singleton `LunoraClient` → same-origin `/_lunora`       |
+| `src/data/lunora-outline-store.ts`    | `lunoraCollectionOptions` + `bindMutators` (spike port) |
+| `src/data/lunora-bridge.ts`           | rows → TreeIndex / Node                                 |
+| `src/data/lunora-sync.ts`             | start/stop, feed tree-store, seedIfEmpty                |
+| `src/components/lunora-sync-host.tsx` | AuthGate child; LunoraProvider when flag ON             |
+| `src/data/collection.ts`              | flag ON → skip `/api/sync` socket                       |
+| `src/data/structural.ts`              | flag ON → no `{ops}` / waitForSeq                       |
+| `src/data/mutations.ts`               | dogfood mutator surface (5 ops)                         |
+
+### Deps (root, bun)
+
+- `@lunora/db@1.0.0-alpha.27`, `@lunora/react@1.0.0-alpha.31`
+- `@tanstack/db@^0.6.16`, `@tanstack/offline-transactions@^1.0.41`
+- Existing: `lunorash@1.0.0-alpha.98`
+
+### Prior slice (still true)
+
+- Shared planners: `src/data/outline-plans/`
+- Worker compose: `/_lunora` → `ShardDO` beside `UserOutlineDO`
+- Identity: product Better Auth → Lunora `resolveIdentity`
+
+## Known gaps (flag ON)
+
+- **Not ported:** multi-select, daily get-or-create, mirrors, move up/down, drag, OPML, history restore, insertChildAtStart (Enter-into-open-parent), field toggles (completed/isTask/kind/bookmark), full plugin structural paths
+- **Enter mid-split** fires two mutators (insertSibling + setText), not one atomic batch
+- **e2e** still on old wire (`seedOutline`); flag must stay OFF for Playwright
+- **KV** side-collections still custom DO (phase 2b)
+- **No data migrate** from UserOutlineDO → Lunora shard yet (flag ON = empty/new Lunora outline)
+- Tree-store Lunora feed is **full rebuild** per change (fine for dogfood; not the incremental hot path)
+
+## Gates (flag OFF)
+
+```sh
+bun run typecheck
+bun run typecheck:worker
+bun run test                    # includes flags + lunora-bridge tests
+```
 
 ## Next
 
-1. **Flag-swap / collection cutover** — `nodesCollection` → `@lunora/db` shape collections; structural path → `bindMutators` (ADR 0055 seq step 4).
-2. Keep `seedOutline` e2e as-is until that swap.
-3. KV side-collections = phase **2b** (don't block on them).
-4. Then MCP remount / data migrate / delete `UserOutlineDO` custom sync → green gates → PR.
-5. Delete this `HANDOFF.md` in the shipping PR.
+1. Widen mutator surface (insertChildAtStart, move, completed/isTask, …) or keep dogfood-only until cutover.
+2. Lunora-aware e2e fixture (mock `/_lunora` or Miniflare) — keep `seedOutline` until then.
+3. KV phase 2b; MCP remount; snapshot migrate; delete `UserOutlineDO` custom sync.
+4. Green gates → PR; **delete this `HANDOFF.md` in the shipping PR.**
 
 ## Note
 
