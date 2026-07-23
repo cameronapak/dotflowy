@@ -1,5 +1,26 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 
+import {
+  applyPlan,
+  buildTreeIndex,
+  planIndent,
+  planInsertChildAtStart,
+  planInsertSibling,
+  planOutdent,
+  planRemoveNode,
+  planRestoreNodes,
+  planSetBookmarkedAt,
+  planSetCollapsed,
+  planSetCompleted,
+  planSetIsTask,
+  planSetKind,
+  planSetText,
+  planSplitNode,
+  type OutlineNode,
+  type OutlinePlan,
+} from "../src/data/outline-plans";
+import { resolveDailyClaim } from "../src/plugins/daily/claim-mapping";
+
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
 // with inert defaults by seedOutline so each test only states what matters.
@@ -383,23 +404,68 @@ function toLunoraRow(n: SeedNode, userId: string): LunoraRow {
   return { ...base, _id: base.id, userId };
 }
 
+function rowToOutline(row: LunoraRow): OutlineNode {
+  const { _id: _, ...rest } = row;
+  return rest;
+}
+
+function outlineToRow(node: OutlineNode): LunoraRow {
+  return { ...node, _id: node.id };
+}
+
+function commitOutlinePlan(
+  store: Map<string, LunoraRow>,
+  plan: OutlinePlan | null | undefined,
+): void {
+  if (!plan) return;
+  const next = applyPlan([...store.values()].map(rowToOutline), plan);
+  store.clear();
+  for (const n of next) store.set(n.id, outlineToRow(n));
+}
+
+type DailyIndexRow = {
+  _id: string;
+  key: string;
+  nodeId: string;
+  touchedAt: number;
+  userId: string;
+};
+
 /**
  * Seed an outline on the Lunora flag-ON path by mocking `/_lunora/ws` +
- * `/_lunora/rpc` enough for smoke (shape subscribe → poke seed; mutators
- * update the in-memory store + poke lastMutationId for watermark hold).
+ * `/_lunora/rpc`. Structural mutators apply the same `outline-plans` pure
+ * planners as production (insert/split/indent/delete/restore/…).
  *
  * Classic `seedOutline` stays the default for the existing suite (flag OFF).
- * This is the foundation — not a full protocol twin; expand as more Lunora
- * e2e coverage lands. Auto-migrate is skipped by mocking GET `/api/nodes` → [].
+ * Opt into Lunora per-spec via this helper — flag stays default OFF in app.
+ * Auto-migrate is skipped by mocking GET `/api/nodes` → [].
  */
 export async function seedOutlineLunora(
   page: Page,
   nodes: SeedNode[],
-  opts: { userId?: string } = {},
+  opts: {
+    userId?: string;
+    /** Pre-seed Lunora kv shapes (dailyIndex / tagColors / savedQueries). */
+    kv?: Record<string, { key: string; value: unknown }[]>;
+  } = {},
 ): Promise<void> {
   const userId = opts.userId ?? "test-user";
   const store = new Map<string, LunoraRow>();
   for (const n of nodes) store.set(n.id, toLunoraRow(n, userId));
+
+  const dailyIndex = new Map<string, DailyIndexRow>();
+  for (const r of opts.kv?.["daily-index"] ?? []) {
+    const v = r.value as { key?: string; nodeId?: string };
+    const key = v.key ?? r.key;
+    const nodeId = String(v.nodeId ?? "");
+    dailyIndex.set(key, {
+      _id: key,
+      key,
+      nodeId,
+      touchedAt: 0,
+      userId,
+    });
+  }
 
   let clientSeq = 0;
   let checkpoint = 0;
@@ -417,7 +483,7 @@ export async function seedOutlineLunora(
   const sendPoke = (
     ws: WebSocketRoute,
     shapeId: string,
-    rows: LunoraRow[],
+    rows: Array<Record<string, unknown> & { _id: string }>,
     lastMutationId: number,
   ) => {
     pokeN += 1;
@@ -459,9 +525,28 @@ export async function seedOutlineLunora(
       sendPoke(ws, shapeId, [...store.values()], 0);
       return;
     }
-    // Empty kv shapes (tagColors / savedQueries / dailyIndex).
+    if (name === "userDailyIndex") {
+      sendPoke(ws, shapeId, [...dailyIndex.values()], 0);
+      return;
+    }
+    // Empty tagColors / savedQueries.
     sendPoke(ws, shapeId, [], 0);
   };
+
+  const pokeSubscribed = (seq: number, shapes: ReadonlySet<string>) => {
+    for (const ws of sockets) {
+      for (const [shapeId, meta] of shapeSubs) {
+        if (!shapes.has(meta.name)) continue;
+        if (meta.name === "wholeOutline") {
+          sendPoke(ws, shapeId, [...store.values()], seq);
+        } else if (meta.name === "userDailyIndex") {
+          sendPoke(ws, shapeId, [...dailyIndex.values()], seq);
+        }
+      }
+    }
+  };
+
+  const liveIndex = () => buildTreeIndex([...store.values()].map(rowToOutline));
 
   await page.addInitScript(() => {
     window.localStorage.setItem("dotflowy:flag:lunora-sync", "on");
@@ -517,57 +602,169 @@ export async function seedOutlineLunora(
       const seq = seqHeader ? Number(seqHeader) : ++clientSeq;
       if (Number.isFinite(seq)) clientSeq = Math.max(clientSeq, seq);
 
-      let result: unknown = null;
+      let result: unknown = {};
+      let pokeShapes = new Set<string>(["wholeOutline"]);
+
+      const id = () => String(args.id ?? "");
+      const updatedAt = () => Number(args.updatedAt ?? Date.now());
 
       if (path === "mutators:setText") {
-        const id = String(args.id ?? "");
-        const cur = store.get(id);
-        if (cur) {
-          store.set(id, {
-            ...cur,
-            text: String(args.text ?? ""),
-            updatedAt: Number(args.updatedAt ?? Date.now()),
-          });
-        }
-        result = { id };
+        commitOutlinePlan(
+          store,
+          planSetText(liveIndex(), id(), String(args.text ?? ""), updatedAt()),
+        );
+        result = { id: id() };
+      } else if (path === "mutators:setCompleted") {
+        commitOutlinePlan(
+          store,
+          planSetCompleted(
+            liveIndex(),
+            id(),
+            Boolean(args.completed),
+            updatedAt(),
+          ),
+        );
+      } else if (path === "mutators:setCollapsed") {
+        commitOutlinePlan(
+          store,
+          planSetCollapsed(
+            liveIndex(),
+            id(),
+            Boolean(args.collapsed),
+            updatedAt(),
+          ),
+        );
+      } else if (path === "mutators:setIsTask") {
+        commitOutlinePlan(
+          store,
+          planSetIsTask(liveIndex(), id(), Boolean(args.isTask), updatedAt()),
+        );
+      } else if (path === "mutators:setKind") {
+        commitOutlinePlan(
+          store,
+          planSetKind(
+            liveIndex(),
+            id(),
+            args.kind === "paragraph" ? "paragraph" : null,
+            updatedAt(),
+          ),
+        );
+      } else if (path === "mutators:setBookmarkedAt") {
+        commitOutlinePlan(
+          store,
+          planSetBookmarkedAt(
+            liveIndex(),
+            id(),
+            (args.bookmarkedAt as number | null) ?? null,
+            updatedAt(),
+          ),
+        );
       } else if (path === "mutators:insertSibling") {
-        const id = String(args.id ?? "");
-        const row: LunoraRow = {
-          _id: id,
-          id,
-          parentId: (args.parentId as string | null) ?? null,
-          prevSiblingId: (args.afterId as string | null) ?? null,
-          text: String(args.text ?? ""),
-          isTask: Boolean(args.isTask),
-          completed: false,
-          collapsed: false,
-          bookmarkedAt: null,
-          mirrorOf: null,
-          createdAt: Number(args.createdAt ?? 0),
-          updatedAt: Number(args.updatedAt ?? 0),
-          origin: null,
-          kind: args.kind === "paragraph" ? "paragraph" : null,
-          userId,
-        };
-        store.set(id, row);
-        result = { id };
+        commitOutlinePlan(
+          store,
+          planInsertSibling(liveIndex(), {
+            id: id(),
+            userId,
+            parentId: (args.parentId as string | null) ?? null,
+            afterId: (args.afterId as string | null) ?? null,
+            text: String(args.text ?? ""),
+            isTask: Boolean(args.isTask),
+            kind: args.kind === "paragraph" ? "paragraph" : null,
+            createdAt: Number(args.createdAt ?? 0),
+            updatedAt: updatedAt(),
+          }),
+        );
+        result = { id: id() };
+      } else if (path === "mutators:insertChildAtStart") {
+        commitOutlinePlan(
+          store,
+          planInsertChildAtStart(liveIndex(), {
+            id: id(),
+            userId,
+            parentId: (args.parentId as string | null) ?? null,
+            text: String(args.text ?? ""),
+            isTask: Boolean(args.isTask),
+            kind: args.kind === "paragraph" ? "paragraph" : null,
+            createdAt: Number(args.createdAt ?? 0),
+            updatedAt: updatedAt(),
+          }),
+        );
+        result = { id: id() };
+      } else if (path === "mutators:splitNode") {
+        const newId = String(args.newId ?? "");
+        commitOutlinePlan(
+          store,
+          planSplitNode(liveIndex(), {
+            id: id(),
+            newId,
+            userId,
+            parentId: (args.parentId as string | null) ?? null,
+            afterId: String(args.afterId ?? id()),
+            leftText: String(args.leftText ?? ""),
+            rightText: String(args.rightText ?? ""),
+            isTask: Boolean(args.isTask),
+            kind: args.kind === "paragraph" ? "paragraph" : null,
+            createdAt: Number(args.createdAt ?? 0),
+            updatedAt: updatedAt(),
+          }),
+        );
+        result = { id: newId };
+      } else if (path === "mutators:indent") {
+        commitOutlinePlan(
+          store,
+          planIndent(
+            liveIndex(),
+            id(),
+            updatedAt(),
+            Boolean(args.resolveMirror),
+          ),
+        );
+      } else if (path === "mutators:outdent") {
+        commitOutlinePlan(store, planOutdent(liveIndex(), id(), updatedAt()));
+      } else if (path === "mutators:removeNode") {
+        commitOutlinePlan(
+          store,
+          planRemoveNode(liveIndex(), id(), updatedAt()),
+        );
+      } else if (path === "mutators:restoreNodes") {
+        const target = (args.nodes as OutlineNode[] | undefined) ?? [];
+        const current = [...store.values()].map(rowToOutline);
+        commitOutlinePlan(store, planRestoreNodes(current, target));
+        result = { ok: true };
       } else if (path === "mutators:seedIfEmpty") {
         result = { seeded: false };
-      } else {
-        // Accept unknown mutators so watermark chain doesn't wedge.
-        result = {};
+      } else if (path === "mutators:claimDailyMapping") {
+        const key = String(args.key ?? "");
+        const candidate = String(args.nodeId ?? "");
+        const existing = dailyIndex.get(key);
+        const { winner, won } = resolveDailyClaim(existing?.nodeId, candidate);
+        dailyIndex.set(key, {
+          _id: key,
+          key,
+          nodeId: winner,
+          touchedAt: Number(args.touchedAt ?? Date.now()),
+          userId,
+        });
+        result = { nodeId: winner, won };
+        pokeShapes = new Set(["userDailyIndex"]);
+      } else if (path === "mutators:upsertDailyMapping") {
+        const key = String(args.key ?? "");
+        dailyIndex.set(key, {
+          _id: key,
+          key,
+          nodeId: String(args.nodeId ?? ""),
+          touchedAt: Number(args.touchedAt ?? Date.now()),
+          userId,
+        });
+        pokeShapes = new Set(["userDailyIndex"]);
+      } else if (path === "mutators:deleteDailyMapping") {
+        dailyIndex.delete(String(args.key ?? ""));
+        pokeShapes = new Set(["userDailyIndex"]);
       }
+      // Unknown mutators: accept so watermark chain doesn't wedge.
 
       await reply(route, { result, lastMutationId: seq });
-
-      // Echo a poke so checkpoints.awaitMutationId resolves.
-      for (const ws of sockets) {
-        for (const [shapeId, meta] of shapeSubs) {
-          if (meta.name === "wholeOutline") {
-            sendPoke(ws, shapeId, [...store.values()], seq);
-          }
-        }
-      }
+      pokeSubscribed(seq, pokeShapes);
     },
   );
 
@@ -593,7 +790,6 @@ export async function seedOutlineLunora(
           return;
         }
         if (msg.type === "connect") {
-          // No ack required by the client.
           return;
         }
         if (msg.type === "shape_subscribe" && msg.id && msg.shape?.name) {
