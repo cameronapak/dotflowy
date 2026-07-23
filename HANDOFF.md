@@ -8,7 +8,8 @@
 
 Commits on `spike/lunora-outline` after Phase 0 docs `78cca687f9`:
 
-_(filled after Phase 1 commits)_
+1. `a4bf137367` / `f942321782` — Phase 0 manual exit-criteria PASS notes
+2. `1b99bce9a2` `feat(spike): shared mapping, TreeIndex bridge, empty-outline seed`
 
 ## Sources of truth
 
@@ -60,7 +61,6 @@ Verified on `http://localhost:5175/` (Vite fell through 5173→5174→5175):
 
 ## Next
 
-- Finish Phase 1 commits (shared map / seed / bridge / trim) — in flight; fill commit hashes above
 - Before any PR to `main`: delete `HANDOFF.md` + empty changeset
 - Phase 2+: richer editor / migrate product — out of scope here
 
