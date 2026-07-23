@@ -2,8 +2,6 @@
  * Lunora row types for kv side-collections (ADR 0055 phase 2b).
  * Collections + mutators are wired in `lunora-outline-store.ts` (one
  * `bindMutators` / clientSeq FIFO with outline writes).
- *
- * dailyIndex stays on `/api/kv` until claimMapping ports.
  */
 
 export type TagColorRowDoc = {
@@ -19,6 +17,16 @@ export type SavedQueryRowDoc = {
   name: string;
   query: string;
   createdAt: number;
+  userId: string;
+  _creationTime?: number;
+} & Record<string, unknown>;
+
+/** Daily scaffold key → nodeId (ADR 0052). `_id` = key. */
+export type DailyIndexRowDoc = {
+  _id: string;
+  key: string;
+  nodeId: string;
+  touchedAt: number;
   userId: string;
   _creationTime?: number;
 } & Record<string, unknown>;

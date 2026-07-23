@@ -42,6 +42,17 @@ export const savedQueries = sqliteTable("savedQueries", {
     userId: text("userId").notNull(),
 });
 
+export const dailyIndex = sqliteTable("dailyIndex", {
+    _id: text("_id").primaryKey(),
+    _creationTime: integer("_creationTime").notNull(),
+    key: text("key").notNull(),
+    nodeId: text("nodeId").notNull(),
+    touchedAt: real("touchedAt").notNull(),
+    userId: text("userId").notNull(),
+}, (t) => ({
+    by_key: index("by_key").on(t.key),
+}));
+
 export const ratelimit_buckets = sqliteTable("ratelimit_buckets", {
     _id: text("_id").primaryKey(),
     _creationTime: integer("_creationTime").notNull(),

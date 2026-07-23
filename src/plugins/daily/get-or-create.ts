@@ -282,7 +282,8 @@ async function materializeNewDay(
 }
 
 /** Lunora flag-ON materialize: plan inserts client-side (sorted afterIds), one
- *  `materializeDailyNodes` mutator, await watermark. Kv claims stay on `/api/kv`. */
+ *  `materializeDailyNodes` mutator, await watermark. Ids claimed via Lunora
+ *  `claimDailyMapping` (daily-index bind) before this runs. */
 async function materializeNewDayLunora(args: {
   container: { id: string; won: boolean; present: boolean };
   day: { id: string; won: boolean; present: boolean };

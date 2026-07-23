@@ -7,6 +7,10 @@ import type { Row } from "@lunora/db";
 import type { Collection } from "@tanstack/db";
 import { createCollection } from "@tanstack/db";
 
+/** Live collection for the `userDailyIndex` replication shape — pass the shape's validated `args` (its partition selector). */
+export const userDailyIndexCollection = (client: LunoraClient, args?: Record<string, unknown>): Collection<Row, string> =>
+    createCollection(lunoraCollectionOptions({ client, shape: { args, name: "userDailyIndex" } }).config);
+
 /** Live collection for the `userSavedQueries` replication shape — pass the shape's validated `args` (its partition selector). */
 export const userSavedQueriesCollection = (client: LunoraClient, args?: Record<string, unknown>): Collection<Row, string> =>
     createCollection(lunoraCollectionOptions({ client, shape: { args, name: "userSavedQueries" } }).config);

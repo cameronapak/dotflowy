@@ -10,10 +10,18 @@
  * (see `collection.ts` early-return when the flag is ON).
  */
 
+import {
+  bindLunoraDailyIndex,
+  unbindLunoraDailyIndex,
+} from "../plugins/daily/daily-index";
 import { markNodesSyncReady } from "./collection";
 import { isLunoraSyncEnabled } from "./flags";
 import { outlineNodeToNode, rowsToOutlineNodes } from "./lunora-bridge";
 import { getLunoraClient } from "./lunora-client";
+import {
+  installMigrateConsoleHelper,
+  maybeAutoMigrateToLunora,
+} from "./lunora-migrate";
 import { createOutlineStore, type OutlineStore } from "./lunora-outline-store";
 import { shouldSeedOutline, seedEmptyOutline } from "./outline-plans";
 import { notifySaveFailed } from "./save-failure";
@@ -59,7 +67,7 @@ export function startLunoraOutlineSync(userId: string): void {
   const store = createOutlineStore(getLunoraClient(), userId);
   ctx = { userId, store };
 
-  // Phase 2b: side-collections ride the same flag (dailyIndex stays on /api/kv).
+  // Phase 2b: side-collections ride the same flag.
   bindLunoraTagColors(store.tagColors, {
     upsert: (tag, color) =>
       trackLunoraMutation(
@@ -84,6 +92,26 @@ export function startLunoraOutlineSync(userId: string): void {
     remove: (id) =>
       trackLunoraMutation(store.mutators.deleteSavedQueryRow({ userId, id })),
   });
+  bindLunoraDailyIndex(store.dailyIndex, {
+    upsert: (key, nodeId) =>
+      trackLunoraMutation(
+        store.mutators.upsertDailyMapping({
+          userId,
+          key,
+          nodeId,
+          touchedAt: Date.now(),
+        }),
+      ),
+    claimTx: (key, nodeId) =>
+      store.mutators.claimDailyMapping({
+        userId,
+        key,
+        nodeId,
+        touchedAt: Date.now(),
+      }),
+  });
+
+  installMigrateConsoleHelper(() => ctx);
 
   collectionSub = store.collection.subscribeChanges(
     () => {
@@ -94,11 +122,15 @@ export function startLunoraOutlineSync(userId: string): void {
 
   void store.collection
     .toArrayWhenReady()
-    .then(() => {
+    .then(async () => {
       if (!ctx || ctx.store !== store) return;
       feedTreeFromCollection(store);
       markNodesSyncReady();
-      maybeSeed(store, userId);
+      // One-shot classic DO → Lunora when shard empty (skip if already has rows).
+      const next = await maybeAutoMigrateToLunora(store, userId);
+      if (!ctx || ctx.store !== store) return;
+      feedTreeFromCollection(store);
+      if (next === "seed") maybeSeed(store, userId);
     })
     .catch((err) => {
       console.error("[lunora-sync] wholeOutline load failed", err);
@@ -132,6 +164,7 @@ export function stopLunoraOutlineSync(): void {
   collectionSub = null;
   unbindLunoraTagColors();
   unbindLunoraSavedQueries();
+  unbindLunoraDailyIndex();
   ctx = null;
   seedStarted = false;
 }

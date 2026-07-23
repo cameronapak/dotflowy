@@ -10,7 +10,11 @@ import { lunoraCollectionOptions } from "@lunora/db";
 import { bindMutators, defineMutator } from "@lunora/db/mutators";
 import { createCollection, type Collection } from "@tanstack/db";
 
-import type { SavedQueryRowDoc, TagColorRowDoc } from "./lunora-kv-store";
+import type {
+  DailyIndexRowDoc,
+  SavedQueryRowDoc,
+  TagColorRowDoc,
+} from "./lunora-kv-store";
 
 import {
   buildTreeIndex,
@@ -75,6 +79,8 @@ export type OutlineStore = {
   tagColors: Collection<TagColorRowDoc, string>;
   /** Phase 2b — Lunora saved queries (flag ON). */
   savedQueries: Collection<SavedQueryRowDoc, string>;
+  /** Phase 2b — Lunora daily index (flag ON). */
+  dailyIndex: Collection<DailyIndexRowDoc, string>;
   mutators: ReturnType<typeof bindOutlineMutators>;
 };
 
@@ -83,6 +89,7 @@ function bindOutlineMutators(
   collection: Collection<NodeRow, string>,
   tagColors: Collection<TagColorRowDoc, string>,
   savedQueries: Collection<SavedQueryRowDoc, string>,
+  dailyIndex: Collection<DailyIndexRowDoc, string>,
   checkpoints: ReturnType<
     typeof lunoraCollectionOptions<NodeRow>
   >["checkpoints"],
@@ -96,6 +103,7 @@ function bindOutlineMutators(
         nodes: collection as never,
         tagColors: tagColors as never,
         savedQueries: savedQueries as never,
+        dailyIndex: dailyIndex as never,
       },
       shardKey: userId,
     },
@@ -526,6 +534,63 @@ function bindOutlineMutators(
           if (savedQueries.has(args.id)) savedQueries.delete(args.id);
         },
       }),
+      // --- dailyIndex ---
+      claimDailyMapping: defineMutator<{
+        userId: string;
+        key: string;
+        nodeId: string;
+        touchedAt: number;
+      }>({
+        serverRef: "mutators:claimDailyMapping",
+        apply: (_ctx, args) => {
+          if (dailyIndex.has(args.key)) {
+            // Keep existing nodeId (pre-existing wins); bump touchedAt.
+            dailyIndex.update(args.key, (draft) => {
+              draft.touchedAt = args.touchedAt;
+            });
+            return;
+          }
+          dailyIndex.insert({
+            _id: args.key,
+            key: args.key,
+            nodeId: args.nodeId,
+            touchedAt: args.touchedAt,
+            userId: args.userId,
+            _creationTime: args.touchedAt,
+          });
+        },
+      }),
+      upsertDailyMapping: defineMutator<{
+        userId: string;
+        key: string;
+        nodeId: string;
+        touchedAt: number;
+      }>({
+        serverRef: "mutators:upsertDailyMapping",
+        apply: (_ctx, args) => {
+          if (dailyIndex.has(args.key)) {
+            dailyIndex.update(args.key, (draft) => {
+              draft.nodeId = args.nodeId;
+              draft.touchedAt = args.touchedAt;
+            });
+          } else {
+            dailyIndex.insert({
+              _id: args.key,
+              key: args.key,
+              nodeId: args.nodeId,
+              touchedAt: args.touchedAt,
+              userId: args.userId,
+              _creationTime: args.touchedAt,
+            });
+          }
+        },
+      }),
+      deleteDailyMapping: defineMutator<{ userId: string; key: string }>({
+        serverRef: "mutators:deleteDailyMapping",
+        apply: (_ctx, args) => {
+          if (dailyIndex.has(args.key)) dailyIndex.delete(args.key);
+        },
+      }),
     },
   );
 }
@@ -565,10 +630,21 @@ export function createOutlineStore(
     },
     load: "eager",
   });
+  const dailyOpts = lunoraCollectionOptions<DailyIndexRowDoc>({
+    client,
+    id: `dailyIndex:${userId}`,
+    shape: {
+      name: "userDailyIndex",
+      args: { userId },
+      shardKey: userId,
+    },
+    load: "eager",
+  });
 
   const collection = createCollection(config);
   const tagColors = createCollection(tagOpts.config);
   const savedQueries = createCollection(savedOpts.config);
+  const dailyIndex = createCollection(dailyOpts.config);
   // wholeOutline checkpoints gate overlay drop for the shared clientSeq FIFO
   // (watermark is per-client on the shard, not per-shape).
   const mutators = bindOutlineMutators(
@@ -576,8 +652,9 @@ export function createOutlineStore(
     collection,
     tagColors,
     savedQueries,
+    dailyIndex,
     checkpoints,
     userId,
   );
-  return { collection, tagColors, savedQueries, mutators };
+  return { collection, tagColors, savedQueries, dailyIndex, mutators };
 }

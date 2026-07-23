@@ -4,6 +4,7 @@ import { Effect, Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
 import { localDateKey } from "../../data/date-links";
+import { isLunoraSyncEnabled } from "../../data/flags";
 import {
   kvDelete,
   kvFetch,
@@ -13,6 +14,7 @@ import {
 } from "../../data/kv-api";
 import { kvGetOrCreateE } from "../../data/kv-client-effect";
 import { queryClient } from "../../data/query-client";
+import { resolveDailyClaim } from "./claim-mapping";
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0001). A row maps a
@@ -171,8 +173,22 @@ export function getKeyForNode(nodeId: string): string | null {
   return keyByNodeId.get(nodeId) ?? null;
 }
 
+type LunoraDailyWrites = {
+  upsert: (key: string, nodeId: string) => void;
+  claim: (
+    key: string,
+    candidate: string,
+  ) => Promise<{ winner: string; won: boolean }>;
+};
+
+let lunoraWrites: LunoraDailyWrites | null = null;
+
 /** Upsert a `key -> nodeId` mapping (used when (re)creating a container/day). */
 export function setMapping(key: string, nodeId: string): void {
+  if (lunoraWrites) {
+    lunoraWrites.upsert(key, nodeId);
+    return;
+  }
   if (dailyIndexCollection.toArray.some((r) => r.key === key)) {
     dailyIndexCollection.update(key, (draft) => void (draft.nodeId = nodeId));
   } else {
@@ -185,25 +201,28 @@ export function setMapping(key: string, nodeId: string): void {
  * itself — the caller supplies a `candidate` node id, and this returns the
  * AUTHORITATIVE winner plus whether this caller won (so it should create the
  * node under `candidate`). Two devices with a stale replica both miss the key
- * locally and both claim; the single-threaded DO lets exactly one win, killing
- * the duplicate-daily-note race at the source.
+ * locally and both claim; the single-threaded DO / Lunora mutator lets exactly
+ * one win, killing the duplicate-daily-note race at the source.
  *
- * This is the boundary that degrades to a value on failure: on a network/server
- * failure it logs and degrades to the optimistic local path (treats `candidate`
- * as the winner), so the feature keeps working — the rare failure window just
- * reopens the pre-fix race, no worse than before the claim existed.
- *
- * Why Effect here (and throwing everywhere else in the kv path): the TanStack
- * DB mutation handlers signal failure by THROWING (a throw triggers optimistic
- * rollback), so the rest of kv-api.ts stays throw-based on purpose. claimMapping
- * has no TanStack caller — it's an awaitable from a click handler — so it can
- * speak Effect's typed-error channel directly and route with catchTag, proving
- * the ergonomics on real I/O. See kv-client-effect.ts.
+ * Flag ON → Lunora `claimDailyMapping` mutator. Flag OFF → `/api/kv?op=claim`
+ * (Effect path). On network/server failure both degrade to treating `candidate`
+ * as the winner so the feature keeps working.
  */
 export async function claimMapping(
   key: string,
   candidate: string,
 ): Promise<{ winner: string; won: boolean }> {
+  if (lunoraWrites) {
+    try {
+      return await lunoraWrites.claim(key, candidate);
+    } catch (e) {
+      console.warn(
+        `daily: Lunora claim "${key}" failed, creating locally:`,
+        e instanceof Error ? e.message : e,
+      );
+      return resolveDailyClaim(null, candidate);
+    }
+  }
   /**
    * Route every typed kv error to a single degraded outcome *inside* the Effect
    * pipeline, then runPromise never rejects — caller sees only plain success.
@@ -225,7 +244,7 @@ export async function claimMapping(
       }),
     ),
   );
-  return { winner: row.nodeId, won: row.nodeId === candidate };
+  return resolveDailyClaim(row.nodeId, candidate);
 }
 
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
@@ -237,17 +256,93 @@ let rows: DailyRow[] = EMPTY;
 let keyByNodeId = new Map<string, string>();
 const listeners = new Set<() => void>();
 let started = false;
+let lunoraUnsub: (() => void) | null = null;
 
-function rebuild() {
-  rows = dailyIndexCollection.toArray;
+function rebuildFrom(source: DailyRow[]) {
+  rows = source;
   const next = new Map<string, string>();
   for (const r of rows) next.set(r.nodeId, r.key);
   keyByNodeId = next;
   for (const l of listeners) l();
 }
 
+function rebuild() {
+  rebuildFrom(dailyIndexCollection.toArray);
+}
+
+/**
+ * Called from `lunora-sync` when flag ON — subscribe to the Lunora shape and
+ * skip `/api/kv` for this collection. `claim` must await the watermark so the
+ * authoritative winner is readable from the local collection afterward.
+ */
+export function bindLunoraDailyIndex(
+  collection: {
+    has: (key: string) => boolean;
+    get: (key: string) => DailyIndexRowDocLike | undefined;
+    toArray: DailyIndexRowDocLike[];
+    subscribeChanges: (
+      cb: () => void,
+      opts?: { includeInitialState?: boolean },
+    ) => { unsubscribe: () => void };
+  },
+  writes: {
+    upsert: (key: string, nodeId: string) => void;
+    claimTx: (
+      key: string,
+      nodeId: string,
+    ) => { isPersisted: { promise: Promise<unknown> } };
+  },
+): void {
+  lunoraUnsub?.();
+  const mapRows = (): DailyRow[] =>
+    collection.toArray.map((r) => ({
+      key: String(r.key ?? r._id),
+      nodeId: String(r.nodeId ?? ""),
+    }));
+  lunoraWrites = {
+    upsert: writes.upsert,
+    claim: async (key, candidate) => {
+      const local = collection.has(key)
+        ? String(collection.get(key)?.nodeId ?? "")
+        : null;
+      if (local) {
+        // Fast path: shape already has the key — no mutator round-trip.
+        return resolveDailyClaim(local, candidate);
+      }
+      const tx = writes.claimTx(key, candidate);
+      await tx.isPersisted.promise;
+      const row = collection.get(key);
+      const winner = row ? String(row.nodeId) : candidate;
+      return resolveDailyClaim(winner, candidate);
+    },
+  };
+  const sub = collection.subscribeChanges(() => rebuildFrom(mapRows()), {
+    includeInitialState: true,
+  });
+  lunoraUnsub = () => sub.unsubscribe();
+  started = true;
+}
+
+/** Tear down Lunora feed (flag OFF / account switch). */
+export function unbindLunoraDailyIndex(): void {
+  lunoraUnsub?.();
+  lunoraUnsub = null;
+  lunoraWrites = null;
+  rows = EMPTY;
+  keyByNodeId = new Map();
+  started = false;
+}
+
+type DailyIndexRowDocLike = {
+  _id: string;
+  key?: unknown;
+  nodeId?: unknown;
+};
+
 function ensureStarted() {
   if (started || typeof window === "undefined") return;
+  // Flag ON: wait for bindLunoraDailyIndex — never open the /api/kv collection.
+  if (isLunoraSyncEnabled()) return;
   started = true;
   dailyIndexCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,
@@ -299,6 +394,8 @@ export function getDailyRows(): DailyRow[] {
  */
 export async function refreshDailyIndex(): Promise<void> {
   ensureStarted();
+  // Lunora shape is live — no kv refetch (and /api/kv is cold when flag ON).
+  if (lunoraWrites) return;
   // Best-effort: a network failure here must NOT block day creation (the caller
   // proceeds with whatever mappings it has), but a silent swallow hid the cause
   // of a misplaced day (finding 2) -- so warn, don't rethrow.

@@ -34,3 +34,13 @@ export const userSavedQueries = defineShape({
     return { userId };
   },
 });
+
+/** Per-user daily scaffold index (phase 2b — claimDailyMapping). */
+export const userDailyIndex = defineShape({
+  args: { userId: v.string() },
+  table: "dailyIndex",
+  where: (ctx, { userId }) => {
+    if (!ctx.auth.userId || ctx.auth.userId !== userId) return { OR: [] };
+    return { userId };
+  },
+});

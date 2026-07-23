@@ -33,7 +33,7 @@ export type {
     WhereOperators,
 } from "lunorash/server/data-model";
 
-export type TableName = "nodes" | "tagColors" | "savedQueries" | "ratelimit_buckets";
+export type TableName = "nodes" | "tagColors" | "savedQueries" | "dailyIndex" | "ratelimit_buckets";
 
 export type Id<TName extends string> = string & { readonly __table: TName };
 
@@ -72,6 +72,15 @@ export interface Doc_savedQueries {
     userId: string;
 }
 
+export interface Doc_dailyIndex {
+    _id: Id<"dailyIndex">;
+    _creationTime: number;
+    key: string;
+    nodeId: string;
+    touchedAt: number;
+    userId: string;
+}
+
 export interface Doc_ratelimit_buckets {
     _id: Id<"ratelimit_buckets">;
     _creationTime: number;
@@ -85,6 +94,7 @@ export interface DataModel {
     nodes: Doc_nodes;
     tagColors: Doc_tagColors;
     savedQueries: Doc_savedQueries;
+    dailyIndex: Doc_dailyIndex;
     ratelimit_buckets: Doc_ratelimit_buckets;
 }
 
@@ -98,6 +108,7 @@ export interface IndexNamesByTable {
     nodes: "by_parent";
     tagColors: "by_tag";
     savedQueries: never;
+    dailyIndex: "by_key";
     ratelimit_buckets: "by_key";
 }
 
@@ -108,6 +119,7 @@ export interface SearchIndexNamesByTable {
     nodes: never;
     tagColors: never;
     savedQueries: never;
+    dailyIndex: never;
     ratelimit_buckets: never;
 }
 
@@ -118,6 +130,7 @@ export interface RankIndexNamesByTable {
     nodes: never;
     tagColors: never;
     savedQueries: never;
+    dailyIndex: never;
     ratelimit_buckets: never;
 }
 
@@ -128,6 +141,7 @@ export interface GeoIndexNamesByTable {
     nodes: never;
     tagColors: never;
     savedQueries: never;
+    dailyIndex: never;
     ratelimit_buckets: never;
 }
 
@@ -171,6 +185,15 @@ export interface Insert_savedQueries {
     userId: string;
 }
 
+export interface Insert_dailyIndex {
+    _id?: Id<"dailyIndex">;
+    _creationTime?: number;
+    key: string;
+    nodeId: string;
+    touchedAt: number;
+    userId: string;
+}
+
 export interface Insert_ratelimit_buckets {
     _id?: Id<"ratelimit_buckets">;
     _creationTime?: number;
@@ -185,6 +208,7 @@ export interface InsertModel {
     nodes: Insert_nodes;
     tagColors: Insert_tagColors;
     savedQueries: Insert_savedQueries;
+    dailyIndex: Insert_dailyIndex;
     ratelimit_buckets: Insert_ratelimit_buckets;
 }
 
@@ -210,6 +234,7 @@ export interface Relations {
     nodes: {};
     tagColors: {};
     savedQueries: {};
+    dailyIndex: {};
     ratelimit_buckets: {};
 }
 

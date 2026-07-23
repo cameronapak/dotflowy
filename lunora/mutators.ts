@@ -32,8 +32,9 @@ import {
   type OutlineNode,
   type OutlinePlan,
 } from "../src/data/outline-plans";
+import { resolveDailyClaim } from "../src/plugins/daily/claim-mapping";
 
-type ShardTable = "nodes" | "tagColors" | "savedQueries";
+type ShardTable = "nodes" | "tagColors" | "savedQueries" | "dailyIndex";
 
 /** Minimal mutator ctx — defineMutator's ServerContext is the base MutationCtx. */
 type MutatorDb = {
@@ -628,8 +629,8 @@ export const outdentMany = defineMutator({
 
 /**
  * Daily get-or-create node half — scaffold + day (+ optional seed) after the
- * client has claimed ids via `/api/kv` (dailyIndex stays on custom DO until
- * claimMapping ports; tagColors/savedQueries are Lunora in this slice).
+ * client has claimed ids via `claimDailyMapping` (flag ON) or `/api/kv`
+ * (flag OFF). ADR 0041 `seedEntryLine` is an optional empty child in `inserts`.
  */
 export const materializeDailyNodes = defineMutator({
   args: {
@@ -759,5 +760,90 @@ export const deleteSavedQuery = defineMutator({
     assertOwner(mctx, args.userId);
     const existing = await mctx.db.get(args.id as Id<"savedQueries">);
     if (existing) await mctx.db.delete(args.id as Id<"savedQueries">);
+  },
+});
+
+// --- dailyIndex (atomic claim = DO getOrCreateKv twin) ----------------------
+
+/**
+ * Atomic get-or-create of a `key → nodeId` mapping. Pre-existing wins; returns
+ * `{ nodeId, won }` so the client knows whether to materialize the node.
+ * `_id` = `key` via clientId (same as tagColors).
+ */
+export const claimDailyMapping = defineMutator({
+  args: {
+    userId: userIdArg,
+    key: v.string(),
+    nodeId: idArg,
+    touchedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.key as Id<"dailyIndex">);
+    const existingNodeId =
+      existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
+    const { winner, won } = resolveDailyClaim(existingNodeId, args.nodeId);
+    if (existing) {
+      // Always write (touchedAt) so the watermark poke fires even on a lost race.
+      await mctx.db.patch(args.key as Id<"dailyIndex">, {
+        nodeId: winner,
+        touchedAt: args.touchedAt,
+      });
+    } else {
+      await mctx.db.insert(
+        "dailyIndex",
+        {
+          key: args.key,
+          nodeId: winner,
+          touchedAt: args.touchedAt,
+          userId: args.userId,
+        },
+        { clientId: args.key },
+      );
+    }
+    return { nodeId: winner, won };
+  },
+});
+
+/** Upsert a daily-index mapping (heal / setMapping). */
+export const upsertDailyMapping = defineMutator({
+  args: {
+    userId: userIdArg,
+    key: v.string(),
+    nodeId: idArg,
+    touchedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.key as Id<"dailyIndex">);
+    if (existing) {
+      await mctx.db.patch(args.key as Id<"dailyIndex">, {
+        nodeId: args.nodeId,
+        touchedAt: args.touchedAt,
+      });
+    } else {
+      await mctx.db.insert(
+        "dailyIndex",
+        {
+          key: args.key,
+          nodeId: args.nodeId,
+          touchedAt: args.touchedAt,
+          userId: args.userId,
+        },
+        { clientId: args.key },
+      );
+    }
+  },
+});
+
+export const deleteDailyMapping = defineMutator({
+  args: { userId: userIdArg, key: v.string() },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.key as Id<"dailyIndex">);
+    if (existing) await mctx.db.delete(args.key as Id<"dailyIndex">);
   },
 });

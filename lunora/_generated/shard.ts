@@ -38,6 +38,15 @@ const LUNORA_TABLE_INDEXES: Record<string, Array<{ fields: string[]; name: strin
             "type": "index"
         }
     ],
+    "dailyIndex": [
+        {
+            "fields": [
+                "key"
+            ],
+            "name": "by_key",
+            "type": "index"
+        }
+    ],
     "ratelimit_buckets": [
         {
             "fields": [
@@ -181,6 +190,39 @@ const LUNORA_TABLE_COLUMNS: Record<string, Array<{ isStorage?: boolean; name: st
         },
         {
             "name": "createdAt",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "userId",
+            "optional": false,
+            "type": "string"
+        }
+    ],
+    "dailyIndex": [
+        {
+            "name": "_id",
+            "optional": false,
+            "pk": true,
+            "type": "id"
+        },
+        {
+            "name": "_creationTime",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "key",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "nodeId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "touchedAt",
             "optional": false,
             "type": "number"
         },
@@ -804,6 +846,7 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
             facade["nodes"] = bindTableFacade(db, "nodes");
             facade["tagColors"] = bindTableFacade(db, "tagColors");
             facade["savedQueries"] = bindTableFacade(db, "savedQueries");
+            facade["dailyIndex"] = bindTableFacade(db, "dailyIndex");
             facade["ratelimit_buckets"] = bindTableFacade(db, "ratelimit_buckets");
 
             // `ctx.log`: the DO base builds the attributed logger (structured

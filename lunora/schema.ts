@@ -7,8 +7,8 @@ import { ratelimit } from "./ratelimit/schema";
  * `userId` shard key. Dotflowy `id` / kv keys map to Lunora `_id` via
  * `clientId` on insert.
  *
- * Phase 2b: `tagColors` + `savedQueries` ride Lunora when the sync flag is ON.
- * `dailyIndex` stays on `/api/kv` until claimMapping lands (atomic get-or-create).
+ * Phase 2b: `tagColors` + `savedQueries` + `dailyIndex` ride Lunora when the
+ * sync flag is ON. `claimDailyMapping` is the DO `getOrCreateKv` twin.
  */
 export default defineSchema({
   nodes: defineTable({
@@ -45,4 +45,19 @@ export default defineSchema({
     createdAt: v.number(),
     userId: v.string(),
   }).shardBy("userId"),
+
+  /**
+   * Daily scaffold identity (ADR 0052). `_id` = key via clientId
+   * (`container` / `YYYY` / `YYYY-MM` / `YYYY-Www` / `YYYY-MM-DD`).
+   * `touchedAt` bumps on every claim so a lost-race claim still emits a
+   * poke (watermark hold needs a write).
+   */
+  dailyIndex: defineTable({
+    key: v.string(),
+    nodeId: v.string(),
+    touchedAt: v.number(),
+    userId: v.string(),
+  })
+    .shardBy("userId")
+    .index("by_key", ["key"]),
 }).extend(ratelimit.extension);
