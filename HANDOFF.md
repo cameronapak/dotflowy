@@ -12,7 +12,7 @@ Commits on `spike/lunora-outline` after Phase 0 docs `78cca687f9`:
 2. `1b99bce9a2` `feat(spike): shared mapping, TreeIndex bridge, empty-outline seed`
 3. `fc7654a1c2` `docs(spike): record Phase 1 bridge commit hash in HANDOFF`
 4. `0b8b3a7d8e` `docs(spike): include Phase 1 docs commit in HANDOFF list`
-5. _(this branch tip)_ — Phase 1 review: `seedIfEmpty` mutator, map unify, empty-UI copy
+5. `e16cd6e845` `fix(spike): server-authoritative seedIfEmpty for multi-tab idempotency`
 
 ## Sources of truth
 
