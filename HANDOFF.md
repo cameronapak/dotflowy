@@ -42,11 +42,18 @@ pnpm dev   # smoke; note printed Local port
 - Advisor `table_without_insert` fires for mutator-only inserts (ignore for this spike)
 - Dual `defineMutator` APIs must not be mixed (server vs `@lunora/db/mutators`)
 
+## Code review (Phase 0)
+
+**Standards** — process-clean for a spike. Merge-to-`main` gates: delete this `HANDOFF.md`; add changeset (`bunx changeset --empty` if spike isn't product news). Mild smells: `docToNode`≈`rowToNode` dup; leftover Vite assets/CSS; nullable codegen casts.
+
+**Spec** — required implementation met. Must-prove #1 automated (planner tests). #2–#5 wired; still need human 2-tab / hard-reload / cross-user pass (README checklist).
+
 ## Next (post Phase 0)
 
-- Manual 2-tab + hard-reload checklist against exit criteria
-- Optional: seed helper / Studio path for faster demos
-- Phase 1+: richer editor / migrate product surfaces — out of scope here
+- Manual 2-tab + hard-reload (+ optional second browser / second user) against exit criteria
+- Before any PR to `main`: delete `HANDOFF.md` + empty changeset
+- Optional: trim unused Vite assets/CSS; seed helper
+- Phase 1+: richer editor / migrate product — out of scope here
 
 ## Note
 
