@@ -4,7 +4,7 @@
 
 ## Status
 
-`phase-2-flag-swap` — outline sync can ride Lunora shapes/mutators behind a **default-OFF** flag. Custom `/api/sync` + `nodesCollection` + `runStructural` remain the default path (Playwright + normal `bun run dev`). **No PR until remaining gaps close + e2e green on Lunora (or still on old wire by design).**
+`phase-2-flag-swap` — outline sync can ride Lunora shapes/mutators behind a **default-OFF** flag. Custom `/api/sync` + `nodesCollection` + `runStructural` remain the default path (Playwright classic suite + normal `bun run dev`). **No PR until remaining gaps close + e2e green on Lunora (or still on old wire by design).**
 
 ## Flag — Lunora outline sync
 
@@ -28,129 +28,76 @@ location.reload()
 # Or open http://localhost:3000/?lunora-sync=on
 ```
 
-Expect: empty Lunora shard seeds demo bullets via `seedIfEmpty`; Enter / Tab / Shift+Tab / Backspace / typing / Cmd+Z / `/mirror` / multi-select Tab·Shift+Tab·Delete / Today get-or-create / quick-add born / OPML import / tag color + saved filter writes use Lunora mutators + watermark checkpoints; Network shows `/_lunora/*` (not `/api/sync` for outline, not `/api/kv` for tag-colors/saved-queries). Second tab same user → live converge. **dailyIndex still hits `/api/kv`.**
+Expect: if classic DO has data and Lunora shard is empty → **auto-migrate** once (nodes + tag-colors + saved-queries + daily-index). Else empty Lunora seeds demo bullets via `seedIfEmpty`. Editor mutators + kv (incl. **dailyIndex / claimDailyMapping**) ride `/_lunora/*`. Second tab same user → live converge.
+
+## Migrate runbook (classic DO → Lunora)
+
+**Safe default: skip if Lunora already has any nodes** (no replace). Classic `UserOutlineDO` data is never deleted.
+
+### Automatic (preferred)
+
+1. Enable `dotflowy:flag:lunora-sync` and reload while signed in.
+2. On first ready load: if Lunora `wholeOutline` is empty **and** `GET /api/nodes` returns rows → chunked `importNodes` + kv upserts.
+3. Console: `[lunora-migrate] imported N nodes + K kv rows from classic DO`.
+
+### Manual retry
+
+- **More menu** (flag ON only): "Migrate to Lunora" — same skip-if-nonempty semantics; toasts the outcome.
+- **DevTools:** `await window.__dotflowyMigrateToLunora()` → `{ status, nodes?, kv?, error? }`.
+
+Statuses: `migrated` | `skipped-nonempty` | `skipped-empty-source` | `failed`.
 
 ## What landed (this slice)
 
-### Quick-add append + OPML import + drag check + KV 2b start
+### dailyIndex on Lunora (KV 2b finish)
 
-| Mutator            | Planner           | Notes                                                                                          |
-| ------------------ | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `appendChild`      | `planAppendChild` | Quick-add born — server resolves last sibling; **one watermark** per capture                   |
-| `importNodes`      | `planImportNodes` | OPML dialog; insert-only chunks of ~500; **clientSeq FIFO**; mid-fail can leave earlier chunks |
-| `upsertTagColor`   | (inline)          | Phase 2b — tag color put                                                                       |
-| `deleteTagColor`   | (inline)          | Phase 2b — tag color clear                                                                     |
-| `upsertSavedQuery` | (inline)          | Phase 2b — pin save                                                                            |
-| `patchSavedQuery`  | (inline)          | Phase 2b — rename                                                                              |
-| `deleteSavedQuery` | (inline)          | Phase 2b — unsave / row delete (client bind name `deleteSavedQueryRow`)                        |
+| Mutator              | Notes                                                                  |
+| -------------------- | ---------------------------------------------------------------------- |
+| `claimDailyMapping`  | Atomic get-or-create; bumps `touchedAt` so watermark poke always fires |
+| `upsertDailyMapping` | `setMapping` / migrate heal                                            |
+| `deleteDailyMapping` | delete                                                                 |
 
-- **Drag-reorder:** already hits `moveNode` via `OutlineEditor` → `runStructural` → Lunora-wired `mutations.moveNode`. No change needed.
-- **KV tables:** `tagColors` + `savedQueries` in `lunora/schema.ts`, shapes `userTagColors` / `userSavedQueries`. Same `isLunoraSyncEnabled()` flag (no sub-flag). Bound into the outline store's **one** `bindMutators` (shared clientSeq FIFO with node writes).
-- **dailyIndex:** still `/api/kv` + `claimMapping` — deferred until atomic get-or-create ports (not in this slice).
-- Worker `KV_COLLECTIONS` path unchanged for flag OFF.
+- Table `dailyIndex` `.shardBy("userId")`, shape `userDailyIndex`, pure `resolveDailyClaim` unit-tested.
+- Flag ON: `claimMapping` / daily index feed use Lunora; flag OFF unchanged `/api/kv`.
+- `materializeDailyNodes` still the node half after claims (ADR 0041 seedEntryLine unchanged).
 
-### Multi-select batches + resolveMirror + daily (still true)
+### DO → Lunora migrate
 
-| Mutator                 | Planner                        | Notes                                                                                       |
-| ----------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `removeMany`            | `planRemoveMany`               | Selection delete — ONE watermark; rebuilds between sibling deletes                          |
-| `moveMany`              | `planMoveMany`                 | Selection move / Send-to-Today later — ONE watermark                                        |
-| `indentMany`            | `planIndentMany`               | Selection Tab; `resolveMirror` → SOURCE                                                     |
-| `outdentMany`           | `planOutdentMany`              | Selection Shift+Tab                                                                         |
-| `materializeDailyNodes` | `planMaterializeDailyNodes`    | Daily scaffold+day(+seed) after kv `claimMapping`; ADR 0041 `seedEntryLine` in same mutator |
-| `indent` (updated)      | `planIndent` + `resolveMirror` | Mirror prev-sibling parents into SOURCE (was skipped when mirrors ON)                       |
+- `src/data/lunora-migrate.ts` — auto on flag-ON empty shard; More menu + `__dotflowyMigrateToLunora`.
+- Imports nodes via `importNodes` chunks (~500) + tag/saved/daily kv upserts.
 
-- Multi planners rebuild a working copy between sibling ops, then `planRestoreNodes`-diff to one plan.
-- `mutations.ts` branches when `isLunoraSyncEnabled()`; selection-mode keeps calling `*ManyNodes` (no UI change).
-- Daily: kv claims stay on `/api/kv`; node half is Lunora-only. `hasNode` / seed checks read Lunora collection when flag ON.
+### e2e foundation
 
-### History restore + mirrors (still true)
+- `seedOutlineLunora` in `e2e/fixtures.ts` — mocks `/_lunora/ws` + `/_lunora/rpc`, enables flag via init script.
+- `e2e/lunora-sync-smoke.spec.ts` — load + edit + reload smoke.
+- Classic `seedOutline` untouched (flag OFF suite).
 
-| Mutator        | Planner            | Notes                                                                 |
-| -------------- | ------------------ | --------------------------------------------------------------------- |
-| `restoreNodes` | `planRestoreNodes` | Full target snapshot → one watermark; `runHistoryRestore` routes here |
-| `mirrorNode`   | `planMirrorNode`   | `/mirror` + `mutations.mirrorNode`; flatten + cycle + trueSource dest |
+### Prior slices (still true)
 
-### Prior mutator/planner parity (still true)
+appendChild / importNodes / tagColors / savedQueries / multi-select / materializeDailyNodes / restoreNodes / mirrorNode / field+structural mutators / flag-swap architecture — see git log.
 
-| Mutator                   | Planner                  | Notes                                                   |
-| ------------------------- | ------------------------ | ------------------------------------------------------- |
-| `insertSibling`           | `planInsertSibling`      | prior                                                   |
-| `insertChildAtStart`      | `planInsertChildAtStart` | Enter into expanded parent                              |
-| `splitNode`               | `planSplitNode`          | Enter mid-split — ONE watermark (setText+insertSibling) |
-| `outdent` / `removeNode`  | prior                    | prior                                                   |
-| `moveNode`                | `planMoveNode`           | Cmd+Shift+↑/↓ + **drag-reorder**; edge reparent OK      |
-| `setText` / field toggles | matching `planSet*`      | completed/collapsed/isTask/kind/bookmarkedAt            |
-| `seedIfEmpty` / `hello`   | prior                    | prior                                                   |
+## Known gaps (toward flag-default-ON)
 
-### Flag-swap architecture
-
-```
-Flag OFF (default):
-  OutlineEditor → mutations/runStructural → nodesCollection → /api/sync + UserOutlineDO
-  tag-colors / saved-queries / daily-index → /api/kv
-
-Flag ON:
-  LunoraSyncHost → createOutlineStore(wholeOutline + userTagColors + userSavedQueries + bindMutators)
-       ↓ subscribeChanges
-  tree-store.resetTreeFromNodes (ADR 0004 feed)
-  tag-colors / saved-queries bindLunora* feeds
-       ↑
-  mutations (+ mirror / multi / daily / appendChild) / OPML importNodes / runHistoryRestore
-  runStructural → body only (watermark hold is checkpoints, not waitForSeq)
-  dailyIndex → still /api/kv
-```
-
-| File                                    | Role                                                    |
-| --------------------------------------- | ------------------------------------------------------- |
-| `src/data/flags.ts`                     | `isLunoraSyncEnabled()`                                 |
-| `src/data/lunora-client.ts`             | singleton `LunoraClient` → same-origin `/_lunora`       |
-| `src/data/lunora-outline-store.ts`      | nodes + tagColors + savedQueries + `bindMutators`       |
-| `src/data/lunora-kv-store.ts`           | KV row types (phase 2b)                                 |
-| `src/data/lunora-bridge.ts`             | rows → TreeIndex / Node                                 |
-| `src/data/lunora-sync.ts`               | start/stop, feed tree-store + kv binds, seedIfEmpty     |
-| `src/components/lunora-sync-host.tsx`   | AuthGate child; LunoraProvider when flag ON             |
-| `src/components/history-restore.tsx`    | flag ON → `restoreNodes` mutator                        |
-| `src/components/opml-import-dialog.tsx` | flag ON → chunked `importNodes`                         |
-| `src/plugins/daily/get-or-create.ts`    | flag ON → `materializeDailyNodes` (kv claims unchanged) |
-| `src/data/tag-colors.ts`                | flag ON → Lunora mutators + shape feed                  |
-| `src/data/saved-queries.ts`             | flag ON → Lunora mutators + shape feed                  |
-| `src/data/collection.ts`                | flag ON → skip `/api/sync` socket                       |
-| `src/data/structural.ts`                | flag ON → no `{ops}` / waitForSeq                       |
-| `src/data/mutations.ts`                 | Lunora mutator surface (+ appendChild)                  |
-| `src/data/outline-plans/`               | shared pure planners + unit tests                       |
-| `lunora/mutators.ts`                    | server `defineMutator` twin                             |
-| `lunora/schema.ts` / `shapes.ts`        | nodes + tagColors + savedQueries                        |
-
-### Deps (root, bun)
-
-- `@lunora/db@1.0.0-alpha.27`, `@lunora/react@1.0.0-alpha.31`
-- `@tanstack/db@^0.6.16`, `@tanstack/offline-transactions@^1.0.41`
-- Existing: `lunorash@1.0.0-alpha.98`
-
-## Known gaps (flag ON)
-
-- **Not ported:** dailyIndex / `claimMapping` atomic get-or-create, daily flat→nested migration under Lunora, full plugin structural paths beyond what's wired, `resyncNodes` no-op when flag ON
-- **OPML large import:** chunked `importNodes` — a mid-import failure can leave earlier chunks durable (documented in dialog copy); flag-OFF path stays all-or-nothing
-- **Quick-add pre-born intents** (`/todo` before first keystroke): still separate field mutators after `appendChild` (rare); born insert itself is one watermark
-- **e2e** still on old wire (`seedOutline`); flag must stay OFF for Playwright
-- **No data migrate** from UserOutlineDO → Lunora shard yet (flag ON = empty/new Lunora outline; kv rows similarly empty until rewritten)
-- Tree-store Lunora feed is **full rebuild** per change (fine for dogfood; not the incremental hot path)
+- Full Playwright suite still on classic wire; only one Lunora smoke (expand fixture coverage).
+- Daily flat→nested migration under Lunora dogfood; MCP remount onto mutators.
+- Snapshot/R2 restore path still classic DO; delete `UserOutlineDO` custom sync **out of scope** until gates green.
+- OPML mid-chunk failure can leave earlier chunks; tree-store Lunora feed is full rebuild per change.
+- Flag must stay **default OFF** until migrate+e2e are dogfood-solid.
 
 ## Gates (flag OFF)
 
 ```sh
-bun run typecheck
-bun run typecheck:worker
-bun run test                    # includes flags + lunora-bridge + outline-plans
+bun run lunora:codegen   # after lunora/ edits
+bun run typecheck && bun run typecheck:worker && bun run typecheck:test
+bun run lint && bun run test
+# optional: bun run test:e2e e2e/lunora-sync-smoke.spec.ts
 ```
 
 ## Next
 
-1. Lunora-aware e2e fixture (mock `/_lunora` or Miniflare) — keep `seedOutline` until then.
-2. dailyIndex + `claimMapping` on Lunora; MCP remount; snapshot migrate; delete `UserOutlineDO` custom sync.
-3. Optional: fold quick-add intents into `appendChild` args; OPML single-watermark for small imports.
-4. Green gates → PR; **delete this `HANDOFF.md` in the shipping PR.**
+1. Harden `seedOutlineLunora` (more mutators, daily claim) + expand smoke / port a few critical specs.
+2. Dogfood migrate on a real account; MCP remount; then consider flag default ON.
+3. Green gates → PR; **delete this `HANDOFF.md` in the shipping PR.**
 
 ## Note
 
