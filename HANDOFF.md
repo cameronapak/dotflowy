@@ -45,10 +45,11 @@ bunx playwright test e2e/lunora-*.spec.ts --workers=1
 E2E_LUNORA=1 E2E_PORT=3231 bunx playwright test e2e --workers=1
 ```
 
-**Last broader matrix** (`E2E_LUNORA=1 E2E_PORT=3231 bunx playwright test e2e --workers=1`):
-**355 passed / 1 flaked / 13 skipped**. Flake was `lunora-structural` `/delete`
-reload racing fire-and-forget watermark — hardened to await `mutators:removeNode`
-(repeat-each green). Prior full run before fixes: **350 / 15 / 4**.
+**Last broader matrix** (`E2E_LUNORA=1 E2E_PORT=3235 bunx playwright test e2e --workers=1`):
+**356 passed / 0 failed / 13 skipped** (369 total — max pass under transport skips).
+Prior flake: `delete-confirm` big-delete reload hid rows before Lunora poke —
+`openSeededOutline` / `waitForSeededNode` in fixtures (2026-07-23). Earlier:
+**355 / 1 flake / 13**; before product fixes **350 / 15 / 4**.
 
 Product fixes that cleared the 15: Lunora big-delete → `mutators.removeMany`;
 keymap delete passes `instanceId` (mirror instance, not source).
@@ -72,6 +73,7 @@ keymap delete passes `instanceId` (mirror instance, not source).
 - Mock: per-shape checkpoints + **delete ops in pokes** (put-only resurrected deletes)
 - `page.unroute("**/_lunora/**")` etc. at seed start (reload / stacked-handler flake)
 - AuthGate session mock kept on Lunora path
+- `openSeededOutline` / `waitForSeededNode` — post-`goto` Lunora hydration wait
 
 ### Product fixes this slice
 

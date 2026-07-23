@@ -47,6 +47,26 @@ function wantsLunoraSeed(opts: { lunora?: boolean } | undefined): boolean {
   return isE2eLunora(opts);
 }
 
+/** Lunora shape pokes can land after `goto`; wait for a seeded row. No-op classic. */
+export async function waitForSeededNode(
+  page: Page,
+  nodeId: string,
+): Promise<void> {
+  if (!isE2eLunora()) return;
+  await page
+    .locator(`li[data-node-id="${nodeId}"]`)
+    .waitFor({ state: "attached", timeout: 15_000 });
+}
+
+/** `page.goto` + Lunora hydration wait on a known seeded id. */
+export async function openSeededOutline(
+  page: Page,
+  opts: { path?: string; anchorId?: string } = {},
+): Promise<void> {
+  await page.goto(opts.path ?? "/");
+  await waitForSeededNode(page, opts.anchorId ?? "alpha");
+}
+
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
 // with inert defaults by seedOutline so each test only states what matters.
