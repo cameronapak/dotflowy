@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { isE2eLunora, seedOutline, STANDARD_TREE } from "./fixtures";
 
 // A node's own editable text span.
 const text = (page: Page, id: string) =>
@@ -37,6 +37,10 @@ test.describe("Save failure surfaces a toast and rolls back (#230)", () => {
   test("a failed structural write toasts and reverts the optimistic bullet", async ({
     page,
   }) => {
+    test.skip(
+      isE2eLunora(),
+      "injects a failure into the classic structural transport",
+    );
     // Seed loads normally; only structural-batch POSTs fail from here on.
     await seedOutline(page, STANDARD_TREE, { failStructuralWrites: true });
     await page.goto("/");
