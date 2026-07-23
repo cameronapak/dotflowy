@@ -4,20 +4,15 @@
 
 ## Status
 
-`phase-1-seed-hardened` — Phase 1 bridge + server-authoritative `seedIfEmpty` (multi-tab seed race fixed).
+`phase-2-cutover` — ADR 0055 accepted; spike Phase 0–1 proven. **No PR until Lunora cutover is complete and pre-existing tests are 100% green.**
 
-Commits on `spike/lunora-outline` after Phase 0 docs `78cca687f9`:
-
-1. `a4bf137367` / `f942321782` — Phase 0 manual exit-criteria PASS notes
-2. `1b99bce9a2` `feat(spike): shared mapping, TreeIndex bridge, empty-outline seed`
-3. `fc7654a1c2` `docs(spike): record Phase 1 bridge commit hash in HANDOFF`
-4. `0b8b3a7d8e` `docs(spike): include Phase 1 docs commit in HANDOFF list`
-5. `e16cd6e845` `fix(spike): server-authoritative seedIfEmpty for multi-tab idempotency`
+Commits (recent): through `40a5004bb2` (seed smoke) + upcoming ADR 0055 commit.
 
 ## Sources of truth
 
-- Spike README: `spikes/lunora-outline/README.md` (run / demo / exit criteria)
-- ADRs: `docs/adr/0004-…`, `docs/adr/0008-…`, `docs/adr/0009-…`
+- **ADR 0055:** `docs/adr/0055-lunora-replaces-custom-outline-sync.md` (cutover sequence)
+- Spike README: `spikes/lunora-outline/README.md`
+- ADRs: `0004`, `0008` (amended by 0055), `0009`, `0055`
 - Research clone (machine-local): `/tmp/lunora-research` (`alpha` branch)
 
 ## Tree state
@@ -70,8 +65,9 @@ Verified on `http://localhost:5175/` (Vite fell through 5173→5174→5175):
 
 ## Next
 
-- Before any PR to `main`: delete `HANDOFF.md` + empty changeset
-- Phase 2+: richer editor / migrate product — out of scope here
+- Phase 2 sequence (ADR 0055): lift shared planners → integrate Lunora into main app → swap `nodesCollection` → migrate kv/MCP/data → delete custom DO sync → green gates → **then** PR
+- Delete this `HANDOFF.md` in the shipping PR (must never reach `main`)
+- Changeset at PR time (likely major communicative bump — readers relearn sync/infra story)
 
 ## Note
 
