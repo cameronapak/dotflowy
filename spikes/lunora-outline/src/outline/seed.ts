@@ -1,7 +1,15 @@
 /**
- * Idempotent first-run demo seed — only when the outline is ready and empty.
- * Uses the existing `insertSibling` mutator (deterministic timestamps in args).
+ * Idempotent first-run demo seed.
+ *
+ * Idempotency is server-authoritative: `seedIfEmpty` loads the shard, no-ops if
+ * any nodes exist, else inserts 4 demo bullets with **deterministic clientIds**.
+ * Watermark FIFO on the DO serializes concurrent calls — the second sees
+ * non-empty and no-ops. Client optimistic apply uses the same ids so multi-tab
+ * overlays converge.
  */
+
+import { makeNode } from "./tree.js";
+import { emptyPlan, type OutlineNode, type OutlinePlan } from "./types.js";
 
 export const DEMO_SEED_TEXTS = [
   "Welcome to the Lunora outline spike",
@@ -10,17 +18,24 @@ export const DEMO_SEED_TEXTS = [
   "Hard reload restores from wholeOutline",
 ] as const;
 
-export type InsertSiblingArgs = {
-  id: string;
-  userId: string;
-  parentId: string | null;
-  afterId: string | null;
-  text: string;
-  createdAt: number;
-  updatedAt: number;
-};
+/**
+ * Fixed UUID clientIds for the 4 demo bullets (shard-local).
+ * Same ids every seed → multi-tab optimistic rows converge; second server call no-ops.
+ */
+export const DEMO_SEED_IDS = [
+  "d0ef1001-5eed-4000-8000-000000000001",
+  "d0ef1002-5eed-4000-8000-000000000002",
+  "d0ef1003-5eed-4000-8000-000000000003",
+  "d0ef1004-5eed-4000-8000-000000000004",
+] as const;
 
-export type InsertSiblingFn = (args: InsertSiblingArgs) => Promise<unknown>;
+export type SeedIfEmptyArgs = {
+  userId: string;
+  /** Base timestamp; bullet i uses createdAt/updatedAt = createdAt + i. */
+  createdAt: number;
+  texts?: readonly string[];
+  ids?: readonly string[];
+};
 
 /** Gate: ready + zero nodes. Callers still guard in-flight / StrictMode. */
 export function shouldSeedOutline(opts: {
@@ -31,39 +46,58 @@ export function shouldSeedOutline(opts: {
 }
 
 /**
- * Insert demo bullets as a top-level chain via `insertSibling`.
- * Returns inserted ids (empty if texts list is empty).
+ * Pure planner: empty outline → insert demo chain; non-empty → null (no-op).
+ */
+export function planSeedIfEmpty(
+  nodes: readonly OutlineNode[],
+  args: SeedIfEmptyArgs,
+): OutlinePlan | null {
+  if (nodes.length > 0) return null;
+
+  const texts = args.texts ?? DEMO_SEED_TEXTS;
+  const ids = args.ids ?? DEMO_SEED_IDS;
+  if (texts.length !== ids.length) {
+    throw new Error("planSeedIfEmpty: texts and ids length mismatch");
+  }
+
+  const plan = emptyPlan();
+  let prev: string | null = null;
+  for (let i = 0; i < texts.length; i++) {
+    const id = ids[i]!;
+    const t = args.createdAt + i;
+    plan.inserts.push(
+      makeNode({
+        id,
+        userId: args.userId,
+        parentId: null,
+        prevSiblingId: prev,
+        text: texts[i]!,
+        createdAt: t,
+        updatedAt: t,
+      }),
+    );
+    prev = id;
+  }
+  return plan;
+}
+
+export type SeedIfEmptyFn = (args: {
+  userId: string;
+  createdAt: number;
+}) => Promise<unknown>;
+
+/**
+ * Fire the server-authoritative `seedIfEmpty` mutator (optimistic apply mirrors
+ * `planSeedIfEmpty` with the same deterministic clientIds).
  */
 export async function seedEmptyOutline(opts: {
   userId: string;
-  insertSibling: InsertSiblingFn;
-  texts?: readonly string[];
-  newId?: () => string;
+  seedIfEmpty: SeedIfEmptyFn;
   now?: () => number;
-}): Promise<string[]> {
-  const texts = opts.texts ?? DEMO_SEED_TEXTS;
-  const newId = opts.newId ?? (() => crypto.randomUUID());
+}): Promise<void> {
   const now = opts.now ?? (() => Date.now());
-
-  let afterId: string | null = null;
-  let t = now();
-  const ids: string[] = [];
-
-  for (const text of texts) {
-    const id = newId();
-    await opts.insertSibling({
-      id,
-      userId: opts.userId,
-      parentId: null,
-      afterId,
-      text,
-      createdAt: t,
-      updatedAt: t,
-    });
-    ids.push(id);
-    afterId = id;
-    t += 1;
-  }
-
-  return ids;
+  await opts.seedIfEmpty({
+    userId: opts.userId,
+    createdAt: now(),
+  });
 }

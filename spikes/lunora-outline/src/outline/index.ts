@@ -12,7 +12,13 @@ export {
   planSetText,
   applyPlan,
 } from "./planners.js";
-export { rowToNode, docToNode, nodeToDocFields } from "./map-node.js";
+export {
+  rowToNode,
+  docToNode,
+  nodeToDocFields,
+  nodeToRow,
+  nodeToInsertFields,
+} from "./map-node.js";
 export type { NodeDocLike } from "./map-node.js";
 export {
   rowsToOutlineNodes,
@@ -21,7 +27,9 @@ export {
 } from "./lunora-bridge.js";
 export {
   DEMO_SEED_TEXTS,
+  DEMO_SEED_IDS,
   shouldSeedOutline,
+  planSeedIfEmpty,
   seedEmptyOutline,
 } from "./seed.js";
-export type { InsertSiblingArgs, InsertSiblingFn } from "./seed.js";
+export type { SeedIfEmptyArgs, SeedIfEmptyFn } from "./seed.js";

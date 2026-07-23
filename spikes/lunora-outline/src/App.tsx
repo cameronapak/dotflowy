@@ -133,9 +133,11 @@ function OutlineApp({ userId }: { userId: string }) {
   const { mutate: outdent } = useMutator(store.mutators.outdent);
   const { mutate: removeNode } = useMutator(store.mutators.removeNode);
   const { mutate: setText } = useMutator(store.mutators.setText);
+  const { mutate: seedIfEmpty } = useMutator(store.mutators.seedIfEmpty);
 
   const [draft, setDraft] = useState("");
   const [afterId, setAfterId] = useState<string | null>(null);
+  const [seedPending, setSeedPending] = useState(false);
   const seedStarted = useRef(false);
 
   const isReady = !isLoading && status === "ready";
@@ -144,15 +146,19 @@ function OutlineApp({ userId }: { userId: string }) {
     if (seedStarted.current) return;
     if (!shouldSeedOutline({ isReady, nodeCount })) return;
     seedStarted.current = true;
+    setSeedPending(true);
     void seedEmptyOutline({
       userId,
-      insertSibling: (args) => insertSibling(args),
-      newId,
-    }).catch((err) => {
-      seedStarted.current = false;
-      console.error("seedEmptyOutline failed", err);
-    });
-  }, [isReady, nodeCount, userId, insertSibling]);
+      seedIfEmpty: (args) => seedIfEmpty(args),
+    })
+      .catch((err) => {
+        seedStarted.current = false;
+        console.error("seedEmptyOutline failed", err);
+      })
+      .finally(() => {
+        setSeedPending(false);
+      });
+  }, [isReady, nodeCount, userId, seedIfEmpty]);
 
   const addBullet = async (event: FormEvent) => {
     event.preventDefault();
@@ -267,7 +273,11 @@ function OutlineApp({ userId }: { userId: string }) {
       {isLoading ? (
         <p style={{ color: "#999" }}>Loading outline…</p>
       ) : orderedTop.length === 0 ? (
-        <p style={{ color: "#999" }}>Seeding demo bullets…</p>
+        <p style={{ color: "#999" }}>
+          {seedPending
+            ? "Seeding demo bullets…"
+            : "Outline empty — insert a bullet to start."}
+        </p>
       ) : null}
     </main>
   );

@@ -33,7 +33,7 @@ Local secrets: `.dev.vars` is gitignored. Scaffold needs `AUTH_SECRET` (and opti
 
 1. `pnpm dev` → open the Local URL (e.g. `http://localhost:5174/`).
 2. **Sign up** once (`spike@dotflowy.local` / `spike-dev-password` prefilled — change as you like).
-3. Empty outline **auto-seeds** 4 demo bullets (idempotent — only when ready + zero nodes).
+3. Empty outline **auto-seeds** 4 demo bullets via server `seedIfEmpty` (idempotent — DO watermark FIFO; second concurrent call no-ops).
 4. Indent/outdent/delete/edit text; insert more bullets.
 5. Open a **second tab** to the same origin (already signed in via cookie).
 6. Edits in either tab should converge live (shape poke + watermark).
@@ -58,9 +58,9 @@ Cross-user: sign out → sign up as a different email → that session’s `auth
 | `lunora/shapes.ts`             | `wholeOutline` owner-gated shape                                        |
 | `lunora/mutators.ts`           | Server `defineMutator` (`lunorash/server`) — authoritative              |
 | `src/outline/`                 | Pure `plan*` + sibling-chain (shared)                                   |
-| `src/outline/map-node.ts`      | Shared `rowToNode` / `docToNode` (one mapping)                          |
+| `src/outline/map-node.ts`      | Shared `rowToNode` / `nodeToDocFields` (=`nodeToRow`) / insert fields   |
 | `src/outline/lunora-bridge.ts` | ADR 0004 seam: Lunora rows → Dotflowy-shaped `TreeIndex`                |
-| `src/outline/seed.ts`          | Idempotent empty-outline demo seed via `insertSibling`                  |
+| `src/outline/seed.ts`          | `planSeedIfEmpty` + deterministic clientIds; DO FIFO idempotency        |
 | `src/outline-store.ts`         | Client `lunoraCollectionOptions` + `@lunora/db/mutators` `bindMutators` |
 | `src/App.tsx`                  | Auth gate + tiny outline list UI (renders via bridge)                   |
 

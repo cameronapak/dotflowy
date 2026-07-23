@@ -8,10 +8,12 @@ import type { Doc } from "../lunora/_generated/dataModel.js";
 
 import {
   buildTreeIndex,
+  nodeToRow,
   planIndent,
   planInsertSibling,
   planOutdent,
   planRemoveNode,
+  planSeedIfEmpty,
   planSetText,
   rowToNode,
   type OutlineNode,
@@ -20,26 +22,6 @@ import {
 
 /** Row shape for TanStack — Doc interfaces lack an index signature. */
 export type NodeRow = Doc<"nodes"> & Record<string, unknown>;
-
-function nodeToRow(node: OutlineNode): NodeRow {
-  return {
-    _id: node.id as NodeRow["_id"],
-    _creationTime: node.createdAt,
-    parentId: node.parentId as NodeRow["parentId"],
-    prevSiblingId: node.prevSiblingId as NodeRow["prevSiblingId"],
-    text: node.text,
-    isTask: node.isTask,
-    completed: node.completed,
-    collapsed: node.collapsed,
-    bookmarkedAt: node.bookmarkedAt as NodeRow["bookmarkedAt"],
-    mirrorOf: node.mirrorOf as NodeRow["mirrorOf"],
-    createdAt: node.createdAt,
-    updatedAt: node.updatedAt,
-    origin: node.origin as NodeRow["origin"],
-    kind: node.kind as NodeRow["kind"],
-    userId: node.userId,
-  };
-}
 
 function applyPlanToCollection(
   collection: Collection<NodeRow, string>,
@@ -54,7 +36,7 @@ function applyPlanToCollection(
     });
   }
   for (const insert of plan.inserts) {
-    collection.insert(nodeToRow(insert));
+    collection.insert(nodeToRow(insert) as NodeRow);
   }
 }
 
@@ -141,6 +123,13 @@ function bindOutlineMutators(
         apply: (_ctx, args) => {
           const index = buildTreeIndex(snapshotNodes(collection));
           const plan = planSetText(index, args.id, args.text, args.updatedAt);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      seedIfEmpty: defineMutator<{ userId: string; createdAt: number }>({
+        serverRef: "mutators:seedIfEmpty",
+        apply: (_ctx, args) => {
+          const plan = planSeedIfEmpty(snapshotNodes(collection), args);
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),

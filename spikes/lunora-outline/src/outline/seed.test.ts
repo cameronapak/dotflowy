@@ -1,64 +1,99 @@
 import { describe, expect, it } from "vitest";
 
+import { applyPlan, buildTreeIndex, childrenOf } from "./index.js";
 import {
+  DEMO_SEED_IDS,
   DEMO_SEED_TEXTS,
+  planSeedIfEmpty,
   seedEmptyOutline,
   shouldSeedOutline,
 } from "./seed.js";
 
-describe("seedEmptyOutline", () => {
+describe("planSeedIfEmpty", () => {
   it("shouldSeedOutline only when ready and empty", () => {
     expect(shouldSeedOutline({ isReady: false, nodeCount: 0 })).toBe(false);
     expect(shouldSeedOutline({ isReady: true, nodeCount: 1 })).toBe(false);
     expect(shouldSeedOutline({ isReady: true, nodeCount: 0 })).toBe(true);
   });
 
-  it("chains insertSibling with deterministic timestamps", async () => {
-    const calls: Array<Record<string, unknown>> = [];
-    let n = 0;
-    const ids = await seedEmptyOutline({
-      userId: "u1",
-      texts: ["one", "two"],
-      newId: () => `id-${++n}`,
-      now: () => 1000,
-      insertSibling: async (args) => {
-        calls.push(args);
-      },
-    });
+  it("returns null when any nodes exist (idempotent no-op)", () => {
+    const plan = planSeedIfEmpty(
+      [
+        {
+          id: "x",
+          parentId: null,
+          prevSiblingId: null,
+          text: "existing",
+          isTask: false,
+          completed: false,
+          collapsed: false,
+          bookmarkedAt: null,
+          mirrorOf: null,
+          createdAt: 1,
+          updatedAt: 1,
+          origin: null,
+          kind: null,
+          userId: "u1",
+        },
+      ],
+      { userId: "u1", createdAt: 1000 },
+    );
+    expect(plan).toBeNull();
+  });
 
-    expect(ids).toEqual(["id-1", "id-2"]);
-    expect(calls).toEqual([
-      {
+  it("inserts demo chain with deterministic ids + timestamps", () => {
+    const plan = planSeedIfEmpty([], {
+      userId: "u1",
+      createdAt: 1000,
+      texts: ["one", "two"],
+      ids: ["id-1", "id-2"],
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.inserts).toEqual([
+      expect.objectContaining({
         id: "id-1",
         userId: "u1",
         parentId: null,
-        afterId: null,
+        prevSiblingId: null,
         text: "one",
         createdAt: 1000,
         updatedAt: 1000,
-      },
-      {
+      }),
+      expect.objectContaining({
         id: "id-2",
         userId: "u1",
         parentId: null,
-        afterId: "id-1",
+        prevSiblingId: "id-1",
         text: "two",
         createdAt: 1001,
         updatedAt: 1001,
-      },
+      }),
     ]);
+    expect(plan!.patches).toEqual([]);
+    expect(plan!.deletes).toEqual([]);
+
+    const index = buildTreeIndex(applyPlan([], plan!));
+    expect(childrenOf(index, null).map((n) => n.id)).toEqual(["id-1", "id-2"]);
   });
 
-  it("default texts cover the demo bullets", async () => {
-    const calls: Array<{ text: string }> = [];
+  it("default texts/ids cover the demo bullets", () => {
+    const plan = planSeedIfEmpty([], { userId: "u1", createdAt: 1 });
+    expect(plan).not.toBeNull();
+    expect(plan!.inserts.map((n) => n.text)).toEqual([...DEMO_SEED_TEXTS]);
+    expect(plan!.inserts.map((n) => n.id)).toEqual([...DEMO_SEED_IDS]);
+  });
+});
+
+describe("seedEmptyOutline", () => {
+  it("calls seedIfEmpty once with userId + createdAt", async () => {
+    const calls: Array<{ userId: string; createdAt: number }> = [];
     await seedEmptyOutline({
       userId: "u1",
-      newId: () => crypto.randomUUID(),
-      now: () => 1,
-      insertSibling: async (args) => {
-        calls.push({ text: args.text });
+      now: () => 42,
+      seedIfEmpty: async (args) => {
+        calls.push(args);
       },
     });
-    expect(calls.map((c) => c.text)).toEqual([...DEMO_SEED_TEXTS]);
+    expect(calls).toEqual([{ userId: "u1", createdAt: 42 }]);
   });
 });

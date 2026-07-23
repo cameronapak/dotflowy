@@ -5,10 +5,12 @@ import type { Id } from "./_generated/dataModel.js";
 import {
   buildTreeIndex,
   docToNode,
+  nodeToInsertFields,
   planIndent,
   planInsertSibling,
   planOutdent,
   planRemoveNode,
+  planSeedIfEmpty,
   planSetText,
   type OutlineNode,
   type OutlinePlan,
@@ -46,26 +48,9 @@ function assertOwner(ctx: MutatorCtx, userId: string): void {
 
 async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
   for (const node of plan.inserts) {
-    const { id, ...fields } = node;
-    await ctx.db.insert(
-      "nodes",
-      {
-        parentId: fields.parentId,
-        prevSiblingId: fields.prevSiblingId,
-        text: fields.text,
-        isTask: fields.isTask,
-        completed: fields.completed,
-        collapsed: fields.collapsed,
-        bookmarkedAt: fields.bookmarkedAt,
-        mirrorOf: fields.mirrorOf,
-        createdAt: fields.createdAt,
-        updatedAt: fields.updatedAt,
-        origin: fields.origin,
-        kind: fields.kind,
-        userId: fields.userId,
-      },
-      { clientId: id },
-    );
+    await ctx.db.insert("nodes", nodeToInsertFields(node), {
+      clientId: node.id,
+    });
   }
 
   for (const patch of plan.patches) {
@@ -114,6 +99,32 @@ export const insertSibling = defineMutator({
     if (!plan) throw new Error("insertSibling: invalid parent/afterId");
     await commitPlan(mctx, plan);
     return { id: args.id };
+  },
+});
+
+/**
+ * Server-authoritative empty-outline seed. Concurrent calls serialize on the
+ * DO watermark FIFO — second sees non-empty and returns `{ seeded: false }`.
+ */
+export const seedIfEmpty = defineMutator({
+  args: {
+    userId: userIdArg,
+    createdAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes = await loadNodes(mctx);
+    const plan = planSeedIfEmpty(nodes, {
+      userId: args.userId,
+      createdAt: args.createdAt,
+    });
+    if (!plan) return { seeded: false as const };
+    await commitPlan(mctx, plan);
+    return {
+      seeded: true as const,
+      ids: plan.inserts.map((n) => n.id),
+    };
   },
 });
 

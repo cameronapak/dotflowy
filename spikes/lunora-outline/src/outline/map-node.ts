@@ -44,12 +44,16 @@ export function rowToNode(doc: NodeDocLike): OutlineNode {
 /** Alias for server mutator docs (`_id` rows from `ctx.db.query`). */
 export const docToNode = rowToNode;
 
-/** Planner node → optimistic collection row (client apply path). */
+/**
+ * Planner node → outbound Doc/row fields (one helper for optimistic insert +
+ * tests). `_creationTime` mirrors Lunora’s system field for TanStack rows.
+ */
 export function nodeToDocFields(
   node: OutlineNode,
-): Omit<NodeDocLike, "_id"> & { _id: string } {
+): Omit<NodeDocLike, "_id"> & { _id: string; _creationTime: number } {
   return {
     _id: node.id,
+    _creationTime: node.createdAt,
     parentId: node.parentId,
     prevSiblingId: node.prevSiblingId,
     text: node.text,
@@ -64,4 +68,15 @@ export function nodeToDocFields(
     kind: node.kind,
     userId: node.userId,
   };
+}
+
+/** Alias — same outbound map (was a near-dup in outline-store). */
+export const nodeToRow = nodeToDocFields;
+
+/** Server insert payload: Doc fields without `_id` / `_creationTime`. */
+export function nodeToInsertFields(
+  node: OutlineNode,
+): Omit<ReturnType<typeof nodeToDocFields>, "_id" | "_creationTime"> {
+  const { _id: _, _creationTime: __, ...fields } = nodeToDocFields(node);
+  return fields;
 }
