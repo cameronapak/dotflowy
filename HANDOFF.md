@@ -90,7 +90,7 @@ Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 3. Browser smoke with `dotflowy:flag:lunora-sync=on` rendered the Lunora outline and **cleared "Loading outline"**.
 4. Fresh run: flag OFF classic source held 3 welcome nodes. Flag ON exposed `window.__dotflowyMigrateToLunora` as a function and cleared loading. After clearing prior local Lunora spike seed rows, the empty shard auto-imported the three classic nodes; the concurrent manual helper then safely returned `skipped-nonempty` with `nodes: 3`. A full reload retained all three classic titles. More menu also displayed its safe-skip toast against a nonempty shard.
 
-**Keep default OFF.** Migration is now dogfood-verified, but MCP live writes and broader dual-path coverage still gate default ON.
+**Keep default OFF.** Migration + dual-path e2e are dogfood-verified; MCP live write still gates default ON.
 
 ## Dogfood MCP with `LUNORA_OUTLINE=1` — **PARTIAL / auth-blocked**
 
@@ -104,9 +104,10 @@ Live probe on `bun run dev` (`dev@dotflowy.local` / `dotflowy-dev`):
 1. ~~Dual-path fixture + representative classic subset~~ **DONE** (this slice)
 2. ~~Manual migration dogfood~~ **DONE** (2026-07-23)
 3. **MCP live write dogfood** with `LUNORA_OUTLINE=1` — mint local OAuth bearer for an entitled test user, then call a write tool and observe the Lunora editor update
-4. Remaining classic specs under `E2E_LUNORA=1` (full suite) — maximize; skip only transport-bound specs
-5. Snapshot/R2/PITR still classic DO — out of scope
-6. Flip client default ON + `.dev.vars.example` `LUNORA_OUTLINE=1` only after 3–4 green
+4. ~~Broader classic specs under `E2E_LUNORA=1`~~ **DONE** (transport-only skips; product gaps fixed)
+5. Optional: re-run full `E2E_LUNORA=1 bunx playwright test e2e` for a clean green count (expect ~359 pass / ~13 skip)
+6. Snapshot/R2/PITR still classic DO — out of scope
+7. Flip client default ON + `.dev.vars.example` `LUNORA_OUTLINE=1` only after 3 green
 
 ## Gates
 
@@ -120,5 +121,5 @@ E2E_LUNORA=1 bunx playwright test <subset> --workers=1
 ## Next
 
 1. Mint an OAuth bearer for a locally entitled test user, exercise an MCP write with `LUNORA_OUTLINE=1`, and observe it in the Lunora editor.
-2. Broader `E2E_LUNORA=1` classic suite; document remaining fails.
+2. Optional clean full-suite recount under `E2E_LUNORA=1`.
 3. Then consider default ON → PR; **delete `HANDOFF.md` in shipping PR.**
