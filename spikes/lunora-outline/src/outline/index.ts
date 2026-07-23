@@ -12,3 +12,16 @@ export {
   planSetText,
   applyPlan,
 } from "./planners.js";
+export { rowToNode, docToNode, nodeToDocFields } from "./map-node.js";
+export type { NodeDocLike } from "./map-node.js";
+export {
+  rowsToOutlineNodes,
+  bridgeTreeIndex,
+  bridgeOrderedChildren,
+} from "./lunora-bridge.js";
+export {
+  DEMO_SEED_TEXTS,
+  shouldSeedOutline,
+  seedEmptyOutline,
+} from "./seed.js";
+export type { InsertSiblingArgs, InsertSiblingFn } from "./seed.js";

@@ -1,6 +1,6 @@
-# Lunora outline spike (Phase 0)
+# Lunora outline spike (Phase 1 — bridge)
 
-Proof that Dotflowy outline semantics can run on Lunora (shapes + mutators + watermark) **without** Dotflowy’s custom `{ops}` sync.
+Proof that Dotflowy outline semantics can run on Lunora (shapes + mutators + watermark) **without** Dotflowy’s custom `{ops}` sync. Phase 1 adds shared row mapping, empty-outline seed, and an ADR 0004 `TreeIndex` bridge.
 
 ## Purpose
 
@@ -8,6 +8,7 @@ Greenfield Vite + React Lunora app with outline nodes, structural mutators (`pla
 
 Constraining ADRs (repo root):
 
+- [ADR 0004 — Localized rendering via the tree store](../../docs/adr/0004-localized-rendering-via-the-tree-store.md) — bridge seam only; **do not** port OutlineEditor
 - [ADR 0008 — Sync via a per-user Durable Object](../../docs/adr/0008-sync-via-a-per-user-durable-object.md)
 - [ADR 0009 — Atomic structural writes](../../docs/adr/0009-atomic-structural-writes.md)
 
@@ -19,11 +20,12 @@ Constraining ADRs (repo root):
 cd spikes/lunora-outline
 pnpm install
 pnpm codegen   # after schema/mutator changes
-pnpm test      # planner chain-invariant unit tests
+pnpm test      # planner + bridge + seed unit tests
+pnpm build
 pnpm dev       # Vite + Worker (default :5173; next free port if busy)
 ```
 
-Other scripts: `pnpm build`, `pnpm lint`, `pnpm preview`.
+Other scripts: `pnpm lint`, `pnpm preview`.
 
 Local secrets: `.dev.vars` is gitignored. Scaffold needs `AUTH_SECRET` (and optional `LUNORA_ADMIN_TOKEN` for Studio). Copy patterns from `.env.example` / existing `.dev.vars`.
 
@@ -31,10 +33,11 @@ Local secrets: `.dev.vars` is gitignored. Scaffold needs `AUTH_SECRET` (and opti
 
 1. `pnpm dev` → open the Local URL (e.g. `http://localhost:5174/`).
 2. **Sign up** once (`spike@dotflowy.local` / `spike-dev-password` prefilled — change as you like).
-3. Insert a few bullets; indent/outdent/delete/edit text.
-4. Open a **second tab** to the same origin (already signed in via cookie).
-5. Edits in either tab should converge live (shape poke + watermark).
-6. Hard reload either tab — outline restores from `wholeOutline` seed.
+3. Empty outline **auto-seeds** 4 demo bullets (idempotent — only when ready + zero nodes).
+4. Indent/outdent/delete/edit text; insert more bullets.
+5. Open a **second tab** to the same origin (already signed in via cookie).
+6. Edits in either tab should converge live (shape poke + watermark).
+7. Hard reload either tab — outline restores from `wholeOutline` seed.
 
 Cross-user: sign out → sign up as a different email → that session’s `authorizeShard` only allows `identity.userId === shardKey`, so the other user’s outline is unreachable.
 
@@ -45,17 +48,21 @@ Cross-user: sign out → sign up as a different email → that session’s `auth
 3. Optimistic overlay held until server watermark confirm (ADR 0009 P2 analogue) — **wired** via `lunoraCollectionOptions` checkpoints → `bindMutators`
 4. Cross-user shard access denied (`authorizeShard: identity.userId === shardKey`) — **wired**
 5. Hard reload restores outline from shape seed — **manual**
+6. TreeIndex bridge order matches planner apply (insert/indent/remove) — **covered** (`lunora-bridge.test.ts`)
 
 ## Layout
 
-| Path                   | Role                                                                    |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `lunora/schema.ts`     | `nodes` table (Dotflowy field parity), `.shardBy("userId")`             |
-| `lunora/shapes.ts`     | `wholeOutline` owner-gated shape                                        |
-| `lunora/mutators.ts`   | Server `defineMutator` (`lunorash/server`) — authoritative              |
-| `src/outline/`         | Pure `plan*` + sibling-chain (shared)                                   |
-| `src/outline-store.ts` | Client `lunoraCollectionOptions` + `@lunora/db/mutators` `bindMutators` |
-| `src/App.tsx`          | Auth gate + tiny outline list UI                                        |
+| Path                           | Role                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `lunora/schema.ts`             | `nodes` table (Dotflowy field parity), `.shardBy("userId")`             |
+| `lunora/shapes.ts`             | `wholeOutline` owner-gated shape                                        |
+| `lunora/mutators.ts`           | Server `defineMutator` (`lunorash/server`) — authoritative              |
+| `src/outline/`                 | Pure `plan*` + sibling-chain (shared)                                   |
+| `src/outline/map-node.ts`      | Shared `rowToNode` / `docToNode` (one mapping)                          |
+| `src/outline/lunora-bridge.ts` | ADR 0004 seam: Lunora rows → Dotflowy-shaped `TreeIndex`                |
+| `src/outline/seed.ts`          | Idempotent empty-outline demo seed via `insertSibling`                  |
+| `src/outline-store.ts`         | Client `lunoraCollectionOptions` + `@lunora/db/mutators` `bindMutators` |
+| `src/App.tsx`                  | Auth gate + tiny outline list UI (renders via bridge)                   |
 
 ## Pinned Lunora packages
 

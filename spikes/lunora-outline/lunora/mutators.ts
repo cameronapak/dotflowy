@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel.js";
 
 import {
   buildTreeIndex,
+  docToNode,
   planIndent,
   planInsertSibling,
   planOutdent,
@@ -31,28 +32,6 @@ type MutatorCtx = {
   auth: { userId?: string | null };
   db: MutatorDb;
 };
-
-/** Doc → planner node. Codegen currently erases `.nullable()` in Doc types. */
-function docToNode(
-  doc: Record<string, unknown> & { _id: string },
-): OutlineNode {
-  return {
-    id: doc._id,
-    parentId: (doc.parentId as string | null) ?? null,
-    prevSiblingId: (doc.prevSiblingId as string | null) ?? null,
-    text: String(doc.text ?? ""),
-    isTask: Boolean(doc.isTask),
-    completed: Boolean(doc.completed),
-    collapsed: Boolean(doc.collapsed),
-    bookmarkedAt: (doc.bookmarkedAt as number | null) ?? null,
-    mirrorOf: (doc.mirrorOf as string | null) ?? null,
-    createdAt: Number(doc.createdAt ?? 0),
-    updatedAt: Number(doc.updatedAt ?? 0),
-    origin: (doc.origin as string | null) ?? null,
-    kind: doc.kind === "paragraph" ? "paragraph" : null,
-    userId: String(doc.userId ?? ""),
-  };
-}
 
 async function loadNodes(ctx: MutatorCtx): Promise<OutlineNode[]> {
   const rows = await ctx.db.query("nodes").collect();

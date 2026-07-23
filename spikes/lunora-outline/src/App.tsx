@@ -1,7 +1,9 @@
 import { useMutator } from "@lunora/react";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -11,9 +13,10 @@ import {
 import { authClient } from "./auth-client.js";
 import { createOutlineStore, type NodeRow } from "./outline-store.js";
 import {
-  buildTreeIndex,
-  childrenOf,
-  orderSiblings,
+  bridgeOrderedChildren,
+  bridgeTreeIndex,
+  seedEmptyOutline,
+  shouldSeedOutline,
   type OutlineNode,
 } from "./outline/index.js";
 import { useLunoraClient } from "./use-lunora-client.js";
@@ -57,7 +60,8 @@ function AuthGate({ children }: { children: (userId: string) => ReactNode }) {
       <h1>Lunora outline spike</h1>
       <p style={{ color: "#666", maxWidth: 480 }}>
         Sign up once, then open a second tab signed in as the same user to prove
-        live sync. Hard reload should restore the outline from the shape.
+        live sync. Hard reload should restore the outline from the shape. An
+        empty outline seeds a few demo bullets once.
       </p>
       <form onSubmit={onSignIn} style={form}>
         <h2>Sign in</h2>
@@ -108,43 +112,21 @@ function OutlineApp({ userId }: { userId: string }) {
     [client, userId],
   );
 
-  const { data: rows } = useLiveQuery((q) => q.from({ n: store.collection }));
+  const {
+    data: rows,
+    isLoading,
+    status,
+  } = useLiveQuery((q) => q.from({ n: store.collection }));
 
-  const nodes: OutlineNode[] = useMemo(() => {
-    const list = (rows as NodeRow[] | undefined) ?? [];
-    return list.map((row) => ({
-      id: row._id,
-      parentId: (row.parentId as string | null) ?? null,
-      prevSiblingId: (row.prevSiblingId as string | null) ?? null,
-      text: row.text,
-      isTask: row.isTask,
-      completed: row.completed,
-      collapsed: row.collapsed,
-      bookmarkedAt: (row.bookmarkedAt as number | null) ?? null,
-      mirrorOf: (row.mirrorOf as string | null) ?? null,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      origin: (row.origin as string | null) ?? null,
-      kind: row.kind === "paragraph" ? "paragraph" : null,
-      userId: row.userId,
-    }));
-  }, [rows]);
+  const list = (rows as NodeRow[] | undefined) ?? [];
+  const nodeCount = list.length;
 
-  const orderedTop = useMemo(() => {
-    const index = buildTreeIndex(nodes);
-    return orderSiblings(childrenOf(index, null));
-  }, [nodes]);
-
-  const childrenByParent = useMemo(() => {
-    const index = buildTreeIndex(nodes);
-    const map = new Map<string, OutlineNode[]>();
-    for (const n of nodes) {
-      if (n.parentId === null) continue;
-      const kids = orderSiblings(childrenOf(index, n.parentId));
-      map.set(n.parentId, kids);
-    }
-    return map;
-  }, [nodes]);
+  // ADR 0004 seam: Lunora rows → TreeIndex (feed tree-store later).
+  const tree = useMemo(
+    () => bridgeTreeIndex((rows as NodeRow[] | undefined) ?? []),
+    [rows],
+  );
+  const orderedTop = useMemo(() => bridgeOrderedChildren(tree, null), [tree]);
 
   const { mutate: insertSibling } = useMutator(store.mutators.insertSibling);
   const { mutate: indent } = useMutator(store.mutators.indent);
@@ -154,6 +136,23 @@ function OutlineApp({ userId }: { userId: string }) {
 
   const [draft, setDraft] = useState("");
   const [afterId, setAfterId] = useState<string | null>(null);
+  const seedStarted = useRef(false);
+
+  const isReady = !isLoading && status === "ready";
+
+  useEffect(() => {
+    if (seedStarted.current) return;
+    if (!shouldSeedOutline({ isReady, nodeCount })) return;
+    seedStarted.current = true;
+    void seedEmptyOutline({
+      userId,
+      insertSibling: (args) => insertSibling(args),
+      newId,
+    }).catch((err) => {
+      seedStarted.current = false;
+      console.error("seedEmptyOutline failed", err);
+    });
+  }, [isReady, nodeCount, userId, insertSibling]);
 
   const addBullet = async (event: FormEvent) => {
     event.preventDefault();
@@ -174,7 +173,7 @@ function OutlineApp({ userId }: { userId: string }) {
   };
 
   const renderRow = (node: OutlineNode, depth: number) => {
-    const kids = childrenByParent.get(node.id) ?? [];
+    const kids = bridgeOrderedChildren(tree, node.id);
     return (
       <li key={node.id} style={{ listStyle: "none", marginLeft: depth * 16 }}>
         <div style={row}>
@@ -248,6 +247,7 @@ function OutlineApp({ userId }: { userId: string }) {
       <p style={{ color: "#666", fontSize: 13 }}>
         Insert after: <code>{afterId ?? "(head)"}</code> · open a second tab to
         watch live sync
+        {isLoading ? " · loading…" : null}
       </p>
       <form onSubmit={addBullet} style={{ display: "flex", gap: 8 }}>
         <input
@@ -264,8 +264,10 @@ function OutlineApp({ userId }: { userId: string }) {
       <ul style={{ marginTop: 16, padding: 0 }}>
         {orderedTop.map((n) => renderRow(n, 0))}
       </ul>
-      {orderedTop.length === 0 ? (
-        <p style={{ color: "#999" }}>Empty outline — insert a bullet.</p>
+      {isLoading ? (
+        <p style={{ color: "#999" }}>Loading outline…</p>
+      ) : orderedTop.length === 0 ? (
+        <p style={{ color: "#999" }}>Seeding demo bullets…</p>
       ) : null}
     </main>
   );

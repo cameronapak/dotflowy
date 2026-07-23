@@ -13,31 +13,13 @@ import {
   planOutdent,
   planRemoveNode,
   planSetText,
+  rowToNode,
   type OutlineNode,
   type OutlinePlan,
 } from "./outline/index.js";
 
 /** Row shape for TanStack — Doc interfaces lack an index signature. */
 export type NodeRow = Doc<"nodes"> & Record<string, unknown>;
-
-function rowToNode(row: NodeRow): OutlineNode {
-  return {
-    id: row._id,
-    parentId: (row.parentId as string | null) ?? null,
-    prevSiblingId: (row.prevSiblingId as string | null) ?? null,
-    text: row.text,
-    isTask: row.isTask,
-    completed: row.completed,
-    collapsed: row.collapsed,
-    bookmarkedAt: (row.bookmarkedAt as number | null) ?? null,
-    mirrorOf: (row.mirrorOf as string | null) ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    origin: (row.origin as string | null) ?? null,
-    kind: row.kind === "paragraph" ? "paragraph" : null,
-    userId: row.userId,
-  };
-}
 
 function nodeToRow(node: OutlineNode): NodeRow {
   return {
