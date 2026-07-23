@@ -10,9 +10,13 @@ import { lunoraCollectionOptions } from "@lunora/db";
 import { bindMutators, defineMutator } from "@lunora/db/mutators";
 import { createCollection, type Collection } from "@tanstack/db";
 
+import type { SavedQueryRowDoc, TagColorRowDoc } from "./lunora-kv-store";
+
 import {
   buildTreeIndex,
   nodeToRow,
+  planAppendChild,
+  planImportNodes,
   planIndent,
   planIndentMany,
   planInsertChildAtStart,
@@ -67,12 +71,18 @@ function snapshotNodes(collection: Collection<NodeRow, string>): OutlineNode[] {
 
 export type OutlineStore = {
   collection: Collection<NodeRow, string>;
+  /** Phase 2b — Lunora tag colors (flag ON). */
+  tagColors: Collection<TagColorRowDoc, string>;
+  /** Phase 2b — Lunora saved queries (flag ON). */
+  savedQueries: Collection<SavedQueryRowDoc, string>;
   mutators: ReturnType<typeof bindOutlineMutators>;
 };
 
 function bindOutlineMutators(
   client: LunoraClient,
   collection: Collection<NodeRow, string>,
+  tagColors: Collection<TagColorRowDoc, string>,
+  savedQueries: Collection<SavedQueryRowDoc, string>,
   checkpoints: ReturnType<
     typeof lunoraCollectionOptions<NodeRow>
   >["checkpoints"],
@@ -82,7 +92,11 @@ function bindOutlineMutators(
     client,
     {
       checkpoints,
-      collections: { nodes: collection as never },
+      collections: {
+        nodes: collection as never,
+        tagColors: tagColors as never,
+        savedQueries: savedQueries as never,
+      },
       shardKey: userId,
     },
     {
@@ -119,6 +133,32 @@ function bindOutlineMutators(
           const index = buildTreeIndex(snapshotNodes(collection));
           const plan = planInsertChildAtStart(index, args);
           if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      appendChild: defineMutator<{
+        id: string;
+        userId: string;
+        parentId: string | null;
+        text: string;
+        isTask?: boolean;
+        kind?: "paragraph" | null;
+        createdAt: number;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:appendChild",
+        apply: (_ctx, args) => {
+          const index = buildTreeIndex(snapshotNodes(collection));
+          const plan = planAppendChild(index, args);
+          if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      importNodes: defineMutator<{
+        userId: string;
+        nodes: OutlineNode[];
+      }>({
+        serverRef: "mutators:importNodes",
+        apply: (_ctx, args) => {
+          applyPlanToCollection(collection, planImportNodes(args.nodes));
         },
       }),
       splitNode: defineMutator<{
@@ -409,11 +449,88 @@ function bindOutlineMutators(
           if (plan) applyPlanToCollection(collection, plan);
         },
       }),
+      // --- phase 2b kv (same clientSeq FIFO as outline) ---
+      upsertTagColor: defineMutator<{
+        userId: string;
+        tag: string;
+        color: string;
+      }>({
+        serverRef: "mutators:upsertTagColor",
+        apply: (_ctx, args) => {
+          if (tagColors.has(args.tag)) {
+            tagColors.update(args.tag, (draft) => {
+              draft.color = args.color;
+            });
+          } else {
+            tagColors.insert({
+              _id: args.tag,
+              tag: args.tag,
+              color: args.color,
+              userId: args.userId,
+              _creationTime: Date.now(),
+            });
+          }
+        },
+      }),
+      deleteTagColor: defineMutator<{ userId: string; tag: string }>({
+        serverRef: "mutators:deleteTagColor",
+        apply: (_ctx, args) => {
+          if (tagColors.has(args.tag)) tagColors.delete(args.tag);
+        },
+      }),
+      upsertSavedQuery: defineMutator<{
+        userId: string;
+        id: string;
+        name: string;
+        query: string;
+        createdAt: number;
+      }>({
+        serverRef: "mutators:upsertSavedQuery",
+        apply: (_ctx, args) => {
+          if (savedQueries.has(args.id)) {
+            savedQueries.update(args.id, (draft) => {
+              draft.name = args.name;
+              draft.query = args.query;
+              draft.createdAt = args.createdAt;
+            });
+          } else {
+            savedQueries.insert({
+              _id: args.id,
+              name: args.name,
+              query: args.query,
+              createdAt: args.createdAt,
+              userId: args.userId,
+              _creationTime: args.createdAt,
+            });
+          }
+        },
+      }),
+      patchSavedQuery: defineMutator<{
+        userId: string;
+        id: string;
+        name?: string;
+        query?: string;
+      }>({
+        serverRef: "mutators:patchSavedQuery",
+        apply: (_ctx, args) => {
+          if (!savedQueries.has(args.id)) return;
+          savedQueries.update(args.id, (draft) => {
+            if (args.name !== undefined) draft.name = args.name;
+            if (args.query !== undefined) draft.query = args.query;
+          });
+        },
+      }),
+      deleteSavedQueryRow: defineMutator<{ userId: string; id: string }>({
+        serverRef: "mutators:deleteSavedQuery",
+        apply: (_ctx, args) => {
+          if (savedQueries.has(args.id)) savedQueries.delete(args.id);
+        },
+      }),
     },
   );
 }
 
-/** Build the outline collection + bound mutators for one signed-in user. */
+/** Build outline + phase-2b kv collections + one bound mutator surface. */
 export function createOutlineStore(
   client: LunoraClient,
   userId: string,
@@ -428,8 +545,39 @@ export function createOutlineStore(
     },
     load: "eager",
   });
+  const tagOpts = lunoraCollectionOptions<TagColorRowDoc>({
+    client,
+    id: `tagColors:${userId}`,
+    shape: {
+      name: "userTagColors",
+      args: { userId },
+      shardKey: userId,
+    },
+    load: "eager",
+  });
+  const savedOpts = lunoraCollectionOptions<SavedQueryRowDoc>({
+    client,
+    id: `savedQueries:${userId}`,
+    shape: {
+      name: "userSavedQueries",
+      args: { userId },
+      shardKey: userId,
+    },
+    load: "eager",
+  });
 
   const collection = createCollection(config);
-  const mutators = bindOutlineMutators(client, collection, checkpoints, userId);
-  return { collection, mutators };
+  const tagColors = createCollection(tagOpts.config);
+  const savedQueries = createCollection(savedOpts.config);
+  // wholeOutline checkpoints gate overlay drop for the shared clientSeq FIFO
+  // (watermark is per-client on the shard, not per-shape).
+  const mutators = bindOutlineMutators(
+    client,
+    collection,
+    tagColors,
+    savedQueries,
+    checkpoints,
+    userId,
+  );
+  return { collection, tagColors, savedQueries, mutators };
 }

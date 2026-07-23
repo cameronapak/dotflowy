@@ -11,6 +11,8 @@ export {
   makeOutlineNode,
   planInsertSibling,
   planInsertChildAtStart,
+  planAppendChild,
+  planImportNodes,
   planIndent,
   planOutdent,
   planRemoveNode,

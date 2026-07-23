@@ -17,6 +17,11 @@ import { getLunoraClient } from "./lunora-client";
 import { createOutlineStore, type OutlineStore } from "./lunora-outline-store";
 import { shouldSeedOutline, seedEmptyOutline } from "./outline-plans";
 import { notifySaveFailed } from "./save-failure";
+import {
+  bindLunoraSavedQueries,
+  unbindLunoraSavedQueries,
+} from "./saved-queries";
+import { bindLunoraTagColors, unbindLunoraTagColors } from "./tag-colors";
 import { resetTreeFromNodes } from "./tree-store";
 
 export type LunoraOutlineContext = {
@@ -53,6 +58,32 @@ export function startLunoraOutlineSync(userId: string): void {
 
   const store = createOutlineStore(getLunoraClient(), userId);
   ctx = { userId, store };
+
+  // Phase 2b: side-collections ride the same flag (dailyIndex stays on /api/kv).
+  bindLunoraTagColors(store.tagColors, {
+    upsert: (tag, color) =>
+      trackLunoraMutation(
+        store.mutators.upsertTagColor({ userId, tag, color }),
+      ),
+    remove: (tag) =>
+      trackLunoraMutation(store.mutators.deleteTagColor({ userId, tag })),
+  });
+  bindLunoraSavedQueries(store.savedQueries, {
+    upsert: (row) =>
+      trackLunoraMutation(
+        store.mutators.upsertSavedQuery({
+          userId,
+          id: row.id,
+          name: row.name,
+          query: row.query,
+          createdAt: row.createdAt,
+        }),
+      ),
+    patchName: (id, name) =>
+      trackLunoraMutation(store.mutators.patchSavedQuery({ userId, id, name })),
+    remove: (id) =>
+      trackLunoraMutation(store.mutators.deleteSavedQueryRow({ userId, id })),
+  });
 
   collectionSub = store.collection.subscribeChanges(
     () => {
@@ -99,6 +130,8 @@ function maybeSeed(store: OutlineStore, userId: string): void {
 export function stopLunoraOutlineSync(): void {
   collectionSub?.unsubscribe();
   collectionSub = null;
+  unbindLunoraTagColors();
+  unbindLunoraSavedQueries();
   ctx = null;
   seedStarted = false;
 }

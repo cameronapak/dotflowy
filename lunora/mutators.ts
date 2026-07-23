@@ -6,6 +6,8 @@ import {
   buildTreeIndex,
   docToNode,
   nodeToInsertFields,
+  planAppendChild,
+  planImportNodes,
   planIndent,
   planIndentMany,
   planInsertChildAtStart,
@@ -31,18 +33,30 @@ import {
   type OutlinePlan,
 } from "../src/data/outline-plans";
 
+type ShardTable = "nodes" | "tagColors" | "savedQueries";
+
 /** Minimal mutator ctx — defineMutator's ServerContext is the base MutationCtx. */
 type MutatorDb = {
-  query: (table: "nodes") => {
+  query: (table: ShardTable) => {
     collect: () => Promise<Array<Record<string, unknown> & { _id: string }>>;
+    withIndex: (
+      name: string,
+      fn: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+    ) => {
+      first: () => Promise<(Record<string, unknown> & { _id: string }) | null>;
+      collect: () => Promise<Array<Record<string, unknown> & { _id: string }>>;
+    };
   };
+  get: (
+    id: Id<ShardTable>,
+  ) => Promise<(Record<string, unknown> & { _id: string }) | null>;
   insert: (
-    table: "nodes",
+    table: ShardTable,
     document: Record<string, unknown>,
     options?: { clientId?: string },
   ) => Promise<string>;
-  patch: (id: Id<"nodes">, fields: Record<string, unknown>) => Promise<void>;
-  delete: (id: Id<"nodes">) => Promise<void>;
+  patch: (id: Id<ShardTable>, fields: Record<string, unknown>) => Promise<void>;
+  delete: (id: Id<ShardTable>) => Promise<void>;
 };
 
 type MutatorCtx = {
@@ -156,6 +170,38 @@ export const insertChildAtStart = defineMutator({
       updatedAt: args.updatedAt,
     });
     if (!plan) throw new Error("insertChildAtStart: invalid parent");
+    await commitPlan(mctx, plan);
+    return { id: args.id };
+  },
+});
+
+/** Quick-add / append-at-end — server resolves last sibling (one watermark). */
+export const appendChild = defineMutator({
+  args: {
+    id: idArg,
+    userId: userIdArg,
+    parentId: v.string().nullable(),
+    text: v.string(),
+    isTask: v.optional(v.boolean()),
+    kind: kindArg,
+    createdAt: tsArg,
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const index = buildTreeIndex(await loadNodes(mctx));
+    const plan = planAppendChild(index, {
+      id: args.id,
+      userId: args.userId,
+      parentId: args.parentId,
+      text: args.text,
+      isTask: args.isTask,
+      kind: args.kind,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!plan) throw new Error("appendChild: invalid parent");
     await commitPlan(mctx, plan);
     return { id: args.id };
   },
@@ -457,6 +503,29 @@ export const restoreNodes = defineMutator({
   },
 });
 
+/**
+ * OPML / bulk insert-only batch. Chains pre-wired by the pure planner.
+ * Large imports may call this multiple times (clientSeq FIFO); a mid-import
+ * failure can leave earlier chunks durable — see HANDOFF.
+ */
+export const importNodes = defineMutator({
+  args: {
+    userId: userIdArg,
+    nodes: v.array(nodeSnapshotArg),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const nodes: OutlineNode[] = args.nodes.map((n) => ({
+      ...n,
+      kind: n.kind === "paragraph" ? "paragraph" : null,
+    }));
+    const plan = planImportNodes(nodes);
+    await commitPlan(mctx, plan);
+    return { count: nodes.length };
+  },
+});
+
 /** `/mirror` — last-child mirror of source under targetParentId (ADR 0022). */
 export const mirrorNode = defineMutator({
   args: {
@@ -559,7 +628,8 @@ export const outdentMany = defineMutator({
 
 /**
  * Daily get-or-create node half — scaffold + day (+ optional seed) after the
- * client has claimed ids via `/api/kv` (phase 2b keeps kv on the custom DO).
+ * client has claimed ids via `/api/kv` (dailyIndex stays on custom DO until
+ * claimMapping ports; tagColors/savedQueries are Lunora in this slice).
  */
 export const materializeDailyNodes = defineMutator({
   args: {
@@ -588,5 +658,106 @@ export const materializeDailyNodes = defineMutator({
     if (!plan) throw new Error("materializeDailyNodes: no-op or invalid");
     await commitPlan(mctx, plan);
     return { count: args.inserts.length };
+  },
+});
+
+// --- Phase 2b side-collections (tagColors + savedQueries) -------------------
+
+/** Upsert a tag color. `tag` is the clientId / `_id`. */
+export const upsertTagColor = defineMutator({
+  args: {
+    userId: userIdArg,
+    tag: v.string(),
+    color: v.string(),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.tag as Id<"tagColors">);
+    if (existing) {
+      await mctx.db.patch(args.tag as Id<"tagColors">, {
+        color: args.color,
+      });
+    } else {
+      await mctx.db.insert(
+        "tagColors",
+        { tag: args.tag, color: args.color, userId: args.userId },
+        { clientId: args.tag },
+      );
+    }
+  },
+});
+
+export const deleteTagColor = defineMutator({
+  args: { userId: userIdArg, tag: v.string() },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.tag as Id<"tagColors">);
+    if (existing) await mctx.db.delete(args.tag as Id<"tagColors">);
+  },
+});
+
+/** Insert a saved query row (`id` = clientId). */
+export const upsertSavedQuery = defineMutator({
+  args: {
+    userId: userIdArg,
+    id: idArg,
+    name: v.string(),
+    query: v.string(),
+    createdAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.id as Id<"savedQueries">);
+    if (existing) {
+      await mctx.db.patch(args.id as Id<"savedQueries">, {
+        name: args.name,
+        query: args.query,
+        createdAt: args.createdAt,
+      });
+    } else {
+      await mctx.db.insert(
+        "savedQueries",
+        {
+          name: args.name,
+          query: args.query,
+          createdAt: args.createdAt,
+          userId: args.userId,
+        },
+        { clientId: args.id },
+      );
+    }
+  },
+});
+
+export const patchSavedQuery = defineMutator({
+  args: {
+    userId: userIdArg,
+    id: idArg,
+    name: v.optional(v.string()),
+    query: v.optional(v.string()),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.id as Id<"savedQueries">);
+    if (!existing) return;
+    const fields: Record<string, unknown> = {};
+    if (args.name !== undefined) fields.name = args.name;
+    if (args.query !== undefined) fields.query = args.query;
+    if (Object.keys(fields).length === 0) return;
+    await mctx.db.patch(args.id as Id<"savedQueries">, fields);
+  },
+});
+
+export const deleteSavedQuery = defineMutator({
+  args: { userId: userIdArg, id: idArg },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const existing = await mctx.db.get(args.id as Id<"savedQueries">);
+    if (existing) await mctx.db.delete(args.id as Id<"savedQueries">);
   },
 });

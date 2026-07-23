@@ -3,10 +3,12 @@ import { defineSchema, defineTable, v } from "lunorash/server";
 import { ratelimit } from "./ratelimit/schema";
 
 /**
- * Outline nodes — Dotflowy Node field parity + Lunora `userId` shard key.
- * Dotflowy `id` maps to Lunora `_id` via `clientId` on insert.
+ * Outline nodes + kv side-collections — Dotflowy field parity + Lunora
+ * `userId` shard key. Dotflowy `id` / kv keys map to Lunora `_id` via
+ * `clientId` on insert.
  *
- * Phase-2 compose stub: lives beside UserOutlineDO until collection cutover.
+ * Phase 2b: `tagColors` + `savedQueries` ride Lunora when the sync flag is ON.
+ * `dailyIndex` stays on `/api/kv` until claimMapping lands (atomic get-or-create).
  */
 export default defineSchema({
   nodes: defineTable({
@@ -26,4 +28,21 @@ export default defineSchema({
   })
     .shardBy("userId")
     .index("by_parent", ["parentId"]),
+
+  /** Custom tag colors (ADR 0007). `_id` = normalized tag via clientId. */
+  tagColors: defineTable({
+    tag: v.string(),
+    color: v.string(),
+    userId: v.string(),
+  })
+    .shardBy("userId")
+    .index("by_tag", ["tag"]),
+
+  /** Saved filter queries (ADR 0048). `_id` = row id via clientId. */
+  savedQueries: defineTable({
+    name: v.string(),
+    query: v.string(),
+    createdAt: v.number(),
+    userId: v.string(),
+  }).shardBy("userId"),
 }).extend(ratelimit.extension);

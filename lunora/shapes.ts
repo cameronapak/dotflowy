@@ -14,3 +14,23 @@ export const wholeOutline = defineShape({
     return { userId };
   },
 });
+
+/** Per-user tag color rows (phase 2b). */
+export const userTagColors = defineShape({
+  args: { userId: v.string() },
+  table: "tagColors",
+  where: (ctx, { userId }) => {
+    if (!ctx.auth.userId || ctx.auth.userId !== userId) return { OR: [] };
+    return { userId };
+  },
+});
+
+/** Per-user saved filter queries (phase 2b). */
+export const userSavedQueries = defineShape({
+  args: { userId: v.string() },
+  table: "savedQueries",
+  where: (ctx, { userId }) => {
+    if (!ctx.auth.userId || ctx.auth.userId !== userId) return { OR: [] };
+    return { userId };
+  },
+});

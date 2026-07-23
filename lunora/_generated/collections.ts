@@ -7,6 +7,14 @@ import type { Row } from "@lunora/db";
 import type { Collection } from "@tanstack/db";
 import { createCollection } from "@tanstack/db";
 
+/** Live collection for the `userSavedQueries` replication shape — pass the shape's validated `args` (its partition selector). */
+export const userSavedQueriesCollection = (client: LunoraClient, args?: Record<string, unknown>): Collection<Row, string> =>
+    createCollection(lunoraCollectionOptions({ client, shape: { args, name: "userSavedQueries" } }).config);
+
+/** Live collection for the `userTagColors` replication shape — pass the shape's validated `args` (its partition selector). */
+export const userTagColorsCollection = (client: LunoraClient, args?: Record<string, unknown>): Collection<Row, string> =>
+    createCollection(lunoraCollectionOptions({ client, shape: { args, name: "userTagColors" } }).config);
+
 /** Live collection for the `wholeOutline` replication shape — pass the shape's validated `args` (its partition selector). */
 export const wholeOutlineCollection = (client: LunoraClient, args?: Record<string, unknown>): Collection<Row, string> =>
     createCollection(lunoraCollectionOptions({ client, shape: { args, name: "wholeOutline" } }).config);

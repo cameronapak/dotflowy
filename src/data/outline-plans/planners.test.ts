@@ -8,6 +8,8 @@ import {
   makeOutlineNode,
   orderSiblings,
   planIndent,
+  planAppendChild,
+  planImportNodes,
   planInsertChildAtStart,
   planInsertSibling,
   planIndentMany,
@@ -195,6 +197,63 @@ describe("sibling-chain invariant (ADR 0009) via outline-plans", () => {
       "root",
       ...Array.from({ length: 20 }, (_, i) => `n${i}`),
     ]);
+  });
+});
+
+describe("planAppendChild", () => {
+  it("appends after the current last sibling", () => {
+    let nodes = seedFlat(["a", "b"]);
+    const plan = planAppendChild(buildTreeIndex(nodes), {
+      id: "c",
+      userId: USER,
+      parentId: null,
+      text: "c",
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    expect(plan).not.toBeNull();
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, null)).toEqual(["a", "b", "c"]);
+    expect(nodes.find((n) => n.id === "c")!.prevSiblingId).toBe("b");
+  });
+
+  it("inserts as sole child when parent is empty", () => {
+    let nodes = seedFlat(["p"]);
+    const plan = planAppendChild(buildTreeIndex(nodes), {
+      id: "c",
+      userId: USER,
+      parentId: "p",
+      text: "c",
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    nodes = applyPlan(nodes, plan!);
+    expect(assertChainOk(nodes, "p")).toEqual(["c"]);
+  });
+});
+
+describe("planImportNodes", () => {
+  it("is insert-only with no patches", () => {
+    const batch = [
+      makeOutlineNode({
+        id: "x",
+        userId: USER,
+        parentId: null,
+        prevSiblingId: null,
+        text: "x",
+      }),
+      makeOutlineNode({
+        id: "y",
+        userId: USER,
+        parentId: null,
+        prevSiblingId: "x",
+        text: "y",
+      }),
+    ];
+    const plan = planImportNodes(batch);
+    expect(plan.deletes).toEqual([]);
+    expect(plan.patches).toEqual([]);
+    expect(plan.inserts.map((n) => n.id)).toEqual(["x", "y"]);
   });
 });
 

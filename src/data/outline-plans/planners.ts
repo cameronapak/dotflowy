@@ -253,6 +253,39 @@ export function planInsertChildAtStart(
   return planInsertSibling(index, { ...args, afterId: null });
 }
 
+/**
+ * Append as LAST child of `parentId` (server resolves the current last sibling).
+ * Port of Dotflowy `appendChild` / quick-add born capture — one watermark.
+ */
+export function planAppendChild(
+  index: TreeIndex,
+  args: {
+    id: string;
+    userId: string;
+    parentId: string | null;
+    text: string;
+    isTask?: boolean;
+    kind?: "paragraph" | null;
+    createdAt: number;
+    updatedAt: number;
+  },
+): OutlinePlan | null {
+  if (args.parentId !== null && !index.byId.has(args.parentId)) return null;
+  const siblings = childrenOf(index, args.parentId);
+  const afterId = siblings.length ? siblings[siblings.length - 1]!.id : null;
+  return planInsertSibling(index, { ...args, afterId });
+}
+
+/**
+ * Bulk insert-only plan (OPML import chunks). Chains are pre-wired by
+ * `planOpmlImport`; no patches. Used by Lunora `importNodes`.
+ */
+export function planImportNodes(nodes: readonly OutlineNode[]): OutlinePlan {
+  const plan = emptyPlan();
+  for (const node of nodes) plan.inserts.push(node);
+  return plan;
+}
+
 /** Field-only text update. */
 export function planSetText(
   index: TreeIndex,

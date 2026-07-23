@@ -23,6 +23,25 @@ export const nodes = sqliteTable("nodes", {
     by_parent: index("by_parent").on(t.parentId),
 }));
 
+export const tagColors = sqliteTable("tagColors", {
+    _id: text("_id").primaryKey(),
+    _creationTime: integer("_creationTime").notNull(),
+    tag: text("tag").notNull(),
+    color: text("color").notNull(),
+    userId: text("userId").notNull(),
+}, (t) => ({
+    by_tag: index("by_tag").on(t.tag),
+}));
+
+export const savedQueries = sqliteTable("savedQueries", {
+    _id: text("_id").primaryKey(),
+    _creationTime: integer("_creationTime").notNull(),
+    name: text("name").notNull(),
+    query: text("query").notNull(),
+    createdAt: real("createdAt").notNull(),
+    userId: text("userId").notNull(),
+});
+
 export const ratelimit_buckets = sqliteTable("ratelimit_buckets", {
     _id: text("_id").primaryKey(),
     _creationTime: integer("_creationTime").notNull(),

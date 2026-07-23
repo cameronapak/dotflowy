@@ -219,21 +219,54 @@ export function splitNode(
 }
 
 /**
- * Append a node at the end of `parentId`'s children. Used by the
- * first-run seed, where we don't have a live TreeIndex in scope and the
- * caller knows the parent is empty or has a known last child.
+ * Append a node at the end of `parentId`'s children. Used by quick-add born
+ * capture and the legacy first-run seed.
  *
- * Pass `prevSiblingId` explicitly so seed code owns the wiring. `id` lets a
- * caller supply the node id up front (the daily plugin's claimed container id);
- * defaults to a fresh id.
+ * Flag OFF: pass `prevSiblingId` explicitly (caller owns the wiring). Flag ON:
+ * Lunora `appendChild` resolves the last sibling server-side (one watermark);
+ * `prevSiblingId` is ignored for the mutator path.
+ *
+ * `id` lets a caller supply the node id up front; defaults to a fresh id.
+ * Optional `isTask` / `kind` let quick-add fold `/todo`/`/paragraph` into the
+ * same born mutator when known at create time.
  */
 export function appendChild(
   parentId: string | null,
   prevSiblingId: string | null = null,
   text = "",
   id = createId(),
+  opts?: { isTask?: boolean; kind?: NodeKind },
 ): string {
-  nodesCollection.insert(makeNode({ id, parentId, prevSiblingId, text }));
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      const t = now();
+      trackLunoraMutation(
+        lunora.store.mutators.appendChild({
+          id,
+          userId: lunora.userId,
+          parentId,
+          text,
+          isTask: opts?.isTask,
+          kind: opts?.kind,
+          createdAt: t,
+          updatedAt: t,
+        }),
+      );
+      return id;
+    }
+  }
+
+  nodesCollection.insert(
+    makeNode({
+      id,
+      parentId,
+      prevSiblingId,
+      text,
+      isTask: opts?.isTask,
+      kind: opts?.kind,
+    }),
+  );
   return id;
 }
 

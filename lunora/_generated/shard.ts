@@ -29,6 +29,15 @@ const LUNORA_TABLE_INDEXES: Record<string, Array<{ fields: string[]; name: strin
             "type": "index"
         }
     ],
+    "tagColors": [
+        {
+            "fields": [
+                "tag"
+            ],
+            "name": "by_tag",
+            "type": "index"
+        }
+    ],
     "ratelimit_buckets": [
         {
             "fields": [
@@ -113,6 +122,67 @@ const LUNORA_TABLE_COLUMNS: Record<string, Array<{ isStorage?: boolean; name: st
             "name": "kind",
             "optional": false,
             "type": "literal"
+        },
+        {
+            "name": "userId",
+            "optional": false,
+            "type": "string"
+        }
+    ],
+    "tagColors": [
+        {
+            "name": "_id",
+            "optional": false,
+            "pk": true,
+            "type": "id"
+        },
+        {
+            "name": "_creationTime",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "tag",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "color",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "userId",
+            "optional": false,
+            "type": "string"
+        }
+    ],
+    "savedQueries": [
+        {
+            "name": "_id",
+            "optional": false,
+            "pk": true,
+            "type": "id"
+        },
+        {
+            "name": "_creationTime",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "name",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "query",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "createdAt",
+            "optional": false,
+            "type": "number"
         },
         {
             "name": "userId",
@@ -732,6 +802,8 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
 
             const facade = db as unknown as Record<string, ReturnType<typeof bindTableFacade>>;
             facade["nodes"] = bindTableFacade(db, "nodes");
+            facade["tagColors"] = bindTableFacade(db, "tagColors");
+            facade["savedQueries"] = bindTableFacade(db, "savedQueries");
             facade["ratelimit_buckets"] = bindTableFacade(db, "ratelimit_buckets");
 
             // `ctx.log`: the DO base builds the attributed logger (structured

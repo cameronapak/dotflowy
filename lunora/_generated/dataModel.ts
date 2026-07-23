@@ -33,7 +33,7 @@ export type {
     WhereOperators,
 } from "lunorash/server/data-model";
 
-export type TableName = "nodes" | "ratelimit_buckets";
+export type TableName = "nodes" | "tagColors" | "savedQueries" | "ratelimit_buckets";
 
 export type Id<TName extends string> = string & { readonly __table: TName };
 
@@ -55,6 +55,23 @@ export interface Doc_nodes {
     userId: string;
 }
 
+export interface Doc_tagColors {
+    _id: Id<"tagColors">;
+    _creationTime: number;
+    tag: string;
+    color: string;
+    userId: string;
+}
+
+export interface Doc_savedQueries {
+    _id: Id<"savedQueries">;
+    _creationTime: number;
+    name: string;
+    query: string;
+    createdAt: number;
+    userId: string;
+}
+
 export interface Doc_ratelimit_buckets {
     _id: Id<"ratelimit_buckets">;
     _creationTime: number;
@@ -66,6 +83,8 @@ export interface Doc_ratelimit_buckets {
 
 export interface DataModel {
     nodes: Doc_nodes;
+    tagColors: Doc_tagColors;
+    savedQueries: Doc_savedQueries;
     ratelimit_buckets: Doc_ratelimit_buckets;
 }
 
@@ -77,6 +96,8 @@ export type Doc<T extends keyof DataModel> = DataModel[T];
  */
 export interface IndexNamesByTable {
     nodes: "by_parent";
+    tagColors: "by_tag";
+    savedQueries: never;
     ratelimit_buckets: "by_key";
 }
 
@@ -85,6 +106,8 @@ export type IndexName<T extends keyof DataModel> = IndexNamesByTable[T];
 /** Per-table search-index name union. `never` for tables without searchIndex. */
 export interface SearchIndexNamesByTable {
     nodes: never;
+    tagColors: never;
+    savedQueries: never;
     ratelimit_buckets: never;
 }
 
@@ -93,6 +116,8 @@ export type SearchIndexName<T extends keyof DataModel> = SearchIndexNamesByTable
 /** Per-table rank-index name union. `never` for tables without a rankIndex. */
 export interface RankIndexNamesByTable {
     nodes: never;
+    tagColors: never;
+    savedQueries: never;
     ratelimit_buckets: never;
 }
 
@@ -101,6 +126,8 @@ export type RankIndexName<T extends keyof DataModel> = RankIndexNamesByTable[T];
 /** Per-table geo-index name union. `never` for tables without a geoIndex. */
 export interface GeoIndexNamesByTable {
     nodes: never;
+    tagColors: never;
+    savedQueries: never;
     ratelimit_buckets: never;
 }
 
@@ -127,6 +154,23 @@ export interface Insert_nodes {
     userId: string;
 }
 
+export interface Insert_tagColors {
+    _id?: Id<"tagColors">;
+    _creationTime?: number;
+    tag: string;
+    color: string;
+    userId: string;
+}
+
+export interface Insert_savedQueries {
+    _id?: Id<"savedQueries">;
+    _creationTime?: number;
+    name: string;
+    query: string;
+    createdAt: number;
+    userId: string;
+}
+
 export interface Insert_ratelimit_buckets {
     _id?: Id<"ratelimit_buckets">;
     _creationTime?: number;
@@ -139,6 +183,8 @@ export interface Insert_ratelimit_buckets {
 /** Per-table insert shape, accepted by `ctx.db.<table>.insert(...)`. */
 export interface InsertModel {
     nodes: Insert_nodes;
+    tagColors: Insert_tagColors;
+    savedQueries: Insert_savedQueries;
     ratelimit_buckets: Insert_ratelimit_buckets;
 }
 
@@ -162,6 +208,8 @@ export interface ManyRelation<Target extends keyof DataModel> {
 /** Per-table relation map keyed by accessor name. `{}` for tables with none. */
 export interface Relations {
     nodes: {};
+    tagColors: {};
+    savedQueries: {};
     ratelimit_buckets: {};
 }
 
