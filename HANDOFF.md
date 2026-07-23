@@ -53,6 +53,7 @@ Verified on `http://localhost:5175/` (Vite fell through 5173→5174→5175):
 - [x] Two tabs, same user: live convergence without refresh (~2.5s)
 - [x] Hard reload restores outline from shape seed
 - [x] Cross-user: second account sees only its own seed, not first user’s bullets
+- [x] Fresh-user `seedIfEmpty` smoke (`:5175`): signup → 4 demo bullets; reload stays 4; insert+reload keeps 5 (no double-seed) — after `e16cd6e845`
 
 ## API surprises vs docs
 
