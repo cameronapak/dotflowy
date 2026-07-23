@@ -1,4 +1,6 @@
 import { nodesCollection } from "./collection";
+import { isLunoraSyncEnabled } from "./flags";
+import { getLunoraOutlineContext, trackLunoraMutation } from "./lunora-sync";
 import {
   type Node,
   type NodeKind,
@@ -54,6 +56,28 @@ export function insertSibling(
   kind: NodeKind = null,
   id = createId(),
 ): string {
+  // ADR 0055: Lunora mutator owns optimistic plan + watermark (dogfood surface).
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      const t = now();
+      trackLunoraMutation(
+        lunora.store.mutators.insertSibling({
+          id,
+          userId: lunora.userId,
+          parentId,
+          afterId,
+          text,
+          isTask,
+          kind,
+          createdAt: t,
+          updatedAt: t,
+        }),
+      );
+      return id;
+    }
+  }
+
   const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.
@@ -212,6 +236,21 @@ export function indent(
   const node = index.byId.get(nodeId);
   if (!node || !node.prevSiblingId) return false;
 
+  // ADR 0055 dogfood: skip mirror-resolution path (mirrors still on custom DO).
+  if (isLunoraSyncEnabled() && !resolveMirror) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      trackLunoraMutation(
+        lunora.store.mutators.indent({
+          id: nodeId,
+          userId: lunora.userId,
+          updatedAt: now(),
+        }),
+      );
+      return true;
+    }
+  }
+
   const newParent = index.byId.get(node.prevSiblingId);
   if (!newParent) return false;
 
@@ -286,6 +325,20 @@ export function indent(
 export function outdent(index: TreeIndex, nodeId: string): boolean {
   const node = index.byId.get(nodeId);
   if (!node || node.parentId === null) return false;
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      trackLunoraMutation(
+        lunora.store.mutators.outdent({
+          id: nodeId,
+          userId: lunora.userId,
+          updatedAt: now(),
+        }),
+      );
+      return true;
+    }
+  }
 
   const oldParent = index.byId.get(node.parentId);
   if (!oldParent) return false;
@@ -693,17 +746,7 @@ export function removeNode(index: TreeIndex, nodeId: string): string | null {
   const node = index.byId.get(nodeId);
   if (!node) return null;
 
-  // Collect subtree ids (depth-first).
-  const toDelete: string[] = [];
-  const stack = [nodeId];
-  while (stack.length) {
-    const id = stack.pop()!;
-    toDelete.push(id);
-    const kids = childrenOf(index, id);
-    for (const k of kids) stack.push(k.id);
-  }
-
-  // Determine focus target before mutating.
+  // Determine focus target before mutating (shared by Lunora + custom-DO paths).
   const siblings = childrenOf(index, node.parentId);
   const i = siblings.findIndex((n) => n.id === nodeId);
   let focusId: string | null = null;
@@ -713,6 +756,30 @@ export function removeNode(index: TreeIndex, nodeId: string): string | null {
     focusId = siblings[i - 1]!.id;
   } else {
     focusId = node.parentId;
+  }
+
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      trackLunoraMutation(
+        lunora.store.mutators.removeNode({
+          id: nodeId,
+          userId: lunora.userId,
+          updatedAt: now(),
+        }),
+      );
+      return focusId;
+    }
+  }
+
+  // Collect subtree ids (depth-first).
+  const toDelete: string[] = [];
+  const stack = [nodeId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    toDelete.push(id);
+    const kids = childrenOf(index, id);
+    for (const k of kids) stack.push(k.id);
   }
 
   // Relink the follower of the last-deleted-in-chain. For the deleted node
@@ -745,6 +812,20 @@ export function removeManyNodes(ids: string[]): void {
 }
 
 export function setText(nodeId: string, text: string) {
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (lunora) {
+      trackLunoraMutation(
+        lunora.store.mutators.setText({
+          id: nodeId,
+          userId: lunora.userId,
+          text,
+          updatedAt: now(),
+        }),
+      );
+      return;
+    }
+  }
   update(nodeId, { text });
 }
 

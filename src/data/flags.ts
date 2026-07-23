@@ -30,3 +30,33 @@ export function isMirrorsEnabled(): boolean {
   }
   return MIRRORS_DEFAULT;
 }
+
+/** ADR 0055 Phase-2: outline sync via Lunora shapes/mutators instead of custom DO. */
+export const LUNORA_SYNC_FLAG_KEY = "dotflowy:flag:lunora-sync";
+
+// Default OFF — Playwright + normal `bun run dev` stay on `/api/sync` +
+// `nodesCollection`. Dogfood: localStorage `on` or `?lunora-sync=on`, then reload.
+const LUNORA_SYNC_DEFAULT = false;
+
+/**
+ * Whether outline sync rides Lunora (`/_lunora` + `@lunora/db`) instead of the
+ * custom `/api/sync` + `nodesCollection` path (ADR 0055). Default OFF.
+ *
+ * Enable: `localStorage.setItem("dotflowy:flag:lunora-sync", "on")` then reload,
+ * or open with `?lunora-sync=on` (URL wins for that load; does not persist).
+ * Disable: `"off"` in localStorage, or `?lunora-sync=off`.
+ */
+export function isLunoraSyncEnabled(): boolean {
+  if (typeof window === "undefined") return LUNORA_SYNC_DEFAULT;
+  try {
+    const q = new URLSearchParams(window.location.search).get("lunora-sync");
+    if (q === "on" || q === "1") return true;
+    if (q === "off" || q === "0") return false;
+    const v = window.localStorage.getItem(LUNORA_SYNC_FLAG_KEY);
+    if (v === "on") return true;
+    if (v === "off") return false;
+  } catch {
+    // localStorage / URLSearchParams can throw; fall back to the default.
+  }
+  return LUNORA_SYNC_DEFAULT;
+}
