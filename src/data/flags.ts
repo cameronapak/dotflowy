@@ -42,6 +42,11 @@ const LUNORA_SYNC_DEFAULT = true;
  * Whether outline sync rides Lunora (`/_lunora` + `@lunora/db`) instead of the
  * custom `/api/sync` + `nodesCollection` path (ADR 0055). Default ON.
  *
+ * Kill-switch pairing (ADR 0055): the browser reads this flag; Worker MCP reads
+ * `LUNORA_OUTLINE` (`isLunoraOutlineEnabled` in worker/lunora-mcp-store.ts).
+ * Flip BOTH together (`lunora-sync=off` AND `LUNORA_OUTLINE=0`) or MCP and the
+ * editor diverge on the same account.
+ *
  * Disable: `localStorage.setItem("dotflowy:flag:lunora-sync", "off")` then reload,
  * or open with `?lunora-sync=off` (URL wins for that load; does not persist).
  * Enable: `"on"` in localStorage, or `?lunora-sync=on`.

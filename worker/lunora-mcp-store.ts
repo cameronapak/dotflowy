@@ -151,7 +151,14 @@ export function createLunoraOutlineStore(
   };
 }
 
-/** True when Worker MCP should use the Lunora shard (default ON when unset). */
+/**
+ * True when Worker MCP should use the Lunora shard (default ON when unset).
+ *
+ * Kill-switch pairing (ADR 0055): MCP reads this env var; the browser reads
+ * `isLunoraSyncEnabled()` (`dotflowy:flag:lunora-sync` / `?lunora-sync=`).
+ * Flip BOTH together (`LUNORA_OUTLINE=0` AND client `lunora-sync=off`) or MCP
+ * and the editor diverge on the same account.
+ */
 export function isLunoraOutlineEnabled(env: {
   LUNORA_OUTLINE?: string;
 }): boolean {
@@ -159,4 +166,12 @@ export function isLunoraOutlineEnabled(env: {
   if (!raw) return true;
   if (raw === "0" || raw === "false" || raw === "off") return false;
   return true;
+}
+
+/** Permanently erase this user's Lunora shard — account deletion (ADR 0051). */
+export async function wipeLunoraUserShard(
+  env: LunoraRpcEnv,
+  userId: string,
+): Promise<void> {
+  await shardRpc(env, userId, "mcp:wipeUserShard", { userId });
 }

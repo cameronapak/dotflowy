@@ -5,6 +5,7 @@
  * - creates `@lunora/db` `wholeOutline` collection + bound mutators
  * - feeds ADR 0004 `tree-store` from collection rows
  * - marks sync ready (shell spinner) + `seedIfEmpty` when the outline is empty
+ *   AFTER auto-migrate from classic DO settles (success or skip)
  *
  * SPA/no-SSR: never start during prerender. Custom `/api/sync` stays cold
  * (see `collection.ts` early-return when the flag is ON).
@@ -125,11 +126,13 @@ export function startLunoraOutlineSync(userId: string): void {
     .then(async () => {
       if (!ctx || ctx.store !== store) return;
       feedTreeFromCollection(store);
-      markNodesSyncReady();
       // One-shot classic DO → Lunora when shard empty (skip if already has rows).
+      // Shell stays gated until migrate settles — otherwise the user can edit/
+      // seed into an empty shard while import chunks land.
       const next = await maybeAutoMigrateToLunora(store, userId);
       if (!ctx || ctx.store !== store) return;
       feedTreeFromCollection(store);
+      markNodesSyncReady();
       if (next === "seed") maybeSeed(store, userId);
     })
     .catch((err) => {

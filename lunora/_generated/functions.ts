@@ -37,6 +37,7 @@ export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
     "mcp:applyChangeOps": lunora_mcp_0.applyChangeOps as unknown as RegisteredLunoraFunction,
     "mcp:listDailyIndex": lunora_mcp_0.listDailyIndex as unknown as RegisteredLunoraFunction,
     "mcp:listNodes": lunora_mcp_0.listNodes as unknown as RegisteredLunoraFunction,
+    "mcp:wipeUserShard": lunora_mcp_0.wipeUserShard as unknown as RegisteredLunoraFunction,
     "mutators:appendChild": lunora_mutators_1.appendChild as unknown as RegisteredLunoraFunction,
     "mutators:claimDailyMapping": lunora_mutators_1.claimDailyMapping as unknown as RegisteredLunoraFunction,
     "mutators:deleteDailyMapping": lunora_mutators_1.deleteDailyMapping as unknown as RegisteredLunoraFunction,
@@ -82,6 +83,11 @@ if (typeof source["userId"] !== "string") return DEFER;
 return { "userId": source["userId"] };
 });
 installCompiledValidatorMap(lunora_mcp_0.listNodes.args, (source) => {
+if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (typeof source["userId"] !== "string") return DEFER;
+return { "userId": source["userId"] };
+});
+installCompiledValidatorMap(lunora_mcp_0.wipeUserShard.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
 if (typeof source["userId"] !== "string") return DEFER;
 return { "userId": source["userId"] };
@@ -151,6 +157,7 @@ export interface Caller {
         applyChangeOps: (args: { userId: string; ops: Array<unknown> }) => Promise<{ count: number; deletes?: undefined; inserts?: undefined; patches?: undefined; } | { count: number; deletes: number; inserts: number; patches: number; }>;
         listDailyIndex: (args: { userId: string }) => Promise<{ key: string; nodeId: string; }[]>;
         listNodes: (args: { userId: string }) => Promise<{ id: string; parentId: string | null; prevSiblingId: string | null; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number | null; mirrorOf: string | null; createdAt: number; updatedAt: number; origin: string | null; kind: "paragraph" | null }[]>;
+        wipeUserShard: (args: { userId: string }) => Promise<{ deleted: number; }>;
     };
 }
 
@@ -170,6 +177,7 @@ export const createCaller = (context: CallerCtx): Caller => ({
         applyChangeOps: (args) => callRegistered(context, "mcp:applyChangeOps", args),
         listDailyIndex: (args) => callRegistered(context, "mcp:listDailyIndex", args),
         listNodes: (args) => callRegistered(context, "mcp:listNodes", args),
+        wipeUserShard: (args) => callRegistered(context, "mcp:wipeUserShard", args),
     },
 });
 

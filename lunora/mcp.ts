@@ -33,7 +33,12 @@ type McpNode = {
   kind: "paragraph" | null;
 };
 
-type ShardTable = "nodes" | "tagColors" | "savedQueries" | "dailyIndex";
+type ShardTable =
+  | "nodes"
+  | "tagColors"
+  | "savedQueries"
+  | "dailyIndex"
+  | "ratelimit_buckets";
 
 type MutatorDb = {
   query: (table: ShardTable) => {
@@ -150,4 +155,33 @@ export const applyChangeOps = internalMutation
       inserts: plan.inserts.length,
       patches: plan.patches.length,
     };
+  });
+
+const WIPE_TABLES: ShardTable[] = [
+  "nodes",
+  "tagColors",
+  "savedQueries",
+  "dailyIndex",
+  "ratelimit_buckets",
+];
+
+/**
+ * Erase every row in this user's shard (outline + side-collections). Worker-only
+ * via `x-lunora-system` — self-serve account deletion (ADR 0051 + ADR 0055).
+ * Keyed by Better Auth `user.id` (same shard the browser/MCP mutators use).
+ */
+export const wipeUserShard = internalMutation
+  .input({ userId: v.string() })
+  .mutation(async ({ ctx, args }) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    let deleted = 0;
+    for (const table of WIPE_TABLES) {
+      const rows = await mctx.db.query(table).collect();
+      for (const row of rows) {
+        await mctx.db.delete(row._id as Id<ShardTable>);
+        deleted += 1;
+      }
+    }
+    return { deleted };
   });
