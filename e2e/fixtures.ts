@@ -373,3 +373,234 @@ export const STANDARD_TREE: SeedNode[] = [
     text: "Alpha two",
   },
 ];
+
+// --- Lunora flag-ON fixture (ADR 0055) --------------------------------------
+
+type LunoraRow = ApiNode & { userId: string; _id: string };
+
+function toLunoraRow(n: SeedNode, userId: string): LunoraRow {
+  const base = toNode(n);
+  return { ...base, _id: base.id, userId };
+}
+
+/**
+ * Seed an outline on the Lunora flag-ON path by mocking `/_lunora/ws` +
+ * `/_lunora/rpc` enough for smoke (shape subscribe → poke seed; mutators
+ * update the in-memory store + poke lastMutationId for watermark hold).
+ *
+ * Classic `seedOutline` stays the default for the existing suite (flag OFF).
+ * This is the foundation — not a full protocol twin; expand as more Lunora
+ * e2e coverage lands. Auto-migrate is skipped by mocking GET `/api/nodes` → [].
+ */
+export async function seedOutlineLunora(
+  page: Page,
+  nodes: SeedNode[],
+  opts: { userId?: string } = {},
+): Promise<void> {
+  const userId = opts.userId ?? "test-user";
+  const store = new Map<string, LunoraRow>();
+  for (const n of nodes) store.set(n.id, toLunoraRow(n, userId));
+
+  let clientSeq = 0;
+  let checkpoint = 0;
+  let pokeN = 0;
+  const sockets = new Set<WebSocketRoute>();
+  const shapeSubs = new Map<string, { name: string }>();
+
+  const reply = (route: Route, data: unknown) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(data),
+    });
+
+  const sendPoke = (
+    ws: WebSocketRoute,
+    shapeId: string,
+    rows: LunoraRow[],
+    lastMutationId: number,
+  ) => {
+    pokeN += 1;
+    const pokeId = `p${pokeN}`;
+    checkpoint += 1;
+    ws.send(
+      JSON.stringify({
+        type: "pokeStart",
+        pokeId,
+        baseCheckpoint: checkpoint - 1,
+        epoch: 1,
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        type: "pokePart",
+        pokeId,
+        shapeId,
+        lastMutationId,
+        rowsPatch: rows.map((r) => ({
+          op: "put",
+          key: r._id,
+          value: r,
+        })),
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        type: "pokeEnd",
+        pokeId,
+        checkpoint,
+        epoch: 1,
+      }),
+    );
+  };
+
+  const seedShape = (ws: WebSocketRoute, shapeId: string, name: string) => {
+    if (name === "wholeOutline") {
+      sendPoke(ws, shapeId, [...store.values()], 0);
+      return;
+    }
+    // Empty kv shapes (tagColors / savedQueries / dailyIndex).
+    sendPoke(ws, shapeId, [], 0);
+  };
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem("dotflowy:flag:lunora-sync", "on");
+  });
+
+  await page.route(
+    (url) => url.pathname === "/api/auth/get-session",
+    (route) =>
+      reply(route, {
+        session: {
+          id: "test-session",
+          userId,
+          token: "test-token",
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        },
+        user: {
+          id: userId,
+          email: "test@example.com",
+          name: "Test User",
+          emailVerified: true,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+      }),
+  );
+
+  // Empty classic DO so auto-migrate no-ops (Lunora store is the seed).
+  await page.route(
+    (url) => url.pathname === "/api/nodes",
+    (route) => {
+      if (route.request().method() === "GET") return reply(route, []);
+      return route.fulfill({ status: 404, body: "{}" });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === "/api/kv",
+    (route) => {
+      if (route.request().method() === "GET") return reply(route, []);
+      return route.fulfill({ status: 404, body: "{}" });
+    },
+  );
+
+  await page.route(
+    (url) => url.pathname === "/_lunora/rpc",
+    async (route) => {
+      const body = route.request().postDataJSON() as {
+        functionPath?: string;
+        args?: Record<string, unknown>;
+      };
+      const path = body.functionPath ?? "";
+      const args = (body.args ?? {}) as Record<string, unknown>;
+      const seqHeader = route.request().headers()["x-lunora-client-seq"];
+      const seq = seqHeader ? Number(seqHeader) : ++clientSeq;
+      if (Number.isFinite(seq)) clientSeq = Math.max(clientSeq, seq);
+
+      let result: unknown = null;
+
+      if (path === "mutators:setText") {
+        const id = String(args.id ?? "");
+        const cur = store.get(id);
+        if (cur) {
+          store.set(id, {
+            ...cur,
+            text: String(args.text ?? ""),
+            updatedAt: Number(args.updatedAt ?? Date.now()),
+          });
+        }
+        result = { id };
+      } else if (path === "mutators:insertSibling") {
+        const id = String(args.id ?? "");
+        const row: LunoraRow = {
+          _id: id,
+          id,
+          parentId: (args.parentId as string | null) ?? null,
+          prevSiblingId: (args.afterId as string | null) ?? null,
+          text: String(args.text ?? ""),
+          isTask: Boolean(args.isTask),
+          completed: false,
+          collapsed: false,
+          bookmarkedAt: null,
+          mirrorOf: null,
+          createdAt: Number(args.createdAt ?? 0),
+          updatedAt: Number(args.updatedAt ?? 0),
+          origin: null,
+          kind: args.kind === "paragraph" ? "paragraph" : null,
+          userId,
+        };
+        store.set(id, row);
+        result = { id };
+      } else if (path === "mutators:seedIfEmpty") {
+        result = { seeded: false };
+      } else {
+        // Accept unknown mutators so watermark chain doesn't wedge.
+        result = {};
+      }
+
+      await reply(route, { result, lastMutationId: seq });
+
+      // Echo a poke so checkpoints.awaitMutationId resolves.
+      for (const ws of sockets) {
+        for (const [shapeId, meta] of shapeSubs) {
+          if (meta.name === "wholeOutline") {
+            sendPoke(ws, shapeId, [...store.values()], seq);
+          }
+        }
+      }
+    },
+  );
+
+  await page.routeWebSocket(
+    (url) => url.pathname === "/_lunora/ws",
+    (ws) => {
+      sockets.add(ws);
+      ws.onClose(() => sockets.delete(ws));
+      ws.onMessage((raw) => {
+        if (typeof raw !== "string") return;
+        if (raw === "lunora-ping") {
+          ws.send("lunora-pong");
+          return;
+        }
+        let msg: {
+          type?: string;
+          id?: string;
+          shape?: { name?: string; args?: unknown };
+        };
+        try {
+          msg = JSON.parse(raw) as typeof msg;
+        } catch {
+          return;
+        }
+        if (msg.type === "connect") {
+          // No ack required by the client.
+          return;
+        }
+        if (msg.type === "shape_subscribe" && msg.id && msg.shape?.name) {
+          shapeSubs.set(msg.id, { name: msg.shape.name });
+          seedShape(ws, msg.id, msg.shape.name);
+        }
+      });
+    },
+  );
+}
