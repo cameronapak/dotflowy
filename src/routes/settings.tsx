@@ -760,7 +760,7 @@ function BetaSection() {
             <Switch
               checked={ready ? enabled : false}
               disabled={!ready}
-              onCheckedChange={(checked) => setLunoraBetaEnabled(checked)}
+              onCheckedChange={(checked) => void setLunoraBetaEnabled(checked)}
               aria-label="Upgraded outline sync beta"
             />
           }

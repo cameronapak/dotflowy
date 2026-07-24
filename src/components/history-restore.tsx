@@ -55,24 +55,27 @@ export function runHistoryRestore(
 
   if (isLunoraSyncEnabled()) {
     const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const nodes: OutlineNode[] = plan.targetNodes.map((n) => ({
-        ...n,
-        userId: lunora.userId,
-      }));
-      if (plan.opCount < RESTORE_SLICE_OPS) {
-        trackLunoraMutation(
-          lunora.store.mutators.restoreNodes({
-            userId: lunora.userId,
-            nodes,
-          }),
-        );
-        if (plan.focusId) setPendingFocus(plan.focusId);
-        return;
-      }
-      void runLunoraRestore(kind, plan, nodes, lunora.userId);
+    if (!lunora) {
+      plan.revert();
+      toast.error("Sync is still starting — try again in a moment.");
       return;
     }
+    const nodes: OutlineNode[] = plan.targetNodes.map((n) => ({
+      ...n,
+      userId: lunora.userId,
+    }));
+    if (plan.opCount < RESTORE_SLICE_OPS) {
+      trackLunoraMutation(
+        lunora.store.mutators.restoreNodes({
+          userId: lunora.userId,
+          nodes,
+        }),
+      );
+      if (plan.focusId) setPendingFocus(plan.focusId);
+      return;
+    }
+    void runLunoraRestore(kind, plan, nodes, lunora.userId);
+    return;
   }
 
   if (plan.opCount < RESTORE_SLICE_OPS) {

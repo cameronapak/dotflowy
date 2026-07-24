@@ -62,23 +62,14 @@ function mirrorLunoraFlag(enabled: boolean) {
   }
 }
 
-function writeLunoraBeta(enabled: boolean) {
-  const exists = accountPrefsCollection.toArray.some(
-    (r) => r.id === LUNORA_BETA_ROW_ID,
-  );
-  if (exists) {
-    accountPrefsCollection.update(
-      LUNORA_BETA_ROW_ID,
-      (draft) => void (draft.enabled = enabled),
-    );
-  } else {
-    accountPrefsCollection.insert({ id: LUNORA_BETA_ROW_ID, enabled });
-  }
+async function writeLunoraBeta(enabled: boolean): Promise<void> {
+  const row: AccountPrefRow = { id: LUNORA_BETA_ROW_ID, enabled };
+  await kvPut(KV, [{ key: LUNORA_BETA_ROW_ID, value: row }]);
 }
 
 /** Persist Lunora beta opt-in, mirror the runtime flag, and reload. */
-export function setLunoraBetaEnabled(enabled: boolean): void {
-  writeLunoraBeta(enabled);
+export async function setLunoraBetaEnabled(enabled: boolean): Promise<void> {
+  await writeLunoraBeta(enabled);
   mirrorLunoraFlag(enabled);
   hardReset(window.location.pathname + window.location.search);
 }
