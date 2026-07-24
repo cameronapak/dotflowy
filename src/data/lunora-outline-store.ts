@@ -1,7 +1,7 @@
 /**
  * Client outline store for the Lunora flag-swap path (ADR 0055).
- * Ported from `spikes/lunora-outline/src/outline-store.ts` — `wholeOutline`
- * shape + `bindMutators` with watermark checkpoints (replaces `waitForSeq`).
+ * `wholeOutline` shape + `bindMutators` with watermark checkpoints (replaces
+ * `waitForSeq`).
  */
 
 import type { LunoraClient } from "lunorash/client";

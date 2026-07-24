@@ -8,8 +8,7 @@
     "dist/**",
     "src/routeTree.gen.ts",
     "landing/src/routeTree.gen.ts",
-    "lunora/_generated/**",
-    "spikes/**/lunora/_generated/**"
+    "lunora/_generated/**"
   ],
   "sortTailwindcss": {
     "stylesheet": "./src/styles.css",

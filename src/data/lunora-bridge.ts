@@ -1,7 +1,6 @@
 /**
  * ADR 0004 handoff seam — build Dotflowy-shaped `TreeIndex` / ordered children
- * from Lunora collection rows (`wholeOutline`). Ported from
- * `spikes/lunora-outline/src/outline/lunora-bridge.ts`.
+ * from Lunora collection rows (`wholeOutline`).
  */
 
 import type { NodeDocLike, OutlineNode, TreeIndex } from "./outline-plans";
