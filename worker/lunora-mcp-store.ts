@@ -12,16 +12,66 @@
  * forwards authenticated RPCs.
  */
 
+import { Schema } from "effect";
 import { resolveShard, type ShardNamespaceLike } from "lunorash/runtime";
 
-import type { ChangeOp, Node } from "../src/data/wire-schema";
 import type { OutlineStore } from "./mcp-tools";
+
+import { NodeSchema, type ChangeOp, type Node } from "../src/data/wire-schema";
 
 type LunoraRpcEnv = {
   SHARD: ShardNamespaceLike;
 };
 
-type RpcResult = { result?: unknown; error?: { message?: string } };
+const RpcEnvelopeSchema = Schema.Struct({
+  result: Schema.optional(Schema.Unknown),
+  error: Schema.optional(
+    Schema.Struct({
+      message: Schema.optional(Schema.String),
+    }),
+  ),
+});
+
+const DailyIndexRowSchema = Schema.Struct({
+  key: Schema.String,
+  nodeId: Schema.String,
+});
+
+const ClaimDailyResultSchema = Schema.Struct({
+  nodeId: Schema.String,
+});
+
+const DailyClaimValueSchema = Schema.Struct({
+  nodeId: Schema.String,
+});
+
+/** Decode unknown JSON at the Worker→shard trust boundary (ADR 0014 twin). */
+export function decodeShardRpcEnvelope(raw: unknown): {
+  result?: unknown;
+  error?: { message?: string };
+} {
+  return Schema.decodeUnknownSync(RpcEnvelopeSchema)(raw);
+}
+
+export function decodeMcpNodeList(raw: unknown): Node[] {
+  return [...Schema.decodeUnknownSync(Schema.Array(NodeSchema))(raw ?? [])];
+}
+
+export function decodeDailyIndexRows(
+  raw: unknown,
+): Array<{ key: string; nodeId: string }> {
+  return [
+    ...Schema.decodeUnknownSync(Schema.Array(DailyIndexRowSchema))(raw ?? []),
+  ];
+}
+
+export function decodeClaimDailyResult(raw: unknown): { nodeId: string } {
+  return Schema.decodeUnknownSync(ClaimDailyResultSchema)(raw);
+}
+
+export function decodeDailyClaimValue(raw: unknown): { nodeId: string } {
+  return Schema.decodeUnknownSync(DailyClaimValueSchema)(raw);
+}
 
 async function shardRpc(
   env: LunoraRpcEnv,
@@ -42,46 +92,22 @@ async function shardRpc(
       body: JSON.stringify({ functionPath, args }),
     }),
   );
-  const json = (await res.json()) as RpcResult;
-  if (!res.ok || json.error) {
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
     throw new Error(
-      json.error?.message ??
+      `lunora shard rpc ${functionPath}: non-JSON response (${res.status})`,
+    );
+  }
+  const envelope = decodeShardRpcEnvelope(json);
+  if (!res.ok || envelope.error) {
+    throw new Error(
+      envelope.error?.message ??
         `lunora shard rpc ${functionPath} failed (${res.status})`,
     );
   }
-  return json.result;
-}
-
-function wireNode(n: {
-  id: string;
-  parentId: string | null;
-  prevSiblingId: string | null;
-  text: string;
-  isTask: boolean;
-  completed: boolean;
-  collapsed: boolean;
-  bookmarkedAt: number | null;
-  mirrorOf: string | null;
-  createdAt: number;
-  updatedAt: number;
-  origin: string | null;
-  kind: "paragraph" | null;
-}): Node {
-  return {
-    id: n.id,
-    parentId: n.parentId,
-    prevSiblingId: n.prevSiblingId,
-    text: n.text,
-    isTask: n.isTask,
-    completed: n.completed,
-    collapsed: n.collapsed,
-    bookmarkedAt: n.bookmarkedAt,
-    mirrorOf: n.mirrorOf,
-    createdAt: n.createdAt,
-    updatedAt: n.updatedAt,
-    origin: n.origin,
-    kind: n.kind,
-  };
+  return envelope.result;
 }
 
 /**
@@ -94,10 +120,8 @@ export function createLunoraOutlineStore(
 ): OutlineStore {
   return {
     async getNodes() {
-      const rows = (await shardRpc(env, userId, "mcp:listNodes", {
-        userId,
-      })) as Array<Parameters<typeof wireNode>[0]>;
-      return (rows ?? []).map(wireNode);
+      const raw = await shardRpc(env, userId, "mcp:listNodes", { userId });
+      return decodeMcpNodeList(raw);
     },
 
     async applyBatch(ops: readonly ChangeOp[]) {
@@ -113,10 +137,10 @@ export function createLunoraOutlineStore(
 
     async getKv(collection: string) {
       if (collection !== "daily-index") return [];
-      const rows = (await shardRpc(env, userId, "mcp:listDailyIndex", {
+      const raw = await shardRpc(env, userId, "mcp:listDailyIndex", {
         userId,
-      })) as Array<{ key: string; nodeId: string }>;
-      return rows ?? [];
+      });
+      return decodeDailyIndexRows(raw);
     },
 
     async getOrCreateKv(collection: string, key: string, value: unknown) {
@@ -125,27 +149,19 @@ export function createLunoraOutlineStore(
           `lunora mcp store: unsupported kv collection ${collection}`,
         );
       }
-      const candidate =
-        value &&
-        typeof value === "object" &&
-        "nodeId" in value &&
-        typeof (value as { nodeId: unknown }).nodeId === "string"
-          ? (value as { nodeId: string }).nodeId
-          : null;
-      if (!candidate) {
+      let candidate: string;
+      try {
+        candidate = decodeDailyClaimValue(value).nodeId;
+      } catch {
         throw new Error("lunora mcp store: daily claim needs { nodeId }");
       }
-      const result = (await shardRpc(
-        env,
+      const raw = await shardRpc(env, userId, "mutators:claimDailyMapping", {
         userId,
-        "mutators:claimDailyMapping",
-        {
-          userId,
-          key,
-          nodeId: candidate,
-          touchedAt: Date.now(),
-        },
-      )) as { nodeId: string };
+        key,
+        nodeId: candidate,
+        touchedAt: Date.now(),
+      });
+      const result = decodeClaimDailyResult(raw);
       return { key, nodeId: result.nodeId };
     },
   };

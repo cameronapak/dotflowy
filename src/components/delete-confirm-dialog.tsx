@@ -5,10 +5,7 @@ import { toast } from "sonner";
 import { nodesCollection } from "../data/collection";
 import { isLunoraSyncEnabled } from "../data/flags";
 import { capture, drop } from "../data/history";
-import {
-  getLunoraOutlineContext,
-  trackLunoraMutation,
-} from "../data/lunora-sync";
+import { getLunoraOutlineContext } from "../data/lunora-sync";
 import { runStructuralSliced } from "../data/structural";
 import { now, planRemoveSubtrees } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
@@ -95,7 +92,8 @@ export function DeleteConfirmDialog() {
           nodeIds: [...rootIds],
           updatedAt: now(),
         });
-        trackLunoraMutation(tx);
+        // Await persistence here (error stage below) — do not also
+        // trackLunoraMutation (would double-toast on failure).
         await tx.isPersisted.promise;
         setStage({ kind: "closed" });
         toast.success(

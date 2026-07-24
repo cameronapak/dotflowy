@@ -106,4 +106,36 @@ describe("shapeFirstCheckpoints", () => {
   test("default fallback window is 3s", () => {
     expect(SHAPE_CHECKPOINT_FALLBACK_MS).toBe(3000);
   });
+
+  test("shape await rejection still falls back after RPC watermark", async () => {
+    const pending = new Map<number, ReturnType<typeof deferred>>();
+    const shape: CheckpointRegistry = {
+      awaitCheckpoint: async () => undefined,
+      resolve: () => undefined,
+      awaitMutationId: (id) => {
+        let d = pending.get(id);
+        if (!d) {
+          d = deferred();
+          pending.set(id, d);
+        }
+        // Reject instead of resolve — must not hang or throw unhandled.
+        return d.promise.then(() => {
+          throw new Error("shape poke missed");
+        });
+      },
+    };
+    let watermark = 0;
+    const gate = shapeFirstCheckpoints(
+      { confirmedMutationWatermark: () => watermark },
+      "u1",
+      shape,
+      { fallbackMs: 40 },
+    );
+
+    const wait = gate.awaitMutationId(3);
+    // Trigger the rejected shape wait.
+    pending.get(3)?.resolve();
+    watermark = 3;
+    await wait;
+  });
 });

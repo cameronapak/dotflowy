@@ -76,7 +76,9 @@ export function shapeFirstCheckpoints(
           settled = true;
           resolve();
         };
-        void shape.awaitMutationId(id).then(finish);
+        // Shape wait failure must not become an unhandled rejection — the
+        // RPC-watermark fallback below still settles the overlay.
+        void shape.awaitMutationId(id).then(finish, () => undefined);
 
         const armFallback = () => {
           if (settled) return;

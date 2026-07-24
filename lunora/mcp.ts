@@ -146,7 +146,9 @@ export const applyChangeOps = internalMutation
   .mutation(async ({ ctx, args }) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
-    if (args.ops.length === 0) return { count: 0 };
+    if (args.ops.length === 0) {
+      return { count: 0, deletes: 0, inserts: 0, patches: 0 };
+    }
     const plan = planFromChangeOps(args.userId, args.ops);
     await commitPlan(mctx, plan);
     return {

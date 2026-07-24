@@ -38,12 +38,13 @@ test.describe("Lunora optimistic hold (missed shape poke)", () => {
     await page.waitForTimeout(3_500);
     await expect(text(page, "hold")).toHaveText("HoldBaseX");
 
-    // SPA remount of the outline (the surface that made the bug obvious).
-    await page.goto("/settings");
+    // SPA remount via in-app nav (hard goto would reset the Lunora client).
+    await page.getByRole("button", { name: /more/i }).click();
+    await page.getByRole("menuitem", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible({
       timeout: 10_000,
     });
-    await page.goto("/");
+    await page.getByRole("button", { name: "Back to outline" }).click();
     await expect(text(page, "hold")).toBeVisible({ timeout: 15_000 });
     await expect(text(page, "hold")).toHaveText("HoldBaseX");
   });

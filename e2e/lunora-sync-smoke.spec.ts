@@ -27,7 +27,17 @@ test.describe("Lunora sync smoke (flag ON)", () => {
     await expect(text(page, "smoke")).toBeVisible({ timeout: 15_000 });
     await expect(text(page, "smoke")).toHaveText("LunoraSmoke");
 
+    // Place caret at end (contentEditable click can land mid-glyph / past text).
     await text(page, "smoke").click();
+    await text(page, "smoke").evaluate((el) => {
+      const sel = window.getSelection();
+      if (!sel) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
     await page.keyboard.type("X");
     await expect(text(page, "smoke")).toHaveText("LunoraSmokeX");
 

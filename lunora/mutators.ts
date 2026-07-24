@@ -515,8 +515,10 @@ export const restoreNodes = defineMutator({
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
     const current = await loadNodes(mctx);
+    // Force shard owner — never trust a client-supplied snapshot userId.
     const target: OutlineNode[] = args.nodes.map((n) => ({
       ...n,
+      userId: args.userId,
       kind: n.kind === "paragraph" ? "paragraph" : null,
     }));
     const plan = planRestoreNodes(current, target);
@@ -542,8 +544,10 @@ export const importNodes = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
+    // Force shard owner — never trust a client-supplied snapshot userId.
     const nodes: OutlineNode[] = args.nodes.map((n) => ({
       ...n,
+      userId: args.userId,
       kind: n.kind === "paragraph" ? "paragraph" : null,
     }));
     const plan = planImportNodes(nodes);
