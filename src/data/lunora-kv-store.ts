@@ -21,7 +21,7 @@ export type SavedQueryRowDoc = {
   _creationTime?: number;
 } & Record<string, unknown>;
 
-/** Daily scaffold key → nodeId (ADR 0052). `_id` = key. */
+/** Daily scaffold key → nodeId (ADR 0052). Collection getKey = `key`. */
 export type DailyIndexRowDoc = {
   _id: string;
   key: string;

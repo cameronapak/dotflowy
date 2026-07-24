@@ -76,6 +76,31 @@ function assertOwner(ctx: MutatorCtx, userId: string): void {
   }
 }
 
+/**
+ * Lunora `clientId` must be a UUID — daily keys (`container`, `YYYY-MM-DD`) and
+ * tag names are not. Look up side-collection rows by their natural key index
+ * and let insert assign a server UUID `_id`.
+ */
+async function getDailyByKey(
+  ctx: MutatorCtx,
+  key: string,
+): Promise<(Record<string, unknown> & { _id: string }) | null> {
+  return ctx.db
+    .query("dailyIndex")
+    .withIndex("by_key", (q) => q.eq("key", key))
+    .first();
+}
+
+async function getTagColorByTag(
+  ctx: MutatorCtx,
+  tag: string,
+): Promise<(Record<string, unknown> & { _id: string }) | null> {
+  return ctx.db
+    .query("tagColors")
+    .withIndex("by_tag", (q) => q.eq("tag", tag))
+    .first();
+}
+
 async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
   // deletes → patches → inserts: restore-safe (a deleted id must be gone
   // before a same-batch insert could reclaim it) and fine for structural ops.
@@ -664,7 +689,7 @@ export const materializeDailyNodes = defineMutator({
 
 // --- Phase 2b side-collections (tagColors + savedQueries) -------------------
 
-/** Upsert a tag color. `tag` is the clientId / `_id`. */
+/** Upsert a tag color. Natural key = `tag` (index `by_tag`); `_id` is a UUID. */
 export const upsertTagColor = defineMutator({
   args: {
     userId: userIdArg,
@@ -674,17 +699,18 @@ export const upsertTagColor = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
-    const existing = await mctx.db.get(args.tag as Id<"tagColors">);
+    const existing = await getTagColorByTag(mctx, args.tag);
     if (existing) {
-      await mctx.db.patch(args.tag as Id<"tagColors">, {
+      await mctx.db.patch(existing._id as Id<"tagColors">, {
         color: args.color,
       });
     } else {
-      await mctx.db.insert(
-        "tagColors",
-        { tag: args.tag, color: args.color, userId: args.userId },
-        { clientId: args.tag },
-      );
+      // No clientId: tag names aren't UUIDs (Lunora requires UUID clientIds).
+      await mctx.db.insert("tagColors", {
+        tag: args.tag,
+        color: args.color,
+        userId: args.userId,
+      });
     }
   },
 });
@@ -694,8 +720,8 @@ export const deleteTagColor = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
-    const existing = await mctx.db.get(args.tag as Id<"tagColors">);
-    if (existing) await mctx.db.delete(args.tag as Id<"tagColors">);
+    const existing = await getTagColorByTag(mctx, args.tag);
+    if (existing) await mctx.db.delete(existing._id as Id<"tagColors">);
   },
 });
 
@@ -768,7 +794,8 @@ export const deleteSavedQuery = defineMutator({
 /**
  * Atomic get-or-create of a `key → nodeId` mapping. Pre-existing wins; returns
  * `{ nodeId, won }` so the client knows whether to materialize the node.
- * `_id` = `key` via clientId (same as tagColors).
+ * Natural key = `key` (index `by_key`); `_id` is a server UUID (keys like
+ * `container` / `YYYY-MM-DD` are not valid Lunora clientIds).
  */
 export const claimDailyMapping = defineMutator({
   args: {
@@ -780,27 +807,23 @@ export const claimDailyMapping = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
-    const existing = await mctx.db.get(args.key as Id<"dailyIndex">);
+    const existing = await getDailyByKey(mctx, args.key);
     const existingNodeId =
       existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
     const { winner, won } = resolveDailyClaim(existingNodeId, args.nodeId);
     if (existing) {
       // Always write (touchedAt) so the watermark poke fires even on a lost race.
-      await mctx.db.patch(args.key as Id<"dailyIndex">, {
+      await mctx.db.patch(existing._id as Id<"dailyIndex">, {
         nodeId: winner,
         touchedAt: args.touchedAt,
       });
     } else {
-      await mctx.db.insert(
-        "dailyIndex",
-        {
-          key: args.key,
-          nodeId: winner,
-          touchedAt: args.touchedAt,
-          userId: args.userId,
-        },
-        { clientId: args.key },
-      );
+      await mctx.db.insert("dailyIndex", {
+        key: args.key,
+        nodeId: winner,
+        touchedAt: args.touchedAt,
+        userId: args.userId,
+      });
     }
     return { nodeId: winner, won };
   },
@@ -817,23 +840,19 @@ export const upsertDailyMapping = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
-    const existing = await mctx.db.get(args.key as Id<"dailyIndex">);
+    const existing = await getDailyByKey(mctx, args.key);
     if (existing) {
-      await mctx.db.patch(args.key as Id<"dailyIndex">, {
+      await mctx.db.patch(existing._id as Id<"dailyIndex">, {
         nodeId: args.nodeId,
         touchedAt: args.touchedAt,
       });
     } else {
-      await mctx.db.insert(
-        "dailyIndex",
-        {
-          key: args.key,
-          nodeId: args.nodeId,
-          touchedAt: args.touchedAt,
-          userId: args.userId,
-        },
-        { clientId: args.key },
-      );
+      await mctx.db.insert("dailyIndex", {
+        key: args.key,
+        nodeId: args.nodeId,
+        touchedAt: args.touchedAt,
+        userId: args.userId,
+      });
     }
   },
 });
@@ -843,7 +862,7 @@ export const deleteDailyMapping = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
-    const existing = await mctx.db.get(args.key as Id<"dailyIndex">);
-    if (existing) await mctx.db.delete(args.key as Id<"dailyIndex">);
+    const existing = await getDailyByKey(mctx, args.key);
+    if (existing) await mctx.db.delete(existing._id as Id<"dailyIndex">);
   },
 });

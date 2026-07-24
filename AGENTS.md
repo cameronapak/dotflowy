@@ -550,9 +550,10 @@ Screenshots **cannot capture view-transition overlays** (they show the settled D
 - Prefer deepening Effect TS and XState usage where they fit.
 - In Cursor, prefer Cursor Auto or Cursor Grok 4.5 for implementation subagents.
 - Lunora sync must stay opt-in (user-facing beta/settings flag); do not force a production cutover while Lunora is alpha.
+- User-facing Settings/beta copy must not name Lunora — frame it as an upgraded/experimental sync option users can try (helps improve Dotflowy; they still own their data).
 
 ## Learned Workspace Facts
 
 - Marketing site lives in the separate `landing/` package (`dotflowy-landing`) at dotflowy.com; the app SPA is at app.dotflowy.com.
-- Lunora (`anolilab/lunora`) is the experimental outline-sync path behind client `dotflowy:flag:lunora-sync` and Worker `LUNORA_OUTLINE`; classic per-user DO remains the default.
+- Lunora (`anolilab/lunora`) is the experimental outline-sync path behind synced `account-prefs`/`lunora-beta` (mirrors localStorage `dotflowy:flag:lunora-sync`) and Worker `LUNORA_OUTLINE`; classic per-user DO remains the default.
 - Vite proxies for `/api` and `/_lunora` need explicit `ws: true` — string shorthand does not upgrade WebSockets and blocks Lunora dogfood on "Loading outline".

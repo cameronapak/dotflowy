@@ -17,6 +17,11 @@ import type {
 } from "./lunora-kv-store";
 
 import {
+  shapeFirstCheckpoints,
+  withDirectOptimisticMetadata,
+  type CheckpointRegistry,
+} from "./lunora-checkpoints";
+import {
   buildTreeIndex,
   nodeToRow,
   planAppendChild,
@@ -47,6 +52,22 @@ import {
   type OutlineNode,
   type OutlinePlan,
 } from "./outline-plans";
+
+/**
+ * Kv-only mutators poke their own shape, not `wholeOutline`. Fan those pokes
+ * into the mutator gate so a shape-based wait can still complete (e2e force-
+ * pokes `wholeOutline` for the same reason).
+ */
+function relayCheckpoints(
+  from: CheckpointRegistry,
+  to: CheckpointRegistry,
+): void {
+  const orig = from.resolve.bind(from);
+  from.resolve = (watermark) => {
+    orig(watermark);
+    to.resolve(watermark);
+  };
+}
 
 /** Row shape for TanStack — Lunora Doc + index signature for collection drafts. */
 export type NodeRow = NodeDocLike &
@@ -613,6 +634,8 @@ export function createOutlineStore(
   const tagOpts = lunoraCollectionOptions<TagColorRowDoc>({
     client,
     id: `tagColors:${userId}`,
+    // Natural key = tag (server `_id` is a UUID — tag names aren't valid clientIds).
+    getKey: (row) => row.tag,
     shape: {
       name: "userTagColors",
       args: { userId },
@@ -633,6 +656,8 @@ export function createOutlineStore(
   const dailyOpts = lunoraCollectionOptions<DailyIndexRowDoc>({
     client,
     id: `dailyIndex:${userId}`,
+    // Natural key = scaffold/day key (server `_id` is a UUID).
+    getKey: (row) => row.key,
     shape: {
       name: "userDailyIndex",
       args: { userId },
@@ -641,20 +666,29 @@ export function createOutlineStore(
     load: "eager",
   });
 
+  // Fan side-collection shape pokes into the wholeOutline gate (belt for the
+  // offline/outbox path where RPC ack hasn't advanced the watermark yet).
+  relayCheckpoints(tagOpts.checkpoints, checkpoints);
+  relayCheckpoints(savedOpts.checkpoints, checkpoints);
+  relayCheckpoints(dailyOpts.checkpoints, checkpoints);
+
   const collection = createCollection(config);
   const tagColors = createCollection(tagOpts.config);
   const savedQueries = createCollection(savedOpts.config);
   const dailyIndex = createCollection(dailyOpts.config);
-  // wholeOutline checkpoints gate overlay drop for the shared clientSeq FIFO
-  // (watermark is per-client on the shard, not per-shape).
-  const mutators = bindOutlineMutators(
-    client,
-    collection,
-    tagColors,
-    savedQueries,
-    dailyIndex,
-    checkpoints,
-    userId,
+  // Shared clientSeq FIFO; hold overlays until shape poke (shapeFirstCheckpoints).
+  // Stamp TanStack "direct" metadata so a missed shape poke's 3s fallback
+  // doesn't drop optimistic typed text as stale.
+  const mutators = withDirectOptimisticMetadata(
+    bindOutlineMutators(
+      client,
+      collection,
+      tagColors,
+      savedQueries,
+      dailyIndex,
+      shapeFirstCheckpoints(client, userId, checkpoints),
+      userId,
+    ),
   );
   return { collection, tagColors, savedQueries, dailyIndex, mutators };
 }

@@ -743,16 +743,17 @@ function BetaSection() {
   return (
     <Section
       title="Beta"
-      description="Experimental features. Classic outline sync stays the default until you opt in."
+      description="Optional early features. The current sync stays the default until you opt in."
     >
       <RowGroup>
         <SettingRow
-          title="Lunora outline sync (beta)"
+          title="Upgraded outline sync"
           description={
             <>
-              Try the experimental Lunora sync backend (alpha). Classic storage
-              remains the production default. May have bugs. Your choice syncs
-              across devices; turning it on or off reloads the app.
+              Try Dotflowy&apos;s next sync engine. Your outline stays yours —
+              we never claim your data. Opting in helps us harden it before
+              everyone gets it. May have rough edges; your choice syncs across
+              devices, and toggling reloads the app.
             </>
           }
           action={
@@ -760,7 +761,7 @@ function BetaSection() {
               checked={ready ? enabled : false}
               disabled={!ready}
               onCheckedChange={(checked) => setLunoraBetaEnabled(checked)}
-              aria-label="Lunora outline sync beta"
+              aria-label="Upgraded outline sync beta"
             />
           }
         />

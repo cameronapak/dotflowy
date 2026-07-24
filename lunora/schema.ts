@@ -29,7 +29,10 @@ export default defineSchema({
     .shardBy("userId")
     .index("by_parent", ["parentId"]),
 
-  /** Custom tag colors (ADR 0007). `_id` = normalized tag via clientId. */
+  /**
+   * Custom tag colors (ADR 0007). Natural key = `tag` (`by_tag`); `_id` is a
+   * server UUID (tag names aren't valid Lunora clientIds).
+   */
   tagColors: defineTable({
     tag: v.string(),
     color: v.string(),
@@ -38,7 +41,7 @@ export default defineSchema({
     .shardBy("userId")
     .index("by_tag", ["tag"]),
 
-  /** Saved filter queries (ADR 0048). `_id` = row id via clientId. */
+  /** Saved filter queries (ADR 0048). `_id` = row id via clientId (UUID). */
   savedQueries: defineTable({
     name: v.string(),
     query: v.string(),
@@ -47,10 +50,10 @@ export default defineSchema({
   }).shardBy("userId"),
 
   /**
-   * Daily scaffold identity (ADR 0052). `_id` = key via clientId
-   * (`container` / `YYYY` / `YYYY-MM` / `YYYY-Www` / `YYYY-MM-DD`).
-   * `touchedAt` bumps on every claim so a lost-race claim still emits a
-   * poke (watermark hold needs a write).
+   * Daily scaffold identity (ADR 0052). Natural key = `key` (`by_key`) —
+   * `container` / `YYYY` / `YYYY-MM` / `YYYY-Www` / `YYYY-MM-DD`. `_id` is a
+   * server UUID (those keys aren't valid Lunora clientIds). `touchedAt` bumps
+   * on every claim so a lost-race claim still emits a poke (watermark hold).
    */
   dailyIndex: defineTable({
     key: v.string(),

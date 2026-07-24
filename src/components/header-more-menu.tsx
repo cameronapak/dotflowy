@@ -3,6 +3,7 @@ import {
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CircleCheckIcon,
+  ClipboardCopyIcon,
   FileTextIcon,
   FocusIcon,
   LogOutIcon,
@@ -18,11 +19,8 @@ import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
-import { isLunoraSyncEnabled } from "../data/flags";
 import { capture } from "../data/history";
 import { flattenInline } from "../data/inline-text";
-import { migrateClassicToLunora } from "../data/lunora-migrate";
-import { getLunoraOutlineContext } from "../data/lunora-sync";
 import { outlineToMarkdown } from "../data/markdown";
 import { toggleCollapsed } from "../data/mutations";
 import { exportOpml } from "../data/opml-export";
@@ -43,34 +41,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-
-async function runMigrateToLunora() {
-  const lunora = getLunoraOutlineContext();
-  if (!lunora) {
-    toast.error("Turn on Lunora beta in Settings, then reload");
-    return;
-  }
-  const result = await migrateClassicToLunora(lunora.store, lunora.userId);
-  switch (result.status) {
-    case "migrated":
-      toast.success(
-        `Migrated ${result.nodes} nodes (+ ${result.kv} kv) to Lunora`,
-      );
-      break;
-    case "skipped-nonempty":
-      toast.message(
-        `Lunora already has ${result.nodes} nodes — skipped (safe default)`,
-      );
-      break;
-    case "skipped-empty-source":
-      toast.message("Classic outline is empty — nothing to migrate");
-      break;
-    case "failed":
-      toast.error("Migrate failed — see console");
-      console.error("[lunora-migrate]", result.error);
-      break;
-  }
-}
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -201,12 +171,11 @@ export function setViewCollapsed(collapsed: boolean) {
 
 /**
  * Header overflow ("More") menu. Since #171 the plan/billing, account (Connect
- * Google, Delete account), connections (MCP), data (import/export/copy), and
+ * Google, Delete account), connections (MCP), data (import/export), and
  * appearance (theme, text size) controls all live on the dedicated `/settings`
- * page -- so this menu is now just the outline-view actions (collapse/expand,
- * show completed, spotlight), the read-only links (What's new, Report a bug,
- * GitHub), and the two entry points that belong on every screen: Settings (top)
- * and Sign out (bottom).
+ * page -- so this menu is outline-view actions first (copy, collapse/expand,
+ * show completed, spotlight), then read-only links (What's new, Report a bug,
+ * GitHub, legal) + Settings, with Sign out last.
  *
  * This is the static v1 of the header-action overflow: the pinned/overflow
  * split is a fixed default. User-customizable pinning (Chrome-extension style)
@@ -246,6 +215,39 @@ export function HeaderMoreMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
+          <ClipboardCopyIcon />
+          Copy as Markdown
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
+          <ChevronsDownUpIcon />
+          Collapse all
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
+          <ChevronsUpDownIcon />
+          Expand all
+        </DropdownMenuItem>
+
+        <DropdownMenuCheckboxItem
+          checked={showCompleted}
+          onCheckedChange={setShowCompleted}
+        >
+          <CircleCheckIcon />
+          Show completed
+        </DropdownMenuCheckboxItem>
+
+        <DropdownMenuCheckboxItem
+          checked={spotlight}
+          onCheckedChange={setSpotlightEnabled}
+        >
+          <FocusIcon />
+          Spotlight mode
+        </DropdownMenuCheckboxItem>
+
+        <DropdownMenuSeparator />
+
         <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
           <SettingsIcon />
           Settings
@@ -308,41 +310,6 @@ export function HeaderMoreMenu() {
           <ShieldCheckIcon />
           Privacy Policy
         </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
-          <ChevronsDownUpIcon />
-          Collapse all
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
-          <ChevronsUpDownIcon />
-          Expand all
-        </DropdownMenuItem>
-
-        <DropdownMenuCheckboxItem
-          checked={showCompleted}
-          onCheckedChange={setShowCompleted}
-        >
-          <CircleCheckIcon />
-          Show completed
-        </DropdownMenuCheckboxItem>
-
-        <DropdownMenuCheckboxItem
-          checked={spotlight}
-          onCheckedChange={setSpotlightEnabled}
-        >
-          <FocusIcon />
-          Spotlight mode
-        </DropdownMenuCheckboxItem>
-
-        {isLunoraSyncEnabled() && (
-          <DropdownMenuItem onClick={() => void runMigrateToLunora()}>
-            <SparklesIcon />
-            Migrate to Lunora
-          </DropdownMenuItem>
-        )}
 
         <DropdownMenuSeparator />
 

@@ -178,3 +178,14 @@ export function trackLunoraMutation(tx: {
 }): void {
   tx.isPersisted.promise.catch(notifySaveFailed);
 }
+
+// HMR: `startLunoraOutlineSync` is idempotent per userId, so a store-module
+// edit would otherwise keep the old mutator bindings (and a hung isPersisted
+// waiter) alive across Fast Refresh. Tear down + restart with the new store.
+if (import.meta.hot) {
+  import.meta.hot.accept("./lunora-outline-store", () => {
+    const userId = ctx?.userId;
+    stopLunoraOutlineSync();
+    if (userId) startLunoraOutlineSync(userId);
+  });
+}

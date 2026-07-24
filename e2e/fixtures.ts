@@ -160,7 +160,9 @@ function toNode(n: SeedNode): ApiNode {
  * `dotflowy:flag:lunora-sync=off` so specs stay on `/api/sync` even though
  * the product default is ON. Classic-only opts (`echoDelayMs`, `echoChunks`,
  * `postDelayMs`, `failStructuralWrites`, `serverVersion`) are ignored on the
- * Lunora path — those specs stay classic-only.
+ * Lunora path — those specs stay classic-only. Lunora-only opts
+ * (`suppressWholeOutlinePoke`, `failMutatorWrites`) live on
+ * `seedOutlineLunora` directly.
  */
 export async function seedOutline(
   page: Page,
@@ -528,6 +530,17 @@ export async function seedOutlineLunora(
     /** Pre-seed Lunora kv shapes from classic kv collection names
      *  (`daily-index` / `tag-colors` / `saved-queries`). */
     kv?: Record<string, { key: string; value: unknown }[]>;
+    /**
+     * Skip post-mutation `wholeOutline` WS pokes (RPC still mutates the mock
+     * store). Reproduces a missed shape poke so the client hits the ~3s
+     * checkpoint fallback — pins the sticky-optimistic typing fix.
+     */
+    suppressWholeOutlinePoke?: boolean;
+    /**
+     * Fail every `mutators:*` RPC with 500 before mutating the store —
+     * Lunora twin of classic `failStructuralWrites` (save-failure rollback).
+     */
+    failMutatorWrites?: boolean;
   } = {},
 ): Promise<void> {
   // Drop prior Lunora mocks from earlier tests on this page — stacked
@@ -734,8 +747,14 @@ export async function seedOutlineLunora(
       const seq = seqHeader ? Number(seqHeader) : ++clientSeq;
       if (Number.isFinite(seq)) clientSeq = Math.max(clientSeq, seq);
 
+      if (opts.failMutatorWrites && path.startsWith("mutators:")) {
+        return route.fulfill({ status: 500, body: "mutator failed" });
+      }
+
       let result: unknown = {};
-      let pokeShapes = new Set<string>(["wholeOutline"]);
+      let pokeShapes = new Set<string>(
+        opts.suppressWholeOutlinePoke ? [] : ["wholeOutline"],
+      );
 
       const id = () => String(args.id ?? "");
       const updatedAt = () => Number(args.updatedAt ?? Date.now());
@@ -1028,11 +1047,16 @@ export async function seedOutlineLunora(
 
       // Watermark is per-client on the shard (wholeOutline checkpoints gate
       // isPersisted). Kv-only mutators must still advance wholeOutline or
-      // claimDailyMapping / materializeDailyNodes hang awaiting the poke.
-      pokeShapes.add("wholeOutline");
+      // claimDailyMapping / materializeDailyNodes hang awaiting the poke —
+      // unless a spec opts into `suppressWholeOutlinePoke` (missed-poke case).
+      if (!opts.suppressWholeOutlinePoke) {
+        pokeShapes.add("wholeOutline");
+      } else {
+        pokeShapes.delete("wholeOutline");
+      }
 
       await reply(route, { result, lastMutationId: seq });
-      pokeSubscribed(seq, pokeShapes);
+      if (pokeShapes.size > 0) pokeSubscribed(seq, pokeShapes);
     },
   );
 

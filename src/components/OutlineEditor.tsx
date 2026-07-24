@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { nodesCollection } from "../data/collection";
+import { echoedTextFor, nodesCollection } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
@@ -1862,6 +1862,13 @@ function ZoomedTitle({
     const el = ref.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === node.text) return;
+    // Same focused-skip as OutlineRow: don't paint a lagging/stale store over
+    // local typing (classic echoedText + Lunora overlay gap).
+    if (document.activeElement === el) {
+      if (echoedTextFor(node.id) === node.text) return;
+      const dom = readSource(el);
+      if (dom !== node.text && dom.startsWith(node.text)) return;
+    }
     const focused = document.activeElement === el;
     const revealOffset = focused ? getCaretOffset(el) : null;
     decorate(el, node.text, revealOffset, focused);
