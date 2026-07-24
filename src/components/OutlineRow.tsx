@@ -321,15 +321,16 @@ function RowChrome({
   // that merely echoes the network back is a lagging/out-of-order echo of our
   // own keystrokes -- repainting it scrambles characters and jumps the caret
   // mid-type, so it's skipped; blur reconciles. See collection.ts `echoedText`.
+  // Lunora: optimistic overlay can briefly drop to a stale synced snapshot
+  // before the shape row lands — treat DOM-ahead-of-store the same as an echo.
   useEffect(() => {
     const el = textRef.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === content.text) return;
-    if (
-      document.activeElement === el &&
-      echoedTextFor(content.id) === content.text
-    ) {
-      return;
+    if (document.activeElement === el) {
+      if (echoedTextFor(content.id) === content.text) return;
+      const dom = readSource(el);
+      if (dom !== content.text && dom.startsWith(content.text)) return;
     }
     const focused = document.activeElement === el;
     const revealOffset = focused ? getCaretOffset(el) : null;

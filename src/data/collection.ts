@@ -8,7 +8,7 @@ import type { Node } from "./schema";
 
 import { createNodes, deleteNodes, updateNodes } from "./api";
 import { noteServerVersion } from "./app-version";
-import { isMirrorsEnabled } from "./flags";
+import { isLunoraSyncEnabled, isMirrorsEnabled } from "./flags";
 import { runPromise } from "./nodes-client-effect";
 import { makeSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
@@ -88,6 +88,11 @@ function markSyncReady(): void {
   if (syncReady) return;
   syncReady = true;
   for (const listener of syncReadyListeners) listener();
+}
+
+/** Lunora flag-swap path marks the shell ready once `wholeOutline` has seeded. */
+export function markNodesSyncReady(): void {
+  markSyncReady();
 }
 
 /** Force the outline to reconcile against server truth now (a fresh snapshot).
@@ -419,6 +424,15 @@ export const nodesCollection = createCollection({
       // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
       // any defensive server-side read resolves empty instead of hanging.
       if (typeof window === "undefined") {
+        markReady();
+        return () => {};
+      }
+
+      // ADR 0055 flag-swap: Lunora owns outline sync. Keep this collection idle
+      // (ready+empty) so e2e / default OFF path is unchanged; tree-store feeds
+      // from the Lunora collection instead. Don't markSyncReady here — Lunora
+      // bootstrap does once `wholeOutline` lands.
+      if (isLunoraSyncEnabled()) {
         markReady();
         return () => {};
       }

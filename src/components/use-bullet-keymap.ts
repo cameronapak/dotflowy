@@ -227,7 +227,8 @@ export function useBulletKeymap({
               if (el.textContent !== "") return;
               e.preventDefault();
               e.stopPropagation();
-              commands.onDeleteNode(node.id);
+              // INSTANCE, not content: mirrors pass the source as `node` (ADR 0022).
+              commands.onDeleteNode(instanceId);
             },
             options: { preventDefault: false, stopPropagation: false },
           },
@@ -236,11 +237,11 @@ export function useBulletKeymap({
             // regardless of text or caret position. On Mac "delete" is the
             // Backspace key; register Delete too for the forward-delete key.
             hotkey: "Mod+Shift+Backspace",
-            callback: () => commands.onDeleteNode(node.id),
+            callback: () => commands.onDeleteNode(instanceId),
           },
           {
             hotkey: "Mod+Shift+Delete",
-            callback: () => commands.onDeleteNode(node.id),
+            callback: () => commands.onDeleteNode(instanceId),
           },
           {
             // Shift+ArrowUp from the top visual line: ENTER node multi-selection

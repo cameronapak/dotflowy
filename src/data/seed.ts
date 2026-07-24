@@ -1,9 +1,26 @@
 import { Effect } from "effect";
 
-import { nodesCollection, nodesLoadError } from "./collection";
+import {
+  isSyncReady,
+  nodesCollection,
+  nodesLoadError,
+  subscribeSyncReady,
+} from "./collection";
 import { BootstrapError } from "./errors";
+import { isLunoraSyncEnabled } from "./flags";
 import { appendChild } from "./mutations";
 import { createId, makeNode, now } from "./tree";
+
+/** Wait until the shell's sync-ready signal flips (custom DO or Lunora). */
+function waitUntilSyncReady(): Promise<void> {
+  if (isSyncReady()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsub = subscribeSyncReady(() => {
+      unsub();
+      resolve();
+    });
+  });
+}
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
@@ -31,6 +48,24 @@ let bootstrapped = false;
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return;
   bootstrapped = true;
+
+  // ADR 0055: Lunora path seeds via `seedIfEmpty` mutator in lunora-sync.
+  // Just wait for wholeOutline ready so the editor doesn't race an empty feed.
+  if (isLunoraSyncEnabled()) {
+    return Effect.runPromise(
+      Effect.match(
+        Effect.tryPromise({
+          try: () => waitUntilSyncReady(),
+          catch: (cause) => new BootstrapError({ cause }),
+        }),
+        {
+          onFailure: (error) => error,
+          onSuccess: () => undefined,
+        },
+      ),
+    );
+  }
+
   // One Effect program. Wait for the first load (tryPromise covers the rare
   // synchronous sync-init throw); then the typed-failure gate — if the sync
   // failed (the common 500/offline case settles ready-but-empty with the error

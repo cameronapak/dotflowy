@@ -2,7 +2,7 @@ import { useSelector } from "@xstate/react";
 import { Schema } from "effect";
 import { createActor, setup } from "xstate";
 
-import { nodesCollection } from "./collection";
+import { getLiveNodes } from "./live-nodes";
 import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 import { getTreeIndex } from "./tree-store";
 import { getViewIsHidden, getViewRootId } from "./view-state";
@@ -217,16 +217,17 @@ const selectionMachine = setup({
         },
         // Re-derive (parentId + rootIds) from the LIVE collection, same
         // anchor/focus, after a structural mutation relocates the run
-        // (indent/outdent). Reads `nodesCollection` directly so it's correct
+        // (indent/outdent). Reads the live store directly so it's correct
         // synchronously inside the same `runStructural` batch, before the tree
-        // store's subscription has rebuilt. ids + order are unchanged by an
+        // store's subscription has rebuilt (classic `nodesCollection` or Lunora
+        // `wholeOutline` — `getLiveNodes`). ids + order are unchanged by an
         // indent/outdent, so only `parentId` shifts.
         refresh: ({ context }) => {
           if (!context.data) return undefined;
           const d = computeRange(
             context.data.anchorId,
             context.data.focusId,
-            buildTreeIndex(nodesCollection.toArray),
+            buildTreeIndex(getLiveNodes()),
           );
           return d
             ? { context: { data: d } }

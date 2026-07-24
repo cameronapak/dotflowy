@@ -6,7 +6,13 @@
 // unchanged. One Cmd+Z restores the whole subtree either way.
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  STANDARD_TREE,
+  waitForSeededNode,
+  type SeedNode,
+} from "./fixtures";
 
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
@@ -36,7 +42,7 @@ function bigSeed(n: number): SeedNode[] {
 test.describe("big-delete confirmation", () => {
   test("a small delete never asks (regression)", async ({ page }) => {
     await seedOutline(page, STANDARD_TREE);
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "alpha" });
     await expect(text(page, "alpha")).toBeVisible();
 
     // alpha's subtree is 3 nodes (< 30): deleted inline, no dialog.
@@ -50,7 +56,7 @@ test.describe("big-delete confirmation", () => {
     page,
   }) => {
     await seedOutline(page, bigSeed(40)); // 41-node subtree >= 30
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "big" });
     await expect(text(page, "big")).toBeVisible();
 
     await text(page, "big").click();
@@ -64,6 +70,7 @@ test.describe("big-delete confirmation", () => {
     // Nothing was deleted — and a reload agrees.
     await expect(text(page, "big")).toBeVisible();
     await page.reload();
+    await waitForSeededNode(page, "big");
     await expect(text(page, "big")).toBeVisible();
   });
 
@@ -71,7 +78,7 @@ test.describe("big-delete confirmation", () => {
     page,
   }) => {
     await seedOutline(page, bigSeed(40));
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "big" });
     await expect(text(page, "big")).toBeVisible();
 
     await text(page, "big").click();
@@ -83,6 +90,7 @@ test.describe("big-delete confirmation", () => {
     await expect(text(page, "charlie")).toBeVisible();
     // Persisted through the (mock) server store.
     await page.reload();
+    await waitForSeededNode(page, "alpha");
     await expect(text(page, "alpha")).toBeVisible();
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
 
@@ -106,7 +114,7 @@ test.describe("big-delete confirmation", () => {
     // Delay the batch POST response so the dialog rests in its post-apply
     // "saving" phase — proof every slice applied while ONE batch is in flight.
     await seedOutline(page, bigSeed(600), { postDelayMs: 600 });
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "big" });
     await expect(text(page, "big")).toBeVisible();
 
     await text(page, "big").click();
@@ -123,6 +131,7 @@ test.describe("big-delete confirmation", () => {
     await expect(page.getByTestId("delete-confirm-dialog")).toHaveCount(0);
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
     await page.reload();
+    await waitForSeededNode(page, "alpha");
     await expect(text(page, "alpha")).toBeVisible();
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
   });
@@ -131,7 +140,7 @@ test.describe("big-delete confirmation", () => {
     page,
   }) => {
     await seedOutline(page, bigSeed(40));
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "big" });
     await expect(text(page, "big")).toBeVisible();
 
     // Enter node selection on the big parent (Shift+Down selects the focused

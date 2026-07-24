@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { isE2eLunora, seedOutline, STANDARD_TREE } from "./fixtures";
 
 /**
  * The stale-tab reload affordance (ADR 0046).
@@ -29,6 +29,10 @@ async function load(page: Page, serverVersion?: string) {
 
 test.describe("update available", () => {
   test("a newer server raises a reload toast", async ({ page }) => {
+    test.skip(
+      isE2eLunora(),
+      "injects serverVersion through the classic sync handshake",
+    );
     await load(page, "99.0.0");
     await expect(toast(page)).toBeVisible();
     await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
@@ -49,6 +53,10 @@ test.describe("update available", () => {
   });
 
   test("the toast does not block editing", async ({ page }) => {
+    test.skip(
+      isE2eLunora(),
+      "injects serverVersion through the classic sync handshake",
+    );
     await load(page, "99.0.0");
     await expect(toast(page)).toBeVisible();
 

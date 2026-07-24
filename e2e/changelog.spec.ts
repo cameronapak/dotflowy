@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { isE2eLunora, seedOutline, STANDARD_TREE } from "./fixtures";
 
 /**
  * The changelog (ADR 0046): a "What's new" dialog reached from the More menu and
@@ -88,6 +88,10 @@ test.describe("changelog", () => {
   test("a caught-up account shows no badge, and does not re-seed", async ({
     page,
   }) => {
+    test.skip(
+      isE2eLunora(),
+      "seeds the cursor through the classic /api/kv mock",
+    );
     const writes = await load(page, cursor(LATEST));
 
     // Open + close the More menu so the header has demonstrably settled: "not
@@ -124,6 +128,10 @@ test.describe("changelog", () => {
   test("opening it advances the cursor to the latest release", async ({
     page,
   }) => {
+    test.skip(
+      isE2eLunora(),
+      "asserts cursor writes through the classic /api/kv mock",
+    );
     // A cursor this build has never heard of: no badge (an unknown version stays
     // quiet) and no silent seed (a row already exists) -- so the only write that
     // can happen is the one the dialog itself makes.

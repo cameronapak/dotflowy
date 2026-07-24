@@ -32,8 +32,21 @@ export default defineConfig({
     // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
     // UI while the real /api/nodes path is served by the Worker against a local
     // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
+    // `ws: true` is required — Vite's string shorthand only sets
+    // `{ target, changeOrigin }` and skips the upgrade listener, so
+    // `/api/sync` and `/_lunora/ws` never reach wrangler (outline stuck on
+    // "Loading outline"). See ADR 0055 dogfood hang.
     proxy: {
-      "/api": "http://localhost:8787",
+      "/api": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/_lunora": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   plugins: [
@@ -77,6 +90,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": new URL("./src", import.meta.url).pathname,
+      // @lunora/react ships precompiled `jsxDEV` imports; Vite's prod React
+      // stub leaves jsxDEV undefined (LunoraProvider crash under cf:dev).
+      "react/jsx-dev-runtime": new URL(
+        "./scripts/react-jsx-dev-runtime-shim.ts",
+        import.meta.url,
+      ).pathname,
     },
   },
 });

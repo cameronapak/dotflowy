@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { isE2eLunora, seedOutline, type SeedNode } from "./fixtures";
 
 // Drag-reorder while a ?q= filter is active (issue #244 / the ADR 0047
 // amendment). Before the fix, buildRows passed `filter: null`, so the drag's
@@ -57,6 +57,7 @@ test.describe("drag reorder under an active ?q= filter (#244)", () => {
   test("a drop between two visible rows with hidden siblings lands after the visible predecessor", async ({
     page,
   }) => {
+    test.skip(isE2eLunora(), "awaits the classic /api/nodes structural POST");
     // Real top-level order: S1, S2, V1, H1, H2, V2, X. Under #go the untagged
     // H1/H2 are pruned, leaving S1, S2, V1, V2, X. The S1/S2 spacers keep the
     // target V1/V2 gap well below the top-edge auto-scroll band so the drop
@@ -120,6 +121,7 @@ test.describe("drag reorder under an active ?q= filter (#244)", () => {
   test("a drop that lands the node hidden discloses with a toast and the node vanishes from the filtered view", async ({
     page,
   }) => {
+    test.skip(isE2eLunora(), "awaits the classic /api/nodes structural POST");
     // Rendered under #go: A (match), C (A's child -- revealed match-descendant,
     // undimmed, NOT a match), P (dimmed context ancestor of K), K (match).
     const tree: SeedNode[] = [

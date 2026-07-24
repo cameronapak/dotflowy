@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { nodesCollection } from "../data/collection";
+import { echoedTextFor, nodesCollection } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
@@ -49,6 +49,7 @@ import {
   setIsTask,
   setKind,
   setText,
+  splitNode,
   toggleCollapsed,
   toggleCompleted,
 } from "../data/mutations";
@@ -1472,6 +1473,20 @@ function useNodeCommands({
                   undefined,
                   content.kind,
                 );
+              } else if (!caretAtEnd) {
+                // Mid-split: one atomic Lunora mutator (or insertSibling+setText
+                // inside this runStructural batch on the custom-DO path).
+                // Mirror rows force caretAtEnd above, so this arm is never a mirror.
+                newId = splitNode(idx, {
+                  nodeId: contentId,
+                  parentId: instance.parentId,
+                  afterId: instanceId,
+                  leftText: before,
+                  rightText: after,
+                  isTask: content.isTask,
+                  kind: content.kind,
+                });
+                atStart = true;
               } else {
                 // New sibling beside the INSTANCE (position is local to where the row
                 // sits). Off-flag / mirror-free, instance === content === id, so this
@@ -1484,11 +1499,6 @@ function useNodeCommands({
                   isMirrorRow ? "" : after,
                   content.kind,
                 );
-                if (!caretAtEnd) {
-                  setText(contentId, before);
-                  // Caret sits before the moved text, where the split happened.
-                  atStart = true;
-                }
               }
               return { instanceId: newId, activeKey, atStart };
             },
@@ -1601,11 +1611,20 @@ function useNodeCommands({
           // Delete the INSTANCE (position is local, ADR 0022): backspacing a
           // mirror's own row removes that mirror, never its source (which would
           // strand the other instances -- promote-on-source-delete is Stage 3).
-          // Address by the focused key; the keymap passes the content id in a
-          // mirror.
-          const activeKey = findFocusedId() ?? id;
-          const instanceId = instanceIdForKey(activeKey);
+          // Prefer the explicit target when it names a live node (Cmd+K / slash
+          // bind the id). Only fall back to focus when the caller passed a
+          // content id while a mirror INSTANCE holds focus (keymap).
           const idx = getTreeIndex();
+          const focused = findFocusedId();
+          const targetInstance = instanceIdForKey(id);
+          const focusedInstance = focused ? instanceIdForKey(focused) : null;
+          const activeKey =
+            focused && focusedInstance === targetInstance
+              ? focused
+              : idx.byId.has(id)
+                ? id
+                : (focused ?? id);
+          const instanceId = instanceIdForKey(activeKey);
           const mirrorsOn = isMirrorsEnabled();
           const contentId = mirrorsOn
             ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
@@ -1843,6 +1862,13 @@ function ZoomedTitle({
     const el = ref.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === node.text) return;
+    // Same focused-skip as OutlineRow: don't paint a lagging/stale store over
+    // local typing (classic echoedText + Lunora overlay gap).
+    if (document.activeElement === el) {
+      if (echoedTextFor(node.id) === node.text) return;
+      const dom = readSource(el);
+      if (dom !== node.text && dom.startsWith(node.text)) return;
+    }
     const focused = document.activeElement === el;
     const revealOffset = focused ? getCaretOffset(el) : null;
     decorate(el, node.text, revealOffset, focused);

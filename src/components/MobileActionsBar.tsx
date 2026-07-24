@@ -11,7 +11,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
-import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 
 /**
  * The zero-arg command surface the bar drives. Each method resolves the focused
@@ -143,22 +142,28 @@ export function MobileActionsBar({
 }) {
   const coarse = useCoarsePointer();
   const editing = useOutlineEditing(findFocusedId);
-  const keyboardOffset = useKeyboardViewport();
 
   // Presence gate: a mouse user never mounts the bar. Visibility gate: no bar
   // without a focused bullet, so every action has a valid target by construction.
   if (!coarse || !editing) return null;
 
   return (
-    // Outer layer owns positioning: fixed to the bottom, lifted above the software
-    // keyboard by the visualViewport gap, and the safe-area pad when it sits at the
-    // real bottom (no keyboard). The pill inside centers within this.
+    // Outer layer owns positioning: fixed to the bottom and lifted above the
+    // software keyboard by `--kb-inset` (styles.css -- the VirtualKeyboard API's
+    // inset, native on Chromium and polyfilled on Safari). The pill inside
+    // centers within this.
+    //
+    // Both declarations are branchless on purpose. The lift is 0px whenever no
+    // keyboard is up, and the safe-area pad SUBTRACTS the lift because a raised
+    // keyboard already covers the home indicator -- padding for it on top of the
+    // lift would float the bar a thumb's width too high. `max(0px, ...)` is what
+    // makes the two cases one expression instead of a ternary on a JS number.
     <div
       className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 transition-transform duration-200 ease-out"
       style={{
-        transform: `translateY(-${keyboardOffset}px)`,
+        transform: "translateY(calc(-1 * var(--kb-inset)))",
         paddingBottom:
-          keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined,
+          "max(0px, calc(env(safe-area-inset-bottom) - var(--kb-inset)))",
       }}
     >
       <div

@@ -22,14 +22,51 @@ behaviors, and keeping them separate is what makes the bar robust:
   state) and hides on blur. This is not cosmetic: it guarantees every button has a valid target by
   construction — `findFocusedId()` is non-null whenever the bar is visible, so each zero-arg action can
   resolve the node it operates on with no ambiguity and no "nothing selected" state to design around.
-- **Position = visual viewport.** A `useKeyboardViewport` hook reads `window.visualViewport` (rAF-throttled)
-  and translates the bar up by `innerHeight - (visualViewport.height + visualViewport.offsetTop)` so it rides
-  above the software keyboard. When the viewport isn't shrunk (hardware keyboard / iPad) that gap is 0 and the
-  bar falls back to `bottom:0` + `env(safe-area-inset-bottom)`.
+- **Position = a measured anchor.** One CSS custom property, `--kb-inset`, written on `<html>` by
+  `data/keyboard-inset.ts` from a zero-size `position: fixed; bottom: 0` probe (`styles.css` holds the `0px`
+  default). The bar stays `bottom: 0` and lifts by `calc(-1 * var(--kb-inset))`; its safe-area pad SUBTRACTS the
+  same inset, because a raised keyboard already covers the home indicator. Both declarations are branchless, and
+  the keyboard animation costs zero React re-renders.
 
-**Why pure `visualViewport`, not `env(keyboard-inset-*)`.** The `env(keyboard-inset-*)` CSS environment
-variables are Chromium-only; iOS Safari (the primary target) needs the JS `visualViewport` path regardless.
-One system that covers both beats two half-systems, so the bar tracks the keyboard entirely in JS.
+**Amended 2026-07-24: the lift cannot be computed from any live viewport property.** This ADR originally
+specified `innerHeight - (visualViewport.height + visualViewport.offsetTop)`, computed in a `useKeyboardViewport`
+hook. That shipped, dogfooded fine, and was wrong. Three candidate replacements were measured on device, in
+order, and each was also wrong:
+
+1. **`window.innerHeight` is not a stable quantity on iOS Safari.** In one simulator session, one page, one
+   keyboard, it read **714, 635 and 279** as the page scrolled and the keyboard animated, silently switching
+   between describing the layout viewport and the visual one. At the bottom of a long page it collapses to
+   equal `visualViewport.height`, which reduces the whole expression to `-offsetTop`: always negative, always
+   clamped to zero, so the bar never lifted. That is the bug users hit, and it is bottom-of-page specific
+   because that is where the collapse happens.
+2. **`documentElement.clientHeight` is not the answer either.** It looked like one — it held 714 across every
+   simulator sample while `innerHeight` thrashed — but on a physical iPhone the same instant read
+   `innerHeight` **526**, `clientHeight` **498**, and a true pre-keyboard band bottom of **590**. Three
+   different answers, and the one that matters is not readable after the keyboard has already opened.
+3. **The VirtualKeyboard API's per-focus baseline is also not the answer.** Tried next, via
+   [`virtual-keyboard-api-polyfill`](https://github.com/cameronapak/polyfill-virtual-keyboard-api), whose SPEC
+   rule 2 captures the visible band at `focusin` and computes
+   `remainder = max(0, baselineBottom - vv.height - vv.offsetTop)`. Correct in principle and it committed
+   sane-looking values — but its baseline (590) is not the box `bottom: 0` resolves against (498), so it
+   over-lifted by exactly that 92px difference. Safari's chrome sits between the two.
+
+The reason all three fail is the same, and it is the finding worth keeping: **iOS Safari moves the box that
+`position: fixed; bottom: 0` resolves against, and no property reliably names it.** Across two samples in one
+keyboard session, `innerHeight` read 526 then **482** while `clientHeight` stayed 498 and the pre-keyboard band
+stayed 590 — nothing else changed. That is why the bar was fine "for the most part" and then suddenly was not:
+each formula is correct only while the chrome sits where that formula assumed.
+
+So the anchor is **measured, not computed**. `data/keyboard-inset.ts` appends a zero-size
+`position: fixed; bottom: 0` probe and reads its `getBoundingClientRect().bottom`, which is where `bottom: 0`
+lands by definition, with no model in between; a client rect is reported in the same space as
+`visualViewport.height`, so the lift is their difference. Fed the two samples above it yields the correct 228 in
+both, even though the anchor itself measured 418 and 390. Chrome drift is absorbed rather than modelled.
+
+**Why not `env(keyboard-inset-*)` even with a polyfill.** The original rejection was "Chromium-only, and iOS
+needs the JS path anyway". A polyfill does close the engine gap, so that premise expired — but the API answers
+a different question than we are asking. It reports the keyboard's occlusion of the _visible band_; we need the
+distance from _our fixed anchor_, and on a page with browser chrome those differ. The name `--kb-inset` is kept
+because it is what consumers mean, but the value is ours.
 
 **Why we blend with iOS's keyboard accessory bar rather than remove it.** On iOS Safari there is **no web API**
 to hide or reorder the system keyboard accessory bar (the floating pill with the prev/next-field arrows + a
@@ -87,7 +124,16 @@ API first.
   check — dropping it de-duplicates and simplifies the control set.
 - **Width breakpoint instead of pointer type.** Would show the bar to a desktop user in a narrow window and
   hide it on a large tablet — the wrong axis. Pointer type is the finger signal.
-- **`env(keyboard-inset-*)` for positioning.** Chromium-only; iOS needs the JS path anyway (see above).
+- **Computing the lift from a viewport property.** Four attempts, all measured on device, all wrong the same
+  way — the anchor moves and the formula does not. Do not re-derive any of these:
+  - **`innerHeight`.** Shipped for a year. Not a stable quantity on iOS; collapses to `visualViewport.height`
+    at the bottom of a long page, which zeroes the lift entirely. This was the reported bug.
+  - **`clientHeight`.** The obvious correction, and stable across every simulator sample — but 92px off the
+    real anchor on a physical iPhone.
+  - **The VirtualKeyboard API baseline** (native `env(keyboard-inset-*)` or the polyfill). Answers a different
+    question: the keyboard's occlusion of the visible band, not the distance from our fixed anchor.
+  - **Zero lift (`bottom: 0` alone),** on the theory that Safari already resolves `bottom` against the visible
+    band. It does not; the bar landed at 589 against a band of 377.
 - **True `/` toggle.** Needs cross-component menu-state observation for a marginal gain over insert-and-open.
 - **Per-node reactive button state (enable/disable, checked).** Re-fights the ADR 0014 per-node render budget;
   row-level feedback already tells the user what happened.

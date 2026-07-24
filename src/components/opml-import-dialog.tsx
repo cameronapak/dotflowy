@@ -4,7 +4,9 @@ import { CircleCheckIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { nodesCollection } from "../data/collection";
+import { isLunoraSyncEnabled } from "../data/flags";
 import { capture, drop } from "../data/history";
+import { getLunoraOutlineContext } from "../data/lunora-sync";
 import {
   OPML_APP_MAX_NODES,
   OpmlEmpty,
@@ -14,6 +16,7 @@ import {
   type OpmlImportResult,
   type OpmlImportReport,
 } from "../data/opml-import";
+import { makeOutlineNode, type OutlineNode } from "../data/outline-plans";
 import { runStructuralSliced } from "../data/structural";
 import { childrenOf, makeNode, now } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
@@ -37,13 +40,13 @@ import {
  * (More menu + Cmd+K) reach it through `openOpmlImport()`.
  *
  * The commit is the client write path, not a new endpoint: one history
- * `capture` (a single Cmd+Z removes the whole import), then ONE
- * `runStructuralSliced` transaction — every insert lands as one `POST
- * /api/nodes {ops}` → DO `applyBatch`, whose reply carries the FINAL seq of the
- * chunked changelog (>500-op batches echo as several frames) and `waitForSeq`
- * holds the optimistic overlay across all of them. Any fault rejects the
- * transaction, TanStack rolls the optimistic state back, and the dialog reports
- * "nothing was imported" — retry-safe, never a half-import.
+ * `capture` (a single Cmd+Z removes the whole import), then — flag OFF — ONE
+ * `runStructuralSliced` transaction (every insert lands as one `POST
+ * /api/nodes {ops}` → DO `applyBatch`). Flag ON (ADR 0055): chunked Lunora
+ * `importNodes` mutators (clientSeq FIFO, ~500 nodes/watermark). A mid-import
+ * failure on the Lunora path can leave earlier chunks durable; the dialog still
+ * reports failure and does not claim success. Flag-OFF faults reject the
+ * transaction, TanStack rolls back, and nothing was imported.
  *
  * The optimistic inserts are applied in ~500-node SLICES that yield to the
  * event loop between applications (multiple `mutate` calls on the one
@@ -234,6 +237,61 @@ export function OpmlImportDialog() {
 
     // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole import.
     capture(index, null);
+
+    if (isLunoraSyncEnabled()) {
+      const lunora = getLunoraOutlineContext();
+      if (!lunora) {
+        drop();
+        setStage({
+          kind: "error",
+          title: "Import failed",
+          detail: "Lunora sync is not ready. Try again in a moment.",
+        });
+        return;
+      }
+      const outlineNodes: OutlineNode[] = [
+        makeOutlineNode({
+          id: containerId,
+          userId: lunora.userId,
+          parentId: null,
+          prevSiblingId: lastTop,
+          text: containerText(timestamp),
+          collapsed: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }),
+      ];
+      for (const op of plan.ops) {
+        if (op.op === "delete") continue;
+        outlineNodes.push({ ...op.value, userId: lunora.userId });
+      }
+      try {
+        let applied = 0;
+        const total = outlineNodes.length;
+        for (let i = 0; i < outlineNodes.length; i += IMPORT_SLICE_NODES) {
+          const chunk = outlineNodes.slice(i, i + IMPORT_SLICE_NODES);
+          const tx = lunora.store.mutators.importNodes({
+            userId: lunora.userId,
+            nodes: chunk,
+          });
+          await tx.isPersisted.promise;
+          applied += chunk.length;
+          setStage({ kind: "importing", count: total, applied });
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        setStage({ kind: "success", containerId, count: plan.count });
+      } catch {
+        drop();
+        setStage({
+          kind: "error",
+          title: "Import failed",
+          detail:
+            "The outline could not be fully saved. Earlier chunks may have landed — undo or re-import carefully.",
+        });
+      }
+      return;
+    }
+
     // The plan is insert-only, emitted depth-first pre-order with the sibling
     // chain wired by construction — replayed verbatim into the collection, in
     // yielding slices so the progress counter below actually paints. `applied`

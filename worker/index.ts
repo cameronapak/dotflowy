@@ -32,7 +32,6 @@ import {
 } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
-import type { AuthEnv } from "./auth";
 import type { Node } from "./wire";
 
 import {
@@ -63,6 +62,11 @@ import {
   pendingWaitlistEmails,
   type InviteBatchResult,
 } from "./invites";
+import { lunoraApp, ShardDO, type LunoraEnv } from "./lunora-app";
+import {
+  createLunoraOutlineStore,
+  isLunoraOutlineEnabledForUser,
+} from "./lunora-mcp-store";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -94,7 +98,12 @@ export const UserOutlineDO = Sentry.instrumentDurableObjectWithSentry(
 );
 type UserOutlineDO = BaseUserOutlineDO;
 
-interface Env extends AuthEnv {
+// Lunora ShardDO (ADR 0055) — re-export for wrangler `SHARD` binding.
+// TEMP: not Sentry-wrapped — Lunora's ShardDOState.sql typing doesn't satisfy
+// Sentry's DurableObjectState constraint (document in HANDOFF).
+export { ShardDO };
+
+interface Env extends LunoraEnv {
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
    *  sentry.ts (ticket #227, decided in #156). */
@@ -159,6 +168,7 @@ const KV_COLLECTIONS = new Set([
   "daily-index",
   "changelog",
   "saved-queries",
+  "account-prefs",
 ]);
 
 /**
@@ -962,10 +972,6 @@ function handleApiRequest(
           },
         });
       }
-      const mcpUserId = resolveUserId(token.userId, env);
-      const mcpStub = env.USER_OUTLINE.get(
-        env.USER_OUTLINE.idFromName(mcpUserId),
-      );
       // Provenance: which agent is calling. The bearer token's OAuth client maps
       // to a registered harness name; every node its write tools create is
       // stamped with it, so the editor can mark agent edits apart from the user's.
@@ -980,7 +986,18 @@ function handleApiRequest(
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
       const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
-      return yield* handleMcp(request, mcpStub, origin, mcpPlan !== "free");
+      const classicStub = env.USER_OUTLINE.get(
+        env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
+      );
+      const useLunora = yield* Effect.promise(() =>
+        isLunoraOutlineEnabledForUser(env, () =>
+          classicStub.getKv("account-prefs"),
+        ),
+      );
+      const mcpStore = useLunora
+        ? createLunoraOutlineStore(env, token.userId)
+        : classicStub;
+      return yield* handleMcp(request, mcpStore, origin, mcpPlan !== "free");
     }
 
     // Identity = the validated session's stable user id. No session → 401.
@@ -1125,6 +1142,13 @@ const handler = {
       return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(
         request,
       );
+    }
+
+    // Lunora reserved paths (ADR 0055 Phase-2 compose). Product Better Auth
+    // stays on `/api/auth/*`; Lunora has no dual signup here — identity is
+    // bridged from the product session inside `worker/lunora-app.ts`.
+    if (url.pathname === "/_lunora" || url.pathname.startsWith("/_lunora/")) {
+      return lunoraApp.fetch(request, env, ctx);
     }
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve

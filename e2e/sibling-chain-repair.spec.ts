@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { isE2eLunora, seedOutline, type SeedNode } from "./fixtures";
 
 interface PatchUpdate {
   id: string;
@@ -41,6 +41,10 @@ function chainsAreClean(nodes: SeedNode[]): boolean {
 test("heals a shattered sibling chain on load so every node is reorderable", async ({
   page,
 }) => {
+  test.skip(
+    isE2eLunora(),
+    "loads malformed rows through the classic snapshot fixture",
+  );
   // Mirrors the production corruption: B and C both point at A (root), so one
   // orphans out of the chain; A1/A2 both claim the head under A (a nested fan).
   const seed: SeedNode[] = [

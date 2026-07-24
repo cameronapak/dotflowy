@@ -9,7 +9,12 @@ import {
   weekLabel,
   yearLabel,
 } from "../src/data/date-links";
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
+import {
+  seedOutline,
+  STANDARD_TREE,
+  isE2eLunora,
+  type SeedNode,
+} from "./fixtures";
 
 // Cmd on macOS, Control elsewhere.
 function modifier() {
@@ -538,6 +543,12 @@ test.describe("daily notes", () => {
   test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
     page,
   }) => {
+    // Classic-only: fakes a stale `/api/kv` replica + `?op=claim` winner ack.
+    // Lunora delivers daily-index via shapes (no empty-GET + claim override).
+    test.skip(
+      isE2eLunora(),
+      "claim-race simulation is classic /api/kv transport",
+    );
     // Simulate the race: this device's local daily-index replica is empty (it
     // GETs an empty /api/kv below), so it thinks today is absent and CLAIMS --
     // but another device already created the container + today's note, so the
@@ -621,7 +632,9 @@ test.describe("daily notes", () => {
   }) => {
     // daily-index points at ids with no matching outline rows (stale mapping).
     // Today must create those nodes under the claimed ids, not show the
-    // "That bullet doesn't exist" empty state.
+    // "That bullet doesn't exist" empty state. Seed via `kv` so both classic
+    // `/api/kv` and Lunora `userDailyIndex` shapes see the orphans (a post-seed
+    // `/api/kv` route override is classic-only).
     const d = new Date();
     const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
       2,
@@ -632,55 +645,20 @@ test.describe("daily notes", () => {
       [todayKey]: "ghost-today",
     };
 
-    await seedOutline(page, STANDARD_TREE);
-
-    const kvStore = new Map<string, { key: string; nodeId: string }>([
-      ["container", { key: "container", nodeId: orphans.container }],
-      [todayKey, { key: todayKey, nodeId: orphans[todayKey] }],
-    ]);
-
-    await page.route(
-      (url) => url.pathname === "/api/kv",
-      async (route) => {
-        const req = route.request();
-        const collection = new URL(req.url()).searchParams.get("collection");
-        if (collection !== "daily-index") return route.fallback();
-
-        switch (req.method()) {
-          case "GET":
-            return route.fulfill({
-              status: 200,
-              contentType: "application/json",
-              body: JSON.stringify([...kvStore.values()]),
-            });
-          case "POST": {
-            if (new URL(req.url()).searchParams.get("op") === "claim") {
-              const { key, value } = req.postDataJSON() as {
-                key: string;
-                value: { key: string; nodeId: string };
-              };
-              if (!kvStore.has(key)) kvStore.set(key, value);
-              return route.fulfill({
-                status: 200,
-                contentType: "application/json",
-                body: JSON.stringify({ value: kvStore.get(key) }),
-              });
-            }
-            const { rows } = req.postDataJSON() as {
-              rows: { key: string; value: { key: string; nodeId: string } }[];
-            };
-            for (const r of rows ?? []) kvStore.set(r.key, r.value);
-            return route.fulfill({
-              status: 200,
-              contentType: "application/json",
-              body: JSON.stringify({ ok: true }),
-            });
-          }
-          default:
-            return route.fallback();
-        }
+    await seedOutline(page, STANDARD_TREE, {
+      kv: {
+        "daily-index": [
+          {
+            key: "container",
+            value: { key: "container", nodeId: orphans.container },
+          },
+          {
+            key: todayKey,
+            value: { key: todayKey, nodeId: orphans[todayKey] },
+          },
+        ],
       },
-    );
+    });
 
     await page.goto("/");
     await expect(
