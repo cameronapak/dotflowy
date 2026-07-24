@@ -100,7 +100,20 @@ async function shardRpc(
       `lunora shard rpc ${functionPath}: non-JSON response (${res.status})`,
     );
   }
-  const envelope = decodeShardRpcEnvelope(json);
+  let envelope: { result?: unknown; error?: { message?: string } };
+  try {
+    envelope = decodeShardRpcEnvelope(json);
+  } catch (err) {
+    // Failed HTTP with a non-envelope body → status error, not a Schema dump.
+    if (!res.ok) {
+      throw new Error(
+        `lunora shard rpc ${functionPath} failed (${res.status})`,
+      );
+    }
+    throw err instanceof Error
+      ? err
+      : new Error(`lunora shard rpc ${functionPath}: invalid response`);
+  }
   if (!res.ok || envelope.error) {
     throw new Error(
       envelope.error?.message ??

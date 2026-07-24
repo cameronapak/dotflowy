@@ -72,6 +72,17 @@ describe("isLunoraOutlineEnabledForUser", () => {
     expect(called).toBe(false);
   });
 
+  test("env force off skips preference lookup", async () => {
+    let called = false;
+    expect(
+      await isLunoraOutlineEnabledForUser({ LUNORA_OUTLINE: "0" }, async () => {
+        called = true;
+        return [{ id: "lunora-beta", enabled: true }];
+      }),
+    ).toBe(false);
+    expect(called).toBe(false);
+  });
+
   test("unset env uses account pref", async () => {
     expect(
       await isLunoraOutlineEnabledForUser({}, async () => [
