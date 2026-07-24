@@ -64,3 +64,39 @@ export function isLunoraSyncEnabled(): boolean {
   }
   return LUNORA_SYNC_DEFAULT;
 }
+
+/** TEMPORARY diagnostic flag — delete with `keyboard-debug.tsx` (see below). */
+export const KEYBOARD_DEBUG_FLAG_KEY = "dotflowy:flag:kbdebug";
+
+/**
+ * Whether the viewport-geometry readout renders (`keyboard-debug.tsx`).
+ * Default OFF; scaffolding for diagnosing the ADR 0030 keyboard-anchored bar on
+ * a real iPhone, to be deleted once the positioning bug is understood.
+ *
+ * Diverges from the flags above in ONE way, on purpose: `?kbdebug=on` PERSISTS
+ * to localStorage. Every other flag is per-load because a dogfooder can flip it
+ * from a desktop console; this one is read on a phone, where typing a URL once
+ * is the only ergonomic switch there is. `?kbdebug=off` clears it again.
+ *
+ * Deliberately NOT gated on `import.meta.env.DEV`: the device loop here is
+ * `bun run cf:dev`, a production build served to the phone over the LAN, where
+ * `DEV` is false and a DEV-gated readout would silently render nothing.
+ */
+export function isKeyboardDebugEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const q = new URLSearchParams(window.location.search).get("kbdebug");
+    if (q === "on" || q === "1") {
+      window.localStorage.setItem(KEYBOARD_DEBUG_FLAG_KEY, "on");
+      return true;
+    }
+    if (q === "off" || q === "0") {
+      window.localStorage.removeItem(KEYBOARD_DEBUG_FLAG_KEY);
+      return false;
+    }
+    return window.localStorage.getItem(KEYBOARD_DEBUG_FLAG_KEY) === "on";
+  } catch {
+    // localStorage / URLSearchParams can throw; stay off.
+    return false;
+  }
+}

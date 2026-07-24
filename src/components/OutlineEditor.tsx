@@ -127,6 +127,7 @@ import {
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
+import { KeyboardDebugOverlay } from "./keyboard-debug";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
@@ -739,6 +740,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           actions={mobileBarActions}
           findFocusedId={findFocusedId}
         />
+
+        {/* TEMPORARY: viewport-geometry readout for diagnosing the bar's
+            keyboard anchoring on a real iPhone (`?kbdebug=on`, default off).
+            Sits beside the bar rather than inside it so it still renders when
+            the bar is hidden or mispositioned. Delete with keyboard-debug.tsx. */}
+        <KeyboardDebugOverlay />
 
         {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
             Gates itself on a fine pointer + a single-span selection, so it
