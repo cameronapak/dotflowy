@@ -2,4 +2,4 @@
 "dotflowy": minor
 ---
 
-Add opt-in Lunora outline beta in Settings. Classic DO sync remains the default; enable the experimental Lunora backend per account (syncs across devices). Local dogfood: `LUNORA_OUTLINE=1` or `?lunora-sync=on`.
+Opt-in experimental outline sync in Settings (classic sync stays the default; preference syncs across devices). Fixes typed text vanishing after a Settings round-trip, and big-delete / mirror-instance delete on the beta path. More menu lists actions first and restores Copy as Markdown; Settings no longer names the sync engine.
