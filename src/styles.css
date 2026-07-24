@@ -216,6 +216,14 @@
  */
 :root {
   --node-deco-budget: 200px;
+
+  /* How far a bottom-pinned surface must lift to clear the software keyboard
+     (ADR 0030). `data/keyboard-inset.ts` overwrites this inline on <html> from a
+     MEASURED anchor probe; this declaration is the default that holds when JS
+     hasn't run, no keyboard is up, or the device has no software keyboard.
+     Consumers read this one var rather than a React hook, so the keyboard
+     animation costs zero re-renders. */
+  --kb-inset: 0px;
 }
 .node-deco {
   display: flex;

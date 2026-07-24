@@ -1,6 +1,9 @@
 // Sentry init must run before any app code (#227). SPA mode has no client entry
 // file, so the root route module is the earliest reliable place. Keep first.
 import "../instrument.client";
+// Installs the VirtualKeyboard API (native on Chromium, polyfilled on Safari) so
+// `--kb-inset` in styles.css resolves. Side-effect import, SSR-safe (ADR 0030).
+import "../data/keyboard-inset";
 import type { ReactNode } from "react";
 
 import {

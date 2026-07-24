@@ -95,7 +95,6 @@ import {
 import { getTreeIndex, useNode } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
-import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import {
   getCaptureDestination,
   keymapSpecs,
@@ -634,7 +633,6 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // Position signal (ADR 0030): lift the panel above the software keyboard on a
   // coarse pointer; a fine pointer centers it and ignores the offset.
   const coarse = useCoarsePointer();
-  const keyboardOffset = useKeyboardViewport();
 
   // The destination for the CURRENT draft (resets to the default per node). The
   // default is the LAZY provider (label known now, node created only at born) --
@@ -1033,11 +1031,11 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         style={
           coarse
             ? {
-                transform: `translateY(-${keyboardOffset}px)`,
+                // Lift above the software keyboard via the VirtualKeyboard
+                // inset; branchless, same reasoning as MobileActionsBar.
+                transform: "translateY(calc(-1 * var(--kb-inset)))",
                 marginBottom:
-                  keyboardOffset === 0
-                    ? "env(safe-area-inset-bottom)"
-                    : undefined,
+                  "max(0px, calc(env(safe-area-inset-bottom) - var(--kb-inset)))",
               }
             : undefined
         }
