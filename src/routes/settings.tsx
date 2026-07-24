@@ -23,6 +23,8 @@ import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
+import { Switch } from "../components/ui/switch";
+import { setLunoraBetaEnabled, useLunoraBetaPref } from "../data/account-prefs";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { outlineToMarkdown } from "../data/markdown";
@@ -736,6 +738,38 @@ function AppearanceSection() {
   );
 }
 
+function BetaSection() {
+  const { ready, enabled } = useLunoraBetaPref();
+  return (
+    <Section
+      title="Beta"
+      description="Optional early features. The current sync stays the default until you opt in."
+    >
+      <RowGroup>
+        <SettingRow
+          title="Upgraded outline sync"
+          description={
+            <>
+              Try Dotflowy&apos;s next sync engine. Your outline stays yours —
+              we never claim your data. Opting in helps us harden it before
+              everyone gets it. May have rough edges; your choice syncs across
+              devices, and toggling reloads the app.
+            </>
+          }
+          action={
+            <Switch
+              checked={ready ? enabled : false}
+              disabled={!ready}
+              onCheckedChange={(checked) => void setLunoraBetaEnabled(checked)}
+              aria-label="Upgraded outline sync beta"
+            />
+          }
+        />
+      </RowGroup>
+    </Section>
+  );
+}
+
 function SettingsPage() {
   // One subscription fetch for the whole page; Plan & billing and the
   // Connections nudge both read it (no double request, no divergent state).
@@ -774,6 +808,7 @@ function SettingsPage() {
         </Section>
 
         <AccountSection />
+        <BetaSection />
         <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />

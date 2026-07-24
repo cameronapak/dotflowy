@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
+import {
+  seedOutline,
+  STANDARD_TREE,
+  isE2eLunora,
+  type SeedNode,
+} from "./fixtures";
 
 // Regression suite for the atomic-structural-writes cure (PLAN.md):
 //  - P1: one structural edit = exactly ONE /api/nodes request carrying every op.
@@ -99,6 +104,11 @@ function applyWrites(seed: SeedNode[], writes: NodesWrite[]): SeedNode[] {
 }
 
 test.describe("atomic structural writes", () => {
+  test.skip(
+    isE2eLunora(),
+    "asserts classic /api/nodes batch wire; Lunora uses /_lunora/rpc",
+  );
+
   test("a structural edit is exactly one /api/nodes batch request (P1)", async ({
     page,
   }) => {

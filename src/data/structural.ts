@@ -8,6 +8,7 @@ import type { Node } from "./schema";
 import { openSettings } from "../components/settings-nav";
 import { persistBatchE } from "./api";
 import { nodesCollection, waitForSeqE } from "./collection";
+import { isLunoraSyncEnabled } from "./flags";
 import { NodesLimitError, runPromise } from "./nodes-client-effect";
 import { notifySaveFailed } from "./save-failure";
 import { chainDisagreements } from "./sibling-chain";
@@ -107,6 +108,13 @@ export function runStructuralTracked<T>(body: () => T): {
   if (getActiveTransaction())
     return { result: body(), persisted: Promise.resolve() };
 
+  // ADR 0055 Lunora flag-swap: mutators own optimistic apply + watermark hold
+  // (checkpoints). Body calls Lunora-aware mutations which fire `bindMutators`
+  // handles — no custom `{ops}` batch / `waitForSeq`.
+  if (isLunoraSyncEnabled()) {
+    return { result: body(), persisted: Promise.resolve() };
+  }
+
   let result!: T;
   const tx = createTransaction({
     mutationFn: async ({ transaction }) => {
@@ -155,6 +163,16 @@ export async function runStructuralSliced(
   // and yielding mid-ambient-transaction would detach the later slices.
   if (getActiveTransaction()) {
     for (const slice of slices) slice();
+    return;
+  }
+  // Lunora dogfood: no large-batch wire path yet — apply slices locally via
+  // mutator-backed mutations (same as runStructuralTracked when flag ON).
+  if (isLunoraSyncEnabled()) {
+    for (const slice of slices) {
+      slice();
+      onProgress?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     return;
   }
   const tx = createTransaction({

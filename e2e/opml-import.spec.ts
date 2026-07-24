@@ -8,7 +8,7 @@ import { expect, test, type FileChooser, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { isE2eLunora, seedOutline, STANDARD_TREE } from "./fixtures";
 
 const SAMPLE_PATH = fileURLToPath(
   new URL(
@@ -148,6 +148,10 @@ test.describe("OPML import", () => {
   test("a multi-slice import (>500 nodes) applies in yielding slices yet lands as ONE atomic batch", async ({
     page,
   }) => {
+    test.skip(
+      isE2eLunora(),
+      "asserts the classic one-batch transport progress state",
+    );
     // Delay the batch POST *response* so the dialog rests in its post-apply
     // "saving" phase — deterministic proof the sliced optimistic apply
     // finished (applied === count) while the single wire batch is in flight.

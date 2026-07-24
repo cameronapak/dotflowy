@@ -11,10 +11,17 @@
 
 import { toast } from "sonner";
 
+import type { OutlineNode } from "../data/outline-plans";
+
 import { nodesCollection } from "../data/collection";
-import { isMirrorsEnabled } from "../data/flags";
+import { isLunoraSyncEnabled, isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop, RESTORE_SLICE_OPS } from "../data/history";
+import { getLiveNodes, getLiveOutlineNodes } from "../data/live-nodes";
+import {
+  getLunoraOutlineContext,
+  trackLunoraMutation,
+} from "../data/lunora-sync";
 import {
   countForest,
   parseMarkdownForest,
@@ -25,7 +32,7 @@ import {
   type MdPastePlan,
 } from "../data/markdown-import";
 import { runStructural, runStructuralSliced } from "../data/structural";
-import { buildTreeIndex, makeNode, now, type Node } from "../data/tree";
+import { buildTreeIndex, makeNode, now } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
   getViewFilter,
@@ -126,6 +133,31 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     return true;
 
   const timestamp = now();
+
+  // Lunora flag-ON: classic `nodesCollection` is idle — land via one
+  // `restoreNodes` watermark (anchor patch + inserts + repoints) so paste
+  // doesn't throw CollectionOperationError on a missing classic key.
+  if (isLunoraSyncEnabled()) {
+    const lunora = getLunoraOutlineContext();
+    if (!lunora) {
+      toast.error("Sync is still starting — try pasting again in a moment.");
+      return true;
+    }
+    capture(index, activeKey);
+    runStructural(() => {
+      applyMarkdownPasteViaRestore(plan, anchorId, timestamp, lunora.userId);
+    });
+    const seam = resolveSeam(plan, anchorId, count);
+    if (seam.id === anchorId)
+      focus.placeCaretHere(plan.anchor.text, seam.offset);
+    else {
+      const key = focusKeyFor(seam.id, activeKey);
+      focus.setPendingFocus(key, seam.offset);
+      scrollRowIntoView(key);
+    }
+    return true;
+  }
+
   const writeAnchor = () => {
     nodesCollection.update(anchorId, (draft) => {
       draft.text = plan.anchor.text;
@@ -197,6 +229,74 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   return true;
 }
 
+/** Build the post-paste outline and commit via Lunora `restoreNodes`. */
+function applyMarkdownPasteViaRestore(
+  plan: MdPastePlan,
+  anchorId: string,
+  timestamp: number,
+  userId: string,
+): void {
+  const lunora = getLunoraOutlineContext();
+  if (!lunora) return;
+
+  const byId = new Map(
+    getLiveOutlineNodes().map((n) => [n.id, { ...n } as OutlineNode]),
+  );
+  const anchor = byId.get(anchorId);
+  if (!anchor) return;
+
+  const nextAnchor: OutlineNode = {
+    ...anchor,
+    text: plan.anchor.text,
+    updatedAt: timestamp,
+    ...(plan.anchor.isTask !== null ? { isTask: plan.anchor.isTask } : {}),
+    ...(plan.anchor.completed !== null
+      ? { completed: plan.anchor.completed }
+      : {}),
+    ...(plan.anchor.kind !== null
+      ? { kind: plan.anchor.kind, isTask: false }
+      : plan.anchor.isTask
+        ? { kind: null }
+        : {}),
+  };
+  byId.set(anchorId, nextAnchor);
+
+  for (const ins of plan.inserts) {
+    byId.set(ins.id, {
+      id: ins.id,
+      userId,
+      parentId: ins.parentId,
+      prevSiblingId: ins.prevSiblingId,
+      text: ins.text,
+      isTask: ins.isTask,
+      completed: ins.completed,
+      collapsed: false,
+      bookmarkedAt: null,
+      mirrorOf: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      origin: null,
+      kind: ins.kind,
+    });
+  }
+  for (const r of plan.repoints) {
+    const n = byId.get(r.id);
+    if (!n) continue;
+    byId.set(r.id, {
+      ...n,
+      prevSiblingId: r.prevSiblingId,
+      updatedAt: timestamp,
+    });
+  }
+
+  trackLunoraMutation(
+    lunora.store.mutators.restoreNodes({
+      userId,
+      nodes: [...byId.values()],
+    }),
+  );
+}
+
 /**
  * Where the caret actually lands, once the tree is on screen.
  *
@@ -215,14 +315,15 @@ function resolveSeam(
   if (plan.focusId === anchorId)
     return { id: anchorId, offset: plan.focusOffset };
 
-  // Build the visible set from a FRESH index off `nodesCollection.toArray` --
+  // Build the visible set from a FRESH index off the live store --
   // synchronously current after `runStructural` -- not `getTreeIndex()`, whose
   // change-notify can lag the optimistic apply and drop the just-inserted seam
   // node from the walk (the exact reason `focusKeyFor`, called right after this,
-  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c).
+  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c). Classic =
+  // `nodesCollection`; Lunora = `wholeOutline` via `getLiveNodes`.
   const visible = new Set(
     buildVisibleRows(
-      buildTreeIndex(nodesCollection.toArray as Node[]),
+      buildTreeIndex(getLiveNodes()),
       getViewRootId(),
       getViewIsHidden(),
       getViewFilter(),
