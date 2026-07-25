@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 const APP_URL = "https://app.dotflowy.com";
 const GITHUB_URL = "https://github.com/cameronapak/dotflowy";
 const GITHUB_API = "https://api.github.com/repos/cameronapak/dotflowy";
+const X_URL = "https://x.com/cameronpak";
 
 function useGithubStars() {
   const [stars, setStars] = useState<number | null>(null);
@@ -564,12 +565,34 @@ function Footer() {
       </div>
       {/* Nominative-fair-use disclaimer: naming Workflowy is lawful, but state
        * plainly that we're independent and unaffiliated. */}
-      <div className="mx-auto w-full max-w-2xl px-6 pb-10">
+      <div className="mx-auto w-full max-w-2xl px-6 pb-6">
         <p className="text-xs leading-relaxed text-muted-foreground/70">
           Workflowy is a trademark of its respective owner. Dotflowy is an
           independent, open-source project and is not affiliated with, sponsored
           by, or endorsed by Workflowy.
         </p>
+      </div>
+      <div className="mx-auto w-full max-w-2xl px-6 pb-10">
+        <a
+          href={X_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="group inline-flex items-center gap-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <img
+            src="/cameron-pak.png"
+            alt="Cameron Pak"
+            width={28}
+            height={28}
+            className="size-7 rounded-full"
+          />
+          <span>
+            Created and maintained by{" "}
+            <span className="text-foreground/80 underline-offset-4 group-hover:underline">
+              Cameron Pak
+            </span>
+          </span>
+        </a>
       </div>
     </footer>
   );
