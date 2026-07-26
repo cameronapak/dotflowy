@@ -33,7 +33,7 @@ export type {
     WhereOperators,
 } from "lunorash/server/data-model";
 
-export type TableName = "nodes" | "tagColors" | "savedQueries" | "dailyIndex" | "migrateState" | "ratelimit_buckets";
+export type TableName = "nodes" | "tagColors" | "savedQueries" | "dailyIndex" | "migrateState" | "runs" | "ratelimit_buckets";
 
 /**
  * The tables **this app declared** — every {@link TableName} except those an add-on
@@ -50,7 +50,7 @@ export type TableName = "nodes" | "tagColors" | "savedQueries" | "dailyIndex" | 
  * const EXPORTED: readonly AppTableName[] = ["nodes", "tagColors"];
  * ```
  */
-export type AppTableName = "nodes" | "tagColors" | "savedQueries" | "dailyIndex" | "migrateState";
+export type AppTableName = "nodes" | "tagColors" | "savedQueries" | "dailyIndex" | "migrateState" | "runs";
 
 export type Id<TName extends string> = string & { readonly __table: TName };
 
@@ -106,6 +106,20 @@ export interface Doc_migrateState {
     kvAt: number;
 }
 
+export interface Doc_runs {
+    _id: Id<"runs">;
+    _creationTime: number;
+    userId: string;
+    questionNodeId: string;
+    status: "running" | "completed" | "cancelled" | "error";
+    partialText: string;
+    answerRootId: string;
+    answerHash: string;
+    error: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
 export interface Doc_ratelimit_buckets {
     _id: Id<"ratelimit_buckets">;
     _creationTime: number;
@@ -121,6 +135,7 @@ export interface DataModel {
     savedQueries: Doc_savedQueries;
     dailyIndex: Doc_dailyIndex;
     migrateState: Doc_migrateState;
+    runs: Doc_runs;
     ratelimit_buckets: Doc_ratelimit_buckets;
 }
 
@@ -136,6 +151,7 @@ export interface IndexNamesByTable {
     savedQueries: never;
     dailyIndex: "by_key";
     migrateState: never;
+    runs: "by_status" | "by_question";
     ratelimit_buckets: "by_key";
 }
 
@@ -148,6 +164,7 @@ export interface SearchIndexNamesByTable {
     savedQueries: never;
     dailyIndex: never;
     migrateState: never;
+    runs: never;
     ratelimit_buckets: never;
 }
 
@@ -160,6 +177,7 @@ export interface RankIndexNamesByTable {
     savedQueries: never;
     dailyIndex: never;
     migrateState: never;
+    runs: never;
     ratelimit_buckets: never;
 }
 
@@ -172,6 +190,7 @@ export interface GeoIndexNamesByTable {
     savedQueries: never;
     dailyIndex: never;
     migrateState: never;
+    runs: never;
     ratelimit_buckets: never;
 }
 
@@ -232,6 +251,20 @@ export interface Insert_migrateState {
     kvAt: number;
 }
 
+export interface Insert_runs {
+    _id?: Id<"runs">;
+    _creationTime?: number;
+    userId: string;
+    questionNodeId: string;
+    status: "running" | "completed" | "cancelled" | "error";
+    partialText: string;
+    answerRootId: string;
+    answerHash: string;
+    error: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
 export interface Insert_ratelimit_buckets {
     _id?: Id<"ratelimit_buckets">;
     _creationTime?: number;
@@ -248,6 +281,7 @@ export interface InsertModel {
     savedQueries: Insert_savedQueries;
     dailyIndex: Insert_dailyIndex;
     migrateState: Insert_migrateState;
+    runs: Insert_runs;
     ratelimit_buckets: Insert_ratelimit_buckets;
 }
 
@@ -275,6 +309,7 @@ export interface Relations {
     savedQueries: {};
     dailyIndex: {};
     migrateState: {};
+    runs: {};
     ratelimit_buckets: {};
 }
 

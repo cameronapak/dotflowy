@@ -11,6 +11,8 @@ import {
 
 export const limits = {
   default: { kind: "token bucket", period: 60_000, rate: 10 },
+  /** Inline `@agent` fire (ADR 0059) — paid beta; keep cheap while stubbed. */
+  agent: { kind: "token bucket", period: 60_000, rate: 20, capacity: 20 },
 } as const satisfies RateLimitConfigMap;
 
 export type LimitName = keyof typeof limits;

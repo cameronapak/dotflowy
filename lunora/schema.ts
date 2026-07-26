@@ -81,4 +81,31 @@ export default defineSchema({
   })
     .shardBy("userId")
     .ownedBy("userId"),
+
+  /**
+   * Inline `@agent` runs (ADR 0059). Live shape subscription drives chip
+   * state + ghost text; one active run per question node; ~3 concurrent/user.
+   */
+  runs: defineTable({
+    userId: v.string(),
+    questionNodeId: v.string(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("cancelled"),
+      v.literal("error"),
+    ),
+    /** Streaming ghost text (ephemeral while running). */
+    partialText: v.string(),
+    answerRootId: v.string().nullable(),
+    /** Replace-guard hash of the answer subtree as written. */
+    answerHash: v.string().nullable(),
+    error: v.string().nullable(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .shardBy("userId")
+    .ownedBy("userId")
+    .index("by_question", ["questionNodeId"])
+    .index("by_status", ["status"]),
 }).extend(ratelimit.extension);

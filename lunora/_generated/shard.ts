@@ -47,6 +47,22 @@ const LUNORA_TABLE_INDEXES: Record<string, Array<{ fields: string[]; name: strin
             "type": "index"
         }
     ],
+    "runs": [
+        {
+            "fields": [
+                "status"
+            ],
+            "name": "by_status",
+            "type": "index"
+        },
+        {
+            "fields": [
+                "questionNodeId"
+            ],
+            "name": "by_question",
+            "type": "index"
+        }
+    ],
     "ratelimit_buckets": [
         {
             "fields": [
@@ -260,6 +276,64 @@ const LUNORA_TABLE_COLUMNS: Record<string, Array<{ isStorage?: boolean; name: st
             "type": "number"
         }
     ],
+    "runs": [
+        {
+            "name": "_id",
+            "optional": false,
+            "pk": true,
+            "type": "id"
+        },
+        {
+            "name": "_creationTime",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "userId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "questionNodeId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "status",
+            "optional": false,
+            "type": "union"
+        },
+        {
+            "name": "partialText",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "answerRootId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "answerHash",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "error",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "createdAt",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "updatedAt",
+            "optional": false,
+            "type": "number"
+        }
+    ],
     "ratelimit_buckets": [
         {
             "name": "_id",
@@ -303,22 +377,6 @@ const LUNORA_TTL_SWEEPS: Array<{ after?: number; field: string; softDeleteField?
 
 /** Static schema advisories (computed by @lunora/advisor at codegen time) served via `__lunora_admin__:getAdvisories`. */
 const LUNORA_ADVISORIES: AdvisoryFinding[] = [
-    {
-        "cacheKey": "table_without_insert:nodes",
-        "categories": [
-            "SCHEMA"
-        ],
-        "description": "No function inserts into this table via `ctx.db.insert(\"<table>\", …)`. It may be read-only by design (seeded by a migration, replicated, or written through a path the advisor can't see) — or it may be dead schema.",
-        "detail": "No function calls `ctx.db.insert(\"nodes\", …)` — table \"nodes\" has no discovered insert path.",
-        "facing": "INTERNAL",
-        "level": "INFO",
-        "metadata": {
-            "table": "nodes"
-        },
-        "name": "table_without_insert",
-        "remediation": "If the table should be writable, add a mutation that calls `ctx.db.insert(\"<table>\", …)`. If it is read-only or seeded elsewhere, this advisory can be ignored.",
-        "title": "Table has no insert path"
-    },
     {
         "cacheKey": "plaintext_secret_in_wrangler_vars:wrangler.jsonc:SENTRY_DSN",
         "categories": [
@@ -906,6 +964,7 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
             facade["savedQueries"] = bindTableFacade(db, "savedQueries");
             facade["dailyIndex"] = bindTableFacade(db, "dailyIndex");
             facade["migrateState"] = bindTableFacade(db, "migrateState");
+            facade["runs"] = bindTableFacade(db, "runs");
             facade["ratelimit_buckets"] = bindTableFacade(db, "ratelimit_buckets");
 
 

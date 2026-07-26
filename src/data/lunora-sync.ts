@@ -15,6 +15,7 @@ import {
   bindLunoraDailyIndex,
   unbindLunoraDailyIndex,
 } from "../plugins/daily/daily-index";
+import { bindLunoraAgentRuns, unbindLunoraAgentRuns } from "./agent-runs";
 import { markNodesSyncReady } from "./collection";
 import { isLunoraSyncEnabled } from "./flags";
 import { outlineNodeToNode, rowsToOutlineNodes } from "./lunora-bridge";
@@ -111,6 +112,7 @@ export function startLunoraOutlineSync(userId: string): void {
         touchedAt: Date.now(),
       }),
   });
+  bindLunoraAgentRuns(store.agentRuns);
 
   installMigrateConsoleHelper(() => ctx);
 
@@ -168,6 +170,7 @@ export function stopLunoraOutlineSync(): void {
   unbindLunoraTagColors();
   unbindLunoraSavedQueries();
   unbindLunoraDailyIndex();
+  unbindLunoraAgentRuns();
   ctx = null;
   seedStarted = false;
 }
