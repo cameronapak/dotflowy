@@ -54,6 +54,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@icons-pack/react-simple-icons": "^13.13.0",
+    "@lunora/ai": "1.0.0-alpha.27",
     "@lunora/db": "1.0.0-alpha.30",
     "@lunora/ratelimit": "1.0.0-alpha.11",
     "@lunora/react": "1.0.0-alpha.34",

@@ -1,6 +1,10 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 
 import {
+  hashAnswerSubtree,
+  shouldReplaceAnswer,
+} from "../src/data/agent-replace-guard";
+import {
   applyPlan,
   buildTreeIndex,
   planAppendChild,
@@ -515,6 +519,19 @@ type SavedQueryRow = {
   userId: string;
 };
 
+type AgentRunRow = {
+  _id: string;
+  questionNodeId: string;
+  status: "running" | "completed" | "cancelled" | "error";
+  partialText: string;
+  answerRootId: string | null;
+  answerHash: string | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+  userId: string;
+};
+
 /**
  * Seed an outline on the Lunora flag-ON path by mocking `/_lunora/ws` +
  * `/_lunora/rpc`. Structural mutators apply the same `outline-plans` pure
@@ -552,6 +569,11 @@ export async function seedOutlineLunora(
      * Lunora twin of classic `failStructuralWrites` (save-failure rollback).
      */
     failMutatorWrites?: boolean;
+    /**
+     * Delay (ms) between ghost partial poke and answer commit for
+     * `agent:fireAgentRun` — exercises streaming ghost UI.
+     */
+    agentFireDelayMs?: number;
   } = {},
 ): Promise<void> {
   // Drop prior mocks from earlier tests on this page — stacked handlers can
@@ -612,6 +634,9 @@ export async function seedOutlineLunora(
       userId,
     });
   }
+
+  /** Inline `@agent` runs (ADR 0059) — mocked; no real Workers AI in e2e. */
+  const agentRuns = new Map<string, AgentRunRow>();
 
   /** Classic→Lunora migrate watermarks (ADR 0058 heal). */
   let migrateState: { nodesAt: number | null; kvAt: number | null } | null =
@@ -695,6 +720,7 @@ export async function seedOutlineLunora(
     if (name === "userDailyIndex") return [...dailyIndex.values()];
     if (name === "userTagColors") return [...tagColors.values()];
     if (name === "userSavedQueries") return [...savedQueries.values()];
+    if (name === "userAgentRuns") return [...agentRuns.values()];
     return [];
   };
 
@@ -1152,6 +1178,310 @@ export async function seedOutlineLunora(
       } else if (path === "mutators:deleteDailyMapping") {
         dailyIndex.delete(String(args.key ?? ""));
         pokeShapes = new Set(["userDailyIndex"]);
+      } else if (path === "mutators:createAgentRun") {
+        const questionNodeId = String(args.questionNodeId ?? "");
+        const existing = [...agentRuns.values()].find(
+          (r) => r.questionNodeId === questionNodeId && r.status === "running",
+        );
+        if (existing) {
+          result = {
+            runId: existing._id,
+            reused: true,
+            answerRootId: existing.answerRootId,
+            answerHash: existing.answerHash,
+          };
+        } else {
+          const prior = [...agentRuns.values()]
+            .filter((r) => r.questionNodeId === questionNodeId)
+            .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+          const runId = crypto.randomUUID();
+          const createdAt = Number(args.createdAt ?? Date.now());
+          agentRuns.set(runId, {
+            _id: runId,
+            questionNodeId,
+            status: "running",
+            partialText: "",
+            answerRootId: prior?.answerRootId ?? null,
+            answerHash: prior?.answerHash ?? null,
+            error: null,
+            createdAt,
+            updatedAt: createdAt,
+            userId,
+          });
+          result = {
+            runId,
+            reused: false,
+            answerRootId: prior?.answerRootId ?? null,
+            answerHash: prior?.answerHash ?? null,
+          };
+        }
+        pokeShapes = new Set(["userAgentRuns"]);
+      } else if (path === "mutators:cancelAgentRun") {
+        const runId = String(args.runId ?? "");
+        const row = agentRuns.get(runId);
+        if (row && row.status === "running") {
+          agentRuns.set(runId, {
+            ...row,
+            status: "cancelled",
+            partialText: "",
+            updatedAt: Number(args.updatedAt ?? Date.now()),
+          });
+          result = { ok: true };
+        } else {
+          result = { ok: false };
+        }
+        pokeShapes = new Set(["userAgentRuns"]);
+      } else if (path === "mutators:patchAgentRunPartial") {
+        const runId = String(args.runId ?? "");
+        const row = agentRuns.get(runId);
+        if (row && row.status === "running") {
+          agentRuns.set(runId, {
+            ...row,
+            partialText: String(args.partialText ?? ""),
+            updatedAt: Number(args.updatedAt ?? Date.now()),
+          });
+        }
+        pokeShapes = new Set(["userAgentRuns"]);
+      } else if (path === "mutators:failAgentRun") {
+        const runId = String(args.runId ?? "");
+        const row = agentRuns.get(runId);
+        if (row) {
+          agentRuns.set(runId, {
+            ...row,
+            status: "error",
+            partialText: "",
+            error: String(args.error ?? "error"),
+            updatedAt: Number(args.updatedAt ?? Date.now()),
+          });
+        }
+        pokeShapes = new Set(["userAgentRuns"]);
+      } else if (path === "mutators:getAgentRun") {
+        const row = agentRuns.get(String(args.runId ?? ""));
+        result = row
+          ? {
+              status: row.status,
+              questionNodeId: row.questionNodeId,
+              partialText: row.partialText,
+              answerRootId: row.answerRootId,
+              answerHash: row.answerHash,
+              error: row.error,
+            }
+          : null;
+        pokeShapes = new Set();
+      } else if (path === "mutators:commitAgentAnswer") {
+        const questionNodeId = String(args.questionNodeId ?? "");
+        const summaryId = String(args.summaryId ?? crypto.randomUUID());
+        const detailId = String(args.detailId ?? crypto.randomUUID());
+        const updatedAt = Number(args.updatedAt ?? Date.now());
+        const priorRoot =
+          typeof args.priorAnswerRootId === "string"
+            ? args.priorAnswerRootId
+            : null;
+        const priorHash =
+          typeof args.priorAnswerHash === "string"
+            ? args.priorAnswerHash
+            : null;
+        let index = liveIndex();
+        if (
+          priorRoot &&
+          priorHash &&
+          shouldReplaceAnswer(index, priorRoot, priorHash)
+        ) {
+          commitOutlinePlan(store, planRemoveNode(index, priorRoot, updatedAt));
+          index = liveIndex();
+        }
+        const summaryPlan = planAppendChild(index, {
+          id: summaryId,
+          userId,
+          parentId: questionNodeId,
+          text: String(args.summaryText ?? ""),
+          createdAt: updatedAt,
+          updatedAt,
+        });
+        if (summaryPlan) {
+          commitOutlinePlan(store, {
+            deletes: summaryPlan.deletes,
+            patches: summaryPlan.patches,
+            inserts: summaryPlan.inserts.map((n) => ({
+              ...n,
+              origin: "agent",
+            })),
+          });
+          index = liveIndex();
+          const detailText = String(args.detailText ?? "").trim();
+          if (detailText) {
+            const detailPlan = planAppendChild(index, {
+              id: detailId,
+              userId,
+              parentId: summaryId,
+              text: detailText,
+              createdAt: updatedAt,
+              updatedAt,
+            });
+            if (detailPlan) {
+              commitOutlinePlan(store, {
+                deletes: detailPlan.deletes,
+                patches: detailPlan.patches,
+                inserts: detailPlan.inserts.map((n) => ({
+                  ...n,
+                  origin: "agent",
+                  collapsed: true,
+                })),
+              });
+              index = liveIndex();
+            }
+          }
+          const answerHash = hashAnswerSubtree(index, summaryId) ?? "";
+          const runId = String(args.runId ?? "");
+          const row = agentRuns.get(runId);
+          if (row) {
+            agentRuns.set(runId, {
+              ...row,
+              status: "completed",
+              partialText: "",
+              answerRootId: summaryId,
+              answerHash,
+              error: null,
+              updatedAt,
+            });
+          }
+          result = { ok: true, answerRootId: summaryId };
+        } else {
+          result = { ok: false, error: "could not append answer" };
+        }
+        pokeShapes = new Set(["wholeOutline", "userAgentRuns"]);
+      } else if (path === "agent:fireAgentRun") {
+        // Mock Workers AI: ghost partial → commit summary (+ optional detail).
+        const questionNodeId = String(args.questionNodeId ?? "");
+        const running = [...agentRuns.values()].find(
+          (r) => r.questionNodeId === questionNodeId && r.status === "running",
+        );
+        if (running) {
+          result = { runId: running._id, status: "running" };
+          pokeShapes = new Set();
+        } else {
+          const prior = [...agentRuns.values()]
+            .filter((r) => r.questionNodeId === questionNodeId)
+            .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+          const runId = crypto.randomUUID();
+          const createdAt = Date.now();
+          agentRuns.set(runId, {
+            _id: runId,
+            questionNodeId,
+            status: "running",
+            partialText: "",
+            answerRootId: prior?.answerRootId ?? null,
+            answerHash: prior?.answerHash ?? null,
+            error: null,
+            createdAt,
+            updatedAt: createdAt,
+            userId,
+          });
+          pokeSubscribed(seq, new Set(["userAgentRuns"]));
+
+          const canned =
+            "Mock agent summary.\nDetail line from the e2e Workers AI stub.";
+          agentRuns.set(runId, {
+            ...agentRuns.get(runId)!,
+            partialText: canned.slice(0, 18),
+            updatedAt: Date.now(),
+          });
+          pokeSubscribed(seq, new Set(["userAgentRuns"]));
+
+          if (opts.agentFireDelayMs && opts.agentFireDelayMs > 0) {
+            await new Promise((r) => setTimeout(r, opts.agentFireDelayMs));
+          }
+
+          const live = agentRuns.get(runId);
+          if (!live || live.status !== "running") {
+            result = { runId, status: "cancelled" };
+            pokeShapes = new Set(["userAgentRuns"]);
+          } else {
+            const summaryId = crypto.randomUUID();
+            const detailId = crypto.randomUUID();
+            const updatedAt = Date.now();
+            let index = liveIndex();
+            if (
+              live.answerRootId &&
+              live.answerHash &&
+              shouldReplaceAnswer(index, live.answerRootId, live.answerHash)
+            ) {
+              commitOutlinePlan(
+                store,
+                planRemoveNode(index, live.answerRootId, updatedAt),
+              );
+              index = liveIndex();
+            }
+            const [summaryText, ...detailParts] = canned.split("\n");
+            const detailText = detailParts.join("\n").trim();
+            const summaryPlan = planAppendChild(index, {
+              id: summaryId,
+              userId,
+              parentId: questionNodeId,
+              text: summaryText ?? canned,
+              createdAt: updatedAt,
+              updatedAt,
+            });
+            if (summaryPlan) {
+              commitOutlinePlan(store, {
+                deletes: summaryPlan.deletes,
+                patches: summaryPlan.patches,
+                inserts: summaryPlan.inserts.map((n) => ({
+                  ...n,
+                  origin: "agent",
+                })),
+              });
+              index = liveIndex();
+              if (detailText) {
+                const detailPlan = planAppendChild(index, {
+                  id: detailId,
+                  userId,
+                  parentId: summaryId,
+                  text: detailText,
+                  createdAt: updatedAt,
+                  updatedAt,
+                });
+                if (detailPlan) {
+                  commitOutlinePlan(store, {
+                    deletes: detailPlan.deletes,
+                    patches: detailPlan.patches,
+                    inserts: detailPlan.inserts.map((n) => ({
+                      ...n,
+                      origin: "agent",
+                      collapsed: true,
+                    })),
+                  });
+                  index = liveIndex();
+                }
+              }
+              const answerHash = hashAnswerSubtree(index, summaryId) ?? "";
+              agentRuns.set(runId, {
+                ...live,
+                status: "completed",
+                partialText: "",
+                answerRootId: summaryId,
+                answerHash,
+                error: null,
+                updatedAt,
+              });
+              result = {
+                runId,
+                status: "completed",
+                answerRootId: summaryId,
+              };
+            } else {
+              agentRuns.set(runId, {
+                ...live,
+                status: "error",
+                partialText: "",
+                error: "commit failed",
+                updatedAt,
+              });
+              result = { runId, status: "error" };
+            }
+            pokeShapes = new Set(["wholeOutline", "userAgentRuns"]);
+          }
+        }
       }
       // Unknown mutators: accept so watermark chain doesn't wedge.
 

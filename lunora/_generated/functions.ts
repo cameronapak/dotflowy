@@ -177,7 +177,7 @@ export type CallerCtx = ActionCtx | MutationCtx | QueryCtx;
  */
 export interface Caller {
     agent: {
-        fireAgentRun: (args: { userId: string; questionNodeId: string }) => Promise<{ runId: string; status: "running"; answerRootId?: undefined; } | { runId: string; status: "cancelled"; answerRootId?: undefined; } | { runId: string; status: "error"; answerRootId?: undefined; } | { runId: string; status: "completed"; answerRootId: string | undefined; }>;
+        fireAgentRun: (args: { userId: string; questionNodeId: string }) => Promise<{ runId: string; status: "error"; } | { runId: string; status: "running"; answerRootId?: undefined; } | { runId: string; status: "cancelled"; answerRootId?: undefined; } | { runId: string; status: "completed"; answerRootId: string | undefined; }>;
     };
     mcp: {
         applyChangeOps: (args: { userId: string; ops: Array<unknown> }) => Promise<{ count: number; deletes: number; inserts: number; patches: number; }>;

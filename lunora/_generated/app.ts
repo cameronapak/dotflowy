@@ -12,6 +12,9 @@ import { createShardDO } from "./shard.js";
 /** Read a value off the per-request `env`. Returns `undefined` to leave the capability unconfigured (its `ctx.*`/admin surface stays a clear-error stub). */
 type Selector<Env, T> = (env: Env) => T | undefined;
 
+/** The generated `createShardDO` config — the long-tail `.ai()` / `.kv()` / … methods pass straight through to it. */
+type ShardConfig = NonNullable<Parameters<typeof createShardDO>[0]>;
+
 /** The composed app: a Cloudflare module worker (`fetch` / `scheduled` / optional `email`) plus the `ShardDO` class binding. */
 interface ComposedApp extends LunoraWorker {
     /** Cloudflare Email Routing entry — present only when `.onEmail(...)` was configured. */
@@ -30,6 +33,7 @@ class AppBuilder<Env extends object> {
     private adminToken?: Selector<Env, string>;
     private readonly extendFns: ((env: Env, derived: Readonly<WorkerOptions>) => Partial<WorkerOptions>)[] = [];
     private readonly routeMap: Record<string, Route> = {};
+    private readonly shardExtras: Partial<ShardConfig> = {};
     private shardSelector?: Selector<Env, ShardNamespaceLike>;
 
     private emailHandler?: (env: Env) => (message: unknown, env: unknown, context: ExecutionContextLike) => Promise<void>;
@@ -69,6 +73,13 @@ class AppBuilder<Env extends object> {
         return this;
     }
 
+    /** Override the Workers AI binding backing `ctx.ai` (defaults to `env.AI`). */
+    public ai(factory: NonNullable<ShardConfig["ai"]>): this {
+        this.shardExtras.ai = factory;
+
+        return this;
+    }
+
     /** Materialise the standalone Cloudflare worker + `ShardDO` class. */
     public build(): ComposedApp {
         return this.assemble();
@@ -76,7 +87,9 @@ class AppBuilder<Env extends object> {
 
     /** Build the shard DO + compose the worker (standalone or framework-hosted), wrapping the lazy per-isolate singletons + auth init. */
     private assemble(): ComposedApp {
-        const ShardDO = createShardDO({});
+        const ShardDO = createShardDO({
+            ...this.shardExtras,
+        });
 
         // Per-isolate singletons: the worker (and auth instance) are expensive to
         // build, so the first request constructs them and every later request on

@@ -19,6 +19,8 @@ import { createAuth } from "./auth";
 
 export type LunoraEnv = AuthEnv & {
   SHARD: ShardNamespaceLike;
+  /** Workers AI binding for inline `@agent` (ADR 0059). */
+  AI: Ai;
   /** Optional Studio / admin bearer (unset = admin routes stay closed). */
   LUNORA_ADMIN_TOKEN?: string;
   /**
@@ -32,6 +34,12 @@ export type LunoraEnv = AuthEnv & {
   LUNORA_TRUSTED_ORIGINS?: string;
   /** Same comma-list as `.dev.vars.example` for Better Auth CSRF (optional). */
   BETTER_AUTH_TRUSTED_ORIGINS?: string;
+  /** Optional AI Gateway (Cloudflare account id) — see `@lunora/ai` resolveAiGateway. */
+  LUNORA_AI_GATEWAY_ACCOUNT_ID?: string;
+  /** Optional AI Gateway id/slug. */
+  LUNORA_AI_GATEWAY_ID?: string;
+  /** Optional AI Gateway auth token (authenticated gateways only). */
+  LUNORA_AI_GATEWAY_TOKEN?: string;
 };
 
 /**

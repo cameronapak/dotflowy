@@ -135,6 +135,12 @@
       "simple": { "limit": 10, "period": 60 },
     },
   ],
+  // Workers AI for the inline `@agent` tool loop (ADR 0059). `ctx.ai` reads
+  // `env.AI`; optional AI Gateway coords are `LUNORA_AI_GATEWAY_*` secrets/vars
+  // (see `.dev.vars.example`) — unset = direct Workers AI.
+  "ai": {
+    "binding": "AI",
+  },
   "observability": {
     "logs": {
       "enabled": true,

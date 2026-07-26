@@ -1402,24 +1402,27 @@ export const commitAgentAnswer = defineMutator({
       inserts: appendSummary.inserts.map((n) => ({ ...n, origin: "agent" })),
     });
 
-    const appendDetail = planAppendChild(index, {
-      id: args.detailId,
-      userId: args.userId,
-      parentId: args.summaryId,
-      text: args.detailText,
-      createdAt: args.updatedAt,
-      updatedAt: args.updatedAt,
-    });
-    if (appendDetail) {
-      absorb({
-        deletes: appendDetail.deletes,
-        patches: appendDetail.patches,
-        inserts: appendDetail.inserts.map((n) => ({
-          ...n,
-          origin: "agent",
-          collapsed: true,
-        })),
+    // Skip empty detail so a one-line answer is summary-only (ADR 0059).
+    if (args.detailText.trim()) {
+      const appendDetail = planAppendChild(index, {
+        id: args.detailId,
+        userId: args.userId,
+        parentId: args.summaryId,
+        text: args.detailText,
+        createdAt: args.updatedAt,
+        updatedAt: args.updatedAt,
       });
+      if (appendDetail) {
+        absorb({
+          deletes: appendDetail.deletes,
+          patches: appendDetail.patches,
+          inserts: appendDetail.inserts.map((n) => ({
+            ...n,
+            origin: "agent",
+            collapsed: true,
+          })),
+        });
+      }
     }
 
     await commitPlan(mctx, combined);
