@@ -3,13 +3,7 @@
 
 import { Effect } from "effect";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/plugins/kit";
@@ -24,44 +18,10 @@ import {
   monthLabel,
   shiftMonthKey,
 } from "../../data/date-links";
-import { getTreeIndex, subscribeTree } from "../../data/tree-store";
-import { getMappedId, subscribeDailyIndex } from "./daily-index";
+import { useDaysWithContent } from "./days-with-content";
 import { goToDate } from "./get-or-create";
 
 const WEEKDAY_INITIALS = ["M", "T", "W", "T", "F", "S", "S"];
-const EMPTY_KEYSET: ReadonlySet<string> = new Set();
-
-function subscribeContentSources(cb: () => void): () => void {
-  const untree = subscribeTree(cb);
-  const undaily = subscribeDailyIndex(cb);
-  return () => {
-    untree();
-    undaily();
-  };
-}
-
-/** Day keys that have a mapped node with children (week-strip content-dot rule). */
-function useDaysWithContent(dayKeys: string[]): ReadonlySet<string> {
-  const cacheRef = useRef<{ sig: string; set: Set<string> } | null>(null);
-  const getSnapshot = useCallback(() => {
-    const index = getTreeIndex();
-    const present: string[] = [];
-    for (const key of dayKeys) {
-      const id = getMappedId(key);
-      if (id && (index.childrenByParent.get(id)?.length ?? 0) > 0)
-        present.push(key);
-    }
-    const sig = present.join(",");
-    if (!cacheRef.current || cacheRef.current.sig !== sig)
-      cacheRef.current = { sig, set: new Set(present) };
-    return cacheRef.current.set;
-  }, [dayKeys]);
-  return useSyncExternalStore(
-    subscribeContentSources,
-    getSnapshot,
-    () => EMPTY_KEYSET,
-  );
-}
 
 export function MonthPickerButton({
   monthKey,

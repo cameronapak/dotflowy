@@ -42,6 +42,7 @@ import {
   parseDateLink,
   scaffoldKeyKind,
   weekLabel,
+  weekdaySearchStems,
   yearLabel,
 } from "../../data/date-links";
 import { isMirrorsEnabled } from "../../data/flags";
@@ -52,7 +53,7 @@ import {
   moveManyNodes,
 } from "../../data/mutations";
 import { isNodesLimitError } from "../../data/nodes-client-effect";
-import { parseGoToDateQuery } from "../../data/parse-go-to-date";
+import { parseGoToDateTargets } from "../../data/parse-go-to-date";
 import { runStructural } from "../../data/structural";
 import { buildTreeIndex } from "../../data/tree";
 import {
@@ -75,6 +76,7 @@ import { DateLinkChip } from "./date-chip";
 import {
   getOrCreateDay,
   getOrCreateDayResult,
+  getOrCreateScaffold,
   goToDate,
 } from "./get-or-create";
 import { useDailyNavigationPending } from "./pending";
@@ -510,7 +512,9 @@ export default definePlugin({
       case "day":
         // ISO key so Cmd+K "2031-08-12" finds an existing day after go-to-date
         // suppress (ADR 0055) — Fuse alone won't match the full weekday title.
-        return [formatDayBadge(key), key];
+        // Weekday stems (`thu`…`thursday`) so virtual go-to stays suppressed
+        // when the mapped day exists (ADR 0057).
+        return [formatDayBadge(key), key, ...weekdaySearchStems(key)];
       case "week": {
         const relative = formatWeekRelative(key);
         return relative ? [relative, weekLabel(key)] : [weekLabel(key)];
@@ -561,30 +565,48 @@ export default definePlugin({
     },
   }),
 
-  // Seam J: VIRTUAL go-to-date row when the queried day does NOT exist yet
-  // (when it does, Fuse + searchAliases surface the real node -- no dup).
-  // NL via chrono (ADR 0055); today stays write-intent seed (ADR 0041).
+  // Seam J: VIRTUAL go-to-date row(s) when the queried day/scaffold does NOT
+  // exist yet (when it does, Fuse + searchAliases surface the real node -- no
+  // dup). NL via chrono + owned weekdays + period catalog (ADR 0055 / 0057);
+  // today stays write-intent seed (ADR 0041). Period phrases navigate the ISO
+  // scaffold (scaffold-only mint — no forced day child).
   searchActions: (query, ctx) => {
-    const hit = parseGoToDateQuery(query);
-    if (!hit) return [];
-    const existing = getMappedId(hit.key);
-    if (existing && ctx.index.byId.has(existing)) return [];
-    const isToday = hit.key === localDateKey();
-    return [
-      {
-        key: `daily-go-date-${hit.key}`,
-        label: hit.label,
-        hint: isToday
-          ? "Creates today's daily note"
-          : "Creates this daily note",
-        icon: CalendarDaysIcon,
-        run: () =>
-          void getOrCreateDay(hit.key, { seedEntryLine: isToday })
-            .then((id) => {
-              if (id) ctx.goTo(id, isToday ? { focus: "last" } : undefined);
-            })
-            .catch(() => toast.error("Couldn't open that daily note")),
-      },
-    ];
+    const hits = parseGoToDateTargets(query);
+    if (hits.length === 0) return [];
+    return hits.flatMap((hit) => {
+      const existing = getMappedId(hit.key);
+      if (existing && ctx.index.byId.has(existing)) return [];
+      const isScaffold = hit.kind !== "day";
+      const isToday = !isScaffold && hit.key === localDateKey();
+      return [
+        {
+          key: `daily-go-date-${hit.key}`,
+          label: hit.label,
+          hint: isScaffold
+            ? "Creates this calendar page"
+            : isToday
+              ? "Creates today's daily note"
+              : "Creates this daily note",
+          icon: CalendarDaysIcon,
+          run: () => {
+            if (isScaffold) {
+              void getOrCreateScaffold(hit.key, {
+                failureToast: "Couldn't open that calendar page",
+              })
+                .then((id) => {
+                  if (id) ctx.goTo(id);
+                })
+                .catch(() => toast.error("Couldn't open that calendar page"));
+              return;
+            }
+            void getOrCreateDay(hit.key, { seedEntryLine: isToday })
+              .then((id) => {
+                if (id) ctx.goTo(id, isToday ? { focus: "last" } : undefined);
+              })
+              .catch(() => toast.error("Couldn't open that daily note"));
+          },
+        },
+      ];
+    });
   },
 });

@@ -90,9 +90,10 @@ export function addDays(key: string, days: number): string {
 }
 
 /**
- * The chip/badge-language label for a key: Today / Yesterday / Tomorrow, else a
- * short date ("Jul 8"). Speaks the same language as the daily badge
- * (`formatDayBadge`) so a date chip and a day note's badge can't disagree.
+ * Day-note **badge** language: Today / Yesterday / Tomorrow, else a short date
+ * ("Jul 8"). Kept for Seam-F badges (`formatDayBadge`). Date chips and search
+ * flatten use {@link formatDateChipLabel} instead (ADR 0057) — "Yesterday" is
+ * badge-only; chips say "one day ago".
  */
 export function formatDateLabel(key: string, today = localDateKey()): string {
   const d = parseDateKey(key);
@@ -103,6 +104,49 @@ export function formatDateLabel(key: string, today = localDateKey()): string {
     if (diff === 0) return "Today";
     if (diff === -1) return "Yesterday";
     if (diff === 1) return "Tomorrow";
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+const CHIP_DAY_WORDS = [
+  "",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+] as const;
+
+/**
+ * Date-chip + search-flatten voice (ADR 0057): Today / Tomorrow; past
+ * `one day ago`…`six days ago` (never "Yesterday"); future `in two days`…`in
+ * six days`; beyond ±6 a short absolute (`Jul 30`, year when other-year).
+ * Hover titles stay {@link formatDateFull}. Badges keep {@link formatDateLabel}.
+ */
+export function formatDateChipLabel(
+  key: string,
+  today = localDateKey(),
+): string {
+  const d = parseDateKey(key);
+  if (!d) return key;
+  const t = parseDateKey(today);
+  if (t) {
+    const diff = Math.round((d.getTime() - t.getTime()) / 86_400_000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Tomorrow";
+    if (diff >= 2 && diff <= 6) return `in ${CHIP_DAY_WORDS[diff]} days`;
+    if (diff === -1) return "one day ago";
+    if (diff >= -6 && diff <= -2) {
+      return `${CHIP_DAY_WORDS[-diff]} days ago`;
+    }
+    if (d.getFullYear() !== t.getFullYear()) {
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
   }
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -121,19 +165,131 @@ export function formatDateFull(key: string): string {
 }
 
 /**
- * Flatten every date token in `text` to its display label ("Today", "Jul 8
- * 14:00") -- the search/display projection (wired into `flattenInline`), so a
- * Cmd+K row or breadcrumb never reads a raw `[[2026-07-08]]`. A shape-matched
- * but non-calendar token stays literal (it renders literal too).
+ * Flatten every date token in `text` to its chip-voice label (ADR 0057) -- the
+ * search/display projection (wired into `flattenInline`), so a Cmd+K row or
+ * breadcrumb never reads a raw `[[2026-07-08]]`. A shape-matched but
+ * non-calendar token stays literal (it renders literal too).
  */
 export function flattenDateLinks(text: string, today = localDateKey()): string {
   if (!text.includes("[[")) return text;
   return text.replace(DATE_LINK_REGEX, (tok) => {
     const parsed = parseDateLink(tok);
     if (!parsed) return tok;
-    const label = formatDateLabel(parsed.key, today);
+    const label = formatDateChipLabel(parsed.key, today);
     return parsed.time ? `${label} ${parsed.time}` : label;
   });
+}
+
+/** English weekday names, Sunday-first (matches `Date#getDay`). */
+export const WEEKDAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+/** Fuse stems for a day key's weekday (`thu`…`thursday`) — ≥3-char prefixes of
+ *  the English name so Cmd+K finds an existing day without the virtual row
+ *  (ADR 0057). Empty on a malformed key. */
+export function weekdaySearchStems(key: string): string[] {
+  const d = parseDateKey(key);
+  if (!d) return [];
+  const name = WEEKDAY_NAMES[d.getDay()]!;
+  const stems: string[] = [];
+  for (let i = 3; i <= name.length; i++) stems.push(name.slice(0, i));
+  return stems;
+}
+
+export type PeriodUnit = "week" | "month" | "year";
+export type PeriodQualifier = "next" | "last";
+
+/** Dual-resolve target for `next|last` × `week|month|year` (ADR 0057): Cmd+K
+ *  navigates the ISO scaffold key; `[[` inserts the period-start day chip
+ *  (Monday / 1st / Jan 1). Computed from ISO helpers — not chrono's mid-week
+ *  "next week" day. */
+export type PeriodResolve = {
+  scaffoldKey: string;
+  scaffoldKind: PeriodUnit;
+  /** Monday of that ISO week / 1st of that month / Jan 1 of that year. */
+  periodStartDay: string;
+};
+
+/**
+ * Resolve `next|last` × `week|month|year` relative to `today` via ISO scaffold
+ * math. Null only when `today` isn't a valid day key.
+ */
+export function resolvePeriod(
+  qualifier: PeriodQualifier,
+  unit: PeriodUnit,
+  today: string,
+): PeriodResolve | null {
+  if (!isValidDateKey(today)) return null;
+  const delta = qualifier === "next" ? 1 : -1;
+  if (unit === "week") {
+    const thisWeek = dayKeyToWeekKey(today);
+    if (!thisWeek) return null;
+    const scaffoldKey = shiftWeekKey(thisWeek, delta);
+    if (!scaffoldKey) return null;
+    const range = weekKeyToDayRange(scaffoldKey);
+    if (!range) return null;
+    return {
+      scaffoldKey,
+      scaffoldKind: "week",
+      periodStartDay: range.monday,
+    };
+  }
+  if (unit === "month") {
+    const thisMonth = today.slice(0, 7);
+    const scaffoldKey = shiftMonthKey(thisMonth, delta);
+    if (!scaffoldKey) return null;
+    return {
+      scaffoldKey,
+      scaffoldKind: "month",
+      periodStartDay: `${scaffoldKey}-01`,
+    };
+  }
+  const y = Number(today.slice(0, 4));
+  const scaffoldKey = String(y + delta);
+  return {
+    scaffoldKey,
+    scaffoldKind: "year",
+    periodStartDay: `${scaffoldKey}-01-01`,
+  };
+}
+
+/**
+ * Upcoming / next / last weekday from a ≥3-char English stem (ADR 0057). Bare
+ * → upcoming (today if it matches); `next` → strictly next week when today is
+ * that weekday; `last` → previous. Null when the stem isn't a weekday prefix.
+ */
+export function resolveWeekdayStem(
+  stem: string,
+  qualifier: PeriodQualifier | null,
+  today: string,
+): string | null {
+  if (stem.length < 3 || !isValidDateKey(today)) return null;
+  const lower = stem.toLowerCase();
+  const name = WEEKDAY_NAMES.find((d) => d.startsWith(lower));
+  if (!name) return null;
+  const targetDow = WEEKDAY_NAMES.indexOf(name);
+  const d = parseDateKey(today);
+  if (!d) return null;
+  const todayDow = d.getDay();
+  if (qualifier === "last") {
+    let delta = (todayDow - targetDow + 7) % 7;
+    if (delta === 0) delta = 7;
+    return addDays(today, -delta);
+  }
+  if (qualifier === "next") {
+    let delta = (targetDow - todayDow + 7) % 7;
+    if (delta === 0) delta = 7;
+    return addDays(today, delta);
+  }
+  // Bare upcoming — today counts.
+  return addDays(today, (targetDow - todayDow + 7) % 7);
 }
 
 const EMPTY_KEYS: string[] = [];

@@ -19,14 +19,7 @@ import { useParams } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import {
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -44,62 +37,13 @@ import {
   weekKeyToMonthKey,
   weekKeyWeekNumber,
 } from "../../data/date-links";
-import { getTreeIndex, subscribeTree } from "../../data/tree-store";
-import {
-  getMappedId,
-  subscribeDailyIndex,
-  useScaffoldKey,
-} from "./daily-index";
+import { useScaffoldKey } from "./daily-index";
+import { useDaysWithContent } from "./days-with-content";
 import { goToDate } from "./get-or-create";
 import { MonthPickerButton } from "./month-picker";
 
 // Weekday initials, Monday-first (matches weekKeyToDays' Mon..Sun order).
 const WEEKDAY_INITIALS = ["M", "T", "W", "T", "F", "S", "S"];
-
-const EMPTY_KEYSET: ReadonlySet<string> = new Set();
-
-/** The content-dot sources: the tree store (a day node's children) AND the daily
- *  index (its `key -> nodeId` mapping). Both must be reactive so a dot lights the
- *  moment content lands or a day is minted. Module-level, so it's a stable
- *  `useSyncExternalStore` subscribe. */
-function subscribeContentSources(cb: () => void): () => void {
-  const untree = subscribeTree(cb);
-  const undaily = subscribeDailyIndex(cb);
-  return () => {
-    untree();
-    undaily();
-  };
-}
-
-/**
- * The subset of `dayKeys` that have a dot: the day key maps to a node AND that
- * node has at least one child ("you wrote something here" -- ADR 0054, decision
- * 6; existence alone would light every seed-free peek). Caches on a stable string
- * signature so the returned Set keeps its identity until the dotted set actually
- * changes, as `useSyncExternalStore` requires. `dayKeys` must be referentially
- * stable across renders (the caller memoizes it on the visible week).
- */
-function useDaysWithContent(dayKeys: string[]): ReadonlySet<string> {
-  const cacheRef = useRef<{ sig: string; set: Set<string> } | null>(null);
-  const getSnapshot = useCallback(() => {
-    const index = getTreeIndex();
-    const present: string[] = [];
-    for (const key of dayKeys) {
-      const id = getMappedId(key);
-      if (id && (index.childrenByParent.get(id)?.length ?? 0) > 0)
-        present.push(key);
-    }
-    const sig = present.join(",");
-    if (!cacheRef.current || cacheRef.current.sig !== sig)
-      cacheRef.current = { sig, set: new Set(present) };
-    return cacheRef.current.set;
-  }, [dayKeys]);
-  return useSyncExternalStore(
-    subscribeContentSources,
-    getSnapshot,
-    () => EMPTY_KEYSET,
-  );
-}
 
 /** The ISO week-number badge for a week key: `2026-W29` -> `W29` (no leading
  *  zero). Display-only string formatting; the week number itself is ISO truth

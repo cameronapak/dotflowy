@@ -1,9 +1,9 @@
 // The date-link chip, as REAL TSX (ADR 0006 -- Seam A's React mode), mounted
-// inside a `<dotflowy-widget>` atom (ADR 0038). It speaks the daily BADGE
-// language -- Today with a sun icon / Yesterday / Tomorrow / "Jul 8" -- so a
-// `[[2026-07-08]]` chip and that day note's own badge can't disagree; the
-// absolute date lives in the hover `title`, and an optional `HH:MM` time
-// trails the label (display + round-trip only, never identity).
+// inside a `<dotflowy-widget>` atom (ADR 0038). Chip voice (ADR 0057): Today /
+// Tomorrow / "one day ago"… / "in two days"… / "Jul 8" — day-note badges keep
+// Today/Yesterday/Tomorrow via `formatDayBadge`. The absolute date lives in
+// the hover `title`, and an optional `HH:MM` time trails the label (display +
+// round-trip only, never identity).
 //
 // Purely presentational, computed from the token's key alone: it must NOT
 // touch the daily index (no lookup, no get-or-create) -- 2,683 imported chips
@@ -19,8 +19,8 @@ import { Badge } from "@/plugins/kit";
 import type { WidgetProps } from "../types";
 
 import {
+  formatDateChipLabel,
   formatDateFull,
-  formatDateLabel,
   localDateKey,
   parseDateLink,
 } from "../../data/date-links";
@@ -32,6 +32,7 @@ export function DateLinkChip({ source }: WidgetProps) {
   if (!parsed) return <span>{source}</span>;
   const { key, time } = parsed;
   const isToday = key === localDateKey();
+  const label = formatDateChipLabel(key);
   return (
     <Badge
       variant={isToday ? "default" : "secondary"}
@@ -43,7 +44,7 @@ export function DateLinkChip({ source }: WidgetProps) {
       data-daily-today={isToday ? "" : undefined}
     >
       {isToday && <SunIcon className="shrink-0" aria-hidden="true" />}
-      {time ? `${formatDateLabel(key)} ${time}` : formatDateLabel(key)}
+      {time ? `${label} ${time}` : label}
     </Badge>
   );
 }

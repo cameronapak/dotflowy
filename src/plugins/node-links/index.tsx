@@ -20,9 +20,8 @@ import {
   NODE_LINK_PATTERN,
 } from "../../data/node-links";
 import { pickerDateSuggestions } from "../../data/parse-go-to-date";
-// Picker dedupe (ADR 0055): suppress the mapped day uuid row when a date
-// suggestion wins. daily-index is the side-collection owner; a seam for one
-// getMappedId call would be speculative.
+// Bounded exemption (ADR 0038/0057): suppress the mapped day uuid row when a
+// date suggestion wins. Identity lookup only — not get-or-create; not a seam.
 import { getMappedId } from "../daily/daily-index";
 import { definePlugin, type MenuTrigger, type WidgetEl } from "../types";
 import { NodeLinkChip } from "./chip";

@@ -20,8 +20,11 @@ import { setRestoreProgress } from "../../components/history-restore";
 import { nodesCollection, resyncNodes } from "../../data/collection";
 import {
   dayKeyToScaffoldChain,
+  monthKeyToYearKey,
   parentScaffoldKey,
+  scaffoldKeyKind,
   scaffoldLabel,
+  weekKeyToMonthKey,
 } from "../../data/date-links";
 import { RESTORE_SLICE_OPS, capture } from "../../data/history";
 import {
@@ -134,7 +137,8 @@ function healExistingDay(
  *  and quick-add's Seam-L rejection can rethrow the REAL NodesLimitError.
  *  Contained to this module; {@link getOrCreateDay} translates it back to
  *  `string | null` for external callers. */
-type NewDayResult = { id: string } | { id: null; cause: unknown };
+/** Shared success/failure shape for day + scaffold-only mint (same map type). */
+type GetOrCreateResult = { id: string } | { id: null; cause: unknown };
 
 /**
  * Materialize a genuinely NEW day and whichever calendar levels above it are
@@ -153,7 +157,7 @@ async function materializeNewDay(
   day: { id: string; won: boolean; present: boolean },
   key: string,
   seedEntryLine: boolean,
-): Promise<NewDayResult> {
+): Promise<GetOrCreateResult> {
   // The day is absent -> derive + claim its Y/M/W chain (concurrently). A
   // non-calendar key (defensive) lands the day directly under the container.
   const chain = dayKeyToScaffoldChain(key);
@@ -421,20 +425,20 @@ async function runDailyMigration(
  *  `withDailyNavigation` is a counter, not a mutex). A same-key second caller
  *  JOINS the entry here instead of re-running the fast path. Only the CREATE
  *  path registers, so an already-durable day never touches this map. The map
- *  caches the RAW {@link NewDayResult} -- never a toast-translated chain -- so
+ *  caches the RAW {@link GetOrCreateResult} -- never a toast-translated chain -- so
  *  every joiner evaluates its OWN toast/rejection decision on the shared result
  *  (a baked-in side effect would inherit the ORIGINATOR's copy/suppression). */
-const inFlightDays = new Map<string, Promise<NewDayResult>>();
+const inFlightDays = new Map<string, Promise<GetOrCreateResult>>();
 
 /** The shared get-or-create body: readiness + claims + migration + heal-or-
- *  create, single-flighted per key. Returns the RAW {@link NewDayResult} and
+ *  create, single-flighted per key. Returns the RAW {@link GetOrCreateResult} and
  *  performs NO toasting -- callers ({@link getOrCreateDay}, the Seam-L
  *  `captureDestination.resolve`) each translate per their own surface. */
 export async function getOrCreateDayResult(
   key: string,
   opts?: { seedEntryLine?: boolean; trackNavigation?: boolean },
-): Promise<NewDayResult> {
-  const run = async (): Promise<NewDayResult> => {
+): Promise<GetOrCreateResult> {
+  const run = async (): Promise<GetOrCreateResult> => {
     // Single-flight join, checked FIRST (F1): while a same-key create is in
     // flight, the claims + `day.present` fast path below read the creator's
     // OPTIMISTIC rows (the claim already set the mapping, the batch already
@@ -532,4 +536,122 @@ export async function goToDate(
   if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
   if (opts?.morph === false) ctx.nav.open(dayId);
   else ctx.nav.zoom(dayId);
+}
+
+// --- scaffold-only mint (ADR 0057): Cmd+K → week/month/year without a day ----
+
+const inFlightScaffolds = new Map<string, Promise<GetOrCreateResult>>();
+
+/**
+ * Mint the Daily > Y > M > W chain up to `key` (year / month / week) WITHOUT
+ * creating a day child. Used when Cmd+K navigates a period scaffold that does
+ * not exist yet. Returns null for non-scaffold keys (callers must not pass a
+ * day — use {@link getOrCreateDay}).
+ */
+export async function getOrCreateScaffold(
+  key: string,
+  opts?: {
+    trackNavigation?: boolean;
+    failureToast?: string;
+  },
+): Promise<string | null> {
+  const kind = scaffoldKeyKind(key);
+  if (kind !== "year" && kind !== "month" && kind !== "week") return null;
+
+  const run = async (): Promise<GetOrCreateResult> => {
+    const joined = inFlightScaffolds.get(key);
+    if (joined) return joined;
+    await refreshDailyIndex();
+
+    const existing = getMappedId(key);
+    if (existing && hasNode(existing)) return { id: existing };
+
+    // Derive parent keys (week → month → year).
+    let monthKey: string | null = null;
+    let yearKey: string | null = null;
+    if (kind === "week") {
+      monthKey = weekKeyToMonthKey(key);
+      yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
+    } else if (kind === "month") {
+      monthKey = key;
+      yearKey = monthKeyToYearKey(key);
+    } else {
+      yearKey = key;
+    }
+    if (!yearKey) return { id: null, cause: null };
+
+    const [container, year, month, week] = await Promise.all([
+      claimScaffoldNode(CONTAINER_KEY),
+      claimScaffoldNode(yearKey),
+      monthKey ? claimScaffoldNode(monthKey) : Promise.resolve(null),
+      kind === "week" ? claimScaffoldNode(key) : Promise.resolve(null),
+    ]);
+
+    await ensureDailyMigrated(container.id);
+
+    const target = kind === "week" ? week : kind === "month" ? month : year;
+    if (!target) return { id: null, cause: null };
+    if (target.present) return { id: target.id };
+
+    const inFlight = inFlightScaffolds.get(key);
+    if (inFlight) return inFlight;
+
+    const creating = (async (): Promise<GetOrCreateResult> => {
+      const claimed = [container, year, month, week].filter(
+        (c): c is { id: string; won: boolean; present: boolean } => c != null,
+      );
+      if (claimed.some((c) => !c.won && !c.present)) resyncNodes();
+
+      const { persisted } = runStructuralTracked(() => {
+        if (!hasNode(container.id)) {
+          const tops = childrenOf(
+            buildTreeIndex(nodesCollection.toArray),
+            null,
+          );
+          const after = tops.length ? tops[tops.length - 1]!.id : null;
+          appendChild(null, after, DAILY_CONTAINER_TEXT, container.id);
+        }
+        if (!hasNode(year.id))
+          insertScaffoldNode(
+            container.id,
+            yearKey,
+            scaffoldLabel(yearKey),
+            year.id,
+          );
+        if (monthKey && month && !hasNode(month.id))
+          insertScaffoldNode(
+            year.id,
+            monthKey,
+            scaffoldLabel(monthKey),
+            month.id,
+          );
+        if (kind === "week" && week && monthKey && month && !hasNode(week.id))
+          insertScaffoldNode(month.id, key, scaffoldLabel(key), week.id);
+      });
+      try {
+        await persisted;
+      } catch (err) {
+        return { id: null, cause: err };
+      }
+      if (hasNode(target.id)) return { id: target.id };
+      resyncNodes();
+      return { id: null, cause: null };
+    })();
+
+    inFlightScaffolds.set(key, creating);
+    void creating.finally(() => {
+      if (inFlightScaffolds.get(key) === creating)
+        inFlightScaffolds.delete(key);
+    });
+    return creating;
+  };
+
+  const result =
+    opts?.trackNavigation === false
+      ? await run()
+      : await withDailyNavigation(run);
+  if (result.id !== null) return result.id;
+  if (!isNodesLimitError(result.cause))
+    toast.error(opts?.failureToast ?? "Couldn't open that calendar page");
+  return null;
 }

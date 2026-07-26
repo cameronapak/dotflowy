@@ -69,7 +69,7 @@ async function caretAtEnd(page: Page, id: string) {
 }
 
 test.describe("date token (ADR 0038)", () => {
-  test("renders as a badge-language chip in the row; near-misses stay literal; no minting at render", async ({
+  test("renders as a chip-voice chip in the row; near-misses stay literal; no minting at render", async ({
     page,
   }) => {
     await load(page);
@@ -222,6 +222,17 @@ test.describe("date token (ADR 0038)", () => {
     await expect(
       bare.getByRole("option", { name: /\d{4}-\d{2}-\d{2}/ }),
     ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    // Weekday phrase: date row appears (ADR 0057); bare month stayed blocked above.
+    await text(page, "blank").click();
+    await page.keyboard.press("Meta+A");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("[[Thursday");
+    const weekdayBox = page.locator('[role="listbox"]');
+    await expect(
+      weekdayBox.getByRole("option", { name: /\d{4}-\d{2}-\d{2}/ }),
+    ).toBeVisible();
   });
 
   test("zoomed day unifies date-mention backlinks with node-link referrers", async ({

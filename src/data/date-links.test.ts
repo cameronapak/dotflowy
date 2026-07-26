@@ -9,7 +9,10 @@ import {
   dayKeyToScaffoldChain,
   dayKeyToWeekKey,
   flattenDateLinks,
+  formatDateChipLabel,
   formatDateLabel,
+  resolveWeekdayStem,
+  weekdaySearchStems,
   isValidDateKey,
   localDateKey,
   monthKeyToCalendarGrid,
@@ -131,15 +134,57 @@ describe("formatDateLabel", () => {
   });
 });
 
+describe("formatDateChipLabel", () => {
+  const today = "2026-07-08";
+
+  test("Today / Tomorrow; past one…six days ago; future in two…six days", () => {
+    expect(formatDateChipLabel("2026-07-08", today)).toBe("Today");
+    expect(formatDateChipLabel("2026-07-09", today)).toBe("Tomorrow");
+    expect(formatDateChipLabel("2026-07-07", today)).toBe("one day ago");
+    expect(formatDateChipLabel("2026-07-06", today)).toBe("two days ago");
+    expect(formatDateChipLabel("2026-07-02", today)).toBe("six days ago");
+    expect(formatDateChipLabel("2026-07-10", today)).toBe("in two days");
+    expect(formatDateChipLabel("2026-07-14", today)).toBe("in six days");
+  });
+
+  test("beyond ±6 uses short absolute; other year includes year", () => {
+    expect(formatDateChipLabel("2026-07-01", today)).toMatch(/Jul/);
+    expect(formatDateChipLabel("2026-07-01", today)).not.toMatch(/2026/);
+    expect(formatDateChipLabel("2025-07-01", today)).toMatch(/2025/);
+  });
+});
+
+describe("resolveWeekdayStem / weekdaySearchStems", () => {
+  const today = "2026-07-25"; // Saturday
+
+  test("≥3-char stems resolve; next/last qualifiers", () => {
+    expect(resolveWeekdayStem("thu", null, today)).toBe("2026-07-30");
+    expect(resolveWeekdayStem("thursd", null, today)).toBe("2026-07-30");
+    expect(resolveWeekdayStem("th", null, today)).toBeNull();
+    expect(resolveWeekdayStem("fri", "last", today)).toBe("2026-07-24");
+    expect(resolveWeekdayStem("friday", "next", today)).toBe("2026-07-31");
+  });
+
+  test("stems for Fuse aliases cover thu…thursday", () => {
+    const stems = weekdaySearchStems("2026-07-30"); // Thursday
+    expect(stems[0]).toBe("thu");
+    expect(stems.at(-1)).toBe("thursday");
+    expect(stems).toContain("thurs");
+  });
+});
+
 describe("flattenDateLinks", () => {
   const today = "2026-07-08";
 
-  test("replaces tokens with their display label, time after the label", () => {
+  test("replaces tokens with chip-voice label, time after the label", () => {
     expect(flattenDateLinks("due [[2026-07-08]] sharp", today)).toBe(
       "due Today sharp",
     );
     expect(flattenDateLinks("standup [[2026-07-09 09:30]]", today)).toBe(
       "standup Tomorrow 09:30",
+    );
+    expect(flattenDateLinks("was [[2026-07-07]]", today)).toBe(
+      "was one day ago",
     );
   });
 
