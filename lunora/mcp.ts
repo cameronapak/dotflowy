@@ -47,15 +47,15 @@ function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {
 
 async function commitPlan(ctx: MutationCtx, plan: OutlinePlan): Promise<void> {
   for (const id of plan.deletes) {
-    // expectedTable avoids cross-table UNION ALL id lookup (Workerd SQLite
-    // compound-SELECT limit — same footgun as lunora/mutators.ts).
-    await ctx.db.delete(ctx.db.asId("nodes", id), "nodes");
+    // asId scopes the delete to `nodes` (avoids cross-table UNION ALL lookup —
+    // Workerd SQLite compound-SELECT limit). MutationCtx's typed delete/patch
+    // take no expectedTable arg; mutators pass it because MutatorCtx is looser.
+    await ctx.db.delete(ctx.db.asId("nodes", id));
   }
   for (const patch of plan.patches) {
     await ctx.db.patch(
       ctx.db.asId("nodes", patch.id),
       patch.fields as Record<string, unknown>,
-      "nodes",
     );
   }
   for (const node of plan.inserts) {
@@ -132,14 +132,10 @@ export const claimDailyMapping = internalMutation
       existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
     const { winner, won } = resolveDailyClaim(current, args.nodeId);
     if (existing) {
-      await ctx.db.patch(
-        ctx.db.asId("dailyIndex", existing._id),
-        {
-          nodeId: winner,
-          touchedAt: args.touchedAt,
-        },
-        "dailyIndex",
-      );
+      await ctx.db.patch(ctx.db.asId("dailyIndex", existing._id), {
+        nodeId: winner,
+        touchedAt: args.touchedAt,
+      });
     } else {
       await ctx.db.insert("dailyIndex", {
         key: args.key,
