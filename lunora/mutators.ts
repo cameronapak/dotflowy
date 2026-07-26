@@ -7,7 +7,6 @@ import {
   docToNode,
   nodeToInsertFields,
   planAppendChild,
-  planImportNodes,
   planIndent,
   planIndentMany,
   planInsertChildAtStart,
@@ -550,9 +549,12 @@ export const restoreNodes = defineMutator({
 });
 
 /**
- * OPML / bulk insert-only batch. Chains pre-wired by the pure planner.
- * Large imports may call this multiple times (clientSeq FIFO); a mid-import
- * failure can leave earlier chunks durable — see HANDOFF.
+ * OPML / classic→Lunora migrate batch. New ids insert; existing ids patch
+ * **structure only** (`parentId` / `prevSiblingId`) so a force remigrate can
+ * reattach orphaned Daily days from classic without clobbering Lunora-era
+ * text / task / bookmark field edits. Large imports may call this multiple
+ * times (clientSeq FIFO); a mid-import failure can leave earlier chunks
+ * durable — see HANDOFF.
  */
 export const importNodes = defineMutator({
   args: {
@@ -563,14 +565,39 @@ export const importNodes = defineMutator({
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
     // Force shard owner — never trust a client-supplied snapshot userId.
-    const nodes: OutlineNode[] = args.nodes.map((n) => ({
-      ...n,
-      userId: args.userId,
-      kind: n.kind === "paragraph" ? "paragraph" : null,
-    }));
-    const plan = planImportNodes(nodes);
-    await commitPlan(mctx, plan);
-    return { count: nodes.length };
+    let inserted = 0;
+    let patched = 0;
+    for (const raw of args.nodes) {
+      const node: OutlineNode = {
+        ...raw,
+        userId: args.userId,
+        kind: raw.kind === "paragraph" ? "paragraph" : null,
+      };
+      const id = node.id as Id<"nodes">;
+      const existing = await mctx.db.get(id, "nodes");
+      if (existing) {
+        if (
+          existing.parentId !== node.parentId ||
+          existing.prevSiblingId !== node.prevSiblingId
+        ) {
+          await mctx.db.patch(
+            id,
+            {
+              parentId: node.parentId,
+              prevSiblingId: node.prevSiblingId,
+            },
+            "nodes",
+          );
+          patched++;
+        }
+      } else {
+        await mctx.db.insert("nodes", nodeToInsertFields(node), {
+          clientId: node.id,
+        });
+        inserted++;
+      }
+    }
+    return { count: args.nodes.length, inserted, patched };
   },
 });
 

@@ -152,6 +152,19 @@ export function inScaffoldScope(
   return false;
 }
 
+/** Mapped day whose parent link is broken — top-level, or `parentId` points at a
+ *  node that is no longer in the tree. These used to fall out of
+ *  {@link inScaffoldScope} (dangling parent → walk ends before the container)
+ *  so the calendar migration never reattached them after a partial cutover /
+ *  scaffold wipe left day nodes stranded. */
+export function isOrphanMappedDay(
+  index: TreeIndex,
+  day: { parentId?: string | null },
+): boolean {
+  if (day.parentId == null) return true;
+  return !index.byId.has(day.parentId);
+}
+
 export function planDailyMigration(
   index: TreeIndex,
   containerId: string,
@@ -168,18 +181,23 @@ export function planDailyMigration(
     if (scaffoldKeyKind(row.key) !== "day") continue;
     const node = index.byId.get(row.nodeId);
     if (!node) continue; // a mapping pointing at a node not in the tree
-    // In scope only when the day's WHOLE ancestor chain stays inside the Daily
-    // scaffold and reaches the container -- a day (or a whole scaffold subtree)
-    // the user relocated elsewhere is left alone (finding 1 + finding 5).
-    if (!inScaffoldScope(index, node, containerId, keyOf)) continue;
+    const orphan = isOrphanMappedDay(index, node);
+    // Orphans are always in scope (reattach). Otherwise only when the day's
+    // WHOLE ancestor chain stays inside the Daily scaffold and reaches the
+    // container -- a day (or a whole scaffold subtree) the user relocated
+    // elsewhere is left alone (finding 1 + finding 5).
+    if (!orphan && !inScaffoldScope(index, node, containerId, keyOf)) continue;
     const chain = dayKeyToScaffoldChain(row.key);
     if (!chain) continue;
     days.push({ nodeId: node.id, dayKey: row.key, weekKey: chain.weekKey });
     years.add(chain.yearKey);
     months.add(chain.monthKey);
     weeks.add(chain.weekKey);
-    // The legacy flat shape parents every day directly under the container.
-    if (node.parentId === containerId) needed = true;
+    // Heal when flat under the container, orphaned, or parked under the wrong
+    // week (already-nested under the correct week is the idempotent no-op).
+    const underCorrectWeek =
+      node.parentId != null && keyOf(node.parentId) === chain.weekKey;
+    if (!underCorrectWeek) needed = true;
   }
 
   days.sort((a, b) => compareScaffoldKeys(a.dayKey, b.dayKey));

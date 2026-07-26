@@ -5,6 +5,7 @@ import { buildTreeIndex, makeNode } from "../../data/tree";
 import {
   formatWeekRange,
   formatWeekRelative,
+  isOrphanMappedDay,
   planDailyMigration,
   sortedInsertAfterId,
   type ScaffoldSibling,
@@ -243,6 +244,59 @@ describe("planDailyMigration", () => {
     expect(plan.needed).toBe(true);
     // Both days are in scope; the already-nested one rides along as a no-op move.
     expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["flat", "nested"]);
+  });
+
+  test("orphan mapped day (dangling parent) is in scope and needed", () => {
+    // After a partial upgraded-sync cutover the day nodes can survive while their
+    // week parents are gone — parentId dangles. inScaffoldScope alone would skip
+    // them forever; orphans must reattach.
+    const nodes = [
+      makeNode({ id: "c", text: "Daily" }),
+      makeNode({ id: "d1", parentId: "deleted-week" }), // 2026-07-16
+      makeNode({ id: "d2", parentId: null }), // 2026-07-08, top-level stray
+    ];
+    const map = {
+      c: "container",
+      d1: "2026-07-16",
+      d2: "2026-07-08",
+    };
+    const index = buildTreeIndex(nodes);
+    expect(isOrphanMappedDay(index, nodes[1]!)).toBe(true);
+    expect(isOrphanMappedDay(index, nodes[2]!)).toBe(true);
+    const plan = planDailyMigration(index, "c", dayRows(map), keyOf(map));
+    expect(plan.needed).toBe(true);
+    expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["d1", "d2"]);
+    expect(plan.scaffoldKeys).toContain("2026-W28");
+    expect(plan.scaffoldKeys).toContain("2026-W29");
+  });
+
+  test("day under the wrong week is needed (reattach), correct week is not", () => {
+    const nodes = [
+      makeNode({ id: "c", text: "Daily" }),
+      makeNode({ id: "y", parentId: "c" }),
+      makeNode({ id: "m", parentId: "y" }),
+      makeNode({ id: "w29", parentId: "m" }),
+      makeNode({ id: "w28", parentId: "m" }),
+      makeNode({ id: "wrong", parentId: "w29" }), // belongs in W28
+      makeNode({ id: "right", parentId: "w29" }), // belongs in W29
+    ];
+    const map = {
+      c: "container",
+      y: "2026",
+      m: "2026-07",
+      w29: "2026-W29",
+      w28: "2026-W28",
+      wrong: "2026-07-08", // W28
+      right: "2026-07-16", // W29
+    };
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
+    expect(plan.needed).toBe(true);
+    expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["right", "wrong"]);
   });
 
   test("a day under a scaffold subtree relocated OUTSIDE Daily is left alone (finding 5)", () => {

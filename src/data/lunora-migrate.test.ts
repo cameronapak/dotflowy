@@ -275,7 +275,7 @@ describe("migrateClassicToLunora", () => {
     ]);
   });
 
-  test("forceRemigrateFromClassic clears both watermarks and imports missing nodes", async () => {
+  test("forceRemigrateFromClassic clears watermarks and syncs all classic nodes", async () => {
     const imports: ImportCall[] = [];
     installClassicFetch({
       nodes: [classicNode("a"), classicNode("b", "a")],
@@ -297,8 +297,9 @@ describe("migrateClassicToLunora", () => {
 
     expect(result.status).toBe("migrated");
     if (result.status !== "migrated") return;
-    expect(result.nodes).toBe(1); // missing b
-    expect(imports.some((i) => i.kind === "nodes")).toBe(true);
+    // Structure sync sends every classic row (a + b), not only missing b.
+    expect(result.nodes).toBe(2);
+    expect(imports.some((i) => i.kind === "nodes" && i.count === 2)).toBe(true);
   });
 
   test("malformed KV 200 → failed migrate, no kvAt stamp", async () => {

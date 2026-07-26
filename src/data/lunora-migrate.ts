@@ -3,7 +3,8 @@
  *
  * Completeness is tracked in Lunora `migrateState` (`nodesAt` / `kvAt`).
  * `nodesAt` is stamped only after the classic node snapshot is fully
- * imported (missing-id chunks when Lunora already has a partial set).
+ * imported (missing-id chunks when Lunora already has a partial set;
+ * `__dotflowyForceLunoraRemigrate` also re-wires structure on existing ids).
  * Nodes alone never skip KV — a partial migrate (nodes landed, daily-index
  * missing) heals on the next flag-ON / `__dotflowyMigrateToLunora` pass.
  *
@@ -214,7 +215,7 @@ async function importKv(
   return result.imported;
 }
 
-/** Classic ids not yet on the Lunora shard — importNodes is insert-only. */
+/** Classic ids not yet on the Lunora shard. */
 function missingClassicNodes(
   store: OutlineStore,
   classic: ClassicNode[],
@@ -228,14 +229,25 @@ function missingClassicNodes(
     .map((n) => asOutlineNode(n, userId));
 }
 
+export type MigrateOpts = {
+  /**
+   * Pass every classic node through `importNodes` (structure upsert for ids
+   * already on the shard). Used by {@link forceRemigrateFromClassic} so
+   * orphaned Daily parent links on Lunora are rewritten from classic.
+   * Default migrate stays missing-id-only so Lunora-era placement edits stick.
+   */
+  syncStructure?: boolean;
+};
+
 /**
  * Import classic DO outline (+ kv) into Lunora, healing incomplete node/KV
  * halves independently. Classic DO data is left untouched. Existing Lunora
- * rows are preserved (missing-id node import; KV upsert).
+ * rows are preserved (missing-id node import unless `syncStructure`; KV upsert).
  */
 export async function migrateClassicToLunora(
   store: OutlineStore,
   userId: string,
+  opts?: MigrateOpts,
 ): Promise<MigrateResult> {
   try {
     // Wait for side-collections so lunoraKvCount is accurate for mark-complete.
@@ -295,9 +307,12 @@ export async function migrateClassicToLunora(
         return { status: "migrated", nodes: 0, kv };
       }
       case "full": {
-        // importNodes is insert-only — skip ids already on the shard so a
-        // partial prior import can top up without clobbering Lunora-era edits.
-        const nodes = missingClassicNodes(store, classic, userId);
+        // Default: missing ids only (preserve Lunora-era placement). Force
+        // remigrate passes every classic row so importNodes can re-wire
+        // parentId/prevSiblingId on orphans without touching text fields.
+        const nodes = opts?.syncStructure
+          ? classic.map((n) => asOutlineNode(n, userId))
+          : missingClassicNodes(store, classic, userId);
         await importNodes(store, userId, nodes);
         await writeMigrateState(store, userId, { nodesAt: now });
         let kv = 0;
@@ -352,17 +367,17 @@ export async function forceHealClassicKv(
 }
 
 /**
- * Clear both watermarks and re-run migrate (missing classic node ids + KV).
- * Stronger than {@link forceHealClassicKv} when day *nodes* may be missing
- * too — still preserves existing Lunora rows (import is insert-missing /
- * KV upsert, not a wipe).
+ * Clear both watermarks and re-run migrate with **structure sync**: every
+ * classic node is sent so existing Lunora rows get classic `parentId` /
+ * `prevSiblingId` (Daily orphan heal) while text/task fields stay Lunora-local.
+ * Also imports missing ids + KV. Not a wipe.
  */
 export async function forceRemigrateFromClassic(
   store: OutlineStore,
   userId: string,
 ): Promise<MigrateResult> {
   await writeMigrateState(store, userId, { nodesAt: null, kvAt: null });
-  return migrateClassicToLunora(store, userId);
+  return migrateClassicToLunora(store, userId, { syncStructure: true });
 }
 
 /** DevTools entries for stuck / false-complete migrate watermarks. */
@@ -374,7 +389,7 @@ export function installMigrateConsoleHelper(
     __dotflowyMigrateToLunora?: () => Promise<MigrateResult>;
     /** Clear `kvAt` → re-import classic KV (Daily identity). */
     __dotflowyForceLunoraKvHeal?: () => Promise<MigrateResult>;
-    /** Clear both watermarks → missing nodes + KV from classic. */
+    /** Clear both watermarks → structure-sync all classic nodes + KV. */
     __dotflowyForceLunoraRemigrate?: () => Promise<MigrateResult>;
   };
   const w = window as unknown as MigrateWin;

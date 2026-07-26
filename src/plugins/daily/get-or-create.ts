@@ -68,6 +68,7 @@ import { withDailyNavigation } from "./pending";
 import {
   type DailyMigrationPlan,
   inScaffoldScope,
+  isOrphanMappedDay,
   planDailyMigration,
   sortedInsertAfterId,
 } from "./scaffold";
@@ -474,7 +475,14 @@ function moveDaySorted(
   if (!day) return; // deleted between plan and apply
   const dayKey = getKeyForNode(dayNodeId);
   if (!dayKey) return;
-  if (!inScaffoldScope(index, day, containerId, getKeyForNode)) return;
+  // Orphans (dangling/missing parent) are the heal target; otherwise only
+  // reparent days still inside the Daily scaffold (finding 1 + 5).
+  if (
+    !isOrphanMappedDay(index, day) &&
+    !inScaffoldScope(index, day, containerId, getKeyForNode)
+  ) {
+    return;
+  }
   const siblings = childrenOf(index, weekId)
     .filter((n) => n.id !== dayNodeId)
     .map((n) => ({ id: n.id, key: getKeyForNode(n.id) }));
@@ -503,17 +511,38 @@ async function runDailyMigration(
   // under its claimed id regardless, so waiting is pure loss. A single resync
   // (when anything is missing) nudges genuinely-remote nodes in for the NEXT
   // touch without stalling this one.
-  const claims = await Promise.all(
-    plan.scaffoldKeys.map(async (key) => {
-      const existing = getMappedId(key);
-      if (existing && hasNode(existing))
-        return { key, id: existing, present: true };
-      const candidate = createId();
-      const { winner } = await claimMapping(key, candidate);
-      setMapping(key, winner);
-      return { key, id: winner, present: hasNode(winner) };
-    }),
-  );
+  // Parents-first (plan.scaffoldKeys order): when claiming each key we can look
+  // under an already-resolved parent for a same-label child and adopt it —
+  // recovers hand-reattached / MCP-repaired scaffolds that never got a
+  // daily-index row, so we don't mint a duplicate June/Week beside them.
+  const indexAtClaim = buildTreeIndex(getLiveNodes());
+  const claims: Array<{ key: string; id: string; present: boolean }> = [];
+  const claimedIds = new Map<string, string>();
+  for (const key of plan.scaffoldKeys) {
+    const existing = getMappedId(key);
+    if (existing && hasNode(existing)) {
+      claimedIds.set(key, existing);
+      claims.push({ key, id: existing, present: true });
+      continue;
+    }
+    const parentKey = parentScaffoldKey(key);
+    const parentId = parentKey ? claimedIds.get(parentKey) : containerId;
+    const label = scaffoldLabel(key);
+    const adoptable =
+      parentId != null
+        ? childrenOf(indexAtClaim, parentId).find((n) => n.text === label)?.id
+        : undefined;
+    // Adopt only when the label match isn't already claimed as another key.
+    const adoptKey = adoptable ? getKeyForNode(adoptable) : null;
+    const candidate =
+      adoptable && (adoptKey === null || adoptKey === key)
+        ? adoptable
+        : createId();
+    const { winner } = await claimMapping(key, candidate);
+    setMapping(key, winner);
+    claimedIds.set(key, winner);
+    claims.push({ key, id: winner, present: hasNode(winner) });
+  }
   const keymap = new Map(claims.map((c) => [c.key, c.id]));
   const toCreate = new Set(claims.filter((c) => !c.present).map((c) => c.key));
   if (toCreate.size > 0) resyncNodes();
