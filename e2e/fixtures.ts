@@ -13,11 +13,13 @@ import {
   planMirrorNode,
   planMoveMany,
   planMoveNode,
+  planFromChangeOps,
   planOutdent,
   planOutdentMany,
   planRemoveMany,
   planRemoveNode,
   planRestoreNodes,
+  type ChangeOpLike,
   planSetBookmarkedAt,
   planSetCollapsed,
   planSetCompleted,
@@ -934,6 +936,17 @@ export async function seedOutlineLunora(
             expandIds: args.expandIds as string[] | undefined,
           }),
         );
+      } else if (path === "mutators:applyChangeOps") {
+        const ops = (args.ops as ChangeOpLike[] | undefined) ?? [];
+        const uid = String(args.userId ?? "e2e-user");
+        const plan = planFromChangeOps(uid, ops);
+        commitOutlinePlan(store, plan);
+        result = {
+          count: ops.length,
+          deletes: plan.deletes.length,
+          inserts: plan.inserts.length,
+          patches: plan.patches.length,
+        };
       } else if (path === "mutators:restoreNodes") {
         const target = (args.nodes as OutlineNode[] | undefined) ?? [];
         commitOutlinePlan(store, planRestoreNodes(liveNodes(), target));

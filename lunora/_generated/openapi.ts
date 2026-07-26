@@ -61,7 +61,7 @@ export const openApiSpec: Record<string, unknown> = {
     "info": {
         "description": "Auto-generated from @lunora/values-typed functions by @lunora/codegen. Do not edit — run `lunora codegen` to regenerate.",
         "title": "Lunora API",
-        "version": "1.10.4"
+        "version": "1.10.5"
     },
     "openapi": "3.1.0",
     "paths": {

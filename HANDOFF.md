@@ -1,6 +1,6 @@
 # HANDOFF — inline AI agent (`claude/outliner-ai-agent-inline-bf0e12`)
 
-**Status:** Scaffolding landed (stub fire action + plugin + ghost + runs). Next: real Workers AI tool loop + `getPlan` billing gate + e2e.
+**Status:** Scaffolding landed (stub fire + plugin + ghost + runs). Merged `main` (paste delta / 1.10.5). Quick-add excludes `/ask` + `Mod+Shift+Enter`. Next: real Workers AI tool loop + `getPlan` billing gate + e2e.
 
 ## Sources of truth
 

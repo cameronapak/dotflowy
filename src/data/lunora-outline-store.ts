@@ -26,6 +26,7 @@ import {
   buildTreeIndex,
   nodeToRow,
   planAppendChild,
+  planFromChangeOps,
   planImportNodes,
   planIndent,
   planIndentMany,
@@ -41,6 +42,7 @@ import {
   planRemoveNode,
   planRestoreNodes,
   planSeedIfEmpty,
+  type ChangeOpLike,
   planSetBookmarkedAt,
   planSetCollapsed,
   planSetCompleted,
@@ -361,6 +363,16 @@ function bindOutlineMutators(
             args.updatedAt,
           );
           if (plan) applyPlanToCollection(collection, plan);
+        },
+      }),
+      applyChangeOps: defineMutator<{
+        userId: string;
+        ops: ChangeOpLike[];
+      }>({
+        serverRef: "mutators:applyChangeOps",
+        apply: (_ctx, args) => {
+          const plan = planFromChangeOps(args.userId, args.ops);
+          applyPlanToCollection(collection, plan);
         },
       }),
       restoreNodes: defineMutator<{

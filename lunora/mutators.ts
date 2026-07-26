@@ -7,10 +7,13 @@ import {
   shouldReplaceAnswer,
 } from "../src/data/agent-replace-guard";
 import {
+  applyPlan,
   buildTreeIndex,
   docToNode,
+  emptyPlan,
   nodeToInsertFields,
   planAppendChild,
+  planFromChangeOps,
   planIndent,
   planIndentMany,
   planInsertChildAtStart,
@@ -36,6 +39,7 @@ import {
   type OutlinePlan,
 } from "../src/data/outline-plans";
 import { resolveDailyClaim } from "../src/plugins/daily/claim-mapping";
+import { changeOpArg } from "./wire-args";
 
 type ShardTable =
   | "nodes"
@@ -520,6 +524,33 @@ const nodeSnapshotArg = v.object({
   updatedAt: tsArg,
   origin: v.string().nullable(),
   kind: v.literal("paragraph").nullable(),
+});
+
+/**
+ * Classic-style `{ops}` delta batch — one watermark for insert/update/delete
+ * without shipping the whole outline (markdown paste, structural batches).
+ * `restoreNodes` stays for undo/redo snapshots that already carry a full target.
+ */
+export const applyChangeOps = defineMutator({
+  args: {
+    userId: userIdArg,
+    ops: v.array(changeOpArg),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    if (args.ops.length === 0) {
+      return { count: 0, deletes: 0, inserts: 0, patches: 0 };
+    }
+    const plan = planFromChangeOps(args.userId, args.ops);
+    await commitPlan(mctx, plan);
+    return {
+      count: args.ops.length,
+      deletes: plan.deletes.length,
+      inserts: plan.inserts.length,
+      patches: plan.patches.length,
+    };
+  },
 });
 
 /**
@@ -1323,10 +1354,23 @@ export const commitAgentAnswer = defineMutator({
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
 
-    let index = buildTreeIndex(await loadNodes(mctx));
+    // Plan entirely in memory, then ONE commitPlan + run patch. The mutator
+    // handler is already one DO transaction; a single plan keeps node writes
+    // contiguous (ADR 0059 "one mutator transaction").
+    let nodes = await loadNodes(mctx);
+    let index = buildTreeIndex(nodes);
     if (!index.byId.has(args.questionNodeId)) {
       return { ok: false as const, error: "question node missing" };
     }
+
+    const combined = emptyPlan();
+    const absorb = (step: OutlinePlan) => {
+      combined.deletes.push(...step.deletes);
+      combined.patches.push(...step.patches);
+      combined.inserts.push(...step.inserts);
+      nodes = applyPlan(nodes, step);
+      index = buildTreeIndex(nodes);
+    };
 
     if (
       args.priorAnswerRootId &&
@@ -1338,10 +1382,7 @@ export const commitAgentAnswer = defineMutator({
         args.priorAnswerRootId,
         args.updatedAt,
       );
-      if (remove) {
-        await commitPlan(mctx, remove);
-        index = buildTreeIndex(await loadNodes(mctx));
-      }
+      if (remove) absorb(remove);
     }
 
     const appendSummary = planAppendChild(index, {
@@ -1355,13 +1396,12 @@ export const commitAgentAnswer = defineMutator({
     if (!appendSummary) {
       return { ok: false as const, error: "could not append answer" };
     }
-    appendSummary.inserts = appendSummary.inserts.map((n) => ({
-      ...n,
-      origin: "agent",
-    }));
-    await commitPlan(mctx, appendSummary);
+    absorb({
+      deletes: appendSummary.deletes,
+      patches: appendSummary.patches,
+      inserts: appendSummary.inserts.map((n) => ({ ...n, origin: "agent" })),
+    });
 
-    index = buildTreeIndex(await loadNodes(mctx));
     const appendDetail = planAppendChild(index, {
       id: args.detailId,
       userId: args.userId,
@@ -1371,15 +1411,19 @@ export const commitAgentAnswer = defineMutator({
       updatedAt: args.updatedAt,
     });
     if (appendDetail) {
-      appendDetail.inserts = appendDetail.inserts.map((n) => ({
-        ...n,
-        origin: "agent",
-        collapsed: true,
-      }));
-      await commitPlan(mctx, appendDetail);
+      absorb({
+        deletes: appendDetail.deletes,
+        patches: appendDetail.patches,
+        inserts: appendDetail.inserts.map((n) => ({
+          ...n,
+          origin: "agent",
+          collapsed: true,
+        })),
+      });
     }
 
-    index = buildTreeIndex(await loadNodes(mctx));
+    await commitPlan(mctx, combined);
+
     const answerHash = hashAnswerSubtree(index, args.summaryId) ?? "";
     await mctx.db.patch(
       args.runId as Id<"runs">,

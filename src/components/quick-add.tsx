@@ -143,17 +143,19 @@ interface PickTarget {
 //
 // Text-authoring only: the structural verbs (core Move/Mirror/Delete, daily's
 // Send/Mirror to Today) are filtered out so the capture surface can never
-// relocate itself mid-compose. Everything else -- /paragraph, /todo, /bullet,
-// the emphasis/highlight/spoiler wraps -- stays.
-const STRUCTURAL_COMMAND_IDS = new Set([
+// relocate itself mid-compose. `/ask` is also excluded (ADR 0059 — quick-add
+// MiniNodeEditor is out of scope for the inline agent in v1). Everything else
+// -- /paragraph, /todo, /bullet, the emphasis/highlight/spoiler wraps -- stays.
+const EXCLUDED_COMMAND_IDS = new Set([
   "move",
   "mirror",
   "delete",
   "send-to-today",
   "mirror-to-today",
+  "ask",
 ]);
 function quickAddCommandFilter(spec: CommandSpec): boolean {
-  return !STRUCTURAL_COMMAND_IDS.has(spec.id);
+  return !EXCLUDED_COMMAND_IDS.has(spec.id);
 }
 
 // A stable placeholder node for the interval BEFORE the first keystroke (the
@@ -263,7 +265,9 @@ const MiniNodeEditor = forwardRef<
       { hotkey: "Mod+Enter", callback: () => onCommitNext() },
       { hotkey: "Escape", callback: () => onEscape() },
       ...keymapSpecs
-        .filter((k) => k.hotkey !== "Mod+Enter")
+        // Drop Mod+Enter (quick-add claims it) and agent-fire (ADR 0059 v1:
+        // MiniNodeEditor is not an agent surface).
+        .filter((k) => k.hotkey !== "Mod+Enter" && k.id !== "agent-fire")
         .map((k) => ({
           hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
           callback: () => k.run(node.id, getCtx()),
