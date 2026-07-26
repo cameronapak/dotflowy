@@ -939,12 +939,13 @@ export async function seedOutlineLunora(
       } else if (path === "mutators:applyChangeOps") {
         const ops = (args.ops as ChangeOpLike[] | undefined) ?? [];
         const uid = String(args.userId ?? "e2e-user");
-        commitOutlinePlan(store, planFromChangeOps(uid, ops));
+        const plan = planFromChangeOps(uid, ops);
+        commitOutlinePlan(store, plan);
         result = {
           count: ops.length,
-          deletes: 0,
-          inserts: 0,
-          patches: 0,
+          deletes: plan.deletes.length,
+          inserts: plan.inserts.length,
+          patches: plan.patches.length,
         };
       } else if (path === "mutators:restoreNodes") {
         const target = (args.nodes as OutlineNode[] | undefined) ?? [];

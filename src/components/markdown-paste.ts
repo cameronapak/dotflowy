@@ -134,9 +134,10 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     return true;
 
   const timestamp = now();
+  const opCount = 1 + plan.insertCount + plan.repoints.length;
 
-  // Lunora flag-ON: classic `nodesCollection` is idle — land via one
-  // `applyChangeOps` watermark (delta only: anchor + inserts + repoints). A
+  // Lunora flag-ON: classic `nodesCollection` is idle — land via
+  // `applyChangeOps` watermarks (delta only: anchor + inserts + repoints). A
   // full-outline `restoreNodes` payload hits "Body too large" on real outlines.
   if (isLunoraSyncEnabled()) {
     const lunora = getLunoraOutlineContext();
@@ -145,34 +146,33 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       return true;
     }
     capture(index, activeKey);
-    let landed = false;
-    try {
-      landed = runStructural(() =>
-        applyMarkdownPasteViaChangeOps(plan, anchorId, timestamp, lunora),
-      );
-    } catch {
-      drop();
-      toast.error("Couldn't paste there — try again.");
+    if (opCount < RESTORE_SLICE_OPS) {
+      let landed = false;
+      try {
+        landed = runStructural(() =>
+          applyMarkdownPasteViaChangeOps(plan, anchorId, timestamp, lunora),
+        );
+      } catch {
+        drop();
+        toast.error("Couldn't paste there — try again.");
+        return true;
+      }
+      if (!landed) {
+        drop();
+        toast.error("Couldn't paste there — try again.");
+        return true;
+      }
+      const seam = resolveSeam(plan, anchorId, count);
+      if (seam.id === anchorId)
+        focus.placeCaretHere(plan.anchor.text, seam.offset);
+      else {
+        const key = focusKeyFor(seam.id, activeKey);
+        focus.setPendingFocus(key, seam.offset);
+        scrollRowIntoView(key);
+      }
       return true;
     }
-    // `plan` was built from `getTreeIndex()` while the write reads
-    // `getLiveOutlineNodes()`, so the two CAN disagree on the anchor. Without
-    // this the paste would burn the undo point just captured, move the caret,
-    // and write nothing — a silent no-op is the one outcome a paste must never
-    // have (ADR 0044).
-    if (!landed) {
-      drop();
-      toast.error("Couldn't paste there — try again.");
-      return true;
-    }
-    const seam = resolveSeam(plan, anchorId, count);
-    if (seam.id === anchorId)
-      focus.placeCaretHere(plan.anchor.text, seam.offset);
-    else {
-      const key = focusKeyFor(seam.id, activeKey);
-      focus.setPendingFocus(key, seam.offset);
-      scrollRowIntoView(key);
-    }
+    void runLunoraSlicedPaste(plan, anchorId, timestamp, lunora, count);
     return true;
   }
 
@@ -209,7 +209,6 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     }
   };
 
-  const opCount = 1 + plan.insertCount + plan.repoints.length;
   // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole paste.
   capture(index, activeKey);
 
@@ -275,12 +274,28 @@ function applyMarkdownPasteViaChangeOps(
   timestamp: number,
   lunora: LunoraOutlineContext,
 ): boolean {
-  const userId = lunora.userId;
+  const ops = buildMarkdownPasteOps(plan, anchorId, timestamp);
+  if (!ops) return false;
+  trackLunoraMutation(
+    lunora.store.mutators.applyChangeOps({
+      userId: lunora.userId,
+      ops,
+    }),
+  );
+  return true;
+}
+
+/** Build classic-shaped `{ops}` for a markdown paste, or null if anchor gone. */
+function buildMarkdownPasteOps(
+  plan: MdPastePlan,
+  anchorId: string,
+  timestamp: number,
+): ChangeOpLike[] | null {
   const byId = new Map(
     getLiveOutlineNodes().map((n) => [n.id, { ...n } as OutlineNode]),
   );
   const anchor = byId.get(anchorId);
-  if (!anchor) return false;
+  if (!anchor) return null;
 
   const nextAnchor: OutlineNode = {
     ...anchor,
@@ -331,14 +346,79 @@ function applyMarkdownPasteViaChangeOps(
       }),
     });
   }
+  return ops;
+}
 
-  trackLunoraMutation(
-    lunora.store.mutators.applyChangeOps({
-      userId,
-      ops,
-    }),
-  );
-  return true;
+/** Slice paste ops for yielding apply — anchor, insert chunks, repoints last. */
+function slicePasteOps(
+  ops: ChangeOpLike[],
+  insertCount: number,
+): ChangeOpLike[][] {
+  const slices: ChangeOpLike[][] = [[ops[0]!]];
+  const insertOps = ops.slice(1, 1 + insertCount);
+  for (let i = 0; i < insertOps.length; i += RESTORE_SLICE_OPS) {
+    slices.push(insertOps.slice(i, i + RESTORE_SLICE_OPS));
+  }
+  const repointOps = ops.slice(1 + insertCount);
+  if (repointOps.length > 0) slices.push(repointOps);
+  return slices;
+}
+
+/**
+ * Large Lunora paste: sequential `applyChangeOps` chunks behind the shared
+ * progress modal (ADR 0044). Chunks persist independently — partial failure
+ * keeps the undo point when anything landed (OPML import pattern).
+ */
+async function runLunoraSlicedPaste(
+  plan: MdPastePlan,
+  anchorId: string,
+  timestamp: number,
+  lunora: LunoraOutlineContext,
+  count: number,
+): Promise<void> {
+  const ops = buildMarkdownPasteOps(plan, anchorId, timestamp);
+  if (!ops) {
+    drop();
+    toast.error("Couldn't paste there — try again.");
+    return;
+  }
+
+  const opCount = ops.length;
+  const slices = slicePasteOps(ops, plan.insertCount);
+  let applied = 0;
+
+  const show = () =>
+    setRestoreProgress({
+      kind: "restoring",
+      label: "Pasting",
+      total: opCount,
+      applied,
+    });
+  show();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  try {
+    for (const chunk of slices) {
+      const tx = lunora.store.mutators.applyChangeOps({
+        userId: lunora.userId,
+        ops: chunk,
+      });
+      await tx.isPersisted.promise;
+      applied += chunk.length;
+      show();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    setRestoreProgress({ kind: "closed" });
+    toast.success(`Pasted ${count.toLocaleString()} bullets.`);
+  } catch {
+    if (applied === 0) drop();
+    setRestoreProgress({ kind: "closed" });
+    toast.error(
+      applied === 0
+        ? "The paste could not be saved. Nothing was pasted."
+        : "The paste could not be fully saved. Earlier chunks landed — press Cmd+Z to remove them.",
+    );
+  }
 }
 
 /**
