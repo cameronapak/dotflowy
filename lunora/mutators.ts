@@ -7,6 +7,7 @@ import {
   docToNode,
   nodeToInsertFields,
   planAppendChild,
+  planFromChangeOps,
   planIndent,
   planIndentMany,
   planInsertChildAtStart,
@@ -515,6 +516,56 @@ const nodeSnapshotArg = v.object({
   updatedAt: tsArg,
   origin: v.string().nullable(),
   kind: v.literal("paragraph").nullable(),
+});
+
+/** Wire node for delta batches (classic ChangeOp value; no userId — server stamps). */
+const wireNodeArg = v.object({
+  id: idArg,
+  parentId: v.string().nullable(),
+  prevSiblingId: v.string().nullable(),
+  text: v.string(),
+  isTask: v.boolean(),
+  completed: v.boolean(),
+  collapsed: v.boolean(),
+  bookmarkedAt: v.number().nullable(),
+  mirrorOf: v.string().nullable(),
+  createdAt: tsArg,
+  updatedAt: tsArg,
+  origin: v.string().nullable(),
+  kind: v.literal("paragraph").nullable(),
+});
+
+const changeOpArg = v.union(
+  v.object({ op: v.literal("insert"), value: wireNodeArg }),
+  v.object({ op: v.literal("update"), value: wireNodeArg }),
+  v.object({ op: v.literal("delete"), key: v.string() }),
+);
+
+/**
+ * Classic-style `{ops}` delta batch — one watermark for insert/update/delete
+ * without shipping the whole outline (markdown paste, structural batches).
+ * `restoreNodes` stays for undo/redo snapshots that already carry a full target.
+ */
+export const applyChangeOps = defineMutator({
+  args: {
+    userId: userIdArg,
+    ops: v.array(changeOpArg),
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    if (args.ops.length === 0) {
+      return { count: 0, deletes: 0, inserts: 0, patches: 0 };
+    }
+    const plan = planFromChangeOps(args.userId, args.ops);
+    await commitPlan(mctx, plan);
+    return {
+      count: args.ops.length,
+      deletes: plan.deletes.length,
+      inserts: plan.inserts.length,
+      patches: plan.patches.length,
+    };
+  },
 });
 
 /**

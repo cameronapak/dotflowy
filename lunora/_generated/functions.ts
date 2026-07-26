@@ -40,6 +40,7 @@ export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
     "mcp:listNodes": lunora_mcp_0.listNodes as unknown as RegisteredLunoraFunction,
     "mcp:wipeUserShard": lunora_mcp_0.wipeUserShard as unknown as RegisteredLunoraFunction,
     "mutators:appendChild": lunora_mutators_1.appendChild as unknown as RegisteredLunoraFunction,
+    "mutators:applyChangeOps": lunora_mutators_1.applyChangeOps as unknown as RegisteredLunoraFunction,
     "mutators:claimDailyMapping": lunora_mutators_1.claimDailyMapping as unknown as RegisteredLunoraFunction,
     "mutators:deleteDailyMapping": lunora_mutators_1.deleteDailyMapping as unknown as RegisteredLunoraFunction,
     "mutators:deleteSavedQuery": lunora_mutators_1.deleteSavedQuery as unknown as RegisteredLunoraFunction,
@@ -123,7 +124,7 @@ export const LUNORA_SHAPES: Record<string, RegisteredShape> = {
  * ShardDO's `isCustomMutator` override routes through the client-watermark push
  * protocol (`x-lunora-client-id`/`x-lunora-client-seq` ordering).
  */
-export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:appendChild", "mutators:claimDailyMapping", "mutators:deleteDailyMapping", "mutators:deleteSavedQuery", "mutators:deleteTagColor", "mutators:getMigrateState", "mutators:hello", "mutators:importKvRows", "mutators:importNodes", "mutators:indent", "mutators:indentMany", "mutators:insertChildAtStart", "mutators:insertSibling", "mutators:materializeDailyNodes", "mutators:mirrorNode", "mutators:moveMany", "mutators:moveNode", "mutators:outdent", "mutators:outdentMany", "mutators:patchSavedQuery", "mutators:removeMany", "mutators:removeNode", "mutators:restoreNodes", "mutators:seedIfEmpty", "mutators:setBookmarkedAt", "mutators:setCollapsed", "mutators:setCompleted", "mutators:setIsTask", "mutators:setKind", "mutators:setMigrateState", "mutators:setText", "mutators:splitNode", "mutators:upsertDailyMapping", "mutators:upsertSavedQuery", "mutators:upsertTagColor"]);
+export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:appendChild", "mutators:applyChangeOps", "mutators:claimDailyMapping", "mutators:deleteDailyMapping", "mutators:deleteSavedQuery", "mutators:deleteTagColor", "mutators:getMigrateState", "mutators:hello", "mutators:importKvRows", "mutators:importNodes", "mutators:indent", "mutators:indentMany", "mutators:insertChildAtStart", "mutators:insertSibling", "mutators:materializeDailyNodes", "mutators:mirrorNode", "mutators:moveMany", "mutators:moveNode", "mutators:outdent", "mutators:outdentMany", "mutators:patchSavedQuery", "mutators:removeMany", "mutators:removeNode", "mutators:restoreNodes", "mutators:seedIfEmpty", "mutators:setBookmarkedAt", "mutators:setCollapsed", "mutators:setCompleted", "mutators:setIsTask", "mutators:setKind", "mutators:setMigrateState", "mutators:setText", "mutators:splitNode", "mutators:upsertDailyMapping", "mutators:upsertSavedQuery", "mutators:upsertTagColor"]);
 
 /**
  * Connection-lifecycle manifest: the function paths the generated ShardDO

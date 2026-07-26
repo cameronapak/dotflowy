@@ -304,22 +304,6 @@ const LUNORA_TTL_SWEEPS: Array<{ after?: number; field: string; softDeleteField?
 /** Static schema advisories (computed by @lunora/advisor at codegen time) served via `__lunora_admin__:getAdvisories`. */
 const LUNORA_ADVISORIES: AdvisoryFinding[] = [
     {
-        "cacheKey": "table_without_insert:nodes",
-        "categories": [
-            "SCHEMA"
-        ],
-        "description": "No function inserts into this table via `ctx.db.insert(\"<table>\", …)`. It may be read-only by design (seeded by a migration, replicated, or written through a path the advisor can't see) — or it may be dead schema.",
-        "detail": "No function calls `ctx.db.insert(\"nodes\", …)` — table \"nodes\" has no discovered insert path.",
-        "facing": "INTERNAL",
-        "level": "INFO",
-        "metadata": {
-            "table": "nodes"
-        },
-        "name": "table_without_insert",
-        "remediation": "If the table should be writable, add a mutation that calls `ctx.db.insert(\"<table>\", …)`. If it is read-only or seeded elsewhere, this advisory can be ignored.",
-        "title": "Table has no insert path"
-    },
-    {
         "cacheKey": "plaintext_secret_in_wrangler_vars:wrangler.jsonc:SENTRY_DSN",
         "categories": [
             "SECURITY"

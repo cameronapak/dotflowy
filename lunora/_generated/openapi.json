@@ -58,7 +58,7 @@
   "info": {
     "description": "Auto-generated from @lunora/values-typed functions by @lunora/codegen. Do not edit — run `lunora codegen` to regenerate.",
     "title": "Lunora API",
-    "version": "1.10.0"
+    "version": "1.10.4"
   },
   "openapi": "3.1.0",
   "paths": {},

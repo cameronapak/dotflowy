@@ -11,7 +11,7 @@
 
 import { toast } from "sonner";
 
-import type { OutlineNode } from "../data/outline-plans";
+import type { ChangeOpLike, OutlineNode } from "../data/outline-plans";
 
 import { nodesCollection } from "../data/collection";
 import { isLunoraSyncEnabled, isMirrorsEnabled } from "../data/flags";
@@ -136,8 +136,8 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   const timestamp = now();
 
   // Lunora flag-ON: classic `nodesCollection` is idle — land via one
-  // `restoreNodes` watermark (anchor patch + inserts + repoints) so paste
-  // doesn't throw CollectionOperationError on a missing classic key.
+  // `applyChangeOps` watermark (delta only: anchor + inserts + repoints). A
+  // full-outline `restoreNodes` payload hits "Body too large" on real outlines.
   if (isLunoraSyncEnabled()) {
     const lunora = getLunoraOutlineContext();
     if (!lunora) {
@@ -145,9 +145,16 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       return true;
     }
     capture(index, activeKey);
-    const landed = runStructural(() =>
-      applyMarkdownPasteViaRestore(plan, anchorId, timestamp, lunora),
-    );
+    let landed = false;
+    try {
+      landed = runStructural(() =>
+        applyMarkdownPasteViaChangeOps(plan, anchorId, timestamp, lunora),
+      );
+    } catch {
+      drop();
+      toast.error("Couldn't paste there — try again.");
+      return true;
+    }
     // `plan` was built from `getTreeIndex()` while the write reads
     // `getLiveOutlineNodes()`, so the two CAN disagree on the anchor. Without
     // this the paste would burn the undo point just captured, move the caret,
@@ -210,11 +217,16 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     // The keystroke-adjacent path. It must stay synchronous: no confirm step, no
     // modal, no await. `DELETE_CONFIRM_THRESHOLD` exists because deletion is
     // destructive; a paste is additive and one Cmd+Z away.
-    runStructural(() => {
-      writeAnchor();
-      for (let i = 0; i < plan.inserts.length; i++) writeInsert(i);
-      writeRepoints();
-    });
+    try {
+      runStructural(() => {
+        writeAnchor();
+        for (let i = 0; i < plan.inserts.length; i++) writeInsert(i);
+        writeRepoints();
+      });
+    } catch (err) {
+      drop();
+      throw err;
+    }
     const seam = resolveSeam(plan, anchorId, count);
     if (seam.id === anchorId)
       focus.placeCaretHere(plan.anchor.text, seam.offset);
@@ -240,8 +252,16 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   return true;
 }
 
+/** Drop Lunora `userId` for the wire ChangeOp value validator. */
+function toWireNode(n: OutlineNode): Omit<OutlineNode, "userId"> {
+  const { userId: _u, ...wire } = n;
+  return wire;
+}
+
 /**
- * Build the post-paste outline and commit via Lunora `restoreNodes`.
+ * Commit a markdown paste as a classic-shaped `{ops}` delta via Lunora
+ * `applyChangeOps` (one watermark). O(touched rows), not O(outline) — a
+ * full-outline `restoreNodes` hit "Body too large" on ~5k-node dogfood outlines.
  *
  * Returns whether anything was written — `false` means the anchor vanished
  * between planning and writing, and the caller owns the disclosure (see the
@@ -249,7 +269,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
  * re-read: the caller already resolved it, and re-reading here would invent a
  * second, silent failure mode for the same condition.
  */
-function applyMarkdownPasteViaRestore(
+function applyMarkdownPasteViaChangeOps(
   plan: MdPastePlan,
   anchorId: string,
   timestamp: number,
@@ -276,46 +296,46 @@ function applyMarkdownPasteViaRestore(
         ? { kind: null }
         : {}),
   };
-  byId.set(anchorId, nextAnchor);
+
+  const ops: ChangeOpLike[] = [{ op: "update", value: toWireNode(nextAnchor) }];
 
   for (const ins of plan.inserts) {
-    byId.set(ins.id, {
-      id: ins.id,
-      userId,
-      parentId: ins.parentId,
-      prevSiblingId: ins.prevSiblingId,
-      text: ins.text,
-      isTask: ins.isTask,
-      completed: ins.completed,
-      collapsed: false,
-      bookmarkedAt: null,
-      mirrorOf: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      origin: null,
-      kind: ins.kind,
+    ops.push({
+      op: "insert",
+      value: {
+        id: ins.id,
+        parentId: ins.parentId,
+        prevSiblingId: ins.prevSiblingId,
+        text: ins.text,
+        isTask: ins.isTask,
+        completed: ins.completed,
+        collapsed: false,
+        bookmarkedAt: null,
+        mirrorOf: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        origin: null,
+        kind: ins.kind,
+      },
     });
   }
   for (const r of plan.repoints) {
     const n = byId.get(r.id);
     if (!n) continue;
-    byId.set(r.id, {
-      ...n,
-      prevSiblingId: r.prevSiblingId,
-      updatedAt: timestamp,
+    ops.push({
+      op: "update",
+      value: toWireNode({
+        ...n,
+        prevSiblingId: r.prevSiblingId,
+        updatedAt: timestamp,
+      }),
     });
   }
 
-  // KNOWN LIMIT (Lunora alpha): this ships the whole outline as the restore
-  // target, not just the touched rows. `planRestoreNodes` diffs server-side so
-  // untouched rows emit no patch, but the payload is still O(outline) and a
-  // row another device changed inside this read/write window gets diffed back
-  // to our stale copy. The fix is a delta mutator (anchor patch + inserts +
-  // repoints), matching what the classic branch sends.
   trackLunoraMutation(
-    lunora.store.mutators.restoreNodes({
+    lunora.store.mutators.applyChangeOps({
       userId,
-      nodes: [...byId.values()],
+      ops,
     }),
   );
   return true;

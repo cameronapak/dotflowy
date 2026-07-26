@@ -43,6 +43,48 @@ describe("orderSiblings", () => {
     expect(ordered.length).toBe(2);
     expect(new Set(ordered.map((n) => n.id))).toEqual(new Set(["a", "b"]));
   });
+
+  test("orphan subchains keep paste order when a fan steals the null head", () => {
+    // d wins the null-prev fan (last in the multimap's arrival list among heads
+    // is not what matters — a is first among null claimants in this feed, but
+    // d appears first so d wins). The a→b→n1→n2→c paste block must still read
+    // in link order, not scrambled collection order.
+    const nodes = [
+      makeNode({ id: "d", prevSiblingId: null, text: "other-head" }),
+      makeNode({ id: "n2", prevSiblingId: "n1", text: "paste2" }),
+      makeNode({ id: "c", prevSiblingId: "n2", text: "after" }),
+      makeNode({ id: "n1", prevSiblingId: "b", text: "paste1" }),
+      makeNode({ id: "a", prevSiblingId: null, text: "anchor" }),
+      makeNode({ id: "b", prevSiblingId: "a", text: "anchor-next" }),
+    ];
+    expect(orderSiblings(nodes).map((n) => n.id)).toEqual([
+      "d",
+      "a",
+      "b",
+      "n1",
+      "n2",
+      "c",
+    ]);
+  });
+
+  test("orphan subchains survive when the fan winner is last in arrival order", () => {
+    const nodes = [
+      makeNode({ id: "n2", prevSiblingId: "n1", text: "paste2" }),
+      makeNode({ id: "c", prevSiblingId: "n2", text: "after" }),
+      makeNode({ id: "n1", prevSiblingId: "b", text: "paste1" }),
+      makeNode({ id: "a", prevSiblingId: null, text: "anchor" }),
+      makeNode({ id: "b", prevSiblingId: "a", text: "anchor-next" }),
+      makeNode({ id: "d", prevSiblingId: null, text: "other-head" }),
+    ];
+    expect(orderSiblings(nodes).map((n) => n.id)).toEqual([
+      "a",
+      "b",
+      "n1",
+      "n2",
+      "c",
+      "d",
+    ]);
+  });
 });
 
 describe("chainDisagreements", () => {
