@@ -19,6 +19,8 @@ import { createAuth } from "./auth";
 
 export type LunoraEnv = AuthEnv & {
   SHARD: ShardNamespaceLike;
+  /** Workers AI binding for inline `@agent` (ADR 0059). */
+  AI: Ai;
   /** Optional Studio / admin bearer (unset = admin routes stay closed). */
   LUNORA_ADMIN_TOKEN?: string;
   /**
@@ -32,6 +34,17 @@ export type LunoraEnv = AuthEnv & {
   LUNORA_TRUSTED_ORIGINS?: string;
   /** Same comma-list as `.dev.vars.example` for Better Auth CSRF (optional). */
   BETTER_AUTH_TRUSTED_ORIGINS?: string;
+  /** Optional AI Gateway (Cloudflare account id) — see `@lunora/ai` resolveAiGateway. */
+  LUNORA_AI_GATEWAY_ACCOUNT_ID?: string;
+  /** Optional AI Gateway id/slug. */
+  LUNORA_AI_GATEWAY_ID?: string;
+  /** Optional AI Gateway auth token (authenticated gateways only). */
+  LUNORA_AI_GATEWAY_TOKEN?: string;
+  /**
+   * Optional Firecrawl key for inline-agent `web_search` (ADR 0059).
+   * Unset = tool omitted.
+   */
+  FIRECRAWL_API_KEY?: string;
 };
 
 /**
@@ -63,6 +76,10 @@ function lunoraTrustedOrigins(env: LunoraEnv): string[] {
     ...new Set([
       "http://localhost:3000",
       "http://localhost:3210",
+      // `bun run cf:dev` serves SPA + Worker on :8787 (no Vite proxy).
+      "http://localhost:8787",
+      "http://127.0.0.1:8787",
+      "http://127.0.0.1:3000",
       ...fromBase,
       ...fromEnv,
     ]),

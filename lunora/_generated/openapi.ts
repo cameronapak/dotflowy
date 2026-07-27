@@ -61,9 +61,81 @@ export const openApiSpec: Record<string, unknown> = {
     "info": {
         "description": "Auto-generated from @lunora/values-typed functions by @lunora/codegen. Do not edit — run `lunora codegen` to regenerate.",
         "title": "Lunora API",
-        "version": "1.10.4"
+        "version": "1.10.5"
     },
     "openapi": "3.1.0",
-    "paths": {},
-    "tags": []
+    "paths": {
+        "/_lunora/rpc#agent:fireAgentRun": {
+            "post": {
+                "description": "Invoke the `action` `agent:fireAgentRun` over the Lunora RPC envelope (POST /_lunora/rpc).",
+                "operationId": "agent:fireAgentRun",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "additionalProperties": false,
+                                "properties": {
+                                    "args": {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "userId": {
+                                                "type": "string"
+                                            },
+                                            "questionNodeId": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": [
+                                            "userId",
+                                            "questionNodeId"
+                                        ],
+                                        "type": "object"
+                                    },
+                                    "functionPath": {
+                                        "const": "agent:fireAgentRun",
+                                        "type": "string"
+                                    },
+                                    "shardKey": {
+                                        "description": "Optional shard key; omitted routes to the default shard.",
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "functionPath"
+                                ],
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "description": "RPC result. The shape is TS-inferred from the function's return type; best-effort — any JSON."
+                                }
+                            }
+                        },
+                        "description": "Successful RPC result (TypeScript-inferred return shape, documented best-effort)."
+                    },
+                    "default": {
+                        "$ref": "#/components/responses/LunoraError"
+                    }
+                },
+                "summary": "action: agent:fireAgentRun",
+                "tags": [
+                    "agent"
+                ],
+                "x-lunora-function-kind": "action"
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "Operations declared in `lunora/agent`.",
+            "name": "agent"
+        }
+    ]
 };

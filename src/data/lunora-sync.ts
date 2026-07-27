@@ -15,6 +15,8 @@ import {
   bindLunoraDailyIndex,
   unbindLunoraDailyIndex,
 } from "../plugins/daily/daily-index";
+import { noteAgentAnswerArrive } from "./agent-arrive";
+import { bindLunoraAgentRuns, unbindLunoraAgentRuns } from "./agent-runs";
 import { markNodesSyncReady } from "./collection";
 import { isLunoraSyncEnabled } from "./flags";
 import { outlineNodeToNode, rowsToOutlineNodes } from "./lunora-bridge";
@@ -111,6 +113,7 @@ export function startLunoraOutlineSync(userId: string): void {
         touchedAt: Date.now(),
       }),
   });
+  bindLunoraAgentRuns(store.agentRuns);
 
   installMigrateConsoleHelper(() => ctx);
 
@@ -168,8 +171,46 @@ export function stopLunoraOutlineSync(): void {
   unbindLunoraTagColors();
   unbindLunoraSavedQueries();
   unbindLunoraDailyIndex();
+  unbindLunoraAgentRuns();
   ctx = null;
   seedStarted = false;
+}
+
+/**
+ * Force an in-app shape reload (same data path as a hard refresh).
+ *
+ * Server-originated writes (`fireAgentRun` → `commitAgentAnswer`) only reach
+ * live clients via `/_lunora/ws` shape poke. When the socket is dead/403, the
+ * action still commits durably but the outline store stays stale until reload.
+ * Call this after a completed agent fire so answer children appear without F5.
+ *
+ * Preserves `window.scrollY` (window virtualizer) and optionally marks
+ * `answerRootId` for a fade/slide entrance — never scrollIntoView / focus.
+ */
+export function softReloadLunoraOutline(opts?: {
+  answerRootId?: string | null;
+}): void {
+  if (!ctx) return;
+  const userId = ctx.userId;
+  const scrollY =
+    typeof window !== "undefined"
+      ? window.scrollY || document.documentElement.scrollTop || 0
+      : 0;
+  if (opts?.answerRootId) noteAgentAnswerArrive(opts.answerRootId);
+  stopLunoraOutlineSync();
+  startLunoraOutlineSync(userId);
+  // Tree feed is async (toArrayWhenReady); restore scroll after layout settles.
+  if (typeof window !== "undefined") {
+    const restore = () => {
+      window.scrollTo(0, scrollY);
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(restore);
+      // One more pass after collection→tree feed (usually <100ms).
+      window.setTimeout(restore, 50);
+      window.setTimeout(restore, 200);
+    });
+  }
 }
 
 /** Fire-and-forget helper: await watermark hold, toast on failure. */

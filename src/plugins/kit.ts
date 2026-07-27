@@ -18,8 +18,10 @@
 // Add a component here only when a plugin needs it; that keeps the surface a
 // decision, not a dumping ground.
 
+export * from "@/components/dot-avatar";
 export * from "@/components/ui/badge";
 export * from "@/components/ui/badge-variants";
+export * from "@/components/ui/braille-loader";
 export * from "@/components/ui/button";
 export * from "@/components/ui/button-variants";
 export * from "@/components/ui/card";

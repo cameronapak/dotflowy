@@ -4,7 +4,11 @@
 import { anyApi } from "lunorash/server/types";
 import type { FunctionReference } from "lunorash/client";
 
-export interface ApiTypes {}
+export interface ApiTypes {
+    agent: {
+        fireAgentRun: FunctionReference<"action", { userId: string; questionNodeId: string }, { runId: string; status: "error"; error: string; } | { runId: string; status: "running"; answerRootId?: undefined; } | { runId: string; status: "cancelled"; answerRootId?: undefined; } | { runId: string; status: "completed"; answerRootId: string | undefined; }>;
+    };
+}
 
 export const api = anyApi as unknown as ApiTypes;
 

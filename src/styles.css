@@ -339,6 +339,31 @@ h2 span.protected-lock {
 }
 
 /*
+ * Agent answer entrance after softReloadLunoraOutline (WS streaming unavailable).
+ * Fade + slight slide — never paired with scrollIntoView / pendingFocus.
+ */
+@keyframes agent-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.outline-row.agent-arrive {
+  animation: agent-arrive 0.35s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-row.agent-arrive {
+    animation: none;
+  }
+}
+
+/*
  * Spotlight focus mode (ADR 0033). `spotlight-on` on <body> = mode enabled; the
  * dim itself is PURE CSS. While a bullet caret is focused (`:has(.node-text:
  * focus)`) every content row drops to 0.3, and the focused row -- and ONLY it

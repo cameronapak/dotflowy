@@ -40,6 +40,18 @@ INVITE_CODES=dev-invite
 # UserOutlineDO. Unset → per-user `account-prefs` / lunora-beta on classic DO.
 # LUNORA_OUTLINE=1
 
+# Optional Cloudflare AI Gateway in front of Workers AI for inline `@agent`
+# (ADR 0059). Both account id + gateway id are required; token only if the
+# gateway is authenticated. Unset = direct Workers AI (`env.AI` binding).
+# LUNORA_AI_GATEWAY_ACCOUNT_ID=
+# LUNORA_AI_GATEWAY_ID=
+# LUNORA_AI_GATEWAY_TOKEN=
+
+# Optional Firecrawl API key for inline-agent `web_search` (ADR 0059). Unset =
+# the tool is omitted (fail closed — Dot will not invent search results).
+# In prod: `wrangler secret put FIRECRAWL_API_KEY`.
+# FIRECRAWL_API_KEY=
+
 # Optional: pin the OAuth issuer the MCP discovery metadata advertises (ADR
 # 0026). Needed to test the MCP OAuth flow against `wrangler dev` — without it
 # the dev proxy's custom-domain simulation makes the inferred origin the prod

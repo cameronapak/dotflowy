@@ -22,3 +22,9 @@ export const userDailyIndex = defineShape({
   owner: true,
   table: "dailyIndex",
 });
+
+/** Per-user inline agent runs (ADR 0059). */
+export const userAgentRuns = defineShape({
+  owner: true,
+  table: "runs",
+});

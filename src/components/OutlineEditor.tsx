@@ -31,6 +31,7 @@ import { toast } from "sonner";
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
+import { useAgentGhostText } from "../data/agent-runs";
 import { echoedTextFor, nodesCollection } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled } from "../data/flags";
@@ -1828,6 +1829,8 @@ function ZoomedTitle({
   // page title. Session-fixed flag -> no reactive work when mirrors are off.
   const mirrorsOn = isMirrorsEnabled();
   const mirrorCount = useMirrorCount(node.id, mirrorsOn);
+  // ADR 0059: ghost sibling of `.node-text` (never inside contentEditable).
+  const agentGhost = useAgentGhostText(node.id);
 
   // Plugin slots for the zoomed title (Seam F) plus the two core decorations
   // (protected lock, mirror badge), in ONE list -- the same composition as
@@ -2047,6 +2050,15 @@ function ZoomedTitle({
             slash.handleKeyDown(e);
           }}
         />
+        {agentGhost ? (
+          <span
+            className="agent-ghost mt-1 block w-full whitespace-pre-wrap text-muted-foreground/70 italic"
+            data-agent-ghost=""
+            aria-live="polite"
+          >
+            {agentGhost}
+          </span>
+        ) : null}
       </span>
       {/* Trailing decoration zone for the zoomed title (Seam F
           `title:after-text`, ADR 0031) -- mirrors OutlineRow's `row:after-text`

@@ -3,8 +3,19 @@ import { defineMutator, v } from "lunorash/server";
 import type { Id } from "./_generated/dataModel";
 
 import {
+  materializeAgentDetailForest,
+  splitAgentAnswer,
+} from "../src/data/agent-answer";
+import {
+  hashAnswerSubtree,
+  shouldReplaceAnswer,
+} from "../src/data/agent-replace-guard";
+import { agentRunAllowsAnswerCommit } from "../src/data/agent-run-gate";
+import {
+  applyPlan,
   buildTreeIndex,
   docToNode,
+  emptyPlan,
   nodeToInsertFields,
   planAppendChild,
   planFromChangeOps,
@@ -40,7 +51,8 @@ type ShardTable =
   | "tagColors"
   | "savedQueries"
   | "dailyIndex"
-  | "migrateState";
+  | "migrateState"
+  | "runs";
 
 /** Minimal mutator ctx — defineMutator's ServerContext is the base MutationCtx. */
 type MutatorDb = {
@@ -1122,5 +1134,386 @@ export const setMigrateState = defineMutator({
       kvAt,
     });
     return { nodesAt, kvAt };
+  },
+});
+
+// --- runs (inline @agent, ADR 0059) -----------------------------------------
+
+const MAX_CONCURRENT_RUNS = 3;
+
+async function getRunByQuestion(
+  ctx: MutatorCtx,
+  questionNodeId: string,
+): Promise<(Record<string, unknown> & { _id: string }) | null> {
+  const rows = await ctx.db
+    .query("runs")
+    .withIndex("by_question", (q) => q.eq("questionNodeId", questionNodeId))
+    .collect();
+  // Prefer the newest running row; else the newest row overall.
+  let best: (Record<string, unknown> & { _id: string }) | null = null;
+  for (const row of rows) {
+    if (!best) {
+      best = row;
+      continue;
+    }
+    const bestTs = typeof best.updatedAt === "number" ? best.updatedAt : 0;
+    const rowTs = typeof row.updatedAt === "number" ? row.updatedAt : 0;
+    if (row.status === "running" && best.status !== "running") best = row;
+    else if (row.status === best.status && rowTs > bestTs) best = row;
+  }
+  return best;
+}
+
+/** Create or reuse a running row for a question node. Enforces concurrency. */
+export const createAgentRun = defineMutator({
+  args: {
+    userId: userIdArg,
+    questionNodeId: idArg,
+    createdAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+
+    const existing = await getRunByQuestion(mctx, args.questionNodeId);
+    if (existing && existing.status === "running") {
+      return {
+        runId: existing._id,
+        reused: true,
+        answerRootId:
+          typeof existing.answerRootId === "string"
+            ? existing.answerRootId
+            : null,
+        answerHash:
+          typeof existing.answerHash === "string" ? existing.answerHash : null,
+      };
+    }
+
+    const all = await mctx.db.query("runs").collect();
+    const running = all.filter((r) => r.status === "running").length;
+    if (running >= MAX_CONCURRENT_RUNS) {
+      throw new Error("too many concurrent agent runs");
+    }
+
+    const runId = await mctx.db.insert("runs", {
+      userId: args.userId,
+      questionNodeId: args.questionNodeId,
+      status: "running",
+      partialText: "",
+      answerRootId:
+        typeof existing?.answerRootId === "string"
+          ? existing.answerRootId
+          : null,
+      answerHash:
+        typeof existing?.answerHash === "string" ? existing.answerHash : null,
+      error: null,
+      createdAt: args.createdAt,
+      updatedAt: args.createdAt,
+    });
+    return {
+      runId,
+      reused: false,
+      answerRootId:
+        typeof existing?.answerRootId === "string"
+          ? existing.answerRootId
+          : null,
+      answerHash:
+        typeof existing?.answerHash === "string" ? existing.answerHash : null,
+    };
+  },
+});
+
+export const cancelAgentRun = defineMutator({
+  args: { userId: userIdArg, runId: idArg, updatedAt: tsArg },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!row || row.userId !== args.userId) return { ok: false as const };
+    if (row.status !== "running") return { ok: false as const };
+    await mctx.db.patch(
+      args.runId as Id<"runs">,
+      {
+        status: "cancelled",
+        partialText: "",
+        updatedAt: args.updatedAt,
+      },
+      "runs",
+    );
+    return { ok: true as const };
+  },
+});
+
+/**
+ * Cancel by question id — needed when the client only has a local `local:`
+ * overlay (WS poke missed) and doesn't know the server runId yet.
+ */
+export const cancelAgentRunForQuestion = defineMutator({
+  args: { userId: userIdArg, questionNodeId: idArg, updatedAt: tsArg },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await getRunByQuestion(mctx, args.questionNodeId);
+    if (!row || row.userId !== args.userId || row.status !== "running") {
+      return { ok: false as const, runId: null };
+    }
+    await mctx.db.patch(
+      row._id as Id<"runs">,
+      {
+        status: "cancelled",
+        partialText: "",
+        updatedAt: args.updatedAt,
+      },
+      "runs",
+    );
+    return { ok: true as const, runId: row._id };
+  },
+});
+
+export const patchAgentRunPartial = defineMutator({
+  args: {
+    userId: userIdArg,
+    runId: idArg,
+    partialText: v.string(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!row || row.userId !== args.userId || row.status !== "running") return;
+    await mctx.db.patch(
+      args.runId as Id<"runs">,
+      { partialText: args.partialText, updatedAt: args.updatedAt },
+      "runs",
+    );
+  },
+});
+
+export const completeAgentRun = defineMutator({
+  args: {
+    userId: userIdArg,
+    runId: idArg,
+    answerRootId: idArg,
+    answerHash: v.string(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!row || row.userId !== args.userId) return;
+    await mctx.db.patch(
+      args.runId as Id<"runs">,
+      {
+        status: "completed",
+        partialText: "",
+        answerRootId: args.answerRootId,
+        answerHash: args.answerHash,
+        error: null,
+        updatedAt: args.updatedAt,
+      },
+      "runs",
+    );
+  },
+});
+
+export const failAgentRun = defineMutator({
+  args: {
+    userId: userIdArg,
+    runId: idArg,
+    error: v.string(),
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!row || row.userId !== args.userId) return;
+    await mctx.db.patch(
+      args.runId as Id<"runs">,
+      {
+        status: "error",
+        partialText: "",
+        error: args.error,
+        updatedAt: args.updatedAt,
+      },
+      "runs",
+    );
+  },
+});
+
+/** Read a run (cooperative cancel checks + client polling fallback). */
+export const getAgentRun = defineMutator({
+  args: { userId: userIdArg, runId: idArg },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!row || row.userId !== args.userId) return null;
+    return {
+      status: row.status as "running" | "completed" | "cancelled" | "error",
+      questionNodeId: String(row.questionNodeId ?? ""),
+      partialText: String(row.partialText ?? ""),
+      answerRootId:
+        typeof row.answerRootId === "string" ? row.answerRootId : null,
+      answerHash: typeof row.answerHash === "string" ? row.answerHash : null,
+      error: typeof row.error === "string" ? row.error : null,
+    };
+  },
+});
+
+/**
+ * Commit a canned/real answer tree in ONE transaction: optional replace of an
+ * untouched prior answer, append summary + markdown detail forest (list →
+ * bullets, bare lines → paragraphs), stamp origin, complete the run with the
+ * replace-guard hash (ADR 0059).
+ *
+ * `detailId` is unused (kept so older callers still typecheck); each forest
+ * node mints its own id. Summary arrives `collapsed: true` when detail exists
+ * (Volume); nested detail parents also arrive collapsed.
+ */
+export const commitAgentAnswer = defineMutator({
+  args: {
+    userId: userIdArg,
+    runId: idArg,
+    questionNodeId: idArg,
+    summaryText: v.string(),
+    detailText: v.string(),
+    priorAnswerRootId: v.string().nullable(),
+    priorAnswerHash: v.string().nullable(),
+    summaryId: idArg,
+    detailId: idArg,
+    updatedAt: tsArg,
+  },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+
+    const runRow = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!runRow || runRow.userId !== args.userId) {
+      return { ok: false as const, error: "run missing" };
+    }
+    // Cooperative cancel: Stop patches status to cancelled; refuse to land
+    // an answer for a run that is no longer running.
+    if (!agentRunAllowsAnswerCommit(runRow.status)) {
+      return { ok: false as const, error: "cancelled" };
+    }
+
+    // Plan entirely in memory, then ONE commitPlan + run patch. The mutator
+    // handler is already one DO transaction; a single plan keeps node writes
+    // contiguous (ADR 0059 "one mutator transaction").
+    let nodes = await loadNodes(mctx);
+    let index = buildTreeIndex(nodes);
+    if (!index.byId.has(args.questionNodeId)) {
+      return { ok: false as const, error: "question node missing" };
+    }
+
+    const combined = emptyPlan();
+    const absorb = (step: OutlinePlan) => {
+      combined.deletes.push(...step.deletes);
+      combined.patches.push(...step.patches);
+      combined.inserts.push(...step.inserts);
+      nodes = applyPlan(nodes, step);
+      index = buildTreeIndex(nodes);
+    };
+
+    if (
+      args.priorAnswerRootId &&
+      args.priorAnswerHash &&
+      shouldReplaceAnswer(index, args.priorAnswerRootId, args.priorAnswerHash)
+    ) {
+      const remove = planRemoveNode(
+        index,
+        args.priorAnswerRootId,
+        args.updatedAt,
+      );
+      if (remove) absorb(remove);
+    }
+
+    // Skip empty detail so a one-line answer is summary-only (ADR 0059).
+    // Re-run the same splitter the engine used so block structure can't drift.
+    const { detailForest } = splitAgentAnswer(
+      args.detailText.trim()
+        ? `${args.summaryText}\n${args.detailText}`
+        : args.summaryText,
+    );
+    const hasDetail = detailForest.length > 0;
+
+    const appendSummary = planAppendChild(index, {
+      id: args.summaryId,
+      userId: args.userId,
+      parentId: args.questionNodeId,
+      text: args.summaryText,
+      createdAt: args.updatedAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!appendSummary) {
+      return { ok: false as const, error: "could not append answer" };
+    }
+    absorb({
+      deletes: appendSummary.deletes,
+      patches: appendSummary.patches,
+      inserts: appendSummary.inserts.map((n) => ({
+        ...n,
+        origin: "agent",
+        // Hide detail until expand (ADR 0059 Volume).
+        collapsed: hasDetail,
+      })),
+    });
+
+    // Prefer the first detailId as the first forest id (stable for older stubs).
+    let detailIdUsed = false;
+    const inserts = materializeAgentDetailForest(
+      detailForest,
+      args.summaryId,
+      () => {
+        if (!detailIdUsed && args.detailId) {
+          detailIdUsed = true;
+          return args.detailId;
+        }
+        return crypto.randomUUID();
+      },
+    );
+    for (const row of inserts) {
+      const step = planAppendChild(index, {
+        id: row.id,
+        userId: args.userId,
+        parentId: row.parentId,
+        text: row.text,
+        isTask: row.isTask,
+        kind: row.kind,
+        createdAt: args.updatedAt,
+        updatedAt: args.updatedAt,
+      });
+      if (!step) continue;
+      absorb({
+        deletes: step.deletes,
+        patches: step.patches,
+        inserts: step.inserts.map((n) => ({
+          ...n,
+          origin: "agent",
+          completed: row.completed,
+          collapsed: row.collapsed,
+        })),
+      });
+    }
+
+    await commitPlan(mctx, combined);
+
+    const answerHash = hashAnswerSubtree(index, args.summaryId) ?? "";
+    await mctx.db.patch(
+      args.runId as Id<"runs">,
+      {
+        status: "completed",
+        partialText: "",
+        answerRootId: args.summaryId,
+        answerHash,
+        error: null,
+        updatedAt: args.updatedAt,
+      },
+      "runs",
+    );
+    return { ok: true as const, answerRootId: args.summaryId };
   },
 });

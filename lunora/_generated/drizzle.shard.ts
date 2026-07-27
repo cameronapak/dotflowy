@@ -61,6 +61,23 @@ export const migrateState = sqliteTable("migrateState", {
     kvAt: real("kvAt").notNull(),
 });
 
+export const runs = sqliteTable("runs", {
+    _id: text("_id").primaryKey(),
+    _creationTime: integer("_creationTime").notNull(),
+    userId: text("userId").notNull(),
+    questionNodeId: text("questionNodeId").notNull(),
+    status: text("status", { mode: "json" }).$type<"running" | "completed" | "cancelled" | "error">().notNull(),
+    partialText: text("partialText").notNull(),
+    answerRootId: text("answerRootId").notNull(),
+    answerHash: text("answerHash").notNull(),
+    error: text("error").notNull(),
+    createdAt: real("createdAt").notNull(),
+    updatedAt: real("updatedAt").notNull(),
+}, (t) => ({
+    by_status: index("by_status").on(t.status),
+    by_question: index("by_question").on(t.questionNodeId),
+}));
+
 export const ratelimit_buckets = sqliteTable("ratelimit_buckets", {
     _id: text("_id").primaryKey(),
     _creationTime: integer("_creationTime").notNull(),

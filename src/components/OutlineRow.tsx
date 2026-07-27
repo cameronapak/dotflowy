@@ -13,6 +13,8 @@ import type { Node } from "../data/schema";
 import type { PluginContext, SlotSpec } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
+import { shouldAgentArrive } from "../data/agent-arrive";
+import { useAgentGhostText } from "../data/agent-runs";
 import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
 import { useSelectionFill } from "../data/selection-fill";
@@ -227,6 +229,9 @@ function RowChrome({
   // path is byte-identical (ADR 0022).
   const isPivot = rowKey === pivotId;
   const faded = content.completed || ancestorCompleted;
+  // ADR 0059: streaming ghost is a sibling of `.node-text`, never inside it
+  // (manual text sync + readSource would desync).
+  const agentGhost = useAgentGhostText(content.id);
 
   const slash = useSlashMenu({
     node: content,
@@ -300,6 +305,21 @@ function RowChrome({
   useLayoutEffect(() => {
     const el = textRef.current;
     if (!el) return;
+    // Soft-reloaded agent answers: fade/slide in. Never focus / flash /
+    // scrollIntoView — those steal the viewport after softReload.
+    if (shouldAgentArrive(content.id)) {
+      const row = el.closest(".outline-row");
+      if (row instanceof HTMLElement) {
+        row.classList.remove("agent-arrive");
+        void row.offsetWidth;
+        row.classList.add("agent-arrive");
+        row.addEventListener(
+          "animationend",
+          () => row.classList.remove("agent-arrive"),
+          { once: true },
+        );
+      }
+    }
     if (pendingFocus.current === rowKey) {
       el.focus();
       applyPendingCaret(el, rowKey, pendingFocusAtStart.current);
@@ -560,6 +580,15 @@ function RowChrome({
               slash.handleKeyDown(e);
             }}
           />
+          {agentGhost ? (
+            <span
+              className="agent-ghost mt-0.5 block w-full whitespace-pre-wrap text-muted-foreground/70 italic"
+              data-agent-ghost=""
+              aria-live="polite"
+            >
+              {agentGhost}
+            </span>
+          ) : null}
         </div>
         {/* Trailing decoration zone (Seam F `row:after-text`, ADR 0031). Flex
             sibling of `.row-body`, hugs the trailing edge; dormant until a

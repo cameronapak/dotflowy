@@ -5,6 +5,9 @@ import type { AdvisoryFinding, DatabaseWriterLike, DataMigrationLike, LogSink, M
 import { applyCdcChanges, assertShapeShardable, createShardCtxDb, runDataMigration, runShardMigrations, ShardDO as ShardDOBase } from "lunorash/do";
 import { asBucketStorage, buildRlsReadRegistry, composeShapeReadWhere, createSecrets, LunoraError } from "lunorash/server";
 import { bindOrm, bindTableFacade } from "lunorash/server";
+import type { AiBindingLike, LunoraAi } from "@lunora/ai";
+import { createAi } from "@lunora/ai";
+import * as lunoraEnvContract from "../env.js";
 
 import schema from "../schema.js";
 import { LUNORA_FUNCTIONS, LUNORA_LIFECYCLE_HOOKS, LUNORA_MIGRATIONS, LUNORA_MUTATOR_PATHS, LUNORA_SHAPES } from "./functions.js";
@@ -44,6 +47,22 @@ const LUNORA_TABLE_INDEXES: Record<string, Array<{ fields: string[]; name: strin
                 "key"
             ],
             "name": "by_key",
+            "type": "index"
+        }
+    ],
+    "runs": [
+        {
+            "fields": [
+                "status"
+            ],
+            "name": "by_status",
+            "type": "index"
+        },
+        {
+            "fields": [
+                "questionNodeId"
+            ],
+            "name": "by_question",
             "type": "index"
         }
     ],
@@ -260,6 +279,64 @@ const LUNORA_TABLE_COLUMNS: Record<string, Array<{ isStorage?: boolean; name: st
             "type": "number"
         }
     ],
+    "runs": [
+        {
+            "name": "_id",
+            "optional": false,
+            "pk": true,
+            "type": "id"
+        },
+        {
+            "name": "_creationTime",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "userId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "questionNodeId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "status",
+            "optional": false,
+            "type": "union"
+        },
+        {
+            "name": "partialText",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "answerRootId",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "answerHash",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "error",
+            "optional": false,
+            "type": "string"
+        },
+        {
+            "name": "createdAt",
+            "optional": false,
+            "type": "number"
+        },
+        {
+            "name": "updatedAt",
+            "optional": false,
+            "type": "number"
+        }
+    ],
     "ratelimit_buckets": [
         {
             "name": "_id",
@@ -366,6 +443,7 @@ export interface ShardDOConfig {
     observability?: (env: Record<string, unknown>) => LogSink | undefined;
     scheduler?: (env: Record<string, unknown>) => unknown;
     storage?: (env: Record<string, unknown>) => unknown;
+    ai?: (env: Record<string, unknown>) => AiBindingLike;
 }
 
 const schedulerStub = {
@@ -402,6 +480,23 @@ const storageStub = {
     upload: async () => {
         throw new Error("ctx.storage: no storage configured. Pass `storage` to createShardDO().");
     },
+};
+
+const aiStub: LunoraAi = {
+    embeddingModel: () => {
+        throw new Error("ctx.ai: no AI binding found. Add an \`ai\` binding (env.AI) to wrangler.jsonc, or pass \`ai\` to createShardDO().");
+    },
+    model: () => {
+        throw new Error("ctx.ai: no AI binding found. Add an \`ai\` binding (env.AI) to wrangler.jsonc, or pass \`ai\` to createShardDO().");
+    },
+    run: async () => {
+        throw new Error("ctx.ai: no AI binding found. Add an \`ai\` binding (env.AI) to wrangler.jsonc, or pass \`ai\` to createShardDO().");
+    },
+    // workersai is a callable-with-properties; a bare throwing arrow isn't
+    // structurally assignable, so cast it. Never invoked (the stub throws first).
+    workersai: (() => {
+        throw new Error("ctx.ai: no AI binding found. Add an \`ai\` binding (env.AI) to wrangler.jsonc, or pass \`ai\` to createShardDO().");
+    }) as unknown as LunoraAi["workersai"],
 };
 
 // Bound in-process `ctx.run*` composition depth so a self- or cyclically-
@@ -836,6 +931,20 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
             const userId = options.identity ? options.identity.userId : this.getCurrentUserId();
             const identity = options.identity ? options.identity.identity : this.getCurrentIdentity();
 
+            const aiBinding = config.ai?.(env) ?? (env as Record<string, unknown>).AI;
+            // Correlate AI-Gateway-routed calls with the Lunora trace: thread the
+            // function path + trace id into createAi, which folds them into the
+            // gateway's native `metadata` only when a gateway is configured (absent
+            // otherwise). Mirror the tracer's anchor guard — a deferred subscription
+            // re-run must not borrow a concurrent dispatch's trace, so read
+            // `getCurrentTrace()` only on the synchronous (non-threaded-identity) path.
+            const aiTrace = options.identity ? undefined : this.getCurrentTrace();
+            const ai: LunoraAi = aiBinding
+                ? createAi({ binding: aiBinding as AiBindingLike, env: env as Record<string, unknown>, metadata: { functionPath: options.functionPath, traceId: aiTrace?.traceId } })
+                : aiStub;
+
+            const envConfig = lunoraEnvContract.env(env);
+
             const secrets = createSecrets(env);
 
             const scheduler = (config.scheduler?.(env) ?? schedulerStub) as SchedulerLike;
@@ -890,6 +999,7 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
             facade["savedQueries"] = bindTableFacade(db, "savedQueries");
             facade["dailyIndex"] = bindTableFacade(db, "dailyIndex");
             facade["migrateState"] = bindTableFacade(db, "migrateState");
+            facade["runs"] = bindTableFacade(db, "runs");
             facade["ratelimit_buckets"] = bindTableFacade(db, "ratelimit_buckets");
 
 
@@ -928,6 +1038,8 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
                 span,
                 storage,
                 trace,
+                ai,
+                env: envConfig,
                 secrets,
             };
 

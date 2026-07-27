@@ -16,6 +16,7 @@ import type {
 } from "./lunora-kv-store";
 
 import {
+  userAgentRunsCollection,
   userDailyIndexCollection,
   userSavedQueriesCollection,
   userTagColorsCollection,
@@ -80,6 +81,20 @@ function snapshotNodes(collection: Collection<NodeRow, string>): OutlineNode[] {
   return collection.toArray.map(rowToNode);
 }
 
+/** Lunora `runs` row (ADR 0059). */
+export type AgentRunRowDoc = {
+  _id: string;
+  questionNodeId: string;
+  status: "running" | "completed" | "cancelled" | "error";
+  partialText: string;
+  answerRootId: string | null;
+  answerHash: string | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+  userId: string;
+} & Record<string, unknown>;
+
 export type OutlineStore = {
   client: LunoraClient;
   collection: Collection<NodeRow, string>;
@@ -89,6 +104,8 @@ export type OutlineStore = {
   savedQueries: Collection<SavedQueryRowDoc, string>;
   /** Phase 2b — Lunora daily index (flag ON). */
   dailyIndex: Collection<DailyIndexRowDoc, string>;
+  /** Inline `@agent` runs (ADR 0059). */
+  agentRuns: Collection<AgentRunRowDoc, string>;
   mutators: ReturnType<typeof bindOutlineMutators>;
 };
 
@@ -98,6 +115,7 @@ function bindOutlineMutators(
   tagColors: Collection<TagColorRowDoc, string>,
   savedQueries: Collection<SavedQueryRowDoc, string>,
   dailyIndex: Collection<DailyIndexRowDoc, string>,
+  agentRuns: Collection<AgentRunRowDoc, string>,
   userId: string,
 ) {
   return bindMutators(
@@ -108,6 +126,7 @@ function bindOutlineMutators(
         tagColors: tagColors as never,
         savedQueries: savedQueries as never,
         dailyIndex: dailyIndex as never,
+        runs: agentRuns as never,
       },
       shardKey: userId,
     },
@@ -605,6 +624,43 @@ function bindOutlineMutators(
           if (dailyIndex.has(args.key)) dailyIndex.delete(args.key);
         },
       }),
+      cancelAgentRun: defineMutator<{
+        userId: string;
+        runId: string;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:cancelAgentRun",
+        apply: (_ctx, args) => {
+          if (!agentRuns.has(args.runId)) return;
+          agentRuns.update(args.runId, (draft) => {
+            draft.status = "cancelled";
+            draft.partialText = "";
+            draft.updatedAt = args.updatedAt;
+          });
+        },
+      }),
+      cancelAgentRunForQuestion: defineMutator<{
+        userId: string;
+        questionNodeId: string;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:cancelAgentRunForQuestion",
+        apply: (_ctx, args) => {
+          for (const row of agentRuns.values()) {
+            if (
+              row.questionNodeId === args.questionNodeId &&
+              row.status === "running"
+            ) {
+              agentRuns.update(row._id, (draft) => {
+                draft.status = "cancelled";
+                draft.partialText = "";
+                draft.updatedAt = args.updatedAt;
+              });
+              break;
+            }
+          }
+        },
+      }),
     },
   );
 }
@@ -636,6 +692,11 @@ export function createOutlineStore(
     load: "eager",
     shardKey: userId,
   });
+  const runsBinding = userAgentRunsCollection({
+    client,
+    load: "eager",
+    shardKey: userId,
+  });
 
   const collection = outlineBinding.collection as unknown as Collection<
     NodeRow,
@@ -653,13 +714,26 @@ export function createOutlineStore(
     DailyIndexRowDoc,
     string
   >;
+  const agentRuns = runsBinding.collection as unknown as Collection<
+    AgentRunRowDoc,
+    string
+  >;
   const mutators = bindOutlineMutators(
     client,
     collection,
     tagColors,
     savedQueries,
     dailyIndex,
+    agentRuns,
     userId,
   );
-  return { client, collection, tagColors, savedQueries, dailyIndex, mutators };
+  return {
+    client,
+    collection,
+    tagColors,
+    savedQueries,
+    dailyIndex,
+    agentRuns,
+    mutators,
+  };
 }
