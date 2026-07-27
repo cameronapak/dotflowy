@@ -19,6 +19,11 @@ describe("buildAgentMessages", () => {
     expect(AGENT_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(AGENT_SYSTEM_PROMPT).toContain("Do NOT offer follow-ups");
     expect(AGENT_SYSTEM_PROMPT).toMatch(/You are Dot/);
+    expect(AGENT_SYSTEM_PROMPT).toContain("does NOT sync with Notion");
+    expect(AGENT_SYSTEM_PROMPT).toContain("web_search");
+    expect(AGENT_SYSTEM_PROMPT).toContain("[title](url)");
+    expect(AGENT_SYSTEM_PROMPT).toContain("Never invent product capabilities");
+    expect(AGENT_SYSTEM_PROMPT).toMatch(/look them up via web_search/);
     expect(msgs[0]).toEqual({ role: "user", content: "@agent prior" });
     expect(msgs[1]).toEqual({
       role: "assistant",

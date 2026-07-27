@@ -13,6 +13,8 @@ export const AGENT_ALLOWED_TOOLS = [
   "add_to_today",
   "mirror_node",
   "mirror_to_today",
+  /** Firecrawl-backed; omitted at runtime when `FIRECRAWL_API_KEY` is unset. */
+  "web_search",
 ] as const;
 
 export type AgentAllowedTool = (typeof AGENT_ALLOWED_TOOLS)[number];

@@ -11,15 +11,13 @@
 // collection, no per-node subscription: `origin` never changes after birth, so
 // reading it off the node the slot is handed is enough.
 //
-// Visual: a small reserved-indigo diamond just before the text — indigo reads as
-// "system / not-you" without the alarm of red/green, and a diamond (not a ring)
-// so it can't be misread as a second bullet dot. Static (no animation: an agent
-// marker that pulsed would read as exactly the AI-generated noise we're avoiding)
-// and single-hued (the one accessory). The harness name + creation time show on
-// hover; the mark itself stays quiet.
+// Visual: Dot avatar for inline Dot (`origin` agent|dot); known MCP harnesses
+// get an attribution brand mark when cleared (ChatGPT Blossom today); else a
+// quiet Sparkle. Tooltip: "Created by {displayName} · {relativeTime}".
 
 import { SparkleIcon } from "lucide-react";
 
+import { ChatGptIcon } from "@/components/brand-icons/chatgpt";
 import { cn } from "@/lib/utils";
 import {
   DotAvatar,
@@ -31,11 +29,7 @@ import {
 import type { Node } from "../../data/tree";
 
 import { definePlugin } from "../types";
-
-/** Inline Dot answers stamp `origin: "agent"` (ADR 0059); MCP may use a harness name. */
-function isDotOrigin(origin: string): boolean {
-  return origin === "agent" || origin === "dot";
-}
+import { resolveHarnessMark } from "./harness";
 
 /** A compact "when", for the hover attribution. Set-once at creation, so this is
  *  read at render time against the wall clock — good enough for a tooltip. */
@@ -64,33 +58,38 @@ function ProvenanceMark({
   placement: "row" | "title";
 }) {
   if (!node.origin) return null;
-  const byDot = isDotOrigin(node.origin);
-  const who = byDot ? "Dot" : node.origin;
-  const label = `Created by ${who} · ${relativeTime(node.createdAt)}`;
+  const mark = resolveHarnessMark(node.origin);
+  const label = `Created by ${mark.displayName} · ${relativeTime(node.createdAt)}`;
   const markClass = cn([
     // Row vertical alignment is the shared `.outline-row [data-origin]`
     // rule (scales with reading size, ADR 0029); only fix the icon size.
     placement === "row" && "size-4",
     placement === "title" && "mt-2 mr-2 size-5",
-    !byDot && "text-muted-foreground",
+    mark.kind !== "dot" && "text-muted-foreground",
   ]);
+  const icon =
+    mark.kind === "dot" ? (
+      <DotAvatar
+        className={markClass}
+        title={label}
+        data-origin={node.origin}
+      />
+    ) : mark.kind === "chatgpt" ? (
+      <ChatGptIcon
+        className={markClass}
+        title={label}
+        data-origin={node.origin}
+      />
+    ) : (
+      <SparkleIcon
+        className={markClass}
+        aria-label={label}
+        data-origin={node.origin}
+      />
+    );
   return (
     <Tooltip>
-      <TooltipTrigger>
-        {byDot ? (
-          <DotAvatar
-            className={markClass}
-            title={label}
-            data-origin={node.origin}
-          />
-        ) : (
-          <SparkleIcon
-            className={markClass}
-            aria-label={label}
-            data-origin={node.origin}
-          />
-        )}
-      </TooltipTrigger>
+      <TooltipTrigger>{icon}</TooltipTrigger>
       <TooltipContent>
         <p>{label}</p>
       </TooltipContent>

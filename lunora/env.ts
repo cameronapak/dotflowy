@@ -7,4 +7,9 @@ import { defineEnv, v } from "lunorash/server";
 export const env = defineEnv({
   /** Better Auth / billing D1 (subscription table). */
   DB: v.any(),
+  /**
+   * Optional Firecrawl key for inline-agent `web_search` (ADR 0059).
+   * Unset = tool omitted (fail closed).
+   */
+  FIRECRAWL_API_KEY: v.optional(v.string()),
 });

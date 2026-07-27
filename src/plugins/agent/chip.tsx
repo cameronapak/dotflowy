@@ -21,15 +21,20 @@ export function AgentChip({ source }: WidgetProps) {
   const status = useAgentRunStatus(nodeId ?? "");
   const running = status === "running";
 
+  // Border grammar matches play/stop (`rounded-full border border-border
+  // bg-background … shadow-sm`) but each piece stays separate — avatar ring,
+  // mention pill, then play/stop — never one fused toolbar blob.
   return (
     <span
       ref={setRoot}
       className="inline-flex items-center gap-1 align-baseline"
       data-agent-chrome=""
     >
-      <DotAvatar className="size-[1.15em] shrink-0 self-center" title="Dot" />
+      <span className="inline-flex size-[1.35em] shrink-0 self-center overflow-hidden rounded-full border border-border bg-background shadow-sm">
+        <DotAvatar className="size-full" title="Dot" />
+      </span>
       <span
-        className="agent-chip inline-flex items-center rounded bg-muted px-1 text-[0.85em] text-muted-foreground select-none"
+        className="agent-chip inline-flex items-center rounded-full border border-border bg-background px-1.5 text-[0.85em] text-muted-foreground shadow-sm select-none"
         data-agent=""
         title={source}
       >

@@ -23,4 +23,9 @@ describe("isAgentToolAllowed", () => {
     expect(isAgentToolAllowed("rm_rf")).toBe(false);
     expect(isAgentToolAllowed("")).toBe(false);
   });
+
+  test("allows web_search (Firecrawl; runtime-gated by API key)", () => {
+    expect(AGENT_ALLOWED_TOOLS).toContain("web_search");
+    expect(isAgentToolAllowed("web_search")).toBe(true);
+  });
 });

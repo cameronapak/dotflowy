@@ -40,6 +40,11 @@ export type LunoraEnv = AuthEnv & {
   LUNORA_AI_GATEWAY_ID?: string;
   /** Optional AI Gateway auth token (authenticated gateways only). */
   LUNORA_AI_GATEWAY_TOKEN?: string;
+  /**
+   * Optional Firecrawl key for inline-agent `web_search` (ADR 0059).
+   * Unset = tool omitted.
+   */
+  FIRECRAWL_API_KEY?: string;
 };
 
 /**

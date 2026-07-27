@@ -154,12 +154,17 @@ export const fireAgentRun = action
       const prompt = buildAgentPrompt(index, args.questionNodeId);
       const messages = buildAgentMessages(prompt);
       const abort = new AbortController();
+      // Optional secret — defineEnv makes the key optional; unset omits web_search.
+      const firecrawlApiKey = (
+        ctx.env as { FIRECRAWL_API_KEY?: string } | undefined
+      )?.FIRECRAWL_API_KEY;
       const agentTools = buildAgentAiTools(store, {
         isCancelled: async () => {
           const ok = await stillRunning();
           if (!ok) abort.abort();
           return !ok;
         },
+        firecrawlApiKey,
       });
 
       // Tool schemas are Effect→JSON; cast past AI SDK ToolSet generics (two
