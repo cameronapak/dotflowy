@@ -10,6 +10,7 @@ import {
   hashAnswerSubtree,
   shouldReplaceAnswer,
 } from "../src/data/agent-replace-guard";
+import { agentRunAllowsAnswerCommit } from "../src/data/agent-run-gate";
 import {
   applyPlan,
   buildTreeIndex,
@@ -1394,7 +1395,7 @@ export const commitAgentAnswer = defineMutator({
     }
     // Cooperative cancel: Stop patches status to cancelled; refuse to land
     // an answer for a run that is no longer running.
-    if (runRow.status !== "running") {
+    if (!agentRunAllowsAnswerCommit(runRow.status)) {
       return { ok: false as const, error: "cancelled" };
     }
 

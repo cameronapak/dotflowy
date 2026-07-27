@@ -8,6 +8,7 @@ import {
   hashAnswerSubtree,
   shouldReplaceAnswer,
 } from "../src/data/agent-replace-guard";
+import { agentRunAllowsAnswerCommit } from "../src/data/agent-run-gate";
 import {
   applyPlan,
   buildTreeIndex,
@@ -1348,7 +1349,7 @@ export async function seedOutlineLunora(
       } else if (path === "mutators:commitAgentAnswer") {
         const runId = String(args.runId ?? "");
         const runRow = agentRuns.get(runId);
-        if (!runRow || runRow.status !== "running") {
+        if (!runRow || !agentRunAllowsAnswerCommit(runRow.status)) {
           result = { ok: false, error: "cancelled" };
           pokeShapes = new Set(["userAgentRuns"]);
         } else {
@@ -1465,7 +1466,7 @@ export async function seedOutlineLunora(
           }
 
           const live = agentRuns.get(runId);
-          if (!live || live.status !== "running") {
+          if (!live || !agentRunAllowsAnswerCommit(live.status)) {
             result = { runId, status: "cancelled" };
             pokeShapes = new Set(["userAgentRuns"]);
           } else {
