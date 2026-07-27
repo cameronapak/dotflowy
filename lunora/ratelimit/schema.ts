@@ -9,7 +9,7 @@ import {
   v,
 } from "lunorash/server";
 
-import { scopeRateLimitDb, type DbWithAsId } from "./scope-db";
+import { scopeRateLimitDb, type DbWithScopedWrites } from "./scope-db";
 
 export const limits = {
   default: { kind: "token bucket", period: 60_000, rate: 10 },
@@ -21,12 +21,12 @@ export type LimitName = keyof typeof limits;
 
 const RATE_LIMIT_TABLE = "ratelimit_buckets";
 
-/** Durable DO-backed limiter; scopes patch/delete via `asId` (see scope-db). */
+/** Durable DO-backed limiter; scopes patch/delete via `expectedTable` (see scope-db). */
 export const makeRateLimiter = (ctx: { db: unknown }): RateLimiter<LimitName> =>
   new RateLimiter<LimitName>({
     config: limits,
     store: createDbStore({
-      db: scopeRateLimitDb(ctx.db as DbWithAsId, RATE_LIMIT_TABLE),
+      db: scopeRateLimitDb(ctx.db as DbWithScopedWrites, RATE_LIMIT_TABLE),
       table: RATE_LIMIT_TABLE,
     }),
   });

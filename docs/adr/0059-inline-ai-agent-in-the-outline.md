@@ -76,6 +76,7 @@ for a future chat surface, not the v1 outline answer path.
   turns — accepted). Sparkle on **every** agent-origin node (summary + detail).
 - No classic sync protocol surface to port or delete at cutover.
 - Sequential fire throttle is durable: Lunora `createDbStore` on
-  `ratelimit_buckets`, with patch/delete scoped via `asId` so the shard
-  avoids unscoped `UNION ALL` id lookup (Workerd SQLite compound-SELECT
-  limit). Paid gate + `MAX_CONCURRENT_RUNS` still bound concurrent abuse.
+  `ratelimit_buckets`, with patch/delete scoped via `expectedTable` so the
+  shard avoids unscoped `UNION ALL` id lookup (Workerd SQLite
+  compound-SELECT limit; `asId` is a TS brand only and does not scope).
+  Paid gate + `MAX_CONCURRENT_RUNS` still bound concurrent abuse.

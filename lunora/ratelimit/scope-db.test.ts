@@ -1,15 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { scopeRateLimitDb, type DbWithAsId } from "./scope-db";
+import { scopeRateLimitDb, type DbWithScopedWrites } from "./scope-db";
 
 describe("scopeRateLimitDb", () => {
-  test("brands patch/delete ids with asId(table, …)", async () => {
+  test("passes expectedTable on patch/delete", async () => {
     const calls: Array<{ op: string; args: unknown[] }> = [];
     const db = {
-      asId: (table: string, id: string) => {
-        calls.push({ op: "asId", args: [table, id] });
-        return `branded:${table}:${id}`;
-      },
       query: (table: string) => {
         calls.push({ op: "query", args: [table] });
         return {
@@ -22,33 +18,34 @@ describe("scopeRateLimitDb", () => {
         calls.push({ op: "insert", args: [table, doc] });
         return "new-id" as never;
       },
-      patch: async (id: unknown, patch: Record<string, unknown>) => {
-        calls.push({ op: "patch", args: [id, patch] });
+      patch: async (
+        id: unknown,
+        patch: Record<string, unknown>,
+        expectedTable?: string,
+      ) => {
+        calls.push({ op: "patch", args: [id, patch, expectedTable] });
       },
-      delete: async (id: unknown) => {
-        calls.push({ op: "delete", args: [id] });
+      delete: async (id: unknown, expectedTable?: string) => {
+        calls.push({ op: "delete", args: [id, expectedTable] });
       },
-    } as unknown as DbWithAsId;
+    } as unknown as DbWithScopedWrites;
 
     const scoped = scopeRateLimitDb(db, "ratelimit_buckets");
     await scoped.patch("raw-id" as never, { value: 1, ts: 2 });
     await scoped.delete("raw-id" as never);
 
     expect(calls).toEqual([
-      { op: "asId", args: ["ratelimit_buckets", "raw-id"] },
       {
         op: "patch",
-        args: ["branded:ratelimit_buckets:raw-id", { value: 1, ts: 2 }],
+        args: ["raw-id", { value: 1, ts: 2 }, "ratelimit_buckets"],
       },
-      { op: "asId", args: ["ratelimit_buckets", "raw-id"] },
-      { op: "delete", args: ["branded:ratelimit_buckets:raw-id"] },
+      { op: "delete", args: ["raw-id", "ratelimit_buckets"] },
     ]);
   });
 
   test("forwards query/insert unchanged", async () => {
     const calls: Array<{ op: string; args: unknown[] }> = [];
     const db = {
-      asId: (table: string, id: string) => `${table}:${id}`,
       query: (table: string) => {
         calls.push({ op: "query", args: [table] });
         return {
@@ -63,7 +60,7 @@ describe("scopeRateLimitDb", () => {
       },
       patch: async () => {},
       delete: async () => {},
-    } as unknown as DbWithAsId;
+    } as unknown as DbWithScopedWrites;
 
     const scoped = scopeRateLimitDb(db, "ratelimit_buckets");
     scoped.query("ratelimit_buckets");

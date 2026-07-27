@@ -85,8 +85,8 @@ export const fireAgentRun = action
     }),
   })
   .use(
-    // Durable `ratelimit_buckets` via createDbStore; asId-scoped patch/delete
-    // (lunora/ratelimit/scope-db.ts) avoids the shard UNION ALL blow-up.
+    // Durable `ratelimit_buckets` via createDbStore; expectedTable-scoped
+    // patch/delete (lunora/ratelimit/scope-db.ts) avoids UNION ALL blow-up.
     // Per-call limiter is fine — bucket state lives in the DO, not the isolate.
     rateLimit((ctx) => makeRateLimiter(ctx), "agent", {
       key: (ctx) => ctx.auth.userId ?? "anon",
