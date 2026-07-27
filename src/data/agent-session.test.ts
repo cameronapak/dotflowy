@@ -4,6 +4,7 @@ import { Schema } from "effect";
 import {
   AskRowSchema,
   PresenceRowSchema,
+  freshestLivePresence,
   hasLivePresence,
   isAskTransitionError,
   planAnnouncePresence,
@@ -33,6 +34,29 @@ describe("agent-session planners (ADR 0059)", () => {
     });
     expect(ask.status).toBe("pending");
     expect(Schema.decodeUnknownSync(AskRowSchema)(ask)).toEqual(ask);
+  });
+
+  test("freshestLivePresence picks newest fresh row", () => {
+    const stale = planAnnouncePresence({
+      agentId: "old",
+      label: "Old",
+      now: 0,
+    });
+    const a = planAnnouncePresence({
+      agentId: "a",
+      label: "A",
+      now: 50_000,
+    });
+    const b = planAnnouncePresence({
+      agentId: "b",
+      label: "B",
+      now: 80_000,
+    });
+    const now = 100_000;
+    expect(hasLivePresence([stale, a, b], now)).toBe(true);
+    expect(freshestLivePresence([stale, a, b], now)?.label).toBe("B");
+    expect(freshestLivePresence([stale], now)).toBeNull();
+    expect(PRESENCE_STALE_MS).toBe(90_000);
   });
 
   test("claim and complete transitions", () => {

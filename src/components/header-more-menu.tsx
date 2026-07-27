@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  BotIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CircleCheckIcon,
@@ -29,6 +30,7 @@ import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
+import { openAddAgent } from "./add-agent-opener";
 import { openChangelog } from "./changelog-opener";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
@@ -245,6 +247,11 @@ export function HeaderMoreMenu() {
           <FocusIcon />
           Spotlight mode
         </DropdownMenuCheckboxItem>
+
+        <DropdownMenuItem onClick={() => openAddAgent()}>
+          <BotIcon />
+          Add agent
+        </DropdownMenuItem>
 
         <DropdownMenuSeparator />
 

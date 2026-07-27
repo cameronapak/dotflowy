@@ -11,6 +11,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
+import { AddAgent } from "../components/add-agent";
 import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
@@ -154,6 +155,7 @@ function RootComponent() {
                   <Outlet />
                   <NodeSwitcher />
                   <QuickAdd />
+                  <AddAgent />
                   {/* Registers openSettings() so the node-limit toast's "Upgrade"
                     action can SPA-navigate to /settings from non-React code. */}
                   <SettingsNavRegistrar />

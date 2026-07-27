@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from "react";
 import type { PluginContext } from "../plugins/types";
 
 import { headerSlots } from "../plugins/registry";
+import { AgentPresenceChip } from "./add-agent";
 import { BookmarkStar } from "./bookmarks";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { CommandCenterButton } from "./node-switcher";
@@ -37,18 +38,12 @@ export function Header({
           720px outline content below. */}
       <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3 max-sm:px-4">
         <div className="min-w-0 flex-1">{children}</div>
-        {/* Right cluster: the spotlight-on indicator leads (ADR 0033: awareness
-            + off-switch), then plugin header slots (the daily Today button),
-            then the focused-node action (BookmarkStar renders itself + its
-            trailing divider only when zoomed), then the filter magnifier (ADR
-            0047 §6: summons the `?q=` filter, not the switcher) and the ⌘
-            command-center button beside it (ADR 0034), and finally the "More"
-            overflow holding the secondary set-once actions (theme, text size,
-            show completed, sign out) -- which also carries the unread changelog
-            signal (ADR 0046): a quiet notification dot on the trigger rather
-            than a loud header CTA. See header-more-menu.tsx. */}
+        {/* Right cluster: spotlight (ADR 0033), BYOA presence chip when live
+            (ADR 0059), plugin header slots (Today), BookmarkStar, filter +
+            Cmd+K, More (Add agent entry + unread changelog dot). */}
         <div className="flex shrink-0 items-center gap-1">
           <SpotlightIndicator />
+          <AgentPresenceChip />
           {getCtx &&
             headerSlots.map((s) => (
               <Fragment key={s.id}>{s.render(getCtx)}</Fragment>

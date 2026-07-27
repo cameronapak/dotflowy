@@ -1,7 +1,7 @@
 # HANDOFF — Bring your own agent (ADR 0059)
 
 **Branch:** `feat/byoa-agent-join`  
-**Status:** Step 1 (MCP protocol) done; steps 2–5 not started.  
+**Status:** Steps 1–2 done; steps 3–5 not started.  
 **Do not merge this file to main** — delete in the shipping PR.
 
 ## Sources of truth
@@ -20,10 +20,11 @@
    - Join prompt: `src/data/agent-join-prompt.ts` → `buildAgentJoinPrompt({ appOrigin })`
    - Tests: `agent-session.test.ts`, `agent-join-prompt.test.ts`, BYOA cases in `worker/mcp.test.ts`
 
-2. **Add agent chrome**
-   - Header entry (paid-only; upgrade bait if free)
-   - Modal: copy prompt (`buildAgentJoinPrompt`) → Waiting for presence… (poll `/api/kv?collection=agent-presence` + `hasLivePresence` / `PRESENCE_STALE_MS`)
-   - Header presence chip when joined
+2. **Add agent chrome** — **DONE**
+   - Header More + Cmd+K **Add agent** → `openAddAgent()`; free = Settings upgrade bait (client `subscription.list`; MCP still server-gates)
+   - Modal: `buildAgentJoinPrompt` → **Copy for agent** → **Waiting for your agent…**; polls `agent-presence` via `src/data/agent-presence.ts` + `hasLivePresence` / `freshestLivePresence`
+   - Header `AgentPresenceChip` when live (label = freshest agent); click reopens modal
+   - Mount: `AddAgent` in `__root.tsx` (beside QuickAdd)
 
 3. **`@agent` / play → Ask**
    - Cherry-pick plugin seams from #323 (widget, play, loader)
@@ -53,7 +54,7 @@
 
 ## Next skills / agents
 
-- Step 2: Add agent modal + presence chip (consume `buildAgentJoinPrompt` + kv poll)
+- Step 3: `@agent` play → Ask (+ #323 chrome cherry-pick)
 - Implementation: Cursor subagents on this branch (orchestrator stays high-level)
 - PR: `/ft-create-concise-pr` when ready; changeset for the feature
 

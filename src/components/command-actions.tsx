@@ -2,6 +2,7 @@ import { useParams } from "@tanstack/react-router";
 import {
   ALargeSmallIcon,
   BookmarkIcon,
+  BotIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CircleCheckIcon,
@@ -29,6 +30,7 @@ import { capture } from "../data/history";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
+import { openAddAgent } from "./add-agent-opener";
 import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
@@ -222,6 +224,24 @@ export function useGlobalActions(opts: {
     }
 
     a.push(
+      {
+        id: "g:add-agent",
+        label: "Add agent",
+        description: "Join a coding agent to this outline (bring your own)",
+        icon: BotIcon,
+        scope: "global",
+        keywords: [
+          "agent",
+          "add agent",
+          "join",
+          "mcp",
+          "cursor",
+          "claude",
+          "ai",
+          "presence",
+        ],
+        run: () => openAddAgent(),
+      },
       {
         id: "g:mcp",
         label: "Connect apps (MCP)",

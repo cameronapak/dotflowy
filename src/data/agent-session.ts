@@ -65,6 +65,20 @@ export function hasLivePresence(
   return rows.some((r) => isPresenceFresh(r, now, staleMs));
 }
 
+/** Freshest live presence row (for the header chip label), or null. */
+export function freshestLivePresence(
+  rows: readonly PresenceRow[],
+  now: number,
+  staleMs = PRESENCE_STALE_MS,
+): PresenceRow | null {
+  let best: PresenceRow | null = null;
+  for (const r of rows) {
+    if (!isPresenceFresh(r, now, staleMs)) continue;
+    if (!best || r.lastSeenAt > best.lastSeenAt) best = r;
+  }
+  return best;
+}
+
 export function planAnnouncePresence(args: {
   agentId: string;
   label: string;
