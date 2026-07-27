@@ -8,6 +8,7 @@ import type { FunctionReference } from "lunorash/client";
 import { toast } from "sonner";
 
 import { api } from "../../lunora/_generated/api";
+import { isInlineAgentBetaEnabled } from "./account-prefs";
 import { hasAgentMention } from "./agent-mention";
 import { getAgentRunForQuestion, noteLocalAgentRun } from "./agent-runs";
 import { isLunoraSyncEnabled } from "./flags";
@@ -65,13 +66,21 @@ export async function fireAgent(nodeId: string): Promise<void> {
   if (!node) return;
 
   if (!hasAgentMention(node.text)) {
-    toast.message("Add @agent to this bullet first");
+    toast.message("Add @agent or @dot to this bullet first");
     return;
   }
 
   if (!isLunoraSyncEnabled()) {
     toast.message("Inline agent needs upgraded sync", {
       description: "Turn on the beta sync option in Settings, then try again.",
+    });
+    return;
+  }
+
+  if (!isInlineAgentBetaEnabled()) {
+    toast.message("Inline agent is off", {
+      description:
+        "Turn on Inline agent (BETA) in Settings → Beta, then try again.",
     });
     return;
   }
@@ -169,7 +178,7 @@ export async function stopAgent(nodeId: string): Promise<void> {
   }
 }
 
-/** Insert `@agent ` at the start of the bullet (Seam C `/ask`). */
+/** Insert `@dot ` at the start of the bullet (Seam C `/ask` — tag only). */
 export function ensureAgentMention(
   nodeId: string,
   onTextChange: (id: string, text: string) => void,
@@ -177,6 +186,6 @@ export function ensureAgentMention(
   const node = getTreeIndex().byId.get(nodeId);
   if (!node) return;
   if (hasAgentMention(node.text)) return;
-  const next = node.text.trim().length ? `@agent ${node.text}` : "@agent ";
+  const next = node.text.trim().length ? `@dot ${node.text}` : "@dot ";
   onTextChange(nodeId, next);
 }

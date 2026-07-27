@@ -16,26 +16,36 @@ describe("AGENT_MENTION", () => {
     expect(matches("@agent what's the ISO week?")).toEqual(["@agent"]);
   });
 
+  test("matches @dot interchangeably", () => {
+    expect(matches("@dot what's the ISO week?")).toEqual(["@dot"]);
+    expect(matches("ask @dot about weeks")).toEqual(["@dot"]);
+  });
+
   test("matches after whitespace", () => {
     expect(matches("ask @agent about weeks")).toEqual(["@agent"]);
   });
 
-  test("does not match mid-word or @agency", () => {
+  test("does not match mid-word, @agency, or @dotted", () => {
     expect(matches("email@agent.com")).toEqual([]);
     expect(matches("@agency research")).toEqual([]);
     expect(matches("x@agent")).toEqual([]);
+    expect(matches("@dotted path")).toEqual([]);
+    expect(matches("x@dot")).toEqual([]);
   });
 
-  test("does not match @Agent case variants", () => {
+  test("does not match @Agent / @Dot case variants", () => {
     expect(matches("@Agent hello")).toEqual([]);
     expect(matches("@AGENT hello")).toEqual([]);
+    expect(matches("@Dot hello")).toEqual([]);
   });
 });
 
 describe("hasAgentMention / parseAgentMentions", () => {
-  test("true when mention present", () => {
+  test("true when @agent or @dot present", () => {
     expect(hasAgentMention("@agent hi")).toBe(true);
+    expect(hasAgentMention("@dot hi")).toBe(true);
     expect(parseAgentMentions("a @agent b")).toEqual(["@agent"]);
+    expect(parseAgentMentions("a @dot b")).toEqual(["@dot"]);
   });
 
   test("false without mention", () => {
@@ -45,10 +55,11 @@ describe("hasAgentMention / parseAgentMentions", () => {
 });
 
 describe("isAiNode", () => {
-  test("true for @agent mention even without origin", () => {
+  test("true for @agent or @dot mention even without origin", () => {
     expect(isAiNode(makeNode({ id: "q", text: "@agent week rule?" }))).toBe(
       true,
     );
+    expect(isAiNode(makeNode({ id: "d", text: "@dot week rule?" }))).toBe(true);
   });
 
   test("true for origin-stamped answer without mention", () => {

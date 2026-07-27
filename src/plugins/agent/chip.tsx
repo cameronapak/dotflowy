@@ -1,11 +1,12 @@
-// `@agent` mention chrome (ADR 0059 / ADR 0006 widget): pill + trailing
-// play (idle) or Dot Matrix loader + Stop (running). Fire is two-step via
-// Seam B on `[data-agent-play]` → Run popover; stop is `[data-agent-stop]`.
+// `@agent` / `@dot` mention chrome (ADR 0059 / ADR 0006 widget): Dot avatar +
+// pill + trailing play (idle) or BrailleLoader + Stop (running). Fire is
+// two-step via Seam B on `[data-agent-play]` → Run popover; stop is
+// `[data-agent-stop]`.
 
 import { Play, Square } from "lucide-react";
 import { useCallback, useState } from "react";
 
-import { DotmSquare3 } from "@/plugins/kit";
+import { BrailleLoader, DotAvatar } from "@/plugins/kit";
 
 import type { WidgetProps } from "../types";
 
@@ -26,10 +27,11 @@ export function AgentChip({ source }: WidgetProps) {
       className="inline-flex items-center gap-1 align-baseline"
       data-agent-chrome=""
     >
+      <DotAvatar className="size-[1.15em] shrink-0 self-center" title="Dot" />
       <span
         className="agent-chip inline-flex items-center rounded bg-muted px-1 text-[0.85em] text-muted-foreground select-none"
         data-agent=""
-        title="@agent"
+        title={source}
       >
         {source}
       </span>
@@ -40,11 +42,12 @@ export function AgentChip({ source }: WidgetProps) {
             aria-hidden="true"
             data-agent-loader=""
           >
-            <DotmSquare3
-              size={14}
-              dotSize={2}
-              speed={1.2}
-              className="text-current"
+            <BrailleLoader
+              variant="breathe"
+              speed="normal"
+              fontSize={12}
+              label="Agent running"
+              className="leading-none"
             />
           </span>
           <button

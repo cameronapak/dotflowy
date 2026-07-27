@@ -704,7 +704,18 @@ export async function seedOutlineLunora(
     null;
 
   const classicNodes = (opts.classicSource?.nodes ?? []).map((n) => toNode(n));
-  const classicKv = opts.classicSource?.kv ?? {};
+  // Product default for Inline agent (BETA) is OFF; e2e seeds ON so agent
+  // fire paths stay exercisable under upgraded sync without Settings UI.
+  // Pass `classicSource.kv["account-prefs"]` to override (e.g. test OFF).
+  const classicKv = {
+    "account-prefs": [
+      {
+        key: "inline-agent-beta",
+        value: { id: "inline-agent-beta", enabled: true },
+      },
+    ],
+    ...opts.classicSource?.kv,
+  };
 
   let clientSeq = 0;
   let pokeN = 0;

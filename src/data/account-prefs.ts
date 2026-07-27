@@ -4,6 +4,9 @@
  * Lunora beta opt-in lives here — not localStorage alone — so enabling on one
  * device can converge others on next load. The runtime flag still mirrors to
  * `dotflowy:flag:lunora-sync` so `LunoraSyncHost` remounts cleanly after reload.
+ *
+ * Inline agent (BETA) opt-in (ADR 0059) is the same shape, default OFF, and
+ * does not reload — fire paths read it live via {@link isInlineAgentBetaEnabled}.
  */
 
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
@@ -25,6 +28,7 @@ export type AccountPrefRow = Schema.Schema.Type<typeof prefRowSchema>;
 
 const KV = "account-prefs";
 export const LUNORA_BETA_ROW_ID = "lunora-beta";
+export const INLINE_AGENT_BETA_ROW_ID = "inline-agent-beta";
 
 const PREFS_RELOAD_GUARD = "dotflowy:lunora-pref-sync-reload";
 
@@ -47,11 +51,16 @@ export const accountPrefsCollection = createCollection(
   }),
 );
 
+function prefRow(id: string): AccountPrefRow | null {
+  return accountPrefsCollection.toArray.find((r) => r.id === id) ?? null;
+}
+
 function lunoraBetaRow(): AccountPrefRow | null {
-  return (
-    accountPrefsCollection.toArray.find((r) => r.id === LUNORA_BETA_ROW_ID) ??
-    null
-  );
+  return prefRow(LUNORA_BETA_ROW_ID);
+}
+
+function inlineAgentBetaRow(): AccountPrefRow | null {
+  return prefRow(INLINE_AGENT_BETA_ROW_ID);
 }
 
 function mirrorLunoraFlag(enabled: boolean) {
@@ -87,22 +96,64 @@ export async function setLunoraBetaEnabled(enabled: boolean): Promise<void> {
   hardReset(window.location.pathname + window.location.search);
 }
 
+/**
+ * Persist Inline agent (BETA) opt-in. No reload — fire paths read the live
+ * collection. REJECTS on a failed write; callers must handle that.
+ */
+export async function setInlineAgentBetaEnabled(
+  enabled: boolean,
+): Promise<void> {
+  const row: AccountPrefRow = { id: INLINE_AGENT_BETA_ROW_ID, enabled };
+  await kvPut(KV, [{ key: INLINE_AGENT_BETA_ROW_ID, value: row }]);
+  if (accountPrefsCollection.has(INLINE_AGENT_BETA_ROW_ID)) {
+    accountPrefsCollection.update(
+      INLINE_AGENT_BETA_ROW_ID,
+      (draft) => void (draft.enabled = enabled),
+    );
+  } else {
+    accountPrefsCollection.insert(row);
+  }
+}
+
+/** Event-time read for fire paths. False until ready / missing row (default OFF). */
+export function isInlineAgentBetaEnabled(): boolean {
+  ensureStarted();
+  if (!collectionReady) return false;
+  return inlineAgentBetaRow()?.enabled === true;
+}
+
 // --- Reactive read -----------------------------------------------------------
 
 const HIDDEN = { ready: false, enabled: false } as const;
 
-type LunoraBetaSnapshot = { ready: boolean; enabled: boolean };
+type PrefSnapshot = { ready: boolean; enabled: boolean };
 
-let snapshot: LunoraBetaSnapshot = HIDDEN;
+let lunoraSnapshot: PrefSnapshot = HIDDEN;
+let inlineAgentSnapshot: PrefSnapshot = HIDDEN;
 let collectionReady = false;
 const listeners = new Set<() => void>();
 let started = false;
 
 function rebuild() {
-  const enabled = collectionReady ? (lunoraBetaRow()?.enabled ?? false) : false;
-  if (snapshot.ready === collectionReady && snapshot.enabled === enabled)
-    return;
-  snapshot = { ready: collectionReady, enabled };
+  const lunoraOn = collectionReady
+    ? (lunoraBetaRow()?.enabled ?? false)
+    : false;
+  const agentOn = collectionReady
+    ? (inlineAgentBetaRow()?.enabled ?? false)
+    : false;
+  const lunoraChanged =
+    lunoraSnapshot.ready !== collectionReady ||
+    lunoraSnapshot.enabled !== lunoraOn;
+  const agentChanged =
+    inlineAgentSnapshot.ready !== collectionReady ||
+    inlineAgentSnapshot.enabled !== agentOn;
+  if (!lunoraChanged && !agentChanged) return;
+  if (lunoraChanged) {
+    lunoraSnapshot = { ready: collectionReady, enabled: lunoraOn };
+  }
+  if (agentChanged) {
+    inlineAgentSnapshot = { ready: collectionReady, enabled: agentOn };
+  }
   for (const l of listeners) l();
 }
 
@@ -130,14 +181,24 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-function getSnapshot(): LunoraBetaSnapshot {
+function getLunoraSnapshot(): PrefSnapshot {
   ensureStarted();
-  return snapshot;
+  return lunoraSnapshot;
+}
+
+function getInlineAgentSnapshot(): PrefSnapshot {
+  ensureStarted();
+  return inlineAgentSnapshot;
 }
 
 /** Synced Lunora beta preference. `enabled` is false until the kv row loads. */
-export function useLunoraBetaPref(): LunoraBetaSnapshot {
-  return useSyncExternalStore(subscribe, getSnapshot, () => HIDDEN);
+export function useLunoraBetaPref(): PrefSnapshot {
+  return useSyncExternalStore(subscribe, getLunoraSnapshot, () => HIDDEN);
+}
+
+/** Synced Inline agent (BETA) preference. Default OFF until the kv row is on. */
+export function useInlineAgentBetaPref(): PrefSnapshot {
+  return useSyncExternalStore(subscribe, getInlineAgentSnapshot, () => HIDDEN);
 }
 
 /**
@@ -166,5 +227,6 @@ function maybeSyncLocalFlagFromAccount() {
 /** Mount once inside AuthGate to start the pref subscription + sync pass. */
 export function AccountPrefsController() {
   useLunoraBetaPref();
+  useInlineAgentBetaPref();
   return null;
 }

@@ -17,6 +17,8 @@ describe("buildAgentMessages", () => {
     const msgs = buildAgentMessages(prompt);
     expect(msgs.every((m) => m.role !== "system")).toBe(true);
     expect(AGENT_SYSTEM_PROMPT.length).toBeGreaterThan(0);
+    expect(AGENT_SYSTEM_PROMPT).toContain("Do NOT offer follow-ups");
+    expect(AGENT_SYSTEM_PROMPT).toMatch(/You are Dot/);
     expect(msgs[0]).toEqual({ role: "user", content: "@agent prior" });
     expect(msgs[1]).toEqual({
       role: "assistant",

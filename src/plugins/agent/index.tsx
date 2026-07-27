@@ -1,10 +1,12 @@
-// Inline `@agent` plugin (ADR 0059). Seams A (widget: pill + trailing
-// play/stop/loader), B (play → Run popover; stop → cancel), C (`/ask`),
-// D (`Mod+Shift+Enter`), H (`@` picker), K (`is:ai`).
+// Inline `@agent` / `@dot` plugin (ADR 0059). Seams A (widget: Dot avatar +
+// pill + trailing play/stop/loader), B (play → Run popover; stop → cancel),
+// C (`/ask`), D (`Mod+Shift+Enter`), H (`@` picker), K (`is:ai`).
 
-import { SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { DotAvatar } from "@/plugins/kit";
+
+import { isInlineAgentBetaEnabled } from "../../data/account-prefs";
 import {
   ensureAgentMention,
   fireAgent,
@@ -38,10 +40,13 @@ function agentMenuMatch(before: string): MenuTrigger | null {
   const prev = before[triggerIndex - 1];
   if (triggerIndex > 0 && !/\s/.test(prev ?? "")) return null;
   const query = before.slice(triggerIndex + 1);
+  const q = query.toLowerCase();
   if (
     query.length > 0 &&
     !/^agent$/i.test(query) &&
-    !"agent".startsWith(query.toLowerCase())
+    !/^dot$/i.test(query) &&
+    !"agent".startsWith(q) &&
+    !"dot".startsWith(q)
   ) {
     return null;
   }
@@ -57,9 +62,27 @@ function anchorRectForNode(nodeId: string): DOMRect {
   return el?.getBoundingClientRect() ?? new DOMRect(24, 24, 0, 0);
 }
 
+function gateInlineAgentFire(): boolean {
+  if (!isLunoraSyncEnabled()) {
+    toast.message("Inline agent needs upgraded sync", {
+      description: "Turn on the beta sync option in Settings, then try again.",
+    });
+    return false;
+  }
+  if (!isInlineAgentBetaEnabled()) {
+    toast.message("Inline agent is off", {
+      description:
+        "Turn on Inline agent (BETA) in Settings → Beta, then try again.",
+    });
+    return false;
+  }
+  return true;
+}
+
 /** Two-step fire (ADR 0059): every surface opens the confirm popover. */
 function openRunPopoverForNode(nodeId: string, ctx: PluginContext) {
   if (getAgentRunForQuestion(nodeId)?.status === "running") return;
+  if (!gateInlineAgentFire()) return;
 
   const rect = anchorRectForNode(nodeId);
   ctx.openOverlay(
@@ -100,15 +123,9 @@ function onStopClick(
   void stopAgent(nodeId);
 }
 
+/** Tag only — user presses play (or Mod+Shift+Enter) when ready. */
 function runAsk(nodeId: string, ctx: PluginContext) {
   ensureAgentMention(nodeId, ctx.mutations.onTextChange);
-  if (!isLunoraSyncEnabled()) {
-    toast.message("Inline agent needs upgraded sync", {
-      description: "Turn on the beta sync option in Settings, then try again.",
-    });
-    return;
-  }
-  openRunPopoverForNode(nodeId, ctx);
 }
 
 /** Confirm to fire; while running, hotkey mirrors trailing Stop. */
@@ -150,10 +167,10 @@ export default definePlugin({
   commands: [
     {
       id: "ask",
-      label: "Ask agent",
-      description: "Tag @agent and run (needs upgraded sync)",
-      icon: SparklesIcon,
-      keywords: ["ask", "agent", "ai", "llm"],
+      label: "Ask Dot",
+      description: "Tag @dot on this bullet — press play when ready (BETA)",
+      icon: DotAvatar,
+      keywords: ["ask", "agent", "dot", "ai", "llm"],
       available: () => true,
       run: (id, ctx) => {
         runAsk(id, ctx);
@@ -179,13 +196,25 @@ export default definePlugin({
       openWhenEmpty: true,
       entries: (trigger) => {
         const q = trigger.query.toLowerCase();
-        if (q && !"agent".startsWith(q)) return [];
         return [
-          {
-            key: "agent",
-            render: () => <span className="text-sm">@agent</span>,
-            replacement: "@agent ",
-          },
+          ...(!q || "agent".startsWith(q)
+            ? [
+                {
+                  key: "agent",
+                  render: () => <span className="text-sm">@agent</span>,
+                  replacement: "@agent ",
+                },
+              ]
+            : []),
+          ...(!q || "dot".startsWith(q)
+            ? [
+                {
+                  key: "dot",
+                  render: () => <span className="text-sm">@dot</span>,
+                  replacement: "@dot ",
+                },
+              ]
+            : []),
         ];
       },
     },
@@ -196,7 +225,7 @@ export default definePlugin({
       key: "is",
       values: ["ai"],
       description:
-        "Part of an AI exchange (@agent mention or agent-origin answer)",
+        "Part of an AI exchange (@agent/@dot mention or agent-origin answer)",
       predicate: (node) => isAiNode(node),
     },
   ],

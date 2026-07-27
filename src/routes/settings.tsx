@@ -18,15 +18,22 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
+import { DotAvatar } from "../components/dot-avatar";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
-import { setLunoraBetaEnabled, useLunoraBetaPref } from "../data/account-prefs";
+import {
+  setInlineAgentBetaEnabled,
+  setLunoraBetaEnabled,
+  useInlineAgentBetaPref,
+  useLunoraBetaPref,
+} from "../data/account-prefs";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
+import { isLunoraSyncEnabled } from "../data/flags";
 import { outlineToMarkdown } from "../data/markdown";
 import { useNodeCount } from "../data/node-count";
 import { exportOpml } from "../data/opml-export";
@@ -84,16 +91,18 @@ function exportWholeOutlineOpml() {
 
 /** A titled section: a quiet uppercase-ish label, optional caption, then body. */
 function Section({
+  id,
   title,
   description,
   children,
 }: {
+  id?: string;
   title: string;
   description?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section id={id} className="flex scroll-mt-16 flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <h2 className="text-sm font-medium text-foreground">{title}</h2>
         {description && (
@@ -738,13 +747,25 @@ function AppearanceSection() {
   );
 }
 
-function BetaSection() {
+function scrollToPlanBilling() {
+  document.getElementById("plan-billing")?.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+}
+
+function BetaSection({ plan }: { plan: PlanName | null }) {
   const { ready, enabled } = useLunoraBetaPref();
-  // The write is a synced `kvPut` followed by a `hardReset`, so it has two
+  const agentPref = useInlineAgentBetaPref();
+  // Lunora write is a synced `kvPut` followed by a `hardReset`, so it has two
   // failure modes worth owning: an offline toggle would otherwise be an
   // unhandled rejection with no explanation (the switch just snaps back), and
   // a double tap would fire two writes plus two reloads.
   const [saving, setSaving] = useState(false);
+  const [agentSaving, setAgentSaving] = useState(false);
+  // Runtime flag is the source of truth after reload; synced row may lag.
+  const syncOn = isLunoraSyncEnabled() || (ready && enabled);
+  const free = plan === "free";
   const onToggle = useCallback((checked: boolean) => {
     setSaving(true);
     setLunoraBetaEnabled(checked).catch(() => {
@@ -754,6 +775,30 @@ function BetaSection() {
     // No `finally`: on success `hardReset` tears this tree down, so leaving
     // the switch disabled through the reload is the honest state.
   }, []);
+  const onAgentToggle = useCallback(
+    (checked: boolean) => {
+      if (!syncOn) return;
+      if (checked && free) {
+        toast.message("Inline agent needs Unlimited", {
+          description: "Upgrade to try the beta inline agent.",
+          action: {
+            label: "See plans",
+            onClick: () => scrollToPlanBilling(),
+          },
+        });
+        return;
+      }
+      setAgentSaving(true);
+      setInlineAgentBetaEnabled(checked)
+        .catch(() => {
+          toast.error(
+            "Couldn't save that. Check your connection and try again.",
+          );
+        })
+        .finally(() => setAgentSaving(false));
+    },
+    [free, syncOn],
+  );
   return (
     <Section
       title="Beta"
@@ -779,6 +824,36 @@ function BetaSection() {
               disabled={!ready || saving}
               onCheckedChange={onToggle}
               aria-label="Upgraded outline sync beta"
+            />
+          }
+        />
+        <SettingRow
+          icon={<DotAvatar className="!size-5" title="Dot" />}
+          title="Inline agent (BETA)"
+          description={
+            <>
+              Tag <code className="text-xs">@agent</code> or{" "}
+              <code className="text-xs">@dot</code> in a bullet and run Dot
+              inline. Rough edges expected; needs upgraded sync. Paid plans only
+              — the server still enforces your plan.
+              {!syncOn && (
+                <>
+                  {" "}
+                  <span className="text-muted-foreground">
+                    Needs upgraded sync above.
+                  </span>
+                </>
+              )}
+            </>
+          }
+          action={
+            <Switch
+              checked={agentPref.ready && syncOn ? agentPref.enabled : false}
+              disabled={
+                !agentPref.ready || !syncOn || agentSaving || plan === null
+              }
+              onCheckedChange={onAgentToggle}
+              aria-label="Inline agent beta"
             />
           }
         />
@@ -818,6 +893,7 @@ function SettingsPage() {
 
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-4 py-8 sm:px-6">
         <Section
+          id="plan-billing"
           title="Plan & billing"
           description="Your plan, usage, and payment."
         >
@@ -825,7 +901,7 @@ function SettingsPage() {
         </Section>
 
         <AccountSection />
-        <BetaSection />
+        <BetaSection plan={plan} />
         <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />

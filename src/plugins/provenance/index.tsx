@@ -21,11 +21,21 @@
 import { SparkleIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
+import {
+  DotAvatar,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/plugins/kit";
 
 import type { Node } from "../../data/tree";
 
 import { definePlugin } from "../types";
+
+/** Inline Dot answers stamp `origin: "agent"` (ADR 0059); MCP may use a harness name. */
+function isDotOrigin(origin: string): boolean {
+  return origin === "agent" || origin === "dot";
+}
 
 /** A compact "when", for the hover attribution. Set-once at creation, so this is
  *  read at render time against the wall clock — good enough for a tooltip. */
@@ -54,21 +64,32 @@ function ProvenanceMark({
   placement: "row" | "title";
 }) {
   if (!node.origin) return null;
-  const label = `Created by ${node.origin} · ${relativeTime(node.createdAt)}`;
+  const byDot = isDotOrigin(node.origin);
+  const who = byDot ? "Dot" : node.origin;
+  const label = `Created by ${who} · ${relativeTime(node.createdAt)}`;
+  const markClass = cn([
+    // Row vertical alignment is the shared `.outline-row [data-origin]`
+    // rule (scales with reading size, ADR 0029); only fix the icon size.
+    placement === "row" && "size-4",
+    placement === "title" && "mt-2 mr-2 size-5",
+    !byDot && "text-muted-foreground",
+  ]);
   return (
     <Tooltip>
       <TooltipTrigger>
-        <SparkleIcon
-          className={cn([
-            "text-muted-foreground",
-            // Row vertical alignment is the shared `.outline-row [data-origin]`
-            // rule (scales with reading size, ADR 0029); only fix the icon size.
-            placement === "row" && "size-4",
-            placement === "title" && "mt-2 mr-2 size-5",
-          ])}
-          aria-label={label}
-          data-origin={node.origin}
-        />
+        {byDot ? (
+          <DotAvatar
+            className={markClass}
+            title={label}
+            data-origin={node.origin}
+          />
+        ) : (
+          <SparkleIcon
+            className={markClass}
+            aria-label={label}
+            data-origin={node.origin}
+          />
+        )}
       </TooltipTrigger>
       <TooltipContent>
         <p>{label}</p>

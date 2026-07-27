@@ -22,6 +22,6 @@
   "menuColor": "default",
   "menuAccent": "subtle",
   "registries": {
-    "@dotmatrix": "https://dotmatrix.zzzzshawn.cloud/r/{name}.json"
+    "@shadcn-braille-loader": "https://shadcn-braille-loader.vercel.app/r/{name}.json"
   }
 }
