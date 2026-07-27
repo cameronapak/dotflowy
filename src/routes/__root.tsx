@@ -129,7 +129,12 @@ export const Route = createRootRoute({
  *  has no session — revokeSessionsOnPasswordReset killed them) and the legal
  *  pages (public by definition, and linked from the signup screen where there
  *  is no session yet); a future signed-out landing is added HERE. */
-const PUBLIC_ROUTES = new Set(["/reset-password", "/terms", "/privacy"]);
+const PUBLIC_ROUTES = new Set([
+  "/reset-password",
+  "/terms",
+  "/privacy",
+  "/agent-docs",
+]);
 
 function RootComponent() {
   // Trailing-slash-tolerant: the router matches `/reset-password/` to the

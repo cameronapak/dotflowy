@@ -16,6 +16,7 @@ describe("buildAgentJoinPrompt (ADR 0059)", () => {
     expect(md).toContain("children");
     expect(md).toContain("search_nodes");
     expect(md).toContain("https://app.dotflowy.com/agent-docs");
+    expect(md).toContain("https://app.dotflowy.com/agent-docs.md");
     expect(md).toContain("20–30 seconds");
   });
 

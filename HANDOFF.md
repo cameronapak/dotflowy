@@ -1,7 +1,7 @@
 # HANDOFF — Bring your own agent (ADR 0059)
 
 **Branch:** `feat/byoa-agent-join`  
-**Status:** Steps 1–3 done; steps 4–5 not started.  
+**Status:** Steps 1–5 done (v1 complete). Later items deferred.  
 **Do not merge this file to main** — delete in the shipping PR.
 
 ## Sources of truth
@@ -32,21 +32,25 @@
    - Play gate: `decideAgentPlay` → no presence → `openAddAgent()`; else SPA upsert pending ask via `agent-asks` kv (`createPendingAsk` / `planCreateAsk`)
    - Busy: pending|claimed → Loader2 + Stop; Stop → `planCancelAsk` / `cancelActiveAsk`
    - **No** Workers AI / `fireAgent` / Lunora runs / BrailleLoader-as-AI / Run confirm popover
-   - Loader: lucide `Loader2` for v1 (Dotmatrix polish → step 4 if still wanted)
+   - Loader: lucide `Loader2` for v1 (Dotmatrix polish deferred — see step 4 notes)
 
-4. **Answer landing**
-   - Prompt/tools steer children-of-ask; provenance sparkle from #323 if useful
-   - Soft-reload / arrive animation only if still needed without hosted stream
-   - Optional: swap Loader2 for Dotmatrix (https://dotmatrix.zzzzshawn.cloud/)
+4. **Answer landing** — **DONE** (light)
+   - Children-of-ask already steered in join prompt + MCP tool copy (`announce_presence` / `list_asks` / `claim_ask` responses) — no new mutation path
+   - Provenance sparkle already works: MCP stamps `origin` at write choke point; `src/plugins/provenance/` Seam F mark + `is:agent` — no #323 glue needed
+   - Soft-reload / arrive animation — **deferred** (no trivial reuse without hosted stream)
+   - Dotmatrix loader swap — **deferred** (shadcn registry install / non-trivial; keep `Loader2`)
 
-5. **Docs surface**
-   - Public `/agent-docs` + skill URL referenced from join prompt (lazy)
+5. **Docs surface** — **DONE**
+   - Public SPA `/agent-docs` (`src/routes/agent-docs.tsx` + `PUBLIC_ROUTES`) renders `docs/agent-docs.md` via `LegalPage`
+   - Raw mirror `public/agent-docs.md` for agent curl; join prompt links both `/agent-docs` and `/agent-docs.md`
+   - Keep the two markdown files in sync when editing
 
 6. **Later (not v1)**
    - HTTP `events/stream` (M→H)
    - Scoped run token in prompt (D→B)
    - Local companion / ACP sandbox (parked)
    - Lunora tables for agent-presence / agent-asks (parity with classic DO kv)
+   - Dotmatrix busy loader; soft arrive animation for answer children
 
 ## Explicit non-goals (v1)
 
@@ -57,9 +61,8 @@
 
 ## Next skills / agents
 
-- Step 4: answer-arrive polish (children + sparkle; no hosted stream)
-- Implementation: Cursor subagents on this branch (orchestrator stays high-level)
-- PR: `/ft-create-concise-pr` when ready; changeset for the feature
+- Dogfood: one real Cursor/Claude Code join → play → children answer before merge
+- PR: `/ft-create-concise-pr` when ready; minor changeset added for BYOA
 
 ## Risks
 
@@ -68,3 +71,4 @@
 - Cherry-pick from #323 may drag Lunora-only assumptions — strip aggressively (**done for step 3**)
 - Lunora beta users: BYOA session kv not wired yet (MCP upsert fails loudly)
 - Cancel is SPA-side only (marks ask `cancelled`); agent may still write if it already claimed — acceptable v1
+- `docs/agent-docs.md` ↔ `public/agent-docs.md` dual copy — edit both (or drop the public mirror later)

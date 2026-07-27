@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
+import { Route as AgentDocsRouteImport } from './routes/agent-docs'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -27,6 +28,11 @@ const IndexRoute = IndexRouteImport.update({
 const NodeIdRoute = NodeIdRouteImport.update({
   id: '/$nodeId',
   path: '/$nodeId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentDocsRoute = AgentDocsRouteImport.update({
+  id: '/agent-docs',
+  path: '/agent-docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -68,6 +74,7 @@ const AdminWaitlistRoute = AdminWaitlistRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/agent-docs': typeof AgentDocsRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/agent-docs': typeof AgentDocsRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/agent-docs': typeof AgentDocsRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/$nodeId'
+    | '/agent-docs'
     | '/privacy'
     | '/reset-password'
     | '/settings'
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/$nodeId'
+    | '/agent-docs'
     | '/privacy'
     | '/reset-password'
     | '/settings'
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/$nodeId'
+    | '/agent-docs'
     | '/privacy'
     | '/reset-password'
     | '/settings'
@@ -138,6 +150,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NodeIdRoute: typeof NodeIdRoute
+  AgentDocsRoute: typeof AgentDocsRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
@@ -161,6 +174,13 @@ declare module '@tanstack/react-router' {
       path: '/$nodeId'
       fullPath: '/$nodeId'
       preLoaderRoute: typeof NodeIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-docs': {
+      id: '/agent-docs'
+      path: '/agent-docs'
+      fullPath: '/agent-docs'
+      preLoaderRoute: typeof AgentDocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/privacy': {
@@ -218,6 +238,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NodeIdRoute: NodeIdRoute,
+  AgentDocsRoute: AgentDocsRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,

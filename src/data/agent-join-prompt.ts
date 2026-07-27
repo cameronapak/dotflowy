@@ -6,7 +6,7 @@
 export type JoinPromptOptions = {
   /** Public origin, e.g. https://app.dotflowy.com — used for MCP + docs URLs. */
   appOrigin?: string;
-  /** Future agent skill/docs path (lazy; may 404 until step 5). */
+  /** Agent skill/docs path (SPA `/agent-docs`; raw markdown at `/agent-docs.md`). */
   docsPath?: string;
 };
 
@@ -61,7 +61,7 @@ If \`list_asks\` is empty, stay present and keep polling / heartbeating — the 
 
 ## 4. Docs (optional)
 
-Protocol notes (may be sparse until filled in): ${docsUrl}
+Protocol notes: ${docsUrl} (raw markdown: ${docsUrl}.md)
 
 ## Ready check
 
