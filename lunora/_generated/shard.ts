@@ -7,6 +7,7 @@ import { asBucketStorage, buildRlsReadRegistry, composeShapeReadWhere, createSec
 import { bindOrm, bindTableFacade } from "lunorash/server";
 import type { AiBindingLike, LunoraAi } from "@lunora/ai";
 import { createAi } from "@lunora/ai";
+import * as lunoraEnvContract from "../env.js";
 
 import schema from "../schema.js";
 import { LUNORA_FUNCTIONS, LUNORA_LIFECYCLE_HOOKS, LUNORA_MIGRATIONS, LUNORA_MUTATOR_PATHS, LUNORA_SHAPES } from "./functions.js";
@@ -942,6 +943,8 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
                 ? createAi({ binding: aiBinding as AiBindingLike, env: env as Record<string, unknown>, metadata: { functionPath: options.functionPath, traceId: aiTrace?.traceId } })
                 : aiStub;
 
+            const envConfig = lunoraEnvContract.env(env);
+
             const secrets = createSecrets(env);
 
             const scheduler = (config.scheduler?.(env) ?? schedulerStub) as SchedulerLike;
@@ -1036,6 +1039,7 @@ export const createShardDO = (config: ShardDOConfig = {}): new (state: ShardDOSt
                 storage,
                 trace,
                 ai,
+                env: envConfig,
                 secrets,
             };
 

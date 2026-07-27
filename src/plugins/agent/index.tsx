@@ -27,15 +27,28 @@ function agentChipEl(tok: string): El {
     tag: "span",
     attrs: {
       class:
-        "agent-chip inline-flex items-center rounded px-1 text-[0.85em] bg-muted text-muted-foreground align-baseline select-none",
+        "agent-chip inline-flex items-center gap-0.5 rounded px-1 text-[0.85em] bg-muted text-muted-foreground align-baseline select-none cursor-pointer hover:bg-accent hover:text-accent-foreground",
       "data-agent": "true",
       // Opaque atom (same contract as folded links): caret jumps the chip;
       // readSource round-trips the literal `@agent`.
       "data-src": tok,
       "data-src-len": tok.length,
       contenteditable: "false",
+      title: "Run agent",
+      role: "button",
     },
-    children: [tok],
+    // Play glyph = click-to-run signifier (ADR 0059 chip is the fire control).
+    children: [
+      {
+        tag: "span",
+        attrs: {
+          class: "text-[0.75em] leading-none opacity-80",
+          "aria-hidden": "true",
+        },
+        children: ["▶"],
+      },
+      tok,
+    ],
   };
 }
 

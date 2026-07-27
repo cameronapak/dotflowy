@@ -3,6 +3,10 @@ import { defineMutator, v } from "lunorash/server";
 import type { Id } from "./_generated/dataModel";
 
 import {
+  materializeAgentDetailForest,
+  splitAgentAnswer,
+} from "../src/data/agent-answer";
+import {
   hashAnswerSubtree,
   shouldReplaceAnswer,
 } from "../src/data/agent-replace-guard";
@@ -1334,8 +1338,12 @@ export const getAgentRun = defineMutator({
 
 /**
  * Commit a canned/real answer tree in ONE transaction: optional replace of an
- * untouched prior answer, append summary + collapsed detail, stamp origin,
- * complete the run with the replace-guard hash (ADR 0059).
+ * untouched prior answer, append summary + markdown detail forest (list →
+ * bullets, bare lines → paragraphs), stamp origin, complete the run with the
+ * replace-guard hash (ADR 0059).
+ *
+ * `detailId` is unused (kept so older callers still typecheck); each forest
+ * node mints its own id. Nested parents arrive `collapsed: true`.
  */
 export const commitAgentAnswer = defineMutator({
   args: {
@@ -1403,26 +1411,47 @@ export const commitAgentAnswer = defineMutator({
     });
 
     // Skip empty detail so a one-line answer is summary-only (ADR 0059).
-    if (args.detailText.trim()) {
-      const appendDetail = planAppendChild(index, {
-        id: args.detailId,
+    // Re-run the same splitter the engine used so block structure can't drift.
+    const { detailForest } = splitAgentAnswer(
+      args.detailText.trim()
+        ? `${args.summaryText}\n${args.detailText}`
+        : args.summaryText,
+    );
+    // Prefer the first detailId as the first forest id (stable for older stubs).
+    let detailIdUsed = false;
+    const inserts = materializeAgentDetailForest(
+      detailForest,
+      args.summaryId,
+      () => {
+        if (!detailIdUsed && args.detailId) {
+          detailIdUsed = true;
+          return args.detailId;
+        }
+        return crypto.randomUUID();
+      },
+    );
+    for (const row of inserts) {
+      const step = planAppendChild(index, {
+        id: row.id,
         userId: args.userId,
-        parentId: args.summaryId,
-        text: args.detailText,
+        parentId: row.parentId,
+        text: row.text,
+        isTask: row.isTask,
+        kind: row.kind,
         createdAt: args.updatedAt,
         updatedAt: args.updatedAt,
       });
-      if (appendDetail) {
-        absorb({
-          deletes: appendDetail.deletes,
-          patches: appendDetail.patches,
-          inserts: appendDetail.inserts.map((n) => ({
-            ...n,
-            origin: "agent",
-            collapsed: true,
-          })),
-        });
-      }
+      if (!step) continue;
+      absorb({
+        deletes: step.deletes,
+        patches: step.patches,
+        inserts: step.inserts.map((n) => ({
+          ...n,
+          origin: "agent",
+          completed: row.completed,
+          collapsed: row.collapsed,
+        })),
+      });
     }
 
     await commitPlan(mctx, combined);

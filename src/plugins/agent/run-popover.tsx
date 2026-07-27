@@ -55,7 +55,7 @@ export function AgentRunPopover({
           disabled={!lunora || running}
           onClick={onRun}
         >
-          Run
+          ▶ Run
         </Button>
       </div>
     </div>,

@@ -1,6 +1,10 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 
 import {
+  materializeAgentDetailForest,
+  splitAgentAnswer,
+} from "../src/data/agent-answer";
+import {
   hashAnswerSubtree,
   shouldReplaceAnswer,
 } from "../src/data/agent-replace-guard";
@@ -494,6 +498,62 @@ function commitOutlinePlan(
   const next = applyPlan([...store.values()].map(rowToOutline), plan);
   store.clear();
   for (const n of next) store.set(n.id, outlineToRow(n));
+}
+
+/** Append ADR 0059 answer detail forest under `summaryId` (shared with mutator). */
+function commitAgentDetailForest(
+  store: Map<string, LunoraRow>,
+  liveIndex: () => ReturnType<typeof buildTreeIndex>,
+  args: {
+    userId: string;
+    summaryId: string;
+    summaryText: string;
+    detailText: string;
+    detailId: string;
+    updatedAt: number;
+  },
+): void {
+  const { detailForest } = splitAgentAnswer(
+    args.detailText.trim()
+      ? `${args.summaryText}\n${args.detailText}`
+      : args.summaryText,
+  );
+  let detailIdUsed = false;
+  const inserts = materializeAgentDetailForest(
+    detailForest,
+    args.summaryId,
+    () => {
+      if (!detailIdUsed && args.detailId) {
+        detailIdUsed = true;
+        return args.detailId;
+      }
+      return crypto.randomUUID();
+    },
+  );
+  for (const row of inserts) {
+    const index = liveIndex();
+    const step = planAppendChild(index, {
+      id: row.id,
+      userId: args.userId,
+      parentId: row.parentId,
+      text: row.text,
+      isTask: row.isTask,
+      kind: row.kind,
+      createdAt: args.updatedAt,
+      updatedAt: args.updatedAt,
+    });
+    if (!step) continue;
+    commitOutlinePlan(store, {
+      deletes: step.deletes,
+      patches: step.patches,
+      inserts: step.inserts.map((n) => ({
+        ...n,
+        origin: "agent",
+        completed: row.completed,
+        collapsed: row.collapsed,
+      })),
+    });
+  }
 }
 
 type DailyIndexRow = {
@@ -1308,29 +1368,15 @@ export async function seedOutlineLunora(
             })),
           });
           index = liveIndex();
-          const detailText = String(args.detailText ?? "").trim();
-          if (detailText) {
-            const detailPlan = planAppendChild(index, {
-              id: detailId,
-              userId,
-              parentId: summaryId,
-              text: detailText,
-              createdAt: updatedAt,
-              updatedAt,
-            });
-            if (detailPlan) {
-              commitOutlinePlan(store, {
-                deletes: detailPlan.deletes,
-                patches: detailPlan.patches,
-                inserts: detailPlan.inserts.map((n) => ({
-                  ...n,
-                  origin: "agent",
-                  collapsed: true,
-                })),
-              });
-              index = liveIndex();
-            }
-          }
+          commitAgentDetailForest(store, liveIndex, {
+            userId,
+            summaryId,
+            summaryText: String(args.summaryText ?? ""),
+            detailText: String(args.detailText ?? ""),
+            detailId,
+            updatedAt,
+          });
+          index = liveIndex();
           const answerHash = hashAnswerSubtree(index, summaryId) ?? "";
           const runId = String(args.runId ?? "");
           const row = agentRuns.get(runId);
@@ -1412,13 +1458,13 @@ export async function seedOutlineLunora(
               );
               index = liveIndex();
             }
-            const [summaryText, ...detailParts] = canned.split("\n");
-            const detailText = detailParts.join("\n").trim();
+            const { summary: summaryText, detail: detailText } =
+              splitAgentAnswer(canned);
             const summaryPlan = planAppendChild(index, {
               id: summaryId,
               userId,
               parentId: questionNodeId,
-              text: summaryText ?? canned,
+              text: summaryText,
               createdAt: updatedAt,
               updatedAt,
             });
@@ -1432,28 +1478,15 @@ export async function seedOutlineLunora(
                 })),
               });
               index = liveIndex();
-              if (detailText) {
-                const detailPlan = planAppendChild(index, {
-                  id: detailId,
-                  userId,
-                  parentId: summaryId,
-                  text: detailText,
-                  createdAt: updatedAt,
-                  updatedAt,
-                });
-                if (detailPlan) {
-                  commitOutlinePlan(store, {
-                    deletes: detailPlan.deletes,
-                    patches: detailPlan.patches,
-                    inserts: detailPlan.inserts.map((n) => ({
-                      ...n,
-                      origin: "agent",
-                      collapsed: true,
-                    })),
-                  });
-                  index = liveIndex();
-                }
-              }
+              commitAgentDetailForest(store, liveIndex, {
+                userId,
+                summaryId,
+                summaryText,
+                detailText,
+                detailId,
+                updatedAt,
+              });
+              index = liveIndex();
               const answerHash = hashAnswerSubtree(index, summaryId) ?? "";
               agentRuns.set(runId, {
                 ...live,

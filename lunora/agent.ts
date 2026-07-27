@@ -10,24 +10,38 @@
  */
 
 import { streamText } from "@lunora/ai";
-import { rateLimit } from "lunorash/ratelimit";
+import { createMemoryStore, RateLimiter, rateLimit } from "lunorash/ratelimit";
 
 import { splitAgentAnswer } from "../src/data/agent-answer";
-import { buildAgentMessages } from "../src/data/agent-messages";
+import {
+  AGENT_SYSTEM_PROMPT,
+  buildAgentMessages,
+} from "../src/data/agent-messages";
 import { buildAgentPrompt } from "../src/data/agent-prompt";
 import { buildTreeIndex } from "../src/data/tree";
 import { getPlan, PAID_PLANS, type Plan } from "../worker/plan";
+import { api } from "./_generated/api";
 import { action, v } from "./_generated/server";
 import { buildAgentAiTools } from "./agent-ai-tools";
 import { createActionOutlineStore } from "./agent-outline-store";
-import {
-  commitAgentAnswer,
-  createAgentRun,
-  failAgentRun,
-  getAgentRun,
-  patchAgentRunPartial,
-} from "./mutators";
-import { makeRateLimiter } from "./ratelimit/schema";
+import { limits, type LimitName } from "./ratelimit/schema";
+
+/**
+ * Mutators aren't listed on generated ApiTypes (client watermark path), but
+ * `api` is `anyApi` — `api.mutators.<name>.__lunoraRef` is `"mutators:<name>"`.
+ * Importing defineMutator exports directly leaves `__lunoraRef` undefined and
+ * `ctx.runMutation` throws `unknown function: undefined` → client "internal error".
+ */
+type AgentMutatorApi = {
+  mutators: {
+    createAgentRun: never;
+    failAgentRun: never;
+    getAgentRun: never;
+    patchAgentRunPartial: never;
+    commitAgentAnswer: never;
+  };
+};
+const agentMutators = (api as unknown as AgentMutatorApi).mutators;
 
 /** Workers AI model (ADR 0059 / Cam lock). Gateway via LUNORA_AI_GATEWAY_* env. */
 const AGENT_MODEL = "@cf/zai-org/glm-4.7-flash";
@@ -38,6 +52,12 @@ const AGENT_MAX_STEPS = 8;
 /** Throttle ghost-text patches (ms). */
 const PARTIAL_PATCH_MS = 200;
 
+/** Module-singleton — recreate-per-request would reset the bucket every fire. */
+const agentRateLimiter = new RateLimiter<LimitName>({
+  config: limits,
+  store: createMemoryStore(),
+});
+
 function isPaidPlan(plan: Plan): boolean {
   return (PAID_PLANS as readonly string[]).includes(plan);
 }
@@ -47,6 +67,29 @@ type BillingEnv = { DB?: D1Database };
 function resolveBillingDb(
   env: Record<string, unknown> | undefined,
 ): D1Database {
+  // #region agent log
+  fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "a23e41",
+    },
+    body: JSON.stringify({
+      sessionId: "a23e41",
+      hypothesisId: "H1",
+      location: "lunora/agent.ts:resolveBillingDb",
+      message: "billing env probe",
+      data: {
+        envDefined: env != null,
+        envKeys:
+          env && typeof env === "object" ? Object.keys(env).slice(0, 40) : [],
+        hasDB: !!(env as BillingEnv | undefined)?.DB,
+      },
+      timestamp: Date.now(),
+      runId: "post-fix",
+    }),
+  }).catch(() => {});
+  // #endregion
   const db = (env as BillingEnv | undefined)?.DB;
   if (!db) {
     throw new Error("billing unavailable");
@@ -58,9 +101,8 @@ function resolveBillingDb(
  * Fire (or re-fire) an `@agent` question. Client only calls when upgraded sync
  * is ON. Paid plans only — fail closed before creating a run / calling AI.
  *
- * Note: ActionCtx.runMutation is typed for `RegisteredMutation`, while
- * `defineMutator` yields `RegisteredMutator`. Cast with `as never` until Lunora
- * widens the overload.
+ * Note: ActionCtx.runMutation wants FunctionReference; mutator refs from anyApi
+ * are typed narrowly here until Lunora widens the overload.
  */
 export const fireAgentRun = action
   .input({
@@ -72,7 +114,10 @@ export const fireAgentRun = action
     }),
   })
   .use(
-    rateLimit((ctx) => makeRateLimiter(ctx), "agent", {
+    // Memory store: createDbStore patch hits SQLite "too many terms in compound
+    // SELECT" on this shard (fail-closed → "rate limiter unavailable"). Isolate
+    // Map is enough for paid-beta dogfood until Lunora ORM patch is fixed.
+    rateLimit(agentRateLimiter, "agent", {
       key: (ctx) => ctx.auth.userId ?? "anon",
     }),
   )
@@ -81,16 +126,76 @@ export const fireAgentRun = action
       throw new Error("unauthorized");
     }
 
+    // #region agent log
+    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a23e41",
+      },
+      body: JSON.stringify({
+        sessionId: "a23e41",
+        hypothesisId: "H4",
+        location: "lunora/agent.ts:fireAgentRun",
+        message: "past rateLimit middleware",
+        data: { hasEnvDB: !!(ctx.env as BillingEnv | undefined)?.DB },
+        timestamp: Date.now(),
+        runId: "post-fix",
+      }),
+    }).catch(() => {});
+    // #endregion
+
     // Paid-plan gate BEFORE createAgentRun / Workers AI (fail closed).
+    // `ctx.env.DB` requires `lunora/env.ts` defineEnv (codegen) — without it
+    // Lunora leaves `ctx.env` empty and we throw "billing unavailable".
     const plan = await getPlan(args.userId, {
-      DB: resolveBillingDb(ctx.env),
+      DB: resolveBillingDb(ctx.env as Record<string, unknown> | undefined),
     });
+    // #region agent log
+    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a23e41",
+      },
+      body: JSON.stringify({
+        sessionId: "a23e41",
+        hypothesisId: "H2",
+        location: "lunora/agent.ts:fireAgentRun",
+        message: "plan resolved",
+        data: { plan, paid: isPaidPlan(plan) },
+        timestamp: Date.now(),
+        runId: "post-fix",
+      }),
+    }).catch(() => {});
+    // #endregion
     if (!isPaidPlan(plan)) {
       throw new Error("Inline agent requires a paid plan");
     }
 
     const now = Date.now();
-    const created = (await ctx.runMutation(createAgentRun as never, {
+    // #region agent log
+    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a23e41",
+      },
+      body: JSON.stringify({
+        sessionId: "a23e41",
+        hypothesisId: "H5",
+        location: "lunora/agent.ts:fireAgentRun:createAgentRun",
+        message: "runMutation ref probe",
+        data: {
+          ref: (agentMutators.createAgentRun as { __lunoraRef?: string })
+            .__lunoraRef,
+        },
+        timestamp: Date.now(),
+        runId: "post-fix",
+      }),
+    }).catch(() => {});
+    // #endregion
+    const created = (await ctx.runMutation(agentMutators.createAgentRun, {
       userId: args.userId,
       questionNodeId: args.questionNodeId,
       createdAt: now,
@@ -101,6 +206,25 @@ export const fireAgentRun = action
       answerHash: string | null;
     };
 
+    // #region agent log
+    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a23e41",
+      },
+      body: JSON.stringify({
+        sessionId: "a23e41",
+        hypothesisId: "H5",
+        location: "lunora/agent.ts:fireAgentRun:createAgentRun:ok",
+        message: "createAgentRun succeeded",
+        data: { runId: created.runId, reused: created.reused },
+        timestamp: Date.now(),
+        runId: "post-fix",
+      }),
+    }).catch(() => {});
+    // #endregion
+
     if (created.reused) {
       return { runId: created.runId, status: "running" as const };
     }
@@ -108,17 +232,17 @@ export const fireAgentRun = action
     const runId = created.runId;
 
     const fail = async (error: string) => {
-      await ctx.runMutation(failAgentRun as never, {
+      await ctx.runMutation(agentMutators.failAgentRun, {
         userId: args.userId,
         runId,
         error,
         updatedAt: Date.now(),
       });
-      return { runId, status: "error" as const };
+      return { runId, status: "error" as const, error };
     };
 
     const stillRunning = async (): Promise<boolean> => {
-      const live = (await ctx.runMutation(getAgentRun as never, {
+      const live = (await ctx.runMutation(agentMutators.getAgentRun, {
         userId: args.userId,
         runId,
       })) as { status: string } | null;
@@ -146,8 +270,11 @@ export const fireAgentRun = action
 
       // Tool schemas are Effect→JSON; cast past AI SDK ToolSet generics (two
       // nested `ai` copies in the graph make the typed overload unusable).
+      // AI SDK: system copy must be `instructions`, not role:"system" in messages
+      // (InvalidPromptError → empty stream → "nothing happened" in the UI).
       const result = streamText({
         model: ctx.ai.model(AGENT_MODEL),
+        instructions: AGENT_SYSTEM_PROMPT,
         messages,
         tools: agentTools,
         abortSignal: abort.signal,
@@ -169,7 +296,7 @@ export const fireAgentRun = action
         const t = Date.now();
         if (t - lastPatchAt >= PARTIAL_PATCH_MS) {
           lastPatchAt = t;
-          await ctx.runMutation(patchAgentRunPartial as never, {
+          await ctx.runMutation(agentMutators.patchAgentRunPartial, {
             userId: args.userId,
             runId,
             partialText: buffer,
@@ -184,7 +311,7 @@ export const fireAgentRun = action
       }
 
       if (finalText && finalText !== buffer) {
-        await ctx.runMutation(patchAgentRunPartial as never, {
+        await ctx.runMutation(agentMutators.patchAgentRunPartial, {
           userId: args.userId,
           runId,
           partialText: finalText,
@@ -193,22 +320,52 @@ export const fireAgentRun = action
       }
 
       const { summary, detail } = splitAgentAnswer(finalText);
-      const commitResult = (await ctx.runMutation(commitAgentAnswer as never, {
-        userId: args.userId,
-        runId,
-        questionNodeId: args.questionNodeId,
-        summaryText: summary,
-        detailText: detail,
-        priorAnswerRootId: created.answerRootId,
-        priorAnswerHash: created.answerHash,
-        summaryId: crypto.randomUUID(),
-        detailId: crypto.randomUUID(),
-        updatedAt: Date.now(),
-      })) as { ok: boolean; answerRootId?: string; error?: string };
+      const commitResult = (await ctx.runMutation(
+        agentMutators.commitAgentAnswer,
+        {
+          userId: args.userId,
+          runId,
+          questionNodeId: args.questionNodeId,
+          summaryText: summary,
+          detailText: detail,
+          priorAnswerRootId: created.answerRootId,
+          priorAnswerHash: created.answerHash,
+          summaryId: crypto.randomUUID(),
+          detailId: crypto.randomUUID(),
+          updatedAt: Date.now(),
+        },
+      )) as { ok: boolean; answerRootId?: string; error?: string };
 
       if (!commitResult.ok) {
         return await fail(commitResult.error ?? "commit failed");
       }
+
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "a23e41",
+          },
+          body: JSON.stringify({
+            sessionId: "a23e41",
+            hypothesisId: "H5",
+            location: "lunora/agent.ts:fireAgentRun:completed",
+            message: "agent run committed",
+            data: {
+              runId,
+              answerRootId: commitResult.answerRootId ?? null,
+              finalTextLen: finalText.length,
+              bufferLen: buffer.length,
+            },
+            timestamp: Date.now(),
+            runId: "post-fix",
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
 
       return {
         runId,
@@ -216,6 +373,30 @@ export const fireAgentRun = action
         answerRootId: commitResult.answerRootId,
       };
     } catch (err) {
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "a23e41",
+          },
+          body: JSON.stringify({
+            sessionId: "a23e41",
+            hypothesisId: "H6",
+            location: "lunora/agent.ts:fireAgentRun:catch",
+            message: "agent loop error",
+            data: {
+              msg: err instanceof Error ? err.message : String(err),
+              name: err instanceof Error ? err.name : typeof err,
+            },
+            timestamp: Date.now(),
+            runId: "post-fix",
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       if (!(await stillRunning())) {
         return { runId, status: "cancelled" as const };
       }

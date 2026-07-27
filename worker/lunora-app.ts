@@ -71,6 +71,10 @@ function lunoraTrustedOrigins(env: LunoraEnv): string[] {
     ...new Set([
       "http://localhost:3000",
       "http://localhost:3210",
+      // `bun run cf:dev` serves SPA + Worker on :8787 (no Vite proxy).
+      "http://localhost:8787",
+      "http://127.0.0.1:8787",
+      "http://127.0.0.1:3000",
       ...fromBase,
       ...fromEnv,
     ]),

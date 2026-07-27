@@ -5,7 +5,7 @@ import type { AgentPrompt } from "./agent-prompt";
 import { buildAgentMessages, AGENT_SYSTEM_PROMPT } from "./agent-messages";
 
 describe("buildAgentMessages", () => {
-  test("orders system, prior turns, then question + context", () => {
+  test("orders prior turns, then question + context (no system role)", () => {
     const prompt: AgentPrompt = {
       question: "@agent what next?",
       turns: [
@@ -15,18 +15,16 @@ describe("buildAgentMessages", () => {
       context: "UNTRUSTED CONTEXT:\nBreadcrumb: Home",
     };
     const msgs = buildAgentMessages(prompt);
-    expect(msgs[0]).toEqual({
-      role: "system",
-      content: AGENT_SYSTEM_PROMPT,
-    });
-    expect(msgs[1]).toEqual({ role: "user", content: "@agent prior" });
-    expect(msgs[2]).toEqual({
+    expect(msgs.every((m) => m.role !== "system")).toBe(true);
+    expect(AGENT_SYSTEM_PROMPT.length).toBeGreaterThan(0);
+    expect(msgs[0]).toEqual({ role: "user", content: "@agent prior" });
+    expect(msgs[1]).toEqual({
       role: "assistant",
       content: "prior answer",
     });
-    expect(msgs[3]?.role).toBe("user");
-    expect(msgs[3]?.content).toContain("UNTRUSTED CONTEXT");
-    expect(msgs[3]?.content).toContain("QUESTION:");
-    expect(msgs[3]?.content).toContain("@agent what next?");
+    expect(msgs[2]?.role).toBe("user");
+    expect(msgs[2]?.content).toContain("UNTRUSTED CONTEXT");
+    expect(msgs[2]?.content).toContain("QUESTION:");
+    expect(msgs[2]?.content).toContain("@agent what next?");
   });
 });
