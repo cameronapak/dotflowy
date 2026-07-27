@@ -75,7 +75,7 @@ for a future chat surface, not the v1 outline answer path.
   prompt build (MCP-created nodes inside an answer subtree also read as agent
   turns — accepted). Sparkle on **every** agent-origin node (summary + detail).
 - No classic sync protocol surface to port or delete at cutover.
-- Sequential fire throttle uses an isolate-local memory rate limiter (Lunora
-  `createDbStore` currently fails on this shard). Paid gate +
-  `MAX_CONCURRENT_RUNS` bound abuse for trusted dogfood; move to a durable
-  store before the paid beta widens.
+- Sequential fire throttle is durable: Lunora `createDbStore` on
+  `ratelimit_buckets`, with patch/delete scoped via `asId` so the shard
+  avoids unscoped `UNION ALL` id lookup (Workerd SQLite compound-SELECT
+  limit). Paid gate + `MAX_CONCURRENT_RUNS` still bound concurrent abuse.

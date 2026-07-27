@@ -10,7 +10,7 @@
  */
 
 import { streamText } from "@lunora/ai";
-import { createMemoryStore, RateLimiter, rateLimit } from "lunorash/ratelimit";
+import { rateLimit } from "lunorash/ratelimit";
 
 import { splitAgentAnswer } from "../src/data/agent-answer";
 import {
@@ -24,7 +24,7 @@ import { api } from "./_generated/api";
 import { action, v } from "./_generated/server";
 import { buildAgentAiTools } from "./agent-ai-tools";
 import { createActionOutlineStore } from "./agent-outline-store";
-import { limits, type LimitName } from "./ratelimit/schema";
+import { makeRateLimiter } from "./ratelimit/schema";
 
 /**
  * Mutators aren't listed on generated ApiTypes (client watermark path), but
@@ -51,12 +51,6 @@ const AGENT_MAX_STEPS = 8;
 
 /** Throttle ghost-text patches (ms). */
 const PARTIAL_PATCH_MS = 200;
-
-/** Module-singleton — recreate-per-request would reset the bucket every fire. */
-const agentRateLimiter = new RateLimiter<LimitName>({
-  config: limits,
-  store: createMemoryStore(),
-});
 
 function isPaidPlan(plan: Plan): boolean {
   return (PAID_PLANS as readonly string[]).includes(plan);
@@ -91,12 +85,10 @@ export const fireAgentRun = action
     }),
   })
   .use(
-    // Memory store: createDbStore patch hits SQLite "too many terms in compound
-    // SELECT" on this shard (fail-closed → "rate limiter unavailable"). Isolate
-    // Map is enough for paid-beta dogfood; sequential AI spend is best-effort
-    // across isolate churn. Swap to a durable store before the beta widens
-    // (ADR 0059 follow-up; paid gate + MAX_CONCURRENT_RUNS already bound abuse).
-    rateLimit(agentRateLimiter, "agent", {
+    // Durable `ratelimit_buckets` via createDbStore; asId-scoped patch/delete
+    // (lunora/ratelimit/scope-db.ts) avoids the shard UNION ALL blow-up.
+    // Per-call limiter is fine — bucket state lives in the DO, not the isolate.
+    rateLimit((ctx) => makeRateLimiter(ctx), "agent", {
       key: (ctx) => ctx.auth.userId ?? "anon",
     }),
   )
