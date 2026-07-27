@@ -48,19 +48,20 @@ function agentMenuMatch(before: string): MenuTrigger | null {
   return { query, triggerIndex };
 }
 
-function openRunPopover(
-  el: HTMLElement,
-  ctx: PluginContext,
-  e: InteractionEvent,
-) {
-  const nodeId = resolveNodeId(el);
-  if (!nodeId) return;
-  e.preventDefault();
-  e.stopPropagation();
+/** Anchor the Run confirm near the play control (or the row) for keyboard/`/ask`. */
+function anchorRectForNode(nodeId: string): DOMRect {
+  const el =
+    document.querySelector(`li[data-node-id="${nodeId}"] [data-agent-play]`) ??
+    document.querySelector(`li[data-node-id="${nodeId}"] .node-text`) ??
+    document.querySelector(`[data-node-id="${nodeId}"]`);
+  return el?.getBoundingClientRect() ?? new DOMRect(24, 24, 0, 0);
+}
 
+/** Two-step fire (ADR 0059): every surface opens the confirm popover. */
+function openRunPopoverForNode(nodeId: string, ctx: PluginContext) {
   if (getAgentRunForQuestion(nodeId)?.status === "running") return;
 
-  const rect = el.getBoundingClientRect();
+  const rect = anchorRectForNode(nodeId);
   ctx.openOverlay(
     <AgentRunPopover
       nodeId={nodeId}
@@ -75,6 +76,18 @@ function openRunPopover(
   );
 }
 
+function openRunPopover(
+  el: HTMLElement,
+  ctx: PluginContext,
+  e: InteractionEvent,
+) {
+  const nodeId = resolveNodeId(el);
+  if (!nodeId) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openRunPopoverForNode(nodeId, ctx);
+}
+
 function onStopClick(
   el: HTMLElement,
   _ctx: PluginContext,
@@ -87,7 +100,7 @@ function onStopClick(
   void stopAgent(nodeId);
 }
 
-async function runAsk(nodeId: string, ctx: PluginContext) {
+function runAsk(nodeId: string, ctx: PluginContext) {
   ensureAgentMention(nodeId, ctx.mutations.onTextChange);
   if (!isLunoraSyncEnabled()) {
     toast.message("Inline agent needs upgraded sync", {
@@ -95,7 +108,16 @@ async function runAsk(nodeId: string, ctx: PluginContext) {
     });
     return;
   }
-  await fireAgent(nodeId);
+  openRunPopoverForNode(nodeId, ctx);
+}
+
+/** Confirm to fire; while running, hotkey mirrors trailing Stop. */
+function onFireHotkey(nodeId: string, ctx: PluginContext) {
+  if (getAgentRunForQuestion(nodeId)?.status === "running") {
+    void stopAgent(nodeId);
+    return;
+  }
+  openRunPopoverForNode(nodeId, ctx);
 }
 
 export default definePlugin({
@@ -134,7 +156,7 @@ export default definePlugin({
       keywords: ["ask", "agent", "ai", "llm"],
       available: () => true,
       run: (id, ctx) => {
-        void runAsk(id, ctx);
+        runAsk(id, ctx);
       },
     },
   ],
@@ -143,8 +165,8 @@ export default definePlugin({
     {
       id: "agent-fire",
       hotkey: "Mod+Shift+Enter",
-      run: (id) => {
-        void fireAgent(id);
+      run: (id, ctx) => {
+        onFireHotkey(id, ctx);
       },
     },
   ],

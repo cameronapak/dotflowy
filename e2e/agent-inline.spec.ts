@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   openSeededOutline,
@@ -10,6 +10,14 @@ import {
  * Inline `@agent` (ADR 0059) on the Lunora path. The mock implements
  * `agent:fireAgentRun` with a canned stream + commit (no real Workers AI).
  */
+
+/** Two-step fire: hotkey opens confirm; ▶ Run starts the action. */
+async function confirmRunFromHotkey(page: Page) {
+  await page.keyboard.press("Meta+Shift+Enter");
+  const dialog = page.getByRole("dialog", { name: "Run agent" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "▶ Run" }).click();
+}
 
 test.describe("inline @agent (Lunora)", () => {
   test("Mod+Shift+Enter commits summary + detail children", async ({
@@ -27,7 +35,7 @@ test.describe("inline @agent (Lunora)", () => {
 
     const text = page.locator('li[data-node-id="q1"] .node-text');
     await text.click();
-    await page.keyboard.press("Meta+Shift+Enter");
+    await confirmRunFromHotkey(page);
 
     // Windowed list: children are flat `li`s keyed by data-parent-id.
     await expect(
@@ -39,6 +47,13 @@ test.describe("inline @agent (Lunora)", () => {
       .first()
       .getAttribute("data-node-id");
     expect(summaryId).toBeTruthy();
+
+    // ADR 0059 Volume: summary arrives collapsed when detail exists.
+    const expand = page.locator(
+      `li[data-node-id="${summaryId}"] button.collapse-toggle[aria-label="Expand"]`,
+    );
+    await expect(expand).toBeVisible();
+    await expand.click();
 
     await expect(
       page.locator(`li[data-parent-id="${summaryId}"] .node-text`),
@@ -64,7 +79,7 @@ test.describe("inline @agent (Lunora)", () => {
 
     const text = page.locator('li[data-node-id="q2"] .node-text');
     await text.click();
-    await page.keyboard.press("Meta+Shift+Enter");
+    await confirmRunFromHotkey(page);
 
     const row = page.locator('li[data-node-id="q2"]');
     await expect(row.locator("[data-agent-loader]")).toBeVisible({
@@ -98,7 +113,7 @@ test.describe("inline @agent (Lunora)", () => {
 
     const text = page.locator('li[data-node-id="q-stop"] .node-text');
     await text.click();
-    await page.keyboard.press("Meta+Shift+Enter");
+    await confirmRunFromHotkey(page);
 
     const row = page.locator('li[data-node-id="q-stop"]');
     await expect(row.locator("[data-agent-stop]")).toBeVisible({

@@ -1370,7 +1370,8 @@ export const getAgentRun = defineMutator({
  * replace-guard hash (ADR 0059).
  *
  * `detailId` is unused (kept so older callers still typecheck); each forest
- * node mints its own id. Nested parents arrive `collapsed: true`.
+ * node mints its own id. Summary arrives `collapsed: true` when detail exists
+ * (Volume); nested detail parents also arrive collapsed.
  */
 export const commitAgentAnswer = defineMutator({
   args: {
@@ -1430,6 +1431,15 @@ export const commitAgentAnswer = defineMutator({
       if (remove) absorb(remove);
     }
 
+    // Skip empty detail so a one-line answer is summary-only (ADR 0059).
+    // Re-run the same splitter the engine used so block structure can't drift.
+    const { detailForest } = splitAgentAnswer(
+      args.detailText.trim()
+        ? `${args.summaryText}\n${args.detailText}`
+        : args.summaryText,
+    );
+    const hasDetail = detailForest.length > 0;
+
     const appendSummary = planAppendChild(index, {
       id: args.summaryId,
       userId: args.userId,
@@ -1444,16 +1454,14 @@ export const commitAgentAnswer = defineMutator({
     absorb({
       deletes: appendSummary.deletes,
       patches: appendSummary.patches,
-      inserts: appendSummary.inserts.map((n) => ({ ...n, origin: "agent" })),
+      inserts: appendSummary.inserts.map((n) => ({
+        ...n,
+        origin: "agent",
+        // Hide detail until expand (ADR 0059 Volume).
+        collapsed: hasDetail,
+      })),
     });
 
-    // Skip empty detail so a one-line answer is summary-only (ADR 0059).
-    // Re-run the same splitter the engine used so block structure can't drift.
-    const { detailForest } = splitAgentAnswer(
-      args.detailText.trim()
-        ? `${args.summaryText}\n${args.detailText}`
-        : args.summaryText,
-    );
     // Prefer the first detailId as the first forest id (stable for older stubs).
     let detailIdUsed = false;
     const inserts = materializeAgentDetailForest(

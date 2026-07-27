@@ -5,8 +5,8 @@
  *
  * Plain Lunora action (not `@lunora/workflow` / `@lunora/agent`): Workers AI
  * tool loop via `@lunora/ai` `streamText`, cooperative cancel between patches,
- * paid-plan gate via `getPlan` before burning AI. Workflow deferred — see
- * HANDOFF.md.
+ * paid-plan gate via `getPlan` before burning AI. Workflow deferred until a
+ * real need clears the ~10-minute action ceiling.
  */
 
 import { streamText } from "@lunora/ai";
@@ -93,7 +93,9 @@ export const fireAgentRun = action
   .use(
     // Memory store: createDbStore patch hits SQLite "too many terms in compound
     // SELECT" on this shard (fail-closed → "rate limiter unavailable"). Isolate
-    // Map is enough for paid-beta dogfood until Lunora ORM patch is fixed.
+    // Map is enough for paid-beta dogfood; sequential AI spend is best-effort
+    // across isolate churn. Swap to a durable store before the beta widens
+    // (ADR 0059 follow-up; paid gate + MAX_CONCURRENT_RUNS already bound abuse).
     rateLimit(agentRateLimiter, "agent", {
       key: (ctx) => ctx.auth.userId ?? "anon",
     }),

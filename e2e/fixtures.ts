@@ -1377,11 +1377,18 @@ export async function seedOutlineLunora(
             );
             index = liveIndex();
           }
+          const summaryText = String(args.summaryText ?? "");
+          const detailText = String(args.detailText ?? "");
+          const hasDetail = Boolean(
+            splitAgentAnswer(
+              detailText.trim() ? `${summaryText}\n${detailText}` : summaryText,
+            ).detailForest.length,
+          );
           const summaryPlan = planAppendChild(index, {
             id: summaryId,
             userId,
             parentId: questionNodeId,
-            text: String(args.summaryText ?? ""),
+            text: summaryText,
             createdAt: updatedAt,
             updatedAt,
           });
@@ -1392,14 +1399,15 @@ export async function seedOutlineLunora(
               inserts: summaryPlan.inserts.map((n) => ({
                 ...n,
                 origin: "agent",
+                collapsed: hasDetail,
               })),
             });
             index = liveIndex();
             commitAgentDetailForest(store, liveIndex, {
               userId,
               summaryId,
-              summaryText: String(args.summaryText ?? ""),
-              detailText: String(args.detailText ?? ""),
+              summaryText,
+              detailText,
               detailId,
               updatedAt,
             });
@@ -1485,8 +1493,11 @@ export async function seedOutlineLunora(
               );
               index = liveIndex();
             }
-            const { summary: summaryText, detail: detailText } =
-              splitAgentAnswer(canned);
+            const {
+              summary: summaryText,
+              detail: detailText,
+              detailForest,
+            } = splitAgentAnswer(canned);
             const summaryPlan = planAppendChild(index, {
               id: summaryId,
               userId,
@@ -1502,6 +1513,7 @@ export async function seedOutlineLunora(
                 inserts: summaryPlan.inserts.map((n) => ({
                   ...n,
                   origin: "agent",
+                  collapsed: detailForest.length > 0,
                 })),
               });
               index = liveIndex();
