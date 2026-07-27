@@ -7,6 +7,16 @@ import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
+// A node's row element. ADR 0019's flat windowed list has no DOM nesting, so
+// parent/child is asserted via `data-parent-id` (absent = top level), never a
+// containment selector.
+const row = (page: Page, id: string) =>
+  page.locator(`li[data-node-id="${id}"]`);
+
+// Every rendered row in document order. Used to reach a freshly inserted node
+// whose id we don't know.
+const rows = (page: Page) => page.locator("li[data-node-id]");
+
 // The bullet that currently holds the caret. After an Enter-split the new
 // sibling is focused, but its id is freshly generated, so we find it by focus.
 const focused = (page: Page) => page.locator(".node-text:focus");
@@ -96,7 +106,7 @@ test.describe("Enter splits the bullet at the caret", () => {
     expect(await orderedTexts(page)).toEqual(["alpha", "beta"]);
   });
 
-  test("caret at the start: pushes all text down, leaves an empty bullet above", async ({
+  test("caret at the start: inserts an empty bullet above, leaves this one alone", async ({
     page,
   }) => {
     await load(page, [
@@ -106,10 +116,98 @@ test.describe("Enter splits the bullet at the caret", () => {
     await caretAt(page, "n", 0);
     await page.keyboard.press("Enter");
 
-    // The original node is left empty; all its text moved into the new bullet.
-    await expect(text(page, "n")).toHaveText("");
+    // Enter at offset 0 is "make room above", not a split: `n` keeps its id AND
+    // its text, and the new node is the empty one. The order below is identical
+    // to the old (buggy) behavior -- only the IDENTITY flips, which is the bug.
+    await expect(text(page, "n")).toHaveText("alpha");
+    // Focus never left the text the user was editing.
     await expect(focused(page)).toHaveText("alpha");
     expect(await orderedTexts(page)).toEqual(["", "alpha"]);
+  });
+
+  test("caret at the start: the caret stays put, so typing continues the thought", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "alpha" },
+    ]);
+
+    await caretAt(page, "n", 0);
+    await page.keyboard.press("Enter");
+    // Caret is still at the START of the ORIGINAL node -- a deliberate
+    // divergence from Workflowy, which parks it in the new blank line.
+    await page.keyboard.type("X");
+
+    await expect(text(page, "n")).toHaveText("Xalpha");
+    expect(await orderedTexts(page)).toEqual(["", "Xalpha"]);
+  });
+
+  test("caret at the start of a parent: children stay with the parent, not the blank line", async ({
+    page,
+  }) => {
+    // The reported bug, verbatim: Enter at the start of P1 used to blank P1 and
+    // hand its text to a new node below -- which left C1/C2 hanging off the
+    // blank line instead of off P1.
+    await load(page, [
+      { id: "p1", parentId: null, prevSiblingId: null, text: "P1" },
+      { id: "p2", parentId: null, prevSiblingId: "p1", text: "P2" },
+      { id: "c1", parentId: "p1", prevSiblingId: null, text: "C1" },
+      { id: "c2", parentId: "p1", prevSiblingId: "c1", text: "C2" },
+    ]);
+
+    await caretAt(page, "p1", 0);
+    await page.keyboard.press("Enter");
+
+    await expect(text(page, "p1")).toHaveText("P1");
+    await expect(focused(page)).toHaveText("P1");
+    expect(await orderedTexts(page)).toEqual(["", "P1", "C1", "C2", "P2"]);
+    // The children still belong to P1...
+    await expect(row(page, "c1")).toHaveAttribute("data-parent-id", "p1");
+    await expect(row(page, "c2")).toHaveAttribute("data-parent-id", "p1");
+    // ...and the new blank line is a top-level sibling above P1, childless.
+    await expect(rows(page).first()).not.toHaveAttribute("data-parent-id", /./);
+  });
+
+  test("caret at the start of the FIRST child: the new bullet becomes the head of the list", async ({
+    page,
+  }) => {
+    // The head-of-list case: `prevSiblingId` is null, so the insert has to
+    // repoint the current head instead of skipping the follower lookup. A miss
+    // leaves two nodes both claiming `prevSiblingId: null` -- a chain fan the
+    // DEV tripwire in structural.ts logs (it only console.errors, so assert it
+    // stayed silent).
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+
+    await load(page, STANDARD_TREE);
+
+    await caretAt(page, "alpha-1", 0);
+    await page.keyboard.press("Enter");
+
+    await expect(text(page, "alpha-1")).toHaveText("Alpha one");
+    await expect(focused(page)).toHaveText("Alpha one");
+    expect(await orderedTexts(page)).toEqual([
+      "Alpha",
+      "",
+      "Alpha one",
+      "Alpha two",
+      "Bravo",
+      "Charlie",
+    ]);
+    // The blank line is alpha's new first child, and the rest of the chain
+    // (alpha-1 then alpha-2) survived intact.
+    await expect(rows(page).nth(1)).toHaveAttribute("data-parent-id", "alpha");
+    await expect(row(page, "alpha-2")).toHaveAttribute(
+      "data-parent-id",
+      "alpha",
+    );
+    expect(chainErrors).toEqual([]);
   });
 
   test("caret at end of an EXPANDED parent still dives in (child at top), no split", async ({

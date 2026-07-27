@@ -1449,6 +1449,35 @@ function useNodeCommands({
               );
               const before = content.text.slice(0, offset);
               const after = content.text.slice(offset);
+              // Caret at the very START of a bullet that HAS text: this is not a
+              // split, it's "make room above". The edited node keeps its id, its
+              // text, and its children -- only an empty sibling appears before it.
+              // (Splitting here would blank this node and hand its text to a NEW
+              // one below, orphaning its children under the blank line and moving
+              // identity out from under every bookmark / [[link]] / mirror / daily
+              // mapping pointing at it.) Checked BEFORE the mirror redirect: this
+              // arm writes nothing to the source and positions the new node beside
+              // the INSTANCE, which is the local-position side (ADR 0022).
+              if (offset === 0 && content.text.length > 0) {
+                // Insert BEFORE = insert after our own predecessor. At the head
+                // that's null, which insertSibling handles by repointing the old
+                // head -- so one call covers head and middle alike.
+                insertSibling(
+                  idx,
+                  instance.parentId,
+                  instance.prevSiblingId,
+                  content.isTask,
+                  "",
+                  content.kind,
+                );
+                // Focus stays on the row the user was editing, caret still at its
+                // start -- the blank line is above, ready to arrow up into. (A
+                // deliberate divergence from Workflowy, which parks the caret in
+                // the new line: every other arm only moves the caret when it moved
+                // the text.) Still routed through pendingFocus because the row
+                // shifts position in the flat windowed list (ADR 0019).
+                return { instanceId, activeKey, atStart: true };
+              }
               // On a mirror's OWN row, Enter never moves text off the source -- the
               // text is the source's content, so a split would either desync every
               // instance or strand the tail on a local node. Treat it as the empty-
