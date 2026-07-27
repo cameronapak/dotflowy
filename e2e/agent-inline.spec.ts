@@ -45,7 +45,7 @@ test.describe("inline @agent (Lunora)", () => {
     ).toHaveText("Detail line from the e2e Workers AI stub.");
   });
 
-  test("ghost text appears while run is delayed", async ({ page }) => {
+  test("trailing loader + stop while run is delayed", async ({ page }) => {
     await seedOutlineLunora(
       page,
       [
@@ -64,13 +64,37 @@ test.describe("inline @agent (Lunora)", () => {
     await text.click();
     await page.keyboard.press("Meta+Shift+Enter");
 
-    await expect(page.locator("[data-agent-ghost]")).toBeVisible({
+    const row = page.locator('li[data-node-id="q2"]');
+    await expect(row.locator("[data-agent-loader]")).toBeVisible({
       timeout: 5_000,
     });
+    await expect(row.locator("[data-agent-stop]")).toBeVisible();
+    await expect(row.locator("[data-agent-play]")).toHaveCount(0);
     await waitForSeededNode(page, "q2");
     await expect(
       page.locator('li[data-parent-id="q2"] .node-text').first(),
     ).toHaveText("Mock agent summary.", { timeout: 15_000 });
-    await expect(page.locator("[data-agent-ghost]")).toHaveCount(0);
+    await expect(row.locator("[data-agent-loader]")).toHaveCount(0);
+    await expect(row.locator("[data-agent-play]")).toBeVisible();
+  });
+
+  test("play opens Run popover then fires", async ({ page }) => {
+    await seedOutlineLunora(page, [
+      {
+        id: "q3",
+        parentId: null,
+        prevSiblingId: null,
+        text: "@agent via play",
+      },
+    ]);
+    await openSeededOutline(page, { anchorId: "q3" });
+
+    await page.locator('li[data-node-id="q3"] [data-agent-play]').click();
+    const dialog = page.getByRole("dialog", { name: "Run agent" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "▶ Run" }).click();
+    await expect(
+      page.locator('li[data-parent-id="q3"] .node-text').first(),
+    ).toHaveText("Mock agent summary.", { timeout: 15_000 });
   });
 });

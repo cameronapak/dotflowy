@@ -25,6 +25,7 @@ export * from "@/components/ui/button-variants";
 export * from "@/components/ui/card";
 export * from "@/components/ui/checkbox";
 export * from "@/components/ui/dialog";
+export * from "@/components/ui/dotm-square-3";
 export * from "@/components/ui/dropdown-menu";
 export * from "@/components/ui/input";
 export * from "@/components/ui/popover";

@@ -30,6 +30,9 @@
   "ignorePatterns": [
     "src/routeTree.gen.ts",
     "landing/src/routeTree.gen.ts",
-    "lunora/_generated/**"
+    "lunora/_generated/**",
+    "src/lib/dotmatrix-core.tsx",
+    "src/lib/dotmatrix-hooks.ts",
+    "src/components/ui/dotm-square-3.tsx"
   ]
 }

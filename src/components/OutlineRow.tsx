@@ -232,41 +232,6 @@ function RowChrome({
   // ADR 0059: streaming ghost is a sibling of `.node-text`, never inside it
   // (manual text sync + readSource would desync).
   const agentGhost = useAgentGhostText(content.id);
-  // #region agent log
-  {
-    const key = `${content.id}:${agentGhost ?? ""}`;
-    const g = globalThis as unknown as {
-      __agentGhostLogged?: Set<string>;
-    };
-    g.__agentGhostLogged ??= new Set();
-    if (agentGhost && !g.__agentGhostLogged.has(key)) {
-      g.__agentGhostLogged.add(key);
-      fetch(
-        "http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "a23e41",
-          },
-          body: JSON.stringify({
-            sessionId: "a23e41",
-            hypothesisId: "H1",
-            location: "src/components/OutlineRow.tsx:RowChrome",
-            message: "ghost mounted",
-            data: {
-              contentId: content.id,
-              ghostLen: agentGhost.length,
-              isEllipsis: agentGhost === "…",
-            },
-            timestamp: Date.now(),
-            runId: "ui-sync",
-          }),
-        },
-      ).catch(() => {});
-    }
-  }
-  // #endregion
 
   const slash = useSlashMenu({
     node: content,

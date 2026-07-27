@@ -639,6 +639,28 @@ function bindOutlineMutators(
           });
         },
       }),
+      cancelAgentRunForQuestion: defineMutator<{
+        userId: string;
+        questionNodeId: string;
+        updatedAt: number;
+      }>({
+        serverRef: "mutators:cancelAgentRunForQuestion",
+        apply: (_ctx, args) => {
+          for (const row of agentRuns.values()) {
+            if (
+              row.questionNodeId === args.questionNodeId &&
+              row.status === "running"
+            ) {
+              agentRuns.update(row._id, (draft) => {
+                draft.status = "cancelled";
+                draft.partialText = "";
+                draft.updatedAt = args.updatedAt;
+              });
+              break;
+            }
+          }
+        },
+      }),
     },
   );
 }

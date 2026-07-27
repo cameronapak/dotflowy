@@ -67,29 +67,6 @@ type BillingEnv = { DB?: D1Database };
 function resolveBillingDb(
   env: Record<string, unknown> | undefined,
 ): D1Database {
-  // #region agent log
-  fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "a23e41",
-    },
-    body: JSON.stringify({
-      sessionId: "a23e41",
-      hypothesisId: "H1",
-      location: "lunora/agent.ts:resolveBillingDb",
-      message: "billing env probe",
-      data: {
-        envDefined: env != null,
-        envKeys:
-          env && typeof env === "object" ? Object.keys(env).slice(0, 40) : [],
-        hasDB: !!(env as BillingEnv | undefined)?.DB,
-      },
-      timestamp: Date.now(),
-      runId: "post-fix",
-    }),
-  }).catch(() => {});
-  // #endregion
   const db = (env as BillingEnv | undefined)?.DB;
   if (!db) {
     throw new Error("billing unavailable");
@@ -126,75 +103,17 @@ export const fireAgentRun = action
       throw new Error("unauthorized");
     }
 
-    // #region agent log
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H4",
-        location: "lunora/agent.ts:fireAgentRun",
-        message: "past rateLimit middleware",
-        data: { hasEnvDB: !!(ctx.env as BillingEnv | undefined)?.DB },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
-
     // Paid-plan gate BEFORE createAgentRun / Workers AI (fail closed).
     // `ctx.env.DB` requires `lunora/env.ts` defineEnv (codegen) — without it
     // Lunora leaves `ctx.env` empty and we throw "billing unavailable".
     const plan = await getPlan(args.userId, {
       DB: resolveBillingDb(ctx.env as Record<string, unknown> | undefined),
     });
-    // #region agent log
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H2",
-        location: "lunora/agent.ts:fireAgentRun",
-        message: "plan resolved",
-        data: { plan, paid: isPaidPlan(plan) },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
     if (!isPaidPlan(plan)) {
       throw new Error("Inline agent requires a paid plan");
     }
 
     const now = Date.now();
-    // #region agent log
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H5",
-        location: "lunora/agent.ts:fireAgentRun:createAgentRun",
-        message: "runMutation ref probe",
-        data: {
-          ref: (agentMutators.createAgentRun as { __lunoraRef?: string })
-            .__lunoraRef,
-        },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
     const created = (await ctx.runMutation(agentMutators.createAgentRun, {
       userId: args.userId,
       questionNodeId: args.questionNodeId,
@@ -205,25 +124,6 @@ export const fireAgentRun = action
       answerRootId: string | null;
       answerHash: string | null;
     };
-
-    // #region agent log
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H5",
-        location: "lunora/agent.ts:fireAgentRun:createAgentRun:ok",
-        message: "createAgentRun succeeded",
-        data: { runId: created.runId, reused: created.reused },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     if (created.reused) {
       return { runId: created.runId, status: "running" as const };
@@ -337,35 +237,11 @@ export const fireAgentRun = action
       )) as { ok: boolean; answerRootId?: string; error?: string };
 
       if (!commitResult.ok) {
+        if (commitResult.error === "cancelled") {
+          return { runId, status: "cancelled" as const };
+        }
         return await fail(commitResult.error ?? "commit failed");
       }
-
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "a23e41",
-          },
-          body: JSON.stringify({
-            sessionId: "a23e41",
-            hypothesisId: "H5",
-            location: "lunora/agent.ts:fireAgentRun:completed",
-            message: "agent run committed",
-            data: {
-              runId,
-              answerRootId: commitResult.answerRootId ?? null,
-              finalTextLen: finalText.length,
-              bufferLen: buffer.length,
-            },
-            timestamp: Date.now(),
-            runId: "post-fix",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
 
       return {
         runId,
@@ -373,30 +249,6 @@ export const fireAgentRun = action
         answerRootId: commitResult.answerRootId,
       };
     } catch (err) {
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "a23e41",
-          },
-          body: JSON.stringify({
-            sessionId: "a23e41",
-            hypothesisId: "H6",
-            location: "lunora/agent.ts:fireAgentRun:catch",
-            message: "agent loop error",
-            data: {
-              msg: err instanceof Error ? err.message : String(err),
-              name: err instanceof Error ? err.name : typeof err,
-            },
-            timestamp: Date.now(),
-            runId: "post-fix",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
       if (!(await stillRunning())) {
         return { runId, status: "cancelled" as const };
       }

@@ -1243,6 +1243,32 @@ export const cancelAgentRun = defineMutator({
   },
 });
 
+/**
+ * Cancel by question id — needed when the client only has a local `local:`
+ * overlay (WS poke missed) and doesn't know the server runId yet.
+ */
+export const cancelAgentRunForQuestion = defineMutator({
+  args: { userId: userIdArg, questionNodeId: idArg, updatedAt: tsArg },
+  server: async (ctx, args) => {
+    const mctx = ctx as unknown as MutatorCtx;
+    assertOwner(mctx, args.userId);
+    const row = await getRunByQuestion(mctx, args.questionNodeId);
+    if (!row || row.userId !== args.userId || row.status !== "running") {
+      return { ok: false as const, runId: null };
+    }
+    await mctx.db.patch(
+      row._id as Id<"runs">,
+      {
+        status: "cancelled",
+        partialText: "",
+        updatedAt: args.updatedAt,
+      },
+      "runs",
+    );
+    return { ok: true as const, runId: row._id };
+  },
+});
+
 export const patchAgentRunPartial = defineMutator({
   args: {
     userId: userIdArg,
@@ -1361,6 +1387,16 @@ export const commitAgentAnswer = defineMutator({
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
     assertOwner(mctx, args.userId);
+
+    const runRow = await mctx.db.get(args.runId as Id<"runs">, "runs");
+    if (!runRow || runRow.userId !== args.userId) {
+      return { ok: false as const, error: "run missing" };
+    }
+    // Cooperative cancel: Stop patches status to cancelled; refuse to land
+    // an answer for a run that is no longer running.
+    if (runRow.status !== "running") {
+      return { ok: false as const, error: "cancelled" };
+    }
 
     // Plan entirely in memory, then ONE commitPlan + run patch. The mutator
     // handler is already one DO transaction; a single plan keeps node writes

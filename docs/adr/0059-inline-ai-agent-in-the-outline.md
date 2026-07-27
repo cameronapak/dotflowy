@@ -16,22 +16,22 @@ would not work for the person building it. Rejected.
 
 ## Locked product decisions
 
-| Area             | Decision                                                                                                                                                                                                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Answer placement | Always a **child** of the fired node (never sibling).                                                                                                                                                                                                            |
-| Volume           | One-line **summary** child; detail as **grandchildren** arriving `collapsed: true`.                                                                                                                                                                              |
-| Search           | Fully searchable/filterable. Nothing hidden from search.                                                                                                                                                                                                         |
-| Cleanup          | No accept/strip. The `@agent` chip stays forever (provenance on a line you authored).                                                                                                                                                                            |
-| Filter           | New Seam-K `is:ai` = `@agent` mention in `node.text` **OR** `origin` set. Distinct from shipped `is:agent` (origin-only).                                                                                                                                        |
-| Run state        | Lunora `runs` table (`.shardBy("userId").ownedBy("userId")`) + live shape subscription. No new classic sync frames.                                                                                                                                              |
-| Streaming        | Partial tokens → subscribed clients via Lunora realtime; UI paints **ghost text** as a sibling of `.node-text` in `RowChrome` (never inside contentEditable). Completion commits the answer tree in **one mutator transaction**.                                 |
-| Discard / undo   | Re-fire replaces (or appends — see replace guard). Cmd+Z does **not** undo server-originated answers (same as MCP today).                                                                                                                                        |
-| Replace guard    | Re-fire replaces only if the prior answer subtree is untouched (hash/snapshot on the run). Touched → append after it.                                                                                                                                            |
-| Tools            | Read + additive only (`get_outline`, `search_nodes`, `export_opml`, `add_node`, `add_subtree`, `add_to_today`, `mirror_node`, `mirror_to_today`). Denied: `update_node`, `delete_node`, `move_nodes`, `import_opml`. Engine re-fire replace is not a model tool. |
-| Firing           | `Mod+Shift+Enter` (row + zoomed title keymaps) + `/ask` + chip Run popover (two-step fire / one-tap stop). Quick-add `MiniNodeEditor` excluded in v1.                                                                                                            |
-| Continuation     | No conversation object. Follow-up = new `@agent` sibling. Prompt = prior turns (mention siblings + their answer subtrees) + one labeled untrusted context block.                                                                                                 |
-| Billing          | Paid plans only (`getPlan`). Free for paid users while in beta. AI Gateway in front of Workers AI.                                                                                                                                                               |
-| Schema           | **No new `Node` field.** Zero wire/migration/`e2e/fixtures`/R2 snapshot risk.                                                                                                                                                                                    |
+| Area             | Decision                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Answer placement | Always a **child** of the fired node (never sibling).                                                                                                                                                                                                                                                                        |
+| Volume           | One-line **summary** child; detail as **grandchildren** arriving `collapsed: true`.                                                                                                                                                                                                                                          |
+| Search           | Fully searchable/filterable. Nothing hidden from search.                                                                                                                                                                                                                                                                     |
+| Cleanup          | No accept/strip. The `@agent` chip stays forever (provenance on a line you authored).                                                                                                                                                                                                                                        |
+| Filter           | New Seam-K `is:ai` = `@agent` mention in `node.text` **OR** `origin` set. Distinct from shipped `is:agent` (origin-only).                                                                                                                                                                                                    |
+| Run state        | Lunora `runs` table (`.shardBy("userId").ownedBy("userId")`) + live shape subscription. No new classic sync frames.                                                                                                                                                                                                          |
+| Streaming        | Partial tokens → Lunora realtime when WS is healthy (future: ghost sibling of `.node-text`). v1 busy UI is **trailing chrome** (loader + Stop), not under-row ghost. Completion commits the answer tree in **one mutator transaction**; clients may soft-reload + animate-in when WS poke is missed.                         |
+| Discard / undo   | Re-fire replaces (or appends — see replace guard). Cmd+Z does **not** undo server-originated answers (same as MCP today).                                                                                                                                                                                                    |
+| Replace guard    | Re-fire replaces only if the prior answer subtree is untouched (hash/snapshot on the run). Touched → append after it.                                                                                                                                                                                                        |
+| Tools            | Read + additive only (`get_outline`, `search_nodes`, `export_opml`, `add_node`, `add_subtree`, `add_to_today`, `mirror_node`, `mirror_to_today`). Denied: `update_node`, `delete_node`, `move_nodes`, `import_opml`. Engine re-fire replace is not a model tool.                                                             |
+| Firing           | `Mod+Shift+Enter` + `/ask` + **trailing circular play** after the `@agent` pill → Run confirm popover (two-step, anti-accident). Play stays whenever fireable (not first-answer-only). While `running`: play becomes **Stop**; a Dot Matrix `dotm-square-3` loader sits beside Stop (status only). Quick-add excluded in v1. |
+| Continuation     | No conversation object. Follow-up = new `@agent` sibling. Prompt = prior turns (mention siblings + their answer subtrees) + one labeled untrusted context block.                                                                                                                                                             |
+| Billing          | Paid plans only (`getPlan`). Free for paid users while in beta. AI Gateway in front of Workers AI.                                                                                                                                                                                                                           |
+| Schema           | **No new `Node` field.** Zero wire/migration/`e2e/fixtures`/R2 snapshot risk.                                                                                                                                                                                                                                                |
 
 ## Lunora streaming / tool-loop gate (closed 2026-07-26)
 
@@ -56,9 +56,12 @@ for a future chat surface, not the v1 outline answer path.
 
 ## Home
 
-- Client: `src/plugins/agent/` — Seams A (`@agent` token), B (chip popover/stop),
-  C (`/ask`), D (`Mod+Shift+Enter`), H (`@` picker), K (`is:ai`).
-- Core: ghost text sibling in `RowChrome` / zoomed title.
+- Client: `src/plugins/agent/` — Seams A (`@agent` widget: pill + trailing
+  play/stop/loader), B (play → Run popover; stop → cancel), C (`/ask`),
+  D (`Mod+Shift+Enter`), H (`@` picker), K (`is:ai`). Loader:
+  Dot Matrix `@dotmatrix/dotm-square-3` (MIT; local shadcn registry install).
+- Core: answer arrive animation after soft-reload; ghost text sibling reserved
+  for future live `partialText` (not the v1 busy affordance).
 - Lunora: `runs` table + mutators + run engine action/workflow.
 - Pure logic (unit-tested): mention parse, `is:ai` predicate, tool allowlist,
   replace-guard hash, turn/context prompt rebuild.
@@ -70,5 +73,5 @@ for a future chat surface, not the v1 outline answer path.
   0058).
 - `origin` does double duty: provenance sparkle + agent-turn attribution at
   prompt build (MCP-created nodes inside an answer subtree also read as agent
-  turns — accepted).
+  turns — accepted). Sparkle on **every** agent-origin node (summary + detail).
 - No classic sync protocol surface to port or delete at cutover.

@@ -197,30 +197,6 @@ export function softReloadLunoraOutline(opts?: {
       ? window.scrollY || document.documentElement.scrollTop || 0
       : 0;
   if (opts?.answerRootId) noteAgentAnswerArrive(opts.answerRootId);
-  // #region agent log
-  const beforeKids = ctx.store.collection.toArray.length;
-  fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "a23e41",
-    },
-    body: JSON.stringify({
-      sessionId: "a23e41",
-      hypothesisId: "H2",
-      location: "src/data/lunora-sync.ts:softReloadLunoraOutline",
-      message: "soft-reloading Lunora outline after agent commit",
-      data: {
-        userIdLen: userId.length,
-        nodeCountBefore: beforeKids,
-        scrollY,
-        answerRootId: opts?.answerRootId ?? null,
-      },
-      timestamp: Date.now(),
-      runId: "ui-sync",
-    }),
-  }).catch(() => {});
-  // #endregion
   stopLunoraOutlineSync();
   startLunoraOutlineSync(userId);
   // Tree feed is async (toArrayWhenReady); restore scroll after layout settles.

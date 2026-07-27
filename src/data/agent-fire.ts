@@ -3,6 +3,8 @@
  * Requires upgraded sync (Lunora); classic accounts get a toast.
  */
 
+import type { FunctionReference } from "lunorash/client";
+
 import { toast } from "sonner";
 
 import { api } from "../../lunora/_generated/api";
@@ -14,8 +16,48 @@ import {
   getLunoraOutlineContext,
   softReloadLunoraOutline,
 } from "./lunora-sync";
-import { childrenOf } from "./tree";
 import { getTreeIndex } from "./tree-store";
+
+/** Question ids the user Stop'd while fireAgent was still in flight. */
+const cancelledQuestions = new Set<string>();
+
+/**
+ * Store mutators (`ctx.store.mutators.*`) apply locally + outbox — and return
+ * the TanStack Transaction, not the server result. Worse: an empty local apply
+ * (no running row in the agentRuns collection yet — only the `local:` overlay)
+ * skips the server write entirely. Cancel must always hit the Worker via
+ * `client.mutation`, same path fire uses for `client.action`.
+ */
+type CancelByQuestionRef = FunctionReference<
+  "mutation",
+  { userId: string; questionNodeId: string; updatedAt: number },
+  { ok: boolean; runId: string | null }
+>;
+const cancelAgentRunForQuestionRef = (
+  api as unknown as {
+    mutators: { cancelAgentRunForQuestion: CancelByQuestionRef };
+  }
+).mutators.cancelAgentRunForQuestion;
+
+async function cancelRunOnServer(
+  userId: string,
+  questionNodeId: string,
+): Promise<{ ok: boolean; runId: string | null }> {
+  const client = getLunoraClient();
+  const result = (await client.mutation(
+    cancelAgentRunForQuestionRef,
+    {
+      userId,
+      questionNodeId,
+      updatedAt: Date.now(),
+    },
+    { shardKey: userId },
+  )) as { ok?: boolean; runId?: string | null };
+  return {
+    ok: result?.ok === true,
+    runId: result?.runId ?? null,
+  };
+}
 
 /** Ensure the focused node mentions `@agent`, then start a Lunora run. */
 export async function fireAgent(nodeId: string): Promise<void> {
@@ -46,7 +88,9 @@ export async function fireAgent(nodeId: string): Promise<void> {
     return;
   }
 
-  // Ghost before shape sync: action→createAgentRun has no client apply.
+  // Fresh fire — drop any prior Stop mark for this question.
+  cancelledQuestions.delete(nodeId);
+  // Trailing busy chrome before shape sync: action→createAgentRun has no client apply.
   noteLocalAgentRun({
     runId: `local:${nodeId}`,
     questionNodeId: nodeId,
@@ -60,24 +104,6 @@ export async function fireAgent(nodeId: string): Promise<void> {
 
   try {
     const client = getLunoraClient();
-    // #region agent log
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H3",
-        location: "src/data/agent-fire.ts:fireAgent",
-        message: "firing agent action",
-        data: { nodeId, userIdLen: ctx.userId.length },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
     const result = (await client.action(
       api.agent.fireAgentRun,
       {
@@ -91,36 +117,21 @@ export async function fireAgent(nodeId: string): Promise<void> {
       answerRootId?: string;
       error?: string;
     };
-    // #region agent log
-    const childCount = childrenOf(getTreeIndex(), nodeId).length;
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H2",
-        location: "src/data/agent-fire.ts:fireAgent:result",
-        message: "fireAgent action returned",
-        data: {
-          status: result?.status ?? null,
-          runId: result?.runId ?? null,
-          answerRootId: result?.answerRootId ?? null,
-          errLen: result?.error?.length ?? 0,
-          errHead: result?.error?.slice(0, 120) ?? null,
-          childCountBeforeReload: childCount,
-        },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
     // Server failAgentRun returns {status:"error"} without throwing — surface it.
     if (result?.status === "error") {
       noteLocalAgentRun(null);
       toast.error(result.error?.slice(0, 200) || "Agent run failed");
+      return;
+    }
+    // Stop may have raced ahead of createAgentRun — cancel again + skip reload.
+    if (cancelledQuestions.has(nodeId) || result?.status === "cancelled") {
+      cancelledQuestions.delete(nodeId);
+      noteLocalAgentRun(null);
+      try {
+        await cancelRunOnServer(ctx.userId, nodeId);
+      } catch {
+        /* best-effort */
+      }
       return;
     }
     noteLocalAgentRun(null);
@@ -136,24 +147,6 @@ export async function fireAgent(nodeId: string): Promise<void> {
   } catch (err) {
     noteLocalAgentRun(null);
     const msg = err instanceof Error ? err.message : "Agent run failed";
-    // #region agent log
-    fetch("http://127.0.0.1:7920/ingest/4fe7f996-e307-4b62-b12b-1c7d5e6b57b8", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a23e41",
-      },
-      body: JSON.stringify({
-        sessionId: "a23e41",
-        hypothesisId: "H3",
-        location: "src/data/agent-fire.ts:fireAgent:catch",
-        message: "fireAgent failed",
-        data: { msg: msg.slice(0, 200) },
-        timestamp: Date.now(),
-        runId: "post-fix",
-      }),
-    }).catch(() => {});
-    // #endregion
     toast.error(msg);
   }
 }
@@ -163,18 +156,13 @@ export async function stopAgent(nodeId: string): Promise<void> {
   const ctx = getLunoraOutlineContext();
   const run = getAgentRunForQuestion(nodeId);
   if (!ctx || !run || run.status !== "running") return;
-  // Local-only stub has no server row yet / cancel is a no-op on server id.
-  if (run.runId.startsWith("local:")) {
-    noteLocalAgentRun(null);
-    return;
-  }
+  cancelledQuestions.add(nodeId);
+  // Optimistic: clear the local busy overlay immediately.
+  noteLocalAgentRun(null);
   try {
-    await ctx.store.mutators.cancelAgentRun({
-      userId: ctx.userId,
-      runId: run.runId,
-      updatedAt: Date.now(),
-    });
-    noteLocalAgentRun(null);
+    // Always cancel by questionNodeId via client.mutation (not store mutators —
+    // see cancelRunOnServer). The UI often only has a `local:` stub.
+    await cancelRunOnServer(ctx.userId, nodeId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Could not stop run";
     toast.error(msg);

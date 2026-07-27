@@ -1,6 +1,6 @@
-// Inline `@agent` plugin (ADR 0059). Seams A (token), B (chip fire/stop),
-// C (`/ask`), D (`Mod+Shift+Enter`), H (`@` picker), K (`is:ai`).
-// Execution is Lunora-native; classic accounts see the chip but cannot fire.
+// Inline `@agent` plugin (ADR 0059). Seams A (widget: pill + trailing
+// play/stop/loader), B (play → Run popover; stop → cancel), C (`/ask`),
+// D (`Mod+Shift+Enter`), H (`@` picker), K (`is:ai`).
 
 import { SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -13,42 +13,22 @@ import {
 import { AGENT_MENTION, isAiNode } from "../../data/agent-mention";
 import { getAgentRunForQuestion } from "../../data/agent-runs";
 import { isLunoraSyncEnabled } from "../../data/flags";
+import { resolveNodeId } from "../token-kit";
 import {
   definePlugin,
-  type El,
   type InteractionEvent,
   type MenuTrigger,
   type PluginContext,
+  type WidgetEl,
 } from "../types";
+import { AgentChip } from "./chip";
 import { AgentRunPopover } from "./run-popover";
 
-function agentChipEl(tok: string): El {
+function agentWidget(tok: string): WidgetEl {
   return {
-    tag: "span",
-    attrs: {
-      class:
-        "agent-chip inline-flex items-center gap-0.5 rounded px-1 text-[0.85em] bg-muted text-muted-foreground align-baseline select-none cursor-pointer hover:bg-accent hover:text-accent-foreground",
-      "data-agent": "true",
-      // Opaque atom (same contract as folded links): caret jumps the chip;
-      // readSource round-trips the literal `@agent`.
-      "data-src": tok,
-      "data-src-len": tok.length,
-      contenteditable: "false",
-      title: "Run agent",
-      role: "button",
-    },
-    // Play glyph = click-to-run signifier (ADR 0059 chip is the fire control).
-    children: [
-      {
-        tag: "span",
-        attrs: {
-          class: "text-[0.75em] leading-none opacity-80",
-          "aria-hidden": "true",
-        },
-        children: ["▶"],
-      },
-      tok,
-    ],
+    kind: "widget",
+    source: tok,
+    attrs: { "data-agent-chrome": true },
   };
 }
 
@@ -73,23 +53,19 @@ function openRunPopover(
   ctx: PluginContext,
   e: InteractionEvent,
 ) {
-  const row = el.closest("[data-node-id]") as HTMLElement | null;
-  const nodeId = row?.dataset.nodeId;
+  const nodeId = resolveNodeId(el);
   if (!nodeId) return;
   e.preventDefault();
   e.stopPropagation();
 
-  const run = getAgentRunForQuestion(nodeId);
-  if (run?.status === "running") {
-    void stopAgent(nodeId);
-    return;
-  }
+  if (getAgentRunForQuestion(nodeId)?.status === "running") return;
 
+  const rect = el.getBoundingClientRect();
   ctx.openOverlay(
     <AgentRunPopover
       nodeId={nodeId}
-      x={e.clientX}
-      y={e.clientY}
+      x={rect.left}
+      y={rect.bottom + 6}
       onClose={() => ctx.openOverlay(null)}
       onRun={() => {
         ctx.openOverlay(null);
@@ -97,6 +73,18 @@ function openRunPopover(
       }}
     />,
   );
+}
+
+function onStopClick(
+  el: HTMLElement,
+  _ctx: PluginContext,
+  e: InteractionEvent,
+) {
+  const nodeId = resolveNodeId(el);
+  if (!nodeId) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void stopAgent(nodeId);
 }
 
 async function runAsk(nodeId: string, ctx: PluginContext) {
@@ -119,15 +107,21 @@ export default definePlugin({
       pattern: AGENT_MENTION,
       // After node-links (5) / daily date (6), before code (10).
       precedence: 7,
-      render: (tok) => agentChipEl(tok),
+      component: AgentChip,
+      render: (tok) => agentWidget(tok),
     },
   ],
 
   interactions: [
     {
-      selector: "[data-agent]",
+      selector: "[data-agent-play]",
       blockCaretOnMouseDown: true,
       onClick: openRunPopover,
+    },
+    {
+      selector: "[data-agent-stop]",
+      blockCaretOnMouseDown: true,
+      onClick: onStopClick,
     },
   ],
 

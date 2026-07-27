@@ -44,6 +44,7 @@ export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
     "mutators:appendChild": lunora_mutators_2.appendChild as unknown as RegisteredLunoraFunction,
     "mutators:applyChangeOps": lunora_mutators_2.applyChangeOps as unknown as RegisteredLunoraFunction,
     "mutators:cancelAgentRun": lunora_mutators_2.cancelAgentRun as unknown as RegisteredLunoraFunction,
+    "mutators:cancelAgentRunForQuestion": lunora_mutators_2.cancelAgentRunForQuestion as unknown as RegisteredLunoraFunction,
     "mutators:claimDailyMapping": lunora_mutators_2.claimDailyMapping as unknown as RegisteredLunoraFunction,
     "mutators:commitAgentAnswer": lunora_mutators_2.commitAgentAnswer as unknown as RegisteredLunoraFunction,
     "mutators:completeAgentRun": lunora_mutators_2.completeAgentRun as unknown as RegisteredLunoraFunction,
@@ -134,7 +135,7 @@ export const LUNORA_SHAPES: Record<string, RegisteredShape> = {
  * ShardDO's `isCustomMutator` override routes through the client-watermark push
  * protocol (`x-lunora-client-id`/`x-lunora-client-seq` ordering).
  */
-export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:appendChild", "mutators:applyChangeOps", "mutators:cancelAgentRun", "mutators:claimDailyMapping", "mutators:commitAgentAnswer", "mutators:completeAgentRun", "mutators:createAgentRun", "mutators:deleteDailyMapping", "mutators:deleteSavedQuery", "mutators:deleteTagColor", "mutators:failAgentRun", "mutators:getAgentRun", "mutators:getMigrateState", "mutators:hello", "mutators:importKvRows", "mutators:importNodes", "mutators:indent", "mutators:indentMany", "mutators:insertChildAtStart", "mutators:insertSibling", "mutators:materializeDailyNodes", "mutators:mirrorNode", "mutators:moveMany", "mutators:moveNode", "mutators:outdent", "mutators:outdentMany", "mutators:patchAgentRunPartial", "mutators:patchSavedQuery", "mutators:removeMany", "mutators:removeNode", "mutators:restoreNodes", "mutators:seedIfEmpty", "mutators:setBookmarkedAt", "mutators:setCollapsed", "mutators:setCompleted", "mutators:setIsTask", "mutators:setKind", "mutators:setMigrateState", "mutators:setText", "mutators:splitNode", "mutators:upsertDailyMapping", "mutators:upsertSavedQuery", "mutators:upsertTagColor"]);
+export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:appendChild", "mutators:applyChangeOps", "mutators:cancelAgentRun", "mutators:cancelAgentRunForQuestion", "mutators:claimDailyMapping", "mutators:commitAgentAnswer", "mutators:completeAgentRun", "mutators:createAgentRun", "mutators:deleteDailyMapping", "mutators:deleteSavedQuery", "mutators:deleteTagColor", "mutators:failAgentRun", "mutators:getAgentRun", "mutators:getMigrateState", "mutators:hello", "mutators:importKvRows", "mutators:importNodes", "mutators:indent", "mutators:indentMany", "mutators:insertChildAtStart", "mutators:insertSibling", "mutators:materializeDailyNodes", "mutators:mirrorNode", "mutators:moveMany", "mutators:moveNode", "mutators:outdent", "mutators:outdentMany", "mutators:patchAgentRunPartial", "mutators:patchSavedQuery", "mutators:removeMany", "mutators:removeNode", "mutators:restoreNodes", "mutators:seedIfEmpty", "mutators:setBookmarkedAt", "mutators:setCollapsed", "mutators:setCompleted", "mutators:setIsTask", "mutators:setKind", "mutators:setMigrateState", "mutators:setText", "mutators:splitNode", "mutators:upsertDailyMapping", "mutators:upsertSavedQuery", "mutators:upsertTagColor"]);
 
 /**
  * Connection-lifecycle manifest: the function paths the generated ShardDO
@@ -177,7 +178,7 @@ export type CallerCtx = ActionCtx | MutationCtx | QueryCtx;
  */
 export interface Caller {
     agent: {
-        fireAgentRun: (args: { userId: string; questionNodeId: string }) => Promise<{ runId: string; status: "error"; } | { runId: string; status: "running"; answerRootId?: undefined; } | { runId: string; status: "cancelled"; answerRootId?: undefined; } | { runId: string; status: "completed"; answerRootId: string | undefined; }>;
+        fireAgentRun: (args: { userId: string; questionNodeId: string }) => Promise<{ runId: string; status: "error"; error: string; } | { runId: string; status: "running"; answerRootId?: undefined; } | { runId: string; status: "cancelled"; answerRootId?: undefined; } | { runId: string; status: "completed"; answerRootId: string | undefined; }>;
     };
     mcp: {
         applyChangeOps: (args: { userId: string; ops: Array<unknown> }) => Promise<{ count: number; deletes: number; inserts: number; patches: number; }>;
