@@ -79,3 +79,19 @@ _Avoid_: saved search (a filter stays put; see Filter), smart view
 **Quick-add**:
 Capturing a thought as a real node in one uninterrupted gesture, without looking at where it lands. The node commits immediately to a default destination (today's note) and is relocatable afterward; the whole point is to write the thing down before the destination's existing content distracts you out of remembering it. Distinct from navigation (Cmd+K takes you somewhere) and from an ordinary new node (which is authored in place, in view of its siblings).
 _Avoid_: quick capture (fine as a synonym, but the action is "quick-add"), inbox (the default is today, not a holding bucket), compose
+
+**Agent session**:
+A joined external coding agent (Cursor, Claude Code, Codex, …) present on the user's outline. Dotflowy does not run the model — the session is presence + protocol over the outline the user already connects via MCP. Paid entitlement only.
+_Avoid_: bot, assistant, Dot (when meaning a hosted in-app model), inline AI
+
+**Add agent**:
+The human gesture that starts an Agent session: copy one join prompt, wait until the agent shows presence. The spine of bring-your-own-agent — not a per-bullet paste.
+_Avoid_: invite link (too generic), connect MCP (that's auth; this is join+presence), Run
+
+**Ask**:
+A focused request for a joined agent, usually from play on an `@agent`-mentioned node. Scope is that node and its descendants; the agent may search the rest of the outline when it needs more. Prefer answers as children of the ask node.
+_Avoid_: prompt (the join copy is a prompt; an ask is the in-outline job), query, run (ambiguous with hosted-AI runs)
+
+**Presence**:
+Visible proof that an Agent session is live — header chrome for the session, and busy state on the Ask being worked. What "Waiting for your agent…" resolves to.
+_Avoid_: online status, cursor (too editor-specific), heartbeat (implementation)
