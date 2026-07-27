@@ -169,6 +169,9 @@ const KV_COLLECTIONS = new Set([
   "changelog",
   "saved-queries",
   "account-prefs",
+  // ADR 0059 BYOA — SPA reads presence / writes asks; MCP tools also upsert.
+  "agent-presence",
+  "agent-asks",
 ]);
 
 /**

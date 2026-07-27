@@ -19,6 +19,23 @@ import { Data, Effect, Schema } from "effect";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import {
+  KV_AGENT_ASKS,
+  KV_AGENT_PRESENCE,
+  AskRowSchema,
+  PresenceRowSchema,
+  type AskRow,
+  type AskStatus,
+  type PresenceRow,
+  filterAsks,
+  formatAskLine,
+  formatPresenceLine,
+  isAskTransitionError,
+  planAnnouncePresence,
+  planClaimAsk,
+  planCompleteAsk,
+  planCreateAsk,
+} from "../src/data/agent-session";
+import {
   PROTECTED_SCAFFOLD_KINDS,
   dayKeyToScaffoldChain,
   scaffoldKeyKind,
@@ -77,6 +94,11 @@ export interface OutlineStore {
     key: string,
     value: unknown,
   ): unknown | Promise<unknown>;
+  /** Upsert kv rows (ADR 0059 presence/asks heartbeats + status flips). */
+  upsertKv(
+    collection: string,
+    rows: readonly { key: string; value: unknown }[],
+  ): void | Promise<void>;
 }
 
 /** A tool execution failure — surfaces as an `isError` tool result (the MCP
@@ -562,6 +584,120 @@ const ExportOpmlInput = Schema.Struct({
     }),
   ),
 });
+
+// --- BYOA presence + asks (ADR 0059) ------------------------------------------
+// Stored in DO kv (`agent-presence` / `agent-asks`). Outline mutations stay on
+// existing tools + applyBatch — these only flip session rows.
+
+const AnnouncePresenceInput = Schema.Struct({
+  agentId: optional(
+    Schema.String.annotate({
+      description:
+        "Stable id for this agent process. Omit on the first announce to mint one; reuse the returned id on every heartbeat.",
+    }),
+  ),
+  label: optional(
+    Schema.String.annotate({
+      description:
+        'Human-facing name shown in the app (e.g. "Cursor", "Claude Code"). Defaults to the OAuth client name.',
+    }),
+  ),
+});
+
+const ListAsksInput = Schema.Struct({
+  status: optional(
+    Schema.Literals(["pending", "claimed", "done", "cancelled"]).annotate({
+      description:
+        "Filter by status. Omit (or null) to list pending asks only — what a joined agent polls for.",
+    }),
+  ),
+});
+
+const ClaimAskInput = Schema.Struct({
+  askId: Schema.String.annotate({
+    description: "Ask id from list_asks.",
+  }),
+  agentId: Schema.String.annotate({
+    description: "Your agentId from announce_presence.",
+  }),
+});
+
+const CompleteAskInput = Schema.Struct({
+  askId: Schema.String.annotate({
+    description: "Ask id to mark done.",
+  }),
+  agentId: optional(
+    Schema.String.annotate({
+      description:
+        "Your agentId. Required when the ask is claimed by someone else (refused).",
+    }),
+  ),
+});
+
+const CreateAskInput = Schema.Struct({
+  questionNodeId: Schema.String.annotate({
+    description:
+      "Focus node for the ask (the node and its descendants). Usually the @agent-mentioned bullet.",
+  }),
+});
+
+const loadAskRows = (store: OutlineStore): Effect.Effect<AskRow[], ToolError> =>
+  Effect.gen(function* () {
+    const raw = yield* Effect.promise(() =>
+      Promise.resolve(store.getKv(KV_AGENT_ASKS)),
+    );
+    const rows: AskRow[] = [];
+    for (const item of raw) {
+      const decoded = Schema.decodeUnknownOption(AskRowSchema)(item);
+      if (decoded._tag === "Some") rows.push(decoded.value);
+    }
+    return rows;
+  });
+
+const loadPresenceRows = (
+  store: OutlineStore,
+): Effect.Effect<PresenceRow[], ToolError> =>
+  Effect.gen(function* () {
+    const raw = yield* Effect.promise(() =>
+      Promise.resolve(store.getKv(KV_AGENT_PRESENCE)),
+    );
+    const rows: PresenceRow[] = [];
+    for (const item of raw) {
+      const decoded = Schema.decodeUnknownOption(PresenceRowSchema)(item);
+      if (decoded._tag === "Some") rows.push(decoded.value);
+    }
+    return rows;
+  });
+
+const putAsk = (
+  store: OutlineStore,
+  ask: AskRow,
+): Effect.Effect<void, ToolError> =>
+  Effect.promise(() =>
+    Promise.resolve(
+      store.upsertKv(KV_AGENT_ASKS, [{ key: ask.key, value: ask }]),
+    ),
+  );
+
+const putPresence = (
+  store: OutlineStore,
+  row: PresenceRow,
+): Effect.Effect<void, ToolError> =>
+  Effect.promise(() =>
+    Promise.resolve(
+      store.upsertKv(KV_AGENT_PRESENCE, [{ key: row.key, value: row }]),
+    ),
+  );
+
+const findAsk = (
+  rows: readonly AskRow[],
+  askId: string,
+): Effect.Effect<AskRow, ToolError> => {
+  const ask = rows.find((r) => r.id === askId);
+  return ask
+    ? Effect.succeed(ask)
+    : Effect.fail(new ToolError({ reason: `ask not found: ${askId}` }));
+};
 
 // --- The tools ----------------------------------------------------------------
 
@@ -1165,6 +1301,128 @@ export const tools: ReadonlyArray<ToolDef> = [
           ? redactSpoilers(rootNode.text)
           : "dotflowy";
         return exportOpml(redactSpoilerIndex(index), rootId, { title });
+      }),
+  },
+  {
+    name: "announce_presence",
+    description:
+      "Join / heartbeat for bring-your-own-agent (ADR 0059). Call on connect and every ~20–30s while working so the app shows you as present. Reuse the returned agentId on every call.",
+    input: AnnouncePresenceInput,
+    readOnly: false,
+    handle: (input: typeof AnnouncePresenceInput.Type, store, origin) =>
+      Effect.gen(function* () {
+        const now = yield* clock;
+        const agentId = input.agentId?.trim() || createId();
+        const label =
+          input.label?.trim() ||
+          (origin && origin.trim() ? origin.trim() : "Agent");
+        const row = planAnnouncePresence({ agentId, label, now });
+        yield* putPresence(store, row);
+        return [
+          `Present as "${row.label}" (agentId: ${row.agentId}).`,
+          `Heartbeat again within ~30s; reuse this agentId.`,
+          `Poll list_asks for pending work; claim_ask then answer as children under questionNodeId; complete_ask when done.`,
+        ].join("\n");
+      }),
+  },
+  {
+    name: "list_asks",
+    description:
+      "List pending (or filtered) asks for a joined agent. Focus for each ask is questionNodeId + descendants. Prefer answering as children of that node.",
+    input: ListAsksInput,
+    readOnly: true,
+    handle: (input: typeof ListAsksInput.Type, store) =>
+      Effect.gen(function* () {
+        const rows = yield* loadAskRows(store);
+        // Omitted/null status → pending only (poll loop). Explicit status filters.
+        const status: AskStatus | null =
+          input.status === undefined || input.status === null
+            ? "pending"
+            : input.status;
+        const listed = filterAsks(rows, status);
+        if (listed.length === 0)
+          return `No ${status} asks. Stay present and keep polling.`;
+        return [
+          `${listed.length} ${status} ask(s):`,
+          ...listed.map(formatAskLine),
+        ].join("\n");
+      }),
+  },
+  {
+    name: "claim_ask",
+    description:
+      "Claim a pending ask so other agents (and the UI) know you are working it. Pass your agentId from announce_presence.",
+    input: ClaimAskInput,
+    readOnly: false,
+    handle: (input: typeof ClaimAskInput.Type, store) =>
+      Effect.gen(function* () {
+        const now = yield* clock;
+        const rows = yield* loadAskRows(store);
+        const ask = yield* findAsk(rows, input.askId);
+        const next = planClaimAsk(ask, input.agentId, now);
+        if (isAskTransitionError(next)) {
+          return yield* Effect.fail(new ToolError({ reason: next.reason }));
+        }
+        yield* putAsk(store, next);
+        return [
+          `Claimed ask ${next.id}.`,
+          `Focus: node ${next.questionNodeId} and its descendants.`,
+          `Prefer answers as children under that node (add_node / add_subtree). Use search_nodes when you need more context.`,
+          `Call complete_ask when finished.`,
+        ].join("\n");
+      }),
+  },
+  {
+    name: "complete_ask",
+    description:
+      "Mark an ask done after you finished writing answers under (or about) its focus node.",
+    input: CompleteAskInput,
+    readOnly: false,
+    handle: (input: typeof CompleteAskInput.Type, store) =>
+      Effect.gen(function* () {
+        const now = yield* clock;
+        const rows = yield* loadAskRows(store);
+        const ask = yield* findAsk(rows, input.askId);
+        const next = planCompleteAsk(ask, input.agentId ?? null, now);
+        if (isAskTransitionError(next)) {
+          return yield* Effect.fail(new ToolError({ reason: next.reason }));
+        }
+        yield* putAsk(store, next);
+        return `Ask ${next.id} marked done.`;
+      }),
+  },
+  {
+    name: "create_ask",
+    description:
+      "Create a pending ask focused on a node (and its descendants). Used by the app when the user plays an @agent mention; agents may also create asks for tests. Does not write outline nodes.",
+    input: CreateAskInput,
+    readOnly: false,
+    handle: (input: typeof CreateAskInput.Type, store) =>
+      Effect.gen(function* () {
+        const index = yield* loadIndex(store);
+        if (!index.byId.has(input.questionNodeId)) {
+          return yield* Effect.fail(
+            new ToolError({
+              reason: `node not found: ${input.questionNodeId}`,
+            }),
+          );
+        }
+        const now = yield* clock;
+        const ask = planCreateAsk({
+          id: createId(),
+          questionNodeId: input.questionNodeId,
+          now,
+        });
+        yield* putAsk(store, ask);
+        const presence = yield* loadPresenceRows(store);
+        const presenceNote =
+          presence.length === 0
+            ? "No agents have announced presence yet."
+            : `Presence:\n${presence.map(formatPresenceLine).join("\n")}`;
+        return [
+          `Created pending ask ${ask.id} on node ${ask.questionNodeId}.`,
+          presenceNote,
+        ].join("\n");
       }),
   },
 ];

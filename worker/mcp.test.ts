@@ -22,7 +22,10 @@ import { handleMcp } from "./mcp";
 interface FakeStore {
   store: OutlineStore;
   nodes: Map<string, Node>;
+  /** daily-index rows — existing daily tool tests assert against this map. */
   kv: Map<string, { key: string; nodeId: string }>;
+  /** Non-daily side collections (agent-presence / agent-asks, …). */
+  sideKv: Map<string, Map<string, unknown>>;
   batches: ChangeOp[][];
 }
 
@@ -32,7 +35,19 @@ function makeStore(
 ): FakeStore {
   const nodes = new Map(seed.map((n) => [n.id, n]));
   const kv = new Map(kvRows.map((r) => [r.key, r]));
+  const sideKv = new Map<string, Map<string, unknown>>();
   const batches: ChangeOp[][] = [];
+
+  const colMap = (collection: string): Map<string, unknown> => {
+    if (collection === "daily-index") return kv as Map<string, unknown>;
+    let col = sideKv.get(collection);
+    if (!col) {
+      col = new Map();
+      sideKv.set(collection, col);
+    }
+    return col;
+  };
+
   const store: OutlineStore = {
     getNodes: () => [...nodes.values()],
     applyBatch: (ops) => {
@@ -43,18 +58,20 @@ function makeStore(
       }
       return batches.length;
     },
-    getKv: (collection) =>
-      collection === "daily-index" ? [...kv.values()] : [],
+    getKv: (collection) => [...colMap(collection).values()],
     getOrCreateKv: (collection, key, value) => {
-      if (collection !== "daily-index")
-        throw new Error(`unexpected kv collection ${collection}`);
-      const existing = kv.get(key);
-      if (existing) return existing;
-      kv.set(key, value as { key: string; nodeId: string });
+      const col = colMap(collection);
+      const existing = col.get(key);
+      if (existing !== undefined) return existing;
+      col.set(key, value as { key: string; nodeId: string });
       return value;
     },
+    upsertKv: (collection, rows) => {
+      const col = colMap(collection);
+      for (const r of rows) col.set(r.key, r.value);
+    },
   };
-  return { store, nodes, kv, batches };
+  return { store, nodes, kv, sideKv, batches };
 }
 
 // --- Request plumbing -----------------------------------------------------------
@@ -160,6 +177,11 @@ describe("MCP transport", () => {
       "mirror_to_today",
       "import_opml",
       "export_opml",
+      "announce_presence",
+      "list_asks",
+      "claim_ask",
+      "complete_ask",
+      "create_ask",
     ]);
     const addNode = json.result.tools.find((t: any) => t.name === "add_node");
     expect(addNode.inputSchema.type).toBe("object");
@@ -855,9 +877,111 @@ describe("MCP tools", () => {
       applyBatch: () => 0,
       getKv: () => [],
       getOrCreateKv: () => ({}),
+      upsertKv: () => {},
     };
     const json = await callTool(broken, "get_outline", {});
     expect(json.error?.code).toBe(-32603);
     expect(JSON.stringify(json)).not.toContain("secret");
+  });
+});
+
+describe("MCP BYOA presence + asks (ADR 0059)", () => {
+  test("announce_presence upserts a presence row and returns agentId", async () => {
+    const fake = makeStore(fixture());
+    const json = await callTool(fake.store, "announce_presence", {
+      label: "Cursor",
+    });
+    expect(json.result?.isError).toBeUndefined();
+    const text = toolText(json);
+    expect(text).toContain('Present as "Cursor"');
+    expect(text).toMatch(/agentId: [0-9a-f-]{36}/i);
+
+    const rows = fake.sideKv.get("agent-presence");
+    expect(rows?.size).toBe(1);
+    const row = [...(rows?.values() ?? [])][0] as {
+      agentId: string;
+      label: string;
+    };
+    expect(row.label).toBe("Cursor");
+
+    // Heartbeat reuses agentId and bumps lastSeenAt.
+    const again = await callTool(fake.store, "announce_presence", {
+      agentId: row.agentId,
+      label: "Cursor",
+    });
+    expect(toolText(again)).toContain(row.agentId);
+    expect(fake.sideKv.get("agent-presence")?.size).toBe(1);
+  });
+
+  test("create_ask → list_asks → claim_ask → complete_ask", async () => {
+    const fake = makeStore(fixture());
+    const created = await callTool(fake.store, "create_ask", {
+      questionNodeId: "a",
+    });
+    expect(created.result?.isError).toBeUndefined();
+    const createText = toolText(created);
+    expect(createText).toContain("Created pending ask");
+    const askId = /Created pending ask ([0-9a-f-]{36})/i.exec(createText)?.[1];
+    expect(askId).toBeTruthy();
+
+    const listed = toolText(await callTool(fake.store, "list_asks", {}));
+    expect(listed).toContain(askId!);
+    expect(listed).toContain("node=a");
+    expect(listed).toContain("status=pending");
+
+    const claimed = await callTool(fake.store, "claim_ask", {
+      askId,
+      agentId: "agent-1",
+    });
+    expect(claimed.result?.isError).toBeUndefined();
+    expect(toolText(claimed)).toContain("Claimed ask");
+    expect(toolText(claimed)).toContain("node a");
+
+    // Second claim by another agent is refused.
+    const conflict = await callTool(fake.store, "claim_ask", {
+      askId,
+      agentId: "agent-2",
+    });
+    expect(conflict.result?.isError).toBe(true);
+    expect(toolText(conflict)).toContain("already claimed");
+
+    const done = await callTool(fake.store, "complete_ask", {
+      askId,
+      agentId: "agent-1",
+    });
+    expect(done.result?.isError).toBeUndefined();
+    expect(toolText(done)).toContain("marked done");
+
+    const pending = toolText(await callTool(fake.store, "list_asks", {}));
+    expect(pending).toContain("No pending asks");
+
+    const doneList = toolText(
+      await callTool(fake.store, "list_asks", { status: "done" }),
+    );
+    expect(doneList).toContain(askId!);
+  });
+
+  test("create_ask refuses an unknown node", async () => {
+    const { store } = makeStore(fixture());
+    const json = await callTool(store, "create_ask", {
+      questionNodeId: "missing",
+    });
+    expect(json.result?.isError).toBe(true);
+    expect(toolText(json)).toContain("node not found");
+  });
+
+  test("BYOA tools are refused without agentAccess (#170)", async () => {
+    const { store, sideKv } = makeStore(fixture());
+    const res = await rpc(
+      store,
+      "tools/call",
+      { name: "announce_presence", arguments: { label: "Nope" } },
+      1,
+      "TestAgent",
+      false,
+    );
+    const json = (await res.json()) as any;
+    expect(json.error.code).toBe(-32001);
+    expect(sideKv.get("agent-presence")).toBeUndefined();
   });
 });

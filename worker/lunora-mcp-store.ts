@@ -125,6 +125,16 @@ export function createLunoraOutlineStore(
       );
       return { key, nodeId: result.nodeId };
     },
+
+    // ADR 0059 session kv lives on classic DO in v1; Lunora tables deferred.
+    async upsertKv(
+      collection: string,
+      _rows: readonly { key: string; value: unknown }[],
+    ) {
+      throw new Error(
+        `lunora mcp store: agent session kv (${collection}) is classic-DO only in v1`,
+      );
+    },
   };
 }
 
