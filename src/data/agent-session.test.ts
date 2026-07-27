@@ -4,10 +4,13 @@ import { Schema } from "effect";
 import {
   AskRowSchema,
   PresenceRowSchema,
+  activeAskForNode,
   freshestLivePresence,
   hasLivePresence,
+  isAskActive,
   isAskTransitionError,
   planAnnouncePresence,
+  planCancelAsk,
   planClaimAsk,
   planCompleteAsk,
   planCreateAsk,
@@ -99,5 +102,28 @@ describe("agent-session planners (ADR 0059)", () => {
     });
     expect(hasLivePresence([row], 1000 + PRESENCE_STALE_MS - 1)).toBe(true);
     expect(hasLivePresence([row], 1000 + PRESENCE_STALE_MS)).toBe(false);
+  });
+
+  test("planCancelAsk + activeAskForNode", () => {
+    const ask = planCreateAsk({
+      id: "ask-1",
+      questionNodeId: "n",
+      now: 1,
+    });
+    expect(isAskActive(ask.status)).toBe(true);
+    expect(activeAskForNode([ask], "n")?.id).toBe("ask-1");
+    expect(activeAskForNode([ask], "other")).toBeNull();
+
+    const cancelled = planCancelAsk(ask, 2);
+    expect(isAskTransitionError(cancelled)).toBe(false);
+    if (isAskTransitionError(cancelled)) return;
+    expect(cancelled.status).toBe("cancelled");
+    expect(isAskActive(cancelled.status)).toBe(false);
+    expect(activeAskForNode([cancelled], "n")).toBeNull();
+
+    const done = planCompleteAsk(ask, "ag", 3);
+    if (isAskTransitionError(done)) throw new Error("unexpected");
+    const cancelDone = planCancelAsk(done, 4);
+    expect(isAskTransitionError(cancelDone)).toBe(true);
   });
 });

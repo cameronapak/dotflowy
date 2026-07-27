@@ -7,6 +7,7 @@
 
 import type { PluginDef } from "./types";
 
+import agent from "./agent";
 import code from "./code";
 import daily from "./daily";
 import emphasis from "./emphasis";
@@ -23,12 +24,15 @@ import todos from "./todos";
 // as the first entry its origin mark renders leftmost — right after the bullet
 // dot, ahead of the todos checkbox / daily badge. No tokens/keymap/commands, so
 // its array position has no precedence side effects.
+// `agent` after node-links so `@agent` token precedence (7) sits in a stable
+// array neighborhood; Seam K `is:ai` is distinct from provenance's `is:agent`.
 export const plugins: PluginDef[] = [
   todos,
   provenance,
   code,
   links,
   nodeLinks,
+  agent,
   routeBible,
   tags,
   emphasis,

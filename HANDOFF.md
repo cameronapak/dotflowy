@@ -1,7 +1,7 @@
 # HANDOFF — Bring your own agent (ADR 0059)
 
 **Branch:** `feat/byoa-agent-join`  
-**Status:** Steps 1–2 done; steps 3–5 not started.  
+**Status:** Steps 1–3 done; steps 4–5 not started.  
 **Do not merge this file to main** — delete in the shipping PR.
 
 ## Sources of truth
@@ -26,15 +26,18 @@
    - Header `AgentPresenceChip` when live (label = freshest agent); click reopens modal
    - Mount: `AddAgent` in `__root.tsx` (beside QuickAdd)
 
-3. **`@agent` / play → Ask**
-   - Cherry-pick plugin seams from #323 (widget, play, loader)
-   - Play creates Ask (`create_ask` MCP or direct DO upsert via `/api/kv` agent-asks) + pings; no second prompt
-   - No listener → reopen Add agent
-   - Row busy while ask active
+3. **`@agent` / play → Ask** — **DONE**
+   - Plugin `src/plugins/agent/` (Seams A widget, B play/stop, C `/ask` tag-only, H `@` picker, K `is:ai`)
+   - Mention parse: `src/data/agent-mention.ts` (from #323, no fireAgent)
+   - Play gate: `decideAgentPlay` → no presence → `openAddAgent()`; else SPA upsert pending ask via `agent-asks` kv (`createPendingAsk` / `planCreateAsk`)
+   - Busy: pending|claimed → Loader2 + Stop; Stop → `planCancelAsk` / `cancelActiveAsk`
+   - **No** Workers AI / `fireAgent` / Lunora runs / BrailleLoader-as-AI / Run confirm popover
+   - Loader: lucide `Loader2` for v1 (Dotmatrix polish → step 4 if still wanted)
 
 4. **Answer landing**
    - Prompt/tools steer children-of-ask; provenance sparkle from #323 if useful
    - Soft-reload / arrive animation only if still needed without hosted stream
+   - Optional: swap Loader2 for Dotmatrix (https://dotmatrix.zzzzshawn.cloud/)
 
 5. **Docs surface**
    - Public `/agent-docs` + skill URL referenced from join prompt (lazy)
@@ -54,7 +57,7 @@
 
 ## Next skills / agents
 
-- Step 3: `@agent` play → Ask (+ #323 chrome cherry-pick)
+- Step 4: answer-arrive polish (children + sparkle; no hosted stream)
 - Implementation: Cursor subagents on this branch (orchestrator stays high-level)
 - PR: `/ft-create-concise-pr` when ready; changeset for the feature
 
@@ -62,5 +65,6 @@
 
 - MCP polling UX vs Proof SSE — validate with one real Cursor/Claude Code dogfood before H
 - Presence without a sticky agent process = false “Waiting…” — join prompt must demand heartbeat
-- Cherry-pick from #323 may drag Lunora-only assumptions — strip aggressively
+- Cherry-pick from #323 may drag Lunora-only assumptions — strip aggressively (**done for step 3**)
 - Lunora beta users: BYOA session kv not wired yet (MCP upsert fails loudly)
+- Cancel is SPA-side only (marks ask `cancelled`); agent may still write if it already claimed — acceptable v1

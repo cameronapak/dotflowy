@@ -82,6 +82,11 @@ export function useAgentPresenceRows(): PresenceRow[] {
   return useSyncExternalStore(subscribe, getRows, () => EMPTY);
 }
 
+/** Sync read for event-time play gate (starts the subscription if needed). */
+export function getAgentPresenceRows(): PresenceRow[] {
+  return getRows();
+}
+
 export type LivePresenceSnapshot = {
   live: boolean;
   agent: PresenceRow | null;

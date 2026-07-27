@@ -198,6 +198,60 @@ export function planCompleteAsk(
   }
 }
 
+/** User cancel from the row Stop control (pending or claimed → cancelled). */
+export function planCancelAsk(
+  ask: AskRow,
+  _now: number,
+): AskRow | AskTransitionError {
+  switch (ask.status) {
+    case "pending":
+    case "claimed":
+      return {
+        ...ask,
+        status: "cancelled",
+      };
+    case "done":
+      return askError(`ask ${ask.id} is already done`);
+    case "cancelled":
+      return ask;
+    default: {
+      const _exhaustive: never = ask.status;
+      return askError(`unknown ask status: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+/** Row is busy while an ask for that node is pending or claimed. */
+export function isAskActive(status: AskStatus): boolean {
+  switch (status) {
+    case "pending":
+    case "claimed":
+      return true;
+    case "done":
+    case "cancelled":
+      return false;
+    default: {
+      const _exhaustive: never = status;
+      void _exhaustive;
+      return false;
+    }
+  }
+}
+
+/** Newest active ask for a question node, or null. */
+export function activeAskForNode(
+  rows: readonly AskRow[],
+  questionNodeId: string,
+): AskRow | null {
+  let best: AskRow | null = null;
+  for (const r of rows) {
+    if (r.questionNodeId !== questionNodeId) continue;
+    if (!isAskActive(r.status)) continue;
+    if (!best || r.createdAt > best.createdAt) best = r;
+  }
+  return best;
+}
+
 export function filterAsks(
   rows: readonly AskRow[],
   status: AskStatus | null,
