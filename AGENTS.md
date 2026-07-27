@@ -546,11 +546,12 @@ Screenshots **cannot capture view-transition overlays** (they show the settled D
 - Landing accents should match the app palette — do not introduce colors (e.g. blue accent) that aren't used in the Dotflowy app.
 - On the landing page, keep feature/list bullets vertical even on desktop — no horizontal bullet rows.
 - Landing import copy should mention Workflowy import alongside OPML (most visitors don't know what OPML is).
-- When grilling or design options are presented, pick the best reasonable option without waiting — favor robustness and best practices, balanced against not over-optimizing low-value work.
+- When grilling or design options are presented, pick the best reasonable option without waiting — favor robustness and best practices, balanced against not over-optimizing low-value work. If the active worktree/branch for the task is unclear, ask before switching checkouts.
 - Prefer deepening Effect TS and XState usage where they fit.
 - In Cursor, prefer Cursor Auto or Cursor Grok 4.5 for implementation subagents.
 - Lunora sync must stay opt-in (user-facing beta/settings flag); do not force a production cutover while Lunora is alpha.
 - User-facing Settings/beta copy must not name Lunora — frame it as an upgraded/experimental sync option users can try (helps improve Dotflowy; they still own their data); disclose that turning it off returns to the last classic snapshot (cutover is one-way; edits while on stay on that backend).
+- Inline `@agent` chip needs a clear run affordance (e.g. play); answers should stream or animate in without abrupt scroll, and land as real outline nodes (`- ` → bullets, plain → paragraphs), not one markdown blob.
 
 ## Learned Workspace Facts
 
@@ -562,3 +563,5 @@ Screenshots **cannot capture view-transition overlays** (they show the settled D
 - Classic→Lunora migrate must finish KV independently of nodes — Daily identity is `daily-index` KV, so nodes-only / skip-on-nonempty leaves Daily empty. Completion is Lunora `migrateState` (`nodesAt` / `kvAt`); backfill all side-collections until `kvAt` is set. Stamp `nodesAt` only after the full classic node import (not merely because Lunora already has some rows). `skipped-complete` means both watermarks are set — heal/remigrate is a no-op until cleared (force helpers / wipe Lunora shard, not classic DO or D1).
 - Lunora mutators must pass `expectedTable` on every patch/delete/get — unscoped id lookup builds `UNION ALL` across shard tables and hits Workerd SQLite `too many terms in compound SELECT` (KV migrate fails on the first daily-index patch while inserts still succeed).
 - Daily calendar day nodes can be orphaned (content intact but detached from `Daily > year > month > week`); remigrate is insert-missing only and will not rewrite `parentId`s — needs an orphan-reattach heal, not another KV-only migrate.
+- Lunora multi-line markdown paste must persist as a ChangeOp delta (not a full-outline body); sibling order must survive refresh, and ADR 0044's sliced path still applies on Lunora.
+- Inline `@agent` (ADR 0059) is Lunora-gated: custom `runs` table + `@lunora/ai` `streamText` (not `@lunora/agent/defineAgent`); paid via `getPlan`.
