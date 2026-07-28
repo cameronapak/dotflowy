@@ -46,6 +46,26 @@ export type JoinPlan =
       /** The disappearing row's text, appended to the target's verbatim. */
       sourceText: string;
     }
+  | {
+      /**
+       * The row above is EMPTY, so the merge is spelled the other way round:
+       * remove the blank and leave this node completely alone -- same id, text,
+       * children, caret. Visually identical to appending onto a blank, but it
+       * keeps IDENTITY on the node that carries the text.
+       *
+       * That matters because Enter at the start of a bullet inserts an empty
+       * sibling above and leaves focus put, so Enter-then-Backspace is a round
+       * trip a user reads as an undo. Appending would quietly move the text onto
+       * the blank's id, out from under every bookmark / [[link]] / daily mapping
+       * pointing at it -- the exact identity move the Enter-at-start arm exists
+       * to avoid (#326, "Enter at the start makes room above"). Here the NODE
+       * BEING DELETED is the target, so the shell guards that end instead.
+       */
+      kind: "remove-empty-target";
+      targetKey: string;
+      targetId: string;
+      targetContentId: string;
+    }
   | { kind: "refuse"; reason: JoinRefusal };
 
 /** The no-op prune for the structural walk: nothing is hidden. */
@@ -71,7 +91,18 @@ const NOTHING_HIDDEN: (n: Node) => boolean = () => false;
  *    visible rows in either walk, so both land on the collapsed node itself --
  *    which is the right target.
  * 4. **no-target** -- nothing above (the first row under a zoom root already
- *    resolves to the root's own title key, which IS a legal target).
+ *    resolves to the root's own title key, which IS a legal target). Also the
+ *    self-referential shape: a mirror of THIS node rendering directly above it
+ *    resolves its content back to us, which would be a write-then-delete of one
+ *    node (refused as `mirror-row`).
+ *
+ * Then one of two plans, depending on the target:
+ *
+ * - **remove-empty-target** -- the row above is empty, so the blank goes and
+ *   this node is left untouched. Identical on screen to appending onto it, but
+ *   identity stays with the text (see the kind's own doc comment).
+ * - **join** -- the ordinary merge: the target keeps its id and gains this
+ *   node's text, this row disappears, and the caret lands at the seam.
  *
  * Pure; no DOM, no React, no collection reads.
  */
@@ -142,6 +173,17 @@ export function planJoinPrevious(
   // what the shell does with it, or reorders it.
   if (targetContentId === instanceId) {
     return { kind: "refuse", reason: "mirror-row" };
+  }
+
+  // Merging INTO a blank line is just "remove the blank line" -- same result on
+  // screen, but this node keeps its id (see the kind's own doc comment).
+  if (target.text.length === 0) {
+    return {
+      kind: "remove-empty-target",
+      targetKey,
+      targetId,
+      targetContentId,
+    };
   }
 
   return {

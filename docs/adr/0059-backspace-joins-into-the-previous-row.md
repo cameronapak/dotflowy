@@ -30,6 +30,26 @@ Three consequences, all deliberate:
 **Rejected: previous sibling only.** Simpler, but the two Backspace flavors would then move the caret to
 different places, and it refuses the common "first child merges into its parent" case outright.
 
+## Merging into a BLANK row removes the blank — it does not append onto it
+
+A merge normally keeps the target and deletes the source. When the target is **empty** the planner
+inverts that (`remove-empty-target`): the blank goes, and the edited node is left completely alone —
+same id, text, children, caret. On screen the two are indistinguishable. The difference is **identity**.
+
+This exists because of the arm directly above it in the same keymap: Enter at the start of a non-empty
+bullet inserts a blank sibling above and **leaves focus put** (#326), so Enter-then-Backspace is a pair
+a user reads as an undo. Appending would restore the text while quietly moving it onto the blank's id,
+out from under every bookmark, `[[link]]`, mirror, and daily mapping pointing at it — precisely the
+identity move that Enter arm was written to avoid. Two features, each correct alone, composing into the
+bug one of them exists to prevent; the fix belongs on this side, because appending onto a blank has no
+value worth defending.
+
+The roles flip with the plan, so the **guards flip too**: the target is now the node being deleted
+(`guardProtected(target, "delete")` + `guardMirrorSourceDelete([target])`), and since nothing is
+rewritten there is no blank-rule subject at all. Emptiness is `text.length === 0` and nothing looser — a
+row holding a single space is content someone typed, so it takes the ordinary join and the seam lands
+after it.
+
 ## A merge never crosses something hidden — two walks, compared
 
 This is where reusing the delete path's walk stops being safe. `findVisibleNeighbor` respects

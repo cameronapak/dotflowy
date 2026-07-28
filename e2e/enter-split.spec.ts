@@ -297,6 +297,34 @@ test.describe("Backspace joins the bullet into the one above", () => {
     await expect(text(page, "n")).toHaveText("alphaXbravo");
   });
 
+  test("Enter at the START then Backspace is a true round trip — same node id", async ({
+    page,
+  }) => {
+    // Enter at offset 0 inserts a blank ABOVE and leaves focus put (#326), so
+    // this pair reads as an undo. Appending onto the blank would restore the
+    // TEXT while quietly moving it onto the blank's id -- the identity move that
+    // Enter arm exists to prevent. Asserting on the id, not just the text, is
+    // the whole point of this test.
+    await load(page, [
+      { id: "keepme", parentId: null, prevSiblingId: null, text: "alpha" },
+    ]);
+
+    await caretAt(page, "keepme", 0);
+    await page.keyboard.press("Enter");
+    expect(await orderedTexts(page)).toEqual(["", "alpha"]);
+
+    await page.keyboard.press("Backspace");
+
+    expect(await orderedTexts(page)).toEqual(["alpha"]);
+    // The ORIGINAL node is the survivor, not a look-alike carrying its text.
+    await expect(text(page, "keepme")).toHaveText("alpha");
+    await expect(rows(page)).toHaveCount(1);
+    // Caret is back at the start, where the user left it.
+    await expect(text(page, "keepme")).toBeFocused();
+    await page.keyboard.type("X");
+    await expect(text(page, "keepme")).toHaveText("Xalpha");
+  });
+
   test("a seeded bullet joins into its previous sibling, caret at the seam", async ({
     page,
   }) => {

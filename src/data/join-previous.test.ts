@@ -254,6 +254,40 @@ describe("planJoinPrevious — refusals", () => {
     });
   });
 
+  test("an EMPTY row above is removed instead — this node keeps its identity", () => {
+    // The Enter-at-start shape (#326): a blank sibling sits above the node the
+    // user is editing. Appending onto the blank would move the text (and every
+    // bookmark / [[link]] / daily mapping) onto the blank's id; removing the
+    // blank is the same thing on screen with identity left alone.
+    const t = [
+      makeNode({ id: "blank", prevSiblingId: null, text: "" }),
+      makeNode({ id: "S", prevSiblingId: "blank", text: "hello" }),
+    ];
+    const i = buildTreeIndex(t);
+    expect(planJoinPrevious(i, "S", null, show, null, false)).toEqual({
+      kind: "remove-empty-target",
+      targetKey: "blank",
+      targetId: "blank",
+      targetContentId: "blank",
+    });
+  });
+
+  test("a WHITESPACE-only row above is a normal join, not a removal", () => {
+    // Only genuinely empty counts. A row holding a space is content the user
+    // typed, so it merges the ordinary way and the seam lands after it.
+    const t = [
+      makeNode({ id: "sp", prevSiblingId: null, text: " " }),
+      makeNode({ id: "S", prevSiblingId: "sp", text: "hello" }),
+    ];
+    const i = buildTreeIndex(t);
+    expect(planJoinPrevious(i, "S", null, show, null, false)).toMatchObject({
+      kind: "join",
+      targetId: "sp",
+      seamOffset: 1,
+      sourceText: "hello",
+    });
+  });
+
   test("a mirror of THIS node directly above it can't produce a self-join", () => {
     // M mirrors S and renders immediately above it, so the target's CONTENT
     // resolves back to S -- the source. Applied literally that plan would be

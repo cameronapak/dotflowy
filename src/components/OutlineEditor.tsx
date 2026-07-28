@@ -1752,6 +1752,42 @@ function useNodeCommands({
             signalJoinRefusal(plan.reason, rowOf(activeKey));
             return;
           }
+          // Merging into a BLANK row above: the blank is what goes, and this
+          // node is left completely untouched (id, text, children, caret). Same
+          // result on screen as appending onto the blank, but identity stays on
+          // the node carrying the text -- which is what makes Enter-at-start
+          // (#326) followed by Backspace a true round trip. The guards flip with
+          // the roles: the TARGET is the one being deleted, and nothing is
+          // rewritten, so there is no blank-rule subject at all.
+          if (plan.kind === "remove-empty-target") {
+            if (
+              guardProtected(
+                plan.targetContentId,
+                "delete",
+                rowOf(plan.targetKey),
+              )
+            )
+              return;
+            if (
+              mirrorsOn &&
+              guardMirrorSourceDelete(
+                idx,
+                [plan.targetId],
+                rowOf(plan.targetKey),
+              )
+            )
+              return;
+            runStructural(() => {
+              capture(idx, activeKey); // ONE undo point
+              removeNode(idx, plan.targetId);
+              // The row keeps its identity but SHIFTS in the flat windowed list,
+              // so focus is re-claimed rather than assumed (ADR 0019) -- with the
+              // caret put back where the user left it, at the start.
+              setPendingCaretOffset(activeKey, 0);
+              pendingFocus.current = activeKey;
+            });
+            return;
+          }
           // The source disappears, so it's a delete...
           if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
           // ...and the target's text is rewritten, so it's a blank-rule subject.
