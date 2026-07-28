@@ -276,5 +276,11 @@ test.describe("keyboard arrow navigation", () => {
     await expect(page.locator('li[data-node-id="mid"]')).toHaveCount(0);
     await expect(text(page, "above")).toBeFocused();
     await expect(text(page, "below")).not.toBeFocused();
+    // ...and it DELETED rather than joined: the row above is untouched, and the
+    // caret sits at its end. Pins the emptiness gate now that it reads the
+    // reconstructed source instead of raw textContent (ADR 0005).
+    await expect(text(page, "above")).toHaveText("above");
+    await page.keyboard.type("!");
+    await expect(text(page, "above")).toHaveText("above!");
   });
 });

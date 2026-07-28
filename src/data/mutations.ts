@@ -220,6 +220,36 @@ export function splitNode(
 }
 
 /**
+ * Backspace join -- the inverse of {@link splitNode}, and deliberately its
+ * neighbour so the pair reads as one operation and its undo. Like `splitNode`
+ * it takes the halves explicitly rather than computing them: the planner
+ * (`planJoinPrevious`, data/join-previous.ts) already decided which row
+ * receives the text and where the seam falls.
+ *
+ * `targetContentId` is where the text actually LIVES (`mirrorOf ?? id`, ADR
+ * 0022) -- appending to a mirror's row edits the shared source, which is how
+ * editing a mirror already works. `sourceInstanceId` is the disappearing row's
+ * INSTANCE (position is local), so joining away a row never touches a source
+ * elsewhere. The planner refuses a mirror as the source outright.
+ *
+ * Both writes belong to ONE `runStructural` batch at the call site (ADR 0009),
+ * so a concurrent tab never observes the text landed but the node still there.
+ */
+export function joinIntoPrevious(
+  index: TreeIndex,
+  args: {
+    targetContentId: string;
+    sourceInstanceId: string;
+    joinedText: string;
+  },
+): void {
+  setText(args.targetContentId, args.joinedText);
+  // `index` is the pre-join snapshot; setText changes no structure, so the
+  // sibling-chain relink inside removeNode still reads accurate state.
+  removeNode(index, args.sourceInstanceId);
+}
+
+/**
  * Append a node at the end of `parentId`'s children. Used by quick-add born
  * capture and the legacy first-run seed.
  *

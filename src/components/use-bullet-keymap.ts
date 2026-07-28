@@ -212,8 +212,15 @@ export function useBulletKeymap({
             // Backspace at the start of a bullet. On a task, the first backspace
             // "deletes the checkbox" -- demoting it to a plain bullet while keeping
             // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
-            // deletes the node and focuses the previous one. Otherwise it falls
-            // through to normal character deletion.
+            // deletes the node and focuses the previous one. With text, it JOINS
+            // this bullet into the row visibly above -- the inverse of the Enter
+            // split. Away from the start it falls through to normal character
+            // deletion.
+            //
+            // Bullet-only on purpose: the zoomed title and the quick-add mini
+            // editor bind no Backspace at all (the three-path trap, ADR 0049).
+            // Joining a zoom root into a node outside the current view is
+            // incoherent, and a quick-add draft has no "bullet above".
             hotkey: "Backspace",
             callback: (e) => {
               const el = textRef.current;
@@ -224,7 +231,17 @@ export function useBulletKeymap({
                 commands.onSetTask(node.id, false);
                 return;
               }
-              if (el.textContent !== "") return;
+              // SOURCE, not textContent (ADR 0005's landmine): a line whose whole
+              // text is a folded token renders shorter than it reads, and a widget
+              // atom with no plain-text child renders as "" -- which would send a
+              // non-empty bullet down the DELETE branch. This gate now chooses
+              // between deleting and merging, so it has to speak source space.
+              if (readSource(el) !== "") {
+                e.preventDefault();
+                e.stopPropagation();
+                commands.onJoinPrevious(instanceId);
+                return;
+              }
               e.preventDefault();
               e.stopPropagation();
               // INSTANCE, not content: mirrors pass the source as `node` (ADR 0022).
@@ -342,7 +359,7 @@ export function useBulletKeymap({
                 e.stopPropagation();
                 return;
               }
-              if (!el || !isCollapsedCaretAtStart(el)) return;
+              if (!el || !isCaretAtStart(el)) return;
               e.preventDefault();
               e.stopPropagation();
               commands.onMoveFocus(node.id, "up");
@@ -415,11 +432,22 @@ function isAllTextSelected(el: HTMLElement): boolean {
   return text.length > 0 && sel.toString() === text;
 }
 
-// Caret at the very start of the bullet, measured by absolute offset so the
-// test holds whether the line is one text node or split around chips.
+// Collapsed caret at the very start of the bullet, measured by absolute offset
+// so the test holds whether the line is one text node or split around chips.
+//
+// Deliberately fails CLOSED. `getCaretOffset` returns the literal 0 for three
+// different states -- no selection, a range outside this element, and a genuine
+// caret at offset 0 -- so the containment and collapse checks have to happen
+// here. This used to fail open (no selection => "at start"), which was tolerable
+// while both outcomes were non-destructive; now a false "at start" would MERGE
+// this bullet into the one above, and a non-collapsed selection ending at 0
+// would merge while text is selected.
 function isCaretAtStart(el: HTMLElement): boolean {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return true;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer))
+    return false;
   return getCaretOffset(el) === 0;
 }
 
@@ -427,11 +455,6 @@ function isCaretAtEnd(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return false;
   return getCaretOffset(el) === readSource(el).length;
-}
-
-function isCollapsedCaretAtStart(el: HTMLElement): boolean {
-  const sel = window.getSelection();
-  return !!sel && sel.isCollapsed && isCaretAtStart(el);
 }
 
 // Caret-to-neighbor navigation is about VISUAL lines, not text offset: on a

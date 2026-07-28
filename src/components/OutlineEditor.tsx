@@ -36,11 +36,13 @@ import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop } from "../data/history";
+import { planJoinPrevious } from "../data/join-previous";
 import { hasLink } from "../data/links";
 import {
   indent,
   insertChildAtStart,
   insertSibling,
+  joinIntoPrevious,
   moveDown,
   moveNode,
   moveUp,
@@ -1676,6 +1678,75 @@ function useNodeCommands({
             const target = above ?? focusId;
             if (target) pendingFocus.current = target;
             else drop(); // node didn't exist; nothing was deleted
+          });
+        },
+
+        onJoinPrevious: (id) => {
+          // Backspace at the start of a bullet that has text: merge it into the
+          // row visibly above -- the inverse of onEnter's mid-split. Same
+          // id-resolution preamble as onDeleteNode (this is a delete of one node
+          // plus a text edit of another), and the SAME guard funnel: a merge
+          // must clear both ends.
+          const idx = getTreeIndex();
+          const focused = findFocusedId();
+          const targetInstance = instanceIdForKey(id);
+          const focusedInstance = focused ? instanceIdForKey(focused) : null;
+          const activeKey =
+            focused && focusedInstance === targetInstance
+              ? focused
+              : idx.byId.has(id)
+                ? id
+                : (focused ?? id);
+          const instanceId = instanceIdForKey(activeKey);
+          const mirrorsOn = isMirrorsEnabled();
+          const contentId = mirrorsOn
+            ? (idx.byId.get(instanceId)?.mirrorOf ?? instanceId)
+            : instanceId;
+
+          // Every eligibility rule -- has-children, mirror-row, the two-walk
+          // hidden-between check, no-target -- is decided by the pure planner so
+          // `bun test` can exercise the combinatorics (join-previous.ts).
+          const plan = planJoinPrevious(
+            idx,
+            activeKey,
+            getViewRootId(),
+            getViewIsHidden(),
+            getViewFilter(),
+            mirrorsOn,
+          );
+          // Refusals are SILENT for now -- exactly today's behavior. The
+          // disclosure layer (shake, and a toast where the reason is invisible
+          // on screen) hangs off `plan.reason` here.
+          if (plan.kind === "refuse") return;
+          // The source disappears, so it's a delete...
+          if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
+          // ...and the target's text is rewritten, so it's a blank-rule subject.
+          // Load-bearing, not defensive: without it a merge appends to a
+          // protected node's canonical text and the blur heal silently reverts
+          // it, losing the merged text outright.
+          if (
+            guardProtected(plan.targetContentId, "blank", rowOf(plan.targetKey))
+          )
+            return;
+          if (
+            mirrorsOn &&
+            guardMirrorSourceDelete(idx, [instanceId], rowOf(activeKey))
+          )
+            return;
+
+          const targetText = idx.byId.get(plan.targetContentId)?.text ?? "";
+          runStructural(() => {
+            capture(idx, activeKey); // ONE undo point: text + node together
+            joinIntoPrevious(idx, {
+              targetContentId: plan.targetContentId,
+              sourceInstanceId: instanceId,
+              joinedText: targetText + plan.sourceText,
+            });
+            // The seam is neither the start nor the end of the target, so it
+            // rides the one-shot offset carrier markdown paste already built
+            // (ADR 0044) -- consumed by whichever claim site focuses the row.
+            setPendingCaretOffset(plan.targetKey, plan.seamOffset);
+            pendingFocus.current = plan.targetKey;
           });
         },
 

@@ -954,6 +954,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       onMoveUp: noop,
       onMoveDown: noop,
       onDeleteNode: noop,
+      // Structural nav is suppressed by construction here, and a capture draft
+      // has no "bullet above" to join into -- the mini editor binds no Backspace
+      // at all, so nothing can reach this (the three-path trap, ADR 0049).
+      onJoinPrevious: noop,
       onToggleCompleted: (_id, completed) =>
         runNodeIntent((id) => toggleCompleted(id, completed)),
       onSetTask: (_id, isTask) => runNodeIntent((id) => setIsTask(id, isTask)),
