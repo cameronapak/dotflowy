@@ -22,8 +22,8 @@ import {
  * `planRemoveSubtrees` shape).
  */
 
-/** Why a merge was refused. Phase 1 returns these silently (today's behavior);
- *  the disclosure layer maps each to a shake and/or a toast. */
+/** Why a merge was refused. The planner only names the reason; the disclosure
+ *  layer (`components/join-refusal.ts`) maps each to a shake and/or a toast. */
 export type JoinRefusal =
   | "has-children"
   | "hidden-between"

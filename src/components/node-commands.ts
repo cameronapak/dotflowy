@@ -27,8 +27,9 @@ export interface NodeCommands {
   // sits (ADR 0022); the text lands on the TARGET's content id. Bullet-only:
   // the zoomed title and the quick-add mini editor don't bind Backspace at all
   // (the three-path trap), and joining a zoom root into a node outside the view
-  // is incoherent. Refuses (silently for now) rather than reparenting children
-  // or merging across anything hidden.
+  // is incoherent. Refuses -- with a shake, and a toast when the reason isn't
+  // on screen -- rather than reparenting children or merging across anything
+  // hidden.
   onJoinPrevious: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
   // Set whether a bullet is a task (checkbox shown/hidden). Clears `kind`.
