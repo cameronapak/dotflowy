@@ -253,4 +253,21 @@ describe("planJoinPrevious — refusals", () => {
       sourceText: "bravo",
     });
   });
+
+  test("a mirror of THIS node directly above it can't produce a self-join", () => {
+    // M mirrors S and renders immediately above it, so the target's CONTENT
+    // resolves back to S -- the source. Applied literally that plan would be
+    // setText(S, …) then removeNode(S): the node and its text both gone. The
+    // shell's guardMirrorSourceDelete refuses first today, but the planner must
+    // never hand out a write-then-delete of the same node in the first place.
+    const t = [
+      makeNode({ id: "M", prevSiblingId: null, mirrorOf: "S" }),
+      makeNode({ id: "S", prevSiblingId: "M", text: "source" }),
+    ];
+    const i = buildTreeIndex(t);
+    expect(planJoinPrevious(i, "S", null, show, null, true)).toEqual({
+      kind: "refuse",
+      reason: "mirror-row",
+    });
+  });
 });

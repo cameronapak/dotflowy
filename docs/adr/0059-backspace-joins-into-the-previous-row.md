@@ -74,7 +74,12 @@ keystroke is worse than a no. `mirror-row` was not in the design discussion and 
 a mirror instance's text belongs to a shared source that **survives** the join, so merging it away would
 copy the text into the target while it still exists everywhere else — a duplication bug, not a move. A
 mirror as the _target_ is fine: appending edits the shared source, which is how editing a mirror already
-works.
+works — with **one** exception the planner must own itself: a mirror of _this_ node rendering directly
+above it resolves its content back to the source, so the plan would be self-referential (`setText(S, …)`
+then `removeNode(S)` — node and text both gone). `guardMirrorSourceDelete` in the shell happens to refuse
+that first, but a planner must not be able to emit a write-then-delete of one node and rely on a
+downstream guard to catch it; `planJoinPrevious` refuses when `targetContentId === instanceId`, pinned by
+a unit test.
 
 ## Two gates tightened, because the branch is now destructive
 

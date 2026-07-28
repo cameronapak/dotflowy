@@ -134,6 +134,15 @@ export function planJoinPrevious(
     : targetId;
   const target = index.byId.get(targetContentId);
   if (!target) return { kind: "refuse", reason: "no-target" };
+  // A mirror of THIS node sitting directly above it resolves its content back to
+  // us, so the plan would be self-referential: `setText(S, …)` followed by
+  // `removeNode(S)` destroys the node AND the text. `guardMirrorSourceDelete` in
+  // the shell refuses this first today, but that is incidental -- the planner
+  // must not be able to emit a write-then-delete of the same node regardless of
+  // what the shell does with it, or reorders it.
+  if (targetContentId === instanceId) {
+    return { kind: "refuse", reason: "mirror-row" };
+  }
 
   return {
     kind: "join",
