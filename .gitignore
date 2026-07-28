@@ -24,3 +24,6 @@ test-results/
 
 # Cursor continual-learning hook state (local index, not shared)
 .cursor/hooks/state/continual-learning*.json
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/
