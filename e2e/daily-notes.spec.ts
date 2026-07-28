@@ -79,6 +79,26 @@ async function goHome(page: Page) {
   }).toPass({ timeout: 10_000 });
 }
 
+// Drop the caret at the very START of a contentEditable span. Sets the Selection
+// range directly: Home/Arrow keys are unreliable in macOS Chromium
+// contentEditable and a plain click lands past the text (see enter-split.spec).
+async function caretAtStart(target: Locator) {
+  await target.click();
+  await target.evaluate((el) => {
+    const sel = window.getSelection();
+    if (!sel) return;
+    const first = document
+      .createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      .nextNode();
+    const range = document.createRange();
+    if (first) range.setStart(first, 0);
+    else range.selectNodeContents(el);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+}
+
 async function clientNavigate(page: Page, path: string) {
   await page.evaluate((to) => {
     window.history.pushState({}, "", to);
@@ -341,6 +361,57 @@ test.describe("daily notes", () => {
       .click();
     await expect(containerText).toHaveText("Daily");
     await expect(page.getByText(/needs a name/i)).toBeVisible();
+  });
+
+  test("Enter at the start of the protected Daily container never blanks it", async ({
+    page,
+  }) => {
+    // Enter at offset 0 used to take the mid-split arm: it wrote "" into the
+    // node and handed its text to a NEW node below -- so a protected node sat
+    // visibly blanked until its row blurred and the heal fired. The insert-above
+    // arm writes nothing to it at all, which is why this funnel deliberately
+    // carries no `guardProtected` call: there is nothing left to guard against.
+    await load(page);
+
+    await todayButton(page).click();
+    await expect(page).toHaveURL(/\/[^/]+$/);
+    await goHome(page);
+
+    // The container's id is a UUID; capture it so the row can be targeted by id
+    // rather than by the text this test is asserting about.
+    const containerId = await rowWithText(page, "Daily").evaluate(
+      (el) =>
+        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+    );
+    expect(containerId).not.toBe("");
+    const containerRow = page.locator(`li[data-node-id="${containerId}"]`);
+    const containerText = page.locator(
+      `li[data-node-id="${containerId}"] > .outline-row .node-text`,
+    );
+
+    await caretAtStart(containerText);
+    await page.keyboard.press("Enter");
+
+    // Wait for the insert to land: a blank row appears directly above.
+    const rowAbove = () =>
+      page.evaluate((id) => {
+        const lis = Array.from(document.querySelectorAll("li[data-node-id]"));
+        const i = lis.findIndex((li) => li.getAttribute("data-node-id") === id);
+        const prev = i > 0 ? lis[i - 1] : null;
+        return prev?.querySelector(".node-text")?.textContent ?? null;
+      }, containerId);
+    await expect.poll(rowAbove).toBe("");
+
+    // ...and the container was never blanked, not even momentarily. Read the
+    // text directly (no retrying matcher, which would happily pass on a value
+    // that had already healed).
+    expect(await containerText.textContent()).toBe("Daily");
+    // No rejection either: the arm is non-destructive, so there is nothing to
+    // refuse -- no shake, no "needs a name" toast.
+    await expect(containerRow).not.toHaveClass(/node-rejected/);
+    await expect(page.getByText(/needs a name/i)).toHaveCount(0);
+    // Still protected, still locked.
+    await expect(containerRow.locator(".protected-lock")).toBeVisible();
   });
 
   test("the protected Daily container can't be turned into a to-do", async ({

@@ -38,8 +38,10 @@ function update(nodeId: string, patch: Partial<Node>) {
 }
 
 /**
- * Insert a fresh empty node as the next sibling of `afterId`, or as the
- * new last child of `parentId` when afterId is null.
+ * Insert a fresh empty node as the next sibling of `afterId`, or as the new
+ * HEAD child of `parentId` when afterId is null (pushing the current head down,
+ * like `insertChildAtStart`). "Insert before X" is spelled as "insert after X's
+ * predecessor", so the null case is what makes that work at the head of a list.
  *
  * `isTask` lets the caller carry the node type forward so pressing Enter at
  * the end of a task creates another task (not a plain bullet). `kind` carries
@@ -89,13 +91,18 @@ export function insertSibling(
   const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.
+  // A null `afterId` is a HEAD insert, so the current head is the follower --
+  // the same branch `planInsertSibling` already has (planners.ts), which is what
+  // keeps the classic and Lunora chains identical for an insert-above.
+  const siblings = childrenOf(index, parentId);
   let nextSiblingId: string | null = null;
   if (afterId) {
-    const siblings = childrenOf(index, parentId);
     const i = siblings.findIndex((n) => n.id === afterId);
     if (i !== -1 && i + 1 < siblings.length) {
       nextSiblingId = siblings[i + 1]!.id;
     }
+  } else if (siblings.length > 0) {
+    nextSiblingId = siblings[0]!.id;
   }
 
   nodesCollection.insert(

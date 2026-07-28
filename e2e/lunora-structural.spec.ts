@@ -69,6 +69,55 @@ test.describe("Lunora structural (flag ON)", () => {
     expect(await orderedTexts(page)).toEqual(["alpha", "bravo"]);
   });
 
+  test("Enter at the start of the FIRST child inserts a blank head that persists", async ({
+    page,
+  }) => {
+    // The head-of-list insert is the exact point where the two engines used to
+    // disagree: `planInsertSibling` (which both Lunora halves call) repointed the
+    // old head on a null `afterId`, while the classic mutator skipped the lookup.
+    // This is the Lunora twin of the classic head-of-list case, and the reload
+    // proves the chain the SERVER stored is the one the client rendered.
+    await load(page, STANDARD_TREE);
+
+    // Await the mutator round trip before reloading -- a fire-and-forget
+    // watermark can race page.reload() (same reason as the /delete case below).
+    const inserted = page.waitForResponse(
+      (r) =>
+        r.url().includes("/_lunora/rpc") &&
+        r.request().method() === "POST" &&
+        (r.request().postData() ?? "").includes("mutators:insertSibling"),
+    );
+    await caretAt(page, "alpha-1", 0);
+    await page.keyboard.press("Enter");
+    await inserted;
+
+    // The edited node kept its id, its text, and the caret; the blank is above.
+    await expect(text(page, "alpha-1")).toHaveText("Alpha one");
+    await expect(focused(page)).toHaveText("Alpha one");
+    const expected = [
+      "Alpha",
+      "",
+      "Alpha one",
+      "Alpha two",
+      "Bravo",
+      "Charlie",
+    ];
+    expect(await orderedTexts(page)).toEqual(expected);
+    // The blank became alpha's new first child; the old head follows it.
+    await expect(page.locator("li[data-node-id]").nth(1)).toHaveAttribute(
+      "data-parent-id",
+      "alpha",
+    );
+    await expect(row(page, "alpha-1")).toHaveAttribute(
+      "data-parent-id",
+      "alpha",
+    );
+
+    await page.reload();
+    await expect(text(page, "alpha")).toBeVisible({ timeout: 15_000 });
+    expect(await orderedTexts(page)).toEqual(expected);
+  });
+
   test("Tab indents under the previous sibling", async ({ page }) => {
     await load(page, [
       { id: "a", parentId: null, prevSiblingId: null, text: "Alpha" },
