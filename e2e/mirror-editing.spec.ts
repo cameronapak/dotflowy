@@ -133,6 +133,58 @@ test.describe("node mirrors -- editing parity inside a mirror (ADR 0022, 2c)", (
     await expect(kids.nth(1)).toBeFocused(); // editing instance keeps focus
   });
 
+  test("Enter at the START of a mirror's own row makes room beside the INSTANCE", async ({
+    page,
+  }) => {
+    // The mirror redirect (`caretAtEnd = isMirrorRow || ...`) exists to stop a
+    // SPLIT from stranding the source's tail on a local node. The insert-above
+    // arm is checked BEFORE it, and rightly so: it writes nothing to the source
+    // and positions the new empty node beside the INSTANCE -- position is the
+    // instance's side of the field split (ADR 0022). M is P's head child, so
+    // this also runs the null-afterId head insert; guard the DEV chain tripwire.
+    const chainErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (
+        msg.type() === "error" &&
+        msg.text().includes("sibling-chain invariant broken")
+      )
+        chainErrors.push(msg.text());
+    });
+    await load(page, MIRROR_TREE);
+    await expect(spans(page, "a1")).toHaveCount(2);
+
+    await caretIn(spans(page, "M"), 0);
+    await page.keyboard.press("Enter");
+
+    // The source is untouched -- its own row and the mirror's window on it both
+    // still read the full text (a split here would have moved it).
+    await expect(spans(page, "A")).toHaveText("alphasource");
+    await expect(spans(page, "M")).toHaveText("alphasource");
+    // Focus never left the row the user was editing.
+    await expect(spans(page, "M")).toBeFocused();
+
+    // Exactly ONE blank appeared, directly above the mirror under P. A write
+    // aimed at the CONTENT id would instead have put one above the source (or
+    // both), so the full ordered read is the assertion that catches it.
+    expect(
+      await page.locator(".outline-row .node-text").allTextContents(),
+    ).toEqual([
+      "alphasource", // source A
+      "childone",
+      "childtwo",
+      "project", // P
+      "", // the new blank, beside the instance
+      "alphasource", // mirror M, windowing A
+      "childone",
+      "childtwo",
+    ]);
+    await expect(page.locator("li[data-node-id]").nth(4)).toHaveAttribute(
+      "data-parent-id",
+      "P",
+    );
+    expect(chainErrors).toEqual([]);
+  });
+
   test("indent + outdent inside a mirror restructures the source in every instance", async ({
     page,
   }) => {
