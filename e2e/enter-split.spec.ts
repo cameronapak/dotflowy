@@ -17,8 +17,24 @@ const focused = (page: Page) => page.locator(".node-text:focus");
 const orderedTexts = (page: Page) =>
   page.locator(".outline-row .node-text").allTextContents();
 
-async function load(page: Page, tree: SeedNode[]) {
+// The shaking element for a refused action: `rowOf` resolves the span's
+// enclosing `.outline-row`, and `rejectRow` puts the one-shot class there.
+const row = (page: Page, id: string) =>
+  page.locator(`li[data-node-id="${id}"] > .outline-row`);
+
+async function load(
+  page: Page,
+  tree: SeedNode[],
+  opts?: { hideCompleted?: boolean },
+) {
   await seedOutline(page, tree);
+  if (opts?.hideCompleted) {
+    // Must be set before goto: the provider reads the persisted value on first
+    // render, so flipping it afterwards wouldn't take until a reload.
+    await page.addInitScript(() => {
+      window.localStorage.setItem("dotflowy:show-completed", "false");
+    });
+  }
   await page.goto("/");
   await expect(text(page, tree[0]!.id)).toBeVisible();
 }
@@ -221,11 +237,12 @@ test.describe("Backspace joins the bullet into the one above", () => {
     expect(await orderedTexts(page)).toEqual(["alpha", "bravo"]);
   });
 
-  test("a bullet with children refuses; its own first child still joins in", async ({
+  test("a bullet with children refuses with a bare shake; its own first child still joins in", async ({
     page,
   }) => {
-    // Refusal is silent in this phase (exactly today's behavior); what matters
-    // is that the outline is untouched -- children are never reparented.
+    // The children are on screen, so the reason is self-evident: shake, and
+    // deliberately NO toast (the one place in the app where rejectRow travels
+    // alone). Nothing is reparented.
     await load(page, [
       { id: "top", parentId: null, prevSiblingId: null, text: "alpha" },
       { id: "par", parentId: null, prevSiblingId: "top", text: "parent" },
@@ -234,8 +251,15 @@ test.describe("Backspace joins the bullet into the one above", () => {
 
     await caretAt(page, "par", 0);
     await page.keyboard.press("Backspace");
+    await expect(row(page, "par")).toHaveClass(/node-rejected/);
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await expect(text(page, "top")).toHaveText("alpha");
     expect(await orderedTexts(page)).toEqual(["alpha", "parent", "kid"]);
+
+    // The class clears itself on animationend, so a repeat can re-trigger it.
+    await expect(row(page, "par")).not.toHaveClass(/node-rejected/, {
+      timeout: 4000,
+    });
 
     // ...and the first child DOES merge into its parent (a different depth), so
     // the refusal above isn't just a dead keymap.
@@ -243,6 +267,44 @@ test.describe("Backspace joins the bullet into the one above", () => {
     await page.keyboard.press("Backspace");
     await expect(text(page, "par")).toHaveText("parentkid");
     expect(await orderedTexts(page)).toEqual(["alpha", "parentkid"]);
+  });
+
+  test("a bullet hidden between the two rows refuses with a shake AND a toast", async ({
+    page,
+  }) => {
+    // With 'Show completed' off, the completed bullet between alpha and bravo
+    // isn't rendered at all -- so the row visually above bravo is alpha, and
+    // merging there would relocate bravo's text past a node the user can't see.
+    // The blocker is invisible by definition, so this refusal has to say so.
+    await load(
+      page,
+      [
+        { id: "one", parentId: null, prevSiblingId: null, text: "alpha" },
+        {
+          id: "mid",
+          parentId: null,
+          prevSiblingId: "one",
+          text: "done",
+          isTask: true,
+          completed: true,
+        },
+        { id: "two", parentId: null, prevSiblingId: "mid", text: "bravo" },
+      ],
+      { hideCompleted: true },
+    );
+
+    // Sanity: the completed bullet really is out of the DOM.
+    await expect(text(page, "mid")).toHaveCount(0);
+
+    await caretAt(page, "two", 0);
+    await page.keyboard.press("Backspace");
+
+    await expect(row(page, "two")).toHaveClass(/node-rejected/);
+    await expect(page.getByText(/hidden bullet/i)).toBeVisible();
+    // Nothing moved: both visible rows are exactly as they were.
+    await expect(text(page, "one")).toHaveText("alpha");
+    await expect(text(page, "two")).toHaveText("bravo");
+    expect(await orderedTexts(page)).toEqual(["alpha", "bravo"]);
   });
 });
 

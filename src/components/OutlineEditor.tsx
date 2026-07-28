@@ -129,6 +129,7 @@ import {
   setCaretOffset,
   watchCaretReveal,
 } from "./inline-code";
+import { signalJoinRefusal } from "./join-refusal";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
@@ -1714,10 +1715,14 @@ function useNodeCommands({
             getViewFilter(),
             mirrorsOn,
           );
-          // Refusals are SILENT for now -- exactly today's behavior. The
-          // disclosure layer (shake, and a toast where the reason is invisible
-          // on screen) hangs off `plan.reason` here.
-          if (plan.kind === "refuse") return;
+          // A refusal is never silent: the row shakes, and where the reason
+          // can't be seen on screen (a mirror row, something hidden between the
+          // two rows) it also toasts. "Nothing happened" is the bug the ticket
+          // reported -- a refused merge has to read as refused.
+          if (plan.kind === "refuse") {
+            signalJoinRefusal(plan.reason, rowOf(activeKey));
+            return;
+          }
           // The source disappears, so it's a delete...
           if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
           // ...and the target's text is rewritten, so it's a blank-rule subject.
