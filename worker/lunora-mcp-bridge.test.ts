@@ -54,12 +54,14 @@ describe("MCP → Lunora applyChangeOps plan", () => {
  */
 function recordingCtx() {
   const calls: Array<{ id: string; op: string; table: string }> = [];
+  const patched: Array<{ fields: unknown; id: string }> = [];
   const tableWriter = (table: string) => ({
     delete: async (id: string) => {
       calls.push({ id, op: "delete", table });
     },
-    patch: async (id: string) => {
+    patch: async (id: string, fields: unknown) => {
       calls.push({ id, op: "patch", table });
+      patched.push({ fields, id });
     },
   });
   const unscoped = (op: string) => (): never => {
@@ -80,12 +82,12 @@ function recordingCtx() {
     nodes: tableWriter("nodes"),
     patch: unscoped("patch"),
   };
-  return { calls, ctx: { db } as unknown as MutationCtx };
+  return { calls, ctx: { db } as unknown as MutationCtx, patched };
 }
 
 describe("commitPlan table scoping", () => {
   test("patches and deletes go through the table accessor, not by-id", async () => {
-    const { calls, ctx } = recordingCtx();
+    const { calls, ctx, patched } = recordingCtx();
     const plan = planFromChangeOps("user-1", [
       { op: "insert", value: makeNode({ id: "a", text: "alpha" }) },
       { op: "update", value: makeNode({ id: "b", text: "BRAVO" }) },
@@ -101,17 +103,20 @@ describe("commitPlan table scoping", () => {
       { id: "b", op: "patch", table: "nodes" },
       { id: "a", op: "insert", table: "nodes" },
     ]);
+    expect(patched[0]!.fields).toMatchObject({ text: "BRAVO" });
   });
 
   test("a null patch field survives — top-level moves set parentId null", async () => {
     // The generated `Insert_nodes` drops `.nullable()`, so this is the case the
-    // cast in `commitPlan` exists for. It must still reach the store.
-    const { calls, ctx } = recordingCtx();
+    // cast in `commitPlan` exists for. Assert the payload, not just the route:
+    // a cast that quietly dropped the null would still route correctly.
+    const { calls, ctx, patched } = recordingCtx();
     await commitPlan(ctx, {
       deletes: [],
       inserts: [],
       patches: [{ fields: { parentId: null }, id: "n1" }],
     });
     expect(calls).toEqual([{ id: "n1", op: "patch", table: "nodes" }]);
+    expect(patched).toEqual([{ fields: { parentId: null }, id: "n1" }]);
   });
 });
