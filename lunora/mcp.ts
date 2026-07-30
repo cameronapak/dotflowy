@@ -6,6 +6,8 @@
  * editor keeps using fine-grained mutators; MCP keeps outline-ops planners.
  */
 
+import type { Insert_nodes } from "./_generated/dataModel";
+
 import {
   docToNode,
   nodeToInsertFields,
@@ -45,17 +47,41 @@ function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {
   }
 }
 
-async function commitPlan(ctx: MutationCtx, plan: OutlinePlan): Promise<void> {
+/**
+ * Go through the per-table accessor (`ctx.db.nodes`), NOT the by-id
+ * `ctx.db.patch`/`ctx.db.delete`.
+ *
+ * `ctx.db.asId(table, id)` is a COMPILE-TIME parse boundary only: it returns a
+ * phantom-branded `Id<T>` whose table name is erased before the call reaches the
+ * store, and the typed by-id `patch`/`delete` have no `expectedTable` parameter
+ * to carry it. The id then resolves via `UNION ALL` across every shard table,
+ * which trips Workerd SQLite's compound-SELECT limit on this 5-table schema and
+ * throws — so every MCP write containing a patch or delete failed while
+ * insert-only writes succeeded (#330).
+ *
+ * `bindTableFacade` forwards its bound table name as `expectedTable`, so the
+ * table accessor is scoped by construction and can't drift back. Keep `asId`
+ * for the branded argument type; it is not what does the scoping.
+ *
+ * Twin of `commitPlan` in `lunora/mutators.ts` (the browser path) — same plan,
+ * same bucket order, two bodies because the ctx types differ. Edit together.
+ */
+export async function commitPlan(
+  ctx: MutationCtx,
+  plan: OutlinePlan,
+): Promise<void> {
   for (const id of plan.deletes) {
-    // asId scopes the delete to `nodes` (avoids cross-table UNION ALL lookup —
-    // Workerd SQLite compound-SELECT limit). MutationCtx's typed delete/patch
-    // take no expectedTable arg; mutators pass it because MutatorCtx is looser.
-    await ctx.db.delete(ctx.db.asId("nodes", id));
+    await ctx.db.nodes.delete(ctx.db.asId("nodes", id));
   }
   for (const patch of plan.patches) {
-    await ctx.db.patch(
+    // Cast: the generated `Insert_nodes` drops `.nullable()` (schema declares
+    // `parentId: v.string().nullable()`, codegen emits `parentId: string`), so a
+    // legitimate null patch — moving a node to the top level — doesn't satisfy
+    // `Partial<Insert_nodes>`. The write is fine; only the generated type is
+    // too narrow.
+    await ctx.db.nodes.patch(
       ctx.db.asId("nodes", patch.id),
-      patch.fields as Record<string, unknown>,
+      patch.fields as Partial<Insert_nodes>,
     );
   }
   for (const node of plan.inserts) {
@@ -132,7 +158,8 @@ export const claimDailyMapping = internalMutation
       existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
     const { winner, won } = resolveDailyClaim(current, args.nodeId);
     if (existing) {
-      await ctx.db.patch(ctx.db.asId("dailyIndex", existing._id), {
+      // Table accessor, not the by-id `ctx.db.patch` — see `commitPlan`.
+      await ctx.db.dailyIndex.patch(ctx.db.asId("dailyIndex", existing._id), {
         nodeId: winner,
         touchedAt: args.touchedAt,
       });
