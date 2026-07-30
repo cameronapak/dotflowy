@@ -147,7 +147,7 @@ describe("commitPlan table scoping", () => {
     // `byId` is the raw by-id writer, reached here directly because the nominal
     // `MutationCtx` can't even SPELL the 3-arg call — which is the whole bug.
     const { byId, calls } = recordingCtx();
-    expect(byId.patch("n1", {})).rejects.toThrow("unscoped by-id patch");
+    await expect(byId.patch("n1", {})).rejects.toThrow("unscoped by-id patch");
     // The explicit third argument is the OTHER correct form (`mutators.ts`),
     // so the fake must accept it — the invariant is "names its table".
     await byId.patch("n1", {}, "nodes");
