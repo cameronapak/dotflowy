@@ -62,6 +62,9 @@ function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {
  * `bindTableFacade` forwards its bound table name as `expectedTable`, so the
  * table accessor is scoped by construction and can't drift back. Keep `asId`
  * for the branded argument type; it is not what does the scoping.
+ *
+ * Twin of `commitPlan` in `lunora/mutators.ts` (the browser path) — same plan,
+ * same bucket order, two bodies because the ctx types differ. Edit together.
  */
 export async function commitPlan(
   ctx: MutationCtx,

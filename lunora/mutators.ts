@@ -119,6 +119,14 @@ async function getTagColorByTag(
     .first();
 }
 
+/**
+ * Twin of `commitPlan` in `lunora/mcp.ts` — same plan, same bucket order, two
+ * bodies, because the two ctx types differ (`MutatorCtx` is loose enough to
+ * take the third `expectedTable` argument; `MutationCtx`'s typed by-id writes
+ * are not, so the MCP copy goes through the table accessor). Edit them
+ * together: that divergence is how the MCP copy shipped unscoped in #330 while
+ * this one stayed healthy.
+ */
 async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
   // deletes → patches → inserts: restore-safe (a deleted id must be gone
   // before a same-batch insert could reclaim it) and fine for structural ops.
