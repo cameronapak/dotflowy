@@ -1089,8 +1089,8 @@ interface ZoomNavigationArgs {
  * Zoom navigation: the shared-element morph between a node's title and list-item
  * roles, Cmd+, zoom-out, and the focus landing after a navigation. Returns the
  * stable `navigateZoom` and the current pivot id. The mount-only effects rely on
- * the editor remounting per zoom view (its `key={nodeId}`; see the "Zoom + view
- * transitions" section of AGENTS.md).
+ * the editor remounting per zoom view (its `key={nodeId}`; see AGENTS.md
+ * "`rootId` is route-owned").
  */
 function useZoomNavigation({
   rootId,
@@ -1973,7 +1973,7 @@ function ZoomedTitle({
   // Plugin slots for the zoomed title (Seam F) plus the two core decorations
   // (protected lock, mirror badge), in ONE list -- the same composition as
   // OutlineRow's `row:before-text`, so the two render paths can't drift (see
-  // AGENTS.md "a node renders in TWO paths"). Mirrors OutlineRow's order: slots,
+  // AGENTS.md "A node renders in three places"). Mirrors OutlineRow's order: slots,
   // then the lock, then the badge.
   const beforeTextSlots: SlotSpec[] = [
     ...slotsAt("title:before-text"),
@@ -2019,7 +2019,7 @@ function ZoomedTitle({
   // The `/` palette (Seam C) on the zoomed title too, mirroring OutlineRow --
   // so `/delete`, `/paragraph`, Move, Mirror, and every plugin `/` command work
   // whether the node is a list bullet or the page title (the two-render-paths
-  // rule; see AGENTS.md "a node renders in TWO paths"). The title keymap below
+  // rule; see AGENTS.md "A node renders in three places"). The title keymap below
   // is gated on `!slash.isOpen` so the menu's Enter/Arrow/Escape win while it's
   // open, exactly as OutlineRow gates useBulletKeymap.
   const slash = useSlashMenu({

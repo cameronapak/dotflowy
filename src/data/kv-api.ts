@@ -14,7 +14,7 @@
  * promise, not an Effect value. The throw is now Effect-backed, not hand-rolled.
  *
  * Same-origin, so the Better Auth session cookie rides along automatically. See
- * AGENTS.md "Error Handling" for the errore -> Effect direction.
+ * AGENTS.md "typed-error channel in Effect" and ADR 0012.
  */
 
 import { kvDeleteE, kvFetchE, kvPutE, runPromise } from "./kv-client-effect";

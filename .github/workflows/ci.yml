@@ -30,6 +30,12 @@ jobs:
         run: bun run typecheck:test
       - name: Unit tests
         run: bun run test
+      # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
+      # rest. That trade is only safe while every pointer resolves: an agent
+      # reads a miss, shrugs, and proceeds without the constraint it was meant
+      # to load. Enforced here rather than remembered.
+      - name: Doc pointers
+        run: bun run check:docs
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.

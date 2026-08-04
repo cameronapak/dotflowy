@@ -9,7 +9,7 @@ const text = (page: Page, id: string) =>
  * One round-trip read of the open menu. Geometry lives here (not in locators)
  * because the invariants are COUNTABLE -- an integer scroll offset and a rect
  * containment -- which read identically on any hardware, unlike a wall clock.
- * See AGENTS.md "Perf guards: assert the countable invariant".
+ * See AGENTS.md "A perf guard asserts a countable invariant".
  */
 async function menuState(page: Page) {
   return page.evaluate(() => {

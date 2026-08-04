@@ -76,7 +76,7 @@ These six entries are the exceptions. In each one, the surface you search for do
 
 ### Data and sync
 
-- **Send structural edits through `runStructural`. Send field edits direct.** A tree-shape change must land as ONE batch. Hold the optimistic overlay until its echo. Tree-shape changes are insert, indent, outdent, move, reparent, remove, undo restore, and daily get-or-create. Both halves are load-bearing. If you drop either one, the sibling chain corrupts again. Field edits (`setText`, `setKind`, `setIsTask`, toggles) stay a direct PATCH. A field edit must never wait for an echo, because that is the keystroke path. Wrap at the call sites, not inside `mutations.ts`. ADR 0009.
+- **Send structural edits through `runStructural`. Send field edits direct.** A tree-shape change must land as ONE batch. Hold the optimistic overlay until its echo. Both halves are load-bearing. If you drop either one, the sibling chain corrupts again. Field edits (`setText`, `setKind`, `setIsTask`, toggles) stay a direct PATCH. A field edit must never wait for an echo, because that is the keystroke path. Wrap at the call sites, not inside `mutations.ts`. The tree-shape changes are insert, indent, outdent, move, reparent, remove, undo restore, and daily get-or-create. ADR 0009.
 - **A new `Node` field touches seven places.** Add the field to each one:
   1. `src/data/wire-schema.ts`
   2. `src/data/schema.ts`
@@ -130,6 +130,7 @@ No ADR covers this area yet. These rules live only here.
 - **The visible-neighbor walk must mirror render visibility.** Skip completed rows when they are hidden. Walk the same filtered rows when a `?q=` filter is active. If the walk does not mirror the render, arrow-key focus silently no-ops.
 - **The `refs` registry maps a node id to its contentEditable span, and the zoomed title registers under `rootId`.** Focus, pending-focus, and the zoom morph all depend on that.
 - **Assert nesting through `data-parent-id` and `data-depth`, never through DOM containment.** The windowed list is flat. Rows are not nested.
+- **`rootId` is route-owned.** `routes/index.tsx` gives `null`, and `routes/$nodeId.tsx` gives `nodeId`. Never add editor-local zoom state. The editor remounts per zoom view through its `key={nodeId}`, and the mount-only effects depend on that. No ADR covers this rule.
 
 ### Plugins
 
@@ -172,6 +173,7 @@ Never import from the fetched copy. App code imports `effect` from npm as normal
 - **`bun run release` is the only way to bump the version.** A direct `changeset version` deletes the fragments before they are archived, and the build then fails. That failure is the process. Do not work around it. ADR 0046.
 - **Semver here is communicative, not contractual.** Nobody can pin Dotflowy. Major means a reader must do something. Minor means a new capability. Patch means it got better.
 - **A React-importing package can crash the running dev server after `bun add`.** The error is "Invalid hook call / multiple copies of React", and the cause is a stale Vite dep-optimize cache. Stop the server, run `rm -rf node_modules/.vite`, then restart.
+- **The Codex app rewrites `.codex/environments/environment.toml`** whenever the environment is edited through its settings pane, and it drops every comment in the file. Do not put load-bearing explanation there.
 
 ## Working agreements
 
@@ -184,10 +186,66 @@ Never import from the fetched copy. App code imports `effect` from npm as normal
 
 ## Tooling
 
-- **Search:** use fff for file search and grep inside the git tree. Use codegraph (`codegraph_*`) for structural questions: what calls what, where a symbol is defined, and what breaks on a change. Trust the codegraph results, because they come from a full AST parse. Re-verifying them with grep is slower and less accurate. Neither tool reaches `~/.opensrc/`.
-- **Skills:** run `bunx @tanstack/intent@latest list` before substantial work. Load the most specific local skill for the package you are changing.
+The three blocks below are written by their own tools. The `:start` and `:end`
+markers are how each tool finds its block to replace. Never hand-edit inside
+them, and never drop the markers: without them the next run appends a duplicate.
+Neither fff nor codegraph reaches `~/.opensrc/`.
+
 - **Occasional audits, not gates:** `npx -y react-doctor@latest . --verbose`, whose editor false-positives are known and accepted. Also Playwright `--trace on`, and the DEV-only `window.__hotkeyManager` handle for live hotkey registration counts.
 - **Capture a repeated incantation** in a `package.json` script or a config file. Reach for `scripts/*.ts` only when there is no config home.
+
+<!-- intent-skills:start -->
+
+## Skill Loading
+
+Before substantial work:
+
+- Skill check: run `bunx @tanstack/intent@latest list`, or use skills already listed in context.
+- Skill guidance: if one local skill clearly matches the task, run `bunx @tanstack/intent@latest load <package>#<skill>` and follow the returned `SKILL.md`.
+- Monorepos: when working across packages, run the skill check from the workspace root and prefer the local skill for the package being changed.
+- Multiple matches: prefer the most specific local skill for the package or concern you are changing; load additional skills only when the task spans multiple packages or concerns.
+
+<!-- intent-skills:end -->
+
+<!-- codegraph:start -->
+
+## CodeGraph
+
+This project has a CodeGraph MCP server (`codegraph_*` tools) configured. CodeGraph is a tree-sitter-parsed knowledge graph of every symbol, edge, and file. Reads are sub-millisecond and return structural information grep cannot.
+
+### When to prefer codegraph over native search
+
+Use codegraph for **structural** questions — what calls what, what would break, where is X defined, what is X's signature. Use native grep/read only for **literal text** queries (string contents, comments, log messages) or after you already have a specific file open.
+
+| Question                                      | Tool                |
+| --------------------------------------------- | ------------------- |
+| "Where is X defined?" / "Find symbol named X" | `codegraph_search`  |
+| "What calls function Y?"                      | `codegraph_callers` |
+| "What does Y call?"                           | `codegraph_callees` |
+| "What would break if I changed Z?"            | `codegraph_impact`  |
+| "Show me Y's signature / source / docstring"  | `codegraph_node`    |
+| "Give me focused context for a task/area"     | `codegraph_context` |
+| "Survey an unfamiliar module/topic"           | `codegraph_explore` |
+| "What files exist under path/"                | `codegraph_files`   |
+| "Is the index healthy?"                       | `codegraph_status`  |
+
+### Rules of thumb
+
+- **Trust codegraph results.** They come from a full AST parse. Do NOT re-verify them with grep — that's slower, less accurate, and wastes context.
+- **Don't grep first** when looking up a symbol by name. `codegraph_search` is faster and returns kind + location + signature in one call.
+- **Don't chain `codegraph_search` + `codegraph_node`** when you just want context — `codegraph_context` is one call.
+- **`codegraph_explore` is the heavy hitter** for unfamiliar areas — it returns full source from all relevant files in one call, but is token-heavy. If your harness supports parallel subagents (e.g., Claude Code's Task tool), spawn one for explore-class questions to keep main session context clean.
+- **Index lag**: the file watcher debounces ~500ms behind writes; don't re-query immediately after editing a file in the same turn.
+
+### If `.codegraph/` doesn't exist
+
+The MCP server returns "not initialized." Ask the user: _"I notice this project doesn't have CodeGraph initialized. Want me to run `codegraph init -i` to build the index?"_
+<!-- codegraph:end -->
+
+<!-- fff:start -->
+
+For any file search or grep in the current git-indexed directory, use fff tools.
+<!-- fff:end -->
 
 ## Preferences
 
@@ -196,7 +254,7 @@ These are Cam's preferences, learned in earlier sessions. You cannot derive them
 - **Implementation calls, once the approach is agreed:** pick the best reasonable option and proceed. Do not stop to ask. Favor robustness and best practices, balanced against not over-optimizing low-value work. This does **not** waive the design interview above. The grilling settles the approach. This preference governs the choices inside it. If the target worktree is unclear, ask before you switch checkouts.
 - **Local dev server:** use `bun run cf:dev` on port 8787. `bun run dev` on port 3000 has a broken database on Cam's machine.
 - **Stack direction:** deepen Effect and XState where they genuinely fit.
-- **Landing site** (the separate `landing/` package, at dotflowy.com): Geist only, no mono. Accents match the app palette. Introduce no color that the app does not use. Feature bullets stay vertical on desktop. Keep "Workflowy alternative" out of the H1 and the footer brand row. Put it in the meta description and quiet body copy instead. Import copy must mention Workflowy next to OPML.
+- **Landing site** (the separate `landing/` package, at dotflowy.com): Geist only, no mono. Accents match the app palette. Introduce no color that the app does not use. Feature bullets stay vertical on desktop. Keep "Workflowy alternative" out of the H1 and the footer brand row. Put it in the meta description and quiet body copy instead. Import copy mentions Workflowy next to OPML.
 - **Icons:** prefer the free MIT Hugeicons (`@hugeicons/react` and `@hugeicons/core-free-icons`), at default stroke.
 - **Lunora sync stays opt-in** behind a user-facing beta flag. Do not cut production over while it is alpha. User-facing copy must not name Lunora. Frame it as an experimental sync option. Disclose that turning it off returns the user to the last classic snapshot.
 - **Implementation subagents in Cursor:** prefer Cursor Auto or Cursor Grok 4.5.
