@@ -51,52 +51,26 @@ This rule applies to:
 Before you write code, do both steps, in this order:
 
 1. **Read the ADRs that constrain the area.** `docs/adr/` holds 58 of them. They carry the constraints that PRs keep breaking. This file cites them by number, but the content is in the ADR itself. An agent that opens none of them designs blind against invariants it cannot see.
-2. **Run `/grill-with-docs`.** This interview sharpens the decision. It also records new ADRs through `/domain-modeling` as they crystallize. If your harness cannot run the skill, do the work by hand. Hold the design against each ADR from step 1. Then stress-test the design before you commit to an approach.
+2. **Stop and ask the user to run `/grill-with-docs`.** An agent cannot fire this skill. It is user-invoked only. The interview sharpens the decision, and it records new ADRs through `/domain-modeling`, which an agent _can_ invoke. If the user waives the interview, do the work by hand. Hold the design against each ADR from step 1. Then stress-test the design before you commit to an approach.
 
 This rule holds for every contributor, human or agent. If you skip it, someone rediscovers the invariants the expensive way.
 
+Every slash command in this file carries its invocation mode where it appears. An agent can invoke `/domain-modeling`, `/code-review`, `/security-review`, and `/ft-create-concise-pr`. Only the user can invoke `/grill-with-docs`.
+
 ### Touching this? Read this first
 
-This table is a shortcut, not the full set. `docs/adr/` is authoritative. Absence from this table means nothing.
+`docs/adr/` filenames name their own surface, so the directory is the index. Run `ls docs/adr/` and read the ADRs that match what you are about to touch.
+
+These six entries are the exceptions. In each one, the surface you search for does not appear in the filename:
 
 | Surface                                                | ADR                                                    |
 | ------------------------------------------------------ | ------------------------------------------------------ |
 | Plugin seams, adding a plugin                          | 0001, 0031, and [`docs/plugins.md`](./docs/plugins.md) |
-| Tree store, per-node rendering                         | 0004                                                   |
-| Rich links, the source-offset caret                    | 0005, 0016                                             |
-| React token widgets                                    | 0006                                                   |
-| Tag colors                                             | 0007                                                   |
-| Per-user DO sync, SPA/no-SSR                           | 0008                                                   |
-| Structural write atomicity                             | 0009, 0010                                             |
-| Auth gate, Google sign-in, verification                | 0011                                                   |
-| Effect (replaces errore), sync socket, schema language | 0012, 0013, 0021, 0053                                 |
-| Worker to DO trust boundary                            | 0014                                                   |
-| Protected nodes                                        | 0015                                                   |
-| Markdown export / paste                                | 0017, 0044                                             |
-| Node multi-selection                                   | 0018, 0020                                             |
-| Virtualized rendering                                  | 0019                                                   |
-| Mirrors                                                | 0022                                                   |
-| DO storage stays native                                | 0023                                                   |
-| Inline emphasis, highlights, spoilers                  | 0025, 0035, 0043                                       |
-| MCP server + tools                                     | 0026, 0027, 0028                                       |
-| Touch targets, reading size, the bullet dot            | 0029                                                   |
-| Mobile actions bar                                     | 0030                                                   |
-| Node links + backlinks                                 | 0032                                                   |
-| Spotlight focus mode                                   | 0033                                                   |
-| Cmd+K command center                                   | 0034                                                   |
-| Desktop selection toolbar                              | 0036                                                   |
-| OPML import/export                                     | 0037                                                   |
-| Date token, go-to-date, date mentions, chip voice      | 0038, 0055, 0056, 0057                                 |
-| Plugin async/Effect seam                               | 0039                                                   |
-| Effect source via opensrc                              | 0040                                                   |
-| Daily notes: seeding, calendar hierarchy, week strip   | 0041, 0052, 0054                                       |
-| Paragraph node kind                                    | 0045                                                   |
-| Changelog + release versioning                         | 0046                                                   |
-| Query filter grammar, saved filters                    | 0047, 0048                                             |
-| Quick-add capture                                      | 0049                                                   |
-| Account deletion                                       | 0051                                                   |
+| Structural write atomicity, and why field edits differ | 0009, 0010                                             |
+| Auth gate, Google sign-in, email verification          | 0011                                                   |
+| Effect: errore removal, sync socket, schemas, fiber    | 0012, 0013, 0021, 0053                                 |
+| Touch targets, reading size, and the bullet dot        | 0029                                                   |
 | Lunora sync (experimental, flag-gated)                 | 0058                                                   |
-| Backspace joins into the previous row                  | 0059                                                   |
 
 ## Gotchas
 
@@ -202,9 +176,9 @@ Never import from the fetched copy. App code imports `effect` from npm as normal
 ## Working agreements
 
 - **Repo reality is the source of truth for the docs.** An objective fact is a path, a command, or the tooling. If `AGENTS.md` or `README.md` becomes false about one, correct it in the same change. Ask first before you change policy, philosophy, or positioning.
-- **Run the app before you call an observable change done.** Green gates are necessary but not sufficient. Typecheck, lint, and tests can all pass while the feature does the wrong thing on screen. The `/verify` skill does exactly this. Skip it only for a change with no runtime surface.
-- **Write PR descriptions with `/ft-create-concise-pr`.** Every PR in this repo follows that template, so reviewers get one skimmable shape. After review changes, run its Update pass rather than letting the description drift.
-- **Run `/code-review` on a non-trivial PR before it is ready.** Add `/security-review` when the diff touches auth, the SSRF surface, the Worker-to-DO trust boundary, or the signup gate.
+- **Run the app before you call an observable change done.** Green gates are necessary but not sufficient. Typecheck, lint, and tests can all pass while the feature does the wrong thing on screen. Drive the change in `bun run cf:dev`, or exercise it through an e2e spec. Skip this step only for a change with no runtime surface.
+- **Write PR descriptions with `/ft-create-concise-pr`** (agent-invocable). Every PR in this repo follows that template, so reviewers get one skimmable shape. After review changes, run its Update pass rather than letting the description drift.
+- **Run `/code-review` on a non-trivial PR before it is ready** (agent-invocable). Add `/security-review` when the diff touches auth, the SSRF surface, the Worker-to-DO trust boundary, or the signup gate.
 - **A decision earns an ADR** when it is hard to reverse, surprising without context, and the result of a real trade-off. If the code already makes the call obvious, the code is the doc. When a decision changes, edit its ADR in place, or mark it superseded.
 - **Multi-session feature work hands state forward in `HANDOFF.md`.** Commit it on the branch and delete it in the shipping PR. It must never reach `main`. Put transient build-coordination state in it. Decisions belong in ADRs.
 
@@ -220,6 +194,7 @@ Never import from the fetched copy. App code imports `effect` from npm as normal
 These are Cam's preferences, learned in earlier sessions. You cannot derive them from the code.
 
 - **Implementation calls, once the approach is agreed:** pick the best reasonable option and proceed. Do not stop to ask. Favor robustness and best practices, balanced against not over-optimizing low-value work. This does **not** waive the design interview above. The grilling settles the approach. This preference governs the choices inside it. If the target worktree is unclear, ask before you switch checkouts.
+- **Local dev server:** use `bun run cf:dev` on port 8787. `bun run dev` on port 3000 has a broken database on Cam's machine.
 - **Stack direction:** deepen Effect and XState where they genuinely fit.
 - **Landing site** (the separate `landing/` package, at dotflowy.com): Geist only, no mono. Accents match the app palette. Introduce no color that the app does not use. Feature bullets stay vertical on desktop. Keep "Workflowy alternative" out of the H1 and the footer brand row. Put it in the meta description and quiet body copy instead. Import copy must mention Workflowy next to OPML.
 - **Icons:** prefer the free MIT Hugeicons (`@hugeicons/react` and `@hugeicons/core-free-icons`), at default stroke.
