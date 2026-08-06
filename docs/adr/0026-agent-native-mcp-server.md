@@ -28,6 +28,26 @@ every POST is self-contained, `initialize` returns no session id, GET streams de
 protocol surface we need (initialize / ping / tools) is ~250 lines of `worker/mcp.ts` — one Effect
 pipeline, `Data.TaggedError`-free because every failure IS a well-formed JSON-RPC response.
 
+_Amended 2026-07-25:_ **the runtime objection above no longer holds against the official SDK v2, and
+the plan is to adopt it — gated, not now.** The TS SDK v2 (`@modelcontextprotocol/server`, beta at
+this writing, targeting the 2026-07-28 revision) is per-request-native: `createMcpHandler`, a
+web-standard Streamable HTTP transport, workerd shims. And the 2026-07-28 spec itself removes
+protocol sessions entirely (SEP-2567/2575 — no `Mcp-Session-Id`, no `initialize` handshake): the
+stateless posture this ADR chose against the SDK is now the spec's own default. What changes the
+adoption calculus is the size of the 2026 era's wire change — `initialize`/`ping` removed, a
+mandatory `server/discover` RPC, `Mcp-Method`/`Mcp-Name` request headers, a required `resultType` on
+every result, required `ttlMs`/`cacheScope` cache hints on `tools/list` — while clients will straddle
+eras for years (the spec adopted a 12-month-minimum deprecation policy). Dual-era serving is exactly
+where hand-rolled stops being ~250 lines; the SDK automates era negotiation, envelope lifting, and a
+legacy shim that serves both eras from one handler. **Adopt when three gates clear:** (1) v2 is
+stable, not beta; (2) Effect Schema plugs into v2's Standard Schema path with JSON-schema publication
+intact (v2 accepts Standard Schema; verify the `StandardSchemaWithJSON` interop, e.g. via
+`Schema.toStandardSchemaV1` + `Schema.toJsonSchemaDocument`) so the schema-is-the-validator rule
+survives without a second schema language ([ADR 0021](./0021-effect-first-one-schema-language.md));
+(3) the DCR deprecation's auth story settles (next amendment). Until then the hand-rolled server
+stays — every mainstream client still negotiates the 2025 era today, and `worker/mcp.ts` answers
+`2025-06-18` correctly to a `2026-07-28` request (offer-latest-supported is the spec's negotiation).
+
 **The tool schema is the validator ([ADR 0014](./0014-validate-the-worker-do-trust-boundary.md)'s rule,
 extended to tools).** Each tool's input contract is an Effect Schema; `tools/list` publishes
 `Schema.toJsonSchemaDocument(input)` and `tools/call` decodes against the same value, so the contract
@@ -69,6 +89,17 @@ plugin's after-hook fires on the sign-in _fetch_, whose cross-origin 302 a brows
 reliably deliver). No consent page: the plugin auto-issues the code for a signed-in user, acceptable
 for a single-user-instance posture; a consent screen is an easy later add (`oidcConfig.consentPage`).
 
+_Amended 2026-07-25:_ **DCR is deprecated upstream; Better Auth isn't ready for the successor yet —
+watch, don't move.** The 2026-07-28 spec deprecates RFC 7591 Dynamic Client Registration in favor of
+Client ID Metadata Documents (CIMD, URL-shaped client ids), keeping DCR available for backwards
+compatibility through the 12-month-minimum deprecation window. On the Better Auth side, the `mcp`
+plugin this ADR chose is itself slated for deprecation in favor of their `oauth-provider` plugin —
+which as of 2026-07-25 still speaks only DCR (CIMD explicitly not yet implemented). Nothing breaks
+today: clients keep registering via DCR. When Better Auth ships CIMD (likely in `oauth-provider`),
+migrate the plugin and re-verify the two `/.well-known` discovery routes and the AuthScreen resume
+flow. This gate also holds back the SDK v2 adoption above — v2 marks `registerClient` deprecated in
+lockstep with the spec.
+
 **Dates are the caller's problem, explicitly.** The daily tools take an optional `date` (`YYYY-MM-DD`)
 that defaults to UTC-today, and the tool description tells the agent to pass the user's local date —
 the Worker cannot know the user's timezone, and inventing one server-side would silently file
@@ -78,7 +109,9 @@ delegated.
 ## Considered and rejected
 
 - **Effect `McpServer.layerHttp` / official SDK stateful mode** — in-memory sessions don't survive
-  stateless isolates (above).
+  stateless isolates (above). _Amended 2026-07-25:_ this held against SDK **v1**; SDK v2 is
+  per-request-native and the objection is retired — v2 adoption is now planned behind the three
+  gates in the transport amendment, so this rejection is historical, not standing.
 - **MCP server inside the Durable Object** — pins session state but bloats the DO with an RPC runtime
   and still loses it on hibernation; the DO stays storage-only.
 - **A `move_node` / full structural tool set in v1** — the asked-for surface is capture + mirror +
