@@ -22,11 +22,12 @@ import { seedOutlineLunora, type SeedNode } from "./fixtures";
  * zero-node snapshot (undo replayed it as delete-everything). Both are pinned
  * here; both fail without the `getLiveNodes()` fix.
  *
- * Today's note is SEEDED, not created by the command. A returning user's day
- * already exists, which is the state the reported bug was hit in. Creating it
- * in-test would instead hit a separate Lunora race in `materializeNewDayLunora`
- * (`isPersisted` resolves before the shape poke applies the rows, so the
- * post-persist `hasNode` check fails and `getOrCreateDay` returns null).
+ * Most tests SEED today's note, because a returning user's day already exists,
+ * and that is the state the reported bug was hit in. The fifth test does the
+ * opposite on purpose: it starts from a bare outline and lets the command create
+ * the day. That path has its own failure mode -- `isPersisted` resolves before
+ * the confirmed rows are readable -- which `waitForLunoraNode` fixes, so it
+ * needs its own coverage rather than an exemption.
  *
  * The last describe covers the same root cause in the editor's post-move filter
  * recheck (`OutlineEditor.tsx`), which read that same starved collection and so
