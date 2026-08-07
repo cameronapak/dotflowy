@@ -335,9 +335,31 @@ export function mirrorNode(
   sourceId: string,
   targetId: string | null,
 ): string | null {
-  if (!index.byId.has(sourceId)) return null;
+  if (!index.byId.has(sourceId)) {
+    // Named per guard because all three collapse into one bare `null`, which is
+    // exactly what disguised the Lunora daily-mirror bug as a plausible refusal
+    // toast. An index of size 0 here means the caller read a starved node
+    // source (ADR 0058); see getLiveNodes().
+    if (import.meta.env.DEV) {
+      console.warn("[mirrorNode] refused: source is absent from the index", {
+        sourceId,
+        targetId,
+        indexSize: index.byId.size,
+      });
+    }
+    return null;
+  }
   const trueSourceId = trueSourceOf(index, sourceId);
-  if (wouldMirrorCycle(index, trueSourceId, targetId)) return null;
+  if (wouldMirrorCycle(index, trueSourceId, targetId)) {
+    if (import.meta.env.DEV) {
+      console.warn(
+        "[mirrorNode] refused: the destination is the true source or sits " +
+          "inside its subtree, so the mirror would window itself",
+        { sourceId, trueSourceId, targetId },
+      );
+    }
+    return null;
+  }
 
   const id = createId();
 
@@ -349,7 +371,16 @@ export function mirrorNode(
       const t = now();
       const resolvedParent =
         targetId !== null ? trueSourceOf(index, targetId) : null;
-      if (wouldMirrorCycle(index, trueSourceId, resolvedParent)) return null;
+      if (wouldMirrorCycle(index, trueSourceId, resolvedParent)) {
+        if (import.meta.env.DEV) {
+          console.warn(
+            "[mirrorNode] refused: the destination RESOLVED through " +
+              "trueSourceOf sits inside the source's subtree",
+            { sourceId, trueSourceId, targetId, resolvedParent },
+          );
+        }
+        return null;
+      }
       trackLunoraMutation(
         lunora.store.mutators.mirrorNode({
           id,

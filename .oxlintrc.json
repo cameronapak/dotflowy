@@ -6,6 +6,10 @@
   },
   "rules": {},
   "overrides": [
+    // An override REPLACES a rule's config; it does not merge it. A second
+    // override matching src/plugins/** would silently kill the kit ban below,
+    // so every plugin-facing no-restricted-imports pattern lives in THIS block.
+    // src/components/** gets its own block only because the globs are disjoint.
     {
       "files": ["src/plugins/**/*.ts", "src/plugins/**/*.tsx"],
       "excludeFiles": ["src/plugins/kit.ts"],
@@ -17,6 +21,33 @@
               {
                 "group": ["@/components/ui/*", "**/components/ui/*"],
                 "message": "Import blessed UI from '@/plugins/kit' (the curated Lane-A shadcn surface, ADR 0031), not directly from components/ui."
+              },
+              {
+                "group": ["**/data/collection", "@/data/collection"],
+                "importNames": ["nodesCollection"],
+                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes). nodesCollection is ready-and-empty while the Lunora flag is ON (ADR 0058)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/components/**/*.ts", "src/components/**/*.tsx"],
+      "excludeFiles": [
+        "src/components/delete-confirm-dialog.tsx",
+        "src/components/opml-import-dialog.tsx",
+        "src/components/markdown-paste.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/data/collection", "@/data/collection"],
+                "importNames": ["nodesCollection"],
+                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes). nodesCollection is ready-and-empty while the Lunora flag is ON (ADR 0058). The three excluded files WRITE to it behind an isLunoraSyncEnabled() gate."
               }
             ]
           }

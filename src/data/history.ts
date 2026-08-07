@@ -49,6 +49,11 @@ const MAX_ENTRIES = 100;
 // so a captured-then-dropped no-op can put it back (see `drop`).
 let redoBackup: Entry[] | null = null;
 
+// Did the most recent `capture` refuse (empty index)? The command layer pairs
+// every capture with a `drop()` on the no-op arm, and that drop would otherwise
+// pop an UNRELATED older entry the refused capture never pushed. See `drop`.
+let lastCaptureRefused = false;
+
 function snapshot(index: TreeIndex): Node[] {
   // Nodes are flat records, so a shallow per-node copy is a full deep copy.
   return Array.from(index.byId.values()).map((n) => ({ ...n }));
@@ -62,12 +67,33 @@ function snapshot(index: TreeIndex): Node[] {
  * pushing. Pass `text:<id>` for keystrokes so an entire typing run on one
  * bullet collapses to a single undo step; pass null for discrete structural
  * actions so each is independently undoable.
+ *
+ * REFUSES an empty index. `planRestore` diffs the snapshot against the LIVE
+ * tree, so a zero-node snapshot classifies every live node as a delete -- one
+ * Cmd+Z away from wiping the outline. That only ever happens when the caller
+ * read a starved node source: `nodesCollection` is ready-and-empty for the
+ * whole session while the Lunora flag is ON (ADR 0058), so it reads as a
+ * legitimately empty outline. An outline that is genuinely empty has nothing
+ * to undo, so refusing costs a real user nothing.
  */
 export function capture(
   index: TreeIndex,
   focusId: string | null = null,
   tag: string | null = null,
 ): void {
+  if (index.byId.size === 0) {
+    lastCaptureRefused = true;
+    if (import.meta.env.DEV) {
+      console.error(
+        "[history] capture() refused an empty index -- wrong node source? " +
+          "Live nodes come from getLiveNodes(), never nodesCollection.toArray.",
+        { focusId, tag },
+      );
+    }
+    return;
+  }
+  lastCaptureRefused = false;
+
   const top = undoStack[undoStack.length - 1];
   if (tag !== null && top && top.tag === tag) return;
   undoStack.push({ nodes: snapshot(index), focusId, tag });
@@ -84,8 +110,16 @@ export function capture(
  * don't leave a redundant entry that makes Cmd+Z look like it did nothing.
  * Also restores the redo stack the matching `capture` cleared, since a no-op
  * never actually forked the timeline.
+ *
+ * No-ops when the matching `capture` REFUSED: there is no entry of ours to pop,
+ * and popping anyway would silently eat an unrelated older undo point. A
+ * refusal never cleared `redoStack` either, so there is nothing to restore.
  */
 export function drop(): void {
+  if (lastCaptureRefused) {
+    lastCaptureRefused = false;
+    return;
+  }
   undoStack.pop();
   if (redoBackup) {
     redoStack.length = 0;

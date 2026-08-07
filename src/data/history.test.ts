@@ -11,13 +11,18 @@ import { rowKeyFor } from "./visible-order";
 // conserved), so neither can drain both. `capture` clears the redo stack, so
 // two captures leave it empty with an empty backup, and `drop` then pops the
 // undo entries back off -- draining all three pieces of state to a clean slate.
+//
+// The drain captures RESET_IDX, not EMPTY: `capture` refuses an empty index, so
+// an EMPTY capture would push nothing, clear nothing, and leave the redo stack
+// loaded for the next test.
 const EMPTY = buildTreeIndex([]);
+const RESET_IDX = buildTreeIndex([makeNode({ id: "__reset" })]);
 function resetHistory(): void {
   while (undo(EMPTY)) {
     /* move every undo entry onto the redo stack */
   }
-  capture(EMPTY);
-  capture(EMPTY);
+  capture(RESET_IDX);
+  capture(RESET_IDX);
   drop();
   drop();
 }
@@ -80,6 +85,61 @@ describe("capture / undo / redo / drop stack transfer", () => {
     capture(idx, "a");
     drop();
     expect(undo(idx)).toBeNull();
+  });
+});
+
+describe("capture refuses an empty index", () => {
+  // An empty index only ever reaches capture() when the caller read a starved
+  // node source -- `nodesCollection` is ready-and-empty while the Lunora flag
+  // is ON (ADR 0058). Storing that snapshot makes the next Cmd+Z classify every
+  // live node as a delete, so capture refuses it and the matching drop no-ops.
+  const idxA = buildTreeIndex([makeNode({ id: "a" })]);
+  const idxB = buildTreeIndex([makeNode({ id: "b" })]);
+
+  test("an empty index pushes nothing", () => {
+    capture(EMPTY, "a");
+    expect(undo(idxA)).toBeNull();
+  });
+
+  test("a refused capture leaves the redo stack intact", () => {
+    capture(idxA, "a");
+    undo(idxA); // the redo stack now holds one entry
+    capture(EMPTY, "ghost"); // refused: never forked the timeline
+    expect(redo(idxA)).not.toBeNull();
+  });
+
+  test("drop after a refused capture leaves the previous entry in place", () => {
+    capture(idxA, "a"); // a real undo point
+    capture(EMPTY, "ghost"); // refused
+    drop(); // the command's no-op arm: must NOT eat the "a" entry
+
+    const plan = undo(idxB, "b");
+    expect(plan).not.toBeNull();
+    expect(plan!.focusId).toBe("a");
+  });
+
+  test("the undo after a refused capture+drop is the newest real entry", () => {
+    // Each index holds the node its focus names, so the restored focusId
+    // survives planRestore's "is it still in the snapshot" gate and identifies
+    // WHICH entry came back.
+    const idxOlder = buildTreeIndex([makeNode({ id: "older" })]);
+    const idxNewer = buildTreeIndex([makeNode({ id: "newer" })]);
+
+    capture(idxOlder, "older");
+    capture(idxNewer, "newer");
+    capture(EMPTY, "ghost");
+    drop();
+
+    // Without the drop guard this would pop "newer" and return "older".
+    expect(undo(idxNewer)!.focusId).toBe("newer");
+  });
+
+  test("a refused capture does not disarm the NEXT drop", () => {
+    capture(EMPTY, "ghost"); // refused, arms the guard
+    capture(idxA, "a"); // a real push, disarms it
+    drop(); // must pop the real entry
+
+    expect(undo(idxA)).toBeNull();
   });
 });
 
@@ -274,16 +334,24 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("deletes at exactly RESTORE_SLICE_OPS are one slice; one more is two", () => {
-    const make = (count: number) => buildTreeIndex(makeNodes(count));
+    // The snapshot keeps ONE node and the live tree adds the rest, so every
+    // extra node is a delete and the survivor is byte-identical (no upsert).
+    // The snapshot can't be EMPTY here: `capture` refuses an empty index.
+    const build = (deletes: number) => {
+      const all = makeNodes(deletes + 1);
+      return { snap: buildTreeIndex([all[0]!]), live: buildTreeIndex(all) };
+    };
 
-    capture(EMPTY, null); // captured empty; every live node is a delete
-    const exact = undo(make(RESTORE_SLICE_OPS))!;
+    const at = build(RESTORE_SLICE_OPS);
+    capture(at.snap, null);
+    const exact = undo(at.live)!;
     expect(exact.opCount).toBe(RESTORE_SLICE_OPS);
     expect(exact.slices).toHaveLength(1);
 
     resetHistory();
-    capture(EMPTY, null);
-    const over = undo(make(RESTORE_SLICE_OPS + 1))!;
+    const over1 = build(RESTORE_SLICE_OPS + 1);
+    capture(over1.snap, null);
+    const over = undo(over1.live)!;
     expect(over.opCount).toBe(RESTORE_SLICE_OPS + 1);
     expect(over.slices).toHaveLength(2);
   });
