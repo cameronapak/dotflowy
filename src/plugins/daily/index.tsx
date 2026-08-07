@@ -34,7 +34,6 @@ import { Badge, Button } from "@/plugins/kit";
 
 import type { WidgetEl } from "../types";
 
-import { nodesCollection } from "../../data/collection";
 import {
   DATE_LINK_PATTERN,
   PROTECTED_SCAFFOLD_KINDS,
@@ -47,6 +46,7 @@ import {
 } from "../../data/date-links";
 import { isMirrorsEnabled } from "../../data/flags";
 import { capture, drop } from "../../data/history";
+import { getLiveNodes } from "../../data/live-nodes";
 import {
   mirrorManyNodes,
   mirrorNode,
@@ -107,6 +107,23 @@ function scaffoldProtection(
     completeReason: `A daily ${noun} can't be completed.`,
     canonicalText: name,
   };
+}
+
+// --- undo capture for the daily commands ------------------------------------
+
+/**
+ * Record an undo point from the LIVE store (classic OR Lunora), focused on
+ * `focusId`.
+ *
+ * `nodesCollection` is ready-and-empty for the whole session while the Lunora
+ * flag is ON (ADR 0058), so building the capture index from it would snapshot
+ * ZERO nodes -- and a later undo replays a zero-node snapshot as
+ * delete-everything. `getLiveNodes()` is the flag-aware read; every daily
+ * command captures through this one helper so a fourth call site can't drift
+ * back onto the starved collection.
+ */
+function captureLive(focusId: string): void {
+  capture(buildTreeIndex(getLiveNodes()), focusId);
 }
 
 // --- Seam A + B: the `[[YYYY-MM-DD]]` date token (ADR 0038) ------------------
@@ -360,7 +377,7 @@ export default definePlugin({
         // runMany twin below. Capture the FRESH index (today may have just been
         // created), so undo restores the move without deleting the new day note.
         const moved = runStructural(() => {
-          capture(buildTreeIndex(nodesCollection.toArray), nodeId);
+          captureLive(nodeId);
           return moveManyNodes(todayId, [nodeId]);
         });
         // No-op move (already last child of today) still captured an undo
@@ -386,7 +403,7 @@ export default definePlugin({
         const targets = ids.filter((id) => id !== todayId);
         if (targets.length === 0) return;
         const moved = runStructural(() => {
-          capture(buildTreeIndex(nodesCollection.toArray), targets[0]!);
+          captureLive(targets[0]!);
           return moveManyNodes(todayId, targets);
         });
         if (!moved) {
@@ -416,7 +433,11 @@ export default definePlugin({
         // Rebuild fresh: today may have just been created, so ctx.tree is stale
         // (no `after`, no cycle context). Capture AFTER, so undo removes the
         // mirror but keeps the new day note (mirrors the runMany path below).
-        const index = buildTreeIndex(nodesCollection.toArray);
+        // Explicit build (not captureLive): `mirrorNode` consumes this index,
+        // and it must come from the LIVE store -- an index built from the
+        // ready-and-empty `nodesCollection` fails `mirrorNode`'s first guard on
+        // the Lunora path, so every mirror-to-today toasted an error.
+        const index = buildTreeIndex(getLiveNodes());
         const newId = runStructural(() => {
           capture(index, nodeId);
           return mirrorNode(index, nodeId, todayId);
@@ -437,7 +458,7 @@ export default definePlugin({
         const todayId = await getOrCreateDay(localDateKey());
         if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         const made = runStructural(() => {
-          capture(buildTreeIndex(nodesCollection.toArray), ids[0]!);
+          captureLive(ids[0]!);
           return mirrorManyNodes(todayId, ids);
         });
         if (!made) {
