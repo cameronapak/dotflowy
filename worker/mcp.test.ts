@@ -321,6 +321,22 @@ describe("MCP tools", () => {
     expect(toolText(json)).toContain('Added "new bullet"');
   });
 
+  test("write-tool confirmation redacts a spoiler in the parent's text", async () => {
+    // The read tools redact ||spoiler|| on egress; the write-tool confirmation
+    // strings echo the destination parent's text, so they must redact too, or an
+    // agent could harvest spoiler plaintext the read path withholds.
+    const fake = makeStore([
+      makeNode({ id: "p", text: "plan ||launch-date||" }),
+    ]);
+    const json = await callTool(fake.store, "add_node", {
+      text: "child",
+      parentId: "p",
+    });
+    const text = toolText(json);
+    expect(text).not.toContain("launch-date");
+    expect(text).toContain("[spoiler]");
+  });
+
   test("add_subtree inserts a nested forest as ONE atomic batch, stamping origin on all", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_subtree", {

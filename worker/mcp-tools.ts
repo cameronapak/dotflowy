@@ -737,7 +737,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         );
         yield* commit(store, plan.ops);
         const where = plan.parentId
-          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
+          ? `under "${redactSpoilers(index.byId.get(plan.parentId)?.text ?? plan.parentId)}"`
           : "at the top level";
         return `Added "${input.text}" ${where} (id: ${plan.nodeId}).`;
       }),
@@ -804,7 +804,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         );
         yield* commit(store, plan.ops);
         const where = plan.parentId
-          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
+          ? `under "${redactSpoilers(index.byId.get(plan.parentId)?.text ?? plan.parentId)}"`
           : "at the top level";
         const kind = plan.parentId ? "bullet(s)" : "top-level bullet(s)";
         return `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
@@ -897,7 +897,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             : "No change — the node(s) are already in that position.";
         }
         const where = plan.parentId
-          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}" (id: ${plan.parentId})`
+          ? `under "${redactSpoilers(index.byId.get(plan.parentId)?.text ?? plan.parentId)}" (id: ${plan.parentId})`
           : "to the top level";
         const noun = plan.parentId ? "children" : "items";
         const pos =
@@ -954,7 +954,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         );
         yield* commit(store, plan.ops);
         const where = input.parentId
-          ? `under "${index.byId.get(trueSourceOf(index, input.parentId))?.text ?? input.parentId}"`
+          ? `under "${redactSpoilers(index.byId.get(trueSourceOf(index, input.parentId))?.text ?? input.parentId)}"`
           : "at the top level";
         return `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`;
       }),
@@ -1114,7 +1114,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         );
         if (!dryRun) yield* commit(store, plan.ops);
         const landing = parentId
-          ? `under "${index.byId.get(parentId)?.text ?? parentId}" (id: ${parentId})`
+          ? `under "${redactSpoilers(index.byId.get(parentId)?.text ?? parentId)}" (id: ${parentId})`
           : "at the top level";
         return renderImportReceipt({
           report,
