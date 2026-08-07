@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/react";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { Effect, Schema } from "effect";
@@ -357,14 +358,24 @@ export function bindLunoraDailyIndex(
       // then calls `setMapping(key, winner)` unconditionally, which under Lunora
       // patches `nodeId` blindly, so the overwrite reaches every other device.
       // Rare now rather than routine, which is exactly why it needs to be
-      // observable: hence the DEV warn.
+      // observable -- and observable in PROD, since every trigger listed above
+      // is a production condition. So this reports, it does not just DEV-warn.
+      //
+      // `captureException` and not `captureMessage`: the errors-only Sentry
+      // posture (#227, decided in #156) is deliberate, and an unresolvable claim
+      // IS an error. The payload stays inside the #227 privacy rule on its own —
+      // `key` is a `localDateKey()` day string and both ids are opaque, so no
+      // user-authored outline text rides along. `captureException` is a no-op
+      // until `Sentry.init` has run (PROD only), so this is safe unconditionally.
       const row = await waitForRow(collection, key);
-      if (!row && import.meta.env.DEV) {
-        console.warn(
+      if (!row) {
+        const err = new Error(
           `[daily-index] claim row for "${key}" never became readable; ` +
             "assuming this caller won. A concurrent winner's mapping may be " +
             "overwritten. See ADR 0058.",
         );
+        Sentry.captureException(err, { extra: { key, candidate } });
+        if (import.meta.env.DEV) console.warn(err.message);
       }
       const winner = row ? String(row.nodeId) : candidate;
       return resolveDailyClaim(winner, candidate);
