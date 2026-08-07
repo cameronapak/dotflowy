@@ -347,11 +347,25 @@ export function bindLunoraDailyIndex(
       // optimistic overlay as soon as the server confirms, and the confirmed row
       // arrives from the sync stream on a LATER tick -- so for one macrotask the
       // row is in neither the overlay nor the synced base. Reading through that
-      // window returns undefined, and the `?? candidate` fallback would then
-      // report a WIN to a caller that actually lost the claim, minting a second
-      // node for a day another device already owns. Same trap as
-      // `waitForLunoraNode` in get-or-create.ts (ADR 0058).
+      // window returns undefined, and the fallback below then reports a WIN to a
+      // caller that actually lost the claim. Same trap as `waitForLunoraNode` in
+      // get-or-create.ts (ADR 0058).
+      //
+      // This NARROWS that window; it does not close it. On a stall past the
+      // timeout (backgrounded tab, reconnect, slow socket) `waitForRow` still
+      // returns undefined and the false WIN still happens -- and `claimScaffoldNode`
+      // then calls `setMapping(key, winner)` unconditionally, which under Lunora
+      // patches `nodeId` blindly, so the overwrite reaches every other device.
+      // Rare now rather than routine, which is exactly why it needs to be
+      // observable: hence the DEV warn.
       const row = await waitForRow(collection, key);
+      if (!row && import.meta.env.DEV) {
+        console.warn(
+          `[daily-index] claim row for "${key}" never became readable; ` +
+            "assuming this caller won. A concurrent winner's mapping may be " +
+            "overwritten. See ADR 0058.",
+        );
+      }
       const winner = row ? String(row.nodeId) : candidate;
       return resolveDailyClaim(winner, candidate);
     },

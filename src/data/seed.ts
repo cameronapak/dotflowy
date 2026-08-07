@@ -1,26 +1,14 @@
 import { Effect } from "effect";
 
 import {
-  isSyncReady,
   nodesCollection,
   nodesLoadError,
-  subscribeSyncReady,
+  whenNodesSyncReady,
 } from "./collection";
 import { BootstrapError } from "./errors";
 import { isLunoraSyncEnabled } from "./flags";
 import { appendChild } from "./mutations";
 import { createId, makeNode, now } from "./tree";
-
-/** Wait until the shell's sync-ready signal flips (custom DO or Lunora). */
-function waitUntilSyncReady(): Promise<void> {
-  if (isSyncReady()) return Promise.resolve();
-  return new Promise((resolve) => {
-    const unsub = subscribeSyncReady(() => {
-      unsub();
-      resolve();
-    });
-  });
-}
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
@@ -55,7 +43,7 @@ export async function bootstrapOutline(): Promise<BootstrapError | void> {
     return Effect.runPromise(
       Effect.match(
         Effect.tryPromise({
-          try: () => waitUntilSyncReady(),
+          try: () => whenNodesSyncReady(),
           catch: (cause) => new BootstrapError({ cause }),
         }),
         {

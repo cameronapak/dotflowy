@@ -107,6 +107,9 @@ export function markNodesSyncReady(): void {
  * settled. It also fires on the initial-load ERROR path, so this never hangs on
  * an unreachable server -- the caller sees the same empty-and-ready state the
  * shell renders.
+ *
+ * The single implementation of that rule. `seed.ts` and `routes/today.tsx` both
+ * call it; do not grow a private copy in a third place.
  */
 export function whenNodesSyncReady(): Promise<void> {
   if (syncReady || typeof window === "undefined") return Promise.resolve();

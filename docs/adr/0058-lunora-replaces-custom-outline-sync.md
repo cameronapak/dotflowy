@@ -46,7 +46,8 @@ A read straight through the await therefore reports a failure for a write that l
 
 - **Wait for visibility, never read straight through.** `waitForLunoraNode` in `src/plugins/daily/get-or-create.ts` and `waitForRow` in `src/plugins/daily/daily-index.ts` both subscribe to the collection and resolve when the row appears, bounded at 3s. They mirror `waitForNode` in `src/data/collection.ts`, which does the same job on the classic path; they are local because that one reads the starved `nodesCollection`.
 - **Both re-check after subscribing.** A delta applied between the first check and the subscribe would otherwise wait out the whole timeout.
-- **The claim path fails DANGEROUSLY, not merely loudly.** `claimTx` falls back to the local candidate id when the row reads as missing, so a read inside the window reports a WIN to a caller that lost the claim. That mints a second node for a day another device already owns.
+- **The claim path fails DANGEROUSLY, not merely loudly.** `claimTx` falls back to the local candidate id when the row reads as missing, so a read inside the window reports a WIN to a caller that lost the claim. `claimScaffoldNode` then calls `setMapping(key, winner)` unconditionally, which under Lunora patches `nodeId` blindly — so the false win overwrites the real winner's mapping on every other device.
+- **The wait NARROWS that window; it does not close it.** A stall past the timeout (backgrounded tab, reconnect, slow socket) still produces the false win. Closing it needs a server-authoritative read, which is follow-up work. Until then the timeout path logs a DEV warn, because a rare silent corruption is harder to find than a routine one.
 
 ## Identity / e2e / kv (locked)
 
