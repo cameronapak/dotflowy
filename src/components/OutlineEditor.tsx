@@ -31,13 +31,14 @@ import { toast } from "sonner";
 import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { echoedTextFor, nodesCollection } from "../data/collection";
+import { echoedTextFor } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop } from "../data/history";
 import { planJoinPrevious } from "../data/join-previous";
 import { hasLink } from "../data/links";
+import { getLiveNodes } from "../data/live-nodes";
 import {
   indent,
   insertChildAtStart,
@@ -448,10 +449,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           // leaves it unrendered -- pendingFlash then harmlessly no-ops. RECOMPUTE
           // the filter against the post-move tree (getViewFilter()'s visibleIds
           // is the pre-move set, so it can't answer this), then toast so the move
-          // isn't silent. Fresh index off the live collection, the focusKeyFor /
+          // isn't silent. Fresh index off the live store, the focusKeyFor /
           // paste-resolveSeam technique (getTreeIndex()'s notify can lag).
+          // getLiveNodes(), never nodesCollection: that collection is
+          // ready-and-empty while the Lunora flag is ON (ADR 0058), so a direct
+          // read yields an index with NO visible ids and every filtered drag
+          // toasts "hidden by the current filter" even when the row is on screen.
           if (getViewFilter()) {
-            const fresh = buildTreeIndex(nodesCollection.toArray as Node[]);
+            const fresh = buildTreeIndex(getLiveNodes());
             const recomputed = buildViewFilter(fresh, viewCtx, isHidden);
             // The render gates a row's filter-visibility on its CONTENT id (a
             // mirror instance is shown iff its source is in visibleIds, ADR

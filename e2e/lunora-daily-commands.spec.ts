@@ -28,6 +28,10 @@ import { seedOutlineLunora, type SeedNode } from "./fixtures";
  * (`isPersisted` resolves before the shape poke applies the rows, so the
  * post-persist `hasNode` check fails and `getOrCreateDay` returns null).
  *
+ * The last describe covers the same root cause in the editor's post-move filter
+ * recheck (`OutlineEditor.tsx`), which read that same starved collection and so
+ * toasted "hidden by the current filter" on every filtered drag under Lunora.
+ *
  * Run: `bunx playwright test e2e/lunora-daily-commands.spec.ts`
  */
 
@@ -216,5 +220,142 @@ test.describe("daily commands (Lunora flag ON)", () => {
     await expect(text(page, "c")).toBeVisible();
     // The day note survives too.
     await expect(row(page, TODAY_ID)).toHaveCount(1);
+  });
+});
+
+// --- the editor's post-move filter recheck ----------------------------------
+
+// Pointer simulation, `settle()` and `rowBox()` are borrowed from
+// e2e/drag-filtered.spec.ts, whose own tests carry `test.skip(isE2eLunora())`
+// because they await the classic /api/nodes POST.
+
+const rowBox = async (page: Page, id: string) => {
+  const box = await page.locator(`li[data-node-id="${id}"]`).boundingBox();
+  if (!box) throw new Error(`row ${id} has no box`);
+  return box;
+};
+
+/** Let the window virtualizer flush its row measurements. The drag projects its
+ *  drop gaps from those measurements, not the DOM, so an unmeasured row rect
+ *  shifts the projection by a row (ADR 0019). */
+const settle = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => r())),
+      ),
+  );
+
+/** The rendered order of mounted rows, by the virtualizer's flat index. */
+const visibleOrder = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll("li[data-node-id]"))
+      .map((li) => ({
+        id: (li as HTMLElement).dataset.nodeId!,
+        index: Number((li as HTMLElement).dataset.index),
+      }))
+      .sort((x, y) => x.index - y.index)
+      .map((r) => r.id),
+  );
+
+/**
+ * Append-only ledger of every toast that ever mounted.
+ *
+ * `expect(toastLocator).toHaveCount(0)` is NOT a "no toast" assertion: it
+ * RETRIES, so it goes green the moment a toast that really did fire
+ * auto-dismisses four seconds later. The pre-fix build passed exactly that way.
+ * A toast is a transient, so pin it with a record instead of a live query.
+ */
+async function recordToasts(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { __e2eToasts: string[] }).__e2eToasts = seen;
+    const scan = () => {
+      for (const el of document.querySelectorAll("[data-sonner-toast]")) {
+        const t = (el as HTMLElement).innerText.trim();
+        if (t && !seen.includes(t)) seen.push(t);
+      }
+    };
+    const start = () => {
+      scan();
+      new MutationObserver(scan).observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    };
+    if (document.body) start();
+    else document.addEventListener("DOMContentLoaded", start);
+  });
+}
+
+const toastLedger = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __e2eToasts?: string[] }).__e2eToasts ?? [],
+  );
+
+test.describe("filtered drag recheck (Lunora flag ON)", () => {
+  test("a drag that lands the row still visible does not toast", async ({
+    page,
+  }) => {
+    // Real top-level order: S1, S2, V1, H1, H2, V2, X. Under #go the untagged
+    // H1/H2 are pruned, leaving S1, S2, V1, V2, X. The S1/S2 spacers keep the
+    // target V1/V2 gap below the top-edge auto-scroll band.
+    const tree: SeedNode[] = [
+      { id: "S1", parentId: null, prevSiblingId: null, text: "spacer1 #go" },
+      { id: "S2", parentId: null, prevSiblingId: "S1", text: "spacer2 #go" },
+      { id: "V1", parentId: null, prevSiblingId: "S2", text: "visible1 #go" },
+      { id: "H1", parentId: null, prevSiblingId: "V1", text: "hidden1" },
+      { id: "H2", parentId: null, prevSiblingId: "H1", text: "hidden2" },
+      { id: "V2", parentId: null, prevSiblingId: "H2", text: "visible2 #go" },
+      { id: "X", parentId: null, prevSiblingId: "V2", text: "mover #go" },
+    ];
+    await seedOutlineLunora(page, tree);
+    await recordToasts(page);
+    await page.goto(`/?q=${encodeURIComponent("#go")}`);
+    await expect(row(page, "V1")).toBeVisible({ timeout: 15_000 });
+    // Sanity: the untagged siblings really are pruned, so a filter IS active
+    // and the post-move recheck really does run.
+    await expect(row(page, "H1")).toHaveCount(0);
+    await expect(row(page, "H2")).toHaveCount(0);
+    await settle(page);
+
+    const bullet = page.locator('li[data-node-id="X"] .bullet');
+    const from = await bullet.boundingBox();
+    if (!from) throw new Error("no bullet box");
+    const startX = from.x + from.width / 2;
+    const startY = from.y + from.height / 2;
+
+    // Drop in the gap between the two VISIBLE rows V1 and V2, at depth 0. X
+    // stays a top-level `#go` match, so it is still in the filter's visible set
+    // and the recheck must stay quiet. Aim a quarter-row into V2 so a sub-pixel
+    // wobble can't flip the gap one row up.
+    const v2 = await rowBox(page, "V2");
+    const dropY = v2.y + Math.min(8, v2.height / 4);
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 10, startY + 10, { steps: 3 });
+    await page.mouse.move(startX, dropY, { steps: 5 });
+    await page.mouse.up();
+
+    // The move landed: X now sits right after the visible predecessor V1.
+    await expect
+      .poll(() => visibleOrder(page), { timeout: 15_000 })
+      .toEqual(["S1", "S2", "V1", "X", "V2"]);
+
+    // Give a spurious toast a bounded window to mount ...
+    await page
+      .locator("[data-sonner-toast]")
+      .first()
+      .waitFor({ state: "attached", timeout: 2_000 })
+      .catch(() => {});
+    // ... then read the ledger. Before the fix the recheck built its index from
+    // the ready-and-empty `nodesCollection`, so `visibleIds` held nothing and
+    // this toast fired on every filtered drag.
+    expect((await toastLedger(page)).join(" | ")).not.toContain(
+      "hidden by the current filter",
+    );
+    // X is a match, so it stays rendered under the filter.
+    await expect(row(page, "X")).toBeVisible();
   });
 });
