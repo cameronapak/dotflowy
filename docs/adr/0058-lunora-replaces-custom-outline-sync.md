@@ -33,9 +33,20 @@ Dotflowy’s hand-rolled per-user DO sync (`/api/sync` + client-planned `{ops}` 
 
 - **Every live-node read goes through `getLiveNodes()`** (`src/data/live-nodes.ts`). It branches on the flag and maps Lunora `wholeOutline` rows into wire-shaped `Node[]`. The tree store is fed the same way, so `getTreeIndex()` is correct on both paths.
 - **Two failures follow from reading the starved collection.** An empty index handed to `mirrorNode` misses its source and returns `null`, which surfaced as "Can't mirror that into Today." An empty index handed to `capture()` stores a zero-node undo point, and the next undo classifies every live node as a delete.
-- **oxlint enforces the rule.** `no-restricted-imports` bans the `nodesCollection` import name in `src/plugins/**` and `src/components/**`. An oxlint override replaces a rule's config rather than merging it, so the plugin ban shares one block with the ADR 0031 kit ban. `src/components/**` gets its own block, because the two globs are disjoint.
+- **oxlint enforces the rule.** `no-restricted-imports` bans the `nodesCollection` import name in `src/plugins/**`, `src/components/**`, and `src/routes/**`. An oxlint override replaces a rule's config rather than merging it, so the plugin ban shares one block with the ADR 0031 kit ban. The other two globs get their own blocks, because all three globs are disjoint.
+- **Readiness is a second, separate trap.** `nodesCollection.toArrayWhenReady()` waits on the COLLECTION's own readiness, which the flag-ON adapter satisfies immediately. The wait therefore resolves instantly and gates nothing. Await `whenNodesSyncReady()` (`src/data/collection.ts`) instead. It rides the module-level `syncReady` signal, which the classic socket fires on its first frame and the Lunora bootstrap fires once `wholeOutline` has landed. That signal also fires on the initial-load error path, so the wait cannot hang. `src/routes/today.tsx` shipped with the broken wait, and ran `getOrCreateDay` against an outline that had not loaded.
 - **Three component files are excluded, because they write.** `delete-confirm-dialog.tsx`, `opml-import-dialog.tsx`, and `markdown-paste.ts` call `.insert()`, `.update()`, or `.delete()` behind an `isLunoraSyncEnabled()` gate. The rule cannot tell a read from a write, so the exclusion list carries that distinction.
 - **`capture()` refuses an empty index** (`src/data/history.ts`) and logs in DEV. A refusal leaves `redoStack` intact, and the matching `drop()` no-ops instead of popping an unrelated entry.
+
+## Reading a row back after `isPersisted` (locked)
+
+**`await tx.isPersisted.promise` does not make the mutator's own rows readable.** TanStack DB drops a mutator's optimistic overlay the moment the server confirms the write, and the confirmed rows arrive from the sync stream on a LATER tick. That leaves a window, one macrotask wide, in which the just-written row sits in neither the overlay nor the synced base. Measured on the day-creation path: `hasNode(dayId)` reads true before the await, false immediately after it, and true again one macrotask later.
+
+A read straight through the await therefore reports a failure for a write that landed. On the daily path that surfaced as "Couldn't open today's daily note" for every user whose day note did not already exist, which is every user, once a day.
+
+- **Wait for visibility, never read straight through.** `waitForLunoraNode` in `src/plugins/daily/get-or-create.ts` and `waitForRow` in `src/plugins/daily/daily-index.ts` both subscribe to the collection and resolve when the row appears, bounded at 3s. They mirror `waitForNode` in `src/data/collection.ts`, which does the same job on the classic path; they are local because that one reads the starved `nodesCollection`.
+- **Both re-check after subscribing.** A delta applied between the first check and the subscribe would otherwise wait out the whole timeout.
+- **The claim path fails DANGEROUSLY, not merely loudly.** `claimTx` falls back to the local candidate id when the row reads as missing, so a read inside the window reports a WIN to a caller that lost the claim. That mints a second node for a day another device already owns.
 
 ## Identity / e2e / kv (locked)
 

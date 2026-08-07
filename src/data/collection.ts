@@ -95,6 +95,29 @@ export function markNodesSyncReady(): void {
   markSyncReady();
 }
 
+/**
+ * Resolve once the outline is ready to read, on EITHER sync path.
+ *
+ * Never `await nodesCollection.toArrayWhenReady()` for this. That waits on the
+ * COLLECTION's own readiness, and this collection's sync adapter calls
+ * `markReady()` and returns immediately while the Lunora flag is ON (ADR 0058),
+ * so the wait resolves instantly and gates nothing. `syncReady` is the
+ * flag-agnostic signal: the classic socket fires it on its first frame, and the
+ * Lunora bootstrap fires it once `wholeOutline` has landed and auto-migrate has
+ * settled. It also fires on the initial-load ERROR path, so this never hangs on
+ * an unreachable server -- the caller sees the same empty-and-ready state the
+ * shell renders.
+ */
+export function whenNodesSyncReady(): Promise<void> {
+  if (syncReady || typeof window === "undefined") return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const unsub = subscribeSyncReady(() => {
+      unsub();
+      resolve();
+    });
+  });
+}
+
 /** Force the outline to reconcile against server truth now (a fresh snapshot).
  *  Used by the daily plugin's claim loser-path; a no-op before the socket
  *  connects (or during the `/` prerender). */

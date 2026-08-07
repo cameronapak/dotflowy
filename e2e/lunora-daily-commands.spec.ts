@@ -41,6 +41,66 @@ const text = (page: Page, id: string) =>
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"]`);
 
+/**
+ * Append-only ledger of every toast that ever mounted.
+ *
+ * `expect(toastLocator).toHaveCount(0)` is NOT a "no toast" assertion: it
+ * RETRIES, so it goes green the moment a toast that really did fire
+ * auto-dismisses four seconds later. The pre-fix build passed exactly that way.
+ * A toast is a transient, so pin it with a record instead of a live query.
+ *
+ * Must be installed BEFORE `page.goto` -- `addInitScript` runs per navigation.
+ */
+async function recordToasts(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { __e2eToasts: string[] }).__e2eToasts = seen;
+    const scan = () => {
+      for (const el of document.querySelectorAll("[data-sonner-toast]")) {
+        const t = (el as HTMLElement).innerText.trim();
+        if (t && !seen.includes(t)) seen.push(t);
+      }
+    };
+    const start = () => {
+      scan();
+      new MutationObserver(scan).observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    };
+    if (document.body) start();
+    else document.addEventListener("DOMContentLoaded", start);
+  });
+}
+
+const toastLedger = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __e2eToasts?: string[] }).__e2eToasts ?? [],
+  );
+
+/** Assert no toast whose text matches `re` has EVER mounted. */
+async function expectNoToast(page: Page, re: RegExp): Promise<void> {
+  expect((await toastLedger(page)).filter((t) => re.test(t))).toEqual([]);
+}
+
+/** Put the caret at the end of a bullet through the Selection API. `.click()`
+ *  can land on a chip or past the text, and macOS Chromium's Home/End/arrow
+ *  keys are unreliable in a contentEditable (AGENTS.md). */
+async function caretAtEnd(page: Page, id: string): Promise<void> {
+  await text(page, id).evaluate((el) => {
+    (el as HTMLElement).focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+  await expect(text(page, id)).toBeFocused();
+}
+
 const DAY_KEY = localDateKey();
 const CHAIN = dayKeyToScaffoldChain(DAY_KEY)!;
 
@@ -111,6 +171,7 @@ const DAILY_KV = {
 
 async function load(page: Page): Promise<void> {
   await seedOutlineLunora(page, TREE, { kv: DAILY_KV });
+  await recordToasts(page);
   await page.goto("/");
   await expect(text(page, "a")).toBeVisible({ timeout: 15_000 });
   // The badge only renders once the daily index has synced, which is what makes
@@ -120,11 +181,11 @@ async function load(page: Page): Promise<void> {
   ).toBeAttached({ timeout: 15_000 });
 }
 
-/** Focus a bullet and open the `/` menu. The leading space makes `detectSlash`
- *  fire (same shape as move-dialog.spec / daily-notes.spec). */
+/** Focus a bullet and open the `/` menu. `detectSlash` reads the source text
+ *  BEFORE the caret, so the caret has to be at the end and the leading space is
+ *  what makes the `/` a command rather than part of a word. */
 async function openSlash(page: Page, id: string, query: string): Promise<void> {
-  await text(page, id).click();
-  await expect(text(page, id)).toBeFocused();
+  await caretAtEnd(page, id);
   await page.keyboard.type(` /${query}`);
   await expect(page.getByRole("listbox")).toBeVisible();
 }
@@ -138,13 +199,12 @@ test.describe("daily commands (Lunora flag ON)", () => {
     await openSlash(page, "a", "mirror");
     await page.getByRole("option", { name: /Mirror to Today/ }).click();
 
-    // The bug's signature was this toast firing every time.
-    await expect(page.getByText("Can't mirror that into Today.")).toHaveCount(
-      0,
-    );
     await expect(page.getByText("Mirrored to Today")).toBeVisible({
       timeout: 15_000,
     });
+    // The bug's signature was this toast firing every time. Read the ledger,
+    // not a live locator -- see recordToasts.
+    await expectNoToast(page, /Can't mirror that into Today/);
 
     const mirror = page.locator('li[data-mirror="instance"]');
     await expect(mirror).toHaveCount(1);
@@ -161,8 +221,7 @@ test.describe("daily commands (Lunora flag ON)", () => {
   }) => {
     await load(page);
 
-    await text(page, "a").click();
-    await expect(text(page, "a")).toBeFocused();
+    await caretAtEnd(page, "a");
     await page.keyboard.press("Shift+ArrowDown"); // enter selection -> [a]
     await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
@@ -207,8 +266,7 @@ test.describe("daily commands (Lunora flag ON)", () => {
 
     // Undo from an untouched sibling. A zero-node capture would make this
     // restore classify EVERY live node as a delete and wipe the outline.
-    await text(page, "b").click();
-    await expect(text(page, "b")).toBeFocused();
+    await caretAtEnd(page, "b");
     await page.keyboard.press("ControlOrMeta+z");
 
     // Alpha is back at the top level ...
@@ -220,6 +278,51 @@ test.describe("daily commands (Lunora flag ON)", () => {
     await expect(text(page, "c")).toBeVisible();
     // The day note survives too.
     await expect(row(page, TODAY_ID)).toHaveCount(1);
+  });
+
+  /**
+   * The day-CREATION branch: no day note, no daily index, so `getOrCreateDay`
+   * has to run `materializeNewDayLunora` before the mirror can land.
+   *
+   * This is the first daily command of a new day, which is the most common way
+   * a user meets #325. The other tests seed the day, so without this one the
+   * whole `claimDailyMapping` -> `materializeDailyNodes` -> post-persist
+   * `hasNode` sequence is untested on the Lunora path.
+   */
+  test("Mirror to Today creates the day note when none exists yet", async ({
+    page,
+  }) => {
+    const bare: SeedNode[] = [
+      { id: "a", parentId: null, prevSiblingId: null, text: "Alpha" },
+      { id: "b", parentId: null, prevSiblingId: "a", text: "Bravo" },
+    ];
+    await seedOutlineLunora(page, bare);
+    await recordToasts(page);
+    await page.goto("/");
+    await expect(text(page, "a")).toBeVisible({ timeout: 15_000 });
+
+    await openSlash(page, "a", "mirror");
+    await page.getByRole("option", { name: /Mirror to Today/ }).click();
+
+    await expect(page.getByText("Mirrored to Today")).toBeVisible({
+      timeout: 15_000,
+    });
+    // getOrCreateDay returning null is the failure this pins: the command bails
+    // before it ever reaches mirrorNode, so the user gets a generic toast.
+    await expectNoToast(page, /Couldn't open today's daily note/);
+    await expectNoToast(page, /Can't mirror that into Today/);
+
+    // The scaffold materialized: Daily > YYYY > Month > Week > today.
+    const day = page.locator(`li:has(> .outline-row [data-daily-today])`);
+    await expect(day).toHaveCount(1);
+    const mirror = page.locator('li[data-mirror="instance"]');
+    await expect(mirror).toHaveCount(1);
+    await expect(mirror.locator("> .outline-row .node-text")).toContainText(
+      "Alpha",
+    );
+    // The mirror is a child of the day note, not a stray top-level bullet.
+    const dayId = await day.getAttribute("data-node-id");
+    await expect(mirror).toHaveAttribute("data-parent-id", dayId!);
   });
 });
 
@@ -256,42 +359,6 @@ const visibleOrder = (page: Page) =>
       }))
       .sort((x, y) => x.index - y.index)
       .map((r) => r.id),
-  );
-
-/**
- * Append-only ledger of every toast that ever mounted.
- *
- * `expect(toastLocator).toHaveCount(0)` is NOT a "no toast" assertion: it
- * RETRIES, so it goes green the moment a toast that really did fire
- * auto-dismisses four seconds later. The pre-fix build passed exactly that way.
- * A toast is a transient, so pin it with a record instead of a live query.
- */
-async function recordToasts(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const seen: string[] = [];
-    (window as unknown as { __e2eToasts: string[] }).__e2eToasts = seen;
-    const scan = () => {
-      for (const el of document.querySelectorAll("[data-sonner-toast]")) {
-        const t = (el as HTMLElement).innerText.trim();
-        if (t && !seen.includes(t)) seen.push(t);
-      }
-    };
-    const start = () => {
-      scan();
-      new MutationObserver(scan).observe(document.body, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-    };
-    if (document.body) start();
-    else document.addEventListener("DOMContentLoaded", start);
-  });
-}
-
-const toastLedger = (page: Page) =>
-  page.evaluate(
-    () => (window as unknown as { __e2eToasts?: string[] }).__e2eToasts ?? [],
   );
 
 test.describe("filtered drag recheck (Lunora flag ON)", () => {

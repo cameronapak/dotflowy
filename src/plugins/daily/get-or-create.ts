@@ -88,6 +88,45 @@ function hasNode(id: string): boolean {
   return getLiveNodes().some((n) => n.id === id);
 }
 
+/**
+ * Resolve once `id` is readable from the Lunora collection, or false on timeout.
+ *
+ * `await tx.isPersisted.promise` is NOT enough on its own. TanStack DB drops a
+ * mutator's optimistic overlay the moment the server confirms the write, and the
+ * confirmed rows arrive from the sync stream on a LATER tick -- so there is a
+ * window, one macrotask wide, in which the row this mutator just wrote is in
+ * neither the overlay nor the synced base. Measured on the day-creation path:
+ * `hasNode()` reads true before the await, false immediately after it, and true
+ * again one macrotask later. Reading straight through the await therefore
+ * reports a failure for a write that in fact landed.
+ *
+ * Mirrors `waitForNode` in `data/collection.ts`, which does the same job on the
+ * classic path. Kept local because that one reads `nodesCollection`, which is
+ * ready-and-empty while the Lunora flag is ON (ADR 0058).
+ */
+function waitForLunoraNode(id: string, timeoutMs = 3000): Promise<boolean> {
+  if (hasNode(id)) return Promise.resolve(true);
+  const lunora = getLunoraOutlineContext();
+  if (!lunora) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      sub.unsubscribe();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(hasNode(id)), timeoutMs);
+    const sub = lunora.store.collection.subscribeChanges(() => {
+      if (hasNode(id)) finish(true);
+    });
+    // Guard the registration gap: a delta applied between the check above and
+    // the subscribe would otherwise wait out the full timeout.
+    if (hasNode(id)) finish(true);
+  });
+}
+
 /** One atomic claim for a scaffold/day key: the authoritative id, whether this
  *  caller won it, and whether its node row is already local. The fast path (a
  *  known-and-present mapping) skips the network round-trip entirely. */
@@ -402,7 +441,7 @@ async function materializeNewDayLunora(args: {
   } catch (err) {
     return { id: null, cause: err };
   }
-  if (hasNode(args.day.id)) return { id: args.day.id };
+  if (await waitForLunoraNode(args.day.id)) return { id: args.day.id };
   resyncNodes();
   return { id: null, cause: null };
 }

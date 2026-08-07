@@ -53,6 +53,23 @@
           }
         ]
       }
+    },
+    {
+      "files": ["src/routes/**/*.ts", "src/routes/**/*.tsx"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/data/collection", "@/data/collection"],
+                "importNames": ["nodesCollection"],
+                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes), and wait for sync with whenNodesSyncReady() -- NOT nodesCollection.toArrayWhenReady(), which resolves instantly while the Lunora flag is ON (ADR 0058)."
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "env": {

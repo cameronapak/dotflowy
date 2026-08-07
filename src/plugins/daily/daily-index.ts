@@ -270,21 +270,53 @@ function rebuild() {
   rebuildFrom(dailyIndexCollection.toArray);
 }
 
+/** The slice of a TanStack DB collection this module reads. */
+interface DailyIndexCollectionLike {
+  has: (key: string) => boolean;
+  get: (key: string) => DailyIndexRowDocLike | undefined;
+  toArray: DailyIndexRowDocLike[];
+  subscribeChanges: (
+    cb: () => void,
+    opts?: { includeInitialState?: boolean },
+  ) => { unsubscribe: () => void };
+}
+
+/** Resolve once `key` is readable, or undefined on timeout. See the call site
+ *  for why an immediate read after `isPersisted` is not safe. */
+function waitForRow(
+  collection: DailyIndexCollectionLike,
+  key: string,
+  timeoutMs = 3000,
+): Promise<DailyIndexRowDocLike | undefined> {
+  const now = collection.get(key);
+  if (now) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (row: DailyIndexRowDocLike | undefined) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      sub.unsubscribe();
+      resolve(row);
+    };
+    const timer = setTimeout(() => finish(collection.get(key)), timeoutMs);
+    const sub = collection.subscribeChanges(() => {
+      const row = collection.get(key);
+      if (row) finish(row);
+    });
+    // Guard the registration gap (a delta applied between the check and subscribe).
+    const raced = collection.get(key);
+    if (raced) finish(raced);
+  });
+}
+
 /**
  * Called from `lunora-sync` when flag ON — subscribe to the Lunora shape and
  * skip `/api/kv` for this collection. `claim` must await the watermark so the
  * authoritative winner is readable from the local collection afterward.
  */
 export function bindLunoraDailyIndex(
-  collection: {
-    has: (key: string) => boolean;
-    get: (key: string) => DailyIndexRowDocLike | undefined;
-    toArray: DailyIndexRowDocLike[];
-    subscribeChanges: (
-      cb: () => void,
-      opts?: { includeInitialState?: boolean },
-    ) => { unsubscribe: () => void };
-  },
+  collection: DailyIndexCollectionLike,
   writes: {
     upsert: (key: string, nodeId: string) => void;
     claimTx: (
@@ -311,7 +343,15 @@ export function bindLunoraDailyIndex(
       }
       const tx = writes.claimTx(key, candidate);
       await tx.isPersisted.promise;
-      const row = collection.get(key);
+      // NOT a plain `collection.get(key)` here. TanStack DB drops the mutator's
+      // optimistic overlay as soon as the server confirms, and the confirmed row
+      // arrives from the sync stream on a LATER tick -- so for one macrotask the
+      // row is in neither the overlay nor the synced base. Reading through that
+      // window returns undefined, and the `?? candidate` fallback would then
+      // report a WIN to a caller that actually lost the claim, minting a second
+      // node for a day another device already owns. Same trap as
+      // `waitForLunoraNode` in get-or-create.ts (ADR 0058).
+      const row = await waitForRow(collection, key);
       const winner = row ? String(row.nodeId) : candidate;
       return resolveDailyClaim(winner, candidate);
     },

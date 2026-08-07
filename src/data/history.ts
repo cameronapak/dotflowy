@@ -73,8 +73,12 @@ function snapshot(index: TreeIndex): Node[] {
  * Cmd+Z away from wiping the outline. That only ever happens when the caller
  * read a starved node source: `nodesCollection` is ready-and-empty for the
  * whole session while the Lunora flag is ON (ADR 0058), so it reads as a
- * legitimately empty outline. An outline that is genuinely empty has nothing
- * to undo, so refusing costs a real user nothing.
+ * legitimately empty outline.
+ *
+ * The cost on a GENUINELY empty outline is one lost undo step: a user who
+ * empties their outline and then types the first bullet cannot Cmd+Z back to
+ * empty. Near-zero, not zero, and the right side of the trade -- the failure it
+ * replaces silently deletes everything the user has.
  */
 export function capture(
   index: TreeIndex,
