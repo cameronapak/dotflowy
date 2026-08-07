@@ -270,3 +270,4 @@ Known traps:
 - Migration must finish KV independently of nodes. Daily identity lives in `daily-index` KV, so a nodes-only migrate leaves Daily empty. Completion is the Lunora `migrateState` pair, `nodesAt` and `kvAt`. Stamp `nodesAt` only after the full classic node import.
 - Every mutator patch, delete, and get must pass `expectedTable`. An unscoped id lookup builds `UNION ALL` across the shard tables and hits the compound-SELECT limit in Workerd SQLite.
 - Remigrate inserts missing rows only. It does not rewrite any `parentId`, so orphaned daily nodes need a reattach heal.
+- `nodesCollection.toArray` is `[]` while the flag is on, and it never errors. Read live nodes through `getLiveNodes()`. A direct read builds an empty tree index, which fails `mirrorNode` and turns a captured undo point into delete-everything. oxlint bans that import in `src/plugins/**` and `src/components/**`, minus three files that write to it.

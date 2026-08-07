@@ -27,6 +27,16 @@ Dotflowy’s hand-rolled per-user DO sync (`/api/sync` + client-planned `{ops}` 
 | Big-bang rewrite in one commit                                               | Editor + e2e + MCP + backups all break together; no incremental proof.     |
 | Replace Better Auth / Stripe / unfurl with Lunora primitives in the same cut | Out of scope — remount HTTP; don’t re-litigate identity/billing.           |
 
+## Reading live nodes (locked)
+
+**With the flag ON, `nodesCollection` is ready and empty.** Its sync adapter calls `markReady()` and returns before it opens a socket, so `nodesCollection.toArray` is `[]` for the whole session. The collection never enters `loading` and never errors, so a direct read looks like a legitimately empty outline. `buildTreeIndex([])` does not throw either. It returns an index whose `byId.has(anything)` is `false`.
+
+- **Every live-node read goes through `getLiveNodes()`** (`src/data/live-nodes.ts`). It branches on the flag and maps Lunora `wholeOutline` rows into wire-shaped `Node[]`. The tree store is fed the same way, so `getTreeIndex()` is correct on both paths.
+- **Two failures follow from reading the starved collection.** An empty index handed to `mirrorNode` misses its source and returns `null`, which surfaced as "Can't mirror that into Today." An empty index handed to `capture()` stores a zero-node undo point, and the next undo classifies every live node as a delete.
+- **oxlint enforces the rule.** `no-restricted-imports` bans the `nodesCollection` import name in `src/plugins/**` and `src/components/**`. An oxlint override replaces a rule's config rather than merging it, so the plugin ban shares one block with the ADR 0031 kit ban. `src/components/**` gets its own block, because the two globs are disjoint.
+- **Three component files are excluded, because they write.** `delete-confirm-dialog.tsx`, `opml-import-dialog.tsx`, and `markdown-paste.ts` call `.insert()`, `.update()`, or `.delete()` behind an `isLunoraSyncEnabled()` gate. The rule cannot tell a read from a write, so the exclusion list carries that distinction.
+- **`capture()` refuses an empty index** (`src/data/history.ts`) and logs in DEV. A refusal leaves `redoStack` intact, and the matching `drop()` no-ops instead of popping an unrelated entry.
+
 ## Identity / e2e / kv (locked)
 
 - **Identity:** product Better Auth stays the session authority (MCP OAuth, Stripe, invite/Turnstile). Lunora `resolveIdentity` reads that session — do **not** run a second `@lunora/auth` signup stack in the main app.
