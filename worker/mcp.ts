@@ -15,8 +15,10 @@
  * (`Schema.toJsonSchemaDocument`), so the contract `tools/list` publishes and
  * the validator `tools/call` enforces are the same value (ADR 0014's rule).
  * JSON-RPC-level failures (parse, bad request, unknown method/tool, bad args)
- * map to typed error responses; tool-level refusals surface as `isError` tool
- * results; unexpected defects (DO faults) collapse to -32603 without leaking.
+ * map to typed error responses; tool-level refusals and store faults surface
+ * as `isError` tool results carrying their real reason (the caller is the
+ * store owner's own agent); only unexpected non-store defects collapse
+ * to -32603.
  */
 
 import { Effect, Schema } from "effect";

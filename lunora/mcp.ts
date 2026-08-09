@@ -48,12 +48,13 @@ function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {
 }
 
 async function commitPlan(ctx: MutationCtx, plan: OutlinePlan): Promise<void> {
-  // Write through the per-table facade (`ctx.db.nodes`), never the bare
-  // `ctx.db.delete`/`ctx.db.patch`. The facade forwards its table name as
-  // `expectedTable`, which scopes the runtime id lookup to one table. `asId`
-  // is compile-time branding only — a bare-id write still resolves the id via
-  // UNION ALL across every shard table and trips Workerd SQLite's
-  // compound-SELECT limit ("too many terms in compound SELECT").
+  // Write through the per-table facade (`ctx.db.nodes`), which forwards its
+  // table name as `expectedTable` and scopes the runtime id lookup to one
+  // table. The bare `ctx.db.delete`/`ctx.db.patch` are safe only with an
+  // explicit positional `expectedTable` (mutators.ts uses that form). Without
+  // it the lookup builds a UNION ALL across every shard table and trips
+  // Workerd SQLite's compound-SELECT limit ("too many terms in compound
+  // SELECT"). `asId` is compile-time branding only and does not scope.
   for (const id of plan.deletes) {
     await ctx.db.nodes.delete(id as Id<"nodes">);
   }

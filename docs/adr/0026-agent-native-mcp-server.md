@@ -32,8 +32,12 @@ pipeline, `Data.TaggedError`-free because every failure IS a well-formed JSON-RP
 extended to tools).** Each tool's input contract is an Effect Schema; `tools/list` publishes
 `Schema.toJsonSchemaDocument(input)` and `tools/call` decodes against the same value, so the contract
 an agent reads and the gate its arguments pass can't drift. Tool-level refusals (protected node, mirror
-cycle, missing id) surface as `isError` tool results — inside the protocol, where the agent can read
-and react to them; DO faults collapse to a bare `-32603` so internals never leak.
+cycle, missing id) and store faults surface as `isError` tool results — inside the protocol, where the
+agent can read and react to them, carrying their real reason. (Amended 2026-08-08: store faults
+originally collapsed to a bare `-32603` "so internals never leak", which hid a whole class of shard
+failures from the one agent able to report them. The endpoint serves a single bearer-authenticated
+user whose store is scoped to their own DO or Lunora shard, so there is no cross-tenant reader to
+hide internals from.) Only unexpected non-store defects still collapse to a bare `-32603`.
 
 **Writes are planned purely, committed atomically.** `worker/outline-ops.ts` is the Worker-side twin of
 the client's `mutations.ts`: pure functions from a snapshot `TreeIndex` to a `ChangeOp[]` batch, with
