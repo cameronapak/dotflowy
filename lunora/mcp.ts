@@ -6,6 +6,8 @@
  * editor keeps using fine-grained mutators; MCP keeps outline-ops planners.
  */
 
+import type { Id } from "./_generated/dataModel";
+
 import {
   docToNode,
   nodeToInsertFields,
@@ -46,15 +48,18 @@ function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {
 }
 
 async function commitPlan(ctx: MutationCtx, plan: OutlinePlan): Promise<void> {
+  // Write through the per-table facade (`ctx.db.nodes`), never the bare
+  // `ctx.db.delete`/`ctx.db.patch`. The facade forwards its table name as
+  // `expectedTable`, which scopes the runtime id lookup to one table. `asId`
+  // is compile-time branding only — a bare-id write still resolves the id via
+  // UNION ALL across every shard table and trips Workerd SQLite's
+  // compound-SELECT limit ("too many terms in compound SELECT").
   for (const id of plan.deletes) {
-    // asId scopes the delete to `nodes` (avoids cross-table UNION ALL lookup —
-    // Workerd SQLite compound-SELECT limit). MutationCtx's typed delete/patch
-    // take no expectedTable arg; mutators pass it because MutatorCtx is looser.
-    await ctx.db.delete(ctx.db.asId("nodes", id));
+    await ctx.db.nodes.delete(id as Id<"nodes">);
   }
   for (const patch of plan.patches) {
-    await ctx.db.patch(
-      ctx.db.asId("nodes", patch.id),
+    await ctx.db.nodes.patch(
+      patch.id as Id<"nodes">,
       patch.fields as Record<string, unknown>,
     );
   }
@@ -132,7 +137,10 @@ export const claimDailyMapping = internalMutation
       existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
     const { winner, won } = resolveDailyClaim(current, args.nodeId);
     if (existing) {
-      await ctx.db.patch(ctx.db.asId("dailyIndex", existing._id), {
+      // Facade patch, not bare `ctx.db.patch` — see commitPlan. This site is
+      // the one every date-resolving MCP tool hits (the "container" key always
+      // exists after first use), so an unscoped patch here broke them all.
+      await ctx.db.dailyIndex.patch(existing._id as Id<"dailyIndex">, {
         nodeId: winner,
         touchedAt: args.touchedAt,
       });

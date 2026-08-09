@@ -847,17 +847,21 @@ describe("MCP tools", () => {
     expect(toolText(scoped)).toContain('<outline text="child 0" />');
   });
 
-  test("a store fault becomes -32603 without leaking internals", async () => {
+  test("a store fault surfaces as a tool error with the real message", async () => {
+    // Store faults used to become protocol-level -32603 "internal error",
+    // which hid the Lunora shard's compound-SELECT failure behind a generic
+    // message. They now match commit(): an isError tool result carrying the
+    // store's own diagnostic (the caller is the shard owner's own agent).
     const broken: OutlineStore = {
       getNodes: () => {
-        throw new Error("secret D1 connection string");
+        throw new Error("too many terms in compound SELECT: SQLITE_ERROR");
       },
       applyBatch: () => 0,
       getKv: () => [],
       getOrCreateKv: () => ({}),
     };
     const json = await callTool(broken, "get_outline", {});
-    expect(json.error?.code).toBe(-32603);
-    expect(JSON.stringify(json)).not.toContain("secret");
+    expect(json.result?.isError).toBe(true);
+    expect(toolText(json)).toContain("too many terms in compound SELECT");
   });
 });

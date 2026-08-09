@@ -109,8 +109,20 @@ export interface ToolDef {
 
 // --- Shared plumbing ----------------------------------------------------------
 
-const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex> =>
-  Effect.promise(async () => buildTreeIndex(await store.getNodes()));
+/** Store failures carry real diagnostics (e.g. the Lunora shard's SQLite
+ *  message). `Effect.promise` would turn them into defects, which the MCP
+ *  endpoint reports as a bare "internal error" — so every store call goes
+ *  through `tryPromise` with this catch. */
+const toToolError = (error: unknown): ToolError =>
+  new ToolError({
+    reason: error instanceof Error ? error.message : String(error),
+  });
+
+const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex, ToolError> =>
+  Effect.tryPromise({
+    try: async () => buildTreeIndex(await store.getNodes()),
+    catch: toToolError,
+  });
 
 const commit = (
   store: OutlineStore,
@@ -120,10 +132,7 @@ const commit = (
     try: async () => {
       if (ops.length) await store.applyBatch(ops);
     },
-    catch: (error) =>
-      new ToolError({
-        reason: error instanceof Error ? error.message : String(error),
-      }),
+    catch: toToolError,
   });
 
 /** Lift a planner's value-shaped failure into the tool error channel,
@@ -153,11 +162,13 @@ const claimDailyId = (
   candidate: string,
 ): Effect.Effect<string, ToolError> =>
   Effect.gen(function* () {
-    const raw = yield* Effect.promise(() =>
-      Promise.resolve(
-        store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate }),
-      ),
-    );
+    const raw = yield* Effect.tryPromise({
+      try: () =>
+        Promise.resolve(
+          store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate }),
+        ),
+      catch: toToolError,
+    });
     const row = yield* Schema.decodeUnknownEffect(DailyRowSchema)(raw).pipe(
       Effect.mapError(
         () =>
@@ -175,11 +186,12 @@ const claimDailyId = (
  *  A read, no side effects. */
 const loadDailyReverseMap = (
   store: OutlineStore,
-): Effect.Effect<ReadonlyMap<string, string>> =>
+): Effect.Effect<ReadonlyMap<string, string>, ToolError> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.promise(() =>
-      Promise.resolve(store.getKv(KV_DAILY)),
-    );
+    const rows = yield* Effect.tryPromise({
+      try: () => Promise.resolve(store.getKv(KV_DAILY)),
+      catch: toToolError,
+    });
     const map = new Map<string, string>();
     for (const raw of rows) {
       const row = Schema.decodeUnknownOption(DailyRowSchema)(raw);
