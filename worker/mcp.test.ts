@@ -561,10 +561,12 @@ describe("MCP tools", () => {
   });
 
   test("timeZone resolves an omitted date to the caller's local today (issue #336)", async () => {
-    setClock(new Date("2026-08-09T23:30:00Z").getTime());
+    setClock(new Date("2026-08-10T00:30:00Z").getTime());
     try {
-      // 23:30 UTC is 08-10 in UTC but still 08-09 in America/Los_Angeles — the
-      // whole point: the capture belongs on the user's calendar day, not UTC's.
+      // 00:30 UTC is already 08-10 in UTC but still 08-09 in
+      // America/Los_Angeles — the whole point: the capture belongs on the
+      // user's calendar day, not UTC's. (23:30Z on the 9th would leave UTC on
+      // the 9th too, so it could never detect a UTC fallback.)
       const fake = makeStore(fixture());
       const json = await callTool(fake.store, "add_to_today", {
         text: "captured",
@@ -590,7 +592,7 @@ describe("MCP tools", () => {
   });
 
   test("timeZone steers the omitted-date default on add_to_today and mirror_to_today", async () => {
-    setClock(new Date("2026-08-09T23:30:00Z").getTime());
+    setClock(new Date("2026-08-10T00:30:00Z").getTime());
     try {
       // add_subtree / import_opml use `date` as a target SELECTOR (mutually
       // exclusive with parentId), not an omitted-date default — so they only
