@@ -17,8 +17,9 @@
  * JSON-RPC-level failures (parse, bad request, unknown method/tool, bad args)
  * map to typed error responses; tool-level refusals and store faults surface
  * as `isError` tool results carrying their real reason (the caller is the
- * store owner's own agent); only unexpected non-store defects collapse
- * to -32603.
+ * store owner's own agent; the Lunora shard redacts its fault text upstream,
+ * so that path carries a coded "internal error" instead); only unexpected
+ * non-store defects collapse to -32603.
  */
 
 import { Effect, Schema } from "effect";

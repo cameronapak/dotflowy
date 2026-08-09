@@ -33,7 +33,9 @@ extended to tools).** Each tool's input contract is an Effect Schema; `tools/lis
 `Schema.toJsonSchemaDocument(input)` and `tools/call` decodes against the same value, so the contract
 an agent reads and the gate its arguments pass can't drift. Tool-level refusals (protected node, mirror
 cycle, missing id) and store faults surface as `isError` tool results — inside the protocol, where the
-agent can read and react to them, carrying their real reason. (Amended 2026-08-08: store faults
+agent can read and react to them, carrying their real reason. On the Lunora shard path the shard DO
+redacts its own fault text to a coded `RPC_FAILED` / "internal error" before it leaves the shard, so
+there the gain is the in-protocol coded `isError`, not the raw message. (Amended 2026-08-08: store faults
 originally collapsed to a bare `-32603` "so internals never leak", which hid a whole class of shard
 failures from the one agent able to report them. The endpoint serves a single bearer-authenticated
 user whose store is scoped to their own DO or Lunora shard, so there is no cross-tenant reader to
