@@ -79,7 +79,11 @@ for a single-user-instance posture; a consent screen is an easy later add (`oidc
 that defaults to UTC-today, and the tool description tells the agent to pass the user's local date —
 the Worker cannot know the user's timezone, and inventing one server-side would silently file
 late-evening captures under tomorrow. Same local-midnight philosophy as `localDateKey`, honestly
-delegated.
+delegated. (Amended 2026-08-09: `add_to_today` and `mirror_to_today` also take an optional `timeZone`
+IANA parameter — when `date` is omitted, "today" resolves in that zone via `Intl.DateTimeFormat`, the
+server twin of `localDateKey`; an explicit `date` still wins, and a malformed zone is a loud `isError`,
+never a silent UTC fallback. `add_subtree` and `import_opml` accept the same parameter but only reach
+the daily path when a `date` is given, so for them it is validated and ignored.)
 
 ## Considered and rejected
 
@@ -91,7 +95,8 @@ delegated.
   edit; move/indent/reorder can follow once real agent usage shows the need. (Move landed as
   `move_nodes` in [ADR 0027](./0027-mcp-move-nodes.md).)
 - **Deriving "today" server-side from a stored user timezone** — new schema + settings surface for
-  something the calling agent already knows better.
+  something the calling agent already knows better. (The 2026-08-09 amendment above keeps this
+  rejected: the timezone travels as a per-call parameter, never as stored per-user state.)
 
 ## Consequences
 

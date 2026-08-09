@@ -16,6 +16,7 @@ import type { OutlineStore } from "./mcp-tools";
 
 import { makeNode } from "../src/data/tree";
 import { handleMcp } from "./mcp";
+import { setClock } from "./mcp-tools";
 
 // --- In-memory store fake -----------------------------------------------------
 
@@ -557,6 +558,144 @@ describe("MCP tools", () => {
     const mirror = [...fake.nodes.values()].find((n) => n.mirrorOf === "a1");
     expect(mirror?.parentId).toBe(dayId);
     expect(toolText(json)).toContain("Friday, July 3, 2026");
+  });
+
+  test("timeZone resolves an omitted date to the caller's local today (issue #336)", async () => {
+    setClock(new Date("2026-08-09T23:30:00Z").getTime());
+    try {
+      // 23:30 UTC is 08-10 in UTC but still 08-09 in America/Los_Angeles — the
+      // whole point: the capture belongs on the user's calendar day, not UTC's.
+      const fake = makeStore(fixture());
+      const json = await callTool(fake.store, "add_to_today", {
+        text: "captured",
+        timeZone: "America/Los_Angeles",
+      });
+      expect(json.result?.isError).toBeUndefined();
+      expect(fake.kv.has("2026-08-09")).toBe(true);
+      expect(fake.kv.has("2026-08-10")).toBe(false);
+      expect(toolText(json)).toContain("Sunday, August 9, 2026");
+
+      // East of UTC the same instant is already tomorrow.
+      const east = makeStore(fixture());
+      const eastJson = await callTool(east.store, "add_to_today", {
+        text: "captured",
+        timeZone: "Asia/Tokyo",
+      });
+      expect(eastJson.result?.isError).toBeUndefined();
+      expect(east.kv.has("2026-08-10")).toBe(true);
+      expect(east.kv.has("2026-08-09")).toBe(false);
+    } finally {
+      setClock(null);
+    }
+  });
+
+  test("timeZone steers the omitted-date default on add_to_today and mirror_to_today", async () => {
+    setClock(new Date("2026-08-09T23:30:00Z").getTime());
+    try {
+      // add_subtree / import_opml use `date` as a target SELECTOR (mutually
+      // exclusive with parentId), not an omitted-date default — so they only
+      // reach the daily path when `date` is present, where `date` wins and
+      // timeZone is validated-then-ignored. add_to_today and mirror_to_today
+      // genuinely default "today", and timeZone steers that.
+      const mir = makeStore(fixture());
+      const mirJson = await callTool(mir.store, "mirror_to_today", {
+        nodeId: "a1",
+        timeZone: "America/Los_Angeles",
+      });
+      expect(mirJson.result?.isError).toBeUndefined();
+      expect(mir.kv.has("2026-08-09")).toBe(true);
+      expect(mir.kv.has("2026-08-10")).toBe(false);
+    } finally {
+      setClock(null);
+    }
+  });
+
+  test("add_subtree / import_opml accept timeZone on the date path and validate it", async () => {
+    const sub = makeStore(fixture());
+    const subJson = await callTool(sub.store, "add_subtree", {
+      date: "2026-07-03",
+      timeZone: "America/Los_Angeles",
+      nodes: [{ text: "x" }],
+    });
+    expect(subJson.result?.isError).toBeUndefined();
+    expect(sub.kv.has("2026-07-03")).toBe(true);
+
+    const imp = makeStore(fixture());
+    const opml =
+      '<?xml version="1.0"?><opml version="2.0"><head></head><body>' +
+      '<outline text="one" /></body></opml>';
+    const impJson = await callTool(imp.store, "import_opml", {
+      date: "2026-07-03",
+      timeZone: "America/Los_Angeles",
+      opml,
+    });
+    expect(impJson.result?.isError).toBeUndefined();
+    expect(imp.kv.has("2026-07-03")).toBe(true);
+
+    // A malformed timeZone is refused even when `date` wins.
+    const bad = makeStore(fixture());
+    const badJson = await callTool(bad.store, "add_subtree", {
+      date: "2026-07-03",
+      timeZone: "bogus",
+      nodes: [{ text: "x" }],
+    });
+    expect(badJson.result?.isError).toBe(true);
+    expect(toolText(badJson)).toContain("IANA");
+    expect(bad.batches).toHaveLength(0);
+  });
+
+  test("an invalid timeZone is a loud isError, nothing written", async () => {
+    const fake = makeStore(fixture());
+    const json = await callTool(fake.store, "add_to_today", {
+      text: "x",
+      timeZone: "Not/AZone",
+    });
+    expect(json.result?.isError).toBe(true);
+    expect(toolText(json)).toContain("IANA");
+    expect(fake.batches).toHaveLength(0);
+    expect(fake.kv.has("container")).toBe(false);
+  });
+
+  test("an explicit date wins over timeZone (which is still validated)", async () => {
+    const fake = makeStore(fixture());
+    const json = await callTool(fake.store, "add_to_today", {
+      text: "x",
+      date: "2026-07-03",
+      timeZone: "America/Los_Angeles",
+    });
+    expect(json.result?.isError).toBeUndefined();
+    expect(fake.kv.has("2026-07-03")).toBe(true);
+    expect(toolText(json)).toContain("Friday, July 3, 2026");
+
+    // date wins, but a malformed timeZone alongside it is still refused.
+    const bad = makeStore(fixture());
+    const badJson = await callTool(bad.store, "add_to_today", {
+      text: "x",
+      date: "2026-07-03",
+      timeZone: "bogus",
+    });
+    expect(badJson.result?.isError).toBe(true);
+    expect(toolText(badJson)).toContain("IANA");
+    expect(bad.batches).toHaveLength(0);
+  });
+
+  test("tools/list exposes the timeZone field on all four daily tools", async () => {
+    const { store } = makeStore();
+    const json = (await (await rpc(store, "tools/list")).json()) as any;
+    const tool = (name: string) =>
+      json.result.tools.find((t: any) => t.name === name);
+    for (const name of [
+      "add_to_today",
+      "mirror_to_today",
+      "add_subtree",
+      "import_opml",
+    ]) {
+      const tz = tool(name).inputSchema.properties.timeZone;
+      expect(tz).toBeDefined();
+      // The field publishes as a nested anyOf [string, null]; its contract
+      // text rides inside the JSON, so assert on the serialized schema.
+      expect(JSON.stringify(tz)).toContain("timezone");
+    }
   });
 
   test("the daily container is protected from delete, blanking, and completing", async () => {

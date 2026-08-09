@@ -142,7 +142,17 @@ const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
     ? Effect.fail(new ToolError({ reason: result.message }))
     : Effect.succeed(result as Exclude<A, Error>);
 
-const clock = Effect.sync(() => Date.now());
+/** The write-timestamp source. Mutable so tests can pin "now" (the pre-agreed
+ *  seam for deterministic timezone/day-boundary tests); production reads the
+ *  real clock on every call, exactly as before. */
+let clock: Effect.Effect<number, never> = Effect.sync(() => Date.now());
+
+/** Test seam: pin the clock to a fixed instant (or restore with `null`). The
+ *  daily tools resolve "today" from this, so timezone-boundary cases are
+ *  deterministic. */
+export const setClock = (now: number | null): void => {
+  clock = now == null ? Effect.sync(() => Date.now()) : Effect.succeed(now);
+};
 
 // --- Daily-index claims -------------------------------------------------------
 
@@ -253,21 +263,62 @@ const claimDailyScaffold = (
     return { containerId, yearId, monthId, weekId, dayId, keyByNodeId, index };
   });
 
-/** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. The
- *  default is the server's UTC today — tools advertise that callers should pass
- *  the user's local date, since the Worker can't know their timezone. */
+/** The calendar day a given instant falls on in a given IANA timezone — the
+ *  server-side twin of the client's `localDateKey`, for an arbitrary zone
+ *  instead of the browser's own. Uses the formatter rather than offset math so
+ *  DST and historical zone changes are the engine's problem, not ours. */
+const todayInZone = (now: number, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(now));
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+};
+
+/** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. An
+ *  explicit `date` wins outright. Otherwise "today" is the caller's local day
+ *  when a `timeZone` is given (matching `localDateKey` in the app), else UTC
+ *  today — tools advertise that callers should pass the user's local date, since
+ *  the Worker can't otherwise know their timezone. */
 const resolveDateKey = (
   date: string | null | undefined,
-): Effect.Effect<string, ToolError> =>
-  date == null
-    ? Effect.sync(() => new Date().toISOString().slice(0, 10))
-    : isValidDateKey(date)
+  timeZone: string | null | undefined,
+  now: number,
+): Effect.Effect<string, ToolError> => {
+  // Validate the timezone even when `date` wins: a typo'd zone is a caller bug
+  // worth surfacing, and it keeps `tools/list`'s promise that a bad value is
+  // refused rather than silently ignored.
+  if (timeZone != null) {
+    try {
+      // Throws RangeError for anything that isn't a real IANA zone name.
+      new Intl.DateTimeFormat("en", { timeZone });
+    } catch {
+      return Effect.fail(
+        new ToolError({
+          reason: `invalid timeZone "${timeZone}" — expected a real IANA name (e.g. America/New_York)`,
+        }),
+      );
+    }
+  }
+  if (date != null) {
+    return isValidDateKey(date)
       ? Effect.succeed(date)
       : Effect.fail(
           new ToolError({
             reason: `invalid date "${date}" — expected a real YYYY-MM-DD`,
           }),
         );
+  }
+  const key =
+    timeZone != null
+      ? todayInZone(now, timeZone)
+      : new Date(now).toISOString().slice(0, 10);
+  return Effect.succeed(key);
+};
 
 // --- Protection (ADR 0015, server-enforced) -----------------------------------
 // The daily container AND every intermediate calendar scaffold node (year,
@@ -363,6 +414,25 @@ const kindField = optional(
   }),
 );
 
+const dateField = optional(
+  Schema.String.annotate({
+    description:
+      "The day's date as YYYY-MM-DD. Pass the user's local date; defaults to today in UTC.",
+  }),
+);
+
+/** The caller's IANA timezone (e.g. "America/New_York", "Asia/Tokyo"). When the
+ *  `date` is omitted, "today" resolves in this timezone instead of UTC — so a
+ *  late-evening capture lands on the user's own calendar day. On the tools where
+ *  `date` is a required target selector (add_subtree / import_opml), it is
+ *  ignored unless `date` is present, and an explicit `date` always wins. */
+const timeZoneField = optional(
+  Schema.String.annotate({
+    description:
+      "The caller's IANA timezone (e.g. America/New_York, Asia/Tokyo). When `date` is omitted, today resolves in this timezone instead of UTC; an explicit date always wins.",
+  }),
+);
+
 const GetOutlineInput = Schema.Struct({
   nodeId: optional(
     Schema.String.annotate({
@@ -441,6 +511,12 @@ const AddSubtreeInput = Schema.Struct({
         "Add onto the daily note for this YYYY-MM-DD instead of a parent (pass the user's local date). Mutually exclusive with `parentId`.",
     }),
   ),
+  timeZone: optional(
+    Schema.String.annotate({
+      description:
+        "The caller's IANA timezone (e.g. America/New_York). Refines an omitted `date` on the daily path; ignored at the top level (no `date`), and an explicit `date` wins.",
+    }),
+  ),
   position: optional(
     Schema.Literals(["first", "last"]).annotate({
       description:
@@ -503,13 +579,6 @@ const MoveNodesInput = Schema.Struct({
   ),
 });
 
-const dateField = optional(
-  Schema.String.annotate({
-    description:
-      "The day's date as YYYY-MM-DD. Pass the user's local date; defaults to today in UTC.",
-  }),
-);
-
 const AddToTodayInput = Schema.Struct({
   text: Schema.String.annotate({
     description: "The bullet text to add to the daily note.",
@@ -521,6 +590,7 @@ const AddToTodayInput = Schema.Struct({
   ),
   kind: kindField,
   date: dateField,
+  timeZone: timeZoneField,
 });
 
 const MirrorNodeInput = Schema.Struct({
@@ -539,6 +609,7 @@ const MirrorToTodayInput = Schema.Struct({
     description: "The node to mirror onto the daily note.",
   }),
   date: dateField,
+  timeZone: timeZoneField,
 });
 
 // The OPML pair (ADR 0037). The document travels as a plain string — a
@@ -562,6 +633,12 @@ const ImportOpmlInput = Schema.Struct({
     Schema.String.annotate({
       description:
         "Import onto the daily note for this YYYY-MM-DD instead of a parent (pass the user's local date). Mutually exclusive with `parentId`.",
+    }),
+  ),
+  timeZone: optional(
+    Schema.String.annotate({
+      description:
+        "The caller's IANA timezone (e.g. America/New_York). Refines an omitted `date` on the daily path; ignored at the top level (no `date`), and an explicit `date` wins.",
     }),
   ),
   dryRun: optional(
@@ -778,7 +855,11 @@ export const tools: ReadonlyArray<ToolDef> = [
         // Daily path: claim the container + day ids atomically, then ensure-and-
         // append the forest under the day (position is ignored — always last).
         if (input.date != null) {
-          const dateKey = yield* resolveDateKey(input.date);
+          const dateKey = yield* resolveDateKey(
+            input.date,
+            input.timeZone,
+            timestamp,
+          );
           // Validate the forest BEFORE claiming any daily-index ids, so an empty
           // or over-cap forest can't leave orphan container/day mappings pointing
           // at nodes we never insert (ADR 0028 all-or-nothing).
@@ -931,12 +1012,13 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: false,
     handle: (input: typeof AddToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const dateKey = yield* resolveDateKey(input.date);
+        const now = yield* clock;
+        const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
         // Reuse the index claimDailyScaffold already built -- only kv claims ran
         // since, so a reload would rebuild the identical tree (finding 6).
         const index = scaffold.index;
-        const timestamp = yield* clock;
+        const timestamp = now;
         const plan = planAddToDaily(index, {
           dateKey,
           ...scaffold,
@@ -985,12 +1067,13 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: false,
     handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const dateKey = yield* resolveDateKey(input.date);
+        const now = yield* clock;
+        const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
         // Reuse the index claimDailyScaffold already built -- only kv claims ran
         // since, so a reload would rebuild the identical tree (finding 6).
         const index = scaffold.index;
-        const timestamp = yield* clock;
+        const timestamp = now;
         const plan = yield* unwrap(
           planMirrorToDaily(index, {
             dateKey,
@@ -1047,7 +1130,11 @@ export const tools: ReadonlyArray<ToolDef> = [
 
         // Daily path (mirrors add_subtree's date targeting: always appends).
         if (input.date != null) {
-          const dateKey = yield* resolveDateKey(input.date);
+          const dateKey = yield* resolveDateKey(
+            input.date,
+            input.timeZone,
+            timestamp,
+          );
           if (dryRun) {
             // A dry run must not claim daily-index ids (a kv claim IS a write);
             // plan against a detached parent purely for the receipt's counts.

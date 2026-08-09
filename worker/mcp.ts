@@ -46,7 +46,8 @@ const SERVER_INFO = {
 const SERVER_INSTRUCTIONS =
   'Dotflowy is the user\'s personal outline (nested bullets; some are to-dos; daily notes live under a "Daily" container). ' +
   "Read with get_outline / search_nodes — every line carries the node id the write tools need. " +
-  "add_to_today and mirror_to_today are the fastest ways to put something on the user's daily note; pass the user's local date when you know it.";
+  "add_to_today and mirror_to_today are the fastest ways to put something on the user's daily note; " +
+  'pass `timeZone` (e.g. "America/New_York") so an omitted `date` resolves to the user\'s own today.';
 
 // JSON-RPC 2.0 error codes.
 const PARSE_ERROR = -32700;
