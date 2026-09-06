@@ -227,4 +227,35 @@ test.describe("spotlight alignment — mobile", () => {
       })
       .toBeLessThan(ALIGN_PX);
   });
+
+  // Spotlight off: focusin does not scroll. Flip the same localStorage store
+  // the More-menu checkbox writes so enable-breath `grow()` is the only align.
+  test("enable-breath sits the lit row just below the sticky header", async ({
+    page,
+  }) => {
+    await seedOutline(page, tallTree());
+    await page.goto("/");
+    await expect(text(page, "n4")).toBeVisible({ timeout: 20_000 });
+    await text(page, "n4").evaluate((el) => el.focus());
+    await expect(text(page, "n4")).toBeFocused();
+    await expect(page.locator("body")).not.toHaveClass(/spotlight-on/);
+
+    await page.evaluate(() => {
+      window.localStorage.setItem("dotflowy:spotlight", "true");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "dotflowy:spotlight" }),
+      );
+    });
+    await expect(page.locator("body")).toHaveClass(/spotlight-on/);
+    await expect(text(page, "n4")).toBeFocused();
+    await expect
+      .poll(
+        async () => {
+          const align = await rowAlign(page, "n4");
+          return align ? Math.abs(align.topGap) : Infinity;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeLessThan(ALIGN_PX);
+  });
 });
