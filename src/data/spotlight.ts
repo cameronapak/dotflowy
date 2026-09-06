@@ -298,7 +298,21 @@ export function installSpotlight(animate = true): void {
   // effect just after; an off-window first row may still be mounting to
   // claim it, so poll briefly before measuring.
   const region = outlineRegion();
-  if (region) region.style.paddingTop = "0px";
+  // Continue from the pad the user is SEEING, never an idealized endpoint. An
+  // inline remnant means a breath tween was in flight and just cancelled --
+  // mid-flight value wins. Otherwise the pre-toggle steady value: the class
+  // just applied at render, so computed padding-top already reads the
+  // post-toggle value; the steady base is symmetric with padding-LEFT (the
+  // region's padding utilities are uniform: p-6 / max-sm:p-4).
+  let padFrom = 0;
+  if (region) {
+    const live = parseFloat(region.style.paddingTop);
+    padFrom =
+      Number.isFinite(live) && region.style.paddingTop !== ""
+        ? live
+        : parseFloat(getComputedStyle(region).paddingLeft) || 0;
+    region.style.paddingTop = `${padFrom}px`;
+  }
   const grow = () => {
     if (!installed) return;
     const active = document.activeElement;
@@ -312,11 +326,15 @@ export function installSpotlight(animate = true): void {
       const rect = row.getBoundingClientRect();
       const viewTop = window.visualViewport?.offsetTop ?? 0;
       const viewHeight = window.visualViewport?.height ?? window.innerHeight;
-      // Where the row lands once the pad has grown above it.
+      // Where the row lands once the pad has grown above it -- from where the
+      // flight actually starts, not from zero.
       delta =
-        rect.top + breathPad() + rect.height / 2 - (viewTop + viewHeight / 2);
+        rect.top +
+        (breathPad() - padFrom) +
+        rect.height / 2 -
+        (viewTop + viewHeight / 2);
     }
-    animateBreath(0, breathPad(), delta);
+    animateBreath(padFrom, breathPad(), delta);
   };
   const waitClaim = (tries: number) => {
     const active = document.activeElement;
@@ -357,13 +375,21 @@ export function uninstallSpotlight(): void {
   const region = outlineRegion();
   const pad = breathPad();
   let base = 0;
+  // Continue from the pad the user is SEEING: an inline remnant (a cancelled
+  // tween's mid-flight value) wins over the idealized full pad. The steady
+  // base must be read with the remnant CLEARED, or it inherits the mid-flight
+  // value and the collapse lands off-steady, snapping when the inline clears.
+  let flight = pad;
   if (region) {
-    // The class just left at render, so computed style IS the steady base the
-    // tween must land on (p-6 / max-sm:p-4 -- NOT 0). Pin the pre-toggle pad
-    // inline NOW (layout effect, pre-paint) so there is no collapsed frame
-    // before the tween's first write.
+    const live = parseFloat(region.style.paddingTop);
+    if (Number.isFinite(live) && region.style.paddingTop !== "") {
+      flight = live;
+      region.style.paddingTop = "";
+    }
     base = parseFloat(getComputedStyle(region).paddingTop) || 0;
-    region.style.paddingTop = `${pad}px`;
+    // Pin the flight pad inline NOW (layout effect, pre-paint) so there is no
+    // collapsed frame before the tween's first write.
+    region.style.paddingTop = `${flight}px`;
   }
-  animateBreath(pad, base, held ? -(pad - base) : -window.scrollY);
+  animateBreath(flight, base, held ? -(flight - base) : -window.scrollY);
 }

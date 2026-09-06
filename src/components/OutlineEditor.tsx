@@ -656,9 +656,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // yanks the caret.
   const prevSpotlight = useRef(spotlight);
   useEffect(() => {
+    // Hold the flip while the skeleton is up: consuming the latch during
+    // loading would strand the caret landing (the effect re-fires once data
+    // arrives, finds `was === true`, and returns -- no lit line, ever).
+    if (loading) return;
     const was = prevSpotlight.current;
     prevSpotlight.current = spotlight;
-    if (!spotlight || was || loading) return;
+    if (!spotlight || was) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active.classList.contains("node-text"))
       return;
