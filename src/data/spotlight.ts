@@ -15,12 +15,15 @@
  *     no focus listeners, no generated stylesheet, no tree walk. Single-node
  *     lighting is exactly what `:focus-within` expresses, and "dim only while a
  *     caret is in the outline" is exactly `:has(:focus)`, so CSS does both.
- *  3. Centering (ADR 0060): a focused list row slides to the vertical center of
- *     the viewport. Same modality split as the dim -- a pointer jump eases
- *     (~200ms), keyboard nav takes a short 120ms beat so fast arrowing never
- *     swims. One rAF tween, cancelled and retargeted by the next focus. No
- *     virtualizer padding wells and no compensating scrolls: edge rows clamp,
- *     and the breathing-room padding (also ADR 0060) lives in OutlineEditor.
+ *  3. Alignment (ADR 0060): a focused list row slides into place. Desktop
+ *     (≥768) centers it in the visual viewport. Mobile (≤767, same gate as
+ *     `useIsMobile`) top-aligns it just below the sticky header so a soft
+ *     keyboard does not cover the caret. Same modality split as the dim -- a
+ *     pointer jump eases (~200ms), keyboard nav takes a short 120ms beat so
+ *     fast arrowing never swims. One rAF tween, cancelled and retargeted by
+ *     the next focus. No virtualizer padding wells and no compensating
+ *     scrolls: edge rows clamp, and the breathing-room padding (also ADR
+ *     0060) lives in OutlineEditor.
  *  4. The breathing-room grow/collapse on toggle (ADR 0060): ONE tween drives
  *     the region's inline padding AND the window scroll in the same frames,
  *     so the anchored row stays glued to the screen. Two separate animations
@@ -201,14 +204,51 @@ function animateBreath(
   );
 }
 
-/** Distance to scroll so a row sits at the vertical center of the viewport. */
+/**
+ * Distance to scroll so a row lands on the spotlight align.
+ * Desktop: vertical center of the visual viewport.
+ * Mobile: top of the visual viewport, just below the sticky header.
+ */
 export function centerScrollDelta(
   rowTop: number,
   rowHeight: number,
   viewTop: number,
   viewHeight: number,
+  stickyHeaderPx = 0,
+  topAlign = false,
 ): number {
+  if (topAlign) return rowTop - viewTop - stickyHeaderPx;
   return rowTop + rowHeight / 2 - (viewTop + viewHeight / 2);
+}
+
+/** Same gate as `useIsMobile` (`max-width: 767px`). Not the React hook. */
+function isMobileViewport(): boolean {
+  return window.matchMedia("(max-width: 767px)").matches;
+}
+
+/** `headerRef` is the sticky wrapper around `<header>` (plus subheader chrome). */
+function stickyHeaderHeight(): number {
+  const header = document.querySelector("header");
+  if (!(header instanceof HTMLElement)) return 0;
+  const sticky = header.parentElement;
+  const el =
+    sticky instanceof HTMLElement && sticky.classList.contains("sticky")
+      ? sticky
+      : header;
+  return el.getBoundingClientRect().height;
+}
+
+function alignScrollDelta(rowTop: number, rowHeight: number): number {
+  const viewTop = window.visualViewport?.offsetTop ?? 0;
+  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+  return centerScrollDelta(
+    rowTop,
+    rowHeight,
+    viewTop,
+    viewHeight,
+    stickyHeaderHeight(),
+    isMobileViewport(),
+  );
 }
 
 /** Zoomed title is an h2, not a list row. Focusing it is explicit intent, so
@@ -248,15 +288,14 @@ const onFocusIn = (e: FocusEvent) => {
  * view (see `animateBreath`).
  */
 
-/** Scroll `el` to the vertical center of the viewport. No-op when the engine
- *  is off, the breath tween is running, or the element has no box yet. */
+/** Scroll `el` onto the spotlight align (center on desktop, just below the
+ *  sticky header on mobile). No-op when the engine is off, the breath tween
+ *  is running, or the element has no box yet. */
 export function centerElement(el: HTMLElement, ms: number): void {
   if (!installed || breathAnimating || !el.isConnected) return;
   const rect = el.getBoundingClientRect();
   if (rect.height === 0) return;
-  const viewTop = window.visualViewport?.offsetTop ?? 0;
-  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
-  slideBy(centerScrollDelta(rect.top, rect.height, viewTop, viewHeight), ms);
+  slideBy(alignScrollDelta(rect.top, rect.height), ms);
 }
 
 /** Center a target after a navigation (e.g. zooming into a childless node).
@@ -324,15 +363,9 @@ export function installSpotlight(animate = true): void {
     let delta = 0;
     if (row) {
       const rect = row.getBoundingClientRect();
-      const viewTop = window.visualViewport?.offsetTop ?? 0;
-      const viewHeight = window.visualViewport?.height ?? window.innerHeight;
       // Where the row lands once the pad has grown above it -- from where the
-      // flight actually starts, not from zero.
-      delta =
-        rect.top +
-        (breathPad() - padFrom) +
-        rect.height / 2 -
-        (viewTop + viewHeight / 2);
+      // flight actually starts, not from zero. Same align fork as focusin.
+      delta = alignScrollDelta(rect.top + (breathPad() - padFrom), rect.height);
     }
     animateBreath(padFrom, breathPad(), delta);
   };

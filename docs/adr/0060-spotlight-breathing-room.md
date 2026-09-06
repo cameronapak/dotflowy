@@ -11,14 +11,16 @@ status: accepted
    outline floats near the vertical center of the viewport instead of hugging
    the header. The class carries NO CSS transition; the grow/collapse on
    toggle is the engine's breath tween (below).
-2. **Centering.** A focused list row slides to the vertical center of the
-   viewport. The zoomed page title (an `h2`, not a list row) centers too when
-   it holds the caret — focusing it is explicit intent, and the children come
-   back the moment a child is focused. Additionally, zooming into a node with
-   **no children** slides the title to center: a lone title at the top of an
-   empty page is exactly the "hugging the header" feeling breathing room
-   exists to fix. A zoom WITH children keeps the title at the top, because the
-   children are the content.
+2. **Alignment.** Desktop (≥768) slides a focused list row to the vertical
+   center of the visual viewport. Mobile (≤767, same gate as `useIsMobile`)
+   top-aligns it just below the sticky header so a soft keyboard does not
+   cover the caret (issue #347). The zoomed page title (an `h2`, not a list
+   row) takes the same align when it holds the caret — focusing it is
+   explicit intent, and the children come back the moment a child is focused.
+   Additionally, zooming into a node with **no children** slides the title
+   onto that align: a lone title at the top of an empty page is exactly the
+   "hugging the header" feeling breathing room exists to fix. A zoom WITH
+   children keeps the title at the top, because the children are the content.
 3. **The breath tween: padding and scroll animate as ONE thing.** On toggle,
    a single rAF tween drives the region's inline `padding-top` AND the window
    scroll in the same frames, so the row the user is anchored to stays glued
@@ -41,9 +43,9 @@ status: accepted
    knows the true first row (a DOM query finds the first _mounted_ row, which
    mid-scroll is a middle bullet), and an off-window first row rides the same
    pendingFocus mount-claim path a structural edit uses. The breath tween's
-   scroll delta centers whatever landed. Mounting with the mode already on
-   (page load) skips the animation and snaps to the steady state — an initial
-   render does not transition.
+   scroll delta uses the same align for whatever landed. Mounting with the
+   mode already on (page load) skips the animation and snaps to the steady
+   state — an initial render does not transition.
 5. **Disabling with no lit line scrolls to the top.** The menu path leaves no
    node in focus, and the collapsed padding would strand the viewport deep in
    the page — which reads as "lost": the breath tween collapses the pad and
@@ -74,13 +76,13 @@ back with every piece of machinery that made #340 heavy removed:
 - **No `visualViewport` resize handling.** The rect is read fresh per focus.
 
 **The modality split (reused from the dim, ADR 0033).** The dim eases on
-pointer focus and snaps on keyboard nav; centering rides the same
+pointer focus and snaps on keyboard nav; the align rides the same
 `spotlight-fade` modality class. A pointer jump eases ~200ms — a deliberate
 click can afford the travel. Keyboard takes a short ~120ms beat, so fast
 arrowing chases the caret without swimming; each new focus cancels the
-in-flight tween and retargets. Keyboard moves (Cmd+Shift+Up/Down) center the
+in-flight tween and retargets. Keyboard moves (Cmd+Shift+Up/Down) align the
 moved row explicitly: a move-up can reuse the DOM span, so focus never leaves
-and no `focusin` fires — the move commands schedule the centering themselves,
+and no `focusin` fires — the move commands schedule the align themselves,
 two frames out, and the focusin path covers every other focus change.
 `prefers-reduced-motion` snaps. The keyboard
 duration is one constant (`KEYBOARD_SLIDE_MS`); if 120ms ever feels slow, the
@@ -92,8 +94,9 @@ fix is that constant, not a redesign.
   the original complaint against #340; it is accepted here as the cost of the
   anchor, since the breathing room keeps short outlines — the common case —
   intact, and the dim keeps context legible.
-- No new tests. The behavior is a scroll delta and a tween; the e2e dim suite
-  covers the toggle lifecycle.
+- A unit test pins the mobile-top vs desktop-center scroll delta; e2e asserts
+  external scroll position on focusin and one non-focusin path (issue #347).
+  The dim suite still covers the toggle lifecycle.
 
 **Rejected alternatives.**
 
