@@ -63,6 +63,7 @@ describe("decideSyncRecovery", () => {
     // The consumer's error channel is `never`, but guard the classification
     // anyway: a Fail is a fault, not an interrupt, so it recovers within budget
     // and gives up after — same as a defect.
+    // SAFETY: deliberate fault injection: the string value is irrelevant, only the Cause.fail shape matters to the classifier.
     const cause = Cause.fail("some error" as never);
     expect(decideSyncRecovery(cause, 0)._tag).toBe("Reestablish");
     expect(decideSyncRecovery(cause, SYNC_RECOVERY_BUDGET)._tag).toBe("GiveUp");

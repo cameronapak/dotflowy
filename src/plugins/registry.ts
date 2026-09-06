@@ -97,6 +97,10 @@ function specForMatch(m: RegExpMatchArray): TokenSpec | null {
 /** Render one matched token to its descriptor, dispatching to its plugin. A
  *  widget result is stamped with the token id (its component key) so the
  *  serializer can address the right `<dotflowy-widget>` component (ADR 0006). */
+const isWidgetRender = (r: El | WidgetEl): r is WidgetEl =>
+  // SAFETY: El is a string or element; the typeof-object branch rules out string
+  typeof r === "object" && (r as WidgetEl).kind === "widget";
+
 export function renderToken(
   m: RegExpMatchArray,
   view: TokenView,
@@ -106,8 +110,9 @@ export function renderToken(
   // raw source as plain text rather than throw on the hot path.
   if (!spec) return m[0];
   const r = spec.render(m[0], view);
-  if (typeof r === "object" && (r as WidgetEl).kind === "widget") {
-    (r as WidgetEl).widget = spec.id;
+  // SAFETY: the string El form is ruled out, leaving the widget discriminator
+  if (isWidgetRender(r)) {
+    r.widget = spec.id;
   }
   return r;
 }
@@ -150,6 +155,7 @@ export function dispatchClick(
     if (!s.onClick) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onClick(el as HTMLElement, ctx, e);
       return true;
     }
@@ -166,6 +172,7 @@ export function dispatchPointerDown(
     if (!s.onPointerDown) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onPointerDown(el as HTMLElement, ctx, e);
       return true;
     }
@@ -182,6 +189,7 @@ export function dispatchPointerUp(
     if (!s.onPointerUp) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onPointerUp(el as HTMLElement, ctx, e);
       return true;
     }
@@ -198,6 +206,7 @@ export function dispatchPointerCancel(
     if (!s.onPointerCancel) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onPointerCancel(el as HTMLElement, ctx, e);
       return true;
     }
@@ -215,6 +224,7 @@ export function dispatchContextMenu(
     if (!s.onContextMenu) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onContextMenu(el as HTMLElement, ctx, e);
       return true;
     }
@@ -280,7 +290,7 @@ export function buildViewFilter(
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
 ): ViewFilter | null {
-  const q = typeof ctx.search.q === "string" ? ctx.search.q : undefined;
+  const q = ctx.search.q;
   const queryFilter = buildQueryFilter(
     index,
     ctx.rootId,

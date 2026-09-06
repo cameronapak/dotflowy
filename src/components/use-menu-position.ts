@@ -23,7 +23,7 @@ export function useClampedMenuPosition(
   x: number,
   y: number,
   revalidateKey: number,
-): { ref: (el: HTMLDivElement | null) => void; style: CSSProperties } {
+) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({
     left: x,
@@ -60,9 +60,13 @@ export function useClampedMenuPosition(
   }, [x, y, revalidateKey]);
 
   return {
-    ref: (el) => {
+    ref: (el: HTMLDivElement | null) => {
       elRef.current = el;
     },
-    style: { position: "fixed", left: pos.left, top: pos.top },
+    style: {
+      position: "fixed",
+      left: pos.left,
+      top: pos.top,
+    } satisfies CSSProperties,
   };
 }

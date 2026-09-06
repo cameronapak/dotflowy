@@ -28,10 +28,22 @@ import type { JoinRefusal } from "../data/join-previous";
 
 import { rejectRow } from "./flash-node";
 
+/** Toast copy for one refusal reason. */
+interface RefusalToast {
+  message: string;
+  description: string;
+}
+
+/** Toast copy keyed by refusal reason. A missing entry means shake-only. */
+interface ToastedRefusals {
+  "has-children"?: RefusalToast;
+  "hidden-between"?: RefusalToast;
+  "no-target"?: RefusalToast;
+  "mirror-row"?: RefusalToast;
+}
+
 /** The reasons that also get spelled out. A missing entry means shake-only. */
-const TOASTED: Partial<
-  Record<JoinRefusal, { message: string; description: string }>
-> = {
+const TOASTED: ToastedRefusals = {
   "mirror-row": {
     message: "Can't merge a mirror into the row above.",
     description:

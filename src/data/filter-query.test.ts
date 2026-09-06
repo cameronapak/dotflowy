@@ -11,7 +11,7 @@ import {
   parseFilterQuery,
   tokenizeQuery,
 } from "./filter-query";
-import { buildTreeIndex, makeNode, type Node } from "./tree";
+import { buildTreeIndex, createNode, type Node } from "./tree";
 
 const index = (nodes: Node[]) => buildTreeIndex(nodes);
 const never = () => false;
@@ -333,9 +333,9 @@ describe("buildFilterSuggestions", () => {
 
 describe("buildQueryFilter", () => {
   // r -> c -> g(#x, "match")
-  const r = makeNode({ id: "r", text: "root" });
-  const c = makeNode({ id: "c", parentId: "r", text: "middle" });
-  const g = makeNode({ id: "g", parentId: "c", text: "#x match" });
+  const r = createNode({ id: "r", text: "root" });
+  const c = createNode({ id: "c", parentId: "r", text: "middle" });
+  const g = createNode({ id: "g", parentId: "c", text: "#x match" });
   const base = index([r, c, g]);
 
   test("no query = no filter (null)", () => {
@@ -356,7 +356,7 @@ describe("buildQueryFilter", () => {
   });
 
   test("free text matches a folded link's label, not its url", () => {
-    const l = makeNode({
+    const l = createNode({
       id: "l",
       parentId: "r",
       text: "see [Docs](http://x)",
@@ -384,16 +384,21 @@ describe("buildQueryFilter", () => {
   });
 
   describe("node-kind operators (ADR 0045 tie-break)", () => {
-    const todo = makeNode({ id: "t", parentId: "r", text: "t", isTask: true });
-    const bullet = makeNode({ id: "b", parentId: "r", text: "b" });
-    const para = makeNode({
+    const todo = createNode({
+      id: "t",
+      parentId: "r",
+      text: "t",
+      isTask: true,
+    });
+    const bullet = createNode({ id: "b", parentId: "r", text: "b" });
+    const para = createNode({
       id: "p",
       parentId: "r",
       text: "p",
       kind: "paragraph",
     });
     // Illegal pair (stale client): kind wins, so this is a paragraph, not a todo.
-    const both = makeNode({
+    const both = createNode({
       id: "x",
       parentId: "r",
       text: "x",
@@ -420,22 +425,27 @@ describe("buildQueryFilter", () => {
   });
 
   test("is:mirror, is:complete, is:agent, has:link, highlight predicates", () => {
-    const mir = makeNode({ id: "m", parentId: "r", text: "m", mirrorOf: "s" });
-    const done = makeNode({
+    const mir = createNode({
+      id: "m",
+      parentId: "r",
+      text: "m",
+      mirrorOf: "s",
+    });
+    const done = createNode({
       id: "d",
       parentId: "r",
       text: "d",
       completed: true,
     });
-    const agent = makeNode({
+    const agent = createNode({
       id: "a",
       parentId: "r",
       text: "a",
       origin: "Claude",
     });
-    const link = makeNode({ id: "k", parentId: "r", text: "[x](http://y)" });
-    const hl = makeNode({ id: "h", parentId: "r", text: "==note==" });
-    const red = makeNode({ id: "rd", parentId: "r", text: "==🔴hot==" });
+    const link = createNode({ id: "k", parentId: "r", text: "[x](http://y)" });
+    const hl = createNode({ id: "h", parentId: "r", text: "==note==" });
+    const red = createNode({ id: "rd", parentId: "r", text: "==🔴hot==" });
     const tree = index([r, mir, done, agent, link, hl, red]);
     const ids = (q: string) =>
       buildQueryFilter(tree, "r", q, never, ops)!.matchIds;
@@ -449,9 +459,14 @@ describe("buildQueryFilter", () => {
   });
 
   test("negation, AND, and OR combine as expected", () => {
-    const a = makeNode({ id: "a", parentId: "r", text: "alpha", isTask: true });
-    const b = makeNode({ id: "b", parentId: "r", text: "bravo" });
-    const cc = makeNode({ id: "cc", parentId: "r", text: "alpha bravo" });
+    const a = createNode({
+      id: "a",
+      parentId: "r",
+      text: "alpha",
+      isTask: true,
+    });
+    const b = createNode({ id: "b", parentId: "r", text: "bravo" });
+    const cc = createNode({ id: "cc", parentId: "r", text: "alpha bravo" });
     const tree = index([r, a, b, cc]);
     const ids = (q: string) =>
       buildQueryFilter(tree, "r", q, never, ops)!.matchIds;
@@ -464,7 +479,7 @@ describe("buildQueryFilter", () => {
   });
 
   test("an unknown operator degrades to a free-text match on its raw source", () => {
-    const n = makeNode({
+    const n = createNode({
       id: "n",
       parentId: "r",
       text: "talk about is:foo now",
@@ -478,9 +493,9 @@ describe("buildQueryFilter", () => {
 
   describe("ADR 0047 §8: a match reveals its subtree", () => {
     // r -> c -> g(match) -> d -> e
-    const g2 = makeNode({ id: "g", parentId: "c", text: "#x" });
-    const d = makeNode({ id: "d", parentId: "g", text: "child" });
-    const e = makeNode({ id: "e", parentId: "d", text: "grandchild" });
+    const g2 = createNode({ id: "g", parentId: "c", text: "#x" });
+    const d = createNode({ id: "d", parentId: "g", text: "child" });
+    const e = createNode({ id: "e", parentId: "d", text: "grandchild" });
 
     test("descendants render undimmed; ancestors stay dimmed context", () => {
       const tree = index([r, c, g2, d, e]);
@@ -493,7 +508,7 @@ describe("buildQueryFilter", () => {
     });
 
     test("a collapsed match hides its descendants (collapse respected)", () => {
-      const gCollapsed = makeNode({
+      const gCollapsed = createNode({
         id: "g",
         parentId: "c",
         text: "#x",
@@ -507,14 +522,14 @@ describe("buildQueryFilter", () => {
 
     test("a match deep inside a collapsed subtree is still revealed", () => {
       // g collapsed, but e independently matches -> revealed with its ancestors
-      const gCollapsed = makeNode({
+      const gCollapsed = createNode({
         id: "g",
         parentId: "c",
         text: "plain",
         collapsed: true,
       });
-      const d2 = makeNode({ id: "d", parentId: "g", text: "plain" });
-      const eMatch = makeNode({ id: "e", parentId: "d", text: "#x deep" });
+      const d2 = createNode({ id: "d", parentId: "g", text: "plain" });
+      const eMatch = createNode({ id: "e", parentId: "d", text: "#x deep" });
       const tree = index([r, c, gCollapsed, d2, eMatch]);
       const f = buildQueryFilter(tree, "r", "#x", never, ops)!;
       expect(f.matchIds).toEqual(new Set(["e"]));

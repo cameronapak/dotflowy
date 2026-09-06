@@ -37,14 +37,14 @@ const HIGHLIGHT_MARKER = { pre: "==", post: "==" };
 // vars) so the content scan emits every class. `text-inherit` neutralizes the
 // UA's `color: marktext` (which could go black-on-dark); the pastel/dark
 // `--tag-*` pair already carries the light/dark split.
-const COLOR_CLASS: Record<HighlightColor, string> = {
+const COLOR_CLASS = {
   red: "bg-[var(--tag-red)]",
   orange: "bg-[var(--tag-orange)]",
   yellow: "bg-[var(--tag-yellow)]",
   green: "bg-[var(--tag-green)]",
   blue: "bg-[var(--tag-blue)]",
   purple: "bg-[var(--tag-purple)]",
-};
+} satisfies Record<HighlightColor, string>;
 
 const MARK_CLASS =
   "md-highlight text-inherit rounded-[0.25em] px-[0.2em] box-decoration-clone";
@@ -223,6 +223,7 @@ export default definePlugin({
       predicate: (node, _index, value) => {
         const colors = highlightColorsIn(node.text);
         if (value === null) return colors.length > 0;
+        // SAFETY: the filter's declared values are the HighlightColor palette names
         return colors.includes(value as HighlightColor);
       },
     },

@@ -22,7 +22,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ChangeOp } from "../src/data/wire-schema";
 
-import { makeNode } from "../src/data/tree";
+import { createNode } from "../src/data/tree";
 import { MAX_FRAME_OPS, planChangeFrames } from "./changelog";
 
 /** n delete ops with distinct, ordered keys — chunking is op-shape-agnostic,
@@ -30,6 +30,7 @@ import { MAX_FRAME_OPS, planChangeFrames } from "./changelog";
 function deletes(n: number): ChangeOp[] {
   return Array.from(
     { length: n },
+    // SAFETY: the literal matches the delete variant of ChangeOp field for field.
     (_, i) => ({ op: "delete", key: `n${i}` }) as ChangeOp,
   );
 }
@@ -76,8 +77,8 @@ describe("planChangeFrames", () => {
 
   test("heterogeneous ops chunk by count, order intact", () => {
     const ops: ChangeOp[] = [
-      { op: "insert", value: makeNode({ id: "a", text: "alpha" }) },
-      { op: "update", value: makeNode({ id: "a", text: "alpha!" }) },
+      { op: "insert", value: createNode({ id: "a", text: "alpha" }) },
+      { op: "update", value: createNode({ id: "a", text: "alpha!" }) },
       { op: "delete", key: "b" },
     ];
     const frames = planChangeFrames(ops, 5, 2);

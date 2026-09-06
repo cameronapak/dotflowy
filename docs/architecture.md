@@ -49,10 +49,10 @@ invariant.
 ### Adding a Node field
 
 A new field touches seven places: `src/data/wire-schema.ts`, `src/data/schema.ts`,
-`makeNode()`, `withNodeDefaults` in `collection.ts`, a DO `ADD COLUMN` migration,
+`createNode()`, `withNodeDefaults` in `collection.ts`, a DO `ADD COLUMN` migration,
 `e2e/fixtures.ts`, and the R2 snapshot boundary in `worker/backup.ts`. Miss the
 fixtures and inbound-frame decode rejects every snapshot. Build nodes with
-`makeNode()` — a schema default makes the field optional in the encoded type
+`createNode()` — a schema default makes the field optional in the encoded type
 ([ADR 0003](./adr/0003-no-schema-defaults.md)).
 
 ### Reading the tree

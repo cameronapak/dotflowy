@@ -93,10 +93,13 @@ export function runStructural<T>(body: () => T): T {
  * 0037: any fault means "nothing was imported"). Same single-batch guarantees
  * as `runStructural`; this only exposes the transaction's own completion.
  */
-export function runStructuralTracked<T>(body: () => T): {
+/** A structural run's outcome: the body's value plus its persistence promise. */
+export interface StructuralRun<T> {
   result: T;
   persisted: Promise<void>;
-} {
+}
+
+export function runStructuralTracked<T>(body: () => T): StructuralRun<T> {
   // Nesting guard: a compound flow (e.g. the daily get-or-create, which creates
   // a container then a day) may call runStructural while already inside one.
   // Join the outer transaction so the whole flow is ONE frame; never open a
@@ -205,6 +208,7 @@ type MutationLike = { type: string; key: unknown; modified: unknown };
  *  post-mutation node (an upsert); the DO recomputes insert-vs-update itself. */
 function toChangeOp(m: MutationLike): ChangeOp {
   if (m.type === "delete") return { op: "delete", key: String(m.key) };
+  // SAFETY: delete returned above and TanStack DB mutations are only insert/update/delete; insert and update carry the full post-mutation Node.
   return { op: m.type as "insert" | "update", value: m.modified as Node };
 }
 
@@ -217,13 +221,19 @@ function toChangeOp(m: MutationLike): ChangeOp {
  * located. Scoped to the touched parents so pre-existing corruption elsewhere
  * (repaired separately by healSiblingChains) doesn't cry wolf. Zero cost in prod.
  */
+/** Type-guard predicate: a modified value usable as a full Node row. */
+const isNodeLike = (mod: MutationLike["modified"]): mod is Node =>
+  mod !== null && mod !== undefined && typeof mod === "object";
+
 function assertTouchedChainsClean(mutations: readonly MutationLike[]): void {
   try {
+    // SAFETY: nodesCollection is a Collection<Node, string>, so toArray is the live Node rows.
     const index = buildTreeIndex(nodesCollection.toArray as Node[]);
     const parents = new Set<string | null>();
     for (const m of mutations) {
+      // SAFETY: insert/update modified values are full Node rows; the mod && typeof check guards before any field read.
       const mod = m.modified as Node | undefined;
-      if (mod && typeof mod === "object") parents.add(mod.parentId);
+      if (isNodeLike(mod)) parents.add(mod.parentId);
       const live = index.byId.get(String(m.key));
       if (live) parents.add(live.parentId);
     }

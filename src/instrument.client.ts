@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react";
 
 import { scrubSentryEvent } from "./data/sentry-scrub";
+import { hasWindow } from "./env";
 
 /**
  * Client-side error monitoring (ticket #227, decided in #156): Sentry,
@@ -18,7 +19,7 @@ import { scrubSentryEvent } from "./data/sentry-scrub";
  */
 const dsn = import.meta.env.VITE_SENTRY_DSN;
 
-if (import.meta.env.PROD && dsn && typeof window !== "undefined") {
+if (import.meta.env.PROD && dsn && hasWindow()) {
   Sentry.init({
     dsn,
     sendDefaultPii: false,

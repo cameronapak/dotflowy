@@ -136,6 +136,7 @@ function matchAction(q: string, action: CommandCenterAction): boolean {
  *  (unlike the focus registry's row key, which is a path address inside a
  *  mirror), so this targets the underlying node directly. */
 function readFocusedNodeId(): string | null {
+  // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
   const active = document.activeElement as HTMLElement | null;
   return active?.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId ?? null;
 }

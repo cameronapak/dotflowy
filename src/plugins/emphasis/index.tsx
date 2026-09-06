@@ -48,13 +48,12 @@ import {
 /** The four marker pairs. Keys match the slash-command ids and the keymap
  *  wiring; the generic wrap mechanics live in components/wrap.ts (shared with
  *  the highlight plugin). */
-const MARKERS: Record<"bold" | "italic" | "underline" | "strike", MarkerPair> =
-  {
-    bold: { pre: "**", post: "**" },
-    italic: { pre: "*", post: "*" },
-    underline: { pre: "~", post: "~" },
-    strike: { pre: "~~", post: "~~" },
-  };
+const MARKERS = {
+  bold: { pre: "**", post: "**" },
+  italic: { pre: "*", post: "*" },
+  underline: { pre: "~", post: "~" },
+  strike: { pre: "~~", post: "~~" },
+} satisfies Record<"bold" | "italic" | "underline" | "strike", MarkerPair>;
 
 // The four emphasis kinds, shared across the token + command + keymap shapes.
 // `kind` is the key into MARKERS (the marker pair) and the discriminator for
@@ -194,7 +193,7 @@ function revealedEmphasisEl(
 // Split a matched run into its marker char-run and interior. Every pattern uses
 // the same marker char on both edges with equal length (1 for italic/underline,
 // 2 for bold/strike), so the leading run of `tok[0]` IS the marker.
-function partsOf(tok: string): { marker: string; interior: string } {
+function partsOf(tok: string) {
   const len = emphasisMarkerLen(tok);
   return {
     marker: tok.slice(0, len),

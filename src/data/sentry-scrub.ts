@@ -26,7 +26,15 @@ interface ScrubbableEvent {
     query_string?: unknown;
     headers?: Record<string, string>;
   };
-  breadcrumbs?: Array<{ data?: Record<string, unknown> } | undefined>;
+  breadcrumbs?: Array<{ data?: BreadcrumbData } | undefined>;
+}
+
+/** Breadcrumb `data` as the browser SDK's navigation/fetch integrations shape
+ *  it: url-bearing string fields we strip query strings from. */
+interface BreadcrumbData {
+  from?: string | null;
+  to?: string | null;
+  url?: string | null;
 }
 
 /** Drop everything after the first `?` (keep origin + path). */
@@ -35,13 +43,17 @@ function stripQuery(url: string): string {
   return q === -1 ? url : url.slice(0, q);
 }
 
+/** Type-guard predicate: Sentry url-bearing fields are optional strings. */
+const isString = (v: string | null | undefined): v is string =>
+  typeof v === "string";
+
 export function scrubSentryEvent<E extends ScrubbableEvent>(event: E): E {
   const request = event.request;
   if (request) {
     delete request.data;
     delete request.cookies;
     delete request.query_string;
-    if (typeof request.url === "string") {
+    if (isString(request.url)) {
       request.url = stripQuery(request.url);
     }
     if (request.headers) {
@@ -64,9 +76,9 @@ export function scrubSentryEvent<E extends ScrubbableEvent>(event: E): E {
     for (const crumb of event.breadcrumbs) {
       const data = crumb?.data;
       if (!data) continue;
-      for (const key of ["from", "to", "url"]) {
+      for (const key of ["from", "to", "url"] as const) {
         const value = data[key];
-        if (typeof value === "string") data[key] = stripQuery(value);
+        if (isString(value)) data[key] = stripQuery(value);
       }
     }
   }

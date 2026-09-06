@@ -32,7 +32,7 @@ import {
   buildTreeIndex,
   buildTrail,
   childrenOf,
-  makeNode,
+  createNode,
   orphanedMirrorsBy,
   trueSourceOf,
   wouldMirrorCycle,
@@ -119,7 +119,7 @@ export class EmptyForest extends Data.TaggedError("EmptyForest")<
 
 // --- Node construction --------------------------------------------------------
 
-/** A complete wire node with caller-supplied identity + clock. `makeNode` owns
+/** A complete wire node with caller-supplied identity + clock. `createNode` owns
  *  the defaults; the explicit timestamps override its `Date.now()` reads. */
 function newNode(args: {
   id: string;
@@ -138,7 +138,7 @@ function newNode(args: {
   timestamp: number;
 }): Node {
   const kind = args.kind ?? null;
-  return makeNode({
+  return createNode({
     id: args.id,
     parentId: args.parentId,
     prevSiblingId: args.prevSiblingId,
@@ -530,6 +530,7 @@ export function planReparent(
   }
 
   for (const id of nodeIds) {
+    // SAFETY: working is a Map<string, MutNode> of Schema-decoded Nodes, so its values are Nodes.
     const idx = buildTreeIndex([...working.values()] as Node[]);
     applyMoveInPlace(working, idx, id, parentId, after);
     after = id;
@@ -601,6 +602,30 @@ export function guardForestSize(
  * loop `planAddNode` (which re-reads the stale last-sibling each call and would
  * give every new root the same predecessor, tearing the chain).
  */
+/** A planner's emitted batch plus the ids of the inserted forest's roots. */
+interface ForestPlan {
+  ops: ChangeOp[];
+  rootIds: string[];
+}
+
+/** Where a sorted insert anchors: the previous sibling plus the follower the
+ *  new key displaces (null = head of the sibling run). */
+interface InsertAnchor {
+  prevSiblingId: string | null;
+  follower: Node | null;
+}
+
+/** planEnsureDaily's result: just the emitted batch (the day id is known). */
+interface DailyPlan {
+  ops: ChangeOp[];
+}
+
+/** planAddToDaily's result: the batch plus the created node's id. */
+interface DailyNodePlan {
+  ops: ChangeOp[];
+  nodeId: string;
+}
+
 function emitForest(
   nodes: readonly SubtreeInput[],
   parentId: string | null,
@@ -608,7 +633,7 @@ function emitForest(
   origin: string | null | undefined,
   timestamp: number,
   newId: () => string,
-): { ops: ChangeOp[]; rootIds: string[] } {
+): ForestPlan {
   const ops: ChangeOp[] = [];
   const walk = (
     siblings: readonly SubtreeInput[],
@@ -764,6 +789,7 @@ const MONTHS = [
  *  user locale; fixed English matches the app's chrome). */
 export function formatDayText(dateKey: string): string {
   if (!isValidDateKey(dateKey)) return dateKey;
+  // SAFETY: isValidDateKey just confirmed YYYY-MM-DD, so split("-") yields exactly three parts.
   const [y, mo, d] = dateKey.split("-").map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, mo - 1, d, 12));
   return `${WEEKDAYS[date.getUTCDay()]}, ${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
@@ -777,6 +803,7 @@ export function formatDayText(dateKey: string): string {
  */
 export function isValidDateKey(dateKey: string): boolean {
   if (!DATE_KEY_PATTERN.test(dateKey)) return false;
+  // SAFETY: the pattern test above confirmed YYYY-MM-DD, so split("-") yields exactly three parts.
   const [y, mo, d] = dateKey.split("-").map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, mo - 1, d, 12));
   return (
@@ -822,7 +849,7 @@ function planSortedInsert(
   parentId: string,
   newKey: string,
   keyByNodeId: ReadonlyMap<string, string>,
-): { prevSiblingId: string | null; follower: Node | null } {
+): InsertAnchor {
   const siblings = childrenOf(index, parentId);
   const afterId = sortedInsertAfterId(
     siblings.map((s) => ({ id: s.id, key: keyByNodeId.get(s.id) ?? null })),
@@ -888,7 +915,7 @@ function emitSortedInsert(
 export function planEnsureDaily(
   index: TreeIndex,
   args: { dateKey: string; timestamp: number } & DailyScaffold,
-): { ops: ChangeOp[] } {
+): DailyPlan {
   const {
     dateKey,
     containerId,
@@ -1008,7 +1035,7 @@ export function planAddToDaily(
     origin?: string | null;
     timestamp: number;
   } & DailyScaffold,
-): { ops: ChangeOp[]; nodeId: string } {
+): DailyNodePlan {
   const { ops } = planEnsureDaily(index, args);
   // A pre-existing day may have children; a just-planned one can't.
   const siblings = index.byId.has(args.dayId)

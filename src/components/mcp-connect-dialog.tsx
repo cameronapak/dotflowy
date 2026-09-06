@@ -20,6 +20,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { hasBtoa, hasWindow } from "../env";
 import { useIsMobile } from "../hooks/use-mobile";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -56,13 +57,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 // Real users always view this on the prod origin, so `origin + /mcp` yields the
 // correct copyable URL and self-heals if the domain ever moves; the fallback
 // only matters during the `/` prerender (no `window`, SPA mode / ADR 0008).
-const MCP_URL =
-  typeof window !== "undefined"
-    ? `${window.location.origin}/mcp`
-    : "https://app.dotflowy.com/mcp";
+const MCP_URL = hasWindow()
+  ? `${window.location.origin}/mcp`
+  : "https://app.dotflowy.com/mcp";
 
 function toBase64(s: string): string {
-  return typeof btoa !== "undefined" ? btoa(s) : "";
+  return hasBtoa() ? btoa(s) : "";
 }
 
 // One-click install deeplinks for the clients that support them. Cursor wants a

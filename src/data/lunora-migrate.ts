@@ -17,6 +17,7 @@ import type { FunctionReference } from "lunorash/client";
 import type { OutlineStore } from "./lunora-outline-store";
 
 import { api } from "../../lunora/_generated/api";
+import { hasWindow } from "../env";
 import {
   planClassicKvImportRows,
   planMigrateSteps,
@@ -50,6 +51,13 @@ type ClassicNode = {
 };
 
 type ImportNodesArgs = { userId: string; nodes: ReadonlyArray<OutlineNode> };
+
+/** The watermark fields a migrate-state write stamps; absent means untouched. */
+type MigrateStatePatch = {
+  nodesAt?: number;
+  kvAt?: number;
+};
+
 type MigrationApi = {
   mutators: {
     importNodes: FunctionReference<"mutation", ImportNodesArgs, unknown>;
@@ -61,7 +69,8 @@ type MigrationApi = {
   };
 };
 
-const migrationApi = api as unknown as MigrationApi;
+// SAFETY: api is the generated Lunora api; MigrationApi restates the exact mutator names and arg shapes that codegen emits.
+const migrationApi = api as MigrationApi;
 
 function asOutlineNode(n: ClassicNode, userId: string): OutlineNode {
   return {
@@ -85,9 +94,24 @@ function asOutlineNode(n: ClassicNode, userId: string): OutlineNode {
 async function fetchClassicNodes(): Promise<ClassicNode[]> {
   const res = await fetch("/api/nodes", { credentials: "include" });
   if (!res.ok) throw new Error(`GET /api/nodes ${res.status}`);
+  // SAFETY: /api/nodes serializes the classic node rows as a JSON array; Array.isArray on the next line guards the shape.
   const body = (await res.json()) as ClassicNode[];
   return Array.isArray(body) ? body : [];
 }
+
+/** A JSON-parsed value of unchecked shape — the domain `res.json()` produces. */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+const isString = (v: JsonValue | undefined): v is string =>
+  typeof v === "string";
+const isNumber = (v: JsonValue | undefined): v is number =>
+  typeof v === "number";
 
 async function fetchKv(collection: string): Promise<ClassicKvRow[]> {
   const res = await fetch(
@@ -95,6 +119,7 @@ async function fetchKv(collection: string): Promise<ClassicKvRow[]> {
     { credentials: "include" },
   );
   if (!res.ok) throw new Error(`GET /api/kv ${collection} ${res.status}`);
+  // SAFETY: asserting to unknown only; the Array.isArray check below rejects non-array bodies before any use.
   const body = (await res.json()) as unknown;
   if (!Array.isArray(body)) {
     throw new Error(`GET /api/kv ${collection} returned a non-array body`);
@@ -102,15 +127,15 @@ async function fetchKv(collection: string): Promise<ClassicKvRow[]> {
   // /api/kv GET returns the stored values; daily-index/tag-colors/saved-queries
   // each embed their key inside the value object.
   return body.map((value) => {
-    const v = value as Record<string, unknown>;
-    const key =
-      typeof v.key === "string"
-        ? v.key
-        : typeof v.tag === "string"
-          ? v.tag
-          : typeof v.id === "string"
-            ? v.id
-            : String(v.key ?? "");
+    // SAFETY: /api/kv stores each value as a JSON object; every property read below is typeof-guarded.
+    const v = value as Record<string, JsonValue>;
+    const key = isString(v.key)
+      ? v.key
+      : isString(v.tag)
+        ? v.tag
+        : isString(v.id)
+          ? v.id
+          : String(v.key ?? "");
     return { key, value };
   });
 }
@@ -124,10 +149,13 @@ async function readMigrateState(
     { userId },
     { shardKey: userId },
   );
+  // SAFETY: the getMigrateState mutator returns the stored MigrateStateSnapshot; every field read below is typeof-guarded.
   const row = result as MigrateStateSnapshot | null | undefined;
+  const nodesAt = row?.nodesAt;
+  const kvAt = row?.kvAt;
   return {
-    nodesAt: typeof row?.nodesAt === "number" ? row.nodesAt : null,
-    kvAt: typeof row?.kvAt === "number" ? row.kvAt : null,
+    nodesAt: isNumber(nodesAt) ? nodesAt : null,
+    kvAt: isNumber(kvAt) ? kvAt : null,
   };
 }
 
@@ -287,7 +315,7 @@ export async function migrateClassicToLunora(
       case "mark-kv-complete": {
         // Stamp nodesAt only when classic has nothing left to import for
         // nodes — never invent completeness over a partial node import.
-        const patch: { nodesAt?: number; kvAt?: number } = {};
+        const patch: MigrateStatePatch = {};
         if (migrateState.nodesAt == null && classic.length === 0) {
           patch.nodesAt = now;
         }
@@ -299,7 +327,7 @@ export async function migrateClassicToLunora(
       }
       case "kv-only": {
         const kv = await importKv(store, userId, classicKv);
-        const patch: { nodesAt?: number; kvAt: number } = { kvAt: now };
+        const patch: MigrateStatePatch = { kvAt: now };
         if (migrateState.nodesAt == null && classic.length === 0) {
           patch.nodesAt = now;
         }
@@ -384,7 +412,7 @@ export async function forceRemigrateFromClassic(
 export function installMigrateConsoleHelper(
   getStore: () => { store: OutlineStore; userId: string } | null,
 ): void {
-  if (typeof window === "undefined") return;
+  if (!hasWindow()) return;
   type MigrateWin = {
     __dotflowyMigrateToLunora?: () => Promise<MigrateResult>;
     /** Clear `kvAt` → re-import classic KV (Daily identity). */
@@ -392,7 +420,8 @@ export function installMigrateConsoleHelper(
     /** Clear both watermarks → structure-sync all classic nodes + KV. */
     __dotflowyForceLunoraRemigrate?: () => Promise<MigrateResult>;
   };
-  const w = window as unknown as MigrateWin;
+  // SAFETY: these debug hooks are assigned only by this module just below; no other code sets them on window.
+  const w = window as MigrateWin;
   const needCtx = ():
     | { store: OutlineStore; userId: string }
     | { status: "failed"; error: Error } => {

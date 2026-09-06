@@ -20,10 +20,11 @@ let pending: Pending[] = [];
 
 function installControlledFetch(): void {
   pending = [];
+  // SAFETY: test stub, not a real fetch: the code under test only calls it with (url, init) and reads init.body.
   globalThis.fetch = ((_url: string, init: { body?: unknown }) =>
     new Promise<Response>((resolve) => {
       pending.push({ body: String(init.body), resolve });
-    })) as unknown as typeof fetch;
+    })) as typeof fetch;
 }
 
 /** A pending request, narrowed away from undefined (noUncheckedIndexedAccess). */

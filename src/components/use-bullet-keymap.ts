@@ -105,6 +105,7 @@ export function useBulletKeymap({
           ...keymapSpecs.map((k) => ({
             // KeymapSpec.hotkey is a plain string (plugin contract stays library-
             // agnostic); the manager wants its RegisterableHotkey union here.
+            // SAFETY: KeymapSpec.hotkey is documented as a react-hotkeys combo string
             hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
             callback: () => {
               const el = textRef.current;

@@ -12,7 +12,12 @@ import { toast } from "sonner";
  * sign-in — doesn't resurface a stale error.
  */
 
-const MESSAGES: Record<string, string> = {
+/** Human copy keyed by OAuth error code; unknown codes fall through. */
+interface OAuthErrorMessages {
+  [code: string]: string;
+}
+
+const MESSAGES: OAuthErrorMessages = {
   // A Google identity with no Dotflowy account hit the server-side signup
   // gate (worker/auth.ts `disableSignUp` — the OAuth face of the invite gate).
   signup_disabled:

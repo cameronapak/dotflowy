@@ -88,12 +88,13 @@ import { runStructural } from "../data/structural";
 import {
   childrenOf,
   createId,
-  makeNode,
+  createNode,
   type Node,
   type TreeIndex,
 } from "../data/tree";
 import { getTreeIndex, useNode } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
+import { hasWindow } from "../env";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import {
@@ -159,7 +160,7 @@ function quickAddCommandFilter(spec: CommandSpec): boolean {
 // A stable placeholder node for the interval BEFORE the first keystroke (the
 // node is born on first input). Slash/menu `available` checks read it; command
 // `run`s never fire against it (picks happen after born, a later render).
-const PLACEHOLDER_NODE: Node = makeNode({
+const PLACEHOLDER_NODE: Node = createNode({
   id: "__quick_add_draft__",
   text: "",
 });
@@ -265,6 +266,7 @@ const MiniNodeEditor = forwardRef<
       ...keymapSpecs
         .filter((k) => k.hotkey !== "Mod+Enter")
         .map((k) => ({
+          // SAFETY: KeymapSpec.hotkey is documented as a react-hotkeys combo string
           hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
           callback: () => k.run(node.id, getCtx()),
         })),
@@ -607,8 +609,9 @@ function awaitResolveGate(): Promise<void> {
   return resolveGate ?? Promise.resolve();
 }
 
-if (import.meta.env.DEV && typeof window !== "undefined") {
-  const w = window as unknown as {
+if (import.meta.env.DEV && hasWindow()) {
+  // SAFETY: DEV-only test hooks this module is the sole writer of
+  const w = window as Window & {
     __quickAddHoldResolve?: () => void;
     __quickAddReleaseResolve?: () => void;
   };
@@ -1167,6 +1170,7 @@ function useContentEditableFocused(): boolean {
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     const update = () => {
+      // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
       const el = document.activeElement as HTMLElement | null;
       setEditing(!!el?.isContentEditable);
     };
@@ -1246,6 +1250,7 @@ export function QuickAdd() {
       if (e.key !== "q" && e.key !== "Q") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (openRef.current) return;
+      // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
       const el = document.activeElement as HTMLElement | null;
       if (el?.isContentEditable) return;
       const tag = el?.tagName;

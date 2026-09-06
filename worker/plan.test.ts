@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ChangeOp } from "../src/data/wire-schema";
 
-import { makeNode } from "../src/data/tree";
+import { createNode } from "../src/data/tree";
 import {
   batchExceedsNodeLimit,
   countNetGrowth,
@@ -93,7 +93,7 @@ describe("batchExceedsNodeLimit", () => {
 describe("countNetGrowth", () => {
   const ins = (id: string): ChangeOp => ({
     op: "insert",
-    value: makeNode({ id, text: id }),
+    value: createNode({ id, text: id }),
   });
   const del = (id: string): ChangeOp => ({ op: "delete", key: id });
   // A pre-batch existence probe backed by the set of ids already in the outline.

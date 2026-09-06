@@ -17,6 +17,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
+import { hasWindow } from "../env";
 import { getSelectedAtom } from "./inline-code";
 import {
   detectMarkerWrap,
@@ -65,8 +66,7 @@ const MARKERS: ReadonlyArray<[key: string, marker: MarkerPair]> = [
  *  world (ADR 0030). We gate on `(pointer: fine)`, the inverse seam. One shared
  *  MediaQueryList (the value only flips on hardware/OS change), so the
  *  selection-tick re-renders don't each allocate a fresh matchMedia. */
-const fineMql =
-  typeof window === "undefined" ? null : window.matchMedia("(pointer: fine)");
+const fineMql = hasWindow() ? window.matchMedia("(pointer: fine)") : null;
 function subscribeFine(onChange: () => void) {
   fineMql?.addEventListener("change", onChange);
   return () => fineMql?.removeEventListener("change", onChange);
@@ -83,6 +83,7 @@ function useFinePointer(): boolean {
  *  outline bullet and the zoomed title carry `.node-text`, so this is the honest
  *  "the selection is inside one editable outline span" test. */
 function outlineSpanOf(node: Node): HTMLElement | null {
+  // SAFETY: nodeType === 1 means the node is an Element, rendered here as HTMLElement
   const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
   return el?.closest<HTMLElement>(".node-text") ?? null;
 }
@@ -212,6 +213,7 @@ export function SelectionFormatToolbar({
       if (!raf) raf = requestAnimationFrame(recompute);
     };
     const onDown = (e: PointerEvent) => {
+      // SAFETY: a pointer event's target is the DOM node hit
       if (ref.current?.contains(e.target as Node)) return;
       dragging = true;
       setInfo(null);

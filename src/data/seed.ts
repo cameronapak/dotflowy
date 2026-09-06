@@ -8,7 +8,7 @@ import {
 import { BootstrapError } from "./errors";
 import { isLunoraSyncEnabled } from "./flags";
 import { appendChild } from "./mutations";
-import { createId, makeNode, now } from "./tree";
+import { createId, createNode, now } from "./tree";
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
@@ -122,7 +122,7 @@ async function seedIfEmpty(): Promise<boolean> {
   const cId = createId();
 
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id: aId,
       parentId: null,
       prevSiblingId: null,
@@ -131,7 +131,7 @@ async function seedIfEmpty(): Promise<boolean> {
     }),
   );
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id: bId,
       parentId: null,
       prevSiblingId: aId,
@@ -139,7 +139,7 @@ async function seedIfEmpty(): Promise<boolean> {
     }),
   );
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id: cId,
       parentId: null,
       prevSiblingId: bId,

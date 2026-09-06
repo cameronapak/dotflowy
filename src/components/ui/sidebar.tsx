@@ -44,6 +44,10 @@ type SidebarContextProps = {
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 
+const isUpdater = (
+  value: boolean | ((value: boolean) => boolean),
+): value is (value: boolean) => boolean => typeof value === "function";
+
 function useSidebar() {
   const context = React.use(SidebarContext);
   if (!context) {
@@ -75,7 +79,7 @@ function SidebarProvider({
   const open = openProp ?? _open;
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const openState = typeof value === "function" ? value(open) : value;
+      const openState = isUpdater(value) ? value(open) : value;
       if (setOpenProp) {
         setOpenProp(openState);
       } else {
@@ -131,6 +135,7 @@ function SidebarProvider({
       <div
         data-slot="sidebar-wrapper"
         style={
+          // SAFETY: CSS custom-property values React.CSSProperties does not type
           {
             "--sidebar-width": SIDEBAR_WIDTH,
             "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
@@ -189,6 +194,7 @@ function Sidebar({
           data-mobile="true"
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
+            // SAFETY: CSS custom-property values React.CSSProperties does not type
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
             } as React.CSSProperties
@@ -497,6 +503,10 @@ const sidebarMenuButtonVariants = cva(
   },
 );
 
+const isTooltipString = (
+  tooltip: string | React.ComponentProps<typeof TooltipContent>,
+): tooltip is string => typeof tooltip === "string";
+
 function SidebarMenuButton({
   render,
   isActive = false,
@@ -532,7 +542,7 @@ function SidebarMenuButton({
     return comp;
   }
 
-  if (typeof tooltip === "string") {
+  if (isTooltipString(tooltip)) {
     tooltip = {
       children: tooltip,
     };
@@ -627,6 +637,7 @@ function SidebarMenuSkeleton({
         className="h-4 max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
         style={
+          // SAFETY: CSS custom-property values React.CSSProperties does not type
           {
             "--skeleton-width": width,
           } as React.CSSProperties

@@ -28,7 +28,12 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import type { PluginContext, SlotSpec, ViewContext } from "../plugins/types";
+import type {
+  PluginContext,
+  RouteSearch,
+  SlotSpec,
+  ViewContext,
+} from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
 import { echoedTextFor } from "../data/collection";
@@ -89,6 +94,7 @@ import {
 } from "../data/view-state";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import { findVisibleNeighbor, instanceIdForKey } from "../data/visible-order";
+import { hasMatchMedia, hasResizeObserver, hasWindow } from "../env";
 import { useIsMobile } from "../hooks/use-mobile";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import {
@@ -205,6 +211,7 @@ interface OutlineEditorProps {
 // route it. Reads only the event + a module import (no local state), so it sits
 // at module scope -- one binding, not a per-render allocation.
 function onContentMouseDown(e: ReactMouseEvent) {
+  // SAFETY: delegated handler bound to the content element, so target is an element
   if (blocksCaret(e.target as HTMLElement)) e.preventDefault();
 }
 
@@ -258,10 +265,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     exposeHotkeyManagerForDev();
   }, []);
 
-  const routeSearch = useSearch({ strict: false }) as {
-    q?: string;
-    focus?: string;
-  };
+  // SAFETY: URL search params are string-valued, only optional string fields are read
+  const routeSearch = useSearch({ strict: false }) as RouteSearch;
   const focusLast = routeSearch.focus === "last";
 
   // Seam G (ADR 0001): the composed per-node visibility predicate. The core no
@@ -336,6 +341,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // (onContentMouseDown is pure and lives at module scope above.)
   const onContentClick = (e: ReactMouseEvent) => {
     if (e.metaKey || e.ctrlKey) {
+      // SAFETY: delegated handler bound to the content element, so target is an element
       const textEl = (e.target as HTMLElement).closest<HTMLElement>(
         ".node-text",
       );
@@ -345,6 +351,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         return;
       }
     }
+    // SAFETY: delegated handler bound to the content element, so target is an element
     dispatchClick(e.target as HTMLElement, pluginCtx(), e);
   };
   const onContentKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
@@ -361,6 +368,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       hovered && active instanceof HTMLElement && active.contains(hovered)
         ? hovered
         : null;
+    // SAFETY: delegated handler bound to the content element, so target is an element
     const target =
       getSelectedAtom(e.currentTarget) ??
       hoveredChip ??
@@ -382,9 +390,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // mounted in a `Sheet` below (the overflow-to-panel host + future Lane-B home).
   const [panelNode, setPanelNode] = useState<ReactNode>(null);
   const onContentContextMenu = (e: ReactMouseEvent) => {
+    // SAFETY: delegated handler bound to the content element, so target is an element
     dispatchContextMenu(e.target as HTMLElement, pluginCtx(), e);
   };
   const onContentPointerDown = (e: ReactPointerEvent) => {
+    // SAFETY: delegated handler bound to the content element, so target is an element
     dispatchPointerDown(e.target as HTMLElement, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
       stopPropagation: () => e.stopPropagation(),
@@ -395,6 +405,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     });
   };
   const onContentPointerUp = (e: ReactPointerEvent) => {
+    // SAFETY: delegated handler bound to the content element, so target is an element
     dispatchPointerUp(e.target as HTMLElement, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
       stopPropagation: () => e.stopPropagation(),
@@ -405,6 +416,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     });
   };
   const onContentPointerCancel = (e: ReactPointerEvent) => {
+    // SAFETY: delegated handler bound to the content element, so target is an element
     dispatchPointerCancel(e.target as HTMLElement, pluginCtx(), {
       preventDefault: () => e.preventDefault(),
       stopPropagation: () => e.stopPropagation(),
@@ -426,6 +438,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // rows the render shows (issue #244 / the ADR 0047 amendment).
     getFilter: getViewFilter,
     getRowEl: (key) =>
+      // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
       (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ?? null,
     getListEl: () => listRef.current,
     onMove: (grabbedKey, newParentInstanceId, afterSiblingId) =>
@@ -704,7 +717,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
     // query-param change, not a remount, so the deps below never fire for it).
     const header = headerRef.current;
-    if (!header || typeof ResizeObserver === "undefined") return;
+    if (!header || !hasResizeObserver()) return;
     const ro = new ResizeObserver(measure);
     ro.observe(header);
     return () => ro.disconnect();
@@ -724,10 +737,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // Without it the window virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
     // load, can outlast a "row is visible" assertion (and shows a blank flash).
-    initialRect:
-      typeof window !== "undefined"
-        ? { width: window.innerWidth, height: window.innerHeight }
-        : undefined,
+    initialRect: hasWindow()
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : undefined,
   });
   // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
   // render ADDRESS (row.key), not the bare id: a source descendant appears under
@@ -1175,10 +1187,7 @@ function useZoomNavigation({
   pendingFocus,
   pendingFlash,
   focusLast,
-}: ZoomNavigationArgs): {
-  navigateZoom: (toRootId: string | null, pivot: string) => void;
-  pivotId: string | null;
-} {
+}: ZoomNavigationArgs) {
   // The "pivot" of the last zoom: the node that swaps between title and list-
   // item roles. The incoming view reads it from history state and names that
   // node's element so the browser morphs it across the navigation.
@@ -2132,6 +2141,7 @@ function ZoomedTitle({
       { hotkey: "Enter", callback: () => onAddChild() },
       { hotkey: "ArrowDown", callback: () => onArrowDown() },
       ...keymapSpecs.map((k) => ({
+        // SAFETY: KeymapSpec.hotkey is documented as a react-hotkeys combo string
         hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
         callback: () => {
           const el = ref.current;
@@ -2529,8 +2539,8 @@ function revealAncestorsToRoot(
 
 function prefersReducedMotion(): boolean {
   return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
+    hasWindow() &&
+    hasMatchMedia() &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 }

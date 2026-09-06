@@ -11,6 +11,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Schema } from "effect";
 import { useSyncExternalStore } from "react";
 
+import { hasWindow } from "../env";
 import { hardReset } from "../lib/auth-client";
 import { isLunoraSyncEnabled, LUNORA_SYNC_FLAG_KEY } from "./flags";
 import { kvFetch, kvPut, toKvRows } from "./kv-api";
@@ -107,7 +108,7 @@ function rebuild() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   accountPrefsCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,
@@ -145,7 +146,7 @@ export function useLunoraBetaPref(): LunoraBetaSnapshot {
  * once so `LunoraSyncHost` picks the synced value (multi-device opt-in).
  */
 function maybeSyncLocalFlagFromAccount() {
-  if (typeof window === "undefined") return;
+  if (!hasWindow()) return;
   try {
     if (sessionStorage.getItem(PREFS_RELOAD_GUARD)) return;
     const q = new URLSearchParams(window.location.search).get("lunora-sync");

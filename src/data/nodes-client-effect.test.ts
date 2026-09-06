@@ -18,13 +18,29 @@ import {
 const realFetch = globalThis.fetch;
 let calls = 0;
 
+/** The preconnect member the Workers fetch type carries; no-op in tests. */
+const stubPreconnect = {
+  preconnect: (
+    _url: string | URL,
+    _options?: {
+      dns?: boolean;
+      tcp?: boolean;
+      http?: boolean;
+      https?: boolean;
+    },
+  ): void => {},
+};
+
 /** Install a fetch that returns `make()` and counts invocations. */
 function stubFetch(make: () => Response): void {
   calls = 0;
-  globalThis.fetch = (() => {
+  // Test stub, not a real fetch: it ignores all arguments, and the code under
+  // test only needs a response promise. preconnect is a no-op to satisfy the
+  // full fetch type.
+  globalThis.fetch = Object.assign(() => {
     calls += 1;
     return Promise.resolve(make());
-  }) as unknown as typeof fetch;
+  }, stubPreconnect);
 }
 
 afterEach(() => {
@@ -56,6 +72,7 @@ describe("sendBatchE", () => {
     stubFetch(() => new Response("boom", { status: 500 }));
     const err = await Effect.runPromise(Effect.flip(sendBatchE([])));
     expect(err._tag).toBe("NodesResponseError");
+    // SAFETY: _tag asserted to be NodesResponseError on the line above.
     expect((err as NodesResponseError).status).toBe(500);
     expect(calls).toBe(1); // a received response is never retried
   });

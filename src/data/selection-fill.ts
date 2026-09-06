@@ -2,6 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import type { VisibleRow } from "./visible-order";
 
+import { hasWindow } from "../env";
 import {
   getSelectionState,
   subscribeSelection,
@@ -46,6 +47,7 @@ function computeFillMap(
   data: SelectionData | null,
 ): Map<string, SelectionFill> {
   const map = new Map<string, SelectionFill>();
+  // SAFETY: the selection schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   const rootIds = data?.rootIds as readonly string[] | undefined;
   if (!rootIds || rootIds.length === 0) return map;
   const rootSet = new Set(rootIds);
@@ -85,7 +87,7 @@ function recompute() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   subscribeSelection(recompute);
 }

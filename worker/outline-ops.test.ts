@@ -4,7 +4,7 @@
  * here because the chain surgery (insert repoints, cascade delete relinks,
  * mirror flatten/cycle rules, daily materialization) is exactly the kind of
  * pure logic bun test owns — e2e can't reach it (the MCP endpoint has no
- * browser caller). Fixtures use `makeNode()` (tree.ts), the canonical builder.
+ * browser caller). Fixtures use `createNode()` (tree.ts), the canonical builder.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -13,7 +13,7 @@ import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import { weekLabel } from "../src/data/date-links";
 import { exportOpml } from "../src/data/opml-export";
-import { makeNode } from "../src/data/tree";
+import { createNode } from "../src/data/tree";
 import {
   BatchTooLarge,
   DAILY_CONTAINER_TEXT,
@@ -46,10 +46,10 @@ const T = 1_700_000_000_000;
 /** a -> b (top level), with a1 -> a2 under a. */
 function fixture(): Node[] {
   return [
-    makeNode({ id: "a", text: "alpha" }),
-    makeNode({ id: "b", text: "bravo", prevSiblingId: "a" }),
-    makeNode({ id: "a1", text: "alpha one", parentId: "a" }),
-    makeNode({
+    createNode({ id: "a", text: "alpha" }),
+    createNode({ id: "b", text: "bravo", prevSiblingId: "a" }),
+    createNode({ id: "a1", text: "alpha one", parentId: "a" }),
+    createNode({
       id: "a2",
       text: "alpha two",
       parentId: "a",
@@ -153,7 +153,7 @@ describe("planAddNode", () => {
   test("a mirror parent redirects to its true source", () => {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
+      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
     ];
     const plan = planAddNode(index(nodes), {
       id: "new",
@@ -227,7 +227,7 @@ describe("planUpdateNode", () => {
   test("content fields on a mirror land on the source; collapsed stays local", () => {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
+      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
     ];
     const plan = planUpdateNode(index(nodes), {
       nodeId: "m",
@@ -254,7 +254,7 @@ describe("planUpdateNode", () => {
   // Kind exclusivity at the trust boundary (ADR 0045): the server normalizes the
   // pair exactly as the client funnels do, so no agent can persist an illegal one.
   test("setting kind=paragraph clears isTask", () => {
-    const nodes = [makeNode({ id: "t", text: "job", isTask: true })];
+    const nodes = [createNode({ id: "t", text: "job", isTask: true })];
     const plan = planUpdateNode(index(nodes), {
       nodeId: "t",
       changes: { kind: "paragraph" },
@@ -267,7 +267,7 @@ describe("planUpdateNode", () => {
   });
 
   test("setting isTask clears kind", () => {
-    const nodes = [makeNode({ id: "p", text: "prose", kind: "paragraph" })];
+    const nodes = [createNode({ id: "p", text: "prose", kind: "paragraph" })];
     const plan = planUpdateNode(index(nodes), {
       nodeId: "p",
       changes: { isTask: true },
@@ -280,7 +280,7 @@ describe("planUpdateNode", () => {
   });
 
   test("kind wins when an agent passes both in one call", () => {
-    const nodes = [makeNode({ id: "n", text: "x" })];
+    const nodes = [createNode({ id: "n", text: "x" })];
     const plan = planUpdateNode(index(nodes), {
       nodeId: "n",
       changes: { isTask: true, kind: "paragraph" },
@@ -293,7 +293,7 @@ describe("planUpdateNode", () => {
   });
 
   test("kind=null turns a paragraph back into a plain bullet", () => {
-    const nodes = [makeNode({ id: "p", text: "prose", kind: "paragraph" })];
+    const nodes = [createNode({ id: "p", text: "prose", kind: "paragraph" })];
     const plan = planUpdateNode(index(nodes), {
       nodeId: "p",
       changes: { kind: null },
@@ -393,7 +393,7 @@ describe("planDeleteNode", () => {
   test("refuses when the subtree has surviving mirrors elsewhere", () => {
     const nodes = [
       ...fixture(),
-      makeNode({
+      createNode({
         id: "m",
         text: "alpha one",
         mirrorOf: "a1",
@@ -407,7 +407,7 @@ describe("planDeleteNode", () => {
   test("deleting a mirror itself is safe and touches only the mirror", () => {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
+      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
     ];
     const plan = planDeleteNode(index(nodes), "m", T);
     if (plan instanceof Error) throw plan;
@@ -419,7 +419,7 @@ describe("planMirrorNode", () => {
   test("mirrors as the last child, flattening mirror-of-mirror to the true source", () => {
     const nodes = [
       ...fixture(),
-      makeNode({
+      createNode({
         id: "m",
         text: "alpha one",
         mirrorOf: "a1",
@@ -491,9 +491,9 @@ describe("planReparent", () => {
 
   test("a batch keeps the passed order (last)", () => {
     const nodes = [
-      makeNode({ id: "p", text: "parent" }),
-      makeNode({ id: "x", text: "x", prevSiblingId: "p" }),
-      makeNode({ id: "y", text: "y", prevSiblingId: "x" }),
+      createNode({ id: "p", text: "parent" }),
+      createNode({ id: "x", text: "x", prevSiblingId: "p" }),
+      createNode({ id: "y", text: "y", prevSiblingId: "x" }),
     ];
     const plan = move(nodes, {
       nodeIds: ["x", "y"],
@@ -511,10 +511,10 @@ describe("planReparent", () => {
 
   test("a batch keeps the passed order at the front (first)", () => {
     const nodes = [
-      makeNode({ id: "p", text: "parent" }),
-      makeNode({ id: "z", text: "z", parentId: "p" }),
-      makeNode({ id: "x", text: "x", prevSiblingId: "p" }),
-      makeNode({ id: "y", text: "y", prevSiblingId: "x" }),
+      createNode({ id: "p", text: "parent" }),
+      createNode({ id: "z", text: "z", parentId: "p" }),
+      createNode({ id: "x", text: "x", prevSiblingId: "p" }),
+      createNode({ id: "y", text: "y", prevSiblingId: "x" }),
     ];
     const plan = move(nodes, {
       nodeIds: ["x", "y"],
@@ -581,7 +581,7 @@ describe("planReparent", () => {
   test("a mirror parent redirects to its true source", () => {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
+      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
     ];
     const plan = move(nodes, {
       nodeIds: ["b"],
@@ -762,7 +762,7 @@ describe("planAddSubtree", () => {
   test("a mirror parent redirects to its true source", () => {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
+      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
     ];
     const plan = planAddSubtree(index(nodes), {
       nodes: [{ text: "x" }],
@@ -833,9 +833,13 @@ describe("planAddSubtree", () => {
   test("planAddSubtreeToDaily materializes the day and appends the forest after its last child", () => {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "cont" }),
-      makeNode({ id: "existing", text: "already here", parentId: "day" }),
+      createNode({
+        id: "cont",
+        text: DAILY_CONTAINER_TEXT,
+        prevSiblingId: "b",
+      }),
+      createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "cont" }),
+      createNode({ id: "existing", text: "already here", parentId: "day" }),
     ];
     const plan = planAddSubtreeToDaily(index(nodes), {
       nodes: [{ text: "one" }, { text: "two" }],
@@ -884,10 +888,14 @@ describe("daily planning", () => {
   function seededWeek(weekKey: string, extraDays: Node[] = []) {
     const nodes = [
       ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "yr", text: "2026", parentId: "cont" }),
-      makeNode({ id: "mo", text: "July", parentId: "yr" }),
-      makeNode({ id: "wk", text: weekLabel(weekKey), parentId: "mo" }),
+      createNode({
+        id: "cont",
+        text: DAILY_CONTAINER_TEXT,
+        prevSiblingId: "b",
+      }),
+      createNode({ id: "yr", text: "2026", parentId: "cont" }),
+      createNode({ id: "mo", text: "July", parentId: "yr" }),
+      createNode({ id: "wk", text: weekLabel(weekKey), parentId: "mo" }),
       ...extraDays,
     ];
     const rev = new Map<string, string>([
@@ -926,7 +934,7 @@ describe("daily planning", () => {
   test("a second day in the same week reuses year/month/week, only minting the day", () => {
     // 2026-07-13 and 2026-07-16 are both ISO Week 29.
     const { nodes, rev } = seededWeek("2026-W29", [
-      makeNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
+      createNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
     ]);
     rev.set("d13", "2026-07-13");
     const plan = planEnsureDaily(index(nodes), {
@@ -948,8 +956,8 @@ describe("daily planning", () => {
     // no daily-index mapping). A newer day chains after the last DAY, NOT past
     // the trailing bullet at the absolute tail — the shared placement decision.
     const { nodes, rev } = seededWeek("2026-W29", [
-      makeNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
-      makeNode({
+      createNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
+      createNode({
         id: "note",
         text: "stray",
         parentId: "wk",
@@ -974,7 +982,11 @@ describe("daily planning", () => {
     // Week 29 already holds 07-16; ensuring 07-13 must land before it — retiring
     // the old "past day lands on top" caveat (decision 4).
     const { nodes, rev } = seededWeek("2026-W29", [
-      makeNode({ id: "d16", text: "Thursday, July 16, 2026", parentId: "wk" }),
+      createNode({
+        id: "d16",
+        text: "Thursday, July 16, 2026",
+        parentId: "wk",
+      }),
     ]);
     rev.set("d16", "2026-07-16");
     const plan = planEnsureDaily(index(nodes), {
@@ -993,8 +1005,8 @@ describe("daily planning", () => {
 
   test("years sort ascending under the container; a later year appends after an earlier one", () => {
     const nodes = [
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT }),
-      makeNode({ id: "yr25", text: "2025", parentId: "cont" }),
+      createNode({ id: "cont", text: DAILY_CONTAINER_TEXT }),
+      createNode({ id: "yr25", text: "2025", parentId: "cont" }),
     ];
     const rev = new Map<string, string>([
       ["cont", "container"],
@@ -1032,8 +1044,16 @@ describe("daily planning", () => {
     // must not mint a parallel Y/M/W scaffold — the client migrates it later.
     const nodes = [
       ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
-      makeNode({ id: "flat", text: "Friday, July 3, 2026", parentId: "cont" }),
+      createNode({
+        id: "cont",
+        text: DAILY_CONTAINER_TEXT,
+        prevSiblingId: "b",
+      }),
+      createNode({
+        id: "flat",
+        text: "Friday, July 3, 2026",
+        parentId: "cont",
+      }),
     ];
     const rev = new Map<string, string>([
       ["cont", "container"],
@@ -1049,7 +1069,7 @@ describe("daily planning", () => {
 
   test("heals a blank existing day's text without re-scaffolding", () => {
     const { nodes, rev } = seededWeek("2026-W27", [
-      makeNode({ id: "day", text: "  ", parentId: "wk" }),
+      createNode({ id: "day", text: "  ", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");
     const plan = planEnsureDaily(index(nodes), {
@@ -1088,8 +1108,8 @@ describe("daily planning", () => {
 
   test("planAddToDaily appends day content under the day, after its last child", () => {
     const { nodes, rev } = seededWeek("2026-W27", [
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
-      makeNode({ id: "entry1", text: "existing", parentId: "day" }),
+      createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
+      createNode({ id: "entry1", text: "existing", parentId: "day" }),
     ]);
     rev.set("day", "2026-07-03");
     const plan = planAddToDaily(index(nodes), {
@@ -1108,7 +1128,7 @@ describe("daily planning", () => {
 
   test("planMirrorToDaily refuses mirroring the container onto its own day", () => {
     const { nodes, rev } = seededWeek("2026-W27", [
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
+      createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");
     const plan = planMirrorToDaily(index(nodes), {
@@ -1127,7 +1147,11 @@ describe("daily planning", () => {
     // or it builds a self-cycle (mirror -> container landing under the container).
     const nodes = [
       ...fixture(),
-      makeNode({ id: "cont", text: DAILY_CONTAINER_TEXT, prevSiblingId: "b" }),
+      createNode({
+        id: "cont",
+        text: DAILY_CONTAINER_TEXT,
+        prevSiblingId: "b",
+      }),
     ];
     const plan = planMirrorToDaily(index(nodes), {
       dateKey: "2026-07-03",
@@ -1141,7 +1165,7 @@ describe("daily planning", () => {
 
   test("planMirrorToDaily mirrors an outside node onto the day", () => {
     const { nodes, rev } = seededWeek("2026-W27", [
-      makeNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
+      createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");
     const plan = planMirrorToDaily(index(nodes), {
@@ -1173,8 +1197,8 @@ describe("daily planning", () => {
 describe("reads", () => {
   test("kind reaches the agent through flattenSubtree, formatOutlineLines, and search", () => {
     const nodes = [
-      makeNode({ id: "a", text: "alpha" }),
-      makeNode({
+      createNode({ id: "a", text: "alpha" }),
+      createNode({
         id: "p",
         text: "alpha prose",
         parentId: "a",
@@ -1197,7 +1221,7 @@ describe("reads", () => {
     // The illegal pair a raw PATCH or a stale client can still write. The app
     // draws a paragraph glyph and no checkbox; the agent must not be told `- [ ]`.
     const nodes = [
-      makeNode({ id: "p", text: "prose", isTask: true, kind: "paragraph" }),
+      createNode({ id: "p", text: "prose", isTask: true, kind: "paragraph" }),
     ];
     const result = flattenSubtree(index(nodes), null, {
       maxDepth: 99,
@@ -1212,16 +1236,16 @@ describe("reads", () => {
     // m mirrors a; a contains m2, which mirrors a again -> the inner instance
     // must render capped instead of recursing forever.
     const nodes = [
-      makeNode({ id: "a", text: "alpha" }),
-      makeNode({ id: "a1", text: "kid", parentId: "a" }),
-      makeNode({
+      createNode({ id: "a", text: "alpha" }),
+      createNode({ id: "a1", text: "kid", parentId: "a" }),
+      createNode({
         id: "m2",
         text: "alpha",
         parentId: "a",
         prevSiblingId: "a1",
         mirrorOf: "a",
       }),
-      makeNode({ id: "m", text: "alpha", prevSiblingId: "a", mirrorOf: "a" }),
+      createNode({ id: "m", text: "alpha", prevSiblingId: "a", mirrorOf: "a" }),
     ];
     const result = flattenSubtree(index(nodes), "m", {
       maxDepth: 99,
@@ -1247,8 +1271,8 @@ describe("reads", () => {
 
   test("formatOutlineLines renders indentation, checkboxes, and ids", () => {
     const nodes = [
-      makeNode({ id: "a", text: "alpha" }),
-      makeNode({
+      createNode({ id: "a", text: "alpha" }),
+      createNode({
         id: "a1",
         text: "todo",
         parentId: "a",
@@ -1284,7 +1308,7 @@ describe("reads", () => {
 // carve-out as worker/wire.test.ts / worker/mcp.test.ts.
 describe("spoiler redaction at the MCP boundary", () => {
   test("flattenSubtree redacts a spoiler run to the [spoiler] sentinel", () => {
-    const nodes = [makeNode({ id: "a", text: "the killer is ||Bob||" })];
+    const nodes = [createNode({ id: "a", text: "the killer is ||Bob||" })];
     const result = flattenSubtree(index(nodes), null, {
       maxDepth: 99,
       maxNodes: 100,
@@ -1295,7 +1319,7 @@ describe("spoiler redaction at the MCP boundary", () => {
   });
 
   test("searchNodes cannot match a term that lives only inside a spoiler", () => {
-    const nodes = [makeNode({ id: "a", text: "the killer is ||Bob||" })];
+    const nodes = [createNode({ id: "a", text: "the killer is ||Bob||" })];
     // "Bob" exists in the source but only inside the spoiler -> zero hits, not a
     // masked hit (an agent must not be able to confirm the term is in there).
     expect(searchNodes(index(nodes), "Bob", 10)).toHaveLength(0);
@@ -1308,8 +1332,8 @@ describe("spoiler redaction at the MCP boundary", () => {
   test("searchNodes redacts spoilers in the ancestor breadcrumb path", () => {
     // An ancestor bullet can hold a spoiler; its crumb must be redacted too.
     const nodes = [
-      makeNode({ id: "p", text: "chapter ||twist||" }),
-      makeNode({ id: "c", text: "a clue", parentId: "p" }),
+      createNode({ id: "p", text: "chapter ||twist||" }),
+      createNode({ id: "c", text: "a clue", parentId: "p" }),
     ];
     const hits = searchNodes(index(nodes), "clue", 10);
     expect(hits).toHaveLength(1);
@@ -1318,8 +1342,8 @@ describe("spoiler redaction at the MCP boundary", () => {
 
   test("redactSpoilerIndex rebuilds an index over redacted text (export_opml path)", () => {
     const nodes = [
-      makeNode({ id: "a", text: "secret is ||42||" }),
-      makeNode({ id: "a1", text: "plain child", parentId: "a" }),
+      createNode({ id: "a", text: "secret is ||42||" }),
+      createNode({ id: "a1", text: "plain child", parentId: "a" }),
     ];
     const redacted = redactSpoilerIndex(index(nodes));
     expect(redacted.byId.get("a")!.text).toBe("secret is [spoiler]");

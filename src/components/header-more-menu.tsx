@@ -126,10 +126,7 @@ export function exportOutlineAsOpml() {
  * The walk descends through already-collapsed branches (the index is unaffected
  * by the flag), so "Expand all" reaches every nested node.
  */
-function collapsibleTargets(collapsed: boolean): {
-  ids: string[];
-  rootId: string | null;
-} {
+function collapsibleTargets(collapsed: boolean) {
   const index = getTreeIndex();
   const rootId = getViewRootId();
   const targets: string[] = [];

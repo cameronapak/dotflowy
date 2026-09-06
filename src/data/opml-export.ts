@@ -119,14 +119,14 @@ const MD_LINK_RE = /^\[([^\]]*)\]\(([^)]*)\)$/;
  *  class (blue -> `bc-sky`; the leading circle emoji is encoding, not
  *  content, and is stripped). Text-color provenance (`c-*`) is never
  *  reconstructed — everything exports as `bc-*` (ADR 0037). */
-const HIGHLIGHT_CLASS: Record<HighlightColor, string> = {
+const HIGHLIGHT_CLASS = {
   red: "bc-red",
   orange: "bc-orange",
   yellow: "bc-yellow",
   green: "bc-green",
   blue: "bc-sky",
   purple: "bc-purple",
-};
+} satisfies Record<HighlightColor, string>;
 
 const WEEKDAYS_SHORT = [
   "Sun",
@@ -157,10 +157,12 @@ const MONTHS_SHORT = [
  *  Worker has no user locale, and Workflowy rebuilds its pill from the
  *  ATTRIBUTES anyway (the display text is redundant, #112). */
 function formatTimeDisplay(key: string, time: string | null): string {
+  // SAFETY: key is a `YYYY-MM-DD` date key from parseDateLink, so the split yields exactly three numeric parts.
   const [y, mo, d] = key.split("-").map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, mo - 1, d, 12));
   let display = `${WEEKDAYS_SHORT[date.getUTCDay()]}, ${MONTHS_SHORT[mo - 1]} ${d}, ${y}`;
   if (time !== null) {
+    // SAFETY: time is an `HH:MM` string from parseDateLink, so the split yields exactly two numeric parts.
     const [hh, mm] = time.split(":").map(Number) as [number, number];
     const h12 = hh % 12 === 0 ? 12 : hh % 12;
     display += ` at ${h12}:${String(mm).padStart(2, "0")}${hh < 12 ? "am" : "pm"}`;
@@ -175,6 +177,7 @@ function formatTimeDisplay(key: string, time: string | null): string {
 function dateTokenToTime(tok: string): string | null {
   const parsed = parseDateLink(tok);
   if (!parsed) return null;
+  // SAFETY: parsed.key is a `YYYY-MM-DD` date key from parseDateLink, so the split yields exactly three numeric parts.
   const [y, mo, d] = parsed.key.split("-").map(Number) as [
     number,
     number,
@@ -182,6 +185,7 @@ function dateTokenToTime(tok: string): string | null {
   ];
   let attrs = ` startYear="${y}" startMonth="${mo}" startDay="${d}"`;
   if (parsed.time !== null) {
+    // SAFETY: parsed.time is an `HH:MM` string from parseDateLink, so the split yields exactly two numeric parts.
     const [hh, mm] = parsed.time.split(":").map(Number) as [number, number];
     attrs += ` startHour="${hh}"`;
     if (mm !== 0) attrs += ` startMinute="${mm}"`;
@@ -310,13 +314,19 @@ function emitNode(
   state.lines.push(`${pad}</outline>`);
 }
 
+/** Nodes in scope plus the true sources of in-scope mirrors (collectScope). */
+interface CollectedScope {
+  scopeIds: Set<string>;
+  mirrorSources: Set<string>;
+}
+
 /** Own-position pass: which node ids are in scope, and which of them are the
  *  true source of an in-scope mirror. A mirror's expansion is NOT an own
  *  position, so the walk doesn't descend into it. */
 function collectScope(
   index: TreeIndex,
   rootIds: readonly string[],
-): { scopeIds: Set<string>; mirrorSources: Set<string> } {
+): CollectedScope {
   const scopeIds = new Set<string>();
   const mirrorSources = new Set<string>();
   const stack = [...rootIds];

@@ -5,7 +5,7 @@ import {
   buildTreeIndex,
   childrenOf,
   countSubtreeNodes,
-  makeNode,
+  createNode,
   orphanedMirrorsBy,
   planRemoveSubtrees,
   trueSourceOf,
@@ -15,9 +15,9 @@ import {
 describe("buildTreeIndex + childrenOf", () => {
   test("orders siblings by the prevSiblingId chain, not input order", () => {
     // a -> b -> c, fed to the index out of order
-    const a = makeNode({ id: "a", prevSiblingId: null });
-    const b = makeNode({ id: "b", prevSiblingId: "a" });
-    const c = makeNode({ id: "c", prevSiblingId: "b" });
+    const a = createNode({ id: "a", prevSiblingId: null });
+    const b = createNode({ id: "b", prevSiblingId: "a" });
+    const c = createNode({ id: "c", prevSiblingId: "b" });
     const index = buildTreeIndex([c, a, b]);
 
     expect(childrenOf(index, null).map((n) => n.id)).toEqual(["a", "b", "c"]);
@@ -25,9 +25,9 @@ describe("buildTreeIndex + childrenOf", () => {
   });
 
   test("children are keyed by parentId", () => {
-    const p = makeNode({ id: "p" });
-    const k1 = makeNode({ id: "k1", parentId: "p", prevSiblingId: null });
-    const k2 = makeNode({ id: "k2", parentId: "p", prevSiblingId: "k1" });
+    const p = createNode({ id: "p" });
+    const k1 = createNode({ id: "k1", parentId: "p", prevSiblingId: null });
+    const k2 = createNode({ id: "k2", parentId: "p", prevSiblingId: "k1" });
     const index = buildTreeIndex([p, k1, k2]);
 
     expect(childrenOf(index, "p").map((n) => n.id)).toEqual(["k1", "k2"]);
@@ -36,10 +36,10 @@ describe("buildTreeIndex + childrenOf", () => {
   });
 
   test("a node orphaned by a broken chain is appended, never dropped", () => {
-    const p = makeNode({ id: "p" });
-    const x = makeNode({ id: "x", parentId: "p", prevSiblingId: null });
+    const p = createNode({ id: "p" });
+    const x = createNode({ id: "x", parentId: "p", prevSiblingId: null });
     // y points at a sibling that does not exist -> off the chain
-    const y = makeNode({ id: "y", parentId: "p", prevSiblingId: "ghost" });
+    const y = createNode({ id: "y", parentId: "p", prevSiblingId: "ghost" });
     const index = buildTreeIndex([p, x, y]);
 
     // x is the chain head; y is appended in arrival order rather than lost
@@ -49,17 +49,17 @@ describe("buildTreeIndex + childrenOf", () => {
 
 describe("buildTreeIndex mirrorsBySource (ADR 0022)", () => {
   test("is empty for a mirror-free outline", () => {
-    const a = makeNode({ id: "a" });
-    const b = makeNode({ id: "b", prevSiblingId: "a" });
+    const a = createNode({ id: "a" });
+    const b = createNode({ id: "b", prevSiblingId: "a" });
     const index = buildTreeIndex([a, b]);
     expect(index.mirrorsBySource.size).toBe(0);
   });
 
   test("buckets every mirror under its source id", () => {
-    const src = makeNode({ id: "src" });
-    const m1 = makeNode({ id: "m1", mirrorOf: "src" });
-    const m2 = makeNode({ id: "m2", mirrorOf: "src" });
-    const other = makeNode({ id: "other" });
+    const src = createNode({ id: "src" });
+    const m1 = createNode({ id: "m1", mirrorOf: "src" });
+    const m2 = createNode({ id: "m2", mirrorOf: "src" });
+    const other = createNode({ id: "other" });
     const index = buildTreeIndex([src, m1, m2, other]);
 
     expect(index.mirrorsBySource.get("src")).toEqual(["m1", "m2"]);
@@ -69,7 +69,7 @@ describe("buildTreeIndex mirrorsBySource (ADR 0022)", () => {
   });
 
   test("a mirror whose source is absent still indexes (broken-mirror tolerant)", () => {
-    const m = makeNode({ id: "m", mirrorOf: "ghost" });
+    const m = createNode({ id: "m", mirrorOf: "ghost" });
     const index = buildTreeIndex([m]);
     expect(index.mirrorsBySource.get("ghost")).toEqual(["m"]);
   });
@@ -78,11 +78,16 @@ describe("buildTreeIndex mirrorsBySource (ADR 0022)", () => {
 describe("orphanedMirrorsBy (delete-source guard, ADR 0022)", () => {
   // src has two children; M (under p) mirrors src.
   const tree = () => [
-    makeNode({ id: "src" }),
-    makeNode({ id: "k1", parentId: "src", prevSiblingId: null }),
-    makeNode({ id: "k2", parentId: "src", prevSiblingId: "k1" }),
-    makeNode({ id: "p", prevSiblingId: "src" }),
-    makeNode({ id: "M", parentId: "p", prevSiblingId: null, mirrorOf: "src" }),
+    createNode({ id: "src" }),
+    createNode({ id: "k1", parentId: "src", prevSiblingId: null }),
+    createNode({ id: "k2", parentId: "src", prevSiblingId: "k1" }),
+    createNode({ id: "p", prevSiblingId: "src" }),
+    createNode({
+      id: "M",
+      parentId: "p",
+      prevSiblingId: null,
+      mirrorOf: "src",
+    }),
   ];
 
   test("deleting a source with a live mirror reports the orphan", () => {
@@ -98,10 +103,10 @@ describe("orphanedMirrorsBy (delete-source guard, ADR 0022)", () => {
   test("a source is found even when it sits inside the deleted subtree", () => {
     // Delete p's parent; src is a deep descendant whose mirror lives elsewhere.
     const nested = [
-      makeNode({ id: "top" }),
-      makeNode({ id: "src", parentId: "top", prevSiblingId: null }),
-      makeNode({ id: "p", prevSiblingId: "top" }),
-      makeNode({
+      createNode({ id: "top" }),
+      createNode({ id: "src", parentId: "top", prevSiblingId: null }),
+      createNode({ id: "p", prevSiblingId: "top" }),
+      createNode({
         id: "M",
         parentId: "p",
         prevSiblingId: null,
@@ -115,9 +120,9 @@ describe("orphanedMirrorsBy (delete-source guard, ADR 0022)", () => {
   test("deleting a source together with all its mirrors is safe", () => {
     // Both src and its only mirror M sit under `top`, so deleting top takes both.
     const together = [
-      makeNode({ id: "top" }),
-      makeNode({ id: "src", parentId: "top", prevSiblingId: null }),
-      makeNode({
+      createNode({ id: "top" }),
+      createNode({ id: "src", parentId: "top", prevSiblingId: null }),
+      createNode({
         id: "M",
         parentId: "top",
         prevSiblingId: "src",
@@ -130,17 +135,17 @@ describe("orphanedMirrorsBy (delete-source guard, ADR 0022)", () => {
 
   test("a mirror-free deletion is always safe", () => {
     const index = buildTreeIndex([
-      makeNode({ id: "a" }),
-      makeNode({ id: "b", parentId: "a", prevSiblingId: null }),
+      createNode({ id: "a" }),
+      createNode({ id: "b", parentId: "a", prevSiblingId: null }),
     ]);
     expect(orphanedMirrorsBy(index, ["a"])).toEqual([]);
   });
 });
 
 describe("trueSourceOf (mirror flatten, ADR 0022)", () => {
-  const src = makeNode({ id: "src" });
-  const m = makeNode({ id: "m", mirrorOf: "src" });
-  const plain = makeNode({ id: "plain" });
+  const src = createNode({ id: "src" });
+  const m = createNode({ id: "m", mirrorOf: "src" });
+  const plain = createNode({ id: "plain" });
   const index = buildTreeIndex([src, m, plain]);
 
   test("a non-mirror node is its own source", () => {
@@ -161,10 +166,14 @@ describe("trueSourceOf (mirror flatten, ADR 0022)", () => {
 
 describe("wouldMirrorCycle (ADR 0022)", () => {
   // src > c > gc ; `other` is an unrelated top-level node.
-  const src = makeNode({ id: "src", parentId: null });
-  const c = makeNode({ id: "c", parentId: "src" });
-  const gc = makeNode({ id: "gc", parentId: "c" });
-  const other = makeNode({ id: "other", parentId: null, prevSiblingId: "src" });
+  const src = createNode({ id: "src", parentId: null });
+  const c = createNode({ id: "c", parentId: "src" });
+  const gc = createNode({ id: "gc", parentId: "c" });
+  const other = createNode({
+    id: "other",
+    parentId: null,
+    prevSiblingId: "src",
+  });
   const index = buildTreeIndex([src, c, gc, other]);
 
   test("mirroring into an unrelated branch is fine", () => {
@@ -193,9 +202,9 @@ describe("wouldMirrorCycle (ADR 0022)", () => {
 
 describe("buildTrail", () => {
   // a -> b -> c (parent chain)
-  const a = makeNode({ id: "a", parentId: null });
-  const b = makeNode({ id: "b", parentId: "a" });
-  const c = makeNode({ id: "c", parentId: "b" });
+  const a = createNode({ id: "a", parentId: null });
+  const b = createNode({ id: "b", parentId: "a" });
+  const c = createNode({ id: "c", parentId: "b" });
   const index = buildTreeIndex([a, b, c]);
 
   test("walks ancestors top-down, including rootId itself", () => {
@@ -212,14 +221,14 @@ describe("countSubtreeNodes + planRemoveSubtrees", () => {
   // top-level: x -> p -> y ; p's children a -> b -> c ; b's children b1 -> b2
   const fixture = () =>
     buildTreeIndex([
-      makeNode({ id: "x", prevSiblingId: null }),
-      makeNode({ id: "p", prevSiblingId: "x" }),
-      makeNode({ id: "y", prevSiblingId: "p" }),
-      makeNode({ id: "a", parentId: "p", prevSiblingId: null }),
-      makeNode({ id: "b", parentId: "p", prevSiblingId: "a" }),
-      makeNode({ id: "c", parentId: "p", prevSiblingId: "b" }),
-      makeNode({ id: "b1", parentId: "b", prevSiblingId: null }),
-      makeNode({ id: "b2", parentId: "b", prevSiblingId: "b1" }),
+      createNode({ id: "x", prevSiblingId: null }),
+      createNode({ id: "p", prevSiblingId: "x" }),
+      createNode({ id: "y", prevSiblingId: "p" }),
+      createNode({ id: "a", parentId: "p", prevSiblingId: null }),
+      createNode({ id: "b", parentId: "p", prevSiblingId: "a" }),
+      createNode({ id: "c", parentId: "p", prevSiblingId: "b" }),
+      createNode({ id: "b1", parentId: "b", prevSiblingId: null }),
+      createNode({ id: "b2", parentId: "b", prevSiblingId: "b1" }),
     ]);
 
   test("counts roots + all descendants, deduping overlapping roots", () => {

@@ -256,6 +256,7 @@ export function getSelectionRootIds(): string[] {
   const d = snapshot().context.data;
   // Variance-only cast: callers read but never mutate (the schema types it
   // readonly); preserving the `string[]` public signature avoids a ripple.
+  // SAFETY: the schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   return d ? (d.rootIds as string[]) : EMPTY_ROOTS;
 }
 
@@ -324,6 +325,7 @@ export function clearSelection() {
 export function useSelectionRootIds(): string[] {
   return useSelector(
     selectionActor,
+    // SAFETY: the schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
     (snap) =>
       (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
     Object.is,

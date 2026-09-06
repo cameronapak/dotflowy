@@ -4,7 +4,7 @@ import type { Node } from "./schema";
 
 import * as realCollection from "./collection";
 import { LUNORA_SYNC_FLAG_KEY } from "./flags";
-import { makeNode } from "./tree";
+import { createNode } from "./tree";
 
 /**
  * Branch selection in `getLiveNodes()` — the seam that decides WHICH store a
@@ -18,16 +18,35 @@ import { makeNode } from "./tree";
 const flagStore = new Map<string, string>();
 const location = { href: "http://localhost/", search: "" };
 
+/** A `wholeOutline` row as the fixtures shape it: the `_id` key plus the node
+ *  columns (and the shard `userId`) Lunora stores. */
+interface FakeLunoraRow {
+  _id: string;
+  parentId: string | null;
+  prevSiblingId: string | null;
+  text: string;
+  isTask: boolean;
+  completed: boolean;
+  collapsed: boolean;
+  bookmarkedAt: number | null;
+  mirrorOf: string | null;
+  createdAt: number;
+  updatedAt: number;
+  origin: string | null;
+  kind: string | null;
+  userId: string;
+}
+
 /** Rows the FAKE classic collection serves (the real one never syncs here). */
 let classicRows: Node[] = [];
 
 /** Rows the FAKE Lunora `wholeOutline` collection serves, `_id`-shaped. */
-let lunoraRows: Array<Record<string, unknown> & { _id: string }> = [];
+let lunoraRows: FakeLunoraRow[] = [];
 
 /** Null models "flag ON but the sync host hasn't mounted yet". */
 let lunoraContext: {
   userId: string;
-  store: { collection: { toArray: unknown[] } };
+  store: { collection: { toArray: FakeLunoraRow[] } };
 } | null = null;
 
 // Spread the real module so the ONE export we swap doesn't strip
@@ -48,10 +67,7 @@ mock.module("./lunora-sync", () => ({
 const { getLiveNodes } = await import("./live-nodes");
 
 /** A `wholeOutline` row as Lunora stores it: `_id` key plus the shard `userId`. */
-function lunoraRow(
-  id: string,
-  text: string,
-): Record<string, unknown> & { _id: string } {
+function lunoraRow(id: string, text: string): FakeLunoraRow {
   return {
     _id: id,
     parentId: null,
@@ -70,9 +86,7 @@ function lunoraRow(
   };
 }
 
-function setLunoraRows(
-  rows: Array<Record<string, unknown> & { _id: string }>,
-): void {
+function setLunoraRows(rows: FakeLunoraRow[]): void {
   lunoraRows = rows;
   lunoraContext = {
     userId: "u1",
@@ -93,6 +107,7 @@ beforeEach(() => {
   classicRows = [];
   lunoraRows = [];
   lunoraContext = null;
+  // SAFETY: test stub for the browser window flags.ts reads; bun test has no DOM, so this is the only window in scope.
   (globalThis as { window?: unknown }).window = {
     localStorage: {
       getItem: (k: string) => flagStore.get(k) ?? null,
@@ -108,19 +123,20 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // SAFETY: the property was assigned by the beforeEach stub above, so delete removes exactly that stub.
   delete (globalThis as { window?: unknown }).window;
 });
 
 describe("getLiveNodes", () => {
   test("flag OFF reads the classic collection", () => {
-    classicRows = [makeNode({ id: "a", text: "Alpha" })];
+    classicRows = [createNode({ id: "a", text: "Alpha" })];
     setLunoraRows([lunoraRow("z", "Zulu")]);
 
     expect(getLiveNodes().map((n) => n.id)).toEqual(["a"]);
   });
 
   test("flag ON with a Lunora context reads the Lunora collection", () => {
-    classicRows = [makeNode({ id: "a", text: "Alpha" })];
+    classicRows = [createNode({ id: "a", text: "Alpha" })];
     setLunoraRows([lunoraRow("z", "Zulu")]);
     flagStore.set(LUNORA_SYNC_FLAG_KEY, "on");
 
@@ -137,7 +153,7 @@ describe("getLiveNodes", () => {
   });
 
   test("flag ON with no Lunora context falls back to the classic collection", () => {
-    classicRows = [makeNode({ id: "a", text: "Alpha" })];
+    classicRows = [createNode({ id: "a", text: "Alpha" })];
     flagStore.set(LUNORA_SYNC_FLAG_KEY, "on");
     lunoraContext = null;
 

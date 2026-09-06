@@ -5,7 +5,7 @@ import {
   buildTreeIndex,
   chainDisagreements,
   childrenOf,
-  makeOutlineNode,
+  createOutlineNode,
   orderSiblings,
   planIndent,
   planAppendChild,
@@ -44,7 +44,7 @@ function assertChainOk(nodes: OutlineNode[], parentId: string | null) {
 
 function seedFlat(ids: string[]): OutlineNode[] {
   return ids.map((id, i) =>
-    makeOutlineNode({
+    createOutlineNode({
       id,
       userId: USER,
       parentId: null,
@@ -235,14 +235,14 @@ describe("planAppendChild", () => {
 describe("planImportNodes", () => {
   it("is insert-only with no patches", () => {
     const batch = [
-      makeOutlineNode({
+      createOutlineNode({
         id: "x",
         userId: USER,
         parentId: null,
         prevSiblingId: null,
         text: "x",
       }),
-      makeOutlineNode({
+      createOutlineNode({
         id: "y",
         userId: USER,
         parentId: null,
@@ -296,7 +296,7 @@ describe("planInsertChildAtStart", () => {
 describe("field planners (kind exclusivity)", () => {
   it("planSetIsTask clears kind", () => {
     let nodes = [
-      makeOutlineNode({
+      createOutlineNode({
         id: "a",
         userId: USER,
         kind: "paragraph",
@@ -313,7 +313,7 @@ describe("field planners (kind exclusivity)", () => {
 
   it("planSetKind clears isTask", () => {
     let nodes = [
-      makeOutlineNode({
+      createOutlineNode({
         id: "a",
         userId: USER,
         isTask: true,
@@ -437,7 +437,7 @@ describe("planRestoreNodes", () => {
       n.id === "a" ? { ...n, text: "alpha" } : n,
     );
     target.push(
-      makeOutlineNode({
+      createOutlineNode({
         id: "d",
         userId: USER,
         parentId: null,
@@ -478,7 +478,7 @@ describe("planMirrorNode", () => {
     let nodes = seedFlat(["src", "dest"]);
     nodes = [
       ...nodes,
-      makeOutlineNode({
+      createOutlineNode({
         id: "child",
         userId: USER,
         parentId: "src",
@@ -533,7 +533,7 @@ describe("planMirrorNode", () => {
     let nodes = seedFlat(["src"]);
     nodes = [
       ...nodes,
-      makeOutlineNode({
+      createOutlineNode({
         id: "child",
         userId: USER,
         parentId: "src",
@@ -656,7 +656,7 @@ describe("multi-select planners (ADR 0018)", () => {
     let nodes = seedFlat(["p", "z"]);
     nodes = [
       ...nodes,
-      makeOutlineNode({
+      createOutlineNode({
         id: "a",
         userId: USER,
         parentId: "p",
@@ -665,7 +665,7 @@ describe("multi-select planners (ADR 0018)", () => {
         createdAt: 1,
         updatedAt: 1,
       }),
-      makeOutlineNode({
+      createOutlineNode({
         id: "b",
         userId: USER,
         parentId: "p",
@@ -711,7 +711,7 @@ describe("planMaterializeDailyNodes", () => {
 
   it("skips ids already present", () => {
     let nodes = [
-      makeOutlineNode({
+      createOutlineNode({
         id: "container",
         userId: USER,
         parentId: null,

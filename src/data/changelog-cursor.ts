@@ -34,6 +34,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Schema } from "effect";
 import { useSyncExternalStore } from "react";
 
+import { hasWindow } from "../env";
 import { latestVersion, releases, unseenCount } from "./changelog-data";
 import { kvFetch, kvPut, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
@@ -133,7 +134,7 @@ function rebuild() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   changelogCursorCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,

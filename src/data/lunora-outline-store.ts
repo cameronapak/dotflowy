@@ -9,6 +9,7 @@ import type { LunoraClient } from "lunorash/client";
 
 import { bindMutators, defineMutator } from "@lunora/db/mutators";
 
+import type { Id } from "../../lunora/_generated/dataModel";
 import type {
   DailyIndexRowDoc,
   SavedQueryRowDoc,
@@ -55,9 +56,11 @@ import {
   type OutlinePlan,
 } from "./outline-plans";
 
-/** Row shape for TanStack — Lunora Doc + index signature for collection drafts. */
-export type NodeRow = NodeDocLike &
-  Record<string, unknown> & { _creationTime?: number };
+/** Row shape for TanStack — the Lunora node Doc plus the _creationTime column. */
+export type NodeRow = NodeDocLike & {
+  _id: Id<"nodes">;
+  _creationTime?: number;
+};
 
 function applyPlanToCollection(
   collection: Collection<NodeRow, string>,
@@ -72,6 +75,7 @@ function applyPlanToCollection(
     });
   }
   for (const insert of plan.inserts) {
+    // SAFETY: nodeToRow is nodeToDocFields, which returns every NodeDocLike field with a string _id.
     collection.insert(nodeToRow(insert) as NodeRow);
   }
 }
@@ -104,9 +108,13 @@ function bindOutlineMutators(
     client,
     {
       collections: {
+        // SAFETY: bindMutators only touches these collections through the apply closures below, which read them at the concrete row types.
         nodes: collection as never,
+        // SAFETY: bindMutators only touches these collections through the apply closures below, which read them at the concrete row types.
         tagColors: tagColors as never,
+        // SAFETY: bindMutators only touches these collections through the apply closures below, which read them at the concrete row types.
         savedQueries: savedQueries as never,
+        // SAFETY: bindMutators only touches these collections through the apply closures below, which read them at the concrete row types.
         dailyIndex: dailyIndex as never,
       },
       shardKey: userId,
@@ -485,7 +493,8 @@ function bindOutlineMutators(
             });
           } else {
             tagColors.insert({
-              _id: args.tag,
+              // SAFETY: the daily/tag rows are keyed by their natural key; the branded Id is that same string.
+              _id: args.tag as Id<"tagColors">,
               tag: args.tag,
               color: args.color,
               userId: args.userId,
@@ -517,7 +526,8 @@ function bindOutlineMutators(
             });
           } else {
             savedQueries.insert({
-              _id: args.id,
+              // SAFETY: the row id is the caller's query id string.
+              _id: args.id as Id<"savedQueries">,
               name: args.name,
               query: args.query,
               createdAt: args.createdAt,
@@ -565,7 +575,8 @@ function bindOutlineMutators(
             return;
           }
           dailyIndex.insert({
-            _id: args.key,
+            // SAFETY: the daily row id is the scaffold key string.
+            _id: args.key as Id<"dailyIndex">,
             key: args.key,
             nodeId: args.nodeId,
             touchedAt: args.touchedAt,
@@ -589,7 +600,8 @@ function bindOutlineMutators(
             });
           } else {
             dailyIndex.insert({
-              _id: args.key,
+              // SAFETY: the daily row id is the scaffold key string.
+              _id: args.key as Id<"dailyIndex">,
               key: args.key,
               nodeId: args.nodeId,
               touchedAt: args.touchedAt,
@@ -637,19 +649,17 @@ export function createOutlineStore(
     shardKey: userId,
   });
 
-  const collection = outlineBinding.collection as unknown as Collection<
-    NodeRow,
-    string
-  >;
-  const tagColors = tagBinding.collection as unknown as Collection<
-    TagColorRowDoc,
-    string
-  >;
-  const savedQueries = savedBinding.collection as unknown as Collection<
+  // SAFETY: the generated Lunora nodes schema matches NodeDocLike field-for-field, so the row types are interchangeable through this seam.
+  const collection = outlineBinding.collection as Collection<NodeRow, string>;
+  // SAFETY: the generated Lunora schema rows are the TagColorRowDoc fields plus _creationTime, which TagColorRowDoc permits.
+  const tagColors = tagBinding.collection as Collection<TagColorRowDoc, string>;
+  // SAFETY: the generated Lunora schema rows are the SavedQueryRowDoc fields plus _creationTime, which SavedQueryRowDoc permits.
+  const savedQueries = savedBinding.collection as Collection<
     SavedQueryRowDoc,
     string
   >;
-  const dailyIndex = dailyBinding.collection as unknown as Collection<
+  // SAFETY: the generated Lunora schema rows are the DailyIndexRowDoc fields plus _creationTime, which DailyIndexRowDoc permits.
+  const dailyIndex = dailyBinding.collection as Collection<
     DailyIndexRowDoc,
     string
   >;

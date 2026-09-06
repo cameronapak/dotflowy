@@ -7,7 +7,7 @@ import {
   parseTags,
   validateOutlineSearch,
 } from "./tags";
-import { buildTreeIndex, makeNode, type Node } from "./tree";
+import { buildTreeIndex, createNode, type Node } from "./tree";
 
 // The `?q=` query grammar (parse + build) moved to filter-query.ts (ADR 0047);
 // its tests live in filter-query.test.ts. This file keeps the pure tag layer.
@@ -24,9 +24,9 @@ describe("normalizeTag", () => {
 
 describe("collectAllTags", () => {
   const tree = index([
-    makeNode({ id: "1", text: "#alpha #beta" }),
-    makeNode({ id: "2", text: "#Alpha" }), // case variant of #alpha
-    makeNode({ id: "3", text: "plain text, no tags" }),
+    createNode({ id: "1", text: "#alpha #beta" }),
+    createNode({ id: "2", text: "#Alpha" }), // case variant of #alpha
+    createNode({ id: "3", text: "plain text, no tags" }),
   ]);
 
   test("distinct, sorted, case-folded dedupe keeping first-seen casing", () => {
@@ -50,10 +50,10 @@ describe("parseTags", () => {
 describe("tagCorpus (buildTreeIndex)", () => {
   test("matches collectAllTags for the same fixture (Plan 004 parity gate)", () => {
     const tree = index([
-      makeNode({ id: "1", text: "#alpha #beta" }),
-      makeNode({ id: "2", text: "#Alpha" }), // case variant of #alpha
-      makeNode({ id: "3", text: "plain text, no tags" }),
-      makeNode({ id: "4", text: "#gamma #gamma" }), // repeated tag, one node
+      createNode({ id: "1", text: "#alpha #beta" }),
+      createNode({ id: "2", text: "#Alpha" }), // case variant of #alpha
+      createNode({ id: "3", text: "plain text, no tags" }),
+      createNode({ id: "4", text: "#gamma #gamma" }), // repeated tag, one node
     ]);
     expect(collectTagCorpus(tree.tagCorpus)).toEqual(collectAllTags(tree));
     expect(collectTagCorpus(tree.tagCorpus)).toEqual([
@@ -70,8 +70,8 @@ describe("tagCorpus (buildTreeIndex)", () => {
 
   test("counts occurrences, not just presence", () => {
     const tree = index([
-      makeNode({ id: "1", text: "#work" }),
-      makeNode({ id: "2", text: "#work #home" }),
+      createNode({ id: "1", text: "#work" }),
+      createNode({ id: "2", text: "#work #home" }),
     ]);
     expect(tree.tagCorpus.get("#work")?.count).toBe(2);
     expect(tree.tagCorpus.get("#home")?.count).toBe(1);

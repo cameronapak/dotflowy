@@ -135,6 +135,7 @@ describe("buildReleases", () => {
     const r = buildReleases([
       { version: "0.2.0", date: "2026-07-10", fragments: ["nope"] },
     ]);
+    // SAFETY: a malformed fragment makes buildReleases return an Error instead of a release list.
     expect((r as Error).message).toContain("0.2.0");
   });
 

@@ -21,8 +21,8 @@ import { isNodesLimitError } from "./nodes-client-effect";
  *    run of structural edits) that all fail offline collapses into ONE notice,
  *    not N stacked toasts. Sonner de-dupes on the id.
  */
-export function notifySaveFailed(err: unknown): void {
-  if (isNodesLimitError(err)) return;
+export function notifySaveFailed(cause: unknown): void {
+  if (isNodesLimitError(cause)) return;
   toast.error("Couldn't save your changes", {
     id: "save-failed",
     description:

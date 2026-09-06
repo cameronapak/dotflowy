@@ -7,52 +7,55 @@ import {
   planMarkdownPaste,
   type MdNode,
 } from "./markdown-import";
-import { buildTreeIndex, makeNode, type Node, type NodeKind } from "./tree";
+import { buildTreeIndex, createNode, type Node, type NodeKind } from "./tree";
 
 // --- helpers ------------------------------------------------------------------
 
-/** The shape the round-trip compares: `outlineToMarkdown` carries text, task
+/** The outline the round-trip compares: `outlineToMarkdown` carries text, task
  *  state, kind, and structure -- nothing else. */
-interface Shape {
+interface OutlineFixture {
   text: string;
   isTask: boolean;
   completed: boolean;
   kind: NodeKind;
-  children: Shape[];
+  children: OutlineFixture[];
 }
 
-const shape = (
+const outlineFixture = (
   text: string,
-  children: Shape[] = [],
+  children: OutlineFixture[] = [],
   isTask = false,
   completed = false,
   kind: NodeKind = null,
-): Shape => ({ text, isTask, completed, kind, children });
+): OutlineFixture => ({ text, isTask, completed, kind, children });
 
 /** A paragraph node, the reason this file grew a `kind` column (ADR 0045). */
-const para = (text: string, children: Shape[] = []): Shape =>
-  shape(text, children, false, false, "paragraph");
+const para = (text: string, children: OutlineFixture[] = []): OutlineFixture =>
+  outlineFixture(text, children, false, false, "paragraph");
 
-const forestShape = (forest: readonly MdNode[]): Shape[] =>
+const forestFixture = (forest: readonly MdNode[]): OutlineFixture[] =>
   forest.map((n) => ({
     text: n.text,
     isTask: n.isTask,
     completed: n.completed,
     kind: n.kind,
-    children: forestShape(n.children),
+    children: forestFixture(n.children),
   }));
 
-/** Materialize a `Shape` forest into a `TreeIndex`, wiring the sibling chain.
+/** Materialize a `OutlineFixture` forest into a `TreeIndex`, wiring the sibling chain.
  *  `mirrors` maps a node's index-path label to the id it mirrors. */
-function buildIndex(forest: Shape[], mirrorOf: Record<string, string> = {}) {
+function buildIndex(
+  forest: OutlineFixture[],
+  mirrorOf: Record<string, string> = {},
+) {
   const nodes: Node[] = [];
   let n = 0;
-  const walk = (siblings: Shape[], parentId: string | null): void => {
+  const walk = (siblings: OutlineFixture[], parentId: string | null): void => {
     let prev: string | null = null;
     for (const node of siblings) {
       const id = `n${n++}`;
       nodes.push(
-        makeNode({
+        createNode({
           id,
           parentId,
           prevSiblingId: prev,
@@ -73,13 +76,13 @@ function buildIndex(forest: Shape[], mirrorOf: Record<string, string> = {}) {
 
 /** Round-trip one forest through export + parse. */
 function roundTrip(
-  forest: Shape[],
+  forest: OutlineFixture[],
   mirrorOf: Record<string, string> = {},
-): Shape[] {
+): OutlineFixture[] {
   const { index } = buildIndex(forest, mirrorOf);
   const roots = index.childrenByParent.get("__root__") ?? [];
   const md = outlineToMarkdown(index, roots);
-  return forestShape(parseMarkdownForest(md));
+  return forestFixture(parseMarkdownForest(md));
 }
 
 /** A tiny deterministic PRNG -- the property test must fail reproducibly. */
@@ -136,9 +139,9 @@ const PARAGRAPH_SAFE_TEXTS = [
   "a  b",
 ];
 
-function randomForest(next: () => number, depth = 0): Shape[] {
+function randomForest(next: () => number, depth = 0): OutlineFixture[] {
   const count = Math.floor(next() * (depth === 0 ? 5 : 3));
-  const out: Shape[] = [];
+  const out: OutlineFixture[] = [];
   for (let i = 0; i < count; i++) {
     // Kinds are mutually exclusive, so one roll picks all three buckets:
     // task < 0.25 <= paragraph < 0.55 <= plain bullet.
@@ -156,9 +159,9 @@ function randomForest(next: () => number, depth = 0): Shape[] {
 }
 
 /** A forest of paragraphs whose text is guaranteed to survive as a bare line. */
-function safeParagraphForest(next: () => number, depth = 0): Shape[] {
+function safeParagraphForest(next: () => number, depth = 0): OutlineFixture[] {
   const count = Math.floor(next() * (depth === 0 ? 5 : 3));
-  const out: Shape[] = [];
+  const out: OutlineFixture[] = [];
   for (let i = 0; i < count; i++) {
     const text =
       PARAGRAPH_SAFE_TEXTS[Math.floor(next() * PARAGRAPH_SAFE_TEXTS.length)]!;
@@ -169,7 +172,7 @@ function safeParagraphForest(next: () => number, depth = 0): Shape[] {
 
 /** Everything the round-trip must preserve UNCONDITIONALLY: text, task state,
  *  done state, structure. Kind is the one field allowed to degrade. */
-const contentOnly = (forest: readonly Shape[]): unknown[] =>
+const contentOnly = (forest: readonly OutlineFixture[]): unknown[] =>
   forest.map((n) => ({
     text: n.text,
     isTask: n.isTask,
@@ -211,37 +214,43 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
   });
 
   test("holds for a single empty bullet (`- ` is eaten by editors)", () => {
-    expect(roundTrip([shape("")])).toEqual([shape("")]);
+    expect(roundTrip([outlineFixture("")])).toEqual([outlineFixture("")]);
   });
 
   test("holds for a task with no text", () => {
-    expect(roundTrip([shape("", [], true, false)])).toEqual([
-      shape("", [], true, false),
+    expect(roundTrip([outlineFixture("", [], true, false)])).toEqual([
+      outlineFixture("", [], true, false),
     ]);
-    expect(roundTrip([shape("", [], true, true)])).toEqual([
-      shape("", [], true, true),
+    expect(roundTrip([outlineFixture("", [], true, true)])).toEqual([
+      outlineFixture("", [], true, true),
     ]);
   });
 
   test("exception 3: a mirror flattens to an independent copy", () => {
     // n0 "source" > n1 "kid"; n2 mirrors n0.
-    const { index } = buildIndex([shape("source", [shape("kid")]), shape("")], {
-      n2: "n0",
-    });
+    const { index } = buildIndex(
+      [outlineFixture("source", [outlineFixture("kid")]), outlineFixture("")],
+      {
+        n2: "n0",
+      },
+    );
     const md = outlineToMarkdown(index, ["n0", "n2"]);
     expect(md).toBe(["- source", "  - kid", "- source", "  - kid"].join("\n"));
     // ...and the copy round-trips as a plain subtree.
-    expect(forestShape(parseMarkdownForest(md))).toEqual([
-      shape("source", [shape("kid")]),
-      shape("source", [shape("kid")]),
+    expect(forestFixture(parseMarkdownForest(md))).toEqual([
+      outlineFixture("source", [outlineFixture("kid")]),
+      outlineFixture("source", [outlineFixture("kid")]),
     ]);
   });
 
   test("exception 3: a mirror inside its own source emits once and stops", () => {
     // n0 "source" > n1 mirrors n0 -- expanding it forever is the cycle.
-    const { index } = buildIndex([shape("source", [shape("snapshot")])], {
-      n1: "n0",
-    });
+    const { index } = buildIndex(
+      [outlineFixture("source", [outlineFixture("snapshot")])],
+      {
+        n1: "n0",
+      },
+    );
     expect(outlineToMarkdown(index, ["n0"])).toBe(
       ["- source", "  - source"].join("\n"),
     );
@@ -250,9 +259,9 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
   test("exception 3: one source mirrored into two branches expands in both", () => {
     const { index } = buildIndex(
       [
-        shape("src", [shape("kid")]),
-        shape("a", [shape("")]),
-        shape("b", [shape("")]),
+        outlineFixture("src", [outlineFixture("kid")]),
+        outlineFixture("a", [outlineFixture("")]),
+        outlineFixture("b", [outlineFixture("")]),
       ],
       { n3: "n0", n5: "n0" },
     );
@@ -262,8 +271,8 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
   });
 
   test("exception 2: `[ ] x` as literal text re-imports as a task", () => {
-    expect(roundTrip([shape("[ ] buy milk")])).toEqual([
-      shape("buy milk", [], true, false),
+    expect(roundTrip([outlineFixture("[ ] buy milk")])).toEqual([
+      outlineFixture("buy milk", [], true, false),
     ]);
   });
 
@@ -272,49 +281,51 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
     // spaces, flattening the indentation of every fence interior the fence rule
     // promises to keep (a pasted code block, copied back out, came back at
     // column zero). See ADR 0044.
-    expect(roundTrip([shape("  x")])).toEqual([shape("  x")]);
-    expect(roundTrip([shape("\tx")])).toEqual([shape("\tx")]);
-    expect(roundTrip([shape("    if x:", [], true, false)])).toEqual([
-      shape("    if x:", [], true, false),
+    expect(roundTrip([outlineFixture("  x")])).toEqual([outlineFixture("  x")]);
+    expect(roundTrip([outlineFixture("\tx")])).toEqual([outlineFixture("\tx")]);
+    expect(roundTrip([outlineFixture("    if x:", [], true, false)])).toEqual([
+      outlineFixture("    if x:", [], true, false),
     ]);
   });
 
   test("a paragraph exports as a bare line, at every depth", () => {
     const { index } = buildIndex([
-      para("prose", [para("nested"), shape("kid")]),
+      para("prose", [para("nested"), outlineFixture("kid")]),
     ]);
     expect(outlineToMarkdown(index, ["n0"])).toBe(
       ["prose", "  nested", "  - kid"].join("\n"),
     );
-    expect(roundTrip([para("prose", [para("nested"), shape("kid")])])).toEqual([
-      para("prose", [para("nested"), shape("kid")]),
-    ]);
+    expect(
+      roundTrip([para("prose", [para("nested"), outlineFixture("kid")])]),
+    ).toEqual([para("prose", [para("nested"), outlineFixture("kid")])]);
   });
 
   test("a lookalike paragraph falls back to `- `, keeping every character", () => {
     // Each of these, emitted bare, would come back as something else. The `- `
     // prefix keeps the text intact and degrades the kind to bullet.
     for (const text of ["- foo", "# foo", "> quoted", "```", "-", "1. x"]) {
-      expect(roundTrip([para(text)])).toEqual([shape(text)]);
+      expect(roundTrip([para(text)])).toEqual([outlineFixture(text)]);
     }
   });
 
   test("an empty paragraph falls back to `- ` (a blank line is a separator)", () => {
-    expect(roundTrip([para("")])).toEqual([shape("")]);
+    expect(roundTrip([para("")])).toEqual([outlineFixture("")]);
   });
 
   test("an indented paragraph falls back to `- ` (trimStart would eat it)", () => {
-    expect(roundTrip([para("  x")])).toEqual([shape("  x")]);
-    expect(roundTrip([para("\tif x:")])).toEqual([shape("\tif x:")]);
+    expect(roundTrip([para("  x")])).toEqual([outlineFixture("  x")]);
+    expect(roundTrip([para("\tif x:")])).toEqual([outlineFixture("\tif x:")]);
   });
 
   test("a paragraph is never a task, even under a task parent", () => {
-    const forest = [shape("job", [para("why it matters")], true, false)];
+    const forest = [
+      outlineFixture("job", [para("why it matters")], true, false),
+    ];
     expect(roundTrip(forest)).toEqual(forest);
   });
 
   test("a pasted code fence survives being copied back out", () => {
-    // The end-to-end shape of the bug above: paste Python, copy as markdown,
+    // The end-to-end outlineFixture of the bug above: paste Python, copy as markdown,
     // paste it back. Every level of indentation must still be there.
     const src = [
       "```py",
@@ -323,7 +334,7 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
       "        return 1",
       "```",
     ].join("\n");
-    const once = forestShape(parseMarkdownForest(src));
+    const once = forestFixture(parseMarkdownForest(src));
     expect(once.map((n) => n.text)).toEqual([
       "```py",
       "def f():",
@@ -393,61 +404,69 @@ describe("parseMarkdownForest", () => {
 
   test("headings drive nesting, and the shallowest normalizes to depth 0", () => {
     const forest = parseMarkdownForest("### Section\nbody\n#### Sub\nmore");
-    expect(forestShape(forest)).toEqual([
-      shape("Section", [para("body"), shape("Sub", [para("more")])]),
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("Section", [
+        para("body"),
+        outlineFixture("Sub", [para("more")]),
+      ]),
     ]);
   });
 
   test("a skipped heading level clamps instead of jumping", () => {
     const forest = parseMarkdownForest("# A\n##### E\ntext");
-    expect(forestShape(forest)).toEqual([
-      shape("A", [shape("E", [para("text")])]),
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("A", [outlineFixture("E", [para("text")])]),
     ]);
   });
 
   test("a heading pops back out to its own level", () => {
     const forest = parseMarkdownForest("# A\n## B\n# C");
-    expect(forestShape(forest)).toEqual([shape("A", [shape("B")]), shape("C")]);
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("A", [outlineFixture("B")]),
+      outlineFixture("C"),
+    ]);
   });
 
   test("list indentation nests inside the heading floor", () => {
     const forest = parseMarkdownForest("# A\n- one\n  - two");
-    expect(forestShape(forest)).toEqual([
-      shape("A", [shape("one", [shape("two")])]),
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("A", [outlineFixture("one", [outlineFixture("two")])]),
     ]);
   });
 
   test("tabs, 2-space and 4-space indents all nest identically", () => {
-    const expected = [shape("a", [shape("b", [shape("c")])])];
-    expect(forestShape(parseMarkdownForest("- a\n  - b\n    - c"))).toEqual(
+    const expected = [
+      outlineFixture("a", [outlineFixture("b", [outlineFixture("c")])]),
+    ];
+    expect(forestFixture(parseMarkdownForest("- a\n  - b\n    - c"))).toEqual(
       expected,
     );
     expect(
-      forestShape(parseMarkdownForest("- a\n    - b\n        - c")),
+      forestFixture(parseMarkdownForest("- a\n    - b\n        - c")),
     ).toEqual(expected);
-    expect(forestShape(parseMarkdownForest("- a\n\t- b\n\t\t- c"))).toEqual(
+    expect(forestFixture(parseMarkdownForest("- a\n\t- b\n\t\t- c"))).toEqual(
       expected,
     );
   });
 
   test("a skipped indent level clamps to one level down", () => {
-    expect(forestShape(parseMarkdownForest("- a\n        - b"))).toEqual([
-      shape("a", [shape("b")]),
+    expect(forestFixture(parseMarkdownForest("- a\n        - b"))).toEqual([
+      outlineFixture("a", [outlineFixture("b")]),
     ]);
   });
 
   test("task markers map to isTask/completed", () => {
     expect(
-      forestShape(parseMarkdownForest("- [ ] open\n- [x] done\n- [X] DONE")),
+      forestFixture(parseMarkdownForest("- [ ] open\n- [x] done\n- [X] DONE")),
     ).toEqual([
-      shape("open", [], true, false),
-      shape("done", [], true, true),
-      shape("DONE", [], true, true),
+      outlineFixture("open", [], true, false),
+      outlineFixture("done", [], true, true),
+      outlineFixture("DONE", [], true, true),
     ]);
   });
 
   test("a task marker needs its list marker (GFM), so bare `[ ] x` is text", () => {
-    expect(forestShape(parseMarkdownForest("[ ] x\ny"))).toEqual([
+    expect(forestFixture(parseMarkdownForest("[ ] x\ny"))).toEqual([
       para("[ ] x"),
       para("y"),
     ]);
@@ -471,7 +490,7 @@ describe("parseMarkdownForest", () => {
     // literal text -- and re-exporting it (`- # A`) is a fixed point.
     // A stripped blockquote line is marker-less, so it lands as a paragraph
     // (ADR 0045); `- # A` on the way back out is still the fixed point.
-    expect(forestShape(parseMarkdownForest("> # A\n> body"))).toEqual([
+    expect(forestFixture(parseMarkdownForest("> # A\n> body"))).toEqual([
       para("# A"),
       para("body"),
     ]);
@@ -481,12 +500,12 @@ describe("parseMarkdownForest", () => {
     const forest = parseMarkdownForest(
       "```ts\n- not a bullet\n  indented\n\n```\nafter",
     );
-    expect(forestShape(forest)).toEqual([
-      shape("```ts"),
-      shape("- not a bullet"),
-      shape("  indented"),
-      shape(""), // a blank line inside a fence is content
-      shape("```"),
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("```ts"),
+      outlineFixture("- not a bullet"),
+      outlineFixture("  indented"),
+      outlineFixture(""), // a blank line inside a fence is content
+      outlineFixture("```"),
       // Raw mode infers no kind, so only the line AFTER the fence is a paragraph.
       para("after"),
     ]);
@@ -494,11 +513,11 @@ describe("parseMarkdownForest", () => {
 
   test("a fence closes only on a bare delimiter of the same char", () => {
     const forest = parseMarkdownForest("```\n~~~\n```js\n```\nout");
-    expect(forestShape(forest)).toEqual([
-      shape("```"),
-      shape("~~~"),
-      shape("```js"),
-      shape("```"),
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("```"),
+      outlineFixture("~~~"),
+      outlineFixture("```js"),
+      outlineFixture("```"),
       para("out"),
     ]);
   });
@@ -516,12 +535,12 @@ describe("parseMarkdownForest", () => {
     const forest = parseMarkdownForest("- a\n  - b\n# C\n```\nd", {
       literal: true,
     });
-    expect(forestShape(forest)).toEqual([
-      shape("- a"),
-      shape("  - b"),
-      shape("# C"),
-      shape("```"),
-      shape("d"),
+    expect(forestFixture(forest)).toEqual([
+      outlineFixture("- a"),
+      outlineFixture("  - b"),
+      outlineFixture("# C"),
+      outlineFixture("```"),
+      outlineFixture("d"),
     ]);
   });
 
@@ -543,9 +562,9 @@ describe("parseMarkdownForest", () => {
 describe("planMarkdownPaste", () => {
   // anchor "A" with an existing child "kid" and a following sibling "next".
   const fixture = () => {
-    const a = makeNode({ id: "A", text: "anchor" });
-    const next = makeNode({ id: "next", prevSiblingId: "A", text: "next" });
-    const kid = makeNode({ id: "kid", parentId: "A", text: "kid" });
+    const a = createNode({ id: "A", text: "anchor" });
+    const next = createNode({ id: "next", prevSiblingId: "A", text: "next" });
+    const kid = createNode({ id: "kid", parentId: "A", text: "kid" });
     return buildTreeIndex([a, next, kid]);
   };
 

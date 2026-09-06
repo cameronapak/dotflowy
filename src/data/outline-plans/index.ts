@@ -4,11 +4,11 @@ export { emptyPlan } from "./types";
 export { orderSiblings, chainDisagreements } from "../sibling-chain";
 export type { ChainDisagreement } from "../sibling-chain";
 
-export { buildTreeIndex, childrenOf, makeNode, parentKeyOf } from "../tree";
+export { buildTreeIndex, childrenOf, createNode, parentKeyOf } from "../tree";
 export type { TreeIndex } from "../tree";
 
 export {
-  makeOutlineNode,
+  createOutlineNode,
   planInsertSibling,
   planInsertChildAtStart,
   planAppendChild,

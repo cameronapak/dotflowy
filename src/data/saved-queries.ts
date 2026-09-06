@@ -3,6 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { hasCryptoRandomUuid, hasWindow } from "../env";
 import { isLunoraSyncEnabled } from "./flags";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
@@ -94,10 +95,9 @@ export function saveQuery(query: string, name?: string): string | null {
   if (!q) return null;
   const existing = findSavedQuery(liveRows(), q);
   if (existing) return existing.id;
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `sq_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const id = hasCryptoRandomUuid()
+    ? crypto.randomUUID()
+    : `sq_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const trimmedName = name?.trim();
   const nameVal =
     trimmedName && trimmedName.length > 0 ? trimmedName : defaultQueryName(q);
@@ -230,7 +230,7 @@ export function unbindLunoraSavedQueries(): void {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   if (isLunoraSyncEnabled()) return;
   started = true;
   savedQueriesCollection.subscribeChanges(() => rebuild(), {

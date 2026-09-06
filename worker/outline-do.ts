@@ -10,6 +10,7 @@ import type {
 } from "../src/data/wire-schema";
 import type { OutlineSnapshot, SnapshotKvRow } from "./backup";
 import type { RestorePoint } from "./restore";
+import type { NodesPatchBody } from "./wire";
 
 import { SNAPSHOT_VERSION } from "./backup";
 import { planChangeFrames } from "./changelog";
@@ -47,7 +48,22 @@ export interface KvRow {
   value: unknown;
 }
 
+/** A kv claim value: the candidate row, narrowed to what callers store today
+ *  (the daily-index claim). Extending to richer side-collection payloads means
+ *  widening this owner contract, not passing untyped JSON. */
+export interface KvClaim {
+  key: string;
+  nodeId: string;
+}
+
 type SqlVal = string | number | null;
+
+/** One decoded PATCH update as the Worker's boundary schema produced it
+ *  (ADR 0010: the changes record is open; the DO filters it against its
+ *  writable-column allowlist at the write). */
+type PatchUpdate = (typeof NodesPatchBody.Type)["updates"][number];
+/** One value from a PATCH changes record, still uncoerced. */
+type FieldChangeValue = PatchUpdate["changes"][string];
 
 /** Columns a client may write, and which of them are stored as 0/1 booleans.
  *  The dynamic PATCH builds its SQL only from this allowlist, so it can't be
@@ -113,8 +129,9 @@ function rowToNode(r: NodeRow): Node {
   };
 }
 
-function toSqlValue(key: string, value: unknown): SqlVal {
+function toSqlValue(key: string, value: FieldChangeValue): SqlVal {
   if (BOOL_COLUMNS.has(key)) return value ? 1 : 0;
+  // SAFETY: after the bool branch, value is a Schema-decoded ChangeOp field: string, number, or null, the whole SqlVal set.
   return (value ?? null) as SqlVal;
 }
 
@@ -208,6 +225,7 @@ export class UserOutlineDO extends DurableObject<Env> {
         // has no `ADD COLUMN IF NOT EXISTS`. A fresh DO already has it from the
         // CREATE, so this skips. The guard lives here (not in a later step)
         // because v1 is the one migration that can meet an already-populated DB.
+        // SAFETY: PRAGMA table_info rows always carry a `name` column in SQLite.
         const hasMirrorOf = (
           sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{
             name: string;
@@ -278,7 +296,8 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  (`currentSeq`, `getKv`, `initialFrame`, …) keep using the type-checked
    *  `exec<{…}>()` overload, which needs no cast. */
   private readRows<T>(query: string, ...params: SqlVal[]): T[] {
-    return this.sql.exec(query, ...params).toArray() as unknown as T[];
+    // SAFETY: each caller's SELECT column list defines T; every call site's column list matches its T.
+    return this.sql.exec(query, ...params).toArray() as T[];
   }
 
   // --- nodes -----------------------------------------------------------------
@@ -460,9 +479,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     );
   }
 
-  patchNodes(
-    updates: readonly { id: string; changes: Record<string, unknown> }[],
-  ): void {
+  patchNodes(updates: readonly PatchUpdate[]): void {
     this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
         const ops: ChangeOp[] = [];
@@ -482,6 +499,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           );
           // Broadcast the full post-patch row (canonical booleans, every field) so
           // a remote client applies an unambiguous update regardless of rowUpdateMode.
+          // SAFETY: the SELECT lists exactly the NodeRow columns; index 0 is absent when the row vanished, hence the union.
           const row = this.readRows<NodeRow>(
             "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes WHERE id = ?",
             u.id,
@@ -543,7 +561,8 @@ export class UserOutlineDO extends DurableObject<Env> {
         JSON.stringify(f.ops),
       );
     }
-    const finalSeq = frames[frames.length - 1].seq;
+    const finalSeq = frames[frames.length - 1]?.seq;
+    if (finalSeq === undefined) return frames;
     this.setSeq(finalSeq);
     this.sql.exec(
       "DELETE FROM changelog WHERE seq <= ?",
@@ -581,7 +600,7 @@ export class UserOutlineDO extends DurableObject<Env> {
         }
       }
     }
-    return frames[frames.length - 1].seq;
+    return frames[frames.length - 1]?.seq ?? this.currentSeq();
   }
 
   /**
@@ -634,8 +653,9 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   private parseHello(raw: string | ArrayBuffer): HelloMessage | null {
-    if (typeof raw !== "string") return null;
+    if (raw instanceof ArrayBuffer) return null;
     try {
+      // SAFETY: the m.type === "hello" guard on the next line rejects anything that is not a HelloMessage.
       const m = JSON.parse(raw) as HelloMessage;
       return m && m.type === "hello" ? m : null;
     } catch {
@@ -676,6 +696,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           seq,
           changes: rows.map((r) => ({
             seq: r.seq,
+            // SAFETY: the ops column is only ever written by recordChange as JSON.stringify(ChangeOp[]).
             ops: JSON.parse(r.ops) as ChangeOp[],
           })),
           serverVersion: APP_VERSION,
@@ -739,7 +760,7 @@ export class UserOutlineDO extends DurableObject<Env> {
    * Generic on purpose: the DO never learns what "daily" is, it just gains an
    * atomic op on its existing kv table, reusable by any future side-collection.
    */
-  getOrCreateKv(collection: string, key: string, value: unknown): unknown {
+  getOrCreateKv(collection: string, key: string, value: KvClaim): KvClaim {
     this.sql.exec(
       `INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)
        ON CONFLICT(collection, key) DO NOTHING`,

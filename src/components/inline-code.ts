@@ -30,7 +30,13 @@ import { WIDGET_TAG } from "./plugin-widget";
 
 /** True for a widget descriptor (Seam A's React mode -- ADR 0006) vs an `El`. */
 function isWidgetEl(el: El | WidgetEl): el is WidgetEl {
+  // SAFETY: typeof "object" rules out the El string form, leaving WidgetEl
   return typeof el === "object" && (el as WidgetEl).kind === "widget";
+}
+
+/** True for the plain-text `El` form vs any descriptor. */
+function isStringEl(el: El | WidgetEl): el is string {
+  return typeof el === "string";
 }
 
 // Last HTML we wrote to each element, so decorate() can skip a rebuild (and the
@@ -74,7 +80,7 @@ function inlineMarkupHtml(text: string, revealOffset: number | null): string {
 // `false`/`undefined` drop the attribute. Insertion order is preserved so the
 // generated HTML stays stable (the render cache compares strings).
 function serializeEl(el: El | WidgetEl): string {
-  if (typeof el === "string") return escapeHtml(el);
+  if (isStringEl(el)) return escapeHtml(el);
   if (isWidgetEl(el)) return serializeWidget(el);
   let out = `<${el.tag}`;
   if (el.attrs) {
@@ -134,6 +140,7 @@ function escapeHtml(s: string): string {
 // tokens (ADR 0001 D6). Non-folding tokens (#tags), a revealed run's markers,
 // and revealed links carry no data-src, so they read back 1:1 as plain text.
 function isAtom(node: Node): node is HTMLElement {
+  // SAFETY: nodeType === 1 means the node is an Element, rendered here as HTMLElement
   return node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src");
 }
 
@@ -258,6 +265,7 @@ function sourceOffsetUpTo(
       return;
     }
     if (isAtom(node)) {
+      // SAFETY: isAtom is the HTMLElement type guard
       total += foldedSrcLen(node as HTMLElement);
       // Caret can't normally land inside an atomic widget; if it somehow did,
       // snap to just after it.
@@ -305,8 +313,10 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
       return;
     }
     if (isAtom(node)) {
+      // SAFETY: isAtom is the HTMLElement type guard
       const len = foldedSrcLen(node as HTMLElement);
       if (remaining <= len) {
+        // SAFETY: isAtom is the HTMLElement type guard
         placeAtWidget(
           node as HTMLElement,
           remaining === 0 ? "before" : "after",
@@ -392,6 +402,7 @@ function atomAtSourceBoundary(
       return;
     }
     if (isAtom(node)) {
+      // SAFETY: isAtom is the HTMLElement type guard
       const atom = node as HTMLElement;
       const len = foldedSrcLen(atom);
       // Only INTERACTIVE chips are arrow-selectable stops. A plain folding atom

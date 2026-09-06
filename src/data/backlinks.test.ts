@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { collectBacklinkReferrerIds } from "./backlinks";
 import { parseDateLinkKeys } from "./date-links";
-import { buildTreeIndex, makeNode } from "./tree";
+import { buildTreeIndex, createNode } from "./tree";
 
 const DAY = "11111111-2222-3333-4444-555555555555";
 const MIRROR = "22222222-3333-4444-5555-666666666666";
@@ -32,18 +32,18 @@ describe("collectBacklinkReferrerIds", () => {
   test("unions node-links and date mentions; dedupes; excludes self + mirrors", () => {
     const index = buildTreeIndex([
       // Day node mentions its own date — must not count as a backlink.
-      makeNode({
+      createNode({
         id: DAY,
         text: "Wednesday, April 22, 2026 [[2026-04-22]]",
       }),
-      makeNode({
+      createNode({
         id: MIRROR,
         text: "Wednesday, April 22, 2026",
         mirrorOf: DAY,
       }),
-      makeNode({ id: VIA_LINK, text: `kickoff for [[${DAY}]]` }),
-      makeNode({ id: VIA_DATE, text: "party [[2026-04-22]]" }),
-      makeNode({ id: BOTH, text: `see [[${DAY}]] on [[2026-04-22]]` }),
+      createNode({ id: VIA_LINK, text: `kickoff for [[${DAY}]]` }),
+      createNode({ id: VIA_DATE, text: "party [[2026-04-22]]" }),
+      createNode({ id: BOTH, text: `see [[${DAY}]] on [[2026-04-22]]` }),
     ]);
 
     const ids = collectBacklinkReferrerIds(index, DAY, "2026-04-22");
@@ -54,9 +54,9 @@ describe("collectBacklinkReferrerIds", () => {
 
   test("without dayKey, only node-link referrers count", () => {
     const index = buildTreeIndex([
-      makeNode({ id: TARGET, text: "Target" }),
-      makeNode({ id: REF, text: `see [[${TARGET}]]` }),
-      makeNode({ id: OTHER, text: "party [[2026-04-22]]" }),
+      createNode({ id: TARGET, text: "Target" }),
+      createNode({ id: REF, text: `see [[${TARGET}]]` }),
+      createNode({ id: OTHER, text: "party [[2026-04-22]]" }),
     ]);
     expect(collectBacklinkReferrerIds(index, TARGET, null)).toEqual([REF]);
   });

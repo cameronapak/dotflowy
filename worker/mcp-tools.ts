@@ -17,6 +17,7 @@
 import { Data, Effect, Schema } from "effect";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
+import type { KvClaim } from "./outline-do";
 
 import {
   PROTECTED_SCAFFOLD_KINDS,
@@ -34,6 +35,7 @@ import {
 import { redactSpoilers } from "../src/data/spoiler";
 import { childrenOf, createId } from "../src/data/tree";
 import {
+  type NodeFieldChanges,
   DAILY_CONTAINER_TEXT,
   type DailyScaffold,
   type TreeIndex,
@@ -75,8 +77,8 @@ export interface OutlineStore {
   getOrCreateKv(
     collection: string,
     key: string,
-    value: unknown,
-  ): unknown | Promise<unknown>;
+    value: KvClaim,
+  ): KvClaim | Promise<KvClaim>;
 }
 
 /** A tool execution failure — surfaces as an `isError` tool result (the MCP
@@ -92,8 +94,10 @@ export class ToolError extends Data.TaggedError("ToolError")<{
 export interface ToolDef {
   name: string;
   description: string;
-  /** Input contract; also the source of the published JSON Schema. */
-  input: Schema.Struct<any>;
+  /** Input contract; also the source of the published JSON Schema. Typed as
+   *  the decode-ready schema seam (never services) so consumers of the
+   *  registry don't inherit `any` from an erased `Schema.Struct<any>`. */
+  input: Schema.Top & { readonly DecodingServices: never };
   /** MCP `readOnlyHint` — true for tools that never write. */
   readOnly: boolean;
   /** `origin` is the caller's provenance stamp — the OAuth client's harness name
@@ -112,16 +116,19 @@ export interface ToolDef {
 /** Store failures carry real diagnostics (e.g. the Lunora shard's SQLite
  *  message). `Effect.promise` would turn them into defects, which the MCP
  *  endpoint reports as a bare "internal error" — so every store call goes
- *  through `tryPromise` with this catch. */
-const toToolError = (error: unknown): ToolError =>
-  new ToolError({
-    reason: error instanceof Error ? error.message : String(error),
-  });
+ *  through `tryPromise` with a catch that lifts the failure's message into
+ *  the typed ToolError channel. */
+const toolErrorFrom = (error: Error): ToolError =>
+  new ToolError({ reason: error.message });
 
 const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex, ToolError> =>
   Effect.tryPromise({
     try: async () => buildTreeIndex(await store.getNodes()),
-    catch: toToolError,
+    // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+    catch: (error) =>
+      error instanceof Error
+        ? toolErrorFrom(error)
+        : new ToolError({ reason: String(error) }),
   });
 
 const commit = (
@@ -132,7 +139,11 @@ const commit = (
     try: async () => {
       if (ops.length) await store.applyBatch(ops);
     },
-    catch: toToolError,
+    // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+    catch: (error) =>
+      error instanceof Error
+        ? toolErrorFrom(error)
+        : new ToolError({ reason: String(error) }),
   });
 
 /** Lift a planner's value-shaped failure into the tool error channel,
@@ -140,7 +151,8 @@ const commit = (
 const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
   result instanceof Error
     ? Effect.fail(new ToolError({ reason: result.message }))
-    : Effect.succeed(result as Exclude<A, Error>);
+    : // SAFETY: the instanceof Error branch above removed the Error side of A.
+      Effect.succeed(result as Exclude<A, Error>);
 
 /** The write-timestamp source. Mutable so tests can pin "now" (the pre-agreed
  *  seam for deterministic timezone/day-boundary tests); production reads the
@@ -177,7 +189,11 @@ const claimDailyId = (
         Promise.resolve(
           store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate }),
         ),
-      catch: toToolError,
+      // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
     });
     const row = yield* Schema.decodeUnknownEffect(DailyRowSchema)(raw).pipe(
       Effect.mapError(
@@ -200,7 +216,11 @@ const loadDailyReverseMap = (
   Effect.gen(function* () {
     const rows = yield* Effect.tryPromise({
       try: () => Promise.resolve(store.getKv(KV_DAILY)),
-      catch: toToolError,
+      // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
     });
     const map = new Map<string, string>();
     for (const raw of rows) {
@@ -917,19 +937,15 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: false,
     handle: (input: typeof UpdateNodeInput.Type, store) =>
       Effect.gen(function* () {
-        const changes = {
-          ...(input.text != null ? { text: input.text } : {}),
-          ...(input.isTask != null ? { isTask: input.isTask } : {}),
-          ...(input.completed != null ? { completed: input.completed } : {}),
-          ...(input.collapsed != null ? { collapsed: input.collapsed } : {}),
-          // `"bullet"` is the explicit reset; the stored field is nullable.
-          ...(input.kind != null
-            ? {
-                kind:
-                  input.kind === "paragraph" ? ("paragraph" as const) : null,
-              }
-            : {}),
-        };
+        // Built field by field: only present fields are edited (absent =
+        // untouched); `"bullet"` is the explicit kind reset (stored nullable).
+        const changes: NodeFieldChanges = {};
+        if (input.text != null) changes.text = input.text;
+        if (input.isTask != null) changes.isTask = input.isTask;
+        if (input.completed != null) changes.completed = input.completed;
+        if (input.collapsed != null) changes.collapsed = input.collapsed;
+        if (input.kind != null)
+          changes.kind = input.kind === "paragraph" ? "paragraph" : null;
         if (!Object.keys(changes).length) {
           return yield* Effect.fail(
             new ToolError({

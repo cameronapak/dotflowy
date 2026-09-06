@@ -6,11 +6,12 @@ import { Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
 import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
 import type { Node } from "./schema";
 
+import { hasWindow } from "../env";
 import { createNodes, deleteNodes, updateNodes } from "./api";
 import { noteServerVersion } from "./app-version";
 import { isLunoraSyncEnabled, isMirrorsEnabled } from "./flags";
 import { runPromise } from "./nodes-client-effect";
-import { makeSyncStream } from "./realtime";
+import { createSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
 import { persistOrNotify } from "./save-failure";
 import { nodeSchema } from "./schema";
@@ -112,7 +113,7 @@ export function markNodesSyncReady(): void {
  * call it; do not grow a private copy in a third place.
  */
 export function whenNodesSyncReady(): Promise<void> {
-  if (syncReady || typeof window === "undefined") return Promise.resolve();
+  if (syncReady || !hasWindow()) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const unsub = subscribeSyncReady(() => {
       unsub();
@@ -422,6 +423,7 @@ function withNodeDefaults(n: Node): Node {
   // The wire/DO type says these are always present, so read them through a loose
   // cast: a row persisted before a field existed (or the e2e mock) may omit it
   // at runtime even though the type can't express that.
+  // SAFETY: a row persisted before a field existed, or the e2e mock, may omit it at runtime even though the Node type cannot express that.
   const loose = n as { mirrorOf?: unknown; origin?: unknown; kind?: unknown };
   if (
     loose.mirrorOf !== undefined &&
@@ -449,7 +451,7 @@ export const nodesCollection = createCollection({
     sync: ({ begin, write, commit, markReady, truncate, metadata }) => {
       // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
       // any defensive server-side read resolves empty instead of hanging.
-      if (typeof window === "undefined") {
+      if (!hasWindow()) {
         markReady();
         return () => {};
       }
@@ -471,6 +473,7 @@ export const nodesCollection = createCollection({
         // Release the shell's loading spinner (module signal, see markSyncReady).
         markSyncReady();
       };
+      // SAFETY: this sync is the only writer of the cursor and always stores a number seq.
       const getCursor = (): number | null =>
         (metadata?.collection.get("cursor") as number | undefined) ?? null;
 
@@ -541,7 +544,7 @@ export const nodesCollection = createCollection({
       // session; the cleanup interrupts it, which closes the WebSocket via the
       // socket's scope finalizer.
       const { events, resync } = Effect.runSync(
-        makeSyncStream(Effect.sync(getCursor)),
+        createSyncStream(Effect.sync(getCursor)),
       );
       resyncFn = () => {
         appRuntime.runFork(resync);
@@ -628,12 +631,14 @@ export const nodesCollection = createCollection({
   // AND the rollback). A no-op toast for the node-limit case, already toasted
   // upstream.
   onInsert: async ({ transaction }) => {
+    // SAFETY: insert mutations on this collection always carry the full Node row that was inserted.
     await persistOrNotify(
       createNodes(transaction.mutations.map((m) => m.modified as Node)),
     );
     return { refetch: false };
   },
   onUpdate: async ({ transaction }) => {
+    // SAFETY: update mutations on this collection only change Node fields, and keys are node ids (getKey: node.id).
     await persistOrNotify(
       updateNodes(
         transaction.mutations.map((m) => ({
@@ -645,6 +650,7 @@ export const nodesCollection = createCollection({
     return { refetch: false };
   },
   onDelete: async ({ transaction }) => {
+    // SAFETY: delete mutation keys are node ids (getKey: node.id).
     await persistOrNotify(
       deleteNodes(transaction.mutations.map((m) => m.key as string)),
     );

@@ -588,13 +588,14 @@ export function buildFilterSuggestions(
     }
     for (const v of info.values) {
       if (partial && !v.startsWith(partial)) continue;
-      out.push({
+      const suggestion: FilterSuggestion = {
         id: `val:${key}:${v}`,
         insert: `${neg}${key}:${v} `,
         label: `${key}:${v}`,
         display: "value",
-        ...(info.swatch ? { swatch: v } : {}),
-      });
+      };
+      if (info.swatch) suggestion.swatch = v;
+      out.push(suggestion);
     }
     return out;
   }

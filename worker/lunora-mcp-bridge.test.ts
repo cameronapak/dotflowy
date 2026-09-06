@@ -6,12 +6,12 @@
 import { describe, expect, test } from "bun:test";
 
 import { planFromChangeOps } from "../src/data/outline-plans";
-import { makeNode } from "../src/data/tree";
+import { createNode } from "../src/data/tree";
 
 describe("MCP → Lunora applyChangeOps plan", () => {
   test("planner batch becomes inserts/patches/deletes", () => {
-    const a = makeNode({ id: "a", text: "alpha" });
-    const b = makeNode({ id: "b", text: "bravo" });
+    const a = createNode({ id: "a", text: "alpha" });
+    const b = createNode({ id: "b", text: "bravo" });
     const plan = planFromChangeOps("user-1", [
       { op: "insert", value: a },
       { op: "update", value: { ...b, text: "BRAVO" } },
@@ -26,7 +26,7 @@ describe("MCP → Lunora applyChangeOps plan", () => {
   test("an insert and a later update on ONE key fold into one insert", () => {
     // The buckets apply deletes → patches → inserts, so an un-coalesced batch
     // would run this patch before its row exists and drop the update entirely.
-    const a = makeNode({ id: "a", text: "alpha" });
+    const a = createNode({ id: "a", text: "alpha" });
     const plan = planFromChangeOps("user-1", [
       { op: "insert", value: a },
       { op: "update", value: { ...a, text: "ALPHA" } },

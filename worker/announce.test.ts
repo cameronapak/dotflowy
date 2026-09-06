@@ -49,16 +49,19 @@ describe("announceEmail", () => {
 function fakeWaitlistDb(
   rows: Array<{ email: string; createdAt: number; notifiedAt: number | null }>,
 ) {
-  const db = {
+  // SAFETY: the object below implements the D1 surface sendAnnouncements uses (prepare/bind/run/all) and nothing else; the single assertion stamps it as D1Database for the env.
+  const db = Object.assign({} as D1Database, {
     prepare() {
       return {
         bind(...args: unknown[]) {
           return {
             run() {
               // UPDATE waitlist SET notifiedAt = ? WHERE email = ? AND notifiedAt IS NULL
+              // SAFETY: this stub is bound only by that UPDATE, whose args are [notifiedAt: number, email: string].
               const [, email] = args as [number, string];
               const row = rows.find((r) => r.email === email);
               if (row && row.notifiedAt == null) {
+                // SAFETY: args[0] is the notifiedAt timestamp the caller bound as a number.
                 row.notifiedAt = args[0] as number;
                 return Promise.resolve({ meta: { changes: 1 } });
               }
@@ -66,6 +69,7 @@ function fakeWaitlistDb(
             },
             all() {
               // SELECT email FROM waitlist WHERE notifiedAt IS NULL ... [LIMIT ?]
+              // SAFETY: the only optional bind on this SELECT is the LIMIT integer.
               const limit = args.length > 0 ? (args[0] as number) : undefined;
               const pending = rows
                 .filter((r) => r.notifiedAt == null)
@@ -87,7 +91,7 @@ function fakeWaitlistDb(
         },
       };
     },
-  } as unknown as D1Database;
+  });
   // EMAIL omitted: sendEmail falls back to console logging (never throws), so a
   // `notified` entry means the row was claimed and the send was attempted.
   const env: AnnounceEnv = { DB: db };

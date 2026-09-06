@@ -331,10 +331,7 @@ function makeSelectionOps({
  * state, so the only effect dep is `active` (toggles the listeners) plus the
  * stable `ops`.
  */
-export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs): {
-  active: boolean;
-  ops: SelectionOps;
-} {
+export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
   // refs is a stable useState Map and pendingFocus a stable ref -- so ops keeps
   // its identity and the listener effect below only re-subscribes when `active`
   // flips, never per render. (getCtx is only for the menu's plugin commands.)
@@ -417,6 +414,7 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs): {
     // (whose buttons run a command). A bullet click also focuses it, which
     // clears via onFocus; this covers clicks on empty space too.
     const onDown = (e: MouseEvent) => {
+      // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="listbox"]')) return;
       clearSelection();

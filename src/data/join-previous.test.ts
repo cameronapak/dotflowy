@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { buildFilterOperatorMap, buildQueryFilter } from "./filter-query";
 import { planJoinPrevious } from "./join-previous";
-import { buildTreeIndex, makeNode } from "./tree";
+import { buildTreeIndex, createNode } from "./tree";
 
 const show = () => false; // nothing hidden
 const hideCompleted = (n: { completed: boolean }) => n.completed;
@@ -13,10 +13,10 @@ describe("planJoinPrevious — the happy path", () => {
   //   a2 "two"
   // B "bravo"
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null, text: "alpha" }),
-    makeNode({ id: "a1", parentId: "A", prevSiblingId: null, text: "one" }),
-    makeNode({ id: "a2", parentId: "A", prevSiblingId: "a1", text: "two" }),
-    makeNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
+    createNode({ id: "A", prevSiblingId: null, text: "alpha" }),
+    createNode({ id: "a1", parentId: "A", prevSiblingId: null, text: "one" }),
+    createNode({ id: "a2", parentId: "A", prevSiblingId: "a1", text: "two" }),
+    createNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
   ];
   const index = buildTreeIndex(tree);
 
@@ -58,14 +58,14 @@ describe("planJoinPrevious — the happy path", () => {
     // A is collapsed, so a1/a2 aren't visible rows in EITHER walk -- both land
     // on A. Merging into a collapsed bullet is normal and expected.
     const collapsed = buildTreeIndex([
-      makeNode({
+      createNode({
         id: "A",
         prevSiblingId: null,
         text: "alpha",
         collapsed: true,
       }),
-      makeNode({ id: "a1", parentId: "A", prevSiblingId: null, text: "one" }),
-      makeNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
+      createNode({ id: "a1", parentId: "A", prevSiblingId: null, text: "one" }),
+      createNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
     ]);
     expect(
       planJoinPrevious(collapsed, "B", null, show, null, false),
@@ -77,8 +77,8 @@ describe("planJoinPrevious — the happy path", () => {
     // markdown -- the caret must land past all 24 characters (ADR 0005).
     const src = "see [docs](https://x.com)";
     const withLink = buildTreeIndex([
-      makeNode({ id: "L", prevSiblingId: null, text: src }),
-      makeNode({ id: "M", prevSiblingId: "L", text: "tail" }),
+      createNode({ id: "L", prevSiblingId: null, text: src }),
+      createNode({ id: "M", prevSiblingId: "L", text: "tail" }),
     ]);
     const plan = planJoinPrevious(withLink, "M", null, show, null, false);
     expect(plan).toMatchObject({ kind: "join", seamOffset: src.length });
@@ -99,9 +99,9 @@ describe("planJoinPrevious — the happy path", () => {
 
 describe("planJoinPrevious — refusals", () => {
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null, text: "alpha" }),
-    makeNode({ id: "a1", parentId: "A", prevSiblingId: null, text: "one" }),
-    makeNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
+    createNode({ id: "A", prevSiblingId: null, text: "alpha" }),
+    createNode({ id: "a1", parentId: "A", prevSiblingId: null, text: "one" }),
+    createNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
   ];
   const index = buildTreeIndex(tree);
 
@@ -114,8 +114,8 @@ describe("planJoinPrevious — refusals", () => {
 
   test("no-target: the very first row, unzoomed", () => {
     const first = buildTreeIndex([
-      makeNode({ id: "A", prevSiblingId: null, text: "alpha" }),
-      makeNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
+      createNode({ id: "A", prevSiblingId: null, text: "alpha" }),
+      createNode({ id: "B", prevSiblingId: "A", text: "bravo" }),
     ]);
     expect(planJoinPrevious(first, "A", null, show, null, false)).toEqual({
       kind: "refuse",
@@ -127,8 +127,8 @@ describe("planJoinPrevious — refusals", () => {
     // The root is prepended to the walk sequence, so it is index 0 -- there is
     // nothing above the title. (Its first child, by contrast, joins INTO it.)
     const leafRoot = buildTreeIndex([
-      makeNode({ id: "R", prevSiblingId: null, text: "root" }),
-      makeNode({ id: "r1", parentId: "R", prevSiblingId: null, text: "kid" }),
+      createNode({ id: "R", prevSiblingId: null, text: "root" }),
+      createNode({ id: "r1", parentId: "R", prevSiblingId: null, text: "kid" }),
     ]);
     expect(
       planJoinPrevious(leafRoot, "r1", "R", show, null, false),
@@ -153,14 +153,14 @@ describe("planJoinPrevious — refusals", () => {
     // visible predecessor is A, but structurally it's C -- merging into A would
     // silently jump the text over a node the user can't see.
     const withDone = buildTreeIndex([
-      makeNode({ id: "A", prevSiblingId: null, text: "alpha" }),
-      makeNode({
+      createNode({ id: "A", prevSiblingId: null, text: "alpha" }),
+      createNode({
         id: "C",
         prevSiblingId: "A",
         text: "done",
         completed: true,
       }),
-      makeNode({ id: "B", prevSiblingId: "C", text: "bravo" }),
+      createNode({ id: "B", prevSiblingId: "C", text: "bravo" }),
     ]);
     expect(
       planJoinPrevious(withDone, "B", null, hideCompleted, null, false),
@@ -175,9 +175,9 @@ describe("planJoinPrevious — refusals", () => {
     // A #go / N (no tag) / B #go. Under `#go`, B's visible predecessor is A;
     // structurally it's N.
     const t = [
-      makeNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
-      makeNode({ id: "N", prevSiblingId: "A", text: "nope" }),
-      makeNode({ id: "B", prevSiblingId: "N", text: "bravo #go" }),
+      createNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
+      createNode({ id: "N", prevSiblingId: "A", text: "nope" }),
+      createNode({ id: "B", prevSiblingId: "N", text: "bravo #go" }),
     ];
     const i = buildTreeIndex(t);
     const filter = buildQueryFilter(
@@ -195,9 +195,9 @@ describe("planJoinPrevious — refusals", () => {
 
   test("negative control: two ADJACENT matches under an active filter still join", () => {
     const t = [
-      makeNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
-      makeNode({ id: "B", prevSiblingId: "A", text: "bravo #go" }),
-      makeNode({ id: "N", prevSiblingId: "B", text: "nope" }),
+      createNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
+      createNode({ id: "B", prevSiblingId: "A", text: "bravo #go" }),
+      createNode({ id: "N", prevSiblingId: "B", text: "nope" }),
     ];
     const i = buildTreeIndex(t);
     const filter = buildQueryFilter(
@@ -219,9 +219,9 @@ describe("planJoinPrevious — refusals", () => {
     // M mirrors S: its text is S's, which survives the join -- merging would
     // duplicate the text rather than move it.
     const t = [
-      makeNode({ id: "S", prevSiblingId: null, text: "source" }),
-      makeNode({ id: "A", prevSiblingId: "S", text: "alpha" }),
-      makeNode({ id: "M", prevSiblingId: "A", mirrorOf: "S" }),
+      createNode({ id: "S", prevSiblingId: null, text: "source" }),
+      createNode({ id: "A", prevSiblingId: "S", text: "alpha" }),
+      createNode({ id: "M", prevSiblingId: "A", mirrorOf: "S" }),
     ];
     const i = buildTreeIndex(t);
     expect(planJoinPrevious(i, "M", null, show, null, true)).toEqual({
@@ -238,10 +238,20 @@ describe("planJoinPrevious — refusals", () => {
 
   test("a mirror as the TARGET is allowed (appending edits the shared source)", () => {
     const t = [
-      makeNode({ id: "S", parentId: "H", prevSiblingId: null, text: "source" }),
-      makeNode({ id: "H", prevSiblingId: null, text: "home", collapsed: true }),
-      makeNode({ id: "M", prevSiblingId: "H", mirrorOf: "S" }),
-      makeNode({ id: "B", prevSiblingId: "M", text: "bravo" }),
+      createNode({
+        id: "S",
+        parentId: "H",
+        prevSiblingId: null,
+        text: "source",
+      }),
+      createNode({
+        id: "H",
+        prevSiblingId: null,
+        text: "home",
+        collapsed: true,
+      }),
+      createNode({ id: "M", prevSiblingId: "H", mirrorOf: "S" }),
+      createNode({ id: "B", prevSiblingId: "M", text: "bravo" }),
     ];
     const i = buildTreeIndex(t);
     expect(planJoinPrevious(i, "B", null, show, null, true)).toMatchObject({
@@ -260,8 +270,8 @@ describe("planJoinPrevious — refusals", () => {
     // bookmark / [[link]] / daily mapping) onto the blank's id; removing the
     // blank is the same thing on screen with identity left alone.
     const t = [
-      makeNode({ id: "blank", prevSiblingId: null, text: "" }),
-      makeNode({ id: "S", prevSiblingId: "blank", text: "hello" }),
+      createNode({ id: "blank", prevSiblingId: null, text: "" }),
+      createNode({ id: "S", prevSiblingId: "blank", text: "hello" }),
     ];
     const i = buildTreeIndex(t);
     expect(planJoinPrevious(i, "S", null, show, null, false)).toEqual({
@@ -276,8 +286,8 @@ describe("planJoinPrevious — refusals", () => {
     // Only genuinely empty counts. A row holding a space is content the user
     // typed, so it merges the ordinary way and the seam lands after it.
     const t = [
-      makeNode({ id: "sp", prevSiblingId: null, text: " " }),
-      makeNode({ id: "S", prevSiblingId: "sp", text: "hello" }),
+      createNode({ id: "sp", prevSiblingId: null, text: " " }),
+      createNode({ id: "S", prevSiblingId: "sp", text: "hello" }),
     ];
     const i = buildTreeIndex(t);
     expect(planJoinPrevious(i, "S", null, show, null, false)).toMatchObject({
@@ -295,8 +305,8 @@ describe("planJoinPrevious — refusals", () => {
     // shell's guardMirrorSourceDelete refuses first today, but the planner must
     // never hand out a write-then-delete of the same node in the first place.
     const t = [
-      makeNode({ id: "M", prevSiblingId: null, mirrorOf: "S" }),
-      makeNode({ id: "S", prevSiblingId: "M", text: "source" }),
+      createNode({ id: "M", prevSiblingId: null, mirrorOf: "S" }),
+      createNode({ id: "S", prevSiblingId: "M", text: "source" }),
     ];
     const i = buildTreeIndex(t);
     expect(planJoinPrevious(i, "S", null, show, null, true)).toEqual({

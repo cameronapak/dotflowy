@@ -43,10 +43,13 @@ const node = (id: string): Node => ({
 
 type AnyBody = Schema.Codec<unknown, unknown, never, never>;
 
-const accepts = (schema: AnyBody, input: unknown) =>
+/** Undecoded request-body payloads as the boundary schemas receive them. */
+type WirePayload = { readonly [key: string]: Schema.Json };
+
+const accepts = (schema: AnyBody, input: WirePayload) =>
   expect(() => Schema.decodeUnknownSync(schema)(input)).not.toThrow();
 
-const rejects = (schema: AnyBody, input: unknown) =>
+const rejects = (schema: AnyBody, input: WirePayload) =>
   expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow();
 
 describe("NodesPostBody (POST /api/nodes)", () => {
