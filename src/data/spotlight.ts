@@ -1,28 +1,32 @@
 /**
- * Spotlight focus mode (ADR 0033 + ADR 0060). When enabled, the outline dims to
- * 0.3 while a bullet is focused -- EXCEPT that focused bullet, which stays full
- * -- so the line you're editing stands out. Single-node by design: dimmed
- * context is still legible at 0.3, so one bright line against a uniform dim
- * field reads calmer than a ladder of lit ancestors, and it matches the intent
- * (focus on the node).
+ * Spotlight focus mode (ADR 0033). When enabled, the outline dims to 0.3 while a
+ * bullet is focused -- EXCEPT that focused bullet, which stays full -- so the
+ * line you're editing stands out. Single-node by design: dimmed context is still
+ * legible at 0.3, so one bright line against a uniform dim field reads calmer
+ * than a ladder of lit ancestors, and it matches the intent (focus on the node).
  *
- * Three halves:
+ * Four halves:
  *  1. A localStorage-backed store for the on/off toggle -- the More-menu
  *     checkbox reads it via `useSpotlightEnabled`, mirroring show-completed.
  *     It's a per-browser view preference, not synced document data.
- *  2. A tiny dim engine that toggles two `<body>` classes: `spotlight-on` (the
- *     mode) and `spotlight-fade` (the input modality). ALL of the dim/light
- *     logic is pure CSS (`:has(.node-text:focus)` + `:focus-within`, see
- *     styles.css) -- no focus listeners, no generated stylesheet, no tree walk
- *     on the dim path. Single-node lighting is exactly what `:focus-within`
- *     expresses, and "dim only while a caret is in the outline" is exactly
- *     `:has(:focus)`, so CSS does both.
- *  3. Typewriter centering (ADR 0060): while the mode is on, a focused list
- *     row is scrolled to the vertical center of the visual viewport. Separate
- *     from the dim -- it only shares the install lifetime. This engine scrolls
- *     `window` from the live rect with an interruptible ease-out slide;
- *     OutlineEditor supplies half-viewport virtualizer padding so the first
- *     and last rows can actually reach center.
+ *  2. A tiny engine that toggles two `<body>` classes: `spotlight-on` (the mode)
+ *     and `spotlight-fade` (the input modality). ALL of the dim/light logic is
+ *     pure CSS (`:has(.node-text:focus)` + `:focus-within`, see styles.css) --
+ *     no focus listeners, no generated stylesheet, no tree walk. Single-node
+ *     lighting is exactly what `:focus-within` expresses, and "dim only while a
+ *     caret is in the outline" is exactly `:has(:focus)`, so CSS does both.
+ *  3. Centering (ADR 0060): a focused list row slides to the vertical center of
+ *     the viewport. Same modality split as the dim -- a pointer jump eases
+ *     (~200ms), keyboard nav takes a short 120ms beat so fast arrowing never
+ *     swims. One rAF tween, cancelled and retargeted by the next focus. No
+ *     virtualizer padding wells and no compensating scrolls: edge rows clamp,
+ *     and the breathing-room padding (also ADR 0060) lives in OutlineEditor.
+ *  4. The breathing-room grow/collapse on toggle (ADR 0060): ONE tween drives
+ *     the region's inline padding AND the window scroll in the same frames,
+ *     so the anchored row stays glued to the screen. Two separate animations
+ *     (a CSS padding transition plus a scroll tween) always fight -- that was
+ *     the bounce. The `pt-[50vh]` class is the steady state the tween hands
+ *     off to; it carries no CSS transition of its own.
  */
 
 import { SPOTLIGHT_KEY } from "../lib/storage-keys";
@@ -71,291 +75,321 @@ const SPOTLIGHT_ON = "spotlight-on";
 const SPOTLIGHT_FADE = "spotlight-fade";
 
 let installed = false;
-let slideRaf = 0;
-const centerRaf = createCenterRafHandle(
-  (cb) => requestAnimationFrame(cb),
-  (id) => cancelAnimationFrame(id),
-);
-
-/** Tracks one rAF so uninstall can drop a queued center before it scrolls. */
-export function createCenterRafHandle(
-  request: (cb: () => void) => number,
-  cancel: (id: number) => void,
-): { schedule: (run: () => void) => void; cancel: () => void } {
-  let id = 0;
-  return {
-    schedule(run) {
-      cancel(id);
-      id = request(() => {
-        id = 0;
-        run();
-      });
-    },
-    cancel() {
-      cancel(id);
-      id = 0;
-    },
-  };
-}
-
-// Pointer-driven focus is armed from pointerdown until pointerup/cancel so we
-// can wait for the gesture to finish before scrolling. Centering on focusin
-// would yank a click-drag text selection as soon as the caret landed.
-let pointerArmed = false;
-let pointerFocusTarget: EventTarget | null = null;
-
-function clearPointerGesture(): void {
-  pointerArmed = false;
-  pointerFocusTarget = null;
-}
 
 // The dim change eases on a pointer-driven focus and snaps on keyboard nav
 // (ADR 0033): a click into a distant bullet can afford a fade, but rapid
 // arrow-stepping must feel immediate. We only track the modality; CSS reacts.
-const onPointerDown = (e: PointerEvent) => {
-  pointerArmed = true;
-  // A click on the already-focused row does not fire focusin. Keep the row
-  // so pointerup can still center it. Chrome (toolbar, empty well) is not
-  // a list row, so this stays null and does not yank.
-  pointerFocusTarget = lineOf(e.target);
-  document.body.classList.add(SPOTLIGHT_FADE);
-};
-const onPointerUp = () => {
-  const target = takePointerCenterTarget(pointerArmed, pointerFocusTarget);
-  clearPointerGesture();
-  scheduleCenter(target);
-};
-const onPointerCancel = () => {
-  clearPointerGesture();
-};
-const onKeyDown = () => {
-  clearPointerGesture();
-  document.body.classList.remove(SPOTLIGHT_FADE);
-};
-const onFocusIn = (e: FocusEvent) => {
-  if (pointerArmed) {
-    pointerFocusTarget = e.target;
-    return;
-  }
-  scheduleCenter(e.target);
-};
+const onPointerDown = () => document.body.classList.add(SPOTLIGHT_FADE);
+const onKeyDown = () => document.body.classList.remove(SPOTLIGHT_FADE);
 
-type LineEl = {
-  matches(sel: string): boolean;
-  classList: { contains(c: string): boolean };
-  closest(sel: string): LineEl | null;
-};
+// -- centering (ADR 0060) ----------------------------------------------------
 
-function elementFromTarget(target: EventTarget | null): HTMLElement | null {
-  if (target instanceof HTMLElement) return target;
-  if (target instanceof Node) return target.parentElement;
-  return null;
-}
+/** Keyboard takes a short beat; a pointer jump can afford a fuller ease. */
+export const KEYBOARD_SLIDE_MS = 120;
+export const POINTER_SLIDE_MS = 200;
 
-/** Normalize something already known to be a list row. */
-export function asLine<T extends LineEl>(el: T | null): T | null {
-  return el?.matches("li[data-node-id]") ? el : null;
-}
+/** The breathing-room grow/collapse: one beat, matching the old CSS ease. */
+export const BREATH_MS = 200;
 
-/**
- * Resolve an event target to a list row through `.node-text`.
- * A bare `<li>` (indent gutter) is not a line. Use `asLine` for a stored row.
- */
-export function lineOfElement<T extends LineEl>(el: T | null): T | null {
-  if (!el) return null;
-  const text = el.classList.contains("node-text")
-    ? el
-    : el.closest(".node-text");
-  if (!text || text.closest("h2.zoomed-title")) return null;
-  return text.closest("li[data-node-id]") as T | null;
-}
+let tweenRaf = 0;
 
-/** Zoomed title is an h2, not a list row -- centering it would hide the children. */
-function lineOf(target: EventTarget | null): HTMLElement | null {
-  return lineOfElement(elementFromTarget(target));
-}
-
-function resolveCenterLine(target: EventTarget | null): HTMLElement | null {
-  const el = elementFromTarget(target);
-  return asLine(el) ?? lineOf(target);
-}
-
-/** Distance to scroll so `line` sits at the vertical center of `view`. */
-export function centerScrollDelta(
-  lineTop: number,
-  lineHeight: number,
-  viewTop: number,
-  viewHeight: number,
-): number {
-  return lineTop + lineHeight / 2 - (viewTop + viewHeight / 2);
-}
-
-/** Skip centering when the user is drag-selecting text inside this row. */
-export function shouldSkipCenterForSelection(
-  isCollapsed: boolean,
-  selectionInsideLine: boolean,
-): boolean {
-  return !isCollapsed && selectionInsideLine;
-}
-
-/** Typewriter slide (~one beat). Rapid arrows cancel and retarget. */
-export const CENTER_SLIDE_MS = 240;
-
-/** Classic ease-out cubic: fast start, settle into place. */
-export function easeOutCubic(t: number): number {
-  return 1 - (1 - t) ** 3;
-}
-
-/** Half-viewport well so first and last rows can reach center. */
-export function typewriterPadPx(viewHeight: number, on: boolean): number {
-  return on ? Math.round(viewHeight / 2) : 0;
-}
-
-/**
- * Scroll delta for the typewriter well. Mount compensates so n0 is not in the
- * well. Mode flip compensates so the view does not jump. A viewport-only pad
- * change returns 0 -- URL-bar / keyboard resize must not scrollBy mid-gesture.
- */
-export function padCompensateDelta(
-  prevOn: boolean | null,
-  nextOn: boolean,
-  prevPad: number,
-  nextPad: number,
-): number {
-  if (prevOn === null) return nextPad;
-  if (prevOn === nextOn) return 0;
-  return nextPad - prevPad;
-}
-
-/** Hold the pad scroll until the real list can absorb it. Spinner height cannot. */
-export function canApplyPadCompensate(
-  viewHeight: number | null,
-  listReady: boolean,
-  listHeight: number,
-  pad: number,
-): boolean {
-  if (viewHeight === null) return false;
-  if (!listReady) return false;
-  if (pad > 0 && listHeight < pad) return false;
-  return true;
-}
-
-/** Remaining scroll after a later scrollTo(0) wiped a mount/zoom well. */
-export function remainingWellScroll(
-  pad: number,
-  scrollY: number,
-  maxScroll = Number.POSITIVE_INFINITY,
-): number {
-  if (pad <= 0) return 0;
-  const target = Math.min(pad, maxScroll);
-  if (scrollY >= target) return 0;
-  return target - scrollY;
-}
-
-/** Mount/zoom leftover is done: pad reached, or a short outline is at max. */
-export function isMountWellSettled(
-  pad: number,
-  scrollY: number,
-  maxScroll: number,
-  listReady: boolean,
-): boolean {
-  if (pad <= 0) return true;
-  if (!listReady) return false;
-  if (scrollY >= pad) return true;
-  if (scrollY >= maxScroll) return true;
-  return false;
-}
-
-/** Pointerup centers a row the gesture hit. Chrome with no row is null. */
-export function takePointerCenterTarget(
-  armed: boolean,
-  recorded: EventTarget | null,
-): EventTarget | null {
-  if (!armed) return null;
-  return recorded;
+function cancelTween(): void {
+  if (!tweenRaf) return;
+  cancelAnimationFrame(tweenRaf);
+  tweenRaf = 0;
 }
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-function cancelSlide(): void {
-  if (!slideRaf) return;
-  cancelAnimationFrame(slideRaf);
-  slideRaf = 0;
-}
-
-function slideWindowBy(delta: number): void {
-  if (Math.abs(delta) < 1) return;
-  cancelSlide();
-  if (prefersReducedMotion()) {
-    window.scrollBy(0, delta);
+/**
+ * ONE interruptible ease-out tween. Every animated scroll goes through here,
+ * so a new target cancels the previous flight instead of stacking on it
+ * (rapid arrows chase the caret; they never queue). `prefers-reduced-motion`
+ * snaps straight to the end.
+ */
+function runTween(
+  ms: number,
+  step: (t: number) => void,
+  done?: () => void,
+): void {
+  cancelTween();
+  if (ms <= 0 || prefersReducedMotion()) {
+    step(1);
+    done?.();
     return;
   }
-  const from = window.scrollY;
-  const to = from + delta;
   const started = performance.now();
-  const step = (now: number) => {
-    const t = Math.min(1, (now - started) / CENTER_SLIDE_MS);
-    window.scrollTo({ top: from + (to - from) * easeOutCubic(t), left: 0 });
-    if (t < 1) slideRaf = requestAnimationFrame(step);
-    else slideRaf = 0;
+  const frame = (now: number) => {
+    const t = Math.min(1, (now - started) / ms);
+    step(1 - (1 - t) ** 3);
+    if (t < 1) tweenRaf = requestAnimationFrame(frame);
+    else {
+      tweenRaf = 0;
+      done?.();
+    }
   };
-  slideRaf = requestAnimationFrame(step);
+  tweenRaf = requestAnimationFrame(frame);
 }
 
-function centerLine(li: HTMLElement): void {
-  if (!installed) return;
-  if (!li.isConnected) return;
-  const sel = document.getSelection();
-  if (
-    sel &&
-    shouldSkipCenterForSelection(sel.isCollapsed, li.contains(sel.anchorNode))
-  )
-    return;
-  const rect = li.getBoundingClientRect();
+/** Interruptible ease-out scroll. */
+function slideBy(delta: number, ms: number): void {
+  if (Math.abs(delta) < 1) return;
+  const from = window.scrollY;
+  runTween(ms, (t) => window.scrollTo(0, from + delta * t));
+}
+
+/**
+ * While true, `centerElement` is a no-op. Set while the breathing-room
+ * tween runs: it drives padding AND scroll in the same frames, so any
+ * focus-driven centering fired underneath it would cancel it mid-grow
+ * (cancelTween) and strand the padding. The tween owns the view until done.
+ */
+let breathAnimating = false;
+
+/** The outline region (ADR 0060 breathing room lives on it as `pt-[50vh]`). */
+function outlineRegion(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[role="region"][aria-label="Outline"]',
+  );
+}
+
+/** Half the viewport, matching the region's `pt-[50vh]` class. */
+function breathPad(): number {
+  return Math.round(window.innerHeight / 2);
+}
+
+/**
+ * Grow (enable) or collapse (disable) the breathing room as ONE animation:
+ * the tween drives the region's inline padding AND the window scroll in the
+ * same frames, so the row the user is anchored to stays GLUED to the screen
+ * while the page eases into its new shape. Two separate animations (CSS
+ * padding transition + scroll tween) always fight -- each cancels or
+ * overshoots the other -- which read as a bounce. Done => the inline style
+ * is cleared and the steady-state class (present/absent) takes over at the
+ * same value, so there is no snap at the end.
+ */
+function animateBreath(
+  padFrom: number,
+  padTo: number,
+  scrollDelta: number,
+): void {
+  const region = outlineRegion();
+  const from = window.scrollY;
+  breathAnimating = true;
+  if (region) {
+    // The tween owns the scroll for its whole flight; the browser's scroll
+    // anchoring must not "compensate" the concurrent layout change (the
+    // header also resizes on toggle) -- it fires a one-frame counter-jump.
+    region.style.overflowAnchor = "none";
+  }
+  runTween(
+    BREATH_MS,
+    (t) => {
+      if (region)
+        region.style.paddingTop = `${Math.round(padFrom + (padTo - padFrom) * t)}px`;
+      window.scrollTo(0, from + scrollDelta * t);
+    },
+    () => {
+      breathAnimating = false;
+      if (region) {
+        region.style.paddingTop = "";
+        region.style.overflowAnchor = "";
+      }
+    },
+  );
+}
+
+/** Distance to scroll so a row sits at the vertical center of the viewport. */
+export function centerScrollDelta(
+  rowTop: number,
+  rowHeight: number,
+  viewTop: number,
+  viewHeight: number,
+): number {
+  return rowTop + rowHeight / 2 - (viewTop + viewHeight / 2);
+}
+
+/** Zoomed title is an h2, not a list row. Focusing it is explicit intent, so
+ *  it centers too (ADR 0060) -- children return when a child is focused. */
+function lineOf(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const title = target.closest<HTMLElement>("h2.zoomed-title");
+  if (title) return title;
+  const text = target.classList.contains("node-text")
+    ? target
+    : target.closest(".node-text");
+  if (!text) return null;
+  return text.closest("li[data-node-id]");
+}
+
+const onFocusIn = (e: FocusEvent) => {
+  const li = lineOf(e.target);
+  if (!li) return;
+  // One layout pass after the browser's own focus-scroll, so the rect we read
+  // is the one the user sees.
+  requestAnimationFrame(() => {
+    if (!installed || !li.isConnected) return;
+    // A drag-select inside the row must not be yanked mid-gesture.
+    const sel = document.getSelection();
+    if (sel && !sel.isCollapsed && li.contains(sel.anchorNode)) return;
+    centerElement(
+      li,
+      document.body.classList.contains(SPOTLIGHT_FADE)
+        ? POINTER_SLIDE_MS
+        : KEYBOARD_SLIDE_MS,
+    );
+  });
+};
+
+/**
+ * While true, `centerElement` is a no-op: the breathing-room tween owns the
+ * view (see `animateBreath`).
+ */
+
+/** Scroll `el` to the vertical center of the viewport. No-op when the engine
+ *  is off, the breath tween is running, or the element has no box yet. */
+export function centerElement(el: HTMLElement, ms: number): void {
+  if (!installed || breathAnimating || !el.isConnected) return;
+  const rect = el.getBoundingClientRect();
   if (rect.height === 0) return;
   const viewTop = window.visualViewport?.offsetTop ?? 0;
   const viewHeight = window.visualViewport?.height ?? window.innerHeight;
-  const delta = centerScrollDelta(rect.top, rect.height, viewTop, viewHeight);
-  slideWindowBy(delta);
+  slideBy(centerScrollDelta(rect.top, rect.height, viewTop, viewHeight), ms);
 }
 
-function scheduleCenter(target: EventTarget | null): void {
-  const li = resolveCenterLine(target);
-  if (!li) return;
-  // After the browser's own focus-scroll and a layout pass (virtualizer
-  // remounts) so the rect we read is the one the user will see.
-  centerRaf.schedule(() => {
-    if (installed) centerLine(li);
-  });
+/** Center a target after a navigation (e.g. zooming into a childless node).
+ *  Deliberate travel, so it uses the fuller pointer ease. */
+export function centerAfterNavigation(el: HTMLElement): void {
+  requestAnimationFrame(() => centerElement(el, POINTER_SLIDE_MS));
 }
 
-export function installSpotlight(): void {
+/**
+ * Center a row after a structural mutation (keyboard move). Two frames so the
+ * re-render has committed; the element is looked up THEN, because a move may
+ * either reuse the DOM span (focus never leaves, so no focusin fires -- the
+ * move-up case) or remount it (focusin already covers it; this re-centers to
+ * the same place). Keyboard mutation, so the short beat.
+ */
+export function centerAfterMutation(getEl: () => HTMLElement | null): void {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const el = getEl();
+      if (el) centerElement(el, KEYBOARD_SLIDE_MS);
+    }),
+  );
+}
+
+export function installSpotlight(animate = true): void {
   if (installed) return;
   installed = true;
-  clearPointerGesture();
   document.body.classList.add(SPOTLIGHT_ON);
   // Capture phase so the modality is set before focus lands.
   window.addEventListener("pointerdown", onPointerDown, true);
-  window.addEventListener("pointerup", onPointerUp, true);
-  window.addEventListener("pointercancel", onPointerCancel, true);
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("focusin", onFocusIn, true);
-  // Turning the mode on while a line already holds the caret: center it now.
-  scheduleCenter(document.activeElement);
+  if (!animate) return;
+  // Enable (ADR 0060): grow the breathing room and center the lit line as
+  // ONE animation. The `pt-[50vh]` class just applied at render; pin the pad
+  // back to its pre-toggle value NOW (this runs in a layout effect, before
+  // paint, so the class never flashes) and let the tween own the growth. The
+  // caret landing (which node gets focus) runs in OutlineEditor's passive
+  // effect just after; an off-window first row may still be mounting to
+  // claim it, so poll briefly before measuring.
+  const region = outlineRegion();
+  // Continue from the pad the user is SEEING, never an idealized endpoint. An
+  // inline remnant means a breath tween was in flight and just cancelled --
+  // mid-flight value wins. Otherwise the pre-toggle steady value: the class
+  // just applied at render, so computed padding-top already reads the
+  // post-toggle value; the steady base is symmetric with padding-LEFT (the
+  // region's padding utilities are uniform: p-6 / max-sm:p-4).
+  let padFrom = 0;
+  if (region) {
+    const live = parseFloat(region.style.paddingTop);
+    padFrom =
+      Number.isFinite(live) && region.style.paddingTop !== ""
+        ? live
+        : parseFloat(getComputedStyle(region).paddingLeft) || 0;
+    region.style.paddingTop = `${padFrom}px`;
+  }
+  const grow = () => {
+    if (!installed) return;
+    const active = document.activeElement;
+    const row =
+      active instanceof HTMLElement && active.classList.contains("node-text")
+        ? (active.closest<HTMLElement>("li[data-node-id], h2.zoomed-title") ??
+          active)
+        : null;
+    let delta = 0;
+    if (row) {
+      const rect = row.getBoundingClientRect();
+      const viewTop = window.visualViewport?.offsetTop ?? 0;
+      const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+      // Where the row lands once the pad has grown above it -- from where the
+      // flight actually starts, not from zero.
+      delta =
+        rect.top +
+        (breathPad() - padFrom) +
+        rect.height / 2 -
+        (viewTop + viewHeight / 2);
+    }
+    animateBreath(padFrom, breathPad(), delta);
+  };
+  const waitClaim = (tries: number) => {
+    const active = document.activeElement;
+    if (
+      (active instanceof HTMLElement &&
+        active.classList.contains("node-text")) ||
+      tries <= 0
+    ) {
+      grow();
+      return;
+    }
+    requestAnimationFrame(() => {
+      if (installed) waitClaim(tries - 1);
+    });
+  };
+  waitClaim(8);
 }
 
 export function uninstallSpotlight(): void {
   if (!installed) return;
   installed = false;
-  clearPointerGesture();
-  centerRaf.cancel();
-  cancelSlide();
+  cancelTween();
+  breathAnimating = false;
   window.removeEventListener("pointerdown", onPointerDown, true);
-  window.removeEventListener("pointerup", onPointerUp, true);
-  window.removeEventListener("pointercancel", onPointerCancel, true);
   window.removeEventListener("keydown", onKeyDown, true);
   window.removeEventListener("focusin", onFocusIn, true);
   document.body.classList.remove(SPOTLIGHT_ON, SPOTLIGHT_FADE);
+  // Disable (ADR 0060): collapse the breathing room as ONE animation. The
+  // class just left at render; pin the pad to its current value NOW (layout
+  // effect, pre-paint -- no snap) and tween it away. A node still holding
+  // focus anchors the view -- the scroll tracks the collapsing pad so the
+  // lit line stays glued. No lit line (the usual menu path) means the
+  // viewport would be stranded deep in the page, which reads as "lost":
+  // collapse and glide to the top in the same motion.
+  const active = document.activeElement;
+  const held =
+    active instanceof HTMLElement && active.classList.contains("node-text");
+  const region = outlineRegion();
+  const pad = breathPad();
+  let base = 0;
+  // Continue from the pad the user is SEEING: an inline remnant (a cancelled
+  // tween's mid-flight value) wins over the idealized full pad. The steady
+  // base must be read with the remnant CLEARED, or it inherits the mid-flight
+  // value and the collapse lands off-steady, snapping when the inline clears.
+  let flight = pad;
+  if (region) {
+    const live = parseFloat(region.style.paddingTop);
+    if (Number.isFinite(live) && region.style.paddingTop !== "") {
+      flight = live;
+      region.style.paddingTop = "";
+    }
+    base = parseFloat(getComputedStyle(region).paddingTop) || 0;
+    // Pin the flight pad inline NOW (layout effect, pre-paint) so there is no
+    // collapsed frame before the tween's first write.
+    region.style.paddingTop = `${flight}px`;
+  }
+  animateBreath(flight, base, held ? -(flight - base) : -window.scrollY);
 }

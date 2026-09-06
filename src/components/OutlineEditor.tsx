@@ -61,13 +61,7 @@ import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
-import {
-  canApplyPadCompensate,
-  isMountWellSettled,
-  padCompensateDelta,
-  remainingWellScroll,
-  typewriterPadPx,
-} from "../data/spotlight";
+import { centerAfterMutation, centerAfterNavigation } from "../data/spotlight";
 import { runStructural } from "../data/structural";
 import {
   buildTreeIndex,
@@ -240,6 +234,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   "use no memo";
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
+  // Spotlight breathing room (ADR 0060): top padding mirrors the bottom
+  // `mb-[50vh]` so a short outline floats near the vertical center instead of
+  // hugging the header. Steady state only -- the spotlight engine animates
+  // the grow/collapse on toggle (one tween driving padding AND scroll, so
+  // they never fight). Centering on focus lives in the engine too.
+  const spotlight = useSpotlightEnabled();
 
   // The shell reads the tree through NARROW slices, never the whole index, so a
   // keystroke in a bullet doesn't re-render the editor itself (ADR 0014): the
@@ -623,6 +623,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   if (loading) showedSkeletonRef.current = true;
   const revealOnLoad = !loading && showedSkeletonRef.current;
 
+  // Spotlight centering for a childless zoom (ADR 0060): zooming into a node
+  // with no children leaves a lone title at the top of an empty page, so slide
+  // it to the vertical center instead. A zoom WITH children keeps the title at
+  // the top -- the children are the content. Runs once per zoom/spotlight
+  // flip; later tree edits never re-center the view under the user.
+  useEffect(() => {
+    if (!spotlight || loading || zoomedNode === null) return;
+    if (childrenOf(getTreeIndex(), zoomedNode.id).length > 0) return;
+    const el = refs.get(zoomedNode.id);
+    if (el) centerAfterNavigation(el);
+  }, [spotlight, loading, zoomedNode, refs]);
+
   // --- Windowed rendering (ADR 0019) ----------------------------------------
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
@@ -632,6 +644,52 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // root -- the flat list has no DOM nesting for a root's tint to paint behind
   // its children. See selection-fill.ts.
   useSyncSelectionFillRows(rows);
+
+  // Landing the caret when spotlight turns ON (ADR 0060): a node already
+  // holding focus keeps it (the engine centers it); otherwise the zoom root's
+  // title, else the first VISIBLE row, gets the caret at line start. The
+  // rows[0] here is the true first row -- a DOM query would find the first
+  // MOUNTED row, which mid-scroll is some middle bullet. A mounted target
+  // focuses directly; an off-window first row rides the same pendingFocus
+  // mount-claim path a structural edit uses. The prev-ref latch keeps this to
+  // the flip event: mounting with the mode already on (page load, zoom) never
+  // yanks the caret.
+  const prevSpotlight = useRef(spotlight);
+  useEffect(() => {
+    // Hold the flip while the skeleton is up: consuming the latch during
+    // loading would strand the caret landing (the effect re-fires once data
+    // arrives, finds `was === true`, and returns -- no lit line, ever).
+    if (loading) return;
+    const was = prevSpotlight.current;
+    prevSpotlight.current = spotlight;
+    if (!spotlight || was) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.classList.contains("node-text"))
+      return;
+    const key = zoomedNode ? zoomedNode.id : (rows[0]?.key ?? null);
+    if (!key) return;
+    pendingFocus.current = key;
+    pendingFocusAtStart.current = true;
+    const el = refs.get(key);
+    if (el) {
+      el.focus();
+      applyPendingCaret(el, key, true);
+      pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
+    } else if (!scrollRowIntoView(key)) {
+      pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
+      clearPendingCaretOffset();
+    }
+  }, [
+    spotlight,
+    loading,
+    zoomedNode,
+    rows,
+    refs,
+    pendingFocus,
+    pendingFocusAtStart,
+  ]);
   // scrollMargin = the list container's distance from the document top (header +
   // title above it). Measured per zoom view; the editor remounts on zoom (route
   // key), so a one-shot mount measure is current. listRef is set in the branch
@@ -651,122 +709,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     ro.observe(header);
     return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
-  // Typewriter well (ADR 0060): half-viewport padding so the first and last
-  // rows can actually reach the vertical center. The virtualizer's own
-  // paddingStart/End, not CSS -- absolute rows would ignore padding-box
-  // otherwise. Pad size tracks visualViewport.resize. Compensate only on
-  // mount and on a mode flip -- a URL-bar or keyboard resize must not
-  // scrollBy mid-gesture. Mount compensate looks past the well onto n0.
-  // Leftover well-finish is mount/zoom only (keyed on rootId). A short
-  // outline settles at max scroll so a resize cannot re-open that scrollBy.
-  const spotlight = useSpotlightEnabled();
-  // null until the client layout pass reads visualViewport. A 0 prerender
-  // snapshot would make the first real pad look like a viewport-only change
-  // and skip mount compensate.
-  const [viewHeight, setViewHeight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const vv = window.visualViewport;
-    const read = () => setViewHeight(vv?.height ?? window.innerHeight);
-    read();
-    if (!vv) return;
-    vv.addEventListener("resize", read);
-    return () => vv.removeEventListener("resize", read);
-  }, []);
-  const typewriterPad = typewriterPadPx(viewHeight ?? 0, spotlight);
-  const prevSpotlight = useRef<boolean | null>(null);
-  const prevTypewriterPad = useRef(0);
-  // True until this editor instance has looked past the well. A later
-  // router scrollTo(0) on zoom can wipe the layout-effect scroll; leftover
-  // rAFs finish it. Viewport resize must not re-open this (ADR 0060).
-  const mountWellPending = useRef(true);
-  const applyPadCompensate = useCallback(() => {
-    const list = listRef.current;
-    const listHeight = list?.getBoundingClientRect().height ?? 0;
-    if (
-      !canApplyPadCompensate(
-        viewHeight,
-        !loading && list != null,
-        listHeight,
-        typewriterPad,
-      )
-    ) {
-      return;
-    }
-    const delta = padCompensateDelta(
-      prevSpotlight.current,
-      spotlight,
-      prevTypewriterPad.current,
-      typewriterPad,
-    );
-    prevSpotlight.current = spotlight;
-    prevTypewriterPad.current = typewriterPad;
-    if (delta !== 0) window.scrollBy(0, delta);
-  }, [viewHeight, loading, typewriterPad, spotlight]);
-  const finishMountWell = useCallback(() => {
-    if (!mountWellPending.current) return;
-    if (typewriterPad === 0) return;
-    const list = listRef.current;
-    const listHeight = list?.getBoundingClientRect().height ?? 0;
-    const listReady = !loading && list != null;
-    if (
-      !canApplyPadCompensate(viewHeight, listReady, listHeight, typewriterPad)
-    ) {
-      return;
-    }
-    const maxScroll = Math.max(
-      0,
-      document.documentElement.scrollHeight -
-        document.documentElement.clientHeight,
-    );
-    const leftover = remainingWellScroll(
-      typewriterPad,
-      window.scrollY,
-      maxScroll,
-    );
-    if (leftover !== 0) window.scrollBy(0, leftover);
-    const afterMax = Math.max(
-      0,
-      document.documentElement.scrollHeight -
-        document.documentElement.clientHeight,
-    );
-    if (isMountWellSettled(typewriterPad, window.scrollY, afterMax, true)) {
-      mountWellPending.current = false;
-    }
-  }, [viewHeight, loading, typewriterPad]);
-  const finishMountWellRef = useRef(finishMountWell);
-  finishMountWellRef.current = finishMountWell;
-  useLayoutEffect(() => {
-    applyPadCompensate();
-  }, [applyPadCompensate]);
-  useEffect(() => {
-    if (!mountWellPending.current) return;
-    let frames = 0;
-    let raf = 0;
-    const tick = () => {
-      finishMountWellRef.current();
-      frames += 1;
-      // Router scroll restoration can land after the first layout pass.
-      if (mountWellPending.current && frames < 24) {
-        raf = requestAnimationFrame(tick);
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    const done = window.setTimeout(() => {
-      finishMountWellRef.current();
-      mountWellPending.current = false;
-    }, 200);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(done);
-    };
-  }, [rootId]);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
     count: rows.length,
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
     scrollMargin,
-    paddingStart: typewriterPad,
-    paddingEnd: typewriterPad,
     // Key by the row's render ADDRESS, not its node id: inside a mirror a
     // source's descendant appears under every instance, so its bare id is no
     // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
@@ -852,8 +799,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         aria-label="Outline"
         className={
           spotlight
-            ? "mx-auto max-w-[720px] p-6 max-sm:p-4"
-            : "mx-auto mb-[50vh] max-w-[720px] p-6 max-sm:p-4"
+            ? "mx-auto mb-[50vh] max-w-180 p-6 pt-[50vh] max-sm:p-4 max-sm:pt-[50vh]"
+            : "mx-auto mb-[50vh] max-w-180 p-6 max-sm:p-4"
         }
         onMouseDown={onContentMouseDown}
         onPointerDown={onContentPointerDown}
@@ -1741,6 +1688,10 @@ function useNodeCommands({
             const key = focusKeyFor(plan.instanceId, plan.activeKey);
             pendingFocus.current = key;
             pendingFlash.current = key;
+            // Spotlight (ADR 0060): a move-up reuses the DOM span, so focus
+            // never leaves and the focusin centering never fires. Center the
+            // moved row explicitly, two frames out.
+            centerAfterMutation(() => refs.get(key) ?? null);
           }
         },
 
@@ -1764,6 +1715,9 @@ function useNodeCommands({
             const key = focusKeyFor(plan.instanceId, plan.activeKey);
             pendingFocus.current = key;
             pendingFlash.current = key;
+            // Mirror of onMoveUp: focusin usually covers a move-down (the row
+            // remounts), but explicit centering keeps the two symmetric.
+            centerAfterMutation(() => refs.get(key) ?? null);
           }
         },
 

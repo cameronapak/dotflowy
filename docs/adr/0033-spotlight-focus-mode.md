@@ -95,6 +95,6 @@ alternative:
   on every caret move, so this would re-render rows on each arrow-step.
 - **Synced setting.** Overweight for an ephemeral view preference (see above).
 - **A `dotflowy:flag:*` dev flag.** Wrong lifecycle: this is a permanent opt-in mode, not a rollback hatch.
-- **Typewriter (center-scroll the active line) as a second toggle.** Shipped bound to this same
-  toggle: see [ADR 0060](./0060-spotlight-typewriter-centering.md). A separate setting would be two
-  controls for one "focus on this line" intent.
+- **Typewriter (center-scroll the active line).** An attempt (PR #340) was
+  reverted; a small centering came back alongside static breathing room — see
+  [ADR 0060](./0060-spotlight-breathing-room.md).
