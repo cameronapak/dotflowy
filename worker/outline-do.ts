@@ -296,7 +296,7 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  (`currentSeq`, `getKv`, `initialFrame`, …) keep using the type-checked
    *  `exec<{…}>()` overload, which needs no cast. */
   private readRows<T>(query: string, ...params: SqlVal[]): T[] {
-    // SAFETY: each caller's SELECT column list defines T; both call sites select exactly the NodeRow columns.
+    // SAFETY: each caller's SELECT column list defines T; every call site's column list matches its T.
     return this.sql.exec(query, ...params).toArray() as T[];
   }
 

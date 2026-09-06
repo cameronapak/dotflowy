@@ -226,7 +226,8 @@ export function kvGetOrCreateE<T>(
           }),
         );
       }
-      // SAFETY: data passed the object, null, and "value" in data checks; the server echoes the claimed value at type T.
+      // SAFETY: data passed the object, null, and "value" in data checks; the server returns the
+      // authoritative stored claim, T-shaped because every writer of the collection stores T.
       return Effect.succeed(data.value as T);
     }),
   );
