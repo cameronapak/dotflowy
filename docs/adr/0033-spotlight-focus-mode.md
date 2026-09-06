@@ -95,5 +95,6 @@ alternative:
   on every caret move, so this would re-render rows on each arrow-step.
 - **Synced setting.** Overweight for an ephemeral view preference (see above).
 - **A `dotflowy:flag:*` dev flag.** Wrong lifecycle: this is a permanent opt-in mode, not a rollback hatch.
-- **Typewriter (center-scroll the active line).** A separate effect (scroll management, fights the
-  virtualizer) that composes with but shares no code with spotlight; deferred to its own ADR.
+- **Typewriter (center-scroll the active line).** An attempt (PR #340) was
+  reverted; a small centering came back alongside static breathing room — see
+  [ADR 0060](./0060-spotlight-breathing-room.md).

@@ -61,6 +61,7 @@ import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
+import { centerAfterMutation, centerAfterNavigation } from "../data/spotlight";
 import { runStructural } from "../data/structural";
 import {
   buildTreeIndex,
@@ -163,6 +164,7 @@ import {
 } from "./SelectionFormatToolbar";
 import { useShowCompleted } from "./show-completed-provider";
 import { useSlashMenu } from "./slash-menu";
+import { useSpotlightEnabled } from "./spotlight-mode";
 import { Subheader } from "./Subheader";
 import { Button } from "./ui/button";
 import {
@@ -232,6 +234,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   "use no memo";
   const navigate = useNavigate();
   const { showCompleted } = useShowCompleted();
+  // Spotlight breathing room (ADR 0060): top padding mirrors the bottom
+  // `mb-[50vh]` so a short outline floats near the vertical center instead of
+  // hugging the header. Steady state only -- the spotlight engine animates
+  // the grow/collapse on toggle (one tween driving padding AND scroll, so
+  // they never fight). Centering on focus lives in the engine too.
+  const spotlight = useSpotlightEnabled();
 
   // The shell reads the tree through NARROW slices, never the whole index, so a
   // keystroke in a bullet doesn't re-render the editor itself (ADR 0014): the
@@ -615,6 +623,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   if (loading) showedSkeletonRef.current = true;
   const revealOnLoad = !loading && showedSkeletonRef.current;
 
+  // Spotlight centering for a childless zoom (ADR 0060): zooming into a node
+  // with no children leaves a lone title at the top of an empty page, so slide
+  // it to the vertical center instead. A zoom WITH children keeps the title at
+  // the top -- the children are the content. Runs once per zoom/spotlight
+  // flip; later tree edits never re-center the view under the user.
+  useEffect(() => {
+    if (!spotlight || loading || zoomedNode === null) return;
+    if (childrenOf(getTreeIndex(), zoomedNode.id).length > 0) return;
+    const el = refs.get(zoomedNode.id);
+    if (el) centerAfterNavigation(el);
+  }, [spotlight, loading, zoomedNode, refs]);
+
   // --- Windowed rendering (ADR 0019) ----------------------------------------
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
@@ -624,6 +644,48 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // root -- the flat list has no DOM nesting for a root's tint to paint behind
   // its children. See selection-fill.ts.
   useSyncSelectionFillRows(rows);
+
+  // Landing the caret when spotlight turns ON (ADR 0060): a node already
+  // holding focus keeps it (the engine centers it); otherwise the zoom root's
+  // title, else the first VISIBLE row, gets the caret at line start. The
+  // rows[0] here is the true first row -- a DOM query would find the first
+  // MOUNTED row, which mid-scroll is some middle bullet. A mounted target
+  // focuses directly; an off-window first row rides the same pendingFocus
+  // mount-claim path a structural edit uses. The prev-ref latch keeps this to
+  // the flip event: mounting with the mode already on (page load, zoom) never
+  // yanks the caret.
+  const prevSpotlight = useRef(spotlight);
+  useEffect(() => {
+    const was = prevSpotlight.current;
+    prevSpotlight.current = spotlight;
+    if (!spotlight || was || loading) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.classList.contains("node-text"))
+      return;
+    const key = zoomedNode ? zoomedNode.id : (rows[0]?.key ?? null);
+    if (!key) return;
+    pendingFocus.current = key;
+    pendingFocusAtStart.current = true;
+    const el = refs.get(key);
+    if (el) {
+      el.focus();
+      applyPendingCaret(el, key, true);
+      pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
+    } else if (!scrollRowIntoView(key)) {
+      pendingFocus.current = null;
+      pendingFocusAtStart.current = false;
+      clearPendingCaretOffset();
+    }
+  }, [
+    spotlight,
+    loading,
+    zoomedNode,
+    rows,
+    refs,
+    pendingFocus,
+    pendingFocusAtStart,
+  ]);
   // scrollMargin = the list container's distance from the document top (header +
   // title above it). Measured per zoom view; the editor remounts on zoom (route
   // key), so a one-shot mount measure is current. listRef is set in the branch
@@ -731,7 +793,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       <div
         role="region"
         aria-label="Outline"
-        className="mx-auto mb-[50vh] max-w-[720px] p-6 max-sm:p-4"
+        className={
+          spotlight
+            ? "mx-auto mb-[50vh] max-w-180 p-6 pt-[50vh] max-sm:p-4 max-sm:pt-[50vh]"
+            : "mx-auto mb-[50vh] max-w-180 p-6 max-sm:p-4"
+        }
         onMouseDown={onContentMouseDown}
         onPointerDown={onContentPointerDown}
         onPointerUp={onContentPointerUp}
@@ -1618,6 +1684,10 @@ function useNodeCommands({
             const key = focusKeyFor(plan.instanceId, plan.activeKey);
             pendingFocus.current = key;
             pendingFlash.current = key;
+            // Spotlight (ADR 0060): a move-up reuses the DOM span, so focus
+            // never leaves and the focusin centering never fires. Center the
+            // moved row explicitly, two frames out.
+            centerAfterMutation(() => refs.get(key) ?? null);
           }
         },
 
@@ -1641,6 +1711,9 @@ function useNodeCommands({
             const key = focusKeyFor(plan.instanceId, plan.activeKey);
             pendingFocus.current = key;
             pendingFlash.current = key;
+            // Mirror of onMoveUp: focusin usually covers a move-down (the row
+            // remounts), but explicit centering keeps the two symmetric.
+            centerAfterMutation(() => refs.get(key) ?? null);
           }
         },
 
