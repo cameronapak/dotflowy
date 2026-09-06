@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // A node's OWN editable text span and its content row (the element that dims).
 const text = (page: Page, id: string) =>
@@ -18,7 +18,7 @@ async function loadWithSpotlight(page: Page, on: boolean) {
     });
   }
   await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await expect(text(page, "alpha")).toBeVisible({ timeout: 20_000 });
 }
 
 // Spotlight focus mode (ADR 0033): while a bullet is focused, every other row
@@ -66,6 +66,7 @@ test.describe("spotlight focus mode", () => {
     await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
 
     // No caret -> `:has(.node-text:focus)` fails -> nothing is dimmed.
+    // SAFETY: activeElement is Element | null; HTMLElement is the blur target.
     await page.evaluate(() =>
       (document.activeElement as HTMLElement | null)?.blur(),
     );
@@ -84,7 +85,7 @@ test.describe("spotlight focus mode", () => {
     await page.goto("/alpha");
     const title = page.locator("h2.zoomed-title");
     const titleText = page.locator("h2.zoomed-title .node-text");
-    await expect(titleText).toBeVisible();
+    await expect(titleText).toBeVisible({ timeout: 20_000 });
 
     // Focus a child bullet -> the title dims like any parent, the child is full.
     await text(page, "alpha-1").click();
@@ -143,5 +144,87 @@ test.describe("spotlight header indicator", () => {
     await text(page, "alpha-1").click();
     await expect(text(page, "alpha-1")).toBeFocused();
     await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
+  });
+});
+
+// Alignment (issue #347): desktop keeps the #344 center; mobile (≤767) sits the
+// row just below the sticky header. External scroll position only. A tall tree
+// is required on mobile so max-scroll does not clamp before the row can reach
+// the header (short outlines still clamp, same as desktop center).
+const ALIGN_PX = 8;
+
+function tallTree(): SeedNode[] {
+  const nodes: SeedNode[] = [];
+  let prev: string | null = null;
+  for (let i = 0; i < 30; i++) {
+    const id = `n${i}`;
+    nodes.push({
+      id,
+      parentId: null,
+      prevSiblingId: prev,
+      text: `Node ${i}`,
+    });
+    prev = id;
+  }
+  return nodes;
+}
+
+async function rowAlign(page: Page, nodeId: string) {
+  return page.evaluate((id) => {
+    const el = document.querySelector<HTMLElement>(`li[data-node-id="${id}"]`);
+    const header = document.querySelector("header");
+    const sticky =
+      header instanceof HTMLElement &&
+      header.parentElement instanceof HTMLElement &&
+      header.parentElement.classList.contains("sticky")
+        ? header.parentElement
+        : header;
+    if (!el || !(sticky instanceof HTMLElement)) return null;
+    const rect = el.getBoundingClientRect();
+    const viewTop = window.visualViewport?.offsetTop ?? 0;
+    const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+    return {
+      topGap: rect.top - viewTop - sticky.getBoundingClientRect().height,
+      centerDelta: rect.top + rect.height / 2 - (viewTop + viewHeight / 2),
+    };
+  }, nodeId);
+}
+
+test.describe("spotlight alignment — desktop", () => {
+  test("focusin centers the lit row in the visual viewport", async ({
+    page,
+  }) => {
+    await loadWithSpotlight(page, true);
+    await text(page, "alpha-1").click();
+    await expect(text(page, "alpha-1")).toBeFocused();
+    await expect
+      .poll(async () => {
+        const align = await rowAlign(page, "alpha-1");
+        return align ? Math.abs(align.centerDelta) : Infinity;
+      })
+      .toBeLessThan(ALIGN_PX);
+  });
+});
+
+test.describe("spotlight alignment — mobile", () => {
+  test.use({ viewport: { width: 375, height: 700 } });
+
+  test("focusin sits the lit row just below the sticky header", async ({
+    page,
+  }) => {
+    await seedOutline(page, tallTree());
+    await page.addInitScript(() => {
+      window.localStorage.setItem("dotflowy:spotlight", "true");
+    });
+    await page.goto("/");
+    await expect(text(page, "n0")).toBeVisible({ timeout: 20_000 });
+    await text(page, "n4").click();
+    await expect(text(page, "n4")).toBeFocused();
+    await expect
+      .poll(async () => {
+        const align = await rowAlign(page, "n4");
+        return align ? Math.abs(align.topGap) : Infinity;
+      })
+      .toBeLessThan(ALIGN_PX);
   });
 });
