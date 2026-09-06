@@ -61,13 +61,6 @@ import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
-import {
-  canApplyPadCompensate,
-  isMountWellSettled,
-  padCompensateDelta,
-  remainingWellScroll,
-  typewriterPadPx,
-} from "../data/spotlight";
 import { runStructural } from "../data/structural";
 import {
   buildTreeIndex,
@@ -170,7 +163,6 @@ import {
 } from "./SelectionFormatToolbar";
 import { useShowCompleted } from "./show-completed-provider";
 import { useSlashMenu } from "./slash-menu";
-import { useSpotlightEnabled } from "./spotlight-mode";
 import { Subheader } from "./Subheader";
 import { Button } from "./ui/button";
 import {
@@ -651,122 +643,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     ro.observe(header);
     return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
-  // Typewriter well (ADR 0060): half-viewport padding so the first and last
-  // rows can actually reach the vertical center. The virtualizer's own
-  // paddingStart/End, not CSS -- absolute rows would ignore padding-box
-  // otherwise. Pad size tracks visualViewport.resize. Compensate only on
-  // mount and on a mode flip -- a URL-bar or keyboard resize must not
-  // scrollBy mid-gesture. Mount compensate looks past the well onto n0.
-  // Leftover well-finish is mount/zoom only (keyed on rootId). A short
-  // outline settles at max scroll so a resize cannot re-open that scrollBy.
-  const spotlight = useSpotlightEnabled();
-  // null until the client layout pass reads visualViewport. A 0 prerender
-  // snapshot would make the first real pad look like a viewport-only change
-  // and skip mount compensate.
-  const [viewHeight, setViewHeight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const vv = window.visualViewport;
-    const read = () => setViewHeight(vv?.height ?? window.innerHeight);
-    read();
-    if (!vv) return;
-    vv.addEventListener("resize", read);
-    return () => vv.removeEventListener("resize", read);
-  }, []);
-  const typewriterPad = typewriterPadPx(viewHeight ?? 0, spotlight);
-  const prevSpotlight = useRef<boolean | null>(null);
-  const prevTypewriterPad = useRef(0);
-  // True until this editor instance has looked past the well. A later
-  // router scrollTo(0) on zoom can wipe the layout-effect scroll; leftover
-  // rAFs finish it. Viewport resize must not re-open this (ADR 0060).
-  const mountWellPending = useRef(true);
-  const applyPadCompensate = useCallback(() => {
-    const list = listRef.current;
-    const listHeight = list?.getBoundingClientRect().height ?? 0;
-    if (
-      !canApplyPadCompensate(
-        viewHeight,
-        !loading && list != null,
-        listHeight,
-        typewriterPad,
-      )
-    ) {
-      return;
-    }
-    const delta = padCompensateDelta(
-      prevSpotlight.current,
-      spotlight,
-      prevTypewriterPad.current,
-      typewriterPad,
-    );
-    prevSpotlight.current = spotlight;
-    prevTypewriterPad.current = typewriterPad;
-    if (delta !== 0) window.scrollBy(0, delta);
-  }, [viewHeight, loading, typewriterPad, spotlight]);
-  const finishMountWell = useCallback(() => {
-    if (!mountWellPending.current) return;
-    if (typewriterPad === 0) return;
-    const list = listRef.current;
-    const listHeight = list?.getBoundingClientRect().height ?? 0;
-    const listReady = !loading && list != null;
-    if (
-      !canApplyPadCompensate(viewHeight, listReady, listHeight, typewriterPad)
-    ) {
-      return;
-    }
-    const maxScroll = Math.max(
-      0,
-      document.documentElement.scrollHeight -
-        document.documentElement.clientHeight,
-    );
-    const leftover = remainingWellScroll(
-      typewriterPad,
-      window.scrollY,
-      maxScroll,
-    );
-    if (leftover !== 0) window.scrollBy(0, leftover);
-    const afterMax = Math.max(
-      0,
-      document.documentElement.scrollHeight -
-        document.documentElement.clientHeight,
-    );
-    if (isMountWellSettled(typewriterPad, window.scrollY, afterMax, true)) {
-      mountWellPending.current = false;
-    }
-  }, [viewHeight, loading, typewriterPad]);
-  const finishMountWellRef = useRef(finishMountWell);
-  finishMountWellRef.current = finishMountWell;
-  useLayoutEffect(() => {
-    applyPadCompensate();
-  }, [applyPadCompensate]);
-  useEffect(() => {
-    if (!mountWellPending.current) return;
-    let frames = 0;
-    let raf = 0;
-    const tick = () => {
-      finishMountWellRef.current();
-      frames += 1;
-      // Router scroll restoration can land after the first layout pass.
-      if (mountWellPending.current && frames < 24) {
-        raf = requestAnimationFrame(tick);
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    const done = window.setTimeout(() => {
-      finishMountWellRef.current();
-      mountWellPending.current = false;
-    }, 200);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(done);
-    };
-  }, [rootId]);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
     count: rows.length,
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
     scrollMargin,
-    paddingStart: typewriterPad,
-    paddingEnd: typewriterPad,
     // Key by the row's render ADDRESS, not its node id: inside a mirror a
     // source's descendant appears under every instance, so its bare id is no
     // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
@@ -850,11 +731,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       <div
         role="region"
         aria-label="Outline"
-        className={
-          spotlight
-            ? "mx-auto max-w-[720px] p-6 max-sm:p-4"
-            : "mx-auto mb-[50vh] max-w-[720px] p-6 max-sm:p-4"
-        }
+        className="mx-auto mb-[50vh] max-w-[720px] p-6 max-sm:p-4"
         onMouseDown={onContentMouseDown}
         onPointerDown={onContentPointerDown}
         onPointerUp={onContentPointerUp}

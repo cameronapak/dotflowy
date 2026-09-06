@@ -26,8 +26,7 @@ export { setSpotlightEnabled } from "../data/spotlight";
 /**
  * Installs / tears down the spotlight DOM engine when the toggle flips. Rendered
  * once at the root (a sibling of TagColorStyles). Renders nothing -- all it does
- * is bind the engine's document listeners (dim classes + typewriter center) to
- * the toggle's lifetime.
+ * is bind the engine's document listeners to the toggle's lifetime.
  */
 export function SpotlightController(): null {
   const enabled = useSpotlightEnabled();
