@@ -76,7 +76,7 @@ back with every piece of machinery that made #340 heavy removed:
 - **No `visualViewport` resize handling.** The rect is read fresh per focus.
 
 **The modality split (reused from the dim, ADR 0033).** The dim eases on
-pointer focus and snaps on keyboard nav; centering rides the same
+pointer focus and snaps on keyboard nav; the align rides the same
 `spotlight-fade` modality class. A pointer jump eases ~200ms — a deliberate
 click can afford the travel. Keyboard takes a short ~120ms beat, so fast
 arrowing chases the caret without swimming; each new focus cancels the
