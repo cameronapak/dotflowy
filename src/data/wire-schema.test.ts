@@ -15,16 +15,24 @@
 import { describe, expect, it } from "bun:test";
 import { Exit, Schema } from "effect";
 
-import { makeNode } from "./tree";
+import { createNode } from "./tree";
 import { ChangeOpSchema, NodeSchema, ServerMessageSchema } from "./wire-schema";
 
 type AnySchema = Schema.Codec<unknown, unknown, never, never>;
 
-const decodes = (schema: AnySchema, input: unknown) =>
+/** Valid payloads plus the malformed shapes the reject-cases feed. */
+type DecodeInput =
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly [key: string]: Schema.Json };
+
+const decodes = (schema: AnySchema, input: DecodeInput) =>
   Exit.isSuccess(Schema.decodeUnknownExit(schema)(input));
 
-const a = makeNode({ id: "a", text: "alpha" });
-const b = makeNode({ id: "b", text: "bravo" });
+const a = createNode({ id: "a", text: "alpha" });
+const b = createNode({ id: "b", text: "bravo" });
 
 describe("NodeSchema", () => {
   it("accepts a complete node", () => {

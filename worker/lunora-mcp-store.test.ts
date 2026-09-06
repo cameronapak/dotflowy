@@ -148,6 +148,7 @@ describe("shard client identity", () => {
           system: request.headers.get("x-lunora-system"),
           userId: request.headers.get("x-lunora-userid"),
         });
+        // SAFETY: this stub only receives requests the shard client serializes, each carrying a functionPath string.
         const body = (await request.json()) as { functionPath: string };
         return Response.json({
           result: body.functionPath === "mcp:listNodes" ? [] : { deleted: 0 },

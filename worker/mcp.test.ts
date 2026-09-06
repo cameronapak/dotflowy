@@ -9,12 +9,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 import type { OutlineStore } from "./mcp-tools";
 
-import { makeNode } from "../src/data/tree";
+import { createNode } from "../src/data/tree";
 import { handleMcp } from "./mcp";
 import { setClock } from "./mcp-tools";
 
@@ -51,6 +51,7 @@ function makeStore(
         throw new Error(`unexpected kv collection ${collection}`);
       const existing = kv.get(key);
       if (existing) return existing;
+      // SAFETY: this fake only serves the daily-index collection, whose values are always the { nodeId } claim.
       kv.set(key, value as { key: string; nodeId: string });
       return value;
     },
@@ -60,20 +61,31 @@ function makeStore(
 
 // --- Request plumbing -----------------------------------------------------------
 
+/** A JSON-RPC params payload the tests send (raw JSON shapes). */
+type RpcParams = { readonly [key: string]: Schema.Json };
+
+/** The JSON-RPC request body the tests serialize. */
+interface RpcRequestBody {
+  jsonrpc: "2.0";
+  method: string;
+  id?: number | null;
+  params?: RpcParams;
+}
+
 // Each test request is its own stateless HTTP exchange, so a fixed id is fine.
 async function rpc(
   store: OutlineStore,
   method: string,
-  params?: unknown,
+  params?: RpcParams,
   id: number | null = 1,
   // The provenance stamp the Worker resolves from the bearer token in prod; a
   // fixed harness name here so the stamping assertions have something to check.
   origin: string | null = "TestAgent",
   agentAccess = true,
 ) {
-  const body: Record<string, unknown> = { jsonrpc: "2.0", method };
-  if (id !== null) body["id"] = id;
-  if (params !== undefined) body["params"] = params;
+  const body: RpcRequestBody = { jsonrpc: "2.0", method };
+  if (id !== null) body.id = id;
+  if (params !== undefined) body.params = params;
   const request = new Request("http://test/api/mcp", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -82,8 +94,9 @@ async function rpc(
   return Effect.runPromise(handleMcp(request, store, origin, agentAccess));
 }
 
-async function callTool(store: OutlineStore, name: string, args: unknown) {
+async function callTool(store: OutlineStore, name: string, args: RpcParams) {
   const res = await rpc(store, "tools/call", { name, arguments: args });
+  // SAFETY: parsed from the JSON-RPC body our own handleMcp serializes; fields verified by the expects below.
   const json = (await res.json()) as {
     result?: {
       content: Array<{ type: string; text: string }>;
@@ -101,9 +114,9 @@ function toolText(json: Awaited<ReturnType<typeof callTool>>): string {
 /** a -> b (top level), a1 under a. */
 function fixture(): Node[] {
   return [
-    makeNode({ id: "a", text: "alpha" }),
-    makeNode({ id: "b", text: "bravo", prevSiblingId: "a" }),
-    makeNode({ id: "a1", text: "alpha one", parentId: "a" }),
+    createNode({ id: "a", text: "alpha" }),
+    createNode({ id: "b", text: "bravo", prevSiblingId: "a" }),
+    createNode({ id: "a1", text: "alpha one", parentId: "a" }),
   ];
 }
 
@@ -117,6 +130,7 @@ describe("MCP transport", () => {
       capabilities: {},
       clientInfo: { name: "test", version: "0" },
     });
+    // SAFETY: parsed from the initialize response our own handler serializes; fields checked by the expects below.
     const json = (await res.json()) as any;
     expect(json.result.protocolVersion).toBe("2025-03-26");
     expect(json.result.capabilities.tools).toBeDefined();
@@ -125,6 +139,7 @@ describe("MCP transport", () => {
 
   test("an unknown requested protocol version is countered with the latest", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the initialize response our own handler serializes; field checked by the expect below.
     const json = (await (
       await rpc(store, "initialize", { protocolVersion: "1999-01-01" })
     ).json()) as any;
@@ -140,12 +155,14 @@ describe("MCP transport", () => {
 
   test("ping pongs", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the ping response our own handler serializes; field checked by the expect below.
     const json = (await (await rpc(store, "ping")).json()) as any;
     expect(json.result).toEqual({});
   });
 
   test("tools/list publishes JSON Schema derived from the Effect Schema inputs", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
     const json = (await (await rpc(store, "tools/list")).json()) as any;
     const names = json.result.tools.map((t: any) => t.name);
     expect(names).toEqual([
@@ -174,6 +191,7 @@ describe("MCP transport", () => {
 
   test("tools/list publishes the paragraph `kind` on every write tool", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
     const json = (await (await rpc(store, "tools/list")).json()) as any;
     const tool = (name: string) =>
       json.result.tools.find((t: any) => t.name === name);
@@ -199,6 +217,7 @@ describe("MCP transport", () => {
 
   test("unknown method is -32601, unknown tool and bad args are -32602", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
     expect(
       ((await (await rpc(store, "resources/list")).json()) as any).error.code,
     ).toBe(-32601);
@@ -218,6 +237,7 @@ describe("MCP transport", () => {
         true,
       ),
     );
+    // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
     expect(((await bad.json()) as any).error.code).toBe(-32700);
 
     const batch = await Effect.runPromise(
@@ -228,6 +248,7 @@ describe("MCP transport", () => {
         true,
       ),
     );
+    // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
     expect(((await batch.json()) as any).error.code).toBe(-32600);
   });
 
@@ -249,6 +270,7 @@ describe("MCP transport", () => {
 
     // tools/call — the only entitlement-gated method — is refused, and no write
     // reaches the store.
+    // SAFETY: parsed from the JSON-RPC error body our own handler serializes; fields checked by the expects below.
     const call = (await (
       await rpc(
         store,
@@ -263,6 +285,7 @@ describe("MCP transport", () => {
     expect(call.error.message).toContain("paid");
     expect(call.result).toBeUndefined();
 
+    // SAFETY: parsed from the JSON-RPC error body our own handler serializes; fields checked by the expects below.
     const write = (await (
       await rpc(
         store,
@@ -279,6 +302,7 @@ describe("MCP transport", () => {
     // initialize / ping / tools/list stay open, so a free connection can still
     // handshake and see WHY every call is refused.
     for (const method of ["initialize", "ping", "tools/list"]) {
+      // SAFETY: parsed from the JSON-RPC body our own handler serializes; fields checked by the expects below.
       const ok = (await (
         await rpc(store, method, {}, 1, "TestAgent", false)
       ).json()) as any;
@@ -401,6 +425,7 @@ describe("MCP tools", () => {
 
   test("add_subtree publishes its recursive input as a named $def", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
     const json = (await (await rpc(store, "tools/list")).json()) as any;
     const addSubtree = json.result.tools.find(
       (t: any) => t.name === "add_subtree",
@@ -683,6 +708,7 @@ describe("MCP tools", () => {
 
   test("tools/list exposes the timeZone field on all four daily tools", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
     const json = (await (await rpc(store, "tools/list")).json()) as any;
     const tool = (name: string) =>
       json.result.tools.find((t: any) => t.name === name);
@@ -780,7 +806,7 @@ describe("MCP tools", () => {
   test("deleting an ancestor of surviving mirrors is refused (ADR 0022 v1 protects)", async () => {
     const fake = makeStore([
       ...fixture(),
-      makeNode({
+      createNode({
         id: "m",
         text: "alpha one",
         mirrorOf: "a1",
@@ -962,12 +988,12 @@ describe("MCP tools", () => {
   });
 
   test("export_opml over the 5,000-node ceiling rejects, never truncates", async () => {
-    const seed: Node[] = [makeNode({ id: "root", text: "root" })];
+    const seed: Node[] = [createNode({ id: "root", text: "root" })];
     let prev: string | null = null;
     for (let i = 0; i < 5001; i++) {
       const id = `c${i}`;
       seed.push(
-        makeNode({
+        createNode({
           id,
           text: `child ${i}`,
           parentId: "root",
@@ -999,7 +1025,7 @@ describe("MCP tools", () => {
       },
       applyBatch: () => 0,
       getKv: () => [],
-      getOrCreateKv: () => ({}),
+      getOrCreateKv: () => ({ key: "", nodeId: "" }),
     };
     const json = await callTool(broken, "get_outline", {});
     expect(json.result?.isError).toBe(true);

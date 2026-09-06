@@ -95,6 +95,7 @@ export function periodCatalogUnits(
   const q = query.trim().toLowerCase();
   const m = /^(next|last)(?:\s+(.*))?$/.exec(q);
   if (!m) return null;
+  // SAFETY: capture group 1 matches only the regex alternation next|last, exactly the PeriodQualifier union.
   const qualifier = m[1] as PeriodQualifier;
   const rest = (m[2] ?? "").trim();
   // Full-word gate is the regex (`next`|`last`); `ne` / `la` never match.
@@ -107,6 +108,7 @@ export function periodCatalogUnits(
 function parseOwnedWeekday(q: string, today: string): string | null {
   const m = /^(?:(next|last)\s+)?([a-z]+)$/i.exec(q);
   if (!m) return null;
+  // SAFETY: capture group 1 matches only next|last (or is absent), which lowercased is PeriodQualifier | undefined.
   const qualifier =
     (m[1]?.toLowerCase() as PeriodQualifier | undefined) ?? null;
   return resolveWeekdayStem(m[2]!, qualifier, today);
@@ -119,6 +121,7 @@ function parseExactPeriod(
 ): ReturnType<typeof resolvePeriod> {
   const m = /^(next|last)\s+(week|month|year)$/i.exec(q);
   if (!m) return null;
+  // SAFETY: the regex restricts group 1 to next|last and group 2 to week|month|year, the PeriodQualifier and PeriodUnit unions.
   return resolvePeriod(
     m[1]!.toLowerCase() as PeriodQualifier,
     m[2]!.toLowerCase() as PeriodUnit,

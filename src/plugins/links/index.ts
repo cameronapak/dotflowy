@@ -195,6 +195,9 @@ const UNFURLING_CLASS = "link-unfurling";
 // and the caller keeps the url placeholder (the graceful fallback). The runtime
 // `signal` wires the fetch up to be interruptible; nothing interrupts it per
 // node today (see the runFork site), so it runs to completion either way.
+const isTitleString = (v: string | null | undefined): v is string =>
+  typeof v === "string";
+
 function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
   return Effect.tryPromise({
     try: async (signal) => {
@@ -202,8 +205,9 @@ function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
         signal,
       });
       if (!res.ok) return null;
+      // SAFETY: /api/unfurl returns { title } JSON
       const data = (await res.json()) as { title?: string | null };
-      return typeof data.title === "string" && data.title ? data.title : null;
+      return isTitleString(data.title) && data.title ? data.title : null;
     },
     catch: (cause) => cause,
   }).pipe(
@@ -249,6 +253,7 @@ function singleAnchor(html: string): { text: string; href: string } | null {
 // selection it opens the popover with an empty label (type both). Positioned at
 // the selection rect, falling back to the span.
 function createLinkFromSelection(nodeId: string, ctx: PluginContext): void {
+  // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
   const el = document.activeElement as HTMLElement | null;
   if (!el || !el.isContentEditable) return;
 
@@ -347,6 +352,7 @@ export default definePlugin({
       onClick: (el, _ctx, e) => {
         e.preventDefault();
         e.stopPropagation();
+        // SAFETY: the selector "a[data-link]" matched, so el is an anchor
         const href = (el as HTMLAnchorElement).href;
         const textEl = el.closest<HTMLElement>(".node-text");
         openUrlInFocusedTab(href, {

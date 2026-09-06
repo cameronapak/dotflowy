@@ -33,6 +33,19 @@ import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
 import { wipeLunoraUserShard } from "./lunora-mcp-store";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
+/** Any undecoded JSON request-body field as the auth hooks see it (Better Auth
+ *  parses the body only after this gate runs). */
+type AuthBodyField =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly AuthBodyField[]
+  | { readonly [key: string]: AuthBodyField };
+
+/** Type guard for undecoded request-body fields reaching the auth hooks. */
+const isString = (v: AuthBodyField): v is string => typeof v === "string";
+
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
   DB: D1Database;
@@ -357,14 +370,13 @@ export function createAuth(
         // in the captcha plugin's onRequest). Accept and let the after-hook
         // redeem any invite that happened to ride along.
         if (isSignupOpen(env)) return;
-        const supplied =
-          typeof ctx.body?.inviteCode === "string"
-            ? ctx.body.inviteCode.trim()
-            : "";
-        const email =
-          typeof ctx.body?.email === "string"
-            ? normalizeEmail(ctx.body.email)
-            : "";
+        const beforeBody = ctx.body;
+        const supplied = isString(beforeBody?.inviteCode)
+          ? beforeBody.inviteCode.trim()
+          : "";
+        const email = isString(beforeBody?.email)
+          ? normalizeEmail(beforeBody.email)
+          : "";
         // (a) A per-email single-use invite bound to this address.
         if (
           supplied &&
@@ -386,14 +398,13 @@ export function createAuth(
         // endpoint's result — surfaced here as `ctx.context.returned` — is an
         // APIError, so we leave the invite unredeemed and reusable.
         if (ctx.context.returned instanceof APIError) return;
-        const supplied =
-          typeof ctx.body?.inviteCode === "string"
-            ? ctx.body.inviteCode.trim()
-            : "";
-        const email =
-          typeof ctx.body?.email === "string"
-            ? normalizeEmail(ctx.body.email)
-            : "";
+        const afterBody = ctx.body;
+        const supplied = isString(afterBody?.inviteCode)
+          ? afterBody.inviteCode.trim()
+          : "";
+        const email = isString(afterBody?.email)
+          ? normalizeEmail(afterBody.email)
+          : "";
         // No-op when `supplied` was the INVITE_CODES backdoor (no invites row).
         if (supplied && email) await redeemInvite(env, email, supplied);
       }),

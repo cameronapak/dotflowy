@@ -19,7 +19,7 @@ import {
   planOpmlImport,
   type OpmlImportResult,
 } from "./opml-import";
-import { buildTreeIndex, makeNode, type TreeIndex } from "./tree";
+import { buildTreeIndex, createNode, type TreeIndex } from "./tree";
 
 const index = (nodes: Node[]): TreeIndex => buildTreeIndex(nodes);
 const reimport = (opml: string): OpmlImportResult =>
@@ -27,8 +27,8 @@ const reimport = (opml: string): OpmlImportResult =>
 
 describe("document shape", () => {
   const idx = index([
-    makeNode({ id: "a", text: "alpha" }),
-    makeNode({
+    createNode({ id: "a", text: "alpha" }),
+    createNode({
       id: "b",
       parentId: "a",
       text: "bravo",
@@ -55,8 +55,8 @@ describe("document shape", () => {
 
   it("emits _kind only for a paragraph (ADR 0045)", () => {
     const withPara = buildTreeIndex([
-      makeNode({ id: "a", text: "alpha" }),
-      makeNode({ id: "p", parentId: "a", text: "prose", kind: "paragraph" }),
+      createNode({ id: "a", text: "alpha" }),
+      createNode({ id: "p", parentId: "a", text: "prose", kind: "paragraph" }),
     ]);
     const opml = exportOpml(withPara, null, { title: "t" });
     expect(opml).toContain('<outline _kind="paragraph" text="prose" />');
@@ -83,7 +83,7 @@ describe("document shape", () => {
 
 describe("escaping (the two layers, in reverse)", () => {
   it("double-escapes a literal < (byte-matching Workflowy) and encodes quotes", () => {
-    const idx = index([makeNode({ id: "a", text: `a < b & "c" 'd'` })]);
+    const idx = index([createNode({ id: "a", text: `a < b & "c" 'd'` })]);
     const out = exportOpml(idx, null, { title: "t" });
     expect(out).toContain(
       'text="a &amp;lt; b &amp;amp; &amp;quot;c&amp;quot; &#39;d&#39;"',
@@ -92,13 +92,13 @@ describe("escaping (the two layers, in reverse)", () => {
 
   it("round-trips special characters byte-exact through import", () => {
     const text = `a < b & "c" 'd' > e`;
-    const idx = index([makeNode({ id: "a", text })]);
+    const idx = index([createNode({ id: "a", text })]);
     const { forest } = reimport(exportOpml(idx, null, { title: "t" }));
     expect(forest[0]!.text).toBe(text);
   });
 
   it("escapes a newline in text as &#10;", () => {
-    const idx = index([makeNode({ id: "a", text: "one\ntwo" })]);
+    const idx = index([createNode({ id: "a", text: "one\ntwo" })]);
     expect(exportOpml(idx, null, { title: "t" })).toContain(
       'text="one&#10;two"',
     );
@@ -107,7 +107,7 @@ describe("escaping (the two layers, in reverse)", () => {
 
 describe("inline inverse projections", () => {
   const project = (text: string, extra: Node[] = []): string =>
-    exportOpml(index([makeNode({ id: "a", text }), ...extra]), null, {
+    exportOpml(index([createNode({ id: "a", text }), ...extra]), null, {
       title: "t",
     });
 
@@ -155,7 +155,7 @@ describe("inline inverse projections", () => {
   it("projects node links to app URLs labeled with the flattened target text", () => {
     const targetId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     const out = project(`see [[${targetId}]]`, [
-      makeNode({ id: targetId, text: "target **bold**" }),
+      createNode({ id: targetId, text: "target **bold**" }),
     ]);
     expect(out).toContain(
       `&lt;a href=&quot;https://app.dotflowy.com/${targetId}&quot;&gt;target bold&lt;/a&gt;`,
@@ -176,9 +176,9 @@ describe("inline inverse projections", () => {
 
 describe("mirror dialect", () => {
   const nodes = [
-    makeNode({ id: "src", text: "source" }),
-    makeNode({ id: "kid", parentId: "src", text: "kid" }),
-    makeNode({
+    createNode({ id: "src", text: "source" }),
+    createNode({ id: "kid", parentId: "src", text: "kid" }),
+    createNode({
       id: "mir",
       text: "source",
       mirrorOf: "src",
@@ -196,8 +196,8 @@ describe("mirror dialect", () => {
 
   it("caps a mirror cycle: a mirror of its own ancestor emits no children", () => {
     const cyclic = index([
-      makeNode({ id: "a", text: "ancestor" }),
-      makeNode({ id: "m", parentId: "a", text: "ancestor", mirrorOf: "a" }),
+      createNode({ id: "a", text: "ancestor" }),
+      createNode({ id: "m", parentId: "a", text: "ancestor", mirrorOf: "a" }),
     ]);
     const out = exportOpml(cyclic, null, { title: "t" });
     // The mirror row is self-closing: its source is already on the path.
@@ -207,19 +207,19 @@ describe("mirror dialect", () => {
 
 describe("round-trip: export -> import re-links mirrors (the acceptance test)", () => {
   const nodes = [
-    makeNode({ id: "src", text: "source **bold**" }),
-    makeNode({
+    createNode({ id: "src", text: "source **bold**" }),
+    createNode({
       id: "kid",
       parentId: "src",
       text: "kid ==🟢go== [[2026-07-08]]",
     }),
-    makeNode({
+    createNode({
       id: "mir",
       text: "source **bold**",
       mirrorOf: "src",
       prevSiblingId: "src",
     }),
-    makeNode({ id: "p", text: "plain `code` last", prevSiblingId: "mir" }),
+    createNode({ id: "p", text: "plain `code` last", prevSiblingId: "mir" }),
   ];
   const opml = exportOpml(index(nodes), null, { title: "round trip" });
   const { forest, report } = reimport(opml);

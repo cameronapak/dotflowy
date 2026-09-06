@@ -25,12 +25,17 @@ export function isOwnerAccount(
   return !!ownerUserId && userId === ownerUserId;
 }
 
+/** The Stripe error fields this check reads; both are optional on the wire. */
+interface StripeCancelError {
+  code?: string;
+  message?: string;
+}
+
 /** Is this a Stripe "the subscription is already gone / already cancelled"
  *  error? Cancelling a subscription that Stripe no longer has active is our
  *  GOAL, not a failure — so it must not abort the account deletion. Everything
  *  else (auth error, network, rate limit) is a real failure and rethrows. */
-function isAlreadyCancelled(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
+function isAlreadyCancelled(e: StripeCancelError): boolean {
   return (
     e?.code === "resource_missing" ||
     /already been canceled|already canceled|no such subscription/i.test(
@@ -120,7 +125,9 @@ export async function cancelActiveSubscriptions(
         try {
           await stripe.subscriptions.cancel(stripeSubscriptionId);
         } catch (err) {
-          if (isAlreadyCancelled(err)) continue;
+          // SAFETY: a caught value's shape is untyped; the probe reads only
+          // optional code/message fields with safe defaults.
+          if (isAlreadyCancelled(err as StripeCancelError)) continue;
           throw err;
         }
       }
@@ -130,7 +137,9 @@ export async function cancelActiveSubscriptions(
           // to it, so this doubly guarantees "no future billing".
           await stripe.customers.del(customerId);
         } catch (err) {
-          if (!isAlreadyCancelled(err)) throw err; // already gone = goal met
+          // SAFETY: a caught value's shape is untyped; the probe reads only
+          // optional code/message fields with safe defaults.
+          if (!isAlreadyCancelled(err as StripeCancelError)) throw err; // already gone = goal met
         }
       }
     }

@@ -9,7 +9,7 @@ import {
 import {
   applyPlan,
   buildTreeIndex,
-  makeOutlineNode,
+  createOutlineNode,
   nodeToDocFields,
   planIndent,
   planInsertSibling,
@@ -53,7 +53,7 @@ describe("lunora-bridge (ADR 0004 seam)", () => {
 
   test("bridge order matches planner apply (insert/indent/remove)", () => {
     let nodes: OutlineNode[] = [
-      makeOutlineNode({
+      createOutlineNode({
         id: "a",
         userId: USER,
         parentId: null,
@@ -62,7 +62,7 @@ describe("lunora-bridge (ADR 0004 seam)", () => {
         createdAt: 0,
         updatedAt: 0,
       }),
-      makeOutlineNode({
+      createOutlineNode({
         id: "b",
         userId: USER,
         parentId: null,

@@ -174,6 +174,7 @@ export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
   }).pipe(Effect.orElseSucceed(() => undefined));
   if (cached) {
     const data = yield* Effect.tryPromise({
+      // SAFETY: cache entries are written only by this module as JSON.stringify({ title }).
       try: () => cached.json() as Promise<{ title?: string | null } | null>,
       catch: (cause) => cause,
     }).pipe(Effect.orElseSucceed(() => null));

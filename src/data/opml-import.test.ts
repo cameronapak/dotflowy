@@ -322,6 +322,7 @@ describe("failure modes (never a partial plan)", () => {
   it("fails a truncated document with line/column", () => {
     const error = runFail(sampleOpml.slice(0, 200));
     expect(error).toBeInstanceOf(OpmlParseError);
+    // SAFETY: instanceof OpmlParseError asserted on the line above.
     const parseError = error as OpmlParseError;
     expect(parseError.line).toBeGreaterThan(0);
     expect(parseError.column).toBeGreaterThan(0);
@@ -342,6 +343,7 @@ describe("failure modes (never a partial plan)", () => {
   it("rejects a well-formed non-OPML document", () => {
     const error = runFail("<foo><bar /></foo>");
     expect(error).toBeInstanceOf(OpmlParseError);
+    // SAFETY: instanceof OpmlParseError asserted on the line above.
     expect((error as OpmlParseError).line).toBeNull();
   });
 });
@@ -452,6 +454,7 @@ describe("planOpmlImport", () => {
       maxNodes: 3,
     });
     expect(plan).toBeInstanceOf(OpmlImportTooLarge);
+    // SAFETY: instanceof OpmlImportTooLarge asserted on the line above.
     expect((plan as OpmlImportTooLarge).count).toBe(4);
   });
 

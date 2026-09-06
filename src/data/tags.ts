@@ -92,10 +92,17 @@ export interface OutlineSearch {
   focus?: "last";
 }
 
-export function validateOutlineSearch(
-  search: Record<string, unknown>,
-): OutlineSearch {
-  const q = typeof search.q === "string" ? search.q.trim() : "";
+/** Search params as the router hands them over: unvalidated query-string values. */
+interface RawSearch {
+  q?: unknown;
+  focus?: unknown;
+}
+
+/** Type-guard predicate: search params carry unknown values. */
+const isString = (v: RawSearch["q"]): v is string => typeof v === "string";
+
+export function validateOutlineSearch(search: RawSearch): OutlineSearch {
+  const q = isString(search.q) ? search.q.trim() : "";
   const out: OutlineSearch = {};
   if (q) out.q = q;
   // Pass `focus=last` through: the router validates the DESTINATION route's

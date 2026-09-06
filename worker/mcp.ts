@@ -22,7 +22,7 @@
  * non-store defects collapse to -32603.
  */
 
-import { Effect, Schema } from "effect";
+import { Effect, JsonSchema as EffectJsonSchema, Schema } from "effect";
 
 import { type OutlineStore, tools } from "./mcp-tools";
 import { APP_VERSION } from "./version";
@@ -76,7 +76,9 @@ const JsonRpcMessageSchema = Schema.Struct({
   // Absent id = a notification (no response expected).
   id: Schema.optional(JsonRpcIdSchema),
   method: Schema.String,
-  params: Schema.optional(Schema.Unknown),
+  // Params arrive as raw JSON off the request body; each method decodes its
+  // own shape below.
+  params: Schema.optional(Schema.Json),
 });
 
 const InitializeParamsSchema = Schema.Struct({
@@ -85,8 +87,11 @@ const InitializeParamsSchema = Schema.Struct({
 
 const CallToolParamsSchema = Schema.Struct({
   name: Schema.String,
-  arguments: Schema.optional(Schema.Unknown),
+  arguments: Schema.optional(Schema.Json),
 });
+
+/** A JSON-RPC params value: raw JSON off the request body, pre-decode. */
+type RpcJson = (typeof JsonRpcMessageSchema.Type)["params"];
 
 // --- Response builders ----------------------------------------------------------
 
@@ -99,14 +104,23 @@ const CORS_HEADERS = {
     "content-type, authorization, mcp-protocol-version, mcp-session-id",
 };
 
-function json(data: unknown, status = 200): Response {
+/** A JSON-RPC 2.0 response body: exactly one of result or error. */
+type JsonRpcResponse =
+  | { jsonrpc: "2.0"; id: JsonRpcId; result: RpcResult }
+  | {
+      jsonrpc: "2.0";
+      id: JsonRpcId;
+      error: { code: number; message: string };
+    };
+
+function json(data: JsonRpcResponse, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json", ...CORS_HEADERS },
   });
 }
 
-function rpcResult(id: JsonRpcId, result: unknown): Response {
+function rpcResult(id: JsonRpcId, result: RpcResult): Response {
   return json({ jsonrpc: "2.0", id, result });
 }
 
@@ -130,9 +144,31 @@ export function mcpCorsPreflight(): Response {
 // Schema from each tool's Effect Schema here guarantees the published contract
 // can't drift from the decoder used in tools/call below.
 
-const toolList = tools.map((tool) => {
+/** One tools/list entry: the tool's name, doc, and registry-derived input
+ *  schema (a JSON Schema document, per toJsonSchemaDocument). */
+interface ToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: EffectJsonSchema.JsonSchema;
+  annotations: { readOnlyHint: boolean };
+}
+
+/** The result payloads this server returns: handshake metadata, the tool
+ *  list, tool output, or nothing (ping). */
+type RpcResult =
+  | {
+      protocolVersion: string;
+      capabilities: { tools: { listChanged: boolean } };
+      serverInfo: { name: string; title: string; version: string };
+      instructions: string;
+    }
+  | { tools: ToolDescriptor[] }
+  | { content: Array<{ type: "text"; text: string }>; isError?: boolean }
+  | Record<string, never>;
+
+const toolList: ToolDescriptor[] = tools.map((tool) => {
   const doc = Schema.toJsonSchemaDocument(tool.input);
-  const inputSchema: Record<string, unknown> = { ...doc.schema };
+  const inputSchema = { ...doc.schema };
   if (Object.keys(doc.definitions).length)
     inputSchema["$defs"] = doc.definitions;
   return {
@@ -149,13 +185,13 @@ const decodeOrNull = <
   S extends Schema.Top & { readonly DecodingServices: never },
 >(
   schema: S,
-  value: unknown,
+  value: RpcJson,
 ): S["Type"] | null => {
   const result = Schema.decodeUnknownOption(schema)(value);
   return result._tag === "Some" ? result.value : null;
 };
 
-function handleInitialize(id: JsonRpcId, params: unknown): Response {
+function handleInitialize(id: JsonRpcId, params: RpcJson): Response {
   const parsed = decodeOrNull(InitializeParamsSchema, params ?? {});
   const requested = parsed?.protocolVersion;
   const protocolVersion =
@@ -172,7 +208,7 @@ function handleInitialize(id: JsonRpcId, params: unknown): Response {
 
 function handleToolCall(
   id: JsonRpcId,
-  params: unknown,
+  params: RpcJson,
   store: OutlineStore,
   origin: string | null,
 ): Effect.Effect<Response> {
@@ -188,12 +224,7 @@ function handleToolCall(
       rpcError(id, INVALID_PARAMS, `unknown tool: ${call.name}`),
     );
 
-  // The registry erases each tool's input type (`Schema.Struct<any>`), which
-  // would leak `any` into the Effect requirements channel — pin the decode
-  // signature at this one seam instead.
-  const decodeInput = Schema.decodeUnknownEffect(tool.input) as unknown as (
-    input: unknown,
-  ) => Effect.Effect<unknown, { readonly message: string }>;
+  const decodeInput = Schema.decodeUnknownEffect(tool.input);
   return decodeInput(call.arguments ?? {}).pipe(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>

@@ -16,7 +16,7 @@ export function caretOffset(el: HTMLElement): number | null {
 }
 
 /** Viewport coords of the caret, falling back to the element's box. */
-export function caretPosition(el: HTMLElement): { x: number; y: number } {
+export function caretPosition(el: HTMLElement) {
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0).cloneRange();

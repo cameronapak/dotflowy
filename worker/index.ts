@@ -32,6 +32,7 @@ import {
 } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
+import type { KvClaim } from "./outline-do";
 import type { Node } from "./wire";
 
 import {
@@ -216,8 +217,8 @@ function rowToNode(r: NodeRow): Node {
   };
 }
 
-function json(
-  data: unknown,
+function json<T>(
+  data: T,
   status = 200,
   headers: Record<string, string> = {},
 ): Response {
@@ -351,7 +352,9 @@ function ensureSeededE(
       // repeated D1 queries on every subsequent request.
       Effect.catchTag("SeedLegacyTablesAbsent", () =>
         Effect.succeed({
+          // SAFETY: empty array literals, so the asserted element types hold trivially.
           nodeRows: [] as NodeRow[],
+          // SAFETY: empty array literal, so the asserted element type holds trivially.
           kvRows: [] as { collection: string; key: string; value: string }[],
         }),
       ),
@@ -363,6 +366,7 @@ function ensureSeededE(
         kv: data.kvRows.map((r) => ({
           collection: r.collection,
           key: r.key,
+          // SAFETY: casting to unknown is a no-op; the JSON value is re-encoded, never interpreted here.
           value: JSON.parse(r.value) as unknown,
         })),
       }),
@@ -484,8 +488,10 @@ function handleKv(
         // to race-safely create today's note / container (the DO serializes it).
         if (new URL(request.url).searchParams.get("op") === "claim") {
           const { key, value } = yield* decodeBody(request, KvClaimBody);
-          const claimed = yield* Effect.promise(() =>
-            stub.getOrCreateKv(collection, key, value),
+          // SAFETY: value came from a JSON-parsed request body validated as { nodeId } by the daily claim client
+          const claimValue = value as KvClaim;
+          const claimed: KvClaim = yield* Effect.promise(() =>
+            stub.getOrCreateKv(collection, key, claimValue),
           );
           return json({ value: claimed });
         }
@@ -975,6 +981,7 @@ function handleApiRequest(
       // Provenance: which agent is calling. The bearer token's OAuth client maps
       // to a registered harness name; every node its write tools create is
       // stamped with it, so the editor can mark agent edits apart from the user's.
+      // SAFETY: optional read of Better Auth's MCP session token; a missing clientId falls to null.
       const clientId = (token as { clientId?: string }).clientId ?? null;
       const origin = yield* Effect.promise(() =>
         resolveMcpOrigin(env, clientId),

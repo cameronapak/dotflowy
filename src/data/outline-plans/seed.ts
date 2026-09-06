@@ -10,7 +10,7 @@
 
 import type { OutlineNode, OutlinePlan } from "./types";
 
-import { makeNode } from "../tree";
+import { createNode } from "../tree";
 import { emptyPlan } from "./types";
 
 export const DEMO_SEED_TEXTS = [
@@ -68,7 +68,7 @@ export function planSeedIfEmpty(
     const id = ids[i]!;
     const t = args.createdAt + i;
     plan.inserts.push({
-      ...makeNode({
+      ...createNode({
         id,
         parentId: null,
         prevSiblingId: prev,
@@ -83,10 +83,17 @@ export function planSeedIfEmpty(
   return plan;
 }
 
+/** Result of the server-authoritative seed: whether it inserted, and the ids.
+ *  Callers that only await completion may resolve void. */
+export interface SeedResult {
+  seeded: boolean;
+  ids?: string[];
+}
+
 export type SeedIfEmptyFn = (args: {
   userId: string;
   createdAt: number;
-}) => Promise<unknown>;
+}) => Promise<SeedResult | void>;
 
 /**
  * Fire the server-authoritative `seedIfEmpty` mutator (optimistic apply mirrors

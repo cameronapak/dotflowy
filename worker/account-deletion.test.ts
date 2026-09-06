@@ -36,6 +36,7 @@ describe("BILLABLE_SUBSCRIPTION_STATUSES", () => {
     // up?" (plan.ts's 'active'/'trialing'). A past_due sub mid-dunning — or an
     // unpaid/incomplete/paused one — grants no entitlement but can still
     // successfully charge later, so deletion must sweep it too.
+    // SAFETY: spreading a readonly string-literal array into a mutable string[] adds no values.
     expect(([...BILLABLE_SUBSCRIPTION_STATUSES] as string[]).sort()).toEqual(
       [
         "active",
@@ -59,7 +60,8 @@ describe("BILLABLE_SUBSCRIPTION_STATUSES", () => {
  *  returns empty results and `first()` a null customer id, so no Stripe client
  *  is ever constructed (which would fire real network calls). */
 function recordingDb(calls: Array<{ sql: string; args: unknown[] }>) {
-  return {
+  // SAFETY: the object below implements the D1 surface these tests exercise (prepare/bind/all/first/run/batch) and nothing else; the single assertion stamps it as D1Database for the env.
+  return Object.assign({} as D1Database, {
     prepare(sql: string) {
       return {
         bind(...args: unknown[]) {
@@ -73,7 +75,7 @@ function recordingDb(calls: Array<{ sql: string; args: unknown[] }>) {
       };
     },
     batch: (stmts: unknown[]) => Promise.resolve(stmts.map(() => ({}))),
-  } as unknown as D1Database;
+  });
 }
 
 describe("cancelActiveSubscriptions", () => {
@@ -118,7 +120,8 @@ describe("deleteResidualUserRows", () => {
     // invites (0007) rows must be deleted under the same trim+lowercase their
     // inserts used (normalizeEmail, worker/invites.ts).
     const calls: Array<{ sql: string; args: unknown[] }> = [];
-    const db = {
+    // SAFETY: the object below implements the D1 surface deleteResidualUserRows exercises (prepare/bind/batch) and nothing else; the single assertion stamps it as D1Database for the call.
+    const db = Object.assign({} as D1Database, {
       prepare(sql: string) {
         return {
           bind(...args: unknown[]) {
@@ -130,7 +133,7 @@ describe("deleteResidualUserRows", () => {
       batch(stmts: unknown[]) {
         return Promise.resolve(stmts.map(() => ({})));
       },
-    } as unknown as D1Database;
+    });
 
     await deleteResidualUserRows(db, "user-abc", "  User@Example.COM ");
 

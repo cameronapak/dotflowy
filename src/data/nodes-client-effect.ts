@@ -32,6 +32,37 @@ import type { Node } from "./schema";
 
 const ENDPOINT = "/api/nodes";
 
+/** A JSON-parsed value of unchecked shape — the domain `res.json()` produces. */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/** Request bodies /api/nodes accepts, one shape per verb. */
+type NodesRequestBody =
+  | { nodes: Node[] }
+  | { updates: { id: string; changes: Partial<Node> }[] }
+  | { ids: string[] }
+  | { ops: ChangeOp[] };
+
+/** Type-guard predicate for the `{ seq }` batch envelope. */
+const hasSeqField = (data: JsonValue | undefined): data is { seq: JsonValue } =>
+  typeof data === "object" && data !== null && "seq" in data;
+
+/** A DO frame seq is a monotonic non-negative safe integer. */
+const isSeq = (v: JsonValue | undefined): v is number =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+
+/** typeof name for a JSON-parsed value (null and array report "object"). */
+const jsonTypeOf = (value: JsonValue | undefined): string => {
+  const tag = Object.prototype.toString.call(value).slice(8, -1);
+  if (tag === "Null" || tag === "Array") return "object";
+  return tag.toLowerCase();
+};
+
 // --- Domain errors ----------------------------------------------------------
 
 export class NodesTransportError extends Data.TaggedError(
@@ -78,8 +109,8 @@ export class NodesLimitError extends Data.TaggedError("NodesLimitError")<{
 /** Was this the free-tier node-ceiling refusal (#170)? The cap has its own
  *  upgrade toast (structural.ts), so failure funnels use this to SKIP a generic
  *  "couldn't save/open" notice and avoid double-toasting the same event. */
-export function isNodesLimitError(err: unknown): err is NodesLimitError {
-  return err instanceof NodesLimitError;
+export function isNodesLimitError(cause: unknown): cause is NodesLimitError {
+  return cause instanceof NodesLimitError;
 }
 
 export type NodesError =
@@ -103,7 +134,7 @@ const retryPolicy = Schedule.both(
  */
 function request(
   method: string,
-  body: unknown,
+  body: NodesRequestBody,
 ): Effect.Effect<Response, NodesError> {
   return Effect.tryPromise({
     // The signal comes from Effect's runtime: `timeoutOrElse` aborts it on
@@ -143,7 +174,8 @@ function classifyResponse(res: Response): Effect.Effect<Response, NodesError> {
   if (res.ok) return Effect.succeed(res);
   if (res.status === 403) {
     return Effect.tryPromise({
-      try: () => res.json() as Promise<unknown>,
+      // SAFETY: widening Promise<any> to Promise<JsonValue>; the body is validated by isNodeLimitBody below.
+      try: () => res.json() as Promise<JsonValue>,
       catch: () => new NodesResponseError({ status: 403 }),
     }).pipe(
       Effect.flatMap(
@@ -159,14 +191,13 @@ function classifyResponse(res: Response): Effect.Effect<Response, NodesError> {
 
 /** Narrow the Worker's 403 body to the node-limit shape. */
 function isNodeLimitBody(
-  body: unknown,
+  body: JsonValue,
 ): body is { error: string; limit: number } {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    (body as { error?: unknown }).error === "node_limit" &&
-    typeof (body as { limit?: unknown }).limit === "number"
-  );
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return false;
+  // SAFETY: body is narrowed to a non-array JSON object by the checks above; each field is then checked before use.
+  const record = body as { error?: JsonValue; limit?: JsonValue };
+  return record.error === "node_limit" && typeof record.limit === "number";
 }
 
 // --- Public API (Effect-shaped) ---------------------------------------------
@@ -198,27 +229,25 @@ export const sendBatchE = (
   request("POST", { ops }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
-        try: () => res.json() as Promise<unknown>,
+        // SAFETY: widening Promise<any> to Promise<JsonValue>; the seq field is validated immediately below.
+        try: () => res.json() as Promise<JsonValue>,
         catch: (cause) => new NodesTransportError({ cause }),
       }),
     ),
     Effect.flatMap((data) => {
       // A DO frame seq is a monotonic non-negative integer counter, so reject
-      // anything that isn't one — `typeof === 'number'` alone would also admit
+      // anything that isn't one — a typeof-string check alone would also admit
       // NaN/Infinity/negatives/floats, and waitForSeqE does a numeric `>=`
       // compare on this (a NaN would hang to its timeout, a bogus value resolve
       // it instantly). JSON can't even carry NaN/Infinity, so this only bites a
       // server bug, but the guard is free.
-      const seq =
-        typeof data === "object" && data !== null && "seq" in data
-          ? (data as { seq: unknown }).seq
-          : undefined;
-      return typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0
+      const seq = hasSeqField(data) ? data.seq : undefined;
+      return isSeq(seq)
         ? Effect.succeed({ seq })
         : Effect.fail(
             new NodesTransportError({
               cause: new Error(
-                `expected { seq: non-negative int }, got ${typeof data}`,
+                `expected { seq: non-negative int }, got ${jsonTypeOf(data)}`,
               ),
             }),
           );

@@ -11,6 +11,7 @@
  * (see `collection.ts` early-return when the flag is ON).
  */
 
+import { hasWindow } from "../env";
 import {
   bindLunoraDailyIndex,
   unbindLunoraDailyIndex,
@@ -60,7 +61,7 @@ function feedTreeFromCollection(store: OutlineStore): void {
  */
 export function startLunoraOutlineSync(userId: string): void {
   if (!isLunoraSyncEnabled()) return;
-  if (typeof window === "undefined") return;
+  if (!hasWindow()) return;
   if (ctx?.userId === userId) return;
 
   stopLunoraOutlineSync();

@@ -16,9 +16,9 @@ import {
   type OpmlImportResult,
   type OpmlImportReport,
 } from "../data/opml-import";
-import { makeOutlineNode, type OutlineNode } from "../data/outline-plans";
+import { createOutlineNode, type OutlineNode } from "../data/outline-plans";
 import { runStructuralSliced } from "../data/structural";
-import { childrenOf, makeNode, now } from "../data/tree";
+import { childrenOf, createNode, now } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { setOpmlImportOpener } from "./opml-import-opener";
 import { Button } from "./ui/button";
@@ -250,7 +250,7 @@ export function OpmlImportDialog() {
         return;
       }
       const outlineNodes: OutlineNode[] = [
-        makeOutlineNode({
+        createOutlineNode({
           id: containerId,
           userId: lunora.userId,
           parentId: null,
@@ -308,7 +308,7 @@ export function OpmlImportDialog() {
     const slices: Array<() => void> = [
       () => {
         nodesCollection.insert(
-          makeNode({
+          createNode({
             id: containerId,
             prevSiblingId: lastTop,
             text: containerText(timestamp),

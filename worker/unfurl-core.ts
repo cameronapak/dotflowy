@@ -31,6 +31,7 @@ function isPrivateIpv4(host: string): boolean {
   if (!m) return false;
   const o = m.slice(1).map(Number);
   if (o.some((n) => n > 255)) return false;
+  // SAFETY: the regex captured exactly four groups and map preserves length.
   const [a, b] = o as [number, number, number, number];
   return (
     a === 0 || // 0.0.0.0/8 "this network"
@@ -89,7 +90,12 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
   return true;
 }
 
-const NAMED_ENTITIES: Record<string, string> = {
+/** The named HTML entities a title carries, keyed by lowercase name. */
+interface EntityTable {
+  [key: string]: string;
+}
+
+const NAMED_ENTITIES: EntityTable = {
   amp: "&",
   lt: "<",
   gt: ">",

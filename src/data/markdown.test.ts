@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import { outlineToMarkdown } from "./markdown";
-import { buildTreeIndex, makeNode } from "./tree";
+import { buildTreeIndex, createNode } from "./tree";
 
 describe("outlineToMarkdown", () => {
   test("nests children two spaces per level under the root bullet", () => {
     // root
     //   child
     //     grandchild
-    const root = makeNode({ id: "root", text: "root" });
-    const child = makeNode({ id: "child", parentId: "root", text: "child" });
-    const grandchild = makeNode({
+    const root = createNode({ id: "root", text: "root" });
+    const child = createNode({ id: "child", parentId: "root", text: "child" });
+    const grandchild = createNode({
       id: "gc",
       parentId: "child",
       text: "grandchild",
@@ -23,14 +23,14 @@ describe("outlineToMarkdown", () => {
   });
 
   test("orders siblings by the prevSiblingId chain", () => {
-    const root = makeNode({ id: "root", text: "root" });
-    const a = makeNode({
+    const root = createNode({ id: "root", text: "root" });
+    const a = createNode({
       id: "a",
       parentId: "root",
       prevSiblingId: null,
       text: "a",
     });
-    const b = makeNode({
+    const b = createNode({
       id: "b",
       parentId: "root",
       prevSiblingId: "a",
@@ -45,13 +45,13 @@ describe("outlineToMarkdown", () => {
   });
 
   test("renders tasks as GFM checkboxes by completion", () => {
-    const open = makeNode({
+    const open = createNode({
       id: "o",
       isTask: true,
       completed: false,
       text: "open",
     });
-    const done = makeNode({
+    const done = createNode({
       id: "d",
       isTask: true,
       completed: true,
@@ -65,7 +65,7 @@ describe("outlineToMarkdown", () => {
   });
 
   test("emits markdown source for links, tags, and code", () => {
-    const node = makeNode({
+    const node = createNode({
       id: "n",
       text: "see [docs](https://x.dev) #ref `code`",
     });
@@ -77,7 +77,7 @@ describe("outlineToMarkdown", () => {
   });
 
   test("exports route-bible references as readable markdown links", () => {
-    const node = makeNode({
+    const node = createNode({
       id: "n",
       text: "Read John 3:16 and Genesis 1",
     });
@@ -89,7 +89,7 @@ describe("outlineToMarkdown", () => {
   });
 
   test("does not relink route-bible references inside existing links or code", () => {
-    const node = makeNode({
+    const node = createNode({
       id: "n",
       text: "see [John 3:16](https://example.com) and `Romans 8:28`",
     });
@@ -101,8 +101,8 @@ describe("outlineToMarkdown", () => {
   });
 
   test("includes collapsed and completed nodes (full fidelity, ignores view)", () => {
-    const root = makeNode({ id: "root", text: "root", collapsed: true });
-    const hidden = makeNode({
+    const root = createNode({ id: "root", text: "root", collapsed: true });
+    const hidden = createNode({
       id: "h",
       parentId: "root",
       text: "still here",
@@ -117,8 +117,8 @@ describe("outlineToMarkdown", () => {
   });
 
   test("an empty node is a bare bullet", () => {
-    const root = makeNode({ id: "root", text: "" });
-    const child = makeNode({ id: "c", parentId: "root", text: "child" });
+    const root = createNode({ id: "root", text: "" });
+    const child = createNode({ id: "c", parentId: "root", text: "child" });
     const index = buildTreeIndex([root, child]);
 
     expect(outlineToMarkdown(index, ["root"])).toBe(
@@ -127,9 +127,9 @@ describe("outlineToMarkdown", () => {
   });
 
   test("multiple roots serialize as adjacent top-level bullets", () => {
-    const a = makeNode({ id: "a", prevSiblingId: null, text: "a" });
-    const b = makeNode({ id: "b", prevSiblingId: "a", text: "b" });
-    const a1 = makeNode({ id: "a1", parentId: "a", text: "a1" });
+    const a = createNode({ id: "a", prevSiblingId: null, text: "a" });
+    const b = createNode({ id: "b", prevSiblingId: "a", text: "b" });
+    const a1 = createNode({ id: "a1", parentId: "a", text: "a1" });
     const index = buildTreeIndex([a, b, a1]);
 
     expect(outlineToMarkdown(index, ["a", "b"])).toBe(
@@ -138,7 +138,7 @@ describe("outlineToMarkdown", () => {
   });
 
   test("unknown root id contributes nothing", () => {
-    const a = makeNode({ id: "a", text: "a" });
+    const a = createNode({ id: "a", text: "a" });
     const index = buildTreeIndex([a]);
 
     expect(outlineToMarkdown(index, ["ghost"])).toBe("");

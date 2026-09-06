@@ -16,7 +16,7 @@ import {
   buildTreeIndex,
   childrenOf,
   createId,
-  makeNode,
+  createNode,
   now,
   trueSourceOf,
   wouldMirrorCycle,
@@ -106,7 +106,7 @@ export function insertSibling(
   }
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId, text, isTask, kind }),
+    createNode({ id, parentId, prevSiblingId, text, isTask, kind }),
   );
 
   // Repoint the follower at the new node.
@@ -159,7 +159,7 @@ export function insertChildAtStart(
   const head = childrenOf(index, parentId)[0] ?? null;
 
   nodesCollection.insert(
-    makeNode({ id, parentId, prevSiblingId: null, text, isTask, kind }),
+    createNode({ id, parentId, prevSiblingId: null, text, isTask, kind }),
   );
 
   // The old head now follows the new node.
@@ -296,12 +296,12 @@ export function appendChild(
   }
 
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id,
       parentId,
       prevSiblingId,
       text,
-      // Resolved, NOT forwarded as `opts?.isTask`. `makeNode` applies its
+      // Resolved, NOT forwarded as `opts?.isTask`. `createNode` applies its
       // defaults via `...partial`, so an explicit `undefined` OVERWRITES them
       // and the insert fails schema validation on `isTask`/`kind` — which is
       // what silently broke every no-opts caller (the Daily container append,
@@ -398,7 +398,7 @@ export function mirrorNode(
   const siblings = childrenOf(index, targetId);
   const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id,
       parentId: targetId,
       prevSiblingId: after,

@@ -34,7 +34,11 @@ function subscribeTheme(onStoreChange: () => void) {
 
 function getThemeSnapshot(): Theme {
   const stored = readStorageMigrated(THEME_KEY, LEGACY_THEME_KEY);
-  if (stored && VALID_THEMES.has(stored as Theme)) return stored as Theme;
+  // SAFETY: VALID_THEMES.has confirmed stored is one of the Theme literals
+  if (stored && VALID_THEMES.has(stored as Theme)) {
+    // SAFETY: set membership confirmed by the condition above
+    return stored as Theme;
+  }
   return "system";
 }
 

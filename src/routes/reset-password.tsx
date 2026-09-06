@@ -26,10 +26,23 @@ interface ResetSearch {
   error?: string;
 }
 
+/** The raw query record the router hands to validateSearch. Values are
+ *  unparsed input, decoded by the guard below at this I/O boundary. */
+interface RawSearch {
+  token?: unknown;
+  error?: unknown;
+}
+
+/** One raw query-param value. */
+type RawSearchValue = RawSearch["token"];
+
+const isSearchString = (v: RawSearchValue): v is string =>
+  typeof v === "string";
+
 export const Route = createFileRoute("/reset-password")({
-  validateSearch: (search: Record<string, unknown>): ResetSearch => ({
-    token: typeof search.token === "string" ? search.token : undefined,
-    error: typeof search.error === "string" ? search.error : undefined,
+  validateSearch: (search: RawSearch): ResetSearch => ({
+    token: isSearchString(search.token) ? search.token : undefined,
+    error: isSearchString(search.error) ? search.error : undefined,
   }),
   component: ResetPassword,
 });

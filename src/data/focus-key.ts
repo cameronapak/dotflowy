@@ -25,6 +25,7 @@ import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
  */
 export function focusKeyFor(instanceId: string, activeKey: string): string {
   if (!isMirrorsEnabled()) return instanceId;
+  // SAFETY: getLiveNodes() already returns Node[]; the cast only satisfies a redundant legacy annotation.
   const index = buildTreeIndex(getLiveNodes() as Node[]);
   const rows = buildVisibleRows(
     index,

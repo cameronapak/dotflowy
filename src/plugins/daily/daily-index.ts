@@ -15,6 +15,7 @@ import {
 } from "../../data/kv-api";
 import { kvGetOrCreateE } from "../../data/kv-client-effect";
 import { queryClient } from "../../data/query-client";
+import { hasWindow } from "../../env";
 import { resolveDailyClaim } from "./claim-mapping";
 
 /**
@@ -405,7 +406,7 @@ type DailyIndexRowDocLike = {
 };
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   // Flag ON: wait for bindLunoraDailyIndex — never open the /api/kv collection.
   if (isLunoraSyncEnabled()) return;
   started = true;

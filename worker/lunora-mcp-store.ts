@@ -17,6 +17,7 @@ import { Schema } from "effect";
 import { createShardClient, type ShardNamespaceLike } from "lunorash/runtime";
 
 import type { OutlineStore } from "./mcp-tools";
+import type { KvClaim } from "./outline-do";
 
 import { internal } from "../lunora/_generated/api";
 import { NodeSchema, type ChangeOp, type Node } from "../src/data/wire-schema";
@@ -44,26 +45,33 @@ const DailyClaimValueSchema = Schema.Struct({
   nodeId: Schema.String,
 });
 
-export function decodeMcpNodeList(raw: unknown): Node[] {
+/** Unvalidated Lunora RPC replies: the shard's typed surface is trusted only
+ *  after a Schema decode at this boundary (codegen also collapses nullability). */
+export function decodeMcpNodeList(raw: readonly unknown[]): Node[] {
   return [...Schema.decodeUnknownSync(Schema.Array(NodeSchema))(raw ?? [])];
 }
 
 export function decodeDailyIndexRows(
-  raw: unknown,
+  raw: readonly unknown[],
 ): Array<{ key: string; nodeId: string }> {
   return [
     ...Schema.decodeUnknownSync(Schema.Array(DailyIndexRowSchema))(raw ?? []),
   ];
 }
 
-export function decodeClaimDailyResult(raw: unknown): {
+export function decodeClaimDailyResult(raw: {
+  nodeId?: unknown;
+  won?: unknown;
+}): {
   nodeId: string;
   won: boolean;
 } {
   return Schema.decodeUnknownSync(ClaimDailyResultSchema)(raw);
 }
 
-export function decodeDailyClaimValue(raw: unknown): { nodeId: string } {
+export function decodeDailyClaimValue(raw: { nodeId?: unknown }): {
+  nodeId: string;
+} {
   return Schema.decodeUnknownSync(DailyClaimValueSchema)(raw);
 }
 
@@ -98,7 +106,8 @@ export function createLunoraOutlineStore(
         userId,
         // lunorash alpha.166 codegen collapses v.string().nullable() to string on
         // FunctionReference inputs; wire validators still accept null at runtime.
-        ops: [...ops] as unknown as GeneratedApplyChangeOps,
+        // SAFETY: the wire validators accept the full nullable ChangeOp shape this cast erases.
+        ops: [...ops] as GeneratedApplyChangeOps,
       });
       // Classic DO returns a seq; Lunora watermarks are internal. Tools ignore
       // the numeric return (commit() awaits applyBatch for side effects only).
@@ -112,7 +121,11 @@ export function createLunoraOutlineStore(
       );
     },
 
-    async getOrCreateKv(collection: string, key: string, value: unknown) {
+    async getOrCreateKv(
+      collection: string,
+      key: string,
+      value: KvClaim,
+    ): Promise<KvClaim> {
       if (collection !== "daily-index") {
         throw new Error(
           `lunora mcp store: unsupported kv collection ${collection}`,
@@ -152,14 +165,20 @@ export function resolveLunoraOutlineEnvForce(
   return false;
 }
 
+/** A synced account-prefs row as the classic DO returns it: only the fields
+ *  the beta check reads, both unvalidated until this decode. */
+const AccountPrefsRowSchema = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Unknown),
+});
+
 /** Parse synced `account-prefs` rows for Lunora beta opt-in. */
 export function parseLunoraBetaPref(rows: unknown[]): boolean {
-  const row = rows.find(
-    (r) =>
-      r &&
-      typeof r === "object" &&
-      (r as { id?: string }).id === LUNORA_BETA_PREF_ID,
-  ) as { enabled?: unknown } | undefined;
+  const decoded = rows.flatMap((r) => {
+    const row = Schema.decodeUnknownOption(AccountPrefsRowSchema)(r);
+    return row._tag === "Some" ? [row.value] : [];
+  });
+  const row = decoded.find((r) => r.id === LUNORA_BETA_PREF_ID);
   return row?.enabled === true;
 }
 

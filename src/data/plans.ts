@@ -17,8 +17,8 @@ export const FREE_NODE_LIMIT = 10000;
 /** A resolved plan for display. Mirrors `worker/plan.ts` `Plan`. */
 export type PlanName = "free" | "unlimited" | "founding";
 
-export const PLAN_LABELS: Record<PlanName, string> = {
+export const PLAN_LABELS = {
   free: "Free",
   unlimited: "Unlimited",
   founding: "Founding",
-};
+} satisfies Record<PlanName, string>;

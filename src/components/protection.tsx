@@ -32,12 +32,12 @@ export type ProtectionKind = "delete" | "blank" | "task" | "complete";
 // Generic fallback copy the core supplies when the plugin names no reason. A
 // plugin overrides per action (`taskReason`, ...) or wholesale (`reason`); these
 // only ever surface for a node protected with no copy of its own.
-const DEFAULT_REASON: Record<ProtectionKind, string> = {
+const DEFAULT_REASON = {
   delete: "This node is protected and can't be deleted.",
   blank: "This node is protected and needs a name.",
   task: "This node is protected and can't be turned into a to-do.",
   complete: "This node is protected and can't be completed.",
-};
+} satisfies Record<ProtectionKind, string>;
 
 /** The message to toast for a rejected `kind` on this protection: the per-action
  *  override, then the general `reason`, then the core default. */

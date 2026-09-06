@@ -1,3 +1,5 @@
+import type { LunoraClient } from "lunorash/client";
+
 import { afterEach, describe, expect, test } from "bun:test";
 
 import type { OutlineStore } from "./lunora-outline-store";
@@ -15,13 +17,23 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-function jsonOk(body: unknown): Response {
+/** A JSON-serializable fixture value (what jsonOk stringifies). */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+function jsonOk<T>(body: T): Response {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
 function installKvFetch(
   handlers: Record<string, () => Response | Promise<Response>>,
 ): void {
+  // SAFETY: stub ignores the init argument; the migrate code under test always passes a URL string first.
   globalThis.fetch = ((url: string) => {
     const u = String(url);
     const collection = new URL(u, "http://local").searchParams.get(
@@ -31,13 +43,14 @@ function installKvFetch(
       return Promise.reject(new Error(`unexpected fetch ${u}`));
     }
     return Promise.resolve(handlers[collection]!());
-  }) as unknown as typeof fetch;
+  }) as typeof fetch;
 }
 
 function installClassicFetch(opts: {
   nodes?: unknown;
-  kv?: Record<string, unknown>;
+  kv?: Record<string, JsonValue>;
 }): void {
+  // SAFETY: stub ignores the init argument; the migrate code under test always passes a URL string first.
   globalThis.fetch = ((url: string) => {
     const u = String(url);
     if (u.includes("/api/nodes")) {
@@ -51,7 +64,7 @@ function installClassicFetch(opts: {
     }
     if (collection) return Promise.resolve(jsonOk([]));
     return Promise.reject(new Error(`unexpected fetch ${u}`));
-  }) as unknown as typeof fetch;
+  }) as typeof fetch;
 }
 
 function readyCollection(rows: unknown[]) {
@@ -61,10 +74,23 @@ function readyCollection(rows: unknown[]) {
   };
 }
 
-type MutatorCall = { ref: string; args: Record<string, unknown> };
+type MutatorCall = { ref: string; args: Record<string, JsonValue> };
 type ImportCall = { kind: "nodes" | "kv"; count: number };
 
 /** Minimal store stub for migrateClassicToLunora unit tests. */
+/** The preconnect member the Workers fetch type carries; no-op in tests. */
+const stubPreconnect = {
+  preconnect: (
+    _url: string | URL,
+    _options?: {
+      dns?: boolean;
+      tcp?: boolean;
+      http?: boolean;
+      https?: boolean;
+    },
+  ): void => {},
+};
+
 function stubStore(opts: {
   nodes?: unknown[];
   tagColors?: unknown[];
@@ -75,14 +101,15 @@ function stubStore(opts: {
   onImport?: (call: ImportCall) => void;
 }): OutlineStore {
   let migrateState = opts.migrateState ?? null;
-  return {
+  const stub = {
     client: {
-      callMutator: async (ref: string, args: Record<string, unknown>) => {
+      callMutator: async (ref: string, args: Record<string, JsonValue>) => {
         opts.onMutator?.({ ref, args });
         if (ref === "mutators:getMigrateState") {
           return { result: migrateState };
         }
         if (ref === "mutators:setMigrateState") {
+          // SAFETY: setMigrateState is only called by lunora-migrate, which passes number | null watermarks.
           migrateState = {
             nodesAt:
               args.nodesAt === undefined
@@ -98,7 +125,7 @@ function stubStore(opts: {
         throw new Error(`unexpected mutator ${ref}`);
       },
       importRows: async (
-        _ref: unknown,
+        _ref: Parameters<LunoraClient["importRows"]>[0],
         rows: unknown[],
         options: { toArgs: (chunk: unknown[]) => { nodes?: unknown[] } },
       ) => {
@@ -113,7 +140,9 @@ function stubStore(opts: {
     savedQueries: readyCollection(opts.savedQueries ?? []),
     dailyIndex: readyCollection(opts.dailyIndex ?? []),
     mutators: {},
-  } as unknown as OutlineStore;
+  };
+  // SAFETY: stub provides the exact OutlineStore surface the migrate functions read: toArray rows, callMutator, and importRows.
+  return Object.assign({} as OutlineStore, stub);
 }
 
 function classicNode(id: string, prev: string | null = null) {
@@ -186,10 +215,16 @@ describe("fetchClassicKvBundles", () => {
 describe("migrateClassicToLunora", () => {
   test("both watermarks set → skipped-complete without classic fetch", async () => {
     let fetchCalls = 0;
-    globalThis.fetch = (() => {
-      fetchCalls += 1;
-      return Promise.reject(new Error("classic fetch must not run"));
-    }) as unknown as typeof fetch;
+    globalThis.fetch = Object.assign(
+      async (
+        _input: RequestInfo | URL,
+        _init?: RequestInit,
+      ): Promise<Response> => {
+        fetchCalls += 1;
+        return Promise.reject(new Error("classic fetch must not run"));
+      },
+      stubPreconnect,
+    );
 
     const result = await migrateClassicToLunora(
       stubStore({
@@ -237,7 +272,9 @@ describe("migrateClassicToLunora", () => {
     // nodesAt stamped before/with kv — never skipped over a partial set.
     expect(patches[0]?.args.nodesAt).toEqual(expect.any(Number));
     expect(patches[0]?.args.kvAt).toBeUndefined();
-    expect(patches.some((p) => typeof p.args.kvAt === "number")).toBe(true);
+    const kvAtIsNumber = (v: JsonValue | undefined): v is number =>
+      typeof v === "number";
+    expect(patches.some((p) => kvAtIsNumber(p.args.kvAt))).toBe(true);
   });
 
   test("forceHealClassicKv clears false-complete kvAt and re-imports KV", async () => {

@@ -87,6 +87,7 @@ export function classicDailyRowToImport(
   row: ClassicKvRow,
   touchedAt: number,
 ): Extract<ImportKvRow, { kind: "dailyIndex" }> | null {
+  // SAFETY: value is JSON persisted by the classic kv daily-index writer, whose shape is { key?, nodeId? }; String() and the emptiness check below absorb a stray shape.
   const value = row.value as { key?: string; nodeId?: string };
   const key = String(value.key ?? row.key);
   const nodeId = String(value.nodeId ?? "");
@@ -98,6 +99,7 @@ export function classicDailyRowToImport(
 export function classicTagColorRowToImport(
   row: ClassicKvRow,
 ): Extract<ImportKvRow, { kind: "tagColor" }> | null {
+  // SAFETY: value is JSON persisted by the classic kv tag-color writer (tag-colors.ts rowToKv), whose shape is { tag?, color? }; String() and the emptiness check below absorb a stray shape.
   const value = row.value as { tag?: string; color?: string };
   const tag = String(value.tag ?? row.key);
   const color = String(value.color ?? "");
@@ -110,6 +112,7 @@ export function classicSavedQueryRowToImport(
   row: ClassicKvRow,
   touchedAt: number,
 ): Extract<ImportKvRow, { kind: "savedQuery" }> | null {
+  // SAFETY: value is JSON persisted by the classic kv saved-query writer, whose shape is { id?, name?, query?, createdAt? }; String() and the emptiness check below absorb a stray shape.
   const value = row.value as {
     id?: string;
     name?: string;

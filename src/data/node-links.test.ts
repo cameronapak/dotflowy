@@ -7,7 +7,7 @@ import {
   NODE_LINK_PATTERN,
   parseNodeLinks,
 } from "./node-links";
-import { buildTreeIndex, makeNode } from "./tree";
+import { buildTreeIndex, createNode } from "./tree";
 
 const A = "11111111-2222-3333-4444-555555555555";
 const B = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -62,8 +62,8 @@ describe("linkedNodeLabel", () => {
 });
 
 describe("flattenNodeText", () => {
-  const target = makeNode({ id: A, text: "Project **Phoenix**" });
-  const referrer = makeNode({ id: B, text: `kickoff for [[${A}]] tomorrow` });
+  const target = createNode({ id: A, text: "Project **Phoenix**" });
+  const referrer = createNode({ id: B, text: `kickoff for [[${A}]] tomorrow` });
   const index = buildTreeIndex([target, referrer]);
 
   test("resolves a link to its target text, flattened", () => {
@@ -82,8 +82,8 @@ describe("flattenNodeText", () => {
   });
 
   test("resolution is one level deep (no recursion through a chain)", () => {
-    const chainEnd = makeNode({ id: FALLBACK, text: "the end" });
-    const mid = makeNode({ id: A, text: `mid [[${FALLBACK}]]` });
+    const chainEnd = createNode({ id: FALLBACK, text: "the end" });
+    const mid = createNode({ id: A, text: `mid [[${FALLBACK}]]` });
     const idx = buildTreeIndex([chainEnd, mid]);
     expect(flattenNodeText(idx, `top [[${A}]]`)).toBe("top mid …");
   });
@@ -91,15 +91,15 @@ describe("flattenNodeText", () => {
 
 describe("buildTreeIndex linksByTarget", () => {
   test("buckets referrers under every target, deduped per referrer", () => {
-    const target = makeNode({ id: A, text: "target" });
-    const ref1 = makeNode({ id: B, text: `[[${A}]] twice [[${A}]]` });
-    const ref2 = makeNode({ id: FALLBACK, text: `also [[${A}]]` });
+    const target = createNode({ id: A, text: "target" });
+    const ref1 = createNode({ id: B, text: `[[${A}]] twice [[${A}]]` });
+    const ref2 = createNode({ id: FALLBACK, text: `also [[${A}]]` });
     const index = buildTreeIndex([target, ref1, ref2]);
     expect(index.linksByTarget.get(A)).toEqual([B, FALLBACK]);
   });
 
   test("empty for a link-free outline", () => {
-    const index = buildTreeIndex([makeNode({ id: A, text: "plain" })]);
+    const index = buildTreeIndex([createNode({ id: A, text: "plain" })]);
     expect(index.linksByTarget.size).toBe(0);
   });
 });

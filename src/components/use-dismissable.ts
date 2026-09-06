@@ -18,6 +18,7 @@ export function useDismissable(
 ): void {
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
+      // SAFETY: a pointer event's target is the DOM node hit
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {

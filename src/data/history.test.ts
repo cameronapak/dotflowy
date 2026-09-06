@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { Node } from "./tree";
 
 import { capture, drop, redo, RESTORE_SLICE_OPS, undo } from "./history";
-import { buildTreeIndex, makeNode } from "./tree";
+import { buildTreeIndex, createNode } from "./tree";
 import { rowKeyFor } from "./visible-order";
 
 // history.ts keeps the undo/redo stacks as module singletons with no exported
@@ -16,7 +16,7 @@ import { rowKeyFor } from "./visible-order";
 // an EMPTY capture would push nothing, clear nothing, and leave the redo stack
 // loaded for the next test.
 const EMPTY = buildTreeIndex([]);
-const RESET_IDX = buildTreeIndex([makeNode({ id: "__reset" })]);
+const RESET_IDX = buildTreeIndex([createNode({ id: "__reset" })]);
 function resetHistory(): void {
   while (undo(EMPTY)) {
     /* move every undo entry onto the redo stack */
@@ -27,16 +27,17 @@ function resetHistory(): void {
   drop();
 }
 
-function makeNodes(count: number, prefix = "n"): Node[] {
+function createNodes(count: number, prefix = "n"): Node[] {
   const nodes: Node[] = [];
-  for (let i = 0; i < count; i++) nodes.push(makeNode({ id: `${prefix}${i}` }));
+  for (let i = 0; i < count; i++)
+    nodes.push(createNode({ id: `${prefix}${i}` }));
   return nodes;
 }
 
 beforeEach(resetHistory);
 
 describe("capture / undo / redo / drop stack transfer", () => {
-  const idx = buildTreeIndex([makeNode({ id: "a" })]);
+  const idx = buildTreeIndex([createNode({ id: "a" })]);
 
   test("an empty stack undoes and redoes to null", () => {
     expect(undo(idx)).toBeNull();
@@ -70,8 +71,8 @@ describe("capture / undo / redo / drop stack transfer", () => {
   });
 
   test("drop restores the redo stack a no-op capture cleared", () => {
-    const idxA = buildTreeIndex([makeNode({ id: "a" })]);
-    const idxB = buildTreeIndex([makeNode({ id: "b" })]);
+    const idxA = buildTreeIndex([createNode({ id: "a" })]);
+    const idxB = buildTreeIndex([createNode({ id: "b" })]);
 
     capture(idxA, "a");
     undo(idxA); // populate the redo stack
@@ -93,8 +94,8 @@ describe("capture refuses an empty index", () => {
   // node source -- `nodesCollection` is ready-and-empty while the Lunora flag
   // is ON (ADR 0058). Storing that snapshot makes the next Cmd+Z classify every
   // live node as a delete, so capture refuses it and the matching drop no-ops.
-  const idxA = buildTreeIndex([makeNode({ id: "a" })]);
-  const idxB = buildTreeIndex([makeNode({ id: "b" })]);
+  const idxA = buildTreeIndex([createNode({ id: "a" })]);
+  const idxB = buildTreeIndex([createNode({ id: "b" })]);
 
   test("an empty index pushes nothing", () => {
     capture(EMPTY, "a");
@@ -122,8 +123,8 @@ describe("capture refuses an empty index", () => {
     // Each index holds the node its focus names, so the restored focusId
     // survives planRestore's "is it still in the snapshot" gate and identifies
     // WHICH entry came back.
-    const idxOlder = buildTreeIndex([makeNode({ id: "older" })]);
-    const idxNewer = buildTreeIndex([makeNode({ id: "newer" })]);
+    const idxOlder = buildTreeIndex([createNode({ id: "older" })]);
+    const idxNewer = buildTreeIndex([createNode({ id: "newer" })]);
 
     capture(idxOlder, "older");
     capture(idxNewer, "newer");
@@ -145,7 +146,7 @@ describe("capture refuses an empty index", () => {
 
 describe("MAX_ENTRIES eviction", () => {
   test("caps the undo stack at 100, evicting the oldest entries", () => {
-    const idx = buildTreeIndex(makeNodes(105, "f"));
+    const idx = buildTreeIndex(createNodes(105, "f"));
 
     for (let i = 0; i < 105; i++) capture(idx, `f${i}`);
 
@@ -166,7 +167,7 @@ describe("MAX_ENTRIES eviction", () => {
 });
 
 describe("capture tag-coalescing", () => {
-  const idx = buildTreeIndex([makeNode({ id: "a" })]);
+  const idx = buildTreeIndex([createNode({ id: "a" })]);
 
   function undoDepth(): number {
     let n = 0;
@@ -212,8 +213,8 @@ describe("capture tag-coalescing", () => {
 });
 
 describe("revert() reverses the stack mutation", () => {
-  const idxA = buildTreeIndex([makeNode({ id: "a" })]);
-  const idxB = buildTreeIndex([makeNode({ id: "b" })]);
+  const idxA = buildTreeIndex([createNode({ id: "a" })]);
+  const idxB = buildTreeIndex([createNode({ id: "b" })]);
 
   test("undo() then revert() returns to the pre-undo state", () => {
     capture(idxA, "a");
@@ -252,7 +253,10 @@ describe("revert() reverses the stack mutation", () => {
 
 describe("planRestore opCount / slices.length / focusId", () => {
   test("identical snapshots produce zero ops and zero slices", () => {
-    const idx = buildTreeIndex([makeNode({ id: "a" }), makeNode({ id: "b" })]);
+    const idx = buildTreeIndex([
+      createNode({ id: "a" }),
+      createNode({ id: "b" }),
+    ]);
     capture(idx, "a");
     const plan = undo(idx)!;
     expect(plan.opCount).toBe(0);
@@ -260,8 +264,8 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("a node added since the snapshot is a delete", () => {
-    const a = makeNode({ id: "a" });
-    const b = makeNode({ id: "b" });
+    const a = createNode({ id: "a" });
+    const b = createNode({ id: "b" });
     const snap = buildTreeIndex([a]); // captured state
     const live = buildTreeIndex([a, b]); // b was added since
 
@@ -272,8 +276,8 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("a node removed since the snapshot is an upsert", () => {
-    const a = makeNode({ id: "a" });
-    const b = makeNode({ id: "b" });
+    const a = createNode({ id: "a" });
+    const b = createNode({ id: "b" });
     const snap = buildTreeIndex([a, b]); // captured state
     const live = buildTreeIndex([a]); // b was removed since
 
@@ -284,13 +288,13 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("a changed field is an upsert", () => {
-    const before = makeNode({
+    const before = createNode({
       id: "a",
       text: "before",
       createdAt: 1,
       updatedAt: 1,
     });
-    const after = makeNode({
+    const after = createNode({
       id: "a",
       text: "after",
       createdAt: 1,
@@ -305,9 +309,9 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("deletes and upserts chunk into separate slices", () => {
-    const a = makeNode({ id: "a" });
-    const x = makeNode({ id: "x" });
-    const y = makeNode({ id: "y" });
+    const a = createNode({ id: "a" });
+    const x = createNode({ id: "x" });
+    const y = createNode({ id: "y" });
     const snap = buildTreeIndex([a, y]); // captured: a, y
     const live = buildTreeIndex([a, x]); // now: a, x
 
@@ -319,7 +323,7 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("upserts at exactly RESTORE_SLICE_OPS are one slice; one more is two", () => {
-    const make = (count: number) => buildTreeIndex(makeNodes(count));
+    const make = (count: number) => buildTreeIndex(createNodes(count));
 
     capture(make(RESTORE_SLICE_OPS), null);
     const exact = undo(EMPTY)!; // all 500 are re-inserts
@@ -338,7 +342,7 @@ describe("planRestore opCount / slices.length / focusId", () => {
     // extra node is a delete and the survivor is byte-identical (no upsert).
     // The snapshot can't be EMPTY here: `capture` refuses an empty index.
     const build = (deletes: number) => {
-      const all = makeNodes(deletes + 1);
+      const all = createNodes(deletes + 1);
       return { snap: buildTreeIndex([all[0]!]), live: buildTreeIndex(all) };
     };
 
@@ -357,19 +361,19 @@ describe("planRestore opCount / slices.length / focusId", () => {
   });
 
   test("focusId survives when its node is in the restored snapshot", () => {
-    const idx = buildTreeIndex([makeNode({ id: "a" })]);
+    const idx = buildTreeIndex([createNode({ id: "a" })]);
     capture(idx, "a");
     expect(undo(idx)!.focusId).toBe("a");
   });
 
   test("focusId is dropped when its node is gone from the snapshot", () => {
-    const idx = buildTreeIndex([makeNode({ id: "a" })]);
+    const idx = buildTreeIndex([createNode({ id: "a" })]);
     capture(idx, "ghost"); // focus points at a node not in the snapshot
     expect(undo(idx)!.focusId).toBeNull();
   });
 
   test("a null focus stays null", () => {
-    const idx = buildTreeIndex([makeNode({ id: "a" })]);
+    const idx = buildTreeIndex([createNode({ id: "a" })]);
     capture(idx, null);
     expect(undo(idx)!.focusId).toBeNull();
   });
@@ -380,12 +384,12 @@ describe("planRestore opCount / slices.length / focusId", () => {
     // the last segment.
     const key = rowKeyFor("p", "a");
 
-    const present = buildTreeIndex([makeNode({ id: "a" })]);
+    const present = buildTreeIndex([createNode({ id: "a" })]);
     capture(present, key);
     expect(undo(present)!.focusId).toBe(key); // last segment "a" exists -> full key
 
     resetHistory();
-    const absent = buildTreeIndex([makeNode({ id: "z" })]);
+    const absent = buildTreeIndex([createNode({ id: "z" })]);
     capture(absent, key);
     expect(undo(absent)!.focusId).toBeNull(); // last segment "a" absent -> dropped
   });
@@ -413,16 +417,16 @@ describe("sameNode field comparison boundaries", () => {
 
   for (const { field, override } of fieldChanges) {
     test(`a change to ${field} registers as one op`, () => {
-      const snap = buildTreeIndex([makeNode(base)]);
-      const live = buildTreeIndex([makeNode({ ...base, ...override })]);
+      const snap = buildTreeIndex([createNode(base)]);
+      const live = buildTreeIndex([createNode({ ...base, ...override })]);
       capture(snap, "n");
       expect(undo(live)!.opCount).toBe(1);
     });
   }
 
   test("no field change registers zero ops (control)", () => {
-    const snap = buildTreeIndex([makeNode(base)]);
-    const live = buildTreeIndex([makeNode(base)]);
+    const snap = buildTreeIndex([createNode(base)]);
+    const live = buildTreeIndex([createNode(base)]);
     capture(snap, "n");
     expect(undo(live)!.opCount).toBe(0);
   });

@@ -14,6 +14,7 @@ beforeEach(() => {
   store.clear();
   location.href = "http://localhost/";
   location.search = "";
+  // SAFETY: test stub for the browser window flags.ts reads; bun test has no DOM, so this is the only window in scope.
   (globalThis as { window?: unknown }).window = {
     localStorage: {
       getItem: (k: string) => store.get(k) ?? null,
@@ -29,6 +30,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // SAFETY: the property was assigned by the beforeEach stub above, so delete removes exactly that stub.
   delete (globalThis as { window?: unknown }).window;
 });
 

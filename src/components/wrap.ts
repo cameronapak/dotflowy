@@ -31,6 +31,7 @@ export type { MarkerPair };
 
 /** The focused contentEditable, or null when no bullet/title is focused. */
 function activeEditable(): HTMLElement | null {
+  // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
   const el = document.activeElement as HTMLElement | null;
   return el && el.isContentEditable ? el : null;
 }

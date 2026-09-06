@@ -33,7 +33,7 @@ import {
   type MdPastePlan,
 } from "../data/markdown-import";
 import { runStructural, runStructuralSliced } from "../data/structural";
-import { buildTreeIndex, makeNode, now } from "../data/tree";
+import { buildTreeIndex, createNode, now } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
   getViewFilter,
@@ -197,7 +197,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   const writeInsert = (i: number) => {
     const node = plan.inserts[i]!;
     nodesCollection.insert(
-      makeNode({ ...node, createdAt: timestamp, updatedAt: timestamp }),
+      createNode({ ...node, createdAt: timestamp, updatedAt: timestamp }),
     );
   };
   const writeRepoints = () => {
@@ -291,25 +291,29 @@ function buildMarkdownPasteOps(
   anchorId: string,
   timestamp: number,
 ): ChangeOpLike[] | null {
+  // SAFETY: getLiveOutlineNodes returns OutlineNode[], the spread only copies it
   const byId = new Map(
     getLiveOutlineNodes().map((n) => [n.id, { ...n } as OutlineNode]),
   );
   const anchor = byId.get(anchorId);
   if (!anchor) return null;
 
+  // A kind demotion forces the plain-paragraph shape (never a task); a bare
+  // isTask promotion clears the kind. Otherwise each field keeps the anchor's
+  // value, matching the old conditional spreads.
   const nextAnchor: OutlineNode = {
     ...anchor,
     text: plan.anchor.text,
     updatedAt: timestamp,
-    ...(plan.anchor.isTask !== null ? { isTask: plan.anchor.isTask } : {}),
-    ...(plan.anchor.completed !== null
-      ? { completed: plan.anchor.completed }
-      : {}),
-    ...(plan.anchor.kind !== null
-      ? { kind: plan.anchor.kind, isTask: false }
-      : plan.anchor.isTask
-        ? { kind: null }
-        : {}),
+    isTask:
+      plan.anchor.kind !== null ? false : (plan.anchor.isTask ?? anchor.isTask),
+    completed: plan.anchor.completed ?? anchor.completed,
+    kind:
+      plan.anchor.kind !== null
+        ? plan.anchor.kind
+        : plan.anchor.isTask
+          ? null
+          : anchor.kind,
   };
 
   const ops: ChangeOpLike[] = [{ op: "update", value: toWireNode(nextAnchor) }];
@@ -431,11 +435,7 @@ async function runLunoraSlicedPaste(
  * changed nothing on screen -- the one silent outcome -- so it is disclosed,
  * loudly, because a toast is the only disclosure surface a paste has.
  */
-function resolveSeam(
-  plan: MdPastePlan,
-  anchorId: string,
-  count: number,
-): { id: string; offset: number } {
+function resolveSeam(plan: MdPastePlan, anchorId: string, count: number) {
   if (plan.focusId === anchorId)
     return { id: anchorId, offset: plan.focusOffset };
 

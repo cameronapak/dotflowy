@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { OutlineNode } from "./types";
 
 import { planFromChangeOps } from "./change-ops";
-import { applyPlan, makeOutlineNode } from "./planners";
+import { applyPlan, createOutlineNode } from "./planners";
 
 /** The wire shape: a node minus the server-forced `userId`. */
 function wire(node: OutlineNode) {
@@ -13,8 +13,8 @@ function wire(node: OutlineNode) {
 
 describe("planFromChangeOps", () => {
   test("maps insert/update/delete into one OutlinePlan", () => {
-    const n1 = makeOutlineNode({ id: "n1", userId: "u", text: "hello" });
-    const n2 = makeOutlineNode({ id: "n2", userId: "u", text: "world" });
+    const n1 = createOutlineNode({ id: "n1", userId: "u", text: "hello" });
+    const n2 = createOutlineNode({ id: "n2", userId: "u", text: "world" });
     const plan = planFromChangeOps("u", [
       { op: "insert", value: wire(n1) },
       { op: "update", value: { ...wire(n2), text: "world!" } },
@@ -33,7 +33,7 @@ describe("planFromChangeOps", () => {
   // preserve stream order. These assert on the APPLIED result, because that is
   // the only place a mis-bucketed op actually shows up.
   test("insert then update on one key lands the updated text", () => {
-    const n1 = makeOutlineNode({ id: "n1", userId: "u", text: "hello" });
+    const n1 = createOutlineNode({ id: "n1", userId: "u", text: "hello" });
     const plan = planFromChangeOps("u", [
       { op: "insert", value: wire(n1) },
       { op: "update", value: { ...wire(n1), text: "hello!" } },
@@ -44,7 +44,7 @@ describe("planFromChangeOps", () => {
   });
 
   test("insert then delete on one key leaves nothing behind", () => {
-    const n1 = makeOutlineNode({ id: "n1", userId: "u", text: "hello" });
+    const n1 = createOutlineNode({ id: "n1", userId: "u", text: "hello" });
     const plan = planFromChangeOps("u", [
       { op: "insert", value: wire(n1) },
       { op: "delete", key: "n1" },
@@ -53,7 +53,7 @@ describe("planFromChangeOps", () => {
   });
 
   test("update then delete on an existing key deletes it", () => {
-    const live = makeOutlineNode({ id: "n1", userId: "u", text: "old" });
+    const live = createOutlineNode({ id: "n1", userId: "u", text: "old" });
     const plan = planFromChangeOps("u", [
       { op: "update", value: { ...wire(live), text: "new" } },
       { op: "delete", key: "n1" },
@@ -62,7 +62,7 @@ describe("planFromChangeOps", () => {
   });
 
   test("delete then re-insert on one key keeps the re-inserted row", () => {
-    const live = makeOutlineNode({ id: "n1", userId: "u", text: "old" });
+    const live = createOutlineNode({ id: "n1", userId: "u", text: "old" });
     const plan = planFromChangeOps("u", [
       { op: "delete", key: "n1" },
       { op: "insert", value: { ...wire(live), text: "reborn" } },
@@ -73,7 +73,7 @@ describe("planFromChangeOps", () => {
   });
 
   test("repeated updates on one key collapse to the last", () => {
-    const live = makeOutlineNode({ id: "n1", userId: "u", text: "a" });
+    const live = createOutlineNode({ id: "n1", userId: "u", text: "a" });
     const plan = planFromChangeOps("u", [
       { op: "update", value: { ...wire(live), text: "b" } },
       { op: "update", value: { ...wire(live), text: "c" } },
@@ -83,8 +83,8 @@ describe("planFromChangeOps", () => {
   });
 
   test("insert order follows first appearance, so sibling chains survive", () => {
-    const a = makeOutlineNode({ id: "a", userId: "u", text: "a" });
-    const b = makeOutlineNode({
+    const a = createOutlineNode({ id: "a", userId: "u", text: "a" });
+    const b = createOutlineNode({
       id: "b",
       userId: "u",
       text: "b",

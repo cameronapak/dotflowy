@@ -5,18 +5,18 @@ import type { OutlineNode, OutlinePlan, PlanPatch } from "./types";
 import {
   buildTreeIndex,
   childrenOf,
-  makeNode,
+  createNode,
   trueSourceOf,
   wouldMirrorCycle,
 } from "../tree";
 import { emptyPlan } from "./types";
 
-/** Dotflowy `makeNode` + Lunora shard `userId`. */
-export function makeOutlineNode(
+/** Dotflowy `createNode` + Lunora shard `userId`. */
+export function createOutlineNode(
   partial: Partial<OutlineNode> & Pick<OutlineNode, "id" | "userId">,
 ): OutlineNode {
   const { userId, id, ...rest } = partial;
-  return { ...makeNode({ id, ...rest }), userId };
+  return { ...createNode({ id, ...rest }), userId };
 }
 
 /**
@@ -52,7 +52,7 @@ export function planInsertSibling(
 
   const plan = emptyPlan();
   plan.inserts.push(
-    makeOutlineNode({
+    createOutlineNode({
       id: args.id,
       userId: args.userId,
       parentId: args.parentId,
@@ -515,9 +515,17 @@ export function planSplitNode(
  * Flat-record equality for restore diffs. Nodes are shallow; `userId` is
  * Lunora-only and ignored so history snapshots (`Node`) compare cleanly.
  */
+/** Node is a flat record; a string-keyed view of its field values lets the
+ *  shallow compare below reach every field without widening to unknown. */
+interface NodeFieldView {
+  [key: string]: Node[keyof Node];
+}
+
 export function sameNodeFields(a: Node, b: Node): boolean {
-  const ra = a as Record<string, unknown>;
-  const rb = b as Record<string, unknown>;
+  // SAFETY: Node is a flat record, so the view reaches every field.
+  const ra = a as NodeFieldView;
+  // SAFETY: Node is a flat record, so the view reaches every field.
+  const rb = b as NodeFieldView;
   for (const key of Object.keys(ra)) {
     if (key === "userId") continue;
     if (ra[key] !== rb[key]) return false;
@@ -608,7 +616,7 @@ export function planMirrorNode(
 
   const plan = emptyPlan();
   plan.inserts.push(
-    makeOutlineNode({
+    createOutlineNode({
       id: args.id,
       userId: args.userId,
       parentId,

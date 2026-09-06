@@ -146,7 +146,7 @@ const backoffDelay = (n: number): Effect.Effect<Duration.Duration> =>
  * `cursor` is read fresh at every (re)connect to build `hello { since }`, so the
  * server replies with only what this client missed (null -> full snapshot).
  */
-export const makeSyncStream = (
+export const createSyncStream = (
   cursor: Effect.Effect<number | null>,
 ): Effect.Effect<SyncStream> =>
   Effect.gen(function* () {

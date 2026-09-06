@@ -1,5 +1,7 @@
 import { getHotkeyManager } from "@tanstack/react-hotkeys";
 
+import { hasWindow } from "../env";
+
 /**
  * DEV-only handle on the singleton hotkey manager.
  *
@@ -25,6 +27,6 @@ declare global {
 
 export function exposeHotkeyManagerForDev(): void {
   if (!import.meta.env.DEV) return;
-  if (typeof window === "undefined") return;
+  if (!hasWindow()) return;
   window.__hotkeyManager = getHotkeyManager();
 }

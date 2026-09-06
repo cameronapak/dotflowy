@@ -42,17 +42,17 @@ import {
 
 /** The reader's axis, straight off the bump type — there is no `category` field
  *  to keep honest, because MAJOR/MINOR/PATCH already say this (ADR 0046). */
-const BUMP_LABEL: Record<Bump, string> = {
+const BUMP_LABEL = {
   major: "Changed",
   minor: "Added",
   patch: "Fixed",
-};
+} satisfies Record<Bump, string>;
 
-const BUMP_VARIANT: Record<Bump, "default" | "secondary" | "outline"> = {
+const BUMP_VARIANT = {
   major: "default",
   minor: "secondary",
   patch: "outline",
-};
+} satisfies Record<Bump, "default" | "secondary" | "outline">;
 
 function formatDate(date: string): string {
   // `date` is a local calendar day (`YYYY-MM-DD`). Parsed bare it would be read

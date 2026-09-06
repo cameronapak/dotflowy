@@ -248,6 +248,7 @@ function useSubscriptions(): Subscriptions {
           setState("error");
           return;
         }
+        // SAFETY: server rows carry the Stripe fields SubRow reads, only nullability typing differs
         setSubs((data ?? []) as SubRow[]);
         setState("ready");
       },

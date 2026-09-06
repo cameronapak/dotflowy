@@ -17,6 +17,7 @@
 
 import { useSyncExternalStore } from "react";
 
+import { hasWindow } from "../env";
 import { isSyncReady, subscribeSyncReady } from "./collection";
 import { getTreeIndex, subscribeTree } from "./tree-store";
 
@@ -44,7 +45,7 @@ function rebuild() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   // Tree subscription starts classic collection sync when the Lunora flag is
   // OFF; when ON, LunoraSyncHost feeds the tree and marks sync ready.

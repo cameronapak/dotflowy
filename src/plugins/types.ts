@@ -264,10 +264,18 @@ export interface InteractionSpec {
 export interface ViewContext {
   /** Whether completed bullets are shown (the todo plugin's hide transform). */
   showCompleted: boolean;
-  /** The current route's search params (opaque to the core -- plugins parse). */
-  search: Record<string, unknown>;
+  /** The current route's search params, keyed by name (parsed from the URL). */
+  search: RouteSearch;
   /** The current zoom root, or null at the top. */
   rootId: string | null;
+}
+
+/** The string-valued search params the shell carries into the view pipe. */
+export interface RouteSearch {
+  /** The `?q=` filter query (ADR 0047). */
+  q?: string;
+  /** Focus landing hint, e.g. `focus=last` from /today. */
+  focus?: string;
 }
 
 /**

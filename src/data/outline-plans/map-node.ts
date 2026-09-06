@@ -25,16 +25,21 @@ export type NodeDocLike = {
 export function rowToNode(doc: NodeDocLike): OutlineNode {
   return {
     id: doc._id,
+    // SAFETY: Lunora rows store parentId/prevSiblingId as string | null; the nullish fallback absorbs a legacy undefined.
     parentId: (doc.parentId as string | null) ?? null,
+    // SAFETY: Lunora rows store prevSiblingId as string | null; the nullish fallback absorbs a legacy undefined.
     prevSiblingId: (doc.prevSiblingId as string | null) ?? null,
     text: String(doc.text ?? ""),
     isTask: Boolean(doc.isTask),
     completed: Boolean(doc.completed),
     collapsed: Boolean(doc.collapsed),
+    // SAFETY: Lunora rows store bookmarkedAt as a numeric timestamp or null; the fallback absorbs a legacy undefined.
     bookmarkedAt: (doc.bookmarkedAt as number | null) ?? null,
+    // SAFETY: Lunora rows store mirrorOf as string | null; the fallback absorbs a legacy undefined.
     mirrorOf: (doc.mirrorOf as string | null) ?? null,
     createdAt: Number(doc.createdAt ?? 0),
     updatedAt: Number(doc.updatedAt ?? 0),
+    // SAFETY: Lunora rows store origin as string | null; the fallback absorbs a legacy undefined.
     origin: (doc.origin as string | null) ?? null,
     kind: doc.kind === "paragraph" ? "paragraph" : null,
     userId: String(doc.userId ?? ""),

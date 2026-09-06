@@ -15,6 +15,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme();
 
   return (
+    // SAFETY: useTheme returns "light" | "dark" | "system", which is ToasterProps["theme"]
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
@@ -26,6 +27,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         loading: <Loader2Icon className="size-4 animate-spin" />,
       }}
       style={
+        // SAFETY: CSS custom-property values React.CSSProperties does not type
         {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",

@@ -22,6 +22,8 @@ import { createRoot, type Root } from "react-dom/client";
 
 import type { Json, WidgetProps } from "../plugins/types";
 
+import { hasCustomElements } from "../env";
+
 /** The custom element tag the serializer emits and `customElements.define`s. */
 export const WIDGET_TAG = "dotflowy-widget";
 
@@ -43,11 +45,7 @@ export function registerWidget(
 // exist in the Node prerender pass (ADR 0004 SPA + the `/` shell prerender), and
 // `registry.ts` -- which imports this for `registerWidget` -- is in that pass, so
 // the class body (and its `createRoot` call) must never evaluate server-side.
-if (
-  typeof HTMLElement !== "undefined" &&
-  typeof customElements !== "undefined" &&
-  !customElements.get(WIDGET_TAG)
-) {
+if (hasCustomElements() && !globalThis.customElements.get(WIDGET_TAG)) {
   class DotflowyWidget extends HTMLElement {
     private root: Root | null = null;
 
@@ -79,6 +77,7 @@ if (
       let props: Record<string, Json> = {};
       if (this.dataset.props) {
         try {
+          // SAFETY: data-props was JSON.stringify'd by this module from Record<string, Json>
           props = JSON.parse(this.dataset.props) as Record<string, Json>;
         } catch {
           // malformed data-props -> keep the empty default

@@ -159,6 +159,7 @@ export function BiblePassageEditPopover({
 
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
+      // SAFETY: a pointer event's target is the DOM node hit
       if (!ref.current?.contains(e.target as Node)) closeAndRefocus();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -307,6 +308,7 @@ export function BiblePassageEditPopover({
               onChange={(e) =>
                 applyStructured({
                   ...structured,
+                  // SAFETY: the options are generated from OSIS_BOOK_CODES, so value is an OsisBookCode
                   book: e.currentTarget.value as OsisBookCode,
                   chapter: 1,
                   startVerse: null,

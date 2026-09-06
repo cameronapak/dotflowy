@@ -4,7 +4,7 @@ import { Socket } from "effect/unstable/socket";
 
 import type { ServerMessage, SyncEvent } from "./realtime";
 
-import { backoffMillis, makeSyncStream } from "./realtime";
+import { backoffMillis, createSyncStream } from "./realtime";
 
 // realtime.ts derives the socket URL from window.location; bun test has no DOM.
 Object.assign(globalThis, {
@@ -50,19 +50,56 @@ describe("backoffMillis", () => {
 // couldn't be unit-tested at all). Events are driven synchronously; we never
 // wait out a real timer, so these stay fast and deterministic.
 
-class FakeWebSocket {
-  readyState = 0;
+class FakeWebSocket implements WebSocket {
+  static readonly CONNECTING = 0 as const;
+  static readonly OPEN = 1 as const;
+  static readonly CLOSING = 2 as const;
+  static readonly CLOSED = 3 as const;
+  readonly CONNECTING = 0 as const;
+  readonly OPEN = 1 as const;
+  readonly CLOSING = 2 as const;
+  readonly CLOSED = 3 as const;
+  readyState: 0 | 1 | 2 | 3 = 0;
   sent: string[] = [];
   closedWith: number | null = null;
-  private listeners = new Map<string, Set<(ev: unknown) => void>>();
+  // Unused EventTarget surface; the client drives everything through listeners.
+  onclose = null;
+  onerror = null;
+  onmessage = null;
+  onopen = null;
+  binaryType: BinaryType = "arraybuffer";
+  bufferedAmount = 0;
+  extensions = "";
+  protocol = "";
+  url = "";
+  private listeners = new Map<
+    string,
+    Set<EventListenerOrEventListenerObject>
+  >();
 
-  addEventListener(type: string, fn: (ev: unknown) => void): void {
+  dispatchEvent(): boolean {
+    return false;
+  }
+  accept(): void {}
+  serializeAttachment(): void {}
+  deserializeAttachment(): string | null {
+    return null;
+  }
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+  ): void {
+    if (listener === null) return;
     let set = this.listeners.get(type);
     if (!set) this.listeners.set(type, (set = new Set()));
-    set.add(fn);
+    set.add(listener);
   }
-  removeEventListener(type: string, fn: (ev: unknown) => void): void {
-    this.listeners.get(type)?.delete(fn);
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+  ): void {
+    if (listener === null) return;
+    this.listeners.get(type)?.delete(listener);
   }
   send(data: string): void {
     this.sent.push(data);
@@ -71,27 +108,37 @@ class FakeWebSocket {
     if (this.closedWith !== null) return;
     this.closedWith = code;
     this.readyState = 3;
-    this.fire("close", { code, reason: "" });
+    this.fire("close", new CloseEvent("close", { code, reason: "" }));
   }
-  private fire(type: string, ev: unknown): void {
-    for (const fn of this.listeners.get(type) ?? []) fn(ev);
+  private fire(type: string, ev: Event): void {
+    const isListenerFn = (
+      l: EventListenerOrEventListenerObject,
+    ): l is EventListener => typeof l === "function";
+    for (const listener of this.listeners.get(type) ?? []) {
+      if (isListenerFn(listener)) listener(ev);
+    }
   }
   // --- test controls ---
   /** Transition to OPEN and fire the `open` event the client is waiting on. */
   driveOpen(): void {
     this.readyState = 1;
-    this.fire("open", {});
+    this.fire("open", new Event("open"));
   }
   /** Deliver a server frame. */
   driveMessage(msg: ServerMessage | string): void {
-    this.fire("message", {
-      data: typeof msg === "string" ? msg : JSON.stringify(msg),
-    });
+    const isString = (m: ServerMessage | string): m is string =>
+      typeof m === "string";
+    this.fire(
+      "message",
+      new MessageEvent("message", {
+        data: isString(msg) ? msg : JSON.stringify(msg),
+      }),
+    );
   }
   /** Simulate an abnormal server-side drop (1006 = no clean close). */
   driveServerClose(code = 1006): void {
     this.readyState = 3;
-    this.fire("close", { code, reason: "" });
+    this.fire("close", new CloseEvent("close", { code, reason: "" }));
   }
 }
 
@@ -121,14 +168,17 @@ function withHarness(
 ): Promise<void> {
   const sockets: FakeWebSocket[] = [];
   const collected: SyncEvent[] = [];
-  const layer = Layer.succeed(Socket.WebSocketConstructor)((() => {
+  const layer = Layer.succeed(Socket.WebSocketConstructor)((
+    _url: string,
+    _protocols?: string | Array<string>,
+  ): WebSocket => {
     const ws = new FakeWebSocket();
     sockets.push(ws);
-    return ws as unknown as WebSocket;
-  }) as (url: string, protocols?: string | Array<string>) => WebSocket);
+    return ws;
+  });
 
   const program = Effect.gen(function* () {
-    const { events, resync } = yield* makeSyncStream(Effect.sync(cursor));
+    const { events, resync } = yield* createSyncStream(Effect.sync(cursor));
     yield* Stream.runForEach(events, (e: SyncEvent) =>
       Effect.sync(() => {
         collected.push(e);
@@ -144,10 +194,11 @@ function withHarness(
 const helloOf = (ws: FakeWebSocket): { type: string; since: number | null } => {
   const first = ws.sent[0];
   if (first === undefined) throw new Error("no hello frame was sent");
+  // SAFETY: the stream's first send is the JSON hello frame { type, since } it serializes itself.
   return JSON.parse(first) as { type: string; since: number | null };
 };
 
-describe("makeSyncStream", () => {
+describe("createSyncStream", () => {
   test("sends hello with the current cursor on connect", () =>
     withHarness(
       () => 42,

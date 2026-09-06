@@ -35,13 +35,13 @@ export const NodeSchema = Schema.Struct({
   bookmarkedAt: Schema.NullOr(Schema.Number),
   // Mirror pointer (ADR 0022): null = own source, an id = a mirror of that node.
   // Required + nullable at the boundary, same as every other field — the client
-  // always sends it (makeNode), so a body without it is malformed (→ 400).
+  // always sends it (createNode), so a body without it is malformed (→ 400).
   mirrorOf: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   // Provenance (write-once): null = human, a harness name = the agent that made
   // it over MCP. Mirrors the client's `nodeSchema` field-for-field; the client
-  // always sends it (makeNode), the DO always returns it (rowToNode), so a body
+  // always sends it (createNode), the DO always returns it (rowToNode), so a body
   // without it is malformed (→ 400). Backfilled to null on any legacy/e2e row
   // that omits it (collection.ts withNodeDefaults, DO ADD COLUMN default NULL).
   origin: Schema.NullOr(Schema.String),

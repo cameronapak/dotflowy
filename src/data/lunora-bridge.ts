@@ -31,5 +31,6 @@ export function bridgeOrderedChildren(
   index: TreeIndex,
   parentId: string | null,
 ): OutlineNode[] {
+  // SAFETY: the index was built from rowsToOutlineNodes above, so every row it returns is an OutlineNode despite the Node[] signature.
   return childrenOf(index, parentId) as OutlineNode[];
 }

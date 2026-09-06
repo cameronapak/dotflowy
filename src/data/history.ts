@@ -164,13 +164,21 @@ export interface RestorePlan {
   revert: () => void;
 }
 
+/** Node is a flat record; a string-keyed view of its field values lets the
+ *  shallow compare below reach every field without widening to unknown. */
+interface NodeFieldView {
+  [key: string]: Node[keyof Node];
+}
+
 /**
  * Two snapshots of a node are equal when every field matches; nodes are flat
  * records, so a shallow field compare is a full compare.
  */
 function sameNode(a: Node, b: Node): boolean {
-  const ra = a as Record<string, unknown>;
-  const rb = b as Record<string, unknown>;
+  // SAFETY: Node is a flat record, so the view reaches every field.
+  const ra = a as NodeFieldView;
+  // SAFETY: Node is a flat record, so the view reaches every field.
+  const rb = b as NodeFieldView;
   const keys = Object.keys(ra);
   if (keys.length !== Object.keys(rb).length) return false;
   for (const key of keys) if (ra[key] !== rb[key]) return false;

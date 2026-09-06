@@ -23,7 +23,7 @@ import type { ChangeOp } from "./wire-schema";
 import { isValidDateKey } from "./date-links";
 import { buildHighlightRun, type HighlightColor } from "./highlight";
 import { encodeUrlForMarkdown, sanitizeLinkLabel } from "./links";
-import { makeNode, type NodeKind } from "./tree";
+import { createNode, type NodeKind } from "./tree";
 
 // --- Typed failures -----------------------------------------------------------
 
@@ -166,7 +166,12 @@ class Tally {
 // CONTENT (a user-typed literal `<` arrives as `&amp;lt;` -> `&lt;` after the
 // XML decode -> `<` here). The two layers must never be conflated (ADR 0037).
 
-const NAMED_ENTITIES: Record<string, string> = {
+/** Named HTML entities the decoder resolves (keyed by entity body). */
+interface NamedEntityMap {
+  [name: string]: string;
+}
+
+const NAMED_ENTITIES: NamedEntityMap = {
   lt: "<",
   gt: ">",
   amp: "&",
@@ -303,7 +308,12 @@ interface MarkerSpec {
   forbid: RegExp;
 }
 
-const FORMAT_MARKERS: Record<string, MarkerSpec> = {
+/** Format markers keyed by the Workflowy tag name that carries them. */
+interface FormatMarkerMap {
+  [tag: string]: MarkerSpec;
+}
+
+const FORMAT_MARKERS: FormatMarkerMap = {
   b: { open: "**", close: "**", forbid: /[*\n]/ },
   i: { open: "*", close: "*", forbid: /[*\n]/ },
   u: { open: "~", close: "~", forbid: /[~\n]/ },
@@ -315,7 +325,11 @@ const FORMAT_MARKERS: Record<string, MarkerSpec> = {
  *  `sky`/`pink` fold to their nearest neighbors; gray/brown have NO mapping
  *  (the shipped ADR 0035 palette has no white emoji — probe amendment) and
  *  degrade to the bare default-blue run. */
-const MARK_COLOR: Record<string, HighlightColor> = {
+interface MarkColorMap {
+  [name: string]: HighlightColor;
+}
+
+const MARK_COLOR: MarkColorMap = {
   red: "red",
   orange: "orange",
   yellow: "yellow",
@@ -515,10 +529,7 @@ interface MapState {
   documentIds: ReadonlySet<string>;
 }
 
-function convertValue(
-  raw: string,
-  state: MapState,
-): { text: string; extraLines: string[] } {
+function convertValue(raw: string, state: MapState) {
   const tree = parseInlineHtml(raw, state.anomalies);
   const converted = convert(tree, {
     degraded: state.degraded,
@@ -528,7 +539,7 @@ function convertValue(
   return { text: lines[0] ?? "", extraLines: lines.slice(1) };
 }
 
-function isOutline(child: unknown): child is XmlElement {
+function isOutline(child: XmlElement["children"][number]): child is XmlElement {
   return child instanceof XmlElement && child.name === "outline";
 }
 
@@ -807,7 +818,7 @@ export function planOpmlImport(
         : null;
       ops.push({
         op: "insert",
-        value: makeNode({
+        value: createNode({
           id,
           parentId,
           prevSiblingId: prev,

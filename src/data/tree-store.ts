@@ -4,6 +4,7 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 
 import type { QueryFilter } from "./filter-query";
 
+import { hasWindow } from "../env";
 import { collectBacklinkReferrerIds } from "./backlinks";
 import { isSyncReady, nodesCollection, subscribeSyncReady } from "./collection";
 import { parseDateLinkKeys } from "./date-links";
@@ -133,6 +134,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   let tagsChanged = false;
   for (const change of changes) {
     if (change.type === "delete") {
+      // SAFETY: this collection's keys are node ids (getKey: node.id), so a delete change key is a string.
       const prev = index.byId.get(change.key as string);
       if (!prev) continue;
       index.byId.delete(prev.id);
@@ -413,7 +415,7 @@ function removeTagOccurrence(tag: string) {
  * {@link resetTreeFromNodes} — do not also subscribe to the idle `nodesCollection`.
  */
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   if (isLunoraSyncEnabled()) return;
   nodesCollection.subscribeChanges((changes) => applyChanges(changes), {

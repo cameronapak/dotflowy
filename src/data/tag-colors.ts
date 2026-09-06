@@ -3,6 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { hasWindow } from "../env";
 import { isLunoraSyncEnabled } from "./flags";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
@@ -88,12 +89,16 @@ const TAG_COLOR_SET = new Set<string>(TAG_COLORS);
  *  (identical oklch) when the highlight plugin adopted the shared `--tag-*`
  *  vars; persisted kv rows may still carry "amber", so resolve it rather than
  *  silently dropping the user's chosen color. */
-const LEGACY_COLOR_ALIAS: Record<string, TagColor> = { amber: "yellow" };
+interface LegacyColorAliasMap {
+  [name: string]: TagColor;
+}
+const LEGACY_COLOR_ALIAS: LegacyColorAliasMap = { amber: "yellow" };
 
 /** The current palette color for a stored value, applying legacy aliases;
  *  null when the value isn't a (known or aliased) palette color. */
 function resolveTagColor(color: string): TagColor | null {
   const c = LEGACY_COLOR_ALIAS[color] ?? color;
+  // SAFETY: TAG_COLOR_SET contains exactly the TagColor palette, so membership proves the string literal.
   return TAG_COLOR_SET.has(c) ? (c as TagColor) : null;
 }
 
@@ -243,7 +248,7 @@ export function unbindLunoraTagColors(): void {
 type TagColorRowDocLike = { _id: string; tag?: unknown; color?: unknown };
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   // Flag ON: wait for bindLunoraTagColors — never open the /api/kv collection.
   if (isLunoraSyncEnabled()) return;
   started = true;

@@ -6,6 +6,8 @@
  * deleted with their fallbacks once dogfooded.
  */
 
+import { hasWindow } from "../env";
+
 const MIRRORS_KEY = "dotflowy:flag:mirrors";
 
 // Compiled default ON. Mirrors (ADR 0022) shipped to all users; localStorage
@@ -20,7 +22,7 @@ const MIRRORS_DEFAULT = true;
  * (SPA/no-SSR rule), so it falls to the default -- the value there is moot.
  */
 export function isMirrorsEnabled(): boolean {
-  if (typeof window === "undefined") return MIRRORS_DEFAULT;
+  if (!hasWindow()) return MIRRORS_DEFAULT;
   try {
     const v = window.localStorage.getItem(MIRRORS_KEY);
     if (v === "on") return true;
@@ -51,7 +53,7 @@ const LUNORA_SYNC_DEFAULT = false;
  * `?lunora-sync=off` (URL wins for that load; does not persist).
  */
 export function isLunoraSyncEnabled(): boolean {
-  if (typeof window === "undefined") return LUNORA_SYNC_DEFAULT;
+  if (!hasWindow()) return LUNORA_SYNC_DEFAULT;
   try {
     const q = new URLSearchParams(window.location.search).get("lunora-sync");
     if (q === "on" || q === "1") return true;
