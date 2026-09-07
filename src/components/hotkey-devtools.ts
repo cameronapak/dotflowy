@@ -16,17 +16,34 @@ import { hasWindow } from "../env";
  * read the live registration count and assert that invariant DETERMINISTICALLY
  * -- a count, not a wall-clock budget, so it never flakes on slower CI hardware
  * the way an "is the zoom under N ms" assertion would. Also handy from the dev
- * console. Vite strips the dead `import.meta.env.DEV` branch from production
- * builds, so this ships nothing.
+ * console.
+ *
+ * Build-flag-gated, NOT DEV-gated (ADR 0061): `import.meta.env.DEV` is false
+ * in every `vite build`, so a DEV gate silently compiles the seam out of the
+ * exact bundle the specs need. `VITE_HOTKEY_DEVTOOLS=1` (set by
+ * scripts/e2e-serve.ts) keeps the seam compiled into e2e builds; ordinary
+ * builds tree-shake it to zero bytes (verified both ways). Same pattern as
+ * the quick-add deferred-resolve seam.
  */
 declare global {
+  // Present only under the VITE_HOTKEY_DEVTOOLS build flag (see above).
   interface Window {
     __hotkeyManager?: ReturnType<typeof getHotkeyManager>;
   }
 }
 
+/** Build-flag gate for the window seam below. Vite statically replaces
+ * `import.meta.env.VITE_HOTKEY_DEVTOOLS` at build - presence of the string
+ * IS the contract (same mechanism as the VITE_SENTRY_DSN gate in
+ * src/instrument.client.ts). */
+function isHotkeyDevtoolsOn(value: string | undefined): value is string {
+  return typeof value === "string";
+}
+
 export function exposeHotkeyManagerForDev(): void {
-  if (!import.meta.env.DEV) return;
+  if (!isHotkeyDevtoolsOn(import.meta.env.VITE_HOTKEY_DEVTOOLS)) return;
   if (!hasWindow()) return;
+  // SAFETY: this module is the sole writer of the hook, and it only ever
+  // writes under the build flag above.
   window.__hotkeyManager = getHotkeyManager();
 }

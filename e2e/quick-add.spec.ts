@@ -29,9 +29,11 @@ async function load(page: Page) {
  *  guarded on "not typing", so blur any focused bullet first -- otherwise the "q"
  *  just types into the outline. */
 async function pressQuickAddKey(page: Page) {
-  await page.evaluate(() =>
-    (document.activeElement as HTMLElement | null)?.blur(),
-  );
+  await page.evaluate(() => {
+    // SAFETY: the focused node is always an Element or null in Playwright's
+    // DOM; editable bullets are HTMLElements, the only kind with blur().
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
   await page.keyboard.press("q");
 }
 
@@ -60,22 +62,52 @@ async function commitNext(page: Page) {
 const toastByText = (page: Page, text: string) =>
   page.locator("[data-sonner-toast]", { hasText: text });
 
-// The deferred-resolve test seam (ADR 0049): hold the destination resolve open
-// to exercise the in-flight-born window (clear/retarget/slash while borning),
-// which the seedOutline Map mock otherwise resolves in a microtask.
+// The deferred-resolve test seam (ADR 0049, ADR 0061): hold the destination
+// resolve open to exercise the in-flight-born window (clear/retarget/slash
+// while borning), which the seedOutline Map mock otherwise resolves in a
+// microtask. The seam installs when <QuickAdd/> mounts in the e2e build
+// (VITE_QUICK_ADD_DEFERRED_SEAM=1) and is compiled out everywhere else, so
+// these helpers wait for it - a wrong build fails loudly here instead of
+// wedging mid-spec.
+type QuickAddSeam = {
+  __quickAddHoldResolve?: () => void;
+  __quickAddReleaseResolve?: () => void;
+};
+
+/** The browser window with the seam contract merged in. `window` already
+ * satisfies an all-optional partial (no evidence is discarded), so this is a
+ * single assertion, not a chain. */
+type SeamWindow = Window & QuickAddSeam;
+type ArmedSeamWindow = Window & Required<QuickAddSeam>;
+
+/** True when the e2e build's seam is installed on this page. The hook the
+ * mount effect writes (or the lack of it) IS the contract - see the seam
+ * comment on QuickAddSeam above. */
+function isSeamArmed(w: SeamWindow): w is ArmedSeamWindow {
+  return typeof w.__quickAddHoldResolve === "function";
+}
+
 async function holdResolve(page: Page) {
-  await page.evaluate(() =>
-    (
-      window as unknown as { __quickAddHoldResolve: () => void }
-    ).__quickAddHoldResolve(),
-  );
+  await page.waitForFunction(() => {
+    // SAFETY: absence of the hook means "module not mounted yet"; the poll
+    // exits as soon as the mount effect installs it.
+    const w = window as SeamWindow;
+    return isSeamArmed(w);
+  });
+  await page.evaluate(() => {
+    // SAFETY: the waitForFunction above established the hook is a function;
+    // the mount effect never uninstalls it while the editor is up.
+    const w = window as ArmedSeamWindow;
+    w.__quickAddHoldResolve();
+  });
 }
 async function releaseResolve(page: Page) {
-  await page.evaluate(() =>
-    (
-      window as unknown as { __quickAddReleaseResolve: () => void }
-    ).__quickAddReleaseResolve(),
-  );
+  await page.evaluate(() => {
+    // SAFETY: every release follows a hold in these specs, and hold proved
+    // the hook is installed on this page.
+    const w = window as ArmedSeamWindow;
+    w.__quickAddReleaseResolve();
+  });
 }
 
 /** The `data-parent-id` of the (first) row whose text matches, or null. */
@@ -581,6 +613,8 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
     await expect(bullet).toBeFocused();
     await expect(fab(page)).toBeHidden();
     // Blur back out -> the FAB returns.
+    // SAFETY: Playwright locators for DOM nodes always resolve to Elements;
+    // only HTMLElements carry blur(), and a focused contentEditable is one.
     await bullet.evaluate((el) => (el as HTMLElement).blur());
     await expect(fab(page)).toBeVisible();
   });

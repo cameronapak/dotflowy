@@ -8,6 +8,7 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,24 +19,22 @@ jobs:
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
-      - name: Format check
-        run: bun run fmt:check
-      - name: Lint
-        run: bun run lint
-      - name: Typecheck
-        run: bun run typecheck
-      - name: Typecheck worker
-        run: bun run typecheck:worker
-      - name: Typecheck tests
-        run: bun run typecheck:test
-      - name: Unit tests
-        run: bun run test
-      # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
-      # rest. That trade is only safe while every pointer resolves: an agent
-      # reads a miss, shrugs, and proceeds without the constraint it was meant
-      # to load. Enforced here rather than remembered.
-      - name: Doc pointers
-        run: bun run check:docs
+      # E2e runs in CI as part of `verify` (ADR 0061): cache the browser
+      # binaries keyed on the lockfile (which pins @playwright/test's version)
+      # so a cache hit skips the ~1min download+deps install.
+      - name: Playwright browser cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      # The whole gate, fresh clone to full proof: setup, fmt, lint, all three
+      # typechecks, unit tests (worker/ inside real workerd), doc pointers,
+      # and e2e against a self-booted wrangler dev serving the built SPA.
+      # The same command any agent runs locally - one bar everywhere.
+      - name: Verify
+        run: bun run verify
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.

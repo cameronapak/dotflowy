@@ -46,7 +46,8 @@
     "test:e2e:ui": "playwright test --ui",
     "effect:src": "opensrc path Effect-TS/effect-smol",
     "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol",
-    "lunora:codegen": "lunora codegen"
+    "lunora:codegen": "lunora codegen",
+    "verify": "bun scripts/verify.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -116,7 +117,7 @@
     "typescript": "^7.0.2",
     "vite": "^8.0.16",
     "vitest": "^4.1.0",
-    "wrangler": "^4.104.0"
+    "wrangler": "^4.129.0"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

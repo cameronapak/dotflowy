@@ -26,13 +26,18 @@ const INDEX = resolve(CLIENT_DIR, "index.html");
 
 const log = (msg: string) => console.log(`\x1b[36m[e2e-serve]\x1b[0m ${msg}`);
 
-function run(cmd: string, args: string[]): Promise<number> {
+function run(
+  cmd: string,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+): Promise<number> {
   return new Promise((res) => {
     const proc = spawn(cmd, args, {
       cwd: ROOT,
       stdio: ["inherit", "inherit", "inherit"],
       env: {
         ...process.env,
+        ...extraEnv,
         // Never prompt about telemetry mid-run; CI and local behave alike.
         WRANGLER_SEND_METRICS: "false",
       },
@@ -41,9 +46,18 @@ function run(cmd: string, args: string[]): Promise<number> {
   });
 }
 
-// 1. Build the SPA exactly as `build:cf` does.
-log(`building SPA (vite build)...`);
-const buildCode = await run("bunx", ["vite", "build"]);
+// 1. Build the SPA exactly as `build:cf` does, PLUS the e2e-only seams.
+// VITE_QUICK_ADD_DEFERRED_SEAM=1 keeps the quick-add deferred-resolve gate
+// (ADR 0049) compiled into this build so the async-born lifecycle specs can
+// drive it; VITE_HOTKEY_DEVTOOLS=1 keeps the hotkey-manager handle the zoom
+// perf guard reads. Both compile out of ordinary builds (prod, dev) by
+// default. These are build-env overrides, not Worker secrets - never put them
+// in .dev.vars, which wrangler would ship to the Worker.
+log(`building SPA (vite build, e2e seams on)...`);
+const buildCode = await run("bunx", ["vite", "build"], {
+  VITE_QUICK_ADD_DEFERRED_SEAM: "1",
+  VITE_HOTKEY_DEVTOOLS: "1",
+});
 if (buildCode !== 0) {
   log("build failed; aborting");
   process.exit(1);

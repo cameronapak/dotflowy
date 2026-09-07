@@ -46,3 +46,10 @@ ships.
   rewriting fixtures.
 - E2e state is disposable by design: teardown kills only what the run
   started, and evidence survives it.
+- E2e-only seams are build-flagged, never DEV-flagged: `import.meta.env.DEV`
+  is false in every `vite build`, so a DEV gate silently compiles the seam
+  out of the exact bundle the specs need. `VITE_QUICK_ADD_DEFERRED_SEAM=1`
+  (set by scripts/e2e-serve.ts) keeps the quick-add deferred-resolve gate
+  compiled in; ordinary builds tree-shake it to zero bytes (verified both
+  ways). The pattern to steal: `isXOn(env.VITE_FLAG)` type-guard +
+  mount-effect install, never a module-scope DEV check.
