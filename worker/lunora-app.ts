@@ -94,7 +94,7 @@ const app = defineApp<LunoraEnv>()
           email: session.user.email ?? undefined,
         };
       }),
-      authorizeShard: (identity, shardKey) => identity?.userId === shardKey,
+      authorizeShard: (caller) => caller.identity?.userId === caller.shardKey,
     };
   })
   .build();

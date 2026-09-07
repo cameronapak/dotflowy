@@ -12,6 +12,9 @@ import { createShardDO } from "./shard.js";
 /** Read a value off the per-request `env`. Returns `undefined` to leave the capability unconfigured (its `ctx.*`/admin surface stays a clear-error stub). */
 type Selector<Env, T> = (env: Env) => T | undefined;
 
+/** The generated `createShardDO` config — `.observability()`, `.maxRelationKeys()` and the long-tail `.ai()` / `.kv()` / … methods pass straight through to it. */
+type ShardConfig = NonNullable<Parameters<typeof createShardDO>[0]>;
+
 /** The composed app: a Cloudflare module worker (`fetch` / `scheduled` / optional `email`) plus the `ShardDO` class binding. */
 interface ComposedApp extends LunoraWorker {
     /** Cloudflare Email Routing entry — present only when `.onEmail(...)` was configured. */
@@ -28,6 +31,11 @@ interface ComposedApp extends LunoraWorker {
  */
 class AppBuilder<Env extends object> {
     private adminToken?: Selector<Env, string>;
+    private cdcEnabled = false;
+    private reactiveCacheConfig: boolean | { maxBytes?: number; maxEntries?: number } = false;
+    private maxRelationKeysLimit?: ShardConfig["maxRelationKeys"];
+    private observabilitySink?: ShardConfig["observability"];
+    private relationExistsPushDownMode?: ShardConfig["relationExistsPushDown"];
     private readonly extendFns: ((env: Env, derived: Readonly<WorkerOptions>) => Partial<WorkerOptions>)[] = [];
     private httpRouterApp?: HttpRouterLike;
     private readonly routeMap: Record<string, Route> = {};
@@ -38,6 +46,55 @@ class AppBuilder<Env extends object> {
     /** Bearer token gating the `/_lunora/admin/*` endpoints the studio calls. */
     public admin(selector: Selector<Env, string>): this {
         this.adminToken = selector;
+
+        return this;
+    }
+
+    /**
+     * Opt into change-data-capture: every write records a post-image to `__cdc_log` — on this shard AND, when the app has `.global()` tables, on the global backend. Backs streaming export, replay-PITR, and the `.global()` half of `defineShape` replication (whose poll tick asks the global changelog which tables moved). Off by default: it costs a changelog row per write, which an app using none of the above should not pay.
+     *
+     * REQUIRED for a shard-local `defineShape`: those replicate out of `__cdc_log`, and a `shape_subscribe` is refused with `SHAPE_REQUIRES_CDC` without it.
+     *
+     * It also changes how fresh a `.global()` shape is against writes made OUTSIDE `ctx.db` — an admin import, a PITR replay, an external ETL job, or a predicate over wall clock. With CDC off the poll re-reads every shape every 2s. With it on the poll asks the global changelog which tables moved and skips the rest, so a change the changelog never saw waits for the 30s unconditional resync instead. Writes through `ctx.db` are unaffected: they append, so the poll sees them on the next tick either way.
+     */
+    public cdc(enabled = true): this {
+        this.cdcEnabled = enabled;
+
+        return this;
+    }
+
+    /**
+     * Enable the per-shard reactive query cache: query results are memoized by `(functionPath, args, identity)` and invalidated by the ctx-db write hooks BEFORE the subscription broadcast, so a subscriber re-running its query always observes the post-write state.
+     *
+     * Off by default (every dispatch re-runs its handler). Pass an options object to tune the caps: `maxEntries` (default 1000) and `maxBytes` (default 4 MiB); either accepts `Number.POSITIVE_INFINITY` to disable that cap.
+     */
+    public reactiveCache(config: boolean | { maxBytes?: number; maxEntries?: number } = true): this {
+        this.reactiveCacheConfig = config;
+
+        return this;
+    }
+
+    /** Ceiling on the join keys ONE relation-crossing `where` predicate may pre-resolve via semijoin before failing closed. Omit for the engine default. */
+    public maxRelationKeys(limit: NonNullable<ShardConfig["maxRelationKeys"]>): this {
+        this.maxRelationKeysLimit = limit;
+
+        return this;
+    }
+
+    /**
+     * Route the shard's `ctx.log` lines, `ctx.trace` spans and `ctx.metrics` measurements to a telemetry sink.
+     *
+     * The DO half of observability: without it every in-handler signal stays in the shard's local ring buffer (the studio Logs panel) and reaches no collector. The worker half — one `onRpc` event per dispatched RPC — is a `createWorker` option; pass the SAME sink to both via `.extend((env) => ({ observability: sink(env) }))` to correlate them.
+     */
+    public observability(selector: NonNullable<ShardConfig["observability"]>): this {
+        this.observabilitySink = selector;
+
+        return this;
+    }
+
+    /** Resolution policy for a relation-crossing `where` whose child is co-located in this shard: `"auto"` (cost-based, the engine default), `"always"` (inline correlated EXISTS) or `"never"` (universal semijoin). All three return identical rows. */
+    public relationExistsPushDown(mode: NonNullable<ShardConfig["relationExistsPushDown"]>): this {
+        this.relationExistsPushDownMode = mode;
 
         return this;
     }
@@ -84,7 +141,13 @@ class AppBuilder<Env extends object> {
 
     /** Build the shard DO + compose the worker (standalone or framework-hosted), wrapping the lazy per-isolate singletons + auth init. */
     private assemble(): ComposedApp {
-        const ShardDO = createShardDO({});
+        const ShardDO = createShardDO({
+            cdc: this.cdcEnabled,
+            reactiveCache: this.reactiveCacheConfig,
+            ...(this.maxRelationKeysLimit === undefined ? {} : { maxRelationKeys: this.maxRelationKeysLimit }),
+            ...(this.observabilitySink === undefined ? {} : { observability: this.observabilitySink }),
+            ...(this.relationExistsPushDownMode === undefined ? {} : { relationExistsPushDown: this.relationExistsPushDownMode }),
+        });
 
         // Per-isolate singletons: the worker (and auth instance) are expensive to
         // build, so the first request constructs them and every later request on
@@ -136,6 +199,8 @@ class AppBuilder<Env extends object> {
         if (this.adminToken) {
             options.adminToken = this.adminToken(env);
         }
+
+        options.listSchemaTables = () => ["nodes", "tagColors", "savedQueries", "dailyIndex", "migrateState", "ratelimit_buckets"];
 
         options.logArchive = resolveLogArchiveFromEnv(env);
 
