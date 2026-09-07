@@ -19,17 +19,28 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  // Always boot our own Vite server, NEVER adopt one already on the port.
-  // `dev`/`dev:web` serve :3000, so the only thing that ever answers on this
-  // port is another Playwright run -- a zombie from an aborted suite, or a
-  // sibling worktree serving DIFFERENT source. Reusing either runs the tests
-  // against code that isn't in front of you, and the failures are shaped
-  // exactly like real regressions. Playwright throws on a busy port instead,
-  // which is the loud version of the same fact.
+  // Prod parity, self-booted (ADR 0061): the webServer builds the SPA once,
+  // applies local D1 migrations, then `wrangler dev` serves SPA + Worker +
+  // DOs from ONE origin - the same shape as production. No Vite dev server,
+  // no proxy (the ADR 0058 dogfood hang is the receipt on proxies), no
+  // wrangler somebody forgot to start. global-setup.ts then signs up a
+  // unique-per-run user through the real HTTP signup: the stack's doctor.
+  globalSetup: "./e2e/global-setup.ts",
+  // Always boot our own origin, NEVER adopt one already on the port - the
+  // only thing that ever answers here is another Playwright run (a zombie
+  // from an aborted suite, or a sibling worktree serving DIFFERENT source).
+  // Reusing either runs the tests against code that isn't in front of you,
+  // and the failures are shaped exactly like real regressions. Playwright
+  // throws on a busy port instead, which is the loud version of the same
+  // fact.
   webServer: {
-    command: `bun run dev:web --port ${PORT}`,
+    command: `bun scripts/e2e-serve.ts`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
-    timeout: 120_000,
+    // Build + migrations + wrangler boot: slower than a bare Vite dev server,
+    // but this is the verification path, not the HMR loop.
+    timeout: 300_000,
+    // Stream server output so build/boot failures are visible in the report.
+    stdout: "pipe",
   },
 });
