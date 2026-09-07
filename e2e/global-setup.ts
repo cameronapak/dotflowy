@@ -125,11 +125,11 @@ export default async function globalSetup(): Promise<void> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      // The e2e port is not the auth base URL (BETTER_AUTH_URL, :8787), so a
-      // request with no Origin is cross-origin and Better Auth rejects it
-      // with MISSING_OR_NULL_ORIGIN. Speak as the trusted base origin, the
-      // same one scripts/seed-user.ts effectively posts to.
-      origin: devVars.BETTER_AUTH_URL || "http://localhost:8787",
+      // The doctor is a headless client, not a browser page: speak as the SPA
+      // origin (worker/auth.ts trusts :3000 and :3210). Never the auth base
+      // URL - Better Auth reads that as the server talking to itself and
+      // rejects it with INVALID_ORIGIN.
+      origin: BASE,
       // Turnstile is off locally unless TURNSTILE_SECRET_KEY is set; when the
       // always-pass TEST secret is configured, any token value passes.
       "x-captcha-response": "e2e-global-setup-dummy-token",
