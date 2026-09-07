@@ -18,7 +18,7 @@
  * transaction writes.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import type { ChangeOp } from "../src/data/wire-schema";
 

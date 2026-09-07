@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
 import { Duration, Effect, Layer, Stream } from "effect";
 import { Socket } from "effect/unstable/socket";
+import { describe, expect, test } from "vitest";
 
 import type { ServerMessage, SyncEvent } from "./realtime";
 
