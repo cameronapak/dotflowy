@@ -80,20 +80,22 @@ type QuickAddSeam = {
 type SeamWindow = Window & QuickAddSeam;
 type ArmedSeamWindow = Window & Required<QuickAddSeam>;
 
-/** True when the e2e build's seam is installed on this page. The hook the
- * mount effect writes (or the lack of it) IS the contract - see the seam
- * comment on QuickAddSeam above. */
-function isSeamArmed(w: SeamWindow): w is ArmedSeamWindow {
-  return typeof w.__quickAddHoldResolve === "function";
-}
-
 async function holdResolve(page: Page) {
+  // The seam installs when <QuickAdd/> mounts in the e2e build
+  // (VITE_QUICK_ADD_DEFERRED_SEAM=1). The predicate serializes into the
+  // page, where spec-module helpers don't exist - so the guard lives inline
+  // with the contract restated (the hook the mount effect writes, or its
+  // absence meaning "not mounted yet").
+  /* oxlint-disable anti-slop/no-runtime-typeof -- page-serialized predicate:
+     the serialized closure cannot call named guards, and the hook-or-absent
+     contract IS the domain value here (see QuickAddSeam). */
   await page.waitForFunction(() => {
-    // SAFETY: absence of the hook means "module not mounted yet"; the poll
-    // exits as soon as the mount effect installs it.
+    // SAFETY: page-side read of the documented seam contract only; the
+    // disable above covers the contract check the rule cannot see.
     const w = window as SeamWindow;
-    return isSeamArmed(w);
+    return typeof w.__quickAddHoldResolve === "function";
   });
+  /* oxlint-enable anti-slop/no-runtime-typeof */
   await page.evaluate(() => {
     // SAFETY: the waitForFunction above established the hook is a function;
     // the mount effect never uninstalls it while the editor is up.
