@@ -16,6 +16,13 @@ export default defineConfig({
         test: {
           name: "src",
           include: ["src/**/*.test.{ts,tsx}"],
+          // The src pool runs in plain Node, which lacks DOM event classes
+          // (CloseEvent, MessageEvent) that Bun's runtime provided for free -
+          // e.g. src/data/realtime.test.ts drives fake socket events through
+          // real event constructors. `web: true` installs them (jsdom-less:
+          // no window/document, just the Web IDL event surface). See
+          // https://vitest.dev/config/#web (Vitest 4 node built-in pool).
+          web: true,
         },
       },
       {
