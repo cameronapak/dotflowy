@@ -31,8 +31,20 @@ export interface RegisteredLunoraFunction {
      * `AbortSignal` as a third argument — the runtime drives it frame-by-frame.
      */
     handler: ((context: unknown, args: Record<string, unknown>) => Promise<unknown> | unknown) | ((context: unknown, args: Record<string, unknown>, signal?: AbortSignal) => AsyncIterable<unknown>);
+    /**
+     * The lifecycle moment a hook fires on, when this registration came from
+     * `onConnect`/`onDisconnect`/`onShardInit`/`onQueryChange`. Read at
+     * dispatch to decide whether the function runs system-trusted: `init` and
+     * `reactor` have no caller identity, so RLS has no user to scope to.
+     */
+    lifecycle?: "connect" | "disconnect" | "init" | "reactor";
     /** `"internal"` functions are rejected on the external RPC path; absence === public. */
     visibility?: "internal" | "public";
+    /**
+     * `.x402({ price })` tag on a paid public procedure. The origin worker
+     * paywalls it; the shard refuses to subscribe it (`isPaidFunction`).
+     */
+    x402?: { readonly price: number | string };
 }
 
 /**
@@ -90,6 +102,7 @@ export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
  */
 installCompiledValidatorMap(lunora_mcp_0.claimDailyMapping.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
 if (typeof source["userId"] !== "string") return DEFER;
 if (typeof source["key"] !== "string") return DEFER;
 if (typeof source["nodeId"] !== "string") return DEFER;
@@ -98,16 +111,19 @@ return { "userId": source["userId"], "key": source["key"], "nodeId": source["nod
 });
 installCompiledValidatorMap(lunora_mcp_0.listDailyIndex.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
 if (typeof source["userId"] !== "string") return DEFER;
 return { "userId": source["userId"] };
 });
 installCompiledValidatorMap(lunora_mcp_0.listNodes.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
 if (typeof source["userId"] !== "string") return DEFER;
 return { "userId": source["userId"] };
 });
 installCompiledValidatorMap(lunora_mcp_0.wipeUserShard.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
 if (typeof source["userId"] !== "string") return DEFER;
 return { "userId": source["userId"] };
 });
@@ -133,14 +149,19 @@ export const LUNORA_SHAPES: Record<string, RegisteredShape> = {
 export const LUNORA_MUTATOR_PATHS: ReadonlySet<string> = new Set(["mutators:appendChild", "mutators:applyChangeOps", "mutators:claimDailyMapping", "mutators:deleteDailyMapping", "mutators:deleteSavedQuery", "mutators:deleteTagColor", "mutators:getMigrateState", "mutators:hello", "mutators:importKvRows", "mutators:importNodes", "mutators:indent", "mutators:indentMany", "mutators:insertChildAtStart", "mutators:insertSibling", "mutators:materializeDailyNodes", "mutators:mirrorNode", "mutators:moveMany", "mutators:moveNode", "mutators:outdent", "mutators:outdentMany", "mutators:patchSavedQuery", "mutators:removeMany", "mutators:removeNode", "mutators:restoreNodes", "mutators:seedIfEmpty", "mutators:setBookmarkedAt", "mutators:setCollapsed", "mutators:setCompleted", "mutators:setIsTask", "mutators:setKind", "mutators:setMigrateState", "mutators:setText", "mutators:splitNode", "mutators:upsertDailyMapping", "mutators:upsertSavedQuery", "mutators:upsertTagColor"]);
 
 /**
- * Connection-lifecycle manifest: the function paths the generated ShardDO
- * dispatches when a client's WebSocket connects (`connect`) or disconnects
- * (`disconnect`). Each path also resolves through {@link LUNORA_FUNCTIONS}; the
- * DO runs every hook under the socket's verified identity via system dispatch.
+ * Lifecycle manifest: the function paths the generated ShardDO dispatches when a
+ * client's WebSocket connects (`connect`) or disconnects (`disconnect`), once
+ * per Durable Object instance before any handler runs (`init`), and after a
+ * write flush when a watched read's result changed (`reactor`). Each path also
+ * resolves through {@link LUNORA_FUNCTIONS}. The socket sides run under the
+ * socket's verified identity; `init` and `reactor` have no caller, so they run
+ * anonymous — all via system dispatch.
  */
-export const LUNORA_LIFECYCLE_HOOKS: { connect: readonly string[]; disconnect: readonly string[] } = {
+export const LUNORA_LIFECYCLE_HOOKS: { connect: readonly string[]; disconnect: readonly string[]; init: readonly string[]; reactor: readonly string[] } = {
     connect: [],
     disconnect: [],
+    init: [],
+    reactor: [],
 };
 
 /**
@@ -186,6 +207,27 @@ const callRegistered = async <R>(context: CallerCtx, functionPath: string, args:
 
     if (!registered) {
         throw new LunoraError("FUNCTION_NOT_FOUND", `function not registered: ${functionPath}`);
+    }
+
+    // A mutation is routed through the caller's own `ctx.runMutation` rather than
+    // invoked directly, so `createCaller(ctx).ns.someMutation()` gets exactly what
+    // `ctx.runMutation(api.ns.someMutation)` gets: the BEGIN/COMMIT span (or the
+    // enclosing one, when the caller is already inside a transaction), the jobs it
+    // schedules held until that span commits, and the deferred object deletes
+    // flushed only once it has. Called straight, a mutation composed from an action
+    // or a stream had none of the three — its writes autocommitted one row at a
+    // time and its `ctx.scheduler` calls dispatched immediately, so a mid-handler
+    // throw left the earlier writes durable and the job already enqueued.
+    //
+    // The fallback covers a context that is not a shard dispatch (`runMutation` is
+    // installed by `buildCtx` on every kind but a query's TYPE omits it); there is
+    // no transaction to join in that case, so a direct call is all there is.
+    if (registered.kind === "mutation") {
+        const { runMutation } = context as { runMutation?: (reference: { __lunoraRef: string }, args: Record<string, unknown>) => Promise<unknown> };
+
+        if (typeof runMutation === "function") {
+            return (await runMutation.call(context, { __lunoraRef: functionPath }, args ?? {})) as R;
+        }
     }
 
     return (await registered.handler(context, args ?? {})) as R;
