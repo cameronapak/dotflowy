@@ -120,6 +120,11 @@
     ".shipstudio/**",
     ".superset/**",
     ".zed/**",
-    "tools/oxlint/anti-slop/**"
+    "tools/oxlint/anti-slop/**",
+    "lunora/_generated/",
+    "lunora/.lunora-schema.json",
+    "lunora.advisor.map.json",
+    ".lunora/",
+    ".wrangler/"
   ]
 }
