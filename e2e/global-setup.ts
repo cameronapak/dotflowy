@@ -29,7 +29,8 @@ const EMAIL = `e2e-${RUN}@dotflowy.local`;
 const PASSWORD = `dotflowy-e2e-${RUN}`;
 
 /** dotenv-parsed `.dev.vars` contents (named contract: the parse is tiny,
- * the shape is exactly KEY -> trimmed string). */
+ * the shape is exactly KEY -> trimmed string). Shared by resolveInvite and
+ * the Origin derivation below so the doctors agree on the local config. */
 type DevVars = Record<string, string>;
 
 /** Parse `.dev.vars` the same tiny way scripts/seed-user.ts does. */
@@ -61,16 +62,16 @@ function parseDevVars(path: string) {
 }
 
 /** Match the signup gate (worker/auth.ts hooks.before): invite code from
- * INVITE_CODES, or open signup when SIGNUP_OPEN is exactly "true". */
-function resolveInvite(
-  env: Record<string, string>,
-): { inviteCode?: string } | null {
-  const code = (env.INVITE_CODES ?? "")
+ * INVITE_CODES, or open signup when SIGNUP_OPEN is exactly "true". Takes
+ * the parsed DevVars, not the raw env, so the check runs against the same
+ * local config the preflight doctor read. */
+function resolveInvite(devVars: DevVars): { inviteCode?: string } | null {
+  const code = (devVars.INVITE_CODES ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)[0];
   if (code) return { inviteCode: code };
-  if (env.SIGNUP_OPEN === "true") return {};
+  if (devVars.SIGNUP_OPEN === "true") return {};
   return null;
 }
 

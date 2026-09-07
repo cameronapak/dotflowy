@@ -107,3 +107,9 @@ wrangler.on("exit", (code) => {
   log(`wrangler dev exited (code ${code})`);
   process.exit(code ?? 1);
 });
+
+// The wrangler child inherits this stdio; nothing after this point in the
+// parent has anything to do, but exiting would take the child down when
+// Playwright (not us) owns the lifetime. Wait on the child forever - the
+// signals above and the exit handler are the only ways out.
+await new Promise(() => {});

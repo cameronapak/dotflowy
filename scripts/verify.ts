@@ -9,7 +9,9 @@
  * `changeset` is deliberately NOT here: it's a disclosure a human (or agent)
  * decides, not a mechanical check - CI enforces its presence separately.
  */
-const ROOT = import.meta.dir.replace(/\/scripts$/, "");
+import { resolve } from "node:path";
+
+const ROOT = resolve(import.meta.dir, "..");
 
 const log = (msg: string) => console.log(`\x1b[36m[verify]\x1b[0m ${msg}`);
 
