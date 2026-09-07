@@ -43,12 +43,34 @@ describe("backoffMillis", () => {
   });
 });
 
-// --- Fake WebSocket harness -------------------------------------------------
-// Effect's WebSocketConstructor is an injectable service, so we drive the whole
-// reconnect/handshake state machine with a controllable socket and zero network.
-// This is the testability the Effect rewrite buys (the old hand-rolled socket
-// couldn't be unit-tested at all). Events are driven synchronously; we never
-// wait out a real timer, so these stay fast and deterministic.
+// --- Fake socket event constructors -----------------------------------------
+// The harness drives fake socket events through the shapes the client reads
+// (`ev.code` / `ev.data`, exactly as production decodes them). The runtime
+// has no DOM event classes on every runner (Bun ships them; plain Node does
+// not, and Vitest 4's node pool has no option to add them), so define the
+// two shapes we need where the constructors are used. The client only reads
+// `.type` (dispatched via `fire`), `code` on close frames, and `data` on
+// message frames - nothing else is modeled.
+
+/** A close frame as realtime.ts reads it: only `code` and `reason`. */
+class FakeCloseEvent {
+  readonly type = "close";
+  readonly code: number;
+  readonly reason: string;
+  constructor(_type: string, init: { code?: number; reason?: string } = {}) {
+    this.code = init.code ?? 1000;
+    this.reason = init.reason ?? "";
+  }
+}
+
+/** A message frame as realtime.ts reads it: only `data`. */
+class FakeMessageEvent {
+  readonly type = "message";
+  readonly data: string;
+  constructor(_type: string, init: { data?: string } = {}) {
+    this.data = init.data ?? "";
+  }
+}
 
 class FakeWebSocket implements WebSocket {
   static readonly CONNECTING = 0 as const;
@@ -108,21 +130,25 @@ class FakeWebSocket implements WebSocket {
     if (this.closedWith !== null) return;
     this.closedWith = code;
     this.readyState = 3;
-    this.fire("close", new CloseEvent("close", { code, reason: "" }));
+    this.fire("close", new FakeCloseEvent("close", { code, reason: "" }));
   }
-  private fire(type: string, ev: Event): void {
+  private fire(type: string, ev: { type: string }): void {
     const isListenerFn = (
       l: EventListenerOrEventListenerObject,
     ): l is EventListener => typeof l === "function";
     for (const listener of this.listeners.get(type) ?? []) {
-      if (isListenerFn(listener)) listener(ev);
+      if (!isListenerFn(listener)) continue;
+      // SAFETY: the fake socket only ever hands shaped frames (FakeCloseEvent
+      // / FakeMessageEvent / bare open) to listeners typed for DOM events;
+      // production casts the same way at its own boundary.
+      listener(ev as Event);
     }
   }
   // --- test controls ---
   /** Transition to OPEN and fire the `open` event the client is waiting on. */
   driveOpen(): void {
     this.readyState = 1;
-    this.fire("open", new Event("open"));
+    this.fire("open", { type: "open" });
   }
   /** Deliver a server frame. */
   driveMessage(msg: ServerMessage | string): void {
@@ -130,7 +156,7 @@ class FakeWebSocket implements WebSocket {
       typeof m === "string";
     this.fire(
       "message",
-      new MessageEvent("message", {
+      new FakeMessageEvent("message", {
         data: isString(msg) ? msg : JSON.stringify(msg),
       }),
     );
@@ -138,7 +164,7 @@ class FakeWebSocket implements WebSocket {
   /** Simulate an abnormal server-side drop (1006 = no clean close). */
   driveServerClose(code = 1006): void {
     this.readyState = 3;
-    this.fire("close", new CloseEvent("close", { code, reason: "" }));
+    this.fire("close", new FakeCloseEvent("close", { code, reason: "" }));
   }
 }
 
