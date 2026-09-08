@@ -47,6 +47,14 @@ jobs:
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
+      # .dev.vars is gitignored, so the runner starts with none - and
+      # `wrangler dev` boots auth-less without BETTER_AUTH_SECRET (createAuth
+      # fails closed, 500-ing every /api/* request). Provision it exactly as
+      # `bun run verify` (and the quality job) does: setup copies
+      # .dev.vars.example and generates a throwaway secret. CI secrets never
+      # enter the machine.
+      - name: Provision .dev.vars
+        run: bun run setup
       # Browser binaries cached keyed on the lockfile (which pins
       # @playwright/test's version) so a cache hit skips the download.
       - name: Playwright browser cache
