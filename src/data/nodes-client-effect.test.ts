@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
   createNodesE,

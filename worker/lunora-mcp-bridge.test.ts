@@ -3,7 +3,7 @@
  * (mcp:applyChangeOps input). Full shard RPC stays integration-only.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import { planFromChangeOps } from "../src/data/outline-plans";
 import { createNode } from "../src/data/tree";

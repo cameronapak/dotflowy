@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { Cause, Duration } from "effect";
+import { describe, expect, test } from "vitest";
 
 import {
   decideSyncRecovery,

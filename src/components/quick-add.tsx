@@ -599,9 +599,18 @@ function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
 // `seedOutline`'s Map mock resolves the daily claim in a microtask, so the
 // in-flight-born window (clear/retarget/slash while borning) never actually
 // happens under e2e -- the exact blind spot that hid a cluster of async-lifecycle
-// bugs. This DEV-only gate lets a spec HOLD the destination resolve open, drive
-// the interfering actions, then release -- exercising the real races. No-op (and
-// tree-shaken) in production.
+// bugs. This gate lets a spec HOLD the destination resolve open, drive
+// the interfering actions, then release -- exercising the real races.
+//
+// Build-flag-gated, NOT DEV-gated: import.meta.env.DEV is false in every
+// `vite build` (including the e2e build that must carry the seam - a DEV gate
+// silently compiles it out and the specs fail with
+// "__quickAddHoldResolve is not a function"). Vite statically replaces
+// `import.meta.env.VITE_QUICK_ADD_DEFERRED_SEAM` at build, so the dead side
+// tree-shakes in ordinary builds and the seam survives ONLY in e2e builds
+// flagged `VITE_QUICK_ADD_DEFERRED_SEAM=1`. No window surface, no behavior,
+// and no bundle bytes anywhere else; with the gate unset, awaitResolveGate()
+// is a resolved promise.
 let resolveGate: Promise<void> | null = null;
 let releaseResolveGate: (() => void) | null = null;
 
@@ -609,12 +618,37 @@ function awaitResolveGate(): Promise<void> {
   return resolveGate ?? Promise.resolve();
 }
 
-if (import.meta.env.DEV && hasWindow()) {
-  // SAFETY: DEV-only test hooks this module is the sole writer of
-  const w = window as Window & {
-    __quickAddHoldResolve?: () => void;
-    __quickAddReleaseResolve?: () => void;
-  };
+/** Build-flag test seam. Vite statically replaces
+ * `import.meta.env.VITE_QUICK_ADD_DEFERRED_SEAM` at build - presence of the
+ * string IS the contract (same mechanism as the VITE_SENTRY_DSN gate in
+ * src/instrument.client.ts); no parser is freer than the check. */
+function isDeferredSeamOn(value: string | undefined): value is string {
+  return typeof value === "string";
+}
+
+const deferredSeamOn = isDeferredSeamOn(
+  import.meta.env.VITE_QUICK_ADD_DEFERRED_SEAM,
+);
+
+// The seam installs when <QuickAdd/> mounts - core chrome in the root, not
+// behind the overlay or the session. A spec that reaches the editor has this
+// component mounted, so the seam is present by the time the first test hook
+// can run. The window write lives in the component's own mount effect (not a
+// hook, not module scope) so the install and its cleanup stay next to the
+// component that owns them.
+/** The window hooks this module writes (build-flag seam only). Same shape
+ * as lunora-migrate.ts's MigrateWin: an all-optional partial window, which
+ * Window satisfies without a chained assertion. */
+type DeferredSeamWindow = {
+  __quickAddHoldResolve?: () => void;
+  __quickAddReleaseResolve?: () => void;
+};
+
+function installDeferredResolveSeam(): void {
+  if (!deferredSeamOn || !hasWindow()) return;
+  // SAFETY: build-flag test hooks this module is the sole writer of; they
+  // only ever exist under VITE_QUICK_ADD_DEFERRED_SEAM.
+  const w = window as DeferredSeamWindow;
   w.__quickAddHoldResolve = () => {
     if (resolveGate) return;
     resolveGate = new Promise<void>((r) => {
@@ -626,6 +660,14 @@ if (import.meta.env.DEV && hasWindow()) {
     resolveGate = null;
     releaseResolveGate = null;
   };
+}
+
+function removeDeferredResolveSeam(): void {
+  if (!deferredSeamOn || !hasWindow()) return;
+  // SAFETY: deletes exactly the two hooks installDeferredResolveSeam wrote.
+  const w = window as DeferredSeamWindow;
+  delete w.__quickAddHoldResolve;
+  delete w.__quickAddReleaseResolve;
 }
 
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
@@ -1236,7 +1278,11 @@ export function QuickAdd() {
 
   useEffect(() => {
     setQuickAddOpener(() => setOpen(true));
-    return () => setQuickAddOpener(null);
+    installDeferredResolveSeam();
+    return () => {
+      setQuickAddOpener(null);
+      removeDeferredResolveSeam();
+    };
   }, []);
 
   useEffect(() => {

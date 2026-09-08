@@ -7,7 +7,7 @@
  * browser caller). Fixtures use `createNode()` (tree.ts), the canonical builder.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 

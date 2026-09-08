@@ -8,6 +8,7 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,24 +19,12 @@ jobs:
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
-      - name: Format check
-        run: bun run fmt:check
-      - name: Lint
-        run: bun run lint
-      - name: Typecheck
-        run: bun run typecheck
-      - name: Typecheck worker
-        run: bun run typecheck:worker
-      - name: Typecheck tests
-        run: bun run typecheck:test
-      - name: Unit tests
-        run: bun run test
-      # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
-      # rest. That trade is only safe while every pointer resolves: an agent
-      # reads a miss, shrugs, and proceeds without the constraint it was meant
-      # to load. Enforced here rather than remembered.
-      - name: Doc pointers
-        run: bun run check:docs
+      # The fast gate (~2 min): setup, fmt, lint, all three typechecks, unit
+      # tests (worker/ inside real workerd), doc pointers. Same steps as
+      # `bun run verify`, minus e2e - which runs in the parallel `e2e` job
+      # below over the identical stack. Two jobs, one bar (ADR 0061).
+      - name: Verify (quick)
+        run: bun run verify:quick
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.
@@ -44,3 +33,44 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           bunx changeset status --since="origin/$GITHUB_BASE_REF"
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      # .dev.vars is gitignored, so the runner starts with none - and
+      # `wrangler dev` boots auth-less without BETTER_AUTH_SECRET (createAuth
+      # fails closed, 500-ing every /api/* request). Provision it exactly as
+      # `bun run verify` (and the quality job) does: setup copies
+      # .dev.vars.example and generates a throwaway secret. CI secrets never
+      # enter the machine.
+      - name: Provision .dev.vars
+        run: bun run setup
+      # Browser binaries cached keyed on the lockfile (which pins
+      # @playwright/test's version) so a cache hit skips the download.
+      - name: Playwright browser cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      # The self-booted e2e stack (ADR 0061): the webServer builds the SPA,
+      # applies local D1 migrations, and boots `wrangler dev` as the single
+      # origin; global-setup signs up the run's user. Each shard owns a
+      # distinct port AND state dir so the three wrangler instances never
+      # collide on listeners or local D1/DO state.
+      - name: E2e (shard ${{ matrix.shard }}/3)
+        run: bun run test:e2e --shard=${{ matrix.shard }}/3
+        env:
+          E2E_PORT: ${{ matrix.shard == 1 && 3210 || matrix.shard == 2 && 3220 || 3230 }}
+          WRANGLER_STATE_DIR: .wrangler/state-e2e-${{ matrix.shard }}

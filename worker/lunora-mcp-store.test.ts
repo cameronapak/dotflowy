@@ -1,6 +1,6 @@
 import type { ShardNamespaceLike } from "lunorash/runtime";
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import {
   createLunoraOutlineStore,

@@ -7,7 +7,7 @@
  * rationale and docs/runbooks/restore-user-pitr.md.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 
 import { RESTORE_WINDOW_MS, resolveRestorePoint } from "./restore";
 

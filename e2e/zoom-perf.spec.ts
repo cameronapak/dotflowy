@@ -21,8 +21,9 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // philosophy as virtualized-windowing.spec.ts: assert the structural invariant
 // that yields the performance, deterministically.
 //
-// The count is read via `window.__hotkeyManager`, exposed DEV-only by
-// src/components/hotkey-devtools.ts (stripped from production).
+// The count is read via `window.__hotkeyManager`, a build-flag seam in
+// src/components/hotkey-devtools.ts (VITE_HOTKEY_DEVTOOLS=1 in e2e builds,
+// stripped from production - ADR 0061).
 
 function perfTree(): SeedNode[] {
   const nodes: SeedNode[] = [];

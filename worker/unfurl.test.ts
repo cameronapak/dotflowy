@@ -7,7 +7,7 @@
  * runtime and aren't unit-tested (they import Workers globals). See docs/adr/0016.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 
 import {
   isAllowedUnfurlTarget,

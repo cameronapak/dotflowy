@@ -6,8 +6,8 @@
  * `wrangler dev --test-scheduled` — see docs/runbooks/offsite-backup-r2.md.
  */
 
-import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import type { Node } from "../src/data/wire-schema";
 

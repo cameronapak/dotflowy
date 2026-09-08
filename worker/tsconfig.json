@@ -19,7 +19,9 @@
     "verbatimModuleSyntax": false
   },
   "include": ["."],
-  // Worker unit tests (*.test.ts) use bun:test + Bun globals; they're typechecked
-  // on their own via tsconfig.test.json, not here (workers-types has no Bun lib).
-  "exclude": ["**/*.test.ts"]
+  // Worker unit tests (*.test.ts) use Vitest imports + the workerd pool;
+  // they and the pool's test infra (worker/test/) are typechecked on their
+  // own via tsconfig.test.json, not here (the plugin's module types are not
+  // part of the Worker runtime program).
+  "exclude": ["**/*.test.ts", "test"]
 }
