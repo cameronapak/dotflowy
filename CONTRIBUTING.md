@@ -168,6 +168,13 @@ bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test   # tsc over the unit tests (vitest types)
 bun run test             # vitest - src on the node pool, worker/ inside real workerd
 bun run test:e2e         # playwright (chromium) - boots its own wrangler dev + built SPA
+```
+
+`bunx changeset` is not part of `verify` - it is a separate required PR
+step (see the changeset rule below): `verify` proves the change works, the
+changeset discloses what it changed.
+
+```sh
 bunx changeset           # describe your change for the changelog (see below)
 ```
 

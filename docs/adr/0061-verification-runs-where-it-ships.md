@@ -9,15 +9,16 @@ agent can drive it from a fresh clone with one command, `bun run verify`
 (#349). Three moves:
 
 1. **Worker tests execute inside real workerd** via
-   `@cloudflare/vitest-pool-workers` - the same runtime, D1, and Durable
+   `@cloudflare/vitest-plugin` (the renamed successor of
+   `@cloudflare/vitest-pool-workers`) - the same runtime, D1, and Durable
    Objects the deploy serves. `src/` pure-logic tests run in a plain node
    pool. One runner (Vitest), one command (`bun run test`).
 2. **E2e is prod-parity and self-booted.** Playwright's `webServer` builds
    the SPA once, then boots `wrangler dev` serving SPA + API from a single
    origin - no Vite dev server, no proxy, no wrangler somebody forgot to
    start. `globalSetup` signs up a unique-per-run user through the real
-   HTTP signup (local invite code), so reruns never couple to stale local
-   state.
+   HTTP signup (invite-gated by default, open signup honored when
+   SIGNUP_OPEN is on), so reruns never couple to stale local state.
 3. **CI runs the same bar.** The quality job calls `bun run verify` -
    setup, fmt, lint, typechecks, both test pools, e2e. No device in the
    loop anywhere.
