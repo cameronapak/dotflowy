@@ -19,9 +19,14 @@ agent can drive it from a fresh clone with one command, `bun run verify`
    start. `globalSetup` signs up a unique-per-run user through the real
    HTTP signup (invite-gated by default, open signup honored when
    SIGNUP_OPEN is on), so reruns never couple to stale local state.
-3. **CI runs the same bar.** The quality job calls `bun run verify` -
-   setup, fmt, lint, typechecks, both test pools, e2e. No device in the
-   loop anywhere.
+3. **CI runs the same bar.** The quality job calls `bun run verify:quick`
+   (everything except e2e, ~2 min feedback) and a sharded `e2e` job runs
+   the full Playwright suite in parallel over the identical stack - two
+   jobs, one bar. Splitting keeps wall time near the fast job's; deleting
+   e2e from CI was considered and rejected (interrogate review): the editor
+   has no other CI coverage, nothing would attest a local e2e run, and the
+   build itself is only proven inside the e2e boot. No device in the loop
+   anywhere.
 
 **Why not the Vite dev server + proxy.** E2e used to run against `vite dev`
 proxying `/api` to a wrangler that nothing started - not headless, not

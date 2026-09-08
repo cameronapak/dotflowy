@@ -47,7 +47,8 @@
     "effect:src": "opensrc path Effect-TS/effect-smol",
     "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol",
     "lunora:codegen": "lunora codegen",
-    "verify": "bun scripts/verify.ts"
+    "verify": "bun scripts/verify.ts",
+    "verify:quick": "bun scripts/verify.ts --quick"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

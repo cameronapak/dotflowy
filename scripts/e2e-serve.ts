@@ -67,24 +67,34 @@ if (existsSync(SHELL)) {
   log("copied _shell.html -> index.html");
 }
 
-// 2. Local D1 migrations (idempotent; same state dir wrangler dev uses).
+// 2. Local D1 migrations (idempotent). Same state dir wrangler dev below
+// uses (WRANGLER_STATE_DIR when set): migrations and server must agree or
+// the doctor signs up against an unmigrated D1.
 log("applying local D1 migrations...");
-const migrateCode = await run("bunx", [
+const migrateArgs = [
   "wrangler",
   "d1",
   "migrations",
   "apply",
   "dotflowy-db",
   "--local",
-]);
+];
+const stateDir = process.env.WRANGLER_STATE_DIR;
+if (stateDir) migrateArgs.push("--persist-to", stateDir);
+const migrateCode = await run("bunx", migrateArgs);
 if (migrateCode !== 0) {
   log("migrations failed; aborting");
   process.exit(1);
 }
 
 // 3. One origin: wrangler serves the built SPA AND the Worker + DOs.
+// WRANGLER_STATE_DIR (used by CI shards and sibling worktrees) moves local
+// D1/DO state off the shared .wrangler/state so concurrent runs never
+// collide. e2e/global-setup.ts reads the same var before its D1 flip.
 log(`starting wrangler dev on :${PORT}`);
-const wrangler = spawn("bunx", ["wrangler", "dev", "--port", PORT], {
+const wranglerArgs = ["wrangler", "dev", "--port", PORT];
+if (stateDir) wranglerArgs.push("--persist-to", stateDir);
+const wrangler = spawn("bunx", wranglerArgs, {
   cwd: ROOT,
   stdio: ["inherit", "inherit", "inherit"],
   env: {

@@ -77,21 +77,22 @@ function resolveInvite(devVars: DevVars): { inviteCode?: string } | null {
 
 /** Flip emailVerified in the same local D1 wrangler dev serves. Best-effort
  * warn (parity with seed-user): no spec signs in as this user today, but a
- * loud warning keeps a future spec from wedging silently. */
+ * loud warning keeps a future spec from wedging silently. Honors
+ * WRANGLER_STATE_DIR (CI shards, sibling worktrees) so the flip lands in
+ * the same state dir the server and migrations used. */
 function markVerified(): void {
-  const proc = spawnSync(
-    "bunx",
-    [
-      "wrangler",
-      "d1",
-      "execute",
-      "dotflowy-db",
-      "--local",
-      "--command",
-      `UPDATE "user" SET "emailVerified" = 1 WHERE email = '${EMAIL}'`,
-    ],
-    { cwd: ROOT, encoding: "utf8" },
-  );
+  const args = [
+    "wrangler",
+    "d1",
+    "execute",
+    "dotflowy-db",
+    "--local",
+    "--command",
+    `UPDATE "user" SET "emailVerified" = 1 WHERE email = '${EMAIL}'`,
+  ];
+  const stateDir = process.env.WRANGLER_STATE_DIR;
+  if (stateDir) args.push("--persist-to", stateDir);
+  const proc = spawnSync("bunx", args, { cwd: ROOT, encoding: "utf8" });
   if (proc.status !== 0) {
     console.warn(
       `[e2e-global-setup] warning: couldn't mark ${EMAIL} verified ` +

@@ -157,7 +157,9 @@ time. Webhooks and `subscription.list()` resolve plans from that same list.
 
 Run the full gate. `bun run verify` runs the whole list in one command -
 it is what CI runs ([ADR 0061](./docs/adr/0061-verification-runs-where-it-ships.md)).
-The pieces:
+Iterating? `bun run verify:quick` skips e2e (~2 min); CI runs both shapes
+in parallel jobs (`quality` quick + sharded `e2e`), so the full bar still
+blocks every PR. The pieces:
 
 ```sh
 bun run verify           # everything below in one command (what CI runs)

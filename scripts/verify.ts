@@ -8,7 +8,13 @@
  * Sequential and fail-fast, with a one-line-per-step summary at the end.
  * `changeset` is deliberately NOT here: it's a disclosure a human (or agent)
  * decides, not a mechanical check - CI enforces its presence separately.
+ *
+ * Two shapes (ADR 0061 amendment): the default runs everything; `--quick`
+ * skips the e2e step for fast iteration. CI runs both in parallel jobs -
+ * `quality` (quick) and `e2e` (sharded) - over the same steps, so the bar
+ * never splits into two tiers.
  */
+const SKIP_E2E = process.argv.includes("--quick");
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -39,6 +45,11 @@ const results: Array<[string, string]> = [];
 const startedAt = Date.now();
 
 for (const [name, cmd, docs] of STEPS) {
+  if (SKIP_E2E && name === "test:e2e") {
+    log("test:e2e - skipped (--quick; CI runs it in the e2e job)");
+    results.push([name, "skipped (--quick)"]);
+    continue;
+  }
   log(`${name} - ${docs}`);
   const stepStart = Date.now();
   const proc = Bun.spawn(cmd, {
@@ -57,9 +68,15 @@ for (const [name, cmd, docs] of STEPS) {
 console.log("");
 log(`summary (${((Date.now() - startedAt) / 1000).toFixed(1)}s total):`);
 for (const [name, outcome] of results) {
-  console.log(
-    `  ${outcome.startsWith("passed") ? "✔" : "✖"} ${name}: ${outcome}`,
-  );
+  const mark = outcome.startsWith("passed")
+    ? "✔"
+    : outcome.startsWith("skipped")
+      ? "○"
+      : "✖";
+  console.log(`  ${mark} ${name}: ${outcome}`);
 }
 
-if (results.some(([, o]) => !o.startsWith("passed"))) process.exit(1);
+if (
+  results.some(([, o]) => !o.startsWith("passed") && !o.startsWith("skipped"))
+)
+  process.exit(1);
