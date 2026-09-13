@@ -30,3 +30,6 @@ test-results/
 
 # Riptide workspace machine-local overrides
 .humanlayer/workspace.local.json
+
+# Amp orb portal runtime files
+.amp/portals/*

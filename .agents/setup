@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+step() {
+  local label="$1"
+  shift
+  local started=$SECONDS
+  printf '\n[orb setup] %s\n' "$label"
+  "$@"
+  printf '[orb setup] %s completed in %ss\n' "$label" "$((SECONDS - started))"
+}
+
+bun_version="$(sed -n 's/.*"packageManager": "bun@\([^"]*\)".*/\1/p' package.json)"
+if [[ -z "$bun_version" ]]; then
+  echo "Could not read the pinned Bun version from package.json" >&2
+  exit 1
+fi
+
+export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+if [[ ! -x "$BUN_INSTALL/bin/bun" ]] || \
+  [[ "$("$BUN_INSTALL/bin/bun" --version)" != "$bun_version" ]]; then
+  step "Install Bun $bun_version" bash -c \
+    'curl -fsSL https://bun.com/install | bash -s -- "bun-v$1"' _ "$bun_version"
+fi
+
+profile_marker="# dotflowy orb Bun"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ "\${PWD}" == "$repo_root" ]]; then
+  export BUN_INSTALL="$BUN_INSTALL"
+  export PATH="\$BUN_INSTALL/bin:\$PATH"
+fi
+EOF
+fi
+
+step "Install root dependencies" bun install --frozen-lockfile
+step "Install landing dependencies" bash -c \
+  'cd landing && bun install --frozen-lockfile'
+step "Prepare local Worker configuration and D1" env CI=1 bun run setup
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+  playwright_version="$(bunx playwright --version)"
+  playwright_version="${playwright_version#Version }"
+  playwright_deps_marker="$HOME/.cache/ms-playwright/.dotflowy-deps-$playwright_version"
+  if [[ ! -f "$playwright_deps_marker" ]]; then
+    step "Install Playwright Chromium and system dependencies" \
+      bunx playwright install --with-deps chromium
+    mkdir -p "$(dirname "$playwright_deps_marker")"
+    touch "$playwright_deps_marker"
+  else
+    step "Install Playwright Chromium" bunx playwright install chromium
+  fi
+else
+  step "Install Playwright Chromium" bunx playwright install chromium
+fi
+
+printf '\n[orb setup] Dotflowy is ready.\n'
