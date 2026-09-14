@@ -51,7 +51,7 @@ Plugin, seam, token, or kit UI: read [`docs/plugins.md`](./docs/plugins.md).
 
 ## Testing
 
-Testing or coverage: read [`CONTRIBUTING.md`](./CONTRIBUTING.md). **A perf guard asserts a countable invariant.**
+Testing or coverage: read [`CONTRIBUTING.md`](./CONTRIBUTING.md). **A perf guard asserts a countable invariant.** `bun run verify` is the whole gate from a fresh clone ([ADR 0061](./docs/adr/0061-verification-runs-where-it-ships.md)): unit tests run on Vitest (worker/ inside real workerd), e2e boots its own `wrangler dev` serving the built SPA.
 
 ## Effect
 

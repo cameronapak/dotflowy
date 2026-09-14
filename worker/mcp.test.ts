@@ -8,8 +8,8 @@
  * mocks the Worker, and MCP has no browser caller).
  */
 
-import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
+import { describe, expect, test } from "vitest";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 import type { OutlineStore } from "./mcp-tools";

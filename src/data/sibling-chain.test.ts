@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import { chainDisagreements, orderSiblings } from "./sibling-chain";
 import { createNode } from "./tree";

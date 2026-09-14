@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import { buildFilterOperatorMap, buildQueryFilter } from "./filter-query";
 import { buildTreeIndex, createNode } from "./tree";

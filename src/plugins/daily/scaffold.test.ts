@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import { dayKeyToWeekKey, scaffoldKeyKind } from "../../data/date-links";
 import { buildTreeIndex, createNode } from "../../data/tree";

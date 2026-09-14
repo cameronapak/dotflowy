@@ -4,7 +4,7 @@
  * so this is their only coverage. See worker/identity.ts.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 
 import {
   isAdminSession,

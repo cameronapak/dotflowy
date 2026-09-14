@@ -40,13 +40,15 @@
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "check:docs": "bun scripts/check-doc-links.ts",
-    "test": "bun test -- ./src ./worker",
+    "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:serial": "playwright test --workers=1",
     "test:e2e:ui": "playwright test --ui",
     "effect:src": "opensrc path Effect-TS/effect-smol",
     "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol",
-    "lunora:codegen": "lunora codegen"
+    "lunora:codegen": "lunora codegen",
+    "verify": "bun scripts/verify.ts",
+    "verify:quick": "bun scripts/verify.ts --quick"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -94,6 +96,7 @@
   "devDependencies": {
     "@babel/core": "^8.0.1",
     "@changesets/cli": "^2.31.0",
+    "@cloudflare/vitest-plugin": "^1.1.4",
     "@cloudflare/workers-types": "^4.20260624.1",
     "@oxlint/plugins": "1.81.0",
     "@playwright/test": "^1.61.0",
@@ -114,7 +117,8 @@
     "tailwindcss": "^4.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.0.16",
-    "wrangler": "^4.104.0"
+    "vitest": "^4.1.0",
+    "wrangler": "^4.129.0"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

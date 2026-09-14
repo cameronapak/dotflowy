@@ -6,8 +6,8 @@
  * mirror-bearing export re-imports with the mirror RE-LINKED.
  */
 
-import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
+import { describe, expect, it } from "vitest";
 
 import type { ChangeOp, Node } from "./wire-schema";
 

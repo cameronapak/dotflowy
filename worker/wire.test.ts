@@ -10,8 +10,8 @@
  * `decodeBody` helper makes at the boundary. See docs/adr/0014.
  */
 
-import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import {
   AdminRestorePostBody,

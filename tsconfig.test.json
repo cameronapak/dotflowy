@@ -1,12 +1,14 @@
 {
-  // Unit tests run under `bun test` (script: `test`). They live co-located as
-  // src/**/*.test.ts (and worker/**/*.test.ts for the Worker trust-boundary
-  // schemas) and are EXCLUDED from the app tsconfig so `bun:test` imports and
-  // Bun globals never leak into the browser app's typecheck. This file
-  // typechecks them on their own, mirroring typecheck:worker.
+  // Unit tests run under Vitest (script: `test`; ADR 0061). They live
+  // co-located as src/**/*.test.ts(x) (node pool) and worker/**/*.test.ts
+  // (workerd pool) and are EXCLUDED from the app tsconfig so test imports
+  // never leak into the browser app's typecheck. This file typechecks them
+  // on their own, mirroring typecheck:worker.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["bun"],
+    // `cloudflare:test` / `cloudflare:workers` module types for the workerd
+    // pool (src tests import from "vitest" explicitly, needing no ambient).
+    "types": ["@cloudflare/vitest-plugin/types"],
     "noEmit": true
   },
   // vite-env.d.ts carries the `virtual:dotflowy-changelog` module declaration
@@ -15,7 +17,8 @@
     "src/vite-env.d.ts",
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
-    "worker/**/*.test.ts"
+    "worker/**/*.test.ts",
+    "worker/test/*.ts"
   ],
   "exclude": []
 }

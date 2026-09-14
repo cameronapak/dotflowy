@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import { CORE_FILTER_OPERATORS } from "./core-filter-operators";
 import {

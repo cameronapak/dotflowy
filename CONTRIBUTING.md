@@ -155,18 +155,29 @@ time. Webhooks and `subscription.list()` resolve plans from that same list.
 
 ## Before you open a PR
 
-Run the full gate. These mirror CI — except `bun run test:e2e`, which is
-local-only — and are the same checks the review process expects to pass:
+Run the full gate. `bun run verify` runs the whole list in one command -
+it is what CI runs ([ADR 0061](./docs/adr/0061-verification-runs-where-it-ships.md)).
+Iterating? `bun run verify:quick` skips e2e (~2 min); CI runs both shapes
+in parallel jobs (`quality` quick + sharded `e2e`), so the full bar still
+blocks every PR. The pieces:
 
 ```sh
-bun run fmt:check       # oxfmt
-bun run lint            # oxlint (correctness = error) over src + worker
-bun run typecheck       # tsc over the app (DOM libs)
+bun run verify           # everything below in one command (what CI runs)
+bun run fmt:check        # oxfmt
+bun run lint             # oxlint (correctness = error) over src + worker
+bun run typecheck        # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
-bun run typecheck:test  # tsc over the unit tests (bun types)
-bun run test            # bun test — pure-logic unit tests (src + worker/)
-bun run test:e2e        # playwright (chromium) — behavior/integration
-bunx changeset          # describe your change for the changelog (see below)
+bun run typecheck:test   # tsc over the unit tests (vitest types)
+bun run test             # vitest - src on the node pool, worker/ inside real workerd
+bun run test:e2e         # playwright (chromium) - boots its own wrangler dev + built SPA
+```
+
+`bunx changeset` is not part of `verify` - it is a separate required PR
+step (see the changeset rule below): `verify` proves the change works, the
+changeset discloses what it changed.
+
+```sh
+bunx changeset           # describe your change for the changelog (see below)
 ```
 
 Then **run the app**: before calling an observable change done, drive it in
@@ -184,16 +195,16 @@ Rules of thumb:
   `changeset version` directly**, which would delete the fragments before they're
   archived. See [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md).
 
-- **Unit tests (`bun test`) cover pure logic only** — `tree.ts`, `tags.ts`,
+- **Unit tests (`bun run test`, Vitest) cover pure logic only** — `tree.ts`, `tags.ts`,
   `links.ts`, the Worker planners/schemas. Editor behavior (caret, contentEditable,
   the collection/DO path) stays in **Playwright** (`e2e/`). Don't unit-test the
   DOM path; you'd just be mocking the world.
 - **Chasing a flake? `bun run test:e2e:serial`** (`--workers=1`) is the
   maximum-determinism local run; `--workers=2` is the clean-signal full run
-  before a PR. **e2e does not run in CI** — Playwright is a local pre-PR gate,
-  so running it here is what stands in for a CI check. A parallel-contention
-  flake isn't a real failure. e2e runs on its own Vite server on port 3210;
-  kill a zombie or set `E2E_PORT`. For a caret, set the Selection range
+  before a PR. e2e runs in CI as part of `bun run verify`, so a flake here
+  will fail there too. E2e boots its own `wrangler dev` serving the built
+  SPA on port 3210 and never adopts a server already on the port; kill a
+  zombie or set `E2E_PORT`. For a caret, set the Selection range
   directly. `toHaveText` normalizes whitespace. **A perf guard asserts a
   countable invariant**, never a wall clock.
 - **react-doctor is an occasional manual audit, not a gate** — its accepted

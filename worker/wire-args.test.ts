@@ -1,11 +1,11 @@
+import { v } from "lunorash/server";
 /**
  * Regression: changeOpArg must accept null on nullable wire fields even when
  * generated FunctionReference types collapse .nullable() to non-null
  * (lunorash alpha.166 codegen). Exercises the real Lunora validator, not the
  * planner.
  */
-import { describe, expect, test } from "bun:test";
-import { v } from "lunorash/server";
+import { describe, expect, test } from "vitest";
 
 import { changeOpArg } from "../lunora/wire-args";
 

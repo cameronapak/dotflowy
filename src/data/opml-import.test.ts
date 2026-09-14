@@ -9,8 +9,9 @@
  * is rejected, and the raw-size guard fires before parsing.
  */
 
-import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
 
 import type { ChangeOp, Node } from "./wire-schema";
 
@@ -25,8 +26,11 @@ import {
   type OpmlImportResult,
 } from "./opml-import";
 
-const SAMPLE_PATH = `${import.meta.dir}/../../docs/spec-assets/opml/workflowy-crafted-sample.opml`;
-const sampleOpml = await Bun.file(SAMPLE_PATH).text();
+const SAMPLE_URL = new URL(
+  "../../docs/spec-assets/opml/workflowy-crafted-sample.opml",
+  import.meta.url,
+);
+const sampleOpml = await readFile(SAMPLE_URL, "utf8");
 
 const run = (src: string): OpmlImportResult => Effect.runSync(parseOpml(src));
 const runFail = (src: string, options?: { maxLength?: number }) =>

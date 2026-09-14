@@ -40,6 +40,11 @@ async function build(): Promise<boolean> {
   const proc = Bun.spawn(["bunx", "vite", "build"], {
     cwd: ROOT,
     stdio: ["inherit", "inherit", "inherit"],
+    // VITE_HOTKEY_DEVTOOLS=1 keeps the hotkey-manager window seam compiled
+    // into this build (ADR 0061): cf:dev is the parity dev loop, so its
+    // console gets the same handle the e2e perf guard reads. Plain `vite
+    // dev` (HMR) never sets it.
+    env: { ...process.env, VITE_HOTKEY_DEVTOOLS: "1" },
   });
   const code = await proc.exited;
   if (code !== 0) {

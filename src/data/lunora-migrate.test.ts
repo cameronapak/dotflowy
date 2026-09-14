@@ -1,6 +1,6 @@
 import type { LunoraClient } from "lunorash/client";
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 
 import type { OutlineStore } from "./lunora-outline-store";
 

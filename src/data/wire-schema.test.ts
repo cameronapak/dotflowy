@@ -12,8 +12,8 @@
  * realtime.test.ts; this file only exercises the schema.)
  */
 
-import { describe, expect, it } from "bun:test";
 import { Exit, Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import { createNode } from "./tree";
 import { ChangeOpSchema, NodeSchema, ServerMessageSchema } from "./wire-schema";
