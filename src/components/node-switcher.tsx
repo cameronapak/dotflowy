@@ -572,18 +572,17 @@ function ActionCommandRow({
           {action.description}
         </span>
       </div>
-      {action.hotkey &&
-        action.hotkey.length > 0 && (
-          // data-slot="command-shortcut" hides CommandItem's trailing check so the
-          // shortcut sits flush at the row's right edge (ml-auto).
-          <span data-slot="command-shortcut" className="ml-auto shrink-0">
-            <KbdGroup>
-              {action.hotkey.map((k, i) => (
-                <Kbd key={i}>{k}</Kbd>
-              ))}
-            </KbdGroup>
-          </span>
-        )}
+      {action.hotkey && action.hotkey.length > 0 && (
+        // data-slot="command-shortcut" hides CommandItem's trailing check so the
+        // shortcut sits flush at the row's right edge (ml-auto).
+        <span data-slot="command-shortcut" className="ml-auto shrink-0">
+          <KbdGroup>
+            {action.hotkey.map((k, i) => (
+              <Kbd key={i}>{k}</Kbd>
+            ))}
+          </KbdGroup>
+        </span>
+      )}
     </CommandItem>
   );
 }
