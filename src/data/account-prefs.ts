@@ -63,6 +63,13 @@ function mirrorLunoraFlag(enabled: boolean) {
   }
 }
 
+/** ADR 0061: the server has verified classic and permanently retired Lunora. */
+export function reloadToClassicAfterRetirement(): void {
+  if (!hasWindow()) return;
+  mirrorLunoraFlag(false);
+  hardReset(window.location.pathname);
+}
+
 /**
  * Persist the preference via a direct `kvPut` — not the collection's
  * insert/update handlers. Those fire async `onInsert`/`onUpdate` that

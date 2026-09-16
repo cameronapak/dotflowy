@@ -54,6 +54,52 @@ export const userDailyIndexCollection = (
     return { checkpoints, collection: createCollection(config), scope };
 };
 
+/** Options for the `userRetirementState` shape binding. */
+export interface UserRetirementStateCollectionOptions {
+        args?: {};
+    /**
+     * Share the optimistic-overlay gate with other collections + mutators on this
+     * shard. Defaults to the shared per-shard registry, which is almost always what
+     * you want — pass one only to isolate this collection's gate.
+     */
+    checkpoints?: CheckpointRegistry;
+    /** The Lunora client to subscribe through. */
+    client: LunoraClient;
+    /** Row key extractor — defaults to `row._id`. Override when the app keys rows by a natural column. */
+    getKey?: (row: Doc<"retirementState"> & Row) => string;
+    /** `"eager"` starts syncing at creation; `"lazy"` (default) on the first subscriber. */
+    load?: "eager" | "lazy";
+    /** Notified when the underlying subscription errors; the collection always leaves `loading`. */
+    onError?: (error: SubscriptionError) => void;
+    /** Routes the subscription to a shard's DO. **Required for a `.shardBy()` table** — without it the watermark lands in the default bucket. */
+    shardKey?: string;
+}
+
+/**
+ * Collection options for the `userRetirementState` replication shape: `config` for
+ * `createCollection`, plus the `checkpoints` registry to hand `bindMutators` and
+ * `scope` to re-point the subscription.
+ */
+export const userRetirementStateCollectionOptions = (options: UserRetirementStateCollectionOptions): LunoraCollectionOptions<Doc<"retirementState"> & Row> =>
+    lunoraCollectionOptions<Doc<"retirementState"> & Row>({
+        client: options.client,
+        ...(options.checkpoints === undefined ? {} : { checkpoints: options.checkpoints }),
+        ...(options.getKey === undefined ? {} : { getKey: options.getKey }),
+        ...(options.load === undefined ? {} : { load: options.load }),
+        ...(options.onError === undefined ? {} : { onError: options.onError }),
+        ...(options.shardKey === undefined ? {} : { shardKey: options.shardKey }),
+        shape: { args: options.args, name: "userRetirementState", ...(options.shardKey === undefined ? {} : { shardKey: options.shardKey }) },
+    });
+
+/** Live collection for the `userRetirementState` shape, with its sync controls. */
+export const userRetirementStateCollection = (
+    options: UserRetirementStateCollectionOptions,
+): { checkpoints: CheckpointRegistry; collection: Collection<Doc<"retirementState"> & Row, string>; scope: (args?: {}) => void } => {
+    const { checkpoints, config, scope } = userRetirementStateCollectionOptions(options);
+
+    return { checkpoints, collection: createCollection(config), scope };
+};
+
 /** Options for the `userSavedQueries` shape binding. */
 export interface UserSavedQueriesCollectionOptions {
         args?: {};

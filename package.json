@@ -23,6 +23,7 @@
     "comp:dev-plan": "bun scripts/comp-dev-plan.ts",
     "mint:mcp-token": "bun scripts/mint-mcp-token.ts",
     "invite": "bun scripts/invite.ts",
+    "lunora:retire": "bun scripts/lunora-retirement.ts",
     "announce": "bun scripts/announce.ts",
     "deploy": "bun run build:cf && wrangler deploy",
     "gen:og": "bun scripts/gen-og.ts",
