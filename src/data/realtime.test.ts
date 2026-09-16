@@ -170,7 +170,7 @@ function withHarness(
   const collected: SyncEvent[] = [];
   const layer = Layer.succeed(Socket.WebSocketConstructor)((
     _url: string,
-    _protocols?: string | Array<string>,
+    _options?: Socket.WebSocketConstructorOptions,
   ): WebSocket => {
     const ws = new FakeWebSocket();
     sockets.push(ws);

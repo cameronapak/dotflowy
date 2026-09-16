@@ -176,7 +176,7 @@ export const createSyncStream = (
           const since = force ? null : yield* cursor;
 
           const socket = yield* Socket.makeWebSocket(syncUrl());
-          const write = yield* socket.writer;
+          const writer = yield* socket.writer;
           const firstFrame = yield* Deferred.make<void>();
 
           const handler = (raw: string) =>
@@ -188,12 +188,24 @@ export const createSyncStream = (
               yield* Queue.offer(out, { _tag: "Message", message: msg });
             });
 
-          // Send `hello` the moment the socket opens. A failed send means the
-          // socket is already dead; the watchdog/run will surface that.
-          const onOpen = write(JSON.stringify({ type: "hello", since })).pipe(
-            Effect.ignore,
-          );
-          const run = socket.runString(handler, { onOpen });
+          // Send `hello` once the socket opens. The writer suspends while
+          // disconnected, so this waits for the open; a failed send means the
+          // socket is already dead and the watchdog/run surfaces that.
+          // Reader acquisition dials the socket; every termination (clean
+          // close included) fails the pull with a SocketError, ending the
+          // connection as a failure (-> backoff and reconnect).
+          const run = Effect.gen(function* () {
+            const pull = yield* Socket.readerString(socket);
+            yield* writer
+              .write(JSON.stringify({ type: "hello", since }))
+              .pipe(Effect.ignore);
+            while (true) {
+              const batch = yield* pull;
+              for (const raw of batch) {
+                yield* handler(raw);
+              }
+            }
+          });
 
           // Reset-after-stable: if this connection survives STABLE_AFTER, clear
           // the backoff counter. Forked into the connection scope, so a drop

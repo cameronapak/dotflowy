@@ -8,14 +8,14 @@ import { Data, Duration, Effect, Schedule } from "effect";
  * (daily-index.ts), which consumes the program directly and degrades to a plain
  * value on failure. See docs/adr/0012-effect-replaces-errore.md.
  *
- * Design notes (Effect v4, beta.90):
+ * Design notes (Effect v4, rc.115):
  *  - Domain errors are tagged classes via `Data.TaggedError('Tag')<{}>`.
  *    routes on the `_tag` discriminator.
  *  - `Effect.tryPromise` lifts `fetch` into the Effect world. Its `catch` maps
  *    the untyped rejection to our `KvTransportError`.
- *  - Retry: `Schedule.both(Schedule.exponential, Schedule.recurs)` — v4 composes
- *    schedules with `both` (stop when either input stops), capping exponential
- *    backoff at a bounded attempt count.
+ *  - Retry: `Schedule.max([Schedule.exponential, Schedule.recurs])` — v4
+ *    combines schedules with `max` (stop when any input stops), capping
+ *    exponential backoff at a bounded attempt count.
  *  - Timeout: `Effect.timeoutOrElse({ duration, orElse })` turns a timeout into
  *    a `KvTimeoutError`, keeping the error channel typed.
  *  - Recovery: `Effect.match({ onFailure, onSuccess })` is the v4 way to
@@ -79,10 +79,10 @@ export class KvTimeoutError extends Data.TaggedError("KvTimeoutError")<{
 // --- Core fetch effect ------------------------------------------------------
 
 /** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
-const retryPolicy = Schedule.both(
+const retryPolicy = Schedule.max([
   Schedule.exponential("100 millis"),
   Schedule.recurs(4),
-);
+]);
 
 interface FetchArgs {
   collection: string;
