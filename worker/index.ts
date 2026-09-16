@@ -68,6 +68,11 @@ import {
   createLunoraOutlineStore,
   isLunoraOutlineEnabledForUser,
 } from "./lunora-mcp-store";
+import {
+  retirementPopulation,
+  retirementReport,
+  runRetirementOperation,
+} from "./lunora-retirement-service";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -77,6 +82,7 @@ import { isHttpUrlString, unfurlTitleE } from "./unfurl";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
+  AdminLunoraRetirementPostBody,
   AdminRestorePostBody,
   AdminSnapshotRestorePostBody,
   KvClaimBody,
@@ -951,6 +957,43 @@ function handleApiRequest(
         }),
       );
       return json({ key, ...result });
+    }
+
+    // Temporary ADR 0061 operator API. Mutations are one user per request;
+    // scripts/lunora-retirement.ts owns sequential batching. The shared admin
+    // gate remains fail-closed and returns 404 to every non-admin probe.
+    if (url.pathname === "/api/admin/lunora-retirement") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method === "GET") {
+        if (url.searchParams.get("population") === "1") {
+          return json({
+            userIds: yield* Effect.promise(() => retirementPopulation(env)),
+          });
+        }
+        const userId =
+          url.searchParams.has("userId") || url.searchParams.has("email")
+            ? yield* resolveRestoreUserId(env, {
+                userId: url.searchParams.get("userId") ?? undefined,
+                email: url.searchParams.get("email") ?? undefined,
+              })
+            : undefined;
+        return json(yield* Effect.promise(() => retirementReport(env, userId)));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminLunoraRetirementPostBody);
+      const targetUserId = yield* resolveRestoreUserId(env, body);
+      return json(
+        yield* Effect.promise(() =>
+          runRetirementOperation(env, targetUserId, body.operation),
+        ),
+      );
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the

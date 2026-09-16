@@ -40,7 +40,8 @@ type ShardTable =
   | "tagColors"
   | "savedQueries"
   | "dailyIndex"
-  | "migrateState";
+  | "migrateState"
+  | "retirementState";
 
 /** Minimal mutator ctx — defineMutator's ServerContext is the base MutationCtx. */
 type MutatorDb = {
@@ -88,9 +89,12 @@ async function loadNodes(ctx: MutatorCtx): Promise<OutlineNode[]> {
   return rows.map(docToNode);
 }
 
-function assertOwner(ctx: MutatorCtx, userId: string): void {
+async function assertOwner(ctx: MutatorCtx, userId: string): Promise<void> {
   if (ctx.auth.userId !== userId) {
     throw new Error("unauthorized: shard userId mismatch");
+  }
+  if ((await ctx.db.query("retirementState").collect()).length > 0) {
+    throw new Error("LUNORA_RETIRED");
   }
 }
 
@@ -151,7 +155,7 @@ export const hello = defineMutator({
   args: { userId: userIdArg },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     return { ok: true as const, userId: args.userId };
   },
 });
@@ -170,7 +174,7 @@ export const insertSibling = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planInsertSibling(index, {
       id: args.id,
@@ -202,7 +206,7 @@ export const insertChildAtStart = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planInsertChildAtStart(index, {
       id: args.id,
@@ -234,7 +238,7 @@ export const appendChild = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planAppendChild(index, {
       id: args.id,
@@ -272,7 +276,7 @@ export const splitNode = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSplitNode(index, {
       id: args.id,
@@ -304,7 +308,7 @@ export const seedIfEmpty = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const nodes = await loadNodes(mctx);
     const plan = planSeedIfEmpty(nodes, {
       userId: args.userId,
@@ -328,7 +332,7 @@ export const indent = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planIndent(
       index,
@@ -345,7 +349,7 @@ export const outdent = defineMutator({
   args: { id: idArg, userId: userIdArg, updatedAt: tsArg },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planOutdent(index, args.id, args.updatedAt);
     if (!plan) throw new Error("outdent: no-op or missing node");
@@ -357,7 +361,7 @@ export const removeNode = defineMutator({
   args: { id: idArg, userId: userIdArg, updatedAt: tsArg },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planRemoveNode(index, args.id, args.updatedAt);
     if (!plan) throw new Error("removeNode: missing node");
@@ -376,7 +380,7 @@ export const moveNode = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planMoveNode(index, {
       id: args.id,
@@ -394,7 +398,7 @@ export const setText = defineMutator({
   args: { id: idArg, userId: userIdArg, text: v.string(), updatedAt: tsArg },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetText(index, args.id, args.text, args.updatedAt);
     if (!plan) throw new Error("setText: missing node");
@@ -411,7 +415,7 @@ export const setCompleted = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetCompleted(
       index,
@@ -433,7 +437,7 @@ export const setCollapsed = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetCollapsed(
       index,
@@ -455,7 +459,7 @@ export const setIsTask = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetIsTask(index, args.id, args.isTask, args.updatedAt);
     if (!plan) throw new Error("setIsTask: missing node");
@@ -472,7 +476,7 @@ export const setKind = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetKind(index, args.id, args.kind, args.updatedAt);
     if (!plan) throw new Error("setKind: missing node");
@@ -489,7 +493,7 @@ export const setBookmarkedAt = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planSetBookmarkedAt(
       index,
@@ -531,7 +535,7 @@ export const applyChangeOps = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     if (args.ops.length === 0) {
       return { count: 0, deletes: 0, inserts: 0, patches: 0 };
     }
@@ -559,7 +563,7 @@ export const restoreNodes = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const current = await loadNodes(mctx);
     // Force shard owner — never trust a client-supplied snapshot userId.
     const target: OutlineNode[] = args.nodes.map((n) => ({
@@ -592,7 +596,7 @@ export const importNodes = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     // Force shard owner — never trust a client-supplied snapshot userId.
     let inserted = 0;
     let patched = 0;
@@ -659,7 +663,7 @@ export const importKvRows = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     for (const row of args.rows) {
       if (row.kind === "tagColor") {
         const existing = await getTagColorByTag(mctx, row.tag);
@@ -729,7 +733,7 @@ export const mirrorNode = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const index = buildTreeIndex(await loadNodes(mctx));
     const plan = planMirrorNode(index, args);
     if (!plan) throw new Error("mirrorNode: missing source/target or cycle");
@@ -747,7 +751,7 @@ export const removeMany = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const nodes = await loadNodes(mctx);
     const plan = planRemoveMany(nodes, args.nodeIds, args.updatedAt);
     if (!plan) throw new Error("removeMany: no-op");
@@ -765,7 +769,7 @@ export const moveMany = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const nodes = await loadNodes(mctx);
     const plan = planMoveMany(nodes, {
       targetId: args.targetId,
@@ -787,7 +791,7 @@ export const indentMany = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const nodes = await loadNodes(mctx);
     const plan = planIndentMany(
       nodes,
@@ -809,7 +813,7 @@ export const outdentMany = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const nodes = await loadNodes(mctx);
     const plan = planOutdentMany(nodes, args.nodeIds, args.updatedAt);
     if (!plan) throw new Error("outdentMany: no-op");
@@ -838,7 +842,7 @@ export const materializeDailyNodes = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const nodes = await loadNodes(mctx);
     const plan = planMaterializeDailyNodes(nodes, {
       userId: args.userId,
@@ -863,7 +867,7 @@ export const upsertTagColor = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await getTagColorByTag(mctx, args.tag);
     if (existing) {
       await mctx.db.patch(
@@ -886,7 +890,7 @@ export const deleteTagColor = defineMutator({
   args: { userId: userIdArg, tag: v.string() },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await getTagColorByTag(mctx, args.tag);
     if (existing)
       await mctx.db.delete(existing._id as Id<"tagColors">, "tagColors");
@@ -904,7 +908,7 @@ export const upsertSavedQuery = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await mctx.db.get(
       args.id as Id<"savedQueries">,
       "savedQueries",
@@ -943,7 +947,7 @@ export const patchSavedQuery = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await mctx.db.get(
       args.id as Id<"savedQueries">,
       "savedQueries",
@@ -961,7 +965,7 @@ export const deleteSavedQuery = defineMutator({
   args: { userId: userIdArg, id: idArg },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await mctx.db.get(
       args.id as Id<"savedQueries">,
       "savedQueries",
@@ -988,7 +992,7 @@ export const claimDailyMapping = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await getDailyByKey(mctx, args.key);
     const existingNodeId =
       existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
@@ -1025,7 +1029,7 @@ export const upsertDailyMapping = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await getDailyByKey(mctx, args.key);
     if (existing) {
       await mctx.db.patch(
@@ -1051,7 +1055,7 @@ export const deleteDailyMapping = defineMutator({
   args: { userId: userIdArg, key: v.string() },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await getDailyByKey(mctx, args.key);
     if (existing)
       await mctx.db.delete(existing._id as Id<"dailyIndex">, "dailyIndex");
@@ -1072,7 +1076,7 @@ export const getMigrateState = defineMutator({
   args: { userId: userIdArg },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const row = await getMigrateStateRow(mctx);
     if (!row)
       return { nodesAt: null as number | null, kvAt: null as number | null };
@@ -1095,7 +1099,7 @@ export const setMigrateState = defineMutator({
   },
   server: async (ctx, args) => {
     const mctx = ctx as unknown as MutatorCtx;
-    assertOwner(mctx, args.userId);
+    await assertOwner(mctx, args.userId);
     const existing = await getMigrateStateRow(mctx);
     if (existing) {
       const patch: Record<string, unknown> = {};

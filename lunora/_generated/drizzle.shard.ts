@@ -61,6 +61,15 @@ export const migrateState = sqliteTable("migrateState", {
     kvAt: real("kvAt").notNull(),
 });
 
+export const retirementState = sqliteTable("retirementState", {
+    _id: text("_id").primaryKey(),
+    _creationTime: integer("_creationTime").notNull(),
+    userId: text("userId").notNull(),
+    migrationId: text("migrationId").notNull(),
+    status: text("status", { mode: "json" }).$type<"frozen" | "retired">().notNull(),
+    updatedAt: real("updatedAt").notNull(),
+});
+
 export const ratelimit_buckets = sqliteTable("ratelimit_buckets", {
     _id: text("_id").primaryKey(),
     _creationTime: integer("_creationTime").notNull(),

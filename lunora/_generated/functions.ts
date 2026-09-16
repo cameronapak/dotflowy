@@ -62,8 +62,12 @@ export interface RegisteredLunoraFunction {
 export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
     "mcp:applyChangeOps": lunora_mcp_0.applyChangeOps as unknown as RegisteredLunoraFunction,
     "mcp:claimDailyMapping": lunora_mcp_0.claimDailyMapping as unknown as RegisteredLunoraFunction,
+    "mcp:freezeAndExportRetirement": lunora_mcp_0.freezeAndExportRetirement as unknown as RegisteredLunoraFunction,
+    "mcp:inspectRetirement": lunora_mcp_0.inspectRetirement as unknown as RegisteredLunoraFunction,
     "mcp:listDailyIndex": lunora_mcp_0.listDailyIndex as unknown as RegisteredLunoraFunction,
     "mcp:listNodes": lunora_mcp_0.listNodes as unknown as RegisteredLunoraFunction,
+    "mcp:markRetirementVerified": lunora_mcp_0.markRetirementVerified as unknown as RegisteredLunoraFunction,
+    "mcp:releaseRetirementFreeze": lunora_mcp_0.releaseRetirementFreeze as unknown as RegisteredLunoraFunction,
     "mcp:wipeUserShard": lunora_mcp_0.wipeUserShard as unknown as RegisteredLunoraFunction,
     "mutators:appendChild": lunora_mutators_1.appendChild as unknown as RegisteredLunoraFunction,
     "mutators:applyChangeOps": lunora_mutators_1.applyChangeOps as unknown as RegisteredLunoraFunction,
@@ -117,6 +121,20 @@ if (typeof source["nodeId"] !== "string") return DEFER;
 if (typeof source["touchedAt"] !== "number" || !Number.isFinite(source["touchedAt"])) return DEFER;
 return { "userId": source["userId"], "key": source["key"], "nodeId": source["nodeId"], "touchedAt": source["touchedAt"] };
 });
+installCompiledValidatorMap(lunora_mcp_0.freezeAndExportRetirement.args, (source) => {
+if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
+if (typeof source["userId"] !== "string") return DEFER;
+if (typeof source["migrationId"] !== "string") return DEFER;
+if (typeof source["now"] !== "number" || !Number.isFinite(source["now"])) return DEFER;
+return { "userId": source["userId"], "migrationId": source["migrationId"], "now": source["now"] };
+});
+installCompiledValidatorMap(lunora_mcp_0.inspectRetirement.args, (source) => {
+if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
+if (typeof source["userId"] !== "string") return DEFER;
+return { "userId": source["userId"] };
+});
 installCompiledValidatorMap(lunora_mcp_0.listDailyIndex.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
 if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
@@ -128,6 +146,21 @@ if (typeof source !== "object" || source === null || Array.isArray(source)) retu
 if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
 if (typeof source["userId"] !== "string") return DEFER;
 return { "userId": source["userId"] };
+});
+installCompiledValidatorMap(lunora_mcp_0.markRetirementVerified.args, (source) => {
+if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
+if (typeof source["userId"] !== "string") return DEFER;
+if (typeof source["migrationId"] !== "string") return DEFER;
+if (typeof source["now"] !== "number" || !Number.isFinite(source["now"])) return DEFER;
+return { "userId": source["userId"], "migrationId": source["migrationId"], "now": source["now"] };
+});
+installCompiledValidatorMap(lunora_mcp_0.releaseRetirementFreeze.args, (source) => {
+if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
+if (typeof source["userId"] !== "string") return DEFER;
+if (typeof source["migrationId"] !== "string") return DEFER;
+return { "userId": source["userId"], "migrationId": source["migrationId"] };
 });
 installCompiledValidatorMap(lunora_mcp_0.wipeUserShard.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
@@ -144,6 +177,7 @@ return { "userId": source["userId"] };
  */
 export const LUNORA_SHAPES: Record<string, RegisteredShape> = {
     "userDailyIndex": lunora_shapes_2.userDailyIndex as unknown as RegisteredShape,
+    "userRetirementState": lunora_shapes_2.userRetirementState as unknown as RegisteredShape,
     "userSavedQueries": lunora_shapes_2.userSavedQueries as unknown as RegisteredShape,
     "userTagColors": lunora_shapes_2.userTagColors as unknown as RegisteredShape,
     "wholeOutline": lunora_shapes_2.wholeOutline as unknown as RegisteredShape,
@@ -204,8 +238,12 @@ export interface Caller {
     mcp: {
         applyChangeOps: (args: { userId: string; ops: Array<{ op: "insert"; value: { id: string; parentId: string; prevSiblingId: string; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number; mirrorOf: string; createdAt: number; updatedAt: number; origin: string; kind: "paragraph" } } | { op: "update"; value: { id: string; parentId: string; prevSiblingId: string; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number; mirrorOf: string; createdAt: number; updatedAt: number; origin: string; kind: "paragraph" } } | { op: "delete"; key: string }> }) => Promise<{ count: number; deletes: number; inserts: number; patches: number; }>;
         claimDailyMapping: (args: { userId: string; key: string; nodeId: string; touchedAt: number }) => Promise<{ nodeId: string; won: boolean; }>;
+        freezeAndExportRetirement: (args: { userId: string; migrationId: string; now: number }) => Promise<{ version: number; exportedAt: number; userId: string; nodes: { userId: string; id: string; parentId: string | null; prevSiblingId: string | null; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number | null; mirrorOf: string | null; createdAt: number; updatedAt: number; origin: string | null; kind: "paragraph" | null; }[]; dailyIndex: { key: string; nodeId: string; touchedAt: number; userId: string; }[]; tagColors: { tag: string; color: string; userId: string; }[]; savedQueries: { id: string; name: string; query: string; createdAt: number; userId: string; }[]; migrateState: { nodesAt: number | null; kvAt: number | null; userId: string; }[]; }>;
+        inspectRetirement: (args: { userId: string }) => Promise<{ retirement: { migrationId: string; status: string; updatedAt: number; } | null; snapshot: { version: number; exportedAt: number; userId: string; nodes: { userId: string; id: string; parentId: string | null; prevSiblingId: string | null; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number | null; mirrorOf: string | null; createdAt: number; updatedAt: number; origin: string | null; kind: "paragraph" | null; }[]; dailyIndex: { key: string; nodeId: string; touchedAt: number; userId: string; }[]; tagColors: { tag: string; color: string; userId: string; }[]; savedQueries: { id: string; name: string; query: string; createdAt: number; userId: string; }[]; migrateState: { nodesAt: number | null; kvAt: number | null; userId: string; }[]; }; }>;
         listDailyIndex: (args: { userId: string }) => Promise<{ key: string; nodeId: string; }[]>;
         listNodes: (args: { userId: string }) => Promise<{ id: string; parentId: string | null; prevSiblingId: string | null; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number | null; mirrorOf: string | null; createdAt: number; updatedAt: number; origin: string | null; kind: "paragraph" | null }[]>;
+        markRetirementVerified: (args: { userId: string; migrationId: string; now: number }) => Promise<{ retired: boolean; }>;
+        releaseRetirementFreeze: (args: { userId: string; migrationId: string }) => Promise<{ released: boolean; }>;
         wipeUserShard: (args: { userId: string }) => Promise<{ deleted: number; tables: Record<string, number>; }>;
     };
 }
@@ -246,8 +284,12 @@ export const createCaller = (context: CallerCtx): Caller => ({
     mcp: {
         applyChangeOps: (args) => callRegistered(context, "mcp:applyChangeOps", args),
         claimDailyMapping: (args) => callRegistered(context, "mcp:claimDailyMapping", args),
+        freezeAndExportRetirement: (args) => callRegistered(context, "mcp:freezeAndExportRetirement", args),
+        inspectRetirement: (args) => callRegistered(context, "mcp:inspectRetirement", args),
         listDailyIndex: (args) => callRegistered(context, "mcp:listDailyIndex", args),
         listNodes: (args) => callRegistered(context, "mcp:listNodes", args),
+        markRetirementVerified: (args) => callRegistered(context, "mcp:markRetirementVerified", args),
+        releaseRetirementFreeze: (args) => callRegistered(context, "mcp:releaseRetirementFreeze", args),
         wipeUserShard: (args) => callRegistered(context, "mcp:wipeUserShard", args),
     },
 });

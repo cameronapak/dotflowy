@@ -47,6 +47,12 @@ function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {
   }
 }
 
+async function assertWritable(ctx: MutationCtx): Promise<void> {
+  if ((await ctx.db.query("retirementState").collect()).length > 0) {
+    throw new Error("LUNORA_RETIRED");
+  }
+}
+
 async function commitPlan(ctx: MutationCtx, plan: OutlinePlan): Promise<void> {
   // Write through the per-table facade (`ctx.db.nodes`), which forwards its
   // table name as `expectedTable` and scopes the runtime id lookup to one
@@ -108,6 +114,7 @@ export const applyChangeOps = internalMutation
   })
   .mutation(async ({ ctx, args }) => {
     assertOwner(ctx, args.userId);
+    await assertWritable(ctx);
     if (args.ops.length === 0) {
       return { count: 0, deletes: 0, inserts: 0, patches: 0 };
     }
@@ -130,6 +137,7 @@ export const claimDailyMapping = internalMutation
   })
   .mutation(async ({ ctx, args }) => {
     assertOwner(ctx, args.userId);
+    await assertWritable(ctx);
     const existing = await ctx.db
       .query("dailyIndex")
       .withIndex("by_key", (q) => q.eq("key", args.key))
@@ -162,6 +170,7 @@ const CONTENT_TABLES = [
   "savedQueries",
   "dailyIndex",
   "migrateState",
+  "retirementState",
 ] as const;
 
 /**
@@ -174,4 +183,117 @@ export const wipeUserShard = internalMutation
   .mutation(async ({ ctx, args }) => {
     void args.userId;
     return ctx.db.wipeShard({ tables: CONTENT_TABLES });
+  });
+
+async function exportRetirementSnapshot(
+  ctx: QueryCtx | MutationCtx,
+  userId: string,
+) {
+  const [nodes, dailyIndex, tagColors, savedQueries, migrateState] =
+    await Promise.all([
+      ctx.db.query("nodes").collect(),
+      ctx.db.query("dailyIndex").collect(),
+      ctx.db.query("tagColors").collect(),
+      ctx.db.query("savedQueries").collect(),
+      ctx.db.query("migrateState").collect(),
+    ]);
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    userId,
+    nodes: nodes.map((row) => ({ ...docToNode(row), userId })),
+    dailyIndex: dailyIndex.map((row) => ({
+      key: String(row.key),
+      nodeId: String(row.nodeId),
+      touchedAt: Number(row.touchedAt),
+      userId: String(row.userId),
+    })),
+    tagColors: tagColors.map((row) => ({
+      tag: String(row.tag),
+      color: String(row.color),
+      userId: String(row.userId),
+    })),
+    savedQueries: savedQueries.map((row) => ({
+      id: String(row._id),
+      name: String(row.name),
+      query: String(row.query),
+      createdAt: Number(row.createdAt),
+      userId: String(row.userId),
+    })),
+    migrateState: migrateState.map((row) => ({
+      nodesAt: typeof row.nodesAt === "number" ? row.nodesAt : null,
+      kvAt: typeof row.kvAt === "number" ? row.kvAt : null,
+      userId: String(row.userId),
+    })),
+  };
+}
+
+/** Consistent dry-run export. No write fence is installed. */
+export const inspectRetirement = internalQuery
+  .input({ userId: v.string() })
+  .query(async ({ ctx, args }) => {
+    const retirement = await ctx.db.query("retirementState").collect();
+    return {
+      retirement: retirement[0]
+        ? {
+            migrationId: String(retirement[0].migrationId),
+            status: String(retirement[0].status),
+            updatedAt: Number(retirement[0].updatedAt),
+          }
+        : null,
+      snapshot: await exportRetirementSnapshot(ctx, args.userId),
+    };
+  });
+
+/** Install the shard write fence and export every content table atomically. */
+export const freezeAndExportRetirement = internalMutation
+  .input({ userId: v.string(), migrationId: v.string(), now: v.number() })
+  .mutation(async ({ ctx, args }) => {
+    const rows = await ctx.db.query("retirementState").collect();
+    const existing = rows[0];
+    if (rows.length > 1) throw new Error("multiple Lunora retirement rows");
+    if (existing) {
+      if (existing.migrationId !== args.migrationId) {
+        throw new Error("Lunora shard is fenced by another migration");
+      }
+    } else {
+      await ctx.db.insert("retirementState", {
+        userId: args.userId,
+        migrationId: args.migrationId,
+        status: "frozen",
+        updatedAt: args.now,
+      });
+    }
+    return exportRetirementSnapshot(ctx, args.userId);
+  });
+
+export const releaseRetirementFreeze = internalMutation
+  .input({ userId: v.string(), migrationId: v.string() })
+  .mutation(async ({ ctx, args }) => {
+    const rows = await ctx.db.query("retirementState").collect();
+    const existing = rows[0];
+    if (!existing) return { released: true };
+    if (existing.migrationId !== args.migrationId) {
+      throw new Error("Lunora shard is fenced by another migration");
+    }
+    if (existing.status === "retired") {
+      throw new Error("retired Lunora shard cannot be unfrozen");
+    }
+    await ctx.db.retirementState.delete(existing._id as Id<"retirementState">);
+    return { released: true };
+  });
+
+export const markRetirementVerified = internalMutation
+  .input({ userId: v.string(), migrationId: v.string(), now: v.number() })
+  .mutation(async ({ ctx, args }) => {
+    const rows = await ctx.db.query("retirementState").collect();
+    const existing = rows[0];
+    if (!existing || existing.migrationId !== args.migrationId) {
+      throw new Error("matching Lunora retirement fence is required");
+    }
+    await ctx.db.retirementState.patch(existing._id as Id<"retirementState">, {
+      status: "retired",
+      updatedAt: args.now,
+    });
+    return { retired: true };
   });

@@ -1,5 +1,7 @@
 # Lunora replaces custom outline sync
 
+Status: superseded by ADR 0061
+
 Dotflowy’s hand-rolled per-user DO sync (`/api/sync` + client-planned `{ops}` batches) converges on the same shape Lunora already ships — DO-as-log, poke fan-out, TanStack DB client, watermarked optimistic mutators ([ADR 0008](./0008-sync-via-a-per-user-durable-object.md)). We will **cut over to Lunora** for outline storage/sync so Cam maintains product/UX, not a second sync engine. Until Lunora is ready for production, it remains an opt-in beta beside the classic default. A prior greenfield spike proved ADR 0009’s chain invariant, live multi-tab convergence, watermark hold, shard deny, and hard-reload seed before the production port.
 
 **Decision.** Outline nodes (and, in follow-on slices, kv side-collections) move onto Lunora: `defineTable` + `.shardBy("userId").ownedBy("userId")`, owner shapes, server-authoritative `defineMutator`, and shared pure `plan*` twins on the client through `@lunora/db`. Dotflowy keeps editor, plugins, domain MCP tool names (thin `/mcp` → mutators — [ADR 0026](./0026-agent-native-mcp-server.md) Option A), and existing non-outline HTTP (unfurl, waitlist, admin, Stripe, Better Auth identity) remounted beside Lunora’s Worker compose.
