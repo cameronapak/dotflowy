@@ -9,7 +9,7 @@ This is the release 1 operator runbook for [ADR 0061](../adr/0061-retire-lunora-
 3. Authenticate with `DOTFLOWY_ADMIN_EMAIL` plus `DOTFLOWY_ADMIN_PASSWORD`, or set `DOTFLOWY_SESSION_COOKIE` to a current admin cookie.
 4. Start with a report and dry run. Do not use `--execute` until every classification has been reviewed.
 
-The CLI defaults to production. Pass `--api` for local or staging work.
+The CLI defaults to production. Pass `--api` for local or staging work. Credential-bearing requests accept only HTTPS `dotflowy.com` origins or HTTP(S) loopback origins, and never follow redirects.
 
 ## Classify
 

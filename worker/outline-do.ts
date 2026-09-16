@@ -13,7 +13,7 @@ import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
 import { SNAPSHOT_VERSION } from "./backup";
-import { planChangeFrames } from "./changelog";
+import { canResumeChangelog, planChangeFrames } from "./changelog";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 
@@ -696,15 +696,22 @@ export class UserOutlineDO extends DurableObject<Env> {
    */
   private initialFrame(since: number | null): ServerMessage {
     const seq = this.currentSeq();
-    if (since !== null && since <= seq) {
+    if (since !== null) {
       const oldest =
         this.sql
           .exec<{ m: number | null }>("SELECT MIN(seq) AS m FROM changelog")
           .toArray()[0]?.m ?? null;
+      const resumeFloor = Number(
+        this.sql
+          .exec<{ value: string }>(
+            "SELECT value FROM meta WHERE key = 'resume_floor'",
+          )
+          .toArray()[0]?.value ?? 0,
+      );
       // Resumable iff the client is already current (nothing to send) or the
-      // next frame it needs (since + 1) is still retained.
-      const canResume =
-        since === seq || (oldest !== null && since + 1 >= oldest);
+      // next frame it needs (since + 1) is retained, without crossing the last
+      // full snapshot replacement.
+      const canResume = canResumeChangelog(since, seq, oldest, resumeFloor);
       if (canResume) {
         const rows = this.sql
           .exec<{ seq: number; ops: string }>(
@@ -1019,18 +1026,29 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   releaseRetirementFreeze(migrationId: string): void {
-    this.ctx.storage.transactionSync(() => {
+    const released = this.ctx.storage.transactionSync(() => {
       const existing = this.sql
         .exec<{ value: string }>(
           "SELECT value FROM meta WHERE key = 'write_freeze'",
         )
         .toArray()[0]?.value;
-      if (!existing) return;
+      if (!existing) return false;
       if (existing !== migrationId) {
         throw new Error("classic outline is fenced by another migration");
       }
       this.sql.exec("DELETE FROM meta WHERE key = 'write_freeze'");
+      return true;
     });
+    if (!released) return;
+    // Reconnect after verification so clients cross the replacement barrier
+    // through initialFrame and receive a full snapshot when required.
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1012, "outline backend changed");
+      } catch {
+        // already gone
+      }
+    }
   }
 
   retirementStatus(): RetirementStatus {
@@ -1072,7 +1090,12 @@ export class UserOutlineDO extends DurableObject<Env> {
           row.updatedAt,
         );
       }
-      this.setSeq(this.currentSeq() + 1);
+      const replacementSeq = this.currentSeq() + 1;
+      this.setSeq(replacementSeq);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('resume_floor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(replacementSeq),
+      );
       this.sql.exec(
         "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
       );
@@ -1107,7 +1130,12 @@ export class UserOutlineDO extends DurableObject<Env> {
           row.updatedAt,
         );
       }
-      this.setSeq(this.currentSeq() + 1);
+      const replacementSeq = this.currentSeq() + 1;
+      this.setSeq(replacementSeq);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('resume_floor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(replacementSeq),
+      );
       this.sql.exec(
         "DELETE FROM meta WHERE key = 'applied_retirement_migration'",
       );

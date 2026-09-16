@@ -21,6 +21,32 @@ interface Args {
   out?: string;
 }
 
+const DEFAULT_API = "https://app.dotflowy.com";
+
+/** Restrict credential-bearing operator requests to owned or local origins. */
+export function normalizeRetirementApiOrigin(input: string): string {
+  const url = new URL(input);
+  const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  const isDotflowy =
+    url.hostname === "dotflowy.com" || url.hostname.endsWith(".dotflowy.com");
+  const approvedTransport =
+    (isDotflowy && url.protocol === "https:" && url.port === "") ||
+    (isLoopback && (url.protocol === "http:" || url.protocol === "https:"));
+  if (
+    !approvedTransport ||
+    url.username !== "" ||
+    url.password !== "" ||
+    (url.pathname !== "" && url.pathname !== "/") ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    throw new Error(
+      "API must be an HTTPS dotflowy.com origin or an HTTP(S) loopback origin",
+    );
+  }
+  return url.origin;
+}
+
 function usage(): never {
   console.error(`Usage:
   bun run lunora:retire [dry-run] (--user ID | --email EMAIL | --all)
@@ -51,10 +77,7 @@ function parseArgs(argv: string[]): Args {
   }
   const args: Args = {
     command,
-    api: (process.env.DOTFLOWY_API ?? "https://app.dotflowy.com").replace(
-      /\/$/,
-      "",
-    ),
+    api: process.env.DOTFLOWY_API ?? DEFAULT_API,
     all: false,
     execute: false,
   };
@@ -64,8 +87,7 @@ function parseArgs(argv: string[]): Args {
     else if (flag === "--email") args.email = argv[index++];
     else if (flag === "--all") args.all = true;
     else if (flag === "--execute") args.execute = true;
-    else if (flag === "--api")
-      args.api = (argv[index++] ?? "").replace(/\/$/, "");
+    else if (flag === "--api") args.api = argv[index++] ?? "";
     else if (flag === "--out") args.out = argv[index++];
     else usage();
   }
@@ -82,6 +104,7 @@ function parseArgs(argv: string[]): Args {
     console.error(`${command} changes data and requires --execute`);
     process.exit(1);
   }
+  args.api = normalizeRetirementApiOrigin(args.api);
   return args;
 }
 
@@ -111,6 +134,7 @@ async function resolveCookie(api: string): Promise<string> {
   }
   const response = await fetch(`${api}/api/auth/sign-in/email`, {
     method: "POST",
+    redirect: "error",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
@@ -136,6 +160,7 @@ async function requestJson(
 ): Promise<unknown> {
   const response = await fetch(`${api}${path}`, {
     ...init,
+    redirect: "error",
     headers: {
       ...(init?.body ? { "content-type": "application/json" } : {}),
       cookie,
@@ -215,4 +240,4 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
 }
 
-await main();
+if (import.meta.main) await main();

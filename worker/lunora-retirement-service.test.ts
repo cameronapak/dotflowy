@@ -167,7 +167,10 @@ function fakeBucket(corruptReadback = false) {
   return { bucket, objects };
 }
 
-function fakeBackends(options?: { failMarkRetired?: boolean }) {
+function fakeBackends(options?: {
+  failMarkRetired?: boolean;
+  failPreRestore?: boolean;
+}) {
   let classic = classicSnapshot();
   let classicFrozenBy: string | null = null;
   let appliedMigrationId: string | null = null;
@@ -175,6 +178,7 @@ function fakeBackends(options?: { failMarkRetired?: boolean }) {
   let lunoraMigrationId: string | null = null;
   let classicFreezeCalls = 0;
   let restoreCalls = 0;
+  let failPreRestore = options?.failPreRestore ?? false;
 
   const backends: RetirementBackends = {
     classic: {
@@ -234,6 +238,7 @@ function fakeBackends(options?: { failMarkRetired?: boolean }) {
       }) {
         if (classicFrozenBy !== input.migrationId)
           throw new Error("rollback attempted without classic fence");
+        if (failPreRestore) throw new Error("pre-migration restore failed");
         classic = {
           ...classic,
           nodes: clone([...input.nodes]),
@@ -307,6 +312,9 @@ function fakeBackends(options?: { failMarkRetired?: boolean }) {
       appliedMigrationId = migrationId;
       lunoraMigrationId = migrationId;
       lunoraStatus = "frozen";
+    },
+    failNextPreRetirementRestore() {
+      failPreRestore = true;
     },
   };
 }
@@ -435,6 +443,48 @@ describe("Lunora retirement coordinator", () => {
     expect(f.backend.classic.nodes.map((row) => row.id)).toEqual(["classic"]);
     expect(preference?.value).toBe('{"id":"lunora-beta","enabled":false}');
     expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBe("retired");
+  });
+
+  it("releases safe fences when operator restore fails before content changes", async () => {
+    const f = fixture();
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "restore",
+      f.backend.backends,
+    );
+
+    expect(result.state).toBe("failed");
+    expect(result.result).toBe("failed-before-restore");
+    expect(result.failureReason).toBe(
+      "classic retirement backup is unavailable",
+    );
+    expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBeNull();
+  });
+
+  it("keeps classic fenced when operator restore may have started", async () => {
+    const f = fixture();
+    const migrated = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "migrate",
+      f.backend.backends,
+    );
+    f.backend.failNextPreRetirementRestore();
+
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "restore",
+      f.backend.backends,
+    );
+
+    expect(result.state).toBe("uncertain");
+    expect(result.result).toBe("operator-recovery-required");
+    expect(result.failureReason).toBe("pre-migration restore failed");
+    expect(f.backend.classicFrozenBy).toBe(migrated.migrationId);
     expect(f.backend.lunoraStatus).toBe("retired");
   });
 });

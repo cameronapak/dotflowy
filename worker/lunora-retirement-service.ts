@@ -100,6 +100,10 @@ interface AttemptRecord {
   failureReason: string | null;
 }
 
+interface RollbackProgress {
+  restoreStarted: boolean;
+}
+
 function classicStub(env: RetirementEnv, userId: string) {
   return env.USER_OUTLINE.get(
     env.USER_OUTLINE.idFromName(resolveUserId(userId, env)),
@@ -281,6 +285,7 @@ async function rollback(
   record: RetirementRecord,
   backends: RetirementBackends,
   allowRetired = false,
+  progress?: RollbackProgress,
 ): Promise<RetirementRecord> {
   if (!record.classicSnapshotKey || !record.classicSnapshotHash) {
     throw new Error("classic retirement backup is unavailable");
@@ -306,6 +311,7 @@ async function rollback(
         kv: disableLunoraPreference(backup.value.kv, record.startedAt),
       }
     : backup.value;
+  if (progress) progress.restoreStarted = true;
   await stub.restorePreRetirementSnapshot({
     migrationId: record.migrationId,
     nodes: target.nodes,
@@ -514,20 +520,43 @@ export async function runRetirementOperation(
     };
   }
   if (operation === "restore") {
+    const progress: RollbackProgress = { restoreStarted: false };
     try {
       await backends.classic.freezeAndExportRetirement(record.migrationId);
-      record = await rollback(env, record, backends, true);
+      record = await rollback(env, record, backends, true, progress);
       record = await updateRecord(env, record, {
         state: "restored-pre-migration",
         result: "restored",
         failureReason: null,
       });
     } catch (error) {
-      record = await updateRecord(env, record, {
-        state: "uncertain",
-        result: "operator-recovery-required",
-        failureReason: failureReason(error),
-      });
+      const reason = failureReason(error);
+      if (!progress.restoreStarted) {
+        try {
+          const retirement = (await backends.lunora.inspect()).retirement;
+          if (retirement?.status !== "retired") {
+            await backends.lunora.releaseFreeze(record.migrationId);
+          }
+          await backends.classic.releaseRetirementFreeze(record.migrationId);
+          record = await updateRecord(env, record, {
+            state: "failed",
+            result: "failed-before-restore",
+            failureReason: reason,
+          });
+        } catch (recoveryError) {
+          record = await updateRecord(env, record, {
+            state: "uncertain",
+            result: "operator-recovery-required",
+            failureReason: `${reason}; recovery: ${failureReason(recoveryError)}`,
+          });
+        }
+      } else {
+        record = await updateRecord(env, record, {
+          state: "uncertain",
+          result: "operator-recovery-required",
+          failureReason: reason,
+        });
+      }
     }
     await appendAttempt(env, record, operation);
     return record;

@@ -23,7 +23,11 @@ import { describe, expect, test } from "bun:test";
 import type { ChangeOp } from "../src/data/wire-schema";
 
 import { createNode } from "../src/data/tree";
-import { MAX_FRAME_OPS, planChangeFrames } from "./changelog";
+import {
+  MAX_FRAME_OPS,
+  canResumeChangelog,
+  planChangeFrames,
+} from "./changelog";
 
 /** n delete ops with distinct, ordered keys — chunking is op-shape-agnostic,
  *  and delete ops keep the big fixtures cheap. */
@@ -92,5 +96,16 @@ describe("planChangeFrames", () => {
     const snapshot = [...ops];
     planChangeFrames(ops, 0);
     expect(ops).toEqual(snapshot);
+  });
+});
+
+describe("canResumeChangelog", () => {
+  test("a snapshot replacement blocks older cursors despite retained rows", () => {
+    expect(canResumeChangelog(10, 11, 3, 11)).toBe(false);
+  });
+
+  test("the replacement snapshot cursor can resume subsequent changes", () => {
+    expect(canResumeChangelog(11, 11, 3, 11)).toBe(true);
+    expect(canResumeChangelog(11, 12, 3, 11)).toBe(true);
   });
 });
