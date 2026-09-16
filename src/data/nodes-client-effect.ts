@@ -122,10 +122,10 @@ export type NodesError =
 // --- Core request effect ----------------------------------------------------
 
 /** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
-const retryPolicy = Schedule.both(
+const retryPolicy = Schedule.max([
   Schedule.exponential("100 millis"),
   Schedule.recurs(4),
-);
+]);
 
 /**
  * One HTTP request to /api/nodes as an Effect. Retries transport failures only
@@ -178,11 +178,10 @@ function classifyResponse(res: Response): Effect.Effect<Response, NodesError> {
       try: () => res.json() as Promise<JsonValue>,
       catch: () => new NodesResponseError({ status: 403 }),
     }).pipe(
-      Effect.flatMap(
-        (body): Effect.Effect<never, NodesError> =>
-          isNodeLimitBody(body)
-            ? Effect.fail(new NodesLimitError({ limit: body.limit }))
-            : Effect.fail(new NodesResponseError({ status: 403 })),
+      Effect.flatMap((body): Effect.Effect<never, NodesError> =>
+        isNodeLimitBody(body)
+          ? Effect.fail(new NodesLimitError({ limit: body.limit }))
+          : Effect.fail(new NodesResponseError({ status: 403 })),
       ),
     );
   }
