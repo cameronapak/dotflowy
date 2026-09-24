@@ -48,6 +48,12 @@ describe("isAllowedUnfurlTarget (SSRF guard)", () => {
     expect(isAllowedUnfurlTarget("http://db.internal/")).toBe(false);
   });
 
+  it("blocks internal-suffix hostnames with a trailing dot (FQDN form)", () => {
+    expect(isAllowedUnfurlTarget("http://db.internal./")).toBe(false);
+    expect(isAllowedUnfurlTarget("http://printer.local./")).toBe(false);
+    expect(isAllowedUnfurlTarget("http://app.localhost./")).toBe(false);
+  });
+
   it("blocks private / loopback / link-local IPv4 literals", () => {
     expect(isAllowedUnfurlTarget("http://127.0.0.1/")).toBe(false);
     expect(isAllowedUnfurlTarget("http://10.0.0.5/")).toBe(false);
