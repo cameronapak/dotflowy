@@ -46,6 +46,12 @@ your outline live across devices via a per-user
 
 Not built yet: sharing.
 
+## Command-line access
+
+The [Dotflowy CLI](./cli/README.md) provides all MCP tools, browser login, and
+JSON output for scripts. It is available from this checkout; npm publication is
+still pending.
+
 ## Run it locally
 
 ```sh
