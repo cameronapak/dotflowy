@@ -1,9 +1,16 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const result = Bun.spawnSync(
-  ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"],
+  [
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    "pack",
+    "--dry-run",
+    "--json",
+    "--ignore-scripts",
+  ],
   { cwd: root, stdout: "pipe", stderr: "pipe" },
 );
 
