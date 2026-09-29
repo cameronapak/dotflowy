@@ -26,6 +26,15 @@ test("I/O errors expose safe operation codes without native messages", async () 
   );
   expect(coded.message).toBe("Cannot prepare credentials. [mkdir: EACCES]");
 
+  const exited = await Effect.runPromise(
+    io(
+      "Cannot prepare credentials.",
+      async () => Promise.reject(Object.assign(new Error(), { code: 13 })),
+      "windows-acl",
+    ).pipe(Effect.flip),
+  );
+  expect(exited.message).toBe("Cannot prepare credentials. [windows-acl: 13]");
+
   const uncoded = await Effect.runPromise(
     io("Cannot prepare credentials.", async () => {
       throw new Error("token=secret");

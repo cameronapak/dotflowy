@@ -111,13 +111,11 @@ const prepareDirectory = (directory: string) =>
               "-Command",
               [
                 "$ErrorActionPreference = 'Stop'",
-                "$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User",
-                "$acl = Get-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY",
-                "$acl.SetAccessRuleProtection($true, $false)",
-                "@($acl.Access) | ForEach-Object { $acl.RemoveAccessRuleSpecific($_) }",
-                "$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')",
-                "$acl.AddAccessRule($rule)",
-                "Set-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY -AclObject $acl",
+                "try { $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { exit 11 }",
+                "try { $acl = Get-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY } catch { exit 12 }",
+                // Replace only the DACL. Keeping the existing descriptor preserves its owner.
+                'try { $acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;$sid)", [System.Security.AccessControl.AccessControlSections]::Access) } catch { exit 13 }',
+                "try { Set-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY -AclObject $acl } catch { exit 14 }",
               ].join("; "),
             ],
             {

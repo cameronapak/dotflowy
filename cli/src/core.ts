@@ -14,15 +14,13 @@ export const fail = (message: string, exitCode = 1) =>
   new CliError({ message, exitCode });
 
 const safeErrorCode = (error: unknown) => {
-  if (
-    typeof error !== "object" ||
-    error === null ||
-    !("code" in error) ||
-    typeof error.code !== "string" ||
-    !/^[A-Z][A-Z0-9_]+$/.test(error.code)
-  )
+  if (typeof error !== "object" || error === null || !("code" in error))
     return undefined;
-  return error.code;
+  if (typeof error.code === "number" && Number.isSafeInteger(error.code))
+    return String(error.code);
+  if (typeof error.code === "string" && /^[A-Z][A-Z0-9_]+$/.test(error.code))
+    return error.code;
+  return undefined;
 };
 
 // Never include native exception messages: they can contain tokens, URLs, or bodies.
