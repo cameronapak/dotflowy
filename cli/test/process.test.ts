@@ -5,9 +5,14 @@ import { resolve } from "node:path";
 import { connect, rpc } from "../src/mcp.js";
 
 const executable = resolve(import.meta.dir, "../dist/main.js");
-const cli = async (server: string, args: string[], input?: string) => {
+const cli = async (
+  server: string,
+  args: string[],
+  input?: string,
+  token = "test-token",
+) => {
   const child = Bun.spawn(["node", executable, "--server", server, ...args], {
-    env: { ...process.env, DOTFLOWY_TOKEN: "test-token", NO_COLOR: "1" },
+    env: { ...process.env, DOTFLOWY_TOKEN: token, NO_COLOR: "1" },
     stdin: input === undefined ? "ignore" : new Blob([input]),
     stdout: "pipe",
     stderr: "pipe",
@@ -27,7 +32,9 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      expect(request.headers.get("authorization")).toBe("Bearer test-token");
+      const authorization = request.headers.get("authorization");
+      expect(authorization?.startsWith("Bearer ")).toBe(true);
+      const token = authorization?.slice("Bearer ".length) ?? "missing";
       const body = await request.json();
       const result = (value: unknown) =>
         Response.json({ jsonrpc: "2.0", id: body.id, result: value });
@@ -53,12 +60,13 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
           content: [
             {
               type: "text",
-              text: 'Rejected bearer test-token and "test-token"',
+              text: `Rejected bearer ${token} and "${token}"`,
             },
           ],
           structuredContent: {
-            authorization: "Bearer test-token",
-            "test-token": "must redact keys too",
+            authorization: `Bearer ${token}`,
+            [token]: "must redact keys too",
+            expiresAt: 1234,
           },
           isError: true,
         });
@@ -116,6 +124,29 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
       structuredContent: {
         authorization: "Bearer [redacted]",
         "[redacted]": "must redact keys too",
+        expiresAt: 1234,
+      },
+      isError: true,
+    });
+    const numericRefusal = await cli(
+      server.url.origin,
+      ["call", "refuse", "--json"],
+      undefined,
+      "123",
+    );
+    expect(numericRefusal.code).toBe(4);
+    expect(numericRefusal.stdout).not.toContain('"123"');
+    expect(JSON.parse(numericRefusal.stdout)).toEqual({
+      content: [
+        {
+          type: "text",
+          text: 'Rejected bearer [redacted] and "[redacted]"',
+        },
+      ],
+      structuredContent: {
+        authorization: "Bearer [redacted]",
+        "[redacted]": "must redact keys too",
+        expiresAt: 1234,
       },
       isError: true,
     });

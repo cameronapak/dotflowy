@@ -35,6 +35,21 @@ const readInput = (path: string) =>
     return Buffer.concat(chunks).toString("utf8");
   });
 
+const redactJson = (
+  value: JsonObject[string],
+  token: string,
+): JsonObject[string] => {
+  if (typeof value === "string") return value.split(token).join("[redacted]");
+  if (Array.isArray(value)) return value.map((item) => redactJson(item, token));
+  if (value !== null && typeof value === "object") {
+    const redacted: JsonObject = {};
+    for (const [key, nested] of Object.entries(value))
+      redacted[key.split(token).join("[redacted]")] = redactJson(nested, token);
+    return redacted;
+  }
+  return value;
+};
+
 const program = Effect.gen(function* () {
   const parsed = yield* parse(process.argv.slice(2));
   if (!parsed) return 0;
@@ -170,10 +185,7 @@ const program = Effect.gen(function* () {
     .join("\n");
   if (result.isError) {
     if (parsed.json) {
-      const encodedToken = JSON.stringify(token).slice(1, -1);
-      console.log(
-        JSON.stringify(result.raw).split(encodedToken).join("[redacted]"),
-      );
+      console.log(JSON.stringify(redactJson(result.raw, token)));
     } else {
       console.error(terminalText(text.split(token).join("[redacted]")));
     }
