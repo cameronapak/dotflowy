@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { decode, fail, io, parseJson } from "./core.js";
@@ -112,14 +112,17 @@ const prepareDirectory = (directory: string) =>
               [
                 "$ErrorActionPreference = 'Stop'",
                 "try { $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { exit 11 }",
-                "try { $acl = Get-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY } catch { exit 12 }",
+                "try { $acl = [System.IO.Directory]::GetAccessControl($env:DOTFLOWY_CREDENTIAL_DIRECTORY, [System.Security.AccessControl.AccessControlSections]::Access) } catch { exit 12 }",
                 // Replace only the DACL. Keeping the existing descriptor preserves its owner.
                 'try { $acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;$sid)", [System.Security.AccessControl.AccessControlSections]::Access) } catch { exit 13 }',
-                "try { Set-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY -AclObject $acl } catch { exit 14 }",
+                "try { [System.IO.Directory]::SetAccessControl($env:DOTFLOWY_CREDENTIAL_DIRECTORY, $acl) } catch { exit 14 }",
               ].join("; "),
             ],
             {
-              env: { ...process.env, DOTFLOWY_CREDENTIAL_DIRECTORY: directory },
+              env: {
+                ...process.env,
+                DOTFLOWY_CREDENTIAL_DIRECTORY: resolve(directory),
+              },
             },
           ),
         "windows-acl",
