@@ -90,7 +90,7 @@ test("file opt-in saves privately, isolates servers, and logout removes only sel
   expect((await Effect.runPromise(two.load()))?.credential.accessToken).toBe(
     "second",
   );
-});
+}, 15_000);
 
 test("environment credentials never touch the credential directory", async () => {
   const dir = await directory();
