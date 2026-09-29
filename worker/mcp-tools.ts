@@ -856,12 +856,13 @@ export const tools: ReadonlyArray<ToolDef> = [
           }),
         );
         yield* commit(store, plan.ops);
+        const parentText = plan.parentId
+          ? index.byId.get(plan.parentId)?.text
+          : undefined;
         const where = plan.parentId
-          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
+          ? `under "${parentText == null ? plan.parentId : redactSpoilers(parentText)}"`
           : "at the top level";
-        return mcpReceipt(
-          `Added "${input.text}" ${where} (id: ${plan.nodeId}).`,
-        );
+        return `Added "${redactSpoilers(input.text)}" ${where} (id: ${plan.nodeId}).`;
       }),
   },
   {

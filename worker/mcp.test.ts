@@ -403,6 +403,23 @@ describe("MCP tools", () => {
     expect(toolText(imported)).not.toContain("secret");
   });
 
+  test("add_node redacts child and parent text independently", async () => {
+    const parent = createNode({
+      id: "unmatched-parent",
+      text: "parent ||",
+      prevSiblingId: "b",
+    });
+    const fake = makeStore([...fixture(), parent]);
+
+    const added = await callTool(fake.store, "add_node", {
+      text: "child ||",
+      parentId: parent.id,
+    });
+
+    expect(toolText(added)).toContain('Added "child ||" under "parent ||"');
+    expect(toolText(added)).not.toContain("[spoiler]");
+  });
+
   test("add_subtree inserts a nested forest as ONE atomic batch, stamping origin on all", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_subtree", {

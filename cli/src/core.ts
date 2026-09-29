@@ -13,11 +13,34 @@ export class CliError extends Schema.TaggedError<CliError>()("CliError", {
 export const fail = (message: string, exitCode = 1) =>
   new CliError({ message, exitCode });
 
+const safeErrorCode = (error: unknown) => {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("code" in error) ||
+    typeof error.code !== "string" ||
+    !/^[A-Z][A-Z0-9_]+$/.test(error.code)
+  )
+    return undefined;
+  return error.code;
+};
+
 // Never include native exception messages: they can contain tokens, URLs, or bodies.
+// Callers may name a safe operation, and Node-style error codes are safe to expose.
 export const io = <A>(
   message: string,
   run: (signal: AbortSignal) => Promise<A>,
-) => Effect.tryPromise({ try: run, catch: () => fail(message) });
+  operation?: string,
+) =>
+  Effect.tryPromise({
+    try: run,
+    catch: (error) => {
+      const details = [operation, safeErrorCode(error)]
+        .filter((value) => value !== undefined)
+        .join(": ");
+      return fail(details ? `${message} [${details}]` : message);
+    },
+  });
 
 export const decode = <
   S extends Schema.Top & { readonly DecodingServices: never },

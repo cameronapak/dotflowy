@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import manifest from "../package.json" with { type: "json" };
 import { callbackCode, trustedEndpoint } from "../src/auth.js";
 import { commands, mergeInput, parse } from "../src/commands.js";
-import { serverUrl, terminalText, VERSION } from "../src/core.js";
+import { io, serverUrl, terminalText, VERSION } from "../src/core.js";
 
 const parsed = async (args: string[]) => {
   const value = await Effect.runPromise(parse(args));
@@ -14,6 +14,25 @@ const parsed = async (args: string[]) => {
 
 test("version matches the distributable package", () =>
   expect(VERSION).toBe(manifest.version));
+
+test("I/O errors expose safe operation codes without native messages", async () => {
+  const error = Object.assign(new Error("token=secret"), { code: "EACCES" });
+  const coded = await Effect.runPromise(
+    io(
+      "Cannot prepare credentials.",
+      async () => Promise.reject(error),
+      "mkdir",
+    ).pipe(Effect.flip),
+  );
+  expect(coded.message).toBe("Cannot prepare credentials. [mkdir: EACCES]");
+
+  const uncoded = await Effect.runPromise(
+    io("Cannot prepare credentials.", async () => {
+      throw new Error("token=secret");
+    }).pipe(Effect.flip),
+  );
+  expect(uncoded.message).toBe("Cannot prepare credentials.");
+});
 
 test("covers all twelve current MCP tools", () => {
   expect(

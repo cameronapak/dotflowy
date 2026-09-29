@@ -87,36 +87,49 @@ const readRecord = Effect.fn("Credentials.readRecord")(function* (
 });
 
 const prepareDirectory = (directory: string) =>
-  io("Cannot create a private credential directory.", async () => {
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    const stat = await fs.lstat(directory);
+  Effect.gen(function* () {
+    const message = "Cannot create a private credential directory.";
+    yield* io(
+      message,
+      () => fs.mkdir(directory, { recursive: true, mode: 0o700 }),
+      "mkdir",
+    );
+    const stat = yield* io(message, () => fs.lstat(directory), "lstat");
     if (!stat.isDirectory() || stat.isSymbolicLink())
-      throw new Error("Unsafe directory");
+      return yield* Effect.fail(fail(`${message} [lstat: unsafe directory]`));
     if (process.platform === "win32") {
       // Replace, rather than merge, the DACL so pre-existing explicit grants cannot survive.
       // The path travels as data, never interpolated into PowerShell source.
-      await exec(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          [
-            "$ErrorActionPreference = 'Stop'",
-            "$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User",
-            "$acl = New-Object System.Security.AccessControl.DirectorySecurity",
-            "$acl.SetAccessRuleProtection($true, $false)",
-            "$acl.SetOwner($sid)",
-            "$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')",
-            "$acl.AddAccessRule($rule)",
-            "Set-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY -AclObject $acl",
-          ].join("; "),
-        ],
-        { env: { ...process.env, DOTFLOWY_CREDENTIAL_DIRECTORY: directory } },
+      yield* io(
+        message,
+        () =>
+          exec(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              [
+                "$ErrorActionPreference = 'Stop'",
+                "$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User",
+                "$acl = Get-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY",
+                "$acl.SetAccessRuleProtection($true, $false)",
+                "@($acl.Access) | ForEach-Object { $acl.RemoveAccessRuleSpecific($_) }",
+                "$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')",
+                "$acl.AddAccessRule($rule)",
+                "Set-Acl -LiteralPath $env:DOTFLOWY_CREDENTIAL_DIRECTORY -AclObject $acl",
+              ].join("; "),
+            ],
+            {
+              env: { ...process.env, DOTFLOWY_CREDENTIAL_DIRECTORY: directory },
+            },
+          ),
+        "windows-acl",
       );
     } else {
-      if (stat.uid !== process.getuid?.()) throw new Error("Wrong owner");
-      await fs.chmod(directory, 0o700);
+      if (stat.uid !== process.getuid?.())
+        return yield* Effect.fail(fail(`${message} [lstat: wrong owner]`));
+      yield* io(message, () => fs.chmod(directory, 0o700), "chmod");
     }
   });
 
