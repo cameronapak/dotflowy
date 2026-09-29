@@ -71,7 +71,7 @@ PR description: `/ft-create-concise-pr`. Review: `/code-review`. Auth, SSRF, Wor
 
 ## Release
 
-Version bump or changelog: [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+App version bump or changelog: [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md). CLI version or npm release: [ADR 0062](./docs/adr/0062-automated-cli-releases.md). Commands: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Landing
 

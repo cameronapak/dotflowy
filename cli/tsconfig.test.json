@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["bun"], "rootDir": ".", "noEmit": true },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts"]
 }

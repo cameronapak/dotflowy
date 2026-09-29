@@ -151,9 +151,10 @@ at `/releases.atom`). The in-app dialog stays the primary surface for signed-in 
 - **`localStorage` for the cursor.** Rejected: "have I read this" is account state, not device
   state, and the kv collection is ~35 lines (`tag-colors.ts`).
 - **Parsing `CHANGELOG.md` at build time.** Product data hostage to prose formatting.
-- **The changesets GitHub Action / Release PR.** Real enforcement, but stands up a release pipeline
-  that doesn't exist (`ci.yml` is quality-only) for a solo repo. The build-time invariant enforces
-  the same thing for free.
+- **The changesets GitHub Action / Release PR for the app.** Real enforcement, but stands up an app
+  release pipeline that doesn't exist (`ci.yml` is quality-only) for a solo repo. The build-time
+  invariant enforces the same thing for free. The independently published CLI uses a release PR;
+  see [ADR 0062](./0062-automated-cli-releases.md).
 - **A branded page fed by fetching the app's `changelog.json` at runtime.** Cross-origin fetch +
   deploy-ordering hazard; rejected in favor of compiling `changelog/**` into the landing bundle
   (same plugin, same invariant). `changelog.json` remains available if a third consumer wants it.

@@ -4,10 +4,17 @@ Use Dotflowy from your terminal or an agent script. The CLI calls the same MCP
 endpoint as an agent connector, including its paid-plan requirement and limits.
 It supports all 12 current tools and can discover and call future server tools.
 
-## Install from this checkout
+## Install
 
-The package is prepared for npm distribution but has not been published by this
-change. From the repository root:
+After the one-time `0.1.0` npm bootstrap is complete, install the public package
+with Node.js 22.19.0 or newer:
+
+```sh
+npm install --global dotflowy
+dotflowy --help
+```
+
+Until then, run it from the repository root:
 
 ```sh
 bun install --cwd cli
@@ -15,9 +22,9 @@ bun run build:cli
 node cli/dist/main.js --help
 ```
 
-To install the executable locally, run `npm pack` inside `cli/`, then
-`npm install --global ./dotflowy-0.1.0.tgz`. Use Node.js 22.19.0 or newer.
-Bun is used for development, not required to run the installed executable.
+To install that checkout globally, run `npm pack` inside `cli/`, then
+`npm install --global ./dotflowy-0.1.0.tgz`. Bun is used for development, not
+required to run the installed executable.
 
 ## Sign in
 
@@ -172,6 +179,7 @@ bun install --cwd cli
 bun run build:cli
 bun run typecheck:cli
 bun run test:cli
+cd cli && bun run check:package
 ```
 
 Tests exercise the Node executable against loopback HTTP fixtures. The opt-in
@@ -191,3 +199,11 @@ The Effect packages are pinned together, including `platform-node-shared`, to
 avoid mixing incompatible prerelease APIs. Update them as a set. The native
 keyring dependency is optional at install time so headless token-based use still
 works on machines without a supported binding; secure login never downgrades.
+
+Packaged CLI behavior changes require a fragment from `cd cli && bun run
+changeset`. This includes source, this packaged README, `LICENSE`, and meaningful
+published package metadata. Tests and development-only package configuration do
+not. This CLI Changesets project and `cli/CHANGELOG.md` are independent from the
+app's version and root changelog. Merging the bot-maintained CLI release PR
+approves publication; see
+[`ADR 0062`](../docs/adr/0062-automated-cli-releases.md).
