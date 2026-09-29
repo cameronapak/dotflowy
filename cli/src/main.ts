@@ -168,9 +168,16 @@ const program = Effect.gen(function* () {
       typeof block.text === "string" ? block.text : JSON.stringify(block),
     )
     .join("\n");
-  if (result.isError && !parsed.json)
-    console.error(terminalText(text.split(token).join("[redacted]")));
-  else out(result.raw, text);
+  if (result.isError) {
+    if (parsed.json) {
+      const encodedToken = JSON.stringify(token).slice(1, -1);
+      console.log(
+        JSON.stringify(result.raw).split(encodedToken).join("[redacted]"),
+      );
+    } else {
+      console.error(terminalText(text.split(token).join("[redacted]")));
+    }
+  } else out(result.raw, text);
   return result.isError ? 4 : 0;
 });
 

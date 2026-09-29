@@ -50,7 +50,16 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
       received = body.params.arguments;
       if (body.params.name === "refuse")
         return result({
-          content: [{ type: "text", text: "No mutation applied" }],
+          content: [
+            {
+              type: "text",
+              text: 'Rejected bearer test-token and "test-token"',
+            },
+          ],
+          structuredContent: {
+            authorization: "Bearer test-token",
+            "test-token": "must redact keys too",
+          },
           isError: true,
         });
       if (body.params.name === "plan")
@@ -96,7 +105,20 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
     ).toBe(0);
     const refused = await cli(server.url.origin, ["call", "refuse", "--json"]);
     expect(refused.code).toBe(4);
-    expect(JSON.parse(refused.stdout).isError).toBe(true);
+    expect(refused.stdout).not.toContain("test-token");
+    expect(JSON.parse(refused.stdout)).toEqual({
+      content: [
+        {
+          type: "text",
+          text: 'Rejected bearer [redacted] and "[redacted]"',
+        },
+      ],
+      structuredContent: {
+        authorization: "Bearer [redacted]",
+        "[redacted]": "must redact keys too",
+      },
+      isError: true,
+    });
     const plan = await cli(server.url.origin, ["call", "plan", "--json"]);
     expect(plan.code).toBe(5);
     expect(plan.stdout).toBe("");
