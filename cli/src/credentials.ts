@@ -223,13 +223,22 @@ const unlockedStore = (directory: string, server: string) => ({
             );
         }
       } else {
+        // Record cleanup intent before touching the keyring. If setPassword
+        // succeeds but the final metadata write fails, logout can still find
+        // and remove the orphaned keyring entry. Preserve a working file
+        // credential until the secure transition fully commits.
+        const intent: Record = previous ?? { server, storage: "keyring" };
+        yield* writeRecord(directory, server, {
+          ...intent,
+          pendingKeyringCleanup: true,
+        });
         const key = yield* entry(server);
         yield* io(secureMessage, () =>
           key.setPassword(JSON.stringify(credential)),
         );
         yield* writeRecord(directory, server, { server, storage: "keyring" });
       }
-    }),
+    }).pipe(Effect.uninterruptible),
   remove: () =>
     Effect.gen(function* () {
       const record = yield* readRecord(directory, server);
@@ -240,7 +249,7 @@ const unlockedStore = (directory: string, server: string) => ({
       yield* io("Cannot remove credential configuration.", () =>
         fs.rm(pathFor(directory, server), { force: true }),
       );
-    }),
+    }).pipe(Effect.uninterruptible),
 });
 
 // An atomic per-server directory coordinates independent CLI processes. Never
