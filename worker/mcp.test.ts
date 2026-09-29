@@ -346,6 +346,80 @@ describe("MCP tools", () => {
     expect(toolText(json)).toContain('Added "new bullet"');
   });
 
+  test("write receipts redact spoilers without changing stored text", async () => {
+    const parent = createNode({
+      id: "secret-parent",
+      text: "parent ||answer||",
+      prevSiblingId: "b",
+    });
+    const fake = makeStore([...fixture(), parent]);
+
+    const added = await callTool(fake.store, "add_node", {
+      text: "child ||twist||",
+      parentId: parent.id,
+    });
+    expect(toolText(added)).toContain(
+      'Added "child [spoiler]" under "parent [spoiler]"',
+    );
+    expect(toolText(added)).not.toContain("answer");
+    expect(toolText(added)).not.toContain("twist");
+    expect(
+      [...fake.nodes.values()].find((n) => n.text === "child ||twist||")?.text,
+    ).toBe("child ||twist||");
+
+    const mirrored = await callTool(fake.store, "mirror_node", {
+      nodeId: "a1",
+      parentId: parent.id,
+    });
+    expect(toolText(mirrored)).toContain('under "parent [spoiler]"');
+    expect(toolText(mirrored)).not.toContain("answer");
+
+    const subtree = await callTool(fake.store, "add_subtree", {
+      nodes: [{ text: "root ||hidden||" }],
+    });
+    expect(toolText(subtree)).toContain("root [spoiler]");
+    expect(toolText(subtree)).not.toContain("hidden");
+
+    const moved = await callTool(fake.store, "move_nodes", {
+      nodeIds: ["b"],
+      newParentId: parent.id,
+    });
+    expect(toolText(moved)).toContain('under "parent [spoiler]"');
+
+    const today = await callTool(fake.store, "add_to_today", {
+      text: "today ||private||",
+      date: "2026-07-03",
+    });
+    expect(toolText(today)).toContain('Added "today [spoiler]"');
+    expect(
+      [...fake.nodes.values()].find((n) => n.text === "today ||private||")
+        ?.text,
+    ).toBe("today ||private||");
+
+    const imported = await callTool(fake.store, "import_opml", {
+      opml: '<opml version="2.0"><body><outline text="import ||secret||"/></body></opml>',
+    });
+    expect(toolText(imported)).toContain('"import [spoiler]"');
+    expect(toolText(imported)).not.toContain("secret");
+  });
+
+  test("add_node redacts child and parent text independently", async () => {
+    const parent = createNode({
+      id: "unmatched-parent",
+      text: "parent ||",
+      prevSiblingId: "b",
+    });
+    const fake = makeStore([...fixture(), parent]);
+
+    const added = await callTool(fake.store, "add_node", {
+      text: "child ||",
+      parentId: parent.id,
+    });
+
+    expect(toolText(added)).toContain('Added "child ||" under "parent ||"');
+    expect(toolText(added)).not.toContain("[spoiler]");
+  });
+
   test("add_subtree inserts a nested forest as ONE atomic batch, stamping origin on all", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_subtree", {

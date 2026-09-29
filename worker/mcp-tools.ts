@@ -686,6 +686,11 @@ const MAX_SEARCH_HITS = 25;
  *  forest at the same ceiling an agent hits reading back (ADR 0028). */
 const MAX_BATCH_NODES = 500;
 
+/** Finalize agent-facing write receipts at the shared MCP boundary. Keep the
+ * planner inputs and committed node text verbatim; only text returned to the
+ * agent is redacted (ADR 0043). */
+const mcpReceipt = (text: string): string => redactSpoilers(text);
+
 /** Render a freshly-planned forest as the agent-facing bullet list with ids —
  *  built from the plan's own insert ops, so no extra read of the store. */
 const renderCreatedForest = (
@@ -851,10 +856,13 @@ export const tools: ReadonlyArray<ToolDef> = [
           }),
         );
         yield* commit(store, plan.ops);
+        const parentText = plan.parentId
+          ? index.byId.get(plan.parentId)?.text
+          : undefined;
         const where = plan.parentId
-          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
+          ? `under "${parentText == null ? plan.parentId : redactSpoilers(parentText)}"`
           : "at the top level";
-        return `Added "${input.text}" ${where} (id: ${plan.nodeId}).`;
+        return `Added "${redactSpoilers(input.text)}" ${where} (id: ${plan.nodeId}).`;
       }),
   },
   {
@@ -905,7 +913,9 @@ export const tools: ReadonlyArray<ToolDef> = [
             }),
           );
           yield* commit(store, plan.ops);
-          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
+          return mcpReceipt(
+            `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
+          );
         }
 
         // Parent (or top-level) path.
@@ -926,7 +936,9 @@ export const tools: ReadonlyArray<ToolDef> = [
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
           : "at the top level";
         const kind = plan.parentId ? "bullet(s)" : "top-level bullet(s)";
-        return `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`;
+        return mcpReceipt(
+          `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
+        );
       }),
   },
   {
@@ -1017,7 +1029,9 @@ export const tools: ReadonlyArray<ToolDef> = [
         const noun = plan.parentId ? "children" : "items";
         const pos =
           position === "first" ? `as the first ${noun}` : `as the last ${noun}`;
-        return `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`;
+        return mcpReceipt(
+          `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`,
+        );
       }),
   },
   {
@@ -1046,7 +1060,9 @@ export const tools: ReadonlyArray<ToolDef> = [
           timestamp,
         });
         yield* commit(store, plan.ops);
-        return `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`;
+        return mcpReceipt(
+          `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`,
+        );
       }),
   },
   {
@@ -1072,7 +1088,9 @@ export const tools: ReadonlyArray<ToolDef> = [
         const where = input.parentId
           ? `under "${index.byId.get(trueSourceOf(index, input.parentId))?.text ?? input.parentId}"`
           : "at the top level";
-        return `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`;
+        return mcpReceipt(
+          `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`,
+        );
       }),
   },
   {
@@ -1164,13 +1182,15 @@ export const tools: ReadonlyArray<ToolDef> = [
                 maxNodes: OPML_MCP_MAX_NODES,
               }),
             );
-            return renderImportReceipt({
-              report,
-              rootIds: plan.rootIds,
-              rootTexts,
-              landing: `onto ${formatDayText(dateKey)}`,
-              dryRun: true,
-            });
+            return mcpReceipt(
+              renderImportReceipt({
+                report,
+                rootIds: plan.rootIds,
+                rootTexts,
+                landing: `onto ${formatDayText(dateKey)}`,
+                dryRun: true,
+              }),
+            );
           }
           const scaffold = yield* claimDailyScaffold(store, dateKey);
           // Reuse the index claimDailyScaffold already built -- only kv claims ran
@@ -1198,13 +1218,15 @@ export const tools: ReadonlyArray<ToolDef> = [
             }),
           );
           yield* commit(store, [...ensure.ops, ...plan.ops]);
-          return renderImportReceipt({
-            report,
-            rootIds: plan.rootIds,
-            rootTexts,
-            landing: `onto ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId})`,
-            dryRun: false,
-          });
+          return mcpReceipt(
+            renderImportReceipt({
+              report,
+              rootIds: plan.rootIds,
+              rootTexts,
+              landing: `onto ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId})`,
+              dryRun: false,
+            }),
+          );
         }
 
         // Parent (or top-level) path. No synthetic wrapper container — the
@@ -1237,13 +1259,15 @@ export const tools: ReadonlyArray<ToolDef> = [
         const landing = parentId
           ? `under "${index.byId.get(parentId)?.text ?? parentId}" (id: ${parentId})`
           : "at the top level";
-        return renderImportReceipt({
-          report,
-          rootIds: plan.rootIds,
-          rootTexts,
-          landing,
-          dryRun,
-        });
+        return mcpReceipt(
+          renderImportReceipt({
+            report,
+            rootIds: plan.rootIds,
+            rootTexts,
+            landing,
+            dryRun,
+          }),
+        );
       }),
   },
   {
