@@ -17,9 +17,6 @@
     "LICENSE"
   ],
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check:changeset": "bun scripts/require-changeset.ts",
