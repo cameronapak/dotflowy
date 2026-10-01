@@ -184,6 +184,16 @@ Rules of thumb:
   `changeset version` directly**, which would delete the fragments before they're
   archived. See [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md).
 
+- **The CLI has a second, independent Changesets project.** A change to packaged
+  CLI behavior also runs `cd cli && bun run changeset`. This includes `cli/src/**`,
+  the packaged `cli/README.md` and `cli/LICENSE`, and meaningful published package
+  metadata. The release PR's version bump and development-only scripts,
+  devDependencies, tests, and release machinery are exempt. The root fragment
+  describes the app/repository change; the CLI fragment chooses the public npm
+  package's semver and feeds `cli/CHANGELOG.md`. The `CLI Release` workflow
+  maintains the release PR; merging that PR approves publication. See
+  [ADR 0062](./docs/adr/0062-automated-cli-releases.md).
+
 - **Unit tests (`bun test`) cover pure logic only** — `tree.ts`, `tags.ts`,
   `links.ts`, the Worker planners/schemas. Editor behavior (caret, contentEditable,
   the collection/DO path) stays in **Playwright** (`e2e/`). Don't unit-test the
@@ -211,6 +221,56 @@ Rules of thumb:
 - **PR descriptions follow the snapshot template** in
   `.agents/skills/ft-create-concise-pr/SKILL.md` (agents: run
   `/ft-create-concise-pr`) — one consistent, skimmable shape for every review.
+
+## CLI release setup
+
+The repository contains the whole pipeline, but these account-level settings
+must be configured before it can maintain release PRs or publish. Do not store a
+PAT or npm token as a workaround.
+
+1. Create a GitHub App for CLI release PRs. Disable webhooks. Grant repository
+   **Contents: Read and write**, **Pull requests: Read and write**, and the
+   implicit **Metadata: Read-only** permission. Install it only on
+   `cameronapak/dotflowy`. Add its client ID as the repository variable
+   `CLI_RELEASE_APP_CLIENT_ID` and its private key as the repository secret
+   `CLI_RELEASE_APP_PRIVATE_KEY`.
+2. Create a GitHub Environment named exactly `npm`. Restrict deployment branches
+   to `main`, but add no required reviewers or wait timer. The merged release PR
+   is the human approval, so the environment must not add a second approval.
+3. In the `main` branch rule, require all six `CLI / test` matrix checks: Ubuntu,
+   macOS, and Windows on Node 22 and Node 24. Also require the separate
+   `CLI / changeset` check so ordinary packaged-behavior PRs cannot bypass the
+   release gate. It remains skipped/successful on the bot release branch. Allow
+   the installed GitHub App to create and update its release branch and PR.
+4. After this pipeline is on `main`, bootstrap the unclaimed npm package once
+   from a clean, current `main` checkout. Use Node 24 and npm 11.5.1+ with an npm
+   owner account protected by 2FA. Record `git rev-parse HEAD` as the bootstrap
+   commit, and do not commit or merge anything between this publish and step 6.
+
+   ```sh
+   cd cli
+   bun install --frozen-lockfile
+   bun run build
+   bun run typecheck
+   bun run test
+   bun run check:package
+   git rev-parse HEAD
+   npm publish --access public
+   ```
+
+5. On npmjs.com, open `dotflowy` package settings and add a GitHub Actions Trusted
+   Publisher with organization/user `cameronapak`, repository `dotflowy`, workflow
+   filename `cli-release.yml`, environment `npm`, and direct `npm publish`
+   allowed. Then set Publishing access to **Require two-factor authentication and
+   disallow tokens**. No npm credential belongs in GitHub.
+6. Manually run the `CLI Release` workflow once with `bootstrap_commit` set to
+   the exact SHA recorded in step 4. It verifies the published `0.1.0`, creates
+   `dotflowy@0.1.0` at that commit if absent, and creates the matching GitHub
+   Release. Later releases need no manual dispatch or commit input.
+
+The publish job is safe to rerun. It rebuilds and retests on Linux Node 24, skips
+an npm version that already exists, repairs a missing tag or GitHub Release, and
+fails rather than moving a conflicting tag.
 
 ## Conventions worth knowing
 

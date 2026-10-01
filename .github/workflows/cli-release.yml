@@ -1,0 +1,109 @@
+name: CLI Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - ".github/workflows/cli-release.yml"
+  workflow_dispatch:
+    inputs:
+      bootstrap_commit:
+        description: "Commit manually published as dotflowy@0.1.0 (first reconciliation only)"
+        required: false
+        type: string
+
+concurrency:
+  group: cli-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --cwd cli --frozen-lockfile
+      - id: mode
+        uses: changesets/action/select-mode@v2.1.1
+        with:
+          cwd: cli
+
+  release-pr:
+    needs: select
+    if: needs.select.outputs.mode == 'version'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.CLI_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLI_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --cwd cli --frozen-lockfile
+      - uses: changesets/action/version@v2.1.1
+        with:
+          cwd: cli
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: bun run version
+          commit-message: "chore(cli): release"
+          pr-title: "chore(cli): release"
+
+  publish:
+    needs: select
+    if: >-
+      needs.select.outputs.mode == 'publish' ||
+      (needs.select.outputs.mode == 'none' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.bootstrap_commit != '')
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: npm install --global npm@11
+      - run: bun install --frozen-lockfile
+      - name: Build
+        run: bun run build
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Test
+        run: bun run test
+      - name: Inspect package
+        run: bun run check:package
+      - name: Reconcile npm, tag, and GitHub Release
+        run: bun scripts/reconcile-release.ts
+        env:
+          BOOTSTRAP_COMMIT: ${{ inputs.bootstrap_commit }}
+          GH_TOKEN: ${{ github.token }}

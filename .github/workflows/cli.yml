@@ -2,10 +2,22 @@ name: CLI
 
 on:
   pull_request:
-    paths: ["cli/**", ".github/workflows/cli.yml"]
+    paths:
+      - "cli/**"
+      - "worker/**"
+      - "src/data/**"
+      - "bun.lock"
+      - ".github/workflows/cli.yml"
+      - ".github/workflows/cli-release.yml"
   push:
     branches: [main]
-    paths: ["cli/**", ".github/workflows/cli.yml"]
+    paths:
+      - "cli/**"
+      - "worker/**"
+      - "src/data/**"
+      - "bun.lock"
+      - ".github/workflows/cli.yml"
+      - ".github/workflows/cli-release.yml"
 
 permissions:
   contents: read
@@ -22,15 +34,32 @@ jobs:
       run:
         working-directory: cli
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run typecheck
       - run: bun run test
-      - run: npm pack --dry-run
+      - run: bun run check:package
+
+  changeset:
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release/')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - name: Require a CLI changeset for packaged behavior
+        run: bun run check:changeset "origin/${GITHUB_BASE_REF}"
