@@ -18,6 +18,7 @@ import type {
 
 import {
   userDailyIndexCollection,
+  userRetirementStateCollection,
   userSavedQueriesCollection,
   userTagColorsCollection,
   wholeOutlineCollection,
@@ -93,6 +94,10 @@ export type OutlineStore = {
   savedQueries: Collection<SavedQueryRowDoc, string>;
   /** Phase 2b — Lunora daily index (flag ON). */
   dailyIndex: Collection<DailyIndexRowDoc, string>;
+  /** Temporary ADR 0061 server-authoritative retirement signal. */
+  retirementState: ReturnType<
+    typeof userRetirementStateCollection
+  >["collection"];
   mutators: ReturnType<typeof bindOutlineMutators>;
 };
 
@@ -648,6 +653,11 @@ export function createOutlineStore(
     load: "eager",
     shardKey: userId,
   });
+  const retirementBinding = userRetirementStateCollection({
+    client,
+    load: "eager",
+    shardKey: userId,
+  });
 
   // SAFETY: the generated Lunora nodes schema matches NodeDocLike field-for-field, so the row types are interchangeable through this seam.
   const collection = outlineBinding.collection as Collection<NodeRow, string>;
@@ -663,6 +673,7 @@ export function createOutlineStore(
     DailyIndexRowDoc,
     string
   >;
+  const retirementState = retirementBinding.collection;
   const mutators = bindOutlineMutators(
     client,
     collection,
@@ -671,5 +682,13 @@ export function createOutlineStore(
     dailyIndex,
     userId,
   );
-  return { client, collection, tagColors, savedQueries, dailyIndex, mutators };
+  return {
+    client,
+    collection,
+    tagColors,
+    savedQueries,
+    dailyIndex,
+    retirementState,
+    mutators,
+  };
 }

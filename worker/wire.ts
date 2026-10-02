@@ -120,3 +120,10 @@ export const AdminSnapshotRestorePostBody = Schema.Struct({
   userId: Schema.optional(Schema.String),
   date: Schema.String,
 });
+
+/** Temporary ADR 0061 one-user operator operation. */
+export const AdminLunoraRetirementPostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  operation: Schema.Literals(["dry-run", "migrate", "retry", "restore"]),
+});

@@ -28,6 +28,22 @@ import type { ChangeFrame, ChangeOp } from "../src/data/wire-schema";
 export const MAX_FRAME_OPS = 500;
 
 /**
+ * Whether a client cursor can replay retained changes without crossing a full
+ * snapshot replacement. `resumeFloor` is the seq stamped by the latest
+ * retirement restore; older cursors must receive the replacement snapshot even
+ * when their old changelog rows are still retained for operator history.
+ */
+export function canResumeChangelog(
+  since: number | null,
+  seq: number,
+  oldest: number | null,
+  resumeFloor: number,
+): boolean {
+  if (since === null || since > seq || since < resumeFloor) return false;
+  return since === seq || (oldest !== null && since + 1 >= oldest);
+}
+
+/**
  * Split one committed batch into consecutive-seq frames of ≤ `maxOps` ops,
  * starting at `lastSeq + 1`. An empty batch plans no frames, so the seq never
  * advances on a no-op commit (e.g. a patch that touched no writable columns).

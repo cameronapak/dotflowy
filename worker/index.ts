@@ -68,6 +68,12 @@ import {
   createLunoraOutlineStore,
   isLunoraOutlineEnabledForUser,
 } from "./lunora-mcp-store";
+import {
+  RetirementOperationInProgress,
+  retirementPopulation,
+  retirementReport,
+  runRetirementOperation,
+} from "./lunora-retirement-service";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -77,6 +83,7 @@ import { isHttpUrlString, unfurlTitleE } from "./unfurl";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
+  AdminLunoraRetirementPostBody,
   AdminRestorePostBody,
   AdminSnapshotRestorePostBody,
   KvClaimBody,
@@ -715,6 +722,7 @@ function handleApiRequest(
   | RouteNotFound
   | BadRequest
   | NodeLimitExceeded
+  | RetirementOperationInProgress
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -953,6 +961,50 @@ function handleApiRequest(
       return json({ key, ...result });
     }
 
+    // Temporary ADR 0061 operator API. Mutations are one user per request;
+    // scripts/lunora-retirement.ts owns sequential batching. The shared admin
+    // gate remains fail-closed and returns 404 to every non-admin probe.
+    if (url.pathname === "/api/admin/lunora-retirement") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method === "GET") {
+        if (url.searchParams.get("population") === "1") {
+          return json({
+            userIds: yield* Effect.promise(() => retirementPopulation(env)),
+          });
+        }
+        const userId =
+          url.searchParams.has("userId") || url.searchParams.has("email")
+            ? yield* resolveRestoreUserId(env, {
+                userId: url.searchParams.get("userId") ?? undefined,
+                email: url.searchParams.get("email") ?? undefined,
+              })
+            : undefined;
+        return json(yield* Effect.promise(() => retirementReport(env, userId)));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminLunoraRetirementPostBody);
+      const targetUserId = yield* resolveRestoreUserId(env, body);
+      return json(
+        yield* Effect.tryPromise({
+          try: () => runRetirementOperation(env, targetUserId, body.operation),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.catch((cause) =>
+            cause instanceof RetirementOperationInProgress
+              ? Effect.fail(cause)
+              : Effect.die(cause),
+          ),
+        ),
+      );
+    }
+
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
     // mcp plugin, stored in D1), not the session cookie, so it's gated here —
     // before the cookie-session check below. Same identity model though: the
@@ -1182,6 +1234,11 @@ const handler = {
         ),
         Effect.catchTag("RouteNotFound", () =>
           Effect.succeed(json({ error: "not found" }, 404)),
+        ),
+        Effect.catchTag("RetirementOperationInProgress", () =>
+          Effect.succeed(
+            json({ error: "retirement_operation_in_progress" }, 409),
+          ),
         ),
         // 403 with a machine-readable body the client keys on to show an upgrade
         // prompt (src/data/nodes-client-effect.ts NodesLimitError).

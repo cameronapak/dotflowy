@@ -81,4 +81,14 @@ export default defineSchema({
   })
     .shardBy("userId")
     .ownedBy("userId"),
+
+  /** Temporary ADR 0061 write fence. Retired shards remain permanently frozen. */
+  retirementState: defineTable({
+    userId: v.string(),
+    migrationId: v.string(),
+    status: v.union(v.literal("frozen"), v.literal("retired")),
+    updatedAt: v.number(),
+  })
+    .shardBy("userId")
+    .ownedBy("userId"),
 }).extend(ratelimit.extension);

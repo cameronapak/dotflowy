@@ -200,7 +200,7 @@ class AppBuilder<Env extends object> {
             options.adminToken = this.adminToken(env);
         }
 
-        options.listSchemaTables = () => ["nodes", "tagColors", "savedQueries", "dailyIndex", "migrateState", "ratelimit_buckets"];
+        options.listSchemaTables = () => ["nodes", "tagColors", "savedQueries", "dailyIndex", "migrateState", "retirementState", "ratelimit_buckets"];
 
         options.logArchive = resolveLogArchiveFromEnv(env);
 

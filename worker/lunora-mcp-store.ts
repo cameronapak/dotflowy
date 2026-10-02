@@ -83,6 +83,34 @@ function systemShardClient(env: LunoraRpcEnv, userId: string) {
   return createShardClient(env.SHARD).asSystem().forShard(userId);
 }
 
+/** Temporary ADR 0061 operator surface. All calls stay Worker-internal. */
+export function createLunoraRetirementClient(
+  env: LunoraRpcEnv,
+  userId: string,
+) {
+  const client = systemShardClient(env, userId);
+  return {
+    inspect: () => client.call(internal.mcp.inspectRetirement, { userId }),
+    freezeAndExport: (migrationId: string, now: number) =>
+      client.call(internal.mcp.freezeAndExportRetirement, {
+        userId,
+        migrationId,
+        now,
+      }),
+    releaseFreeze: (migrationId: string) =>
+      client.call(internal.mcp.releaseRetirementFreeze, {
+        userId,
+        migrationId,
+      }),
+    markRetired: (migrationId: string, now: number) =>
+      client.call(internal.mcp.markRetirementVerified, {
+        userId,
+        migrationId,
+        now,
+      }),
+  };
+}
+
 /**
  * OutlineStore that reads/writes the Lunora shard for `userId`.
  * `userId` is the Better Auth id (shard key) — not resolveUserId('default').

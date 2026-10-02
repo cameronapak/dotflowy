@@ -22,3 +22,9 @@ export const userDailyIndex = defineShape({
   owner: true,
   table: "dailyIndex",
 });
+
+/** Temporary ADR 0061 retirement signal. Clients reload only on `retired`. */
+export const userRetirementState = defineShape({
+  owner: true,
+  table: "retirementState",
+});

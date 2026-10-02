@@ -13,7 +13,7 @@ import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
 import { SNAPSHOT_VERSION } from "./backup";
-import { planChangeFrames } from "./changelog";
+import { canResumeChangelog, planChangeFrames } from "./changelog";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 
@@ -54,6 +54,11 @@ export interface KvRow {
 export interface KvClaim {
   key: string;
   nodeId: string;
+}
+
+export interface RetirementStatus {
+  frozenBy: string | null;
+  appliedMigrationId: string | null;
 }
 
 type SqlVal = string | number | null;
@@ -354,6 +359,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   upsertNodes(nodes: readonly Node[]): void {
+    this.assertWritable();
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
         this.recordChange(nodes.map((n) => this.putNode(n))),
@@ -385,6 +391,16 @@ export class UserOutlineDO extends DurableObject<Env> {
     );
   }
 
+  /** ADR 0061 write fence. Reads and account deletion remain available. */
+  private assertWritable(): void {
+    const row = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM meta WHERE key = 'write_freeze'",
+      )
+      .toArray()[0];
+    if (row) throw new Error("OUTLINE_FROZEN");
+  }
+
   /**
    * `applyBatch`, gated by a free-tier node ceiling. Returns the committed seq,
    * or `null` when the batch would grow the outline past `limit` (the Worker maps
@@ -404,6 +420,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     ops: readonly ChangeOp[],
     limit: number | null,
   ): number | null {
+    this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       if (limit !== null) {
         const { inserts, deletes } = countNetGrowth(ops, (id) =>
@@ -429,6 +446,7 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  Every node is an upsert, so growth = ids not already present; returns false
    *  when applying would exceed the cap (nothing written), true otherwise. */
   upsertNodesGated(nodes: readonly Node[], limit: number | null): boolean {
+    this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       if (limit !== null) {
         const newIds = new Set<string>();
@@ -464,6 +482,7 @@ export class UserOutlineDO extends DurableObject<Env> {
    * absolute (keyed by id), so the final state is order-independent.
    */
   applyBatch(ops: readonly ChangeOp[]): number {
+    this.assertWritable();
     return this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
         const out: ChangeOp[] = [];
@@ -480,6 +499,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   patchNodes(updates: readonly PatchUpdate[]): void {
+    this.assertWritable();
     this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
         const ops: ChangeOp[] = [];
@@ -512,6 +532,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   deleteNodes(ids: readonly string[]): void {
+    this.assertWritable();
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
         this.recordChange(ids.map((id) => this.deleteNodeRow(id))),
@@ -675,15 +696,22 @@ export class UserOutlineDO extends DurableObject<Env> {
    */
   private initialFrame(since: number | null): ServerMessage {
     const seq = this.currentSeq();
-    if (since !== null && since <= seq) {
+    if (since !== null) {
       const oldest =
         this.sql
           .exec<{ m: number | null }>("SELECT MIN(seq) AS m FROM changelog")
           .toArray()[0]?.m ?? null;
+      const resumeFloor = Number(
+        this.sql
+          .exec<{ value: string }>(
+            "SELECT value FROM meta WHERE key = 'resume_floor'",
+          )
+          .toArray()[0]?.value ?? 0,
+      );
       // Resumable iff the client is already current (nothing to send) or the
-      // next frame it needs (since + 1) is still retained.
-      const canResume =
-        since === seq || (oldest !== null && since + 1 >= oldest);
+      // next frame it needs (since + 1) is retained, without crossing the last
+      // full snapshot replacement.
+      const canResume = canResumeChangelog(since, seq, oldest, resumeFloor);
       if (canResume) {
         const rows = this.sql
           .exec<{ seq: number; ops: string }>(
@@ -727,6 +755,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     collection: string,
     rows: readonly { key: string; value: unknown }[],
   ): void {
+    this.assertWritable();
     const ts = Date.now();
     for (const r of rows) {
       this.sql.exec(
@@ -742,6 +771,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   }
 
   deleteKv(collection: string, keys: readonly string[]): void {
+    this.assertWritable();
     for (const k of keys)
       this.sql.exec(
         "DELETE FROM kv WHERE collection = ? AND key = ?",
@@ -761,6 +791,7 @@ export class UserOutlineDO extends DurableObject<Env> {
    * atomic op on its existing kv table, reusable by any future side-collection.
    */
   getOrCreateKv(collection: string, key: string, value: KvClaim): KvClaim {
+    this.assertWritable();
     this.sql.exec(
       `INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)
        ON CONFLICT(collection, key) DO NOTHING`,
@@ -829,6 +860,7 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  which owns the D1 binding) into this DO, then mark it seeded so it never
    *  re-imports. Non-destructive: D1 is left intact. */
   seed(data: { nodes: Node[]; kv: KvRow[] }): void {
+    this.assertWritable();
     if (this.isSeeded()) return;
     this.upsertNodes(data.nodes);
     for (const collection of new Set(data.kv.map((r) => r.collection))) {
@@ -872,6 +904,7 @@ export class UserOutlineDO extends DurableObject<Env> {
   async restoreToTime(
     point: RestorePoint,
   ): Promise<{ previousBookmark: string; targetBookmark: string }> {
+    this.assertWritable();
     // The pre-recovery handle FIRST — this is "now", the undo target.
     const previousBookmark = await this.ctx.storage.getCurrentBookmark();
     const targetBookmark =
@@ -942,6 +975,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     nodes: readonly Node[];
     kv: readonly SnapshotKvRow[];
   }): Promise<{ previousBookmark: string | null; nodes: number; kv: number }> {
+    this.assertWritable();
     let previousBookmark: string | null = null;
     try {
       previousBookmark = await this.ctx.storage.getCurrentBookmark();
@@ -970,5 +1004,142 @@ export class UserOutlineDO extends DurableObject<Env> {
     });
     this.deferredAbort("snapshot restore");
     return { previousBookmark, nodes: data.nodes.length, kv: data.kv.length };
+  }
+
+  /** Freeze classic writes and return one atomic pre-migration snapshot. */
+  freezeAndExportRetirement(migrationId: string): OutlineSnapshot {
+    return this.ctx.storage.transactionSync(() => {
+      const existing = this.sql
+        .exec<{ value: string }>(
+          "SELECT value FROM meta WHERE key = 'write_freeze'",
+        )
+        .toArray()[0]?.value;
+      if (existing && existing !== migrationId) {
+        throw new Error("classic outline is fenced by another migration");
+      }
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('write_freeze', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        migrationId,
+      );
+      return this.exportSnapshot();
+    });
+  }
+
+  releaseRetirementFreeze(migrationId: string): void {
+    const released = this.ctx.storage.transactionSync(() => {
+      const existing = this.sql
+        .exec<{ value: string }>(
+          "SELECT value FROM meta WHERE key = 'write_freeze'",
+        )
+        .toArray()[0]?.value;
+      if (!existing) return false;
+      if (existing !== migrationId) {
+        throw new Error("classic outline is fenced by another migration");
+      }
+      this.sql.exec("DELETE FROM meta WHERE key = 'write_freeze'");
+      return true;
+    });
+    if (!released) return;
+    // Reconnect after verification so clients cross the replacement barrier
+    // through initialFrame and receive a full snapshot when required.
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1012, "outline backend changed");
+      } catch {
+        // already gone
+      }
+    }
+  }
+
+  retirementStatus(): RetirementStatus {
+    const rows = this.sql
+      .exec<{ key: string; value: string }>(
+        "SELECT key, value FROM meta WHERE key IN ('write_freeze', 'applied_retirement_migration')",
+      )
+      .toArray();
+    const values = new Map(rows.map((row) => [row.key, row.value]));
+    return {
+      frozenBy: values.get("write_freeze") ?? null,
+      appliedMigrationId: values.get("applied_retirement_migration") ?? null,
+    };
+  }
+
+  /** Replace content while retaining classic changelog and migration fence. */
+  restoreRetirementSnapshot(data: {
+    migrationId: string;
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): { applied: boolean; nodes: number; kv: number } {
+    return this.ctx.storage.transactionSync(() => {
+      const status = this.retirementStatus();
+      if (status.appliedMigrationId === data.migrationId) {
+        return { applied: false, nodes: this.nodeCount(), kv: data.kv.length };
+      }
+      if (status.frozenBy !== data.migrationId) {
+        throw new Error("matching classic write fence is required");
+      }
+      this.sql.exec("DELETE FROM nodes");
+      this.sql.exec("DELETE FROM kv");
+      for (const node of data.nodes) this.putNode(node);
+      for (const row of data.kv) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          row.value,
+          row.updatedAt,
+        );
+      }
+      const replacementSeq = this.currentSeq() + 1;
+      this.setSeq(replacementSeq);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('resume_floor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(replacementSeq),
+      );
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+      );
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('applied_retirement_migration', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        data.migrationId,
+      );
+      return { applied: true, nodes: data.nodes.length, kv: data.kv.length };
+    });
+  }
+
+  /** Operator rollback to the verified immutable pre-migration payload. */
+  restorePreRetirementSnapshot(data: {
+    migrationId: string;
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): { nodes: number; kv: number } {
+    return this.ctx.storage.transactionSync(() => {
+      const status = this.retirementStatus();
+      if (status.frozenBy !== data.migrationId) {
+        throw new Error("matching classic write fence is required");
+      }
+      this.sql.exec("DELETE FROM nodes");
+      this.sql.exec("DELETE FROM kv");
+      for (const node of data.nodes) this.putNode(node);
+      for (const row of data.kv) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          row.value,
+          row.updatedAt,
+        );
+      }
+      const replacementSeq = this.currentSeq() + 1;
+      this.setSeq(replacementSeq);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('resume_floor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(replacementSeq),
+      );
+      this.sql.exec(
+        "DELETE FROM meta WHERE key = 'applied_retirement_migration'",
+      );
+      return { nodes: data.nodes.length, kv: data.kv.length };
+    });
   }
 }

@@ -16,6 +16,7 @@ import {
   bindLunoraDailyIndex,
   unbindLunoraDailyIndex,
 } from "../plugins/daily/daily-index";
+import { reloadToClassicAfterRetirement } from "./account-prefs";
 import { markNodesSyncReady } from "./collection";
 import { isLunoraSyncEnabled } from "./flags";
 import { outlineNodeToNode, rowsToOutlineNodes } from "./lunora-bridge";
@@ -41,6 +42,7 @@ export type LunoraOutlineContext = {
 
 let ctx: LunoraOutlineContext | null = null;
 let collectionSub: { unsubscribe: () => void } | null = null;
+let retirementSub: { unsubscribe: () => void } | null = null;
 let seedStarted = false;
 
 /** Active Lunora outline context, or null when flag OFF / not started. */
@@ -121,6 +123,16 @@ export function startLunoraOutlineSync(userId: string): void {
     },
     { includeInitialState: true },
   );
+  retirementSub = store.retirementState.subscribeChanges(
+    () => {
+      if (
+        store.retirementState.toArray.some((row) => row.status === "retired")
+      ) {
+        reloadToClassicAfterRetirement();
+      }
+    },
+    { includeInitialState: true },
+  );
 
   void store.collection
     .toArrayWhenReady()
@@ -166,6 +178,8 @@ function maybeSeed(store: OutlineStore, userId: string): void {
 export function stopLunoraOutlineSync(): void {
   collectionSub?.unsubscribe();
   collectionSub = null;
+  retirementSub?.unsubscribe();
+  retirementSub = null;
   unbindLunoraTagColors();
   unbindLunoraSavedQueries();
   unbindLunoraDailyIndex();
