@@ -700,6 +700,9 @@ export function QueryFilterBar() {
   };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Typing already opens and recomputes the popover. Its deferred initial
+    // reveal must not later reset a suggestion the user has highlighted.
+    cancelDeferredReveal();
     const value = e.target.value;
     draftRef.current = value;
     setDraft(value);

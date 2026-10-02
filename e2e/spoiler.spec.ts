@@ -32,7 +32,7 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await text(page, id).evaluate((el, target) => {
     const sel = window.getSelection();
     if (!sel) return;
-    let remaining = target as number;
+    let remaining = target;
     let placed = false;
     const visit = (node: Node): void => {
       if (placed) return;
@@ -48,11 +48,8 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (
-        node.nodeType === 1 &&
-        (node as HTMLElement).hasAttribute("data-src")
-      ) {
-        const e = node as HTMLElement;
+      if (node instanceof Element && node.hasAttribute("data-src")) {
+        const e = node;
         const len =
           Number(e.getAttribute("data-src-len")) ||
           (e.getAttribute("data-src") ?? "").length;
@@ -182,7 +179,7 @@ test.describe("Spoiler: creation", () => {
       { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
     ]);
     await selectAll(page, "n");
-    await page.keyboard.press("Meta+Shift+s");
+    await page.keyboard.press("ControlOrMeta+Shift+s");
     // Caret sits in the fresh run, so it's REVEALED: fences inside the container.
     await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveText(
       "||alphabravo||",

@@ -34,7 +34,7 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await text(page, id).evaluate((el, target) => {
     const sel = window.getSelection();
     if (!sel) return;
-    let remaining = target as number;
+    let remaining = target;
     let placed = false;
     const visit = (node: Node): void => {
       if (placed) return;
@@ -50,11 +50,8 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (
-        node.nodeType === 1 &&
-        (node as HTMLElement).hasAttribute("data-src")
-      ) {
-        const e = node as HTMLElement;
+      if (node instanceof Element && node.hasAttribute("data-src")) {
+        const e = node;
         const len =
           Number(e.getAttribute("data-src-len")) ||
           (e.getAttribute("data-src") ?? "").length;
@@ -243,31 +240,29 @@ test.describe("Inline emphasis: creation", () => {
       { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
     ]);
     await text(page, "n").click();
-    await page.keyboard.press("Meta+a"); // rung 1: native text select-all
-    await page.keyboard.press("Meta+b");
+    await page.keyboard.press("ControlOrMeta+a"); // rung 1: native text select-all
+    await page.keyboard.press("ControlOrMeta+b");
     await expect(run(page, "n", "strong")).toHaveText("alphabravo");
     // The browser's native bold (execCommand) must NOT have fired -- no stray
     // <b>; our source-level wrap produced a real `**...**` run.
     await expect(text(page, "n").locator("b")).toHaveCount(0);
   });
 
-  test("Cmd+I / Cmd+U / Cmd+Shift+X wrap a selection in each kind", async ({
-    page,
-  }) => {
-    for (const [combo, tag] of [
-      ["Meta+i", "em"],
-      ["Meta+u", "u"],
-      ["Meta+Shift+x", "del"],
-    ] as const) {
+  for (const [combo, tag] of [
+    ["ControlOrMeta+i", "em"],
+    ["ControlOrMeta+u", "u"],
+    ["ControlOrMeta+Shift+x", "del"],
+  ] as const) {
+    test(`${combo} wraps a selection in ${tag}`, async ({ page }) => {
       await load(page, [
         { id: "n", parentId: null, prevSiblingId: null, text: "word" },
       ]);
       await text(page, "n").click();
-      await page.keyboard.press("Meta+a");
+      await page.keyboard.press("ControlOrMeta+a");
       await page.keyboard.press(combo);
       await expect(run(page, "n", tag)).toHaveText("word");
-    }
-  });
+    });
+  }
 
   test("/bold inserts empty markers with the caret inside", async ({
     page,
