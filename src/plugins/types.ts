@@ -280,7 +280,8 @@ export interface RouteSearch {
 
 /**
  * A precomputed visible-set for a global view transform (the tag filter today).
- * `visibleIds`: nodes that render (matches + their ancestor context).
+ * Both sets contain render keys: bare node IDs until a mirror is crossed.
+ * `visibleIds`: rows that render (matches, their descendants, and ancestor context).
  * `matchIds`: the subset rendered as real matches; the rest are dimmed context.
  */
 export interface ViewFilter {

@@ -23,20 +23,26 @@ import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import {
   dayKeyToScaffoldChain,
+  localDateKey,
   scaffoldLabel,
   sortedInsertAfterId,
 } from "../src/data/date-links";
+import {
+  nodeMatches,
+  parseFilterQuery,
+  walkQueryNodes,
+} from "../src/data/filter-query";
 import { redactSpoilers } from "../src/data/spoiler";
 import {
   type TreeIndex,
   buildTreeIndex,
-  buildTrail,
   childrenOf,
   createNode,
   orphanedMirrorsBy,
   trueSourceOf,
   wouldMirrorCycle,
 } from "../src/data/tree";
+import { queryOperators } from "../src/plugins/filter-operators";
 
 export { buildTreeIndex, trueSourceOf };
 export type { TreeIndex };
@@ -1272,34 +1278,45 @@ export interface SearchHit {
   text: string;
   /** `"paragraph"` when the hit is prose rather than a list item (ADR 0045). */
   kind: NodeKind;
-  /** Ancestor texts from the top of the outline down to (not including) the hit. */
+  isTask: boolean;
+  completed: boolean;
+  mirrorOf: string | null;
+  /** First ancestor path within the searched view, excluding the hit. */
   path: string[];
 }
 
-/** Case-insensitive substring search over node text, capped at `limit` hits in
- *  snapshot order, each with its breadcrumb trail for orientation. */
+/** DQL over spoiler-redacted content, in outline preorder. Each node ID appears
+ * once, mirrors follow source content, and scope includes its root (ADR 0063).
+ * The offset counts matches, not nodes. Payload allocation stays page-bounded. */
 export function searchNodes(
   index: TreeIndex,
   query: string,
   limit: number,
+  rootId: string | null = null,
+  offset = 0,
+  today = localDateKey(),
 ): SearchHit[] {
-  const q = query.trim().toLowerCase();
+  const parsed = parseFilterQuery(query);
   const hits: SearchHit[] = [];
-  if (!q) return hits;
-  for (const node of index.byId.values()) {
-    // MCP egress: match against the REDACTED text, so a term that lives only
-    // inside a spoiler yields ZERO hits -- the interior is invisible to agent
-    // search, not merely masked in the result (ADR 0043). Redact the output
-    // text AND every ancestor `path` crumb (an ancestor bullet can hold a
-    // spoiler too).
-    if (!redactSpoilers(node.text).toLowerCase().includes(q)) continue;
+  if (parsed.groups.length === 0 || limit <= 0) return hits;
+  // Redact the entire index BEFORE evaluating any condition, including tags,
+  // links, highlights, and content resolved through a mirror (ADR 0043).
+  const safeIndex = redactSpoilerIndex(index);
+  let skipped = 0;
+  for (const { node, path } of walkQueryNodes(safeIndex, rootId, {
+    includeRoot: true,
+    deduplicate: true,
+  })) {
+    if (!nodeMatches(parsed, node, safeIndex, queryOperators, today)) continue;
+    if (skipped++ < offset) continue;
     hits.push({
       id: node.id,
-      text: redactSpoilers(node.text),
+      text: node.text,
       kind: node.kind,
-      path: buildTrail(index, node.id)
-        .slice(0, -1)
-        .map((n) => redactSpoilers(n.text)),
+      isTask: node.kind !== "paragraph" && node.isTask,
+      completed: node.completed,
+      mirrorOf: node.mirrorOf,
+      path: path.map((ancestor) => ancestor.text),
     });
     if (hits.length >= limit) break;
   }

@@ -18,7 +18,6 @@ import { openUrlInFocusedTab } from "../../components/open-url";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
-  hasLink,
   isHttpUrl,
   LINK_PATTERN,
   sanitizeLinkLabel,
@@ -27,6 +26,7 @@ import {
 import { getTreeIndex } from "../../data/tree-store";
 import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
+import { LINK_FILTER_OPERATORS } from "./filter-operators";
 import {
   openLinkCreatePopover,
   openLinkEditPopover,
@@ -433,12 +433,5 @@ export default definePlugin({
   // Query filter (ADR 0047 §4): `has:link` -- a markdown `[label](url)` run in
   // the text. Reuses the pure `hasLink` (bails before any regex on `[`-free
   // text), so the predicate is O(1) on the overwhelming majority of nodes.
-  filterOperators: [
-    {
-      key: "has",
-      values: ["link"],
-      description: "Filter to nodes containing a link",
-      predicate: (node) => hasLink(node.text),
-    },
-  ],
+  filterOperators: LINK_FILTER_OPERATORS,
 });

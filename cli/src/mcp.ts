@@ -1,7 +1,7 @@
-import { Effect, Schema } from "effect";
+import { Effect, Predicate, Schema } from "effect";
 import { randomUUID } from "node:crypto";
 
-import { decode, fail, JsonObject, VERSION } from "./core.js";
+import { CliError, decode, fail, JsonObject, VERSION } from "./core.js";
 import { requestJson } from "./http.js";
 
 const Envelope = Schema.Struct({
@@ -30,6 +30,25 @@ const ToolList = Schema.Struct({
 });
 const ToolResult = Schema.Struct({
   content: Schema.Array(JsonObject),
+  isError: Schema.optionalKey(Schema.Boolean),
+});
+const SearchNode = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  kind: Schema.NullOr(Schema.Literal("paragraph")),
+  isTask: Schema.Boolean,
+  completed: Schema.Boolean,
+  mirrorOf: Schema.NullOr(Schema.String),
+  path: Schema.Array(Schema.String),
+});
+const SearchPage = Schema.Struct({
+  content: Schema.Array(
+    Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+  ),
+  structuredContent: Schema.Struct({
+    nodes: Schema.Array(SearchNode),
+    nextCursor: Schema.NullOr(Schema.String),
+  }),
   isError: Schema.optionalKey(Schema.Boolean),
 });
 const Initialize = Schema.Struct({
@@ -134,5 +153,62 @@ export const connect = Effect.fn("MCP.connect")(function* (
             : error,
         ),
       ),
+  };
+});
+
+type Invoke = (
+  name: string,
+  args: JsonObject,
+  write: boolean,
+) => Effect.Effect<
+  { raw: JsonObject; isError: boolean; content: ReadonlyArray<JsonObject> },
+  CliError
+>;
+
+export const invokeAllSearch = Effect.fn("MCP.invokeAllSearch")(function* (
+  invoke: Invoke,
+  args: JsonObject,
+) {
+  const nodes: Array<typeof SearchNode.Type> = [];
+  const bodies: string[] = [];
+  const nodeIds = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const pageArgs: JsonObject = { ...args };
+    if (cursor !== null) pageArgs.cursor = cursor;
+    const result = yield* invoke("search_nodes", pageArgs, false);
+    if (result.isError) {
+      const reason = result.content
+        .map((block) => (Predicate.isString(block.text) ? block.text : ""))
+        .filter(Boolean)
+        .join("\n");
+      return yield* Effect.fail(
+        fail(`Search failed before all pages were read. ${reason}`),
+      );
+    }
+    const page = yield* decode(SearchPage, result.raw, "search page");
+    const body = page.content[0];
+    if (body === undefined)
+      return yield* Effect.fail(fail("Invalid search page."));
+    bodies.push(body.text);
+    for (const node of page.structuredContent.nodes) {
+      if (nodeIds.has(node.id))
+        return yield* Effect.fail(
+          fail("Server returned a duplicate search node."),
+        );
+      nodeIds.add(node.id);
+      nodes.push(node);
+    }
+    cursor = page.structuredContent.nextCursor;
+    if (cursor !== null) {
+      if (cursors.has(cursor))
+        return yield* Effect.fail(fail("Server repeated a search cursor."));
+      cursors.add(cursor);
+    }
+  } while (cursor !== null);
+  return {
+    content: [{ type: "text", text: bodies.join("\n") }],
+    structuredContent: { nodes, nextCursor: null },
   };
 });

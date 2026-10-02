@@ -23,6 +23,7 @@ import { runStructural } from "../../data/structural";
 import { type Node } from "../../data/tree";
 import { isProtected } from "../registry";
 import { definePlugin, type PluginContext } from "../types";
+import { TODO_FILTER_OPERATORS } from "./filter-operators";
 
 // Toggle completion on a node, shared by Mod+Enter and Mod+D. Reads the live
 // node off the tree so it flips relative to the current state.
@@ -190,12 +191,5 @@ export default definePlugin({
   // concept (D9), so the operator that reads it lives here too -- registered
   // beside the core `is:todo|bullet|paragraph|mirror`, sharing the `is` key
   // without collision (the guard is on the (key, value) pair).
-  filterOperators: [
-    {
-      key: "is",
-      values: ["complete"],
-      description: "Filter to completed nodes",
-      predicate: (node) => node.completed,
-    },
-  ],
+  filterOperators: TODO_FILTER_OPERATORS,
 });

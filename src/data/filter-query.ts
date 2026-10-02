@@ -12,9 +12,11 @@
 
 import type { Node, TreeIndex } from "./tree";
 
+import { localDateKey } from "./date-links";
 import { flattenInline } from "./inline-text";
 import { parseTags } from "./tags";
-import { childrenOf } from "./tree";
+import { childrenOf, trueSourceOf } from "./tree";
+import { rowKeyFor } from "./visible-order";
 
 // --- Operators (the plugin seam's data shape) -------------------------------
 //
@@ -289,11 +291,12 @@ function termMatches(
   node: Node,
   index: TreeIndex,
   operators: FilterOperatorMap,
+  today: string,
 ): boolean {
   let hit: boolean;
   switch (term.type) {
     case "text":
-      hit = flattenInline(node.text)
+      hit = flattenInline(node.text, today)
         .toLowerCase()
         .includes(term.value.toLowerCase());
       break;
@@ -307,7 +310,7 @@ function termMatches(
       hit = op
         ? op.predicate(node, index, term.value)
         : // Graceful degradation: an unknown key/value is just free text (§2).
-          flattenInline(node.text)
+          flattenInline(node.text, today)
             .toLowerCase()
             .includes(term.raw.toLowerCase());
       break;
@@ -316,16 +319,111 @@ function termMatches(
   return term.negated ? !hit : hit;
 }
 
-/** True iff `node` satisfies the whole query: every group has a matching term. */
-function nodeMatches(
+/** True iff a content-resolved node satisfies every group. Callers redact the
+ * index before resolving agent-facing content (ADR 0063). */
+export function nodeMatches(
   query: FilterQuery,
   node: Node,
   index: TreeIndex,
   operators: FilterOperatorMap,
+  today = localDateKey(),
 ): boolean {
   return query.groups.every((g) =>
-    g.terms.some((t) => termMatches(t, node, index, operators)),
+    g.terms.some((t) => termMatches(t, node, index, operators, today)),
   );
+}
+
+/** Content comes from the source; position, collapse, and mirror identity stay
+ * on the instance. A missing source keeps the instance's stored fields. */
+export function queryNode(
+  index: TreeIndex,
+  node: Node,
+  mirrorsEnabled = true,
+): Node {
+  if (!mirrorsEnabled || node.mirrorOf === null) return node;
+  const source = index.byId.get(trueSourceOf(index, node.id));
+  if (!source) return node;
+  return {
+    ...source,
+    id: node.id,
+    parentId: node.parentId,
+    prevSiblingId: node.prevSiblingId,
+    mirrorOf: node.mirrorOf,
+    collapsed: node.collapsed,
+    bookmarkedAt: node.bookmarkedAt,
+  };
+}
+
+/** Preorder over the reachable view, with mirror-cycle capping and no recursion.
+ * `path` and `ancestorKeys` exclude the current row and are borrowed until the
+ * next iteration. Keys follow the renderer's crossed-mirror convention.
+ * Search deduplicates both node emissions and source expansion; the app walks
+ * every instance path so all contextual ancestors remain visible. */
+export function* walkQueryNodes(
+  index: TreeIndex,
+  rootId: string | null,
+  options: {
+    includeRoot?: boolean;
+    mirrorsEnabled?: boolean;
+    isHidden?: (node: Node) => boolean;
+    deduplicate?: boolean;
+  } = {},
+): Generator<{
+  node: Node;
+  path: readonly Node[];
+  key: string;
+  ancestorKeys: readonly string[];
+}> {
+  const mirrorsEnabled = options.mirrorsEnabled ?? true;
+  const root = rootId === null ? undefined : index.byId.get(rootId);
+  if (rootId !== null && !root) return;
+  const rootContentId =
+    root && mirrorsEnabled ? trueSourceOf(index, root.id) : rootId;
+  const roots =
+    root && options.includeRoot ? [root] : childrenOf(index, rootContentId);
+  const stack: Array<{ node: Node; prefix: string | null } | { exit: string }> =
+    roots.reverse().map((node) => ({ node, prefix: null }));
+  const path: Node[] = [];
+  const ancestorKeys: string[] = [];
+  const expanded = new Set<string>();
+  const emitted = new Set<string>();
+  const searchedSources = new Set<string>();
+  if (root && !options.includeRoot && rootContentId !== null) {
+    expanded.add(rootContentId);
+    searchedSources.add(rootContentId);
+  }
+  while (stack.length) {
+    const step = stack.pop();
+    if (!step) break;
+    if ("exit" in step) {
+      path.pop();
+      ancestorKeys.pop();
+      expanded.delete(step.exit);
+      continue;
+    }
+    const node = queryNode(index, step.node, mirrorsEnabled);
+    if (options.isHidden?.(node)) continue;
+    const contentId = mirrorsEnabled ? trueSourceOf(index, node.id) : node.id;
+    const key = rowKeyFor(step.prefix, node.id);
+    if (!options.deduplicate || !emitted.has(node.id)) {
+      emitted.add(node.id);
+      yield { node, path, key, ancestorKeys };
+    }
+    if (expanded.has(contentId)) continue;
+    if (options.deduplicate && searchedSources.has(contentId)) continue;
+    searchedSources.add(contentId);
+    path.push(node);
+    ancestorKeys.push(key);
+    expanded.add(contentId);
+    stack.push({ exit: contentId });
+    const prefix =
+      step.prefix !== null || (mirrorsEnabled && node.mirrorOf !== null)
+        ? key
+        : null;
+    for (const child of childrenOf(index, contentId).reverse()) {
+      stack.push({ node: child, prefix });
+    }
+  }
 }
 
 /**
@@ -341,7 +439,8 @@ function nodeMatches(
  * - **A match's descendants** now render too (§8: "a match reveals its subtree"),
  *   under NORMAL visibility rules -- collapse respected, `isHidden` applied --
  *   and UNDIMMED, so they go into `matchIds` (the row render derives dimming as
- *   `!matchIds.has(id)`, so descendants must be members to stay lit).
+ *   `!matchIds.has(rowKey)`, so descendants must be members to stay lit).
+ * Both sets contain render keys, not shared descendant node IDs.
  *
  * Returns `null` for an empty/absent query (no filter). `emptyMessage` is set
  * when nothing matches (the editor shows it in place of the list).
@@ -356,50 +455,38 @@ export function buildQueryFilter(
   query: string | undefined,
   isHidden: (node: Node) => boolean,
   operators: FilterOperatorMap,
+  mirrorsEnabled = true,
 ): QueryFilter | null {
   const parsed = parseFilterQuery(query);
   if (parsed.groups.length === 0) return null;
 
   const visibleIds = new Set<string>();
   const matchIds = new Set<string>();
-  const matched: Node[] = [];
+  const today = localDateKey();
 
-  // Pass 1: find every match, ignoring collapse (a match inside a closed subtree
-  // is still revealed). Add each match + its ancestors up to (not including) the
-  // root -- the ancestors are the dimmed context showing WHERE a match lives.
-  const findMatches = (parentId: string | null) => {
-    for (const child of childrenOf(index, parentId)) {
-      if (isHidden(child)) continue;
-      if (nodeMatches(parsed, child, index, operators)) {
-        matchIds.add(child.id);
-        matched.push(child);
-        let cur: Node | undefined = child;
-        while (cur && cur.id !== rootId) {
-          visibleIds.add(cur.id);
-          cur = cur.parentId ? index.byId.get(cur.parentId) : undefined;
-        }
-      }
-      findMatches(child.id);
+  // Preorder lets an expanded match reveal its children along this exact render
+  // path. Independently matching rows still reveal collapsed ancestor context.
+  for (const { node, path, key, ancestorKeys } of walkQueryNodes(
+    index,
+    rootId,
+    {
+      isHidden,
+      mirrorsEnabled,
+    },
+  )) {
+    const parent = path[path.length - 1];
+    const parentKey = ancestorKeys[ancestorKeys.length - 1];
+    const revealed =
+      parent &&
+      parentKey !== undefined &&
+      !parent.collapsed &&
+      matchIds.has(parentKey);
+    if (revealed || nodeMatches(parsed, node, index, operators, today)) {
+      matchIds.add(key);
+      visibleIds.add(key);
+      for (const ancestorKey of ancestorKeys) visibleIds.add(ancestorKey);
     }
-  };
-  findMatches(rootId);
-
-  // Pass 2 (ADR 0047 §8): reveal each match's descendants under NORMAL rules --
-  // collapse respected (a collapsed match shows no children; toggling it
-  // recomputes), `isHidden` applied -- and undimmed (into `matchIds`). Emission
-  // stays gated on `visibleIds` in `buildVisibleRows`, whose filter-mode walk
-  // force-descends; adding only the collapse-respecting descendants here is what
-  // keeps a collapsed match's subtree hidden without mutating `collapsed`.
-  const revealSubtree = (node: Node) => {
-    if (node.collapsed) return;
-    for (const child of childrenOf(index, node.id)) {
-      if (isHidden(child)) continue;
-      visibleIds.add(child.id);
-      matchIds.add(child.id);
-      revealSubtree(child);
-    }
-  };
-  for (const m of matched) revealSubtree(m);
+  }
 
   const result: QueryFilter = { visibleIds, matchIds };
   if (matchIds.size === 0) {
@@ -413,7 +500,8 @@ export function buildQueryFilter(
  * path (`buildVisibleRows`, the row's dimming derivation) and the plugin Seam-G
  * `ViewFilter` both consume. Generalizes the old `TagFilter`.
  *
- * - `visibleIds`: every node that renders (matches + ancestor context + a
+ * These sets store render keys (bare node IDs until a mirror is crossed).
+ * - `visibleIds`: every row that renders (matches + ancestor context + a
  *   match's revealed descendants).
  * - `matchIds`: the UNDIMMED subset (matches + their descendants); the rest of
  *   `visibleIds` (ancestor context) renders dimmed.
