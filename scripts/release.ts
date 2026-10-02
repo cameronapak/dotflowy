@@ -16,6 +16,7 @@
  *
  * Split in two on purpose: step 5 leaves a commit to read before anything
  * becomes public, and publishing is separately re-runnable if `gh` hiccups.
+ * `--ci` skips versioning when there is no news; the deployment still proceeds.
  */
 
 import { $ } from "bun";
@@ -37,7 +38,7 @@ const CHANGESET_DIR = join(ROOT, ".changeset");
 const CHANGELOG_DIR = join(ROOT, "changelog");
 const MANIFEST = join(CHANGELOG_DIR, "manifest.json");
 
-function die(message: string): never {
+function die(message: string) {
   console.error(`\nrelease: ${message}\n`);
   process.exit(1);
 }
@@ -54,7 +55,7 @@ function today(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-async function version() {
+async function version(allowNoRelease = false) {
   if ((await $`git status --porcelain`.text()).trim()) {
     die("the working tree is dirty. Commit or stash first.");
   }
@@ -63,6 +64,10 @@ async function version() {
     .filter((f) => f.endsWith(".md") && f !== "README.md")
     .sort();
   if (files.length === 0) {
+    if (allowNoRelease) {
+      console.log("release: no changesets; deploy the current version.");
+      return;
+    }
     die(
       "no changesets to release. Every PR adds one (`bunx changeset`, or `bunx changeset --empty` when it isn't news).",
     );
@@ -80,6 +85,12 @@ async function version() {
     if (parsed) entries += 1;
   }
   if (entries === 0) {
+    if (allowNoRelease) {
+      console.log(
+        "release: only empty changesets; deploy the current version.",
+      );
+      return;
+    }
     die(
       `${files.length} changeset(s), all empty — there is nothing to tell anyone, and no version to bump.`,
     );
@@ -148,6 +159,20 @@ function releaseNotes(version: string): string {
 async function publish() {
   const v = packageVersion();
   const notes = releaseNotes(v);
+  // Only a confirmed 404 means absent. Authentication/network failures must
+  // fail the run rather than being mistaken for permission to create a release.
+  const existing = await $`gh api repos/{owner}/{repo}/releases/tags/${`v${v}`}`
+    .quiet()
+    .nothrow();
+  if (existing.exitCode === 0) {
+    const release = JSON.parse(existing.stdout.toString());
+    if (release.draft) die(`v${v} exists as a draft; publish it explicitly.`);
+    console.log(`release: v${v} is already published.`);
+    return;
+  }
+  if (!existing.stderr.toString().includes("(HTTP 404)")) {
+    die(`cannot check v${v}: ${existing.stderr.toString().trim()}`);
+  }
   const tmp = join(tmpdir(), `dotflowy-release-notes-v${v}.md`);
   writeFileSync(tmp, `${notes}\n`);
   await $`gh release create ${`v${v}`} --title ${`v${v}`} --notes-file ${tmp} --verify-tag`;
@@ -158,5 +183,6 @@ async function publish() {
 
 const mode = process.argv[2];
 if (mode === "--publish") await publish();
+else if (mode === "--ci") await version(true);
 else if (mode === undefined) await version();
-else die(`unknown argument "${mode}" (expected nothing, or --publish)`);
+else die(`unknown argument "${mode}" (expected nothing, --ci, or --publish)`);
