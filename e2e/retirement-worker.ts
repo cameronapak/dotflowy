@@ -13,6 +13,8 @@ import type {
 
 import { api } from "../lunora/_generated/api";
 import { LUNORA_FUNCTIONS } from "../lunora/_generated/functions";
+import { resolveUserId } from "../worker/identity";
+import productionWorker from "../worker/index";
 import {
   createLunoraOutlineStore,
   createLunoraRetirementClient,
@@ -30,7 +32,7 @@ import {
 export { UserOutlineDO } from "../worker/outline-do";
 export { ShardDO } from "../worker/lunora-app";
 
-type Env = Parameters<typeof runRetirementOperation>[0];
+type Env = Parameters<NonNullable<typeof productionWorker.fetch>>[1];
 export type Input = {
   userId: string;
   classicNodes?: Node[];
@@ -43,8 +45,18 @@ export type Input = {
 };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      const fetch = productionWorker.fetch;
+      if (!fetch)
+        throw new Error("production Worker fetch missing from fixture");
+      return fetch(request, env, ctx);
+    }
     if (url.pathname === "/_lunora/ws") {
       // Test-only identity bridge; the production Worker resolves a server session.
       // The bound ShardDO below is the production class and configuration.
@@ -66,7 +78,9 @@ export default {
     // SAFETY: only the accompanying spec constructs requests to this isolated test Worker.
     const input = await request.json<Input>();
     const { userId } = input;
-    const classic = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId));
+    const classic = env.USER_OUTLINE.get(
+      env.USER_OUTLINE.idFromName(resolveUserId(userId, env)),
+    );
     const lunora = createLunoraRetirementClient(env, userId);
     const client = createShardClient(env.SHARD).as({ userId }).forShard(userId);
     try {
@@ -91,6 +105,9 @@ export default {
             })),
           ],
         });
+        if (input.lunoraNodes === undefined) {
+          return Response.json({ classic: await classic.exportSnapshot() });
+        }
         // SAFETY: generated input types collapse nullability; runtime validators accept the wire Node fields.
         await client.call(api.mutators.importNodes, {
           userId,

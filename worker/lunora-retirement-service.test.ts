@@ -8,7 +8,10 @@ import type {
   RetirementRecord,
 } from "./lunora-retirement-service";
 
-import { runRetirementOperation } from "./lunora-retirement-service";
+import {
+  retirementDiagnostic,
+  runRetirementOperation,
+} from "./lunora-retirement-service";
 
 const USER_ID = "user-1";
 
@@ -368,6 +371,106 @@ function fixture(options?: {
   } as Parameters<typeof runRetirementOperation>[0];
   return { db, bucket, backend, env };
 }
+
+describe("read-only retirement diagnostic", () => {
+  it("reads both backends without creating a record, backup, or fence", async () => {
+    const f = fixture();
+    const before = await f.backend.backends.lunora.inspect();
+    const classicBefore = clone(f.backend.classic);
+    const report = await retirementDiagnostic(
+      f.env,
+      USER_ID,
+      f.backend.backends,
+    );
+    expect(report).toMatchObject({
+      userId: USER_ID,
+      experimentalPreference: "enabled",
+      nodes: { classic: 1, experimental: 1, shared: 0 },
+    });
+    expect(report.readFinishedAt).toBeGreaterThanOrEqual(report.readStartedAt);
+    expect(f.backend.classic).toEqual(classicBefore);
+    expect(await f.backend.backends.lunora.inspect()).toEqual(before);
+    expect(f.db.record).toBeNull();
+    expect(f.db.attempts).toBe(0);
+    expect(f.bucket.objects.size).toBe(0);
+    expect(f.backend.classicFreezeCalls).toBe(0);
+    expect(f.backend.restoreCalls).toBe(0);
+  });
+
+  it("rejects malformed snapshots with a constant content-free error", async () => {
+    for (const backend of ["classic", "experimental"]) {
+      const f = fixture();
+      if (backend === "classic") {
+        const classic = classicSnapshot();
+        for (const row of classic.nodes) Reflect.deleteProperty(row, "text");
+        f.backend.replaceClassic(classic);
+      } else {
+        const experimental = lunoraSnapshot();
+        for (const row of experimental.nodes)
+          Reflect.deleteProperty(row, "text");
+        f.backend.replaceLunora(experimental);
+      }
+      await expect(
+        retirementDiagnostic(f.env, USER_ID, f.backend.backends),
+      ).rejects.toThrow("retirement diagnostic snapshot schema rejected");
+    }
+  });
+
+  it("rejects unsupported versions and foreign ownership in every experimental collection", async () => {
+    const mutations: Array<(f: ReturnType<typeof fixture>) => void> = [
+      (f) => f.backend.replaceClassic({ ...classicSnapshot(), version: 2 }),
+      (f) => f.backend.replaceLunora({ ...lunoraSnapshot(), version: 2 }),
+      (f) =>
+        f.backend.replaceLunora({ ...lunoraSnapshot(), userId: "foreign" }),
+      (f) =>
+        f.backend.replaceLunora({
+          ...lunoraSnapshot(),
+          nodes: [{ ...node("x"), userId: "foreign" }],
+        }),
+      (f) =>
+        f.backend.replaceLunora({
+          ...lunoraSnapshot(),
+          dailyIndex: [
+            { key: "SECRET_DAY", nodeId: "x", touchedAt: 1, userId: "foreign" },
+          ],
+        }),
+      (f) =>
+        f.backend.replaceLunora({
+          ...lunoraSnapshot(),
+          tagColors: [
+            { tag: "SECRET_TAG", color: "SECRET_COLOR", userId: "foreign" },
+          ],
+        }),
+      (f) =>
+        f.backend.replaceLunora({
+          ...lunoraSnapshot(),
+          savedQueries: [
+            {
+              id: "q",
+              name: "SECRET_NAME",
+              query: "SECRET_QUERY",
+              createdAt: 1,
+              userId: "foreign",
+            },
+          ],
+        }),
+      (f) =>
+        f.backend.replaceLunora({
+          ...lunoraSnapshot(),
+          migrateState: [{ nodesAt: 1, kvAt: 1, userId: "foreign" }],
+        }),
+    ];
+    for (const mutate of mutations) {
+      const f = fixture();
+      mutate(f);
+      await expect(
+        retirementDiagnostic(f.env, USER_ID, f.backend.backends),
+      ).rejects.toThrow("retirement diagnostic version or ownership rejected");
+      expect(f.db.record).toBeNull();
+      expect(f.bucket.objects.size).toBe(0);
+    }
+  });
+});
 
 describe("Lunora retirement coordinator", () => {
   it("installs both write fences before restore and leaves only Lunora retired", async () => {

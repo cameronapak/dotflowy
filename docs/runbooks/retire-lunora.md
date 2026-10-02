@@ -31,6 +31,45 @@ Inspect every user's Lunora snapshot, including users whose preference is off. C
 
 Reports contain user ids, states, collection counts, hashes, snapshot keys, timestamps, and failure reasons. They never contain node text.
 
+## Compare a manual-review account without writing
+
+Use `GET /api/admin/lunora-retirement?diagnostic=1&userId=REVIEWED_USER_ID`
+to compare one account's current classic and experimental snapshots. You can
+provide `email` instead of `userId`, but not both. The server checks the admin
+session before resolving the target; anonymous and non-admin callers receive 404. Responses use `Cache-Control: private, no-store`.
+
+In a signed-in admin tab in desktop Chrome or Edge, run this in the console:
+
+```js
+const response = await fetch(
+  "/api/admin/lunora-retirement?" +
+    new URLSearchParams({ diagnostic: "1", userId: "REVIEWED_USER_ID" }),
+  { credentials: "same-origin", cache: "no-store" },
+);
+if (!response.ok) throw new Error(`Diagnostic failed: HTTP ${response.status}`);
+const report = await response.json();
+console.log(report);
+copy(JSON.stringify(report, null, 2));
+```
+
+The diagnostic reports the saved preference as enabled, disabled, missing, or
+invalid. It returns graph validation, missing-reference ids and their presence
+in the other backend, node counts, backend-only ids, changed-field names, and
+side-collection difference counts. It excludes node text, tag names, colors,
+query names, query expressions, and content hashes. ID and changed-field samples
+are capped at 50; their counts cover the full snapshots. Duplicate node ids or
+malformed or duplicate side-collection rows make the affected comparison
+unavailable (`comparable: false`, difference totals `null`).
+
+This request does not seed or heal data, freeze writes, create audit records or
+backups, change preferences, repair references, or migrate the account. It reads
+the backends separately while edits may continue. The read and export timestamps
+describe the comparison window, not which backend has newer content. Finding a
+missing parent in classic does not authorize copying it into experimental.
+Keep migration checks strict and review the report before proposing any repair
+or source choice. Do not enable experimental sync to inspect a blocked account;
+client startup can import or heal data.
+
 ## Migrate
 
 ```sh

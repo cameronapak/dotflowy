@@ -18,6 +18,7 @@ import type { RetirementRecord } from "../worker/lunora-retirement-service";
 import type { Input } from "./retirement-worker";
 
 import { ServerMessageSchema } from "../src/data/wire-schema";
+import { compareRetirementSnapshots } from "../worker/lunora-retirement";
 
 // Real local Workerd storage, no production credentials or remote bindings.
 test.describe.configure({ mode: "serial" });
@@ -159,6 +160,17 @@ test.beforeAll(async () => {
             },
             DB: { type: "d1", id: "retirement-db" },
             BACKUPS: { type: "r2", name: "retirement-backups" },
+            BETTER_AUTH_SECRET: {
+              type: "text",
+              value: "disposable-retirement-test-secret-not-for-production",
+            },
+            BETTER_AUTH_URL: { type: "text", value: "http://fixture" },
+            SIGNUP_OPEN: { type: "text", value: "true" },
+            ADMIN_EMAILS: {
+              type: "text",
+              value: "diagnostic-admin@dotflowy.local",
+            },
+            OWNER_USER_ID: { type: "text", value: "diagnostic-owner" },
           },
           exports: {
             UserOutlineDO: { type: "durable-object", storage: "sqlite" },
@@ -170,6 +182,7 @@ test.beforeAll(async () => {
   });
   const db = await mf.getD1Database("DB");
   for (const migration of [
+    "0003_create_auth.sql",
     "0010_lunora_retirement.sql",
     "0011_lunora_retirement_operation_claim.sql",
   ]) {
@@ -181,6 +194,211 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await mf?.dispose();
   if (directory) await rm(directory, { recursive: true, force: true });
+});
+
+test("production diagnostic is admin-only, content-free, and leaves outline and audit storage unchanged", async () => {
+  const db = await mf.getD1Database("DB");
+  const signUp = async (email: string) => {
+    const response = await mf.dispatchFetch(
+      "http://fixture/api/auth/sign-up/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://fixture",
+        },
+        body: JSON.stringify({
+          email,
+          name: "Diagnostic fixture",
+          password: "disposable-test-password",
+        }),
+      },
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    // Disposable local fixture only: production requires verified email before sign-in.
+    await db
+      .prepare('UPDATE "user" SET emailVerified=1 WHERE email=?')
+      .bind(email)
+      .run();
+    const signedIn = await mf.dispatchFetch(
+      "http://fixture/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://fixture",
+        },
+        body: JSON.stringify({ email, password: "disposable-test-password" }),
+      },
+    );
+    expect(signedIn.status).toBe(200);
+    const cookie = signedIn.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+    expect(cookie).not.toBe("");
+    return cookie;
+  };
+  const adminCookie = await signUp("diagnostic-admin@dotflowy.local");
+  const otherCookie = await signUp("diagnostic-nonadmin@dotflowy.local");
+  const userId = "diagnostic-owner";
+  await db
+    .prepare(
+      'INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?, ?, ?, 1, ?, ?)',
+    )
+    .bind(
+      userId,
+      "Owner fixture",
+      "diagnostic-owner@dotflowy.local",
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    .run();
+  const root = node("SECRET_OUTLINE_TEXT");
+  const parent = node("SECRET_PARENT_TEXT", root.id);
+  const child = node("SECRET_CHILD_TEXT", parent.id);
+  await command("/seed", userId, {
+    classicNodes: [root, parent, child],
+    lunoraNodes: [root, child],
+  });
+  const before = await command<Inspection>("/inspect", userId);
+  const auditBefore = await db.prepare("SELECT * FROM lunora_retirement").all();
+  const attemptsBefore = await db
+    .prepare("SELECT * FROM lunora_retirement_attempt")
+    .all();
+  const backupsBefore = await (await mf.getR2Bucket("BACKUPS")).list();
+  const path = `http://fixture/api/admin/lunora-retirement?diagnostic=1&userId=${userId}`;
+  for (const cookie of ["", otherCookie]) {
+    const denied = await mf.dispatchFetch(path, { headers: { cookie } });
+    expect(denied.status).toBe(404);
+    expect(denied.headers.get("cache-control")).toBe("private, no-store");
+    expect(await denied.json()).toEqual({ error: "not found" });
+  }
+  const response = await mf.dispatchFetch(path, {
+    headers: { cookie: adminCookie },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  const serialized = await response.text();
+  expect(serialized).not.toContain("SECRET_");
+  expect(serialized).not.toContain("#work");
+  expect(serialized).not.toContain('"blue"');
+  const report: ReturnType<typeof compareRetirementSnapshots> =
+    JSON.parse(serialized);
+  expect(report.nodes.classicOnly).toMatchObject({
+    count: 1,
+    sample: [parent.id],
+  });
+  expect(report.graphs.experimental.missingReferences).toMatchObject({
+    count: 1,
+    sample: [
+      {
+        nodeId: child.id,
+        field: "parentId",
+        referencedId: parent.id,
+        presentInOtherBackend: true,
+      },
+    ],
+  });
+  // Email is only a lookup: owner-continuity still routes classic to 'default'.
+  const byEmail = await mf.dispatchFetch(
+    "http://fixture/api/admin/lunora-retirement?diagnostic=1&email=diagnostic-owner%40dotflowy.local",
+    { headers: { cookie: adminCookie } },
+  );
+  expect(byEmail.status).toBe(200);
+  expect(await byEmail.json()).toMatchObject({
+    nodes: { classic: 3, experimental: 2 },
+  });
+  for (const query of [
+    "",
+    "&userId=unknown",
+    `&userId=${userId}&email=diagnostic-owner%40dotflowy.local`,
+  ]) {
+    const invalid = await mf.dispatchFetch(
+      `http://fixture/api/admin/lunora-retirement?diagnostic=1${query}`,
+      { headers: { cookie: adminCookie } },
+    );
+    expect(invalid.status).toBe(400);
+    expect(invalid.headers.get("cache-control")).toBe("private, no-store");
+  }
+  for (const cookie of ["", otherCookie, adminCookie]) {
+    const post = await mf.dispatchFetch(path, {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        origin: "http://fixture",
+      },
+      body: JSON.stringify({ userId, operation: "migrate" }),
+    });
+    expect(post.status).toBe(cookie === adminCookie ? 405 : 404);
+    expect(post.headers.get("cache-control")).toBe("private, no-store");
+  }
+  const after = await command<Inspection>("/inspect", userId);
+  expect(after.classic.nodes).toEqual(before.classic.nodes);
+  expect(after.classic.kv).toEqual(before.classic.kv);
+  expect(after.classic.seq).toBe(before.classic.seq);
+  expect(after.lunora.snapshot).toMatchObject({
+    nodes: before.lunora.snapshot.nodes,
+    dailyIndex: before.lunora.snapshot.dailyIndex,
+    tagColors: before.lunora.snapshot.tagColors,
+    savedQueries: before.lunora.snapshot.savedQueries,
+    migrateState: before.lunora.snapshot.migrateState,
+  });
+  expect(after.status).toEqual(before.status);
+  expect(after.lunora.retirement).toEqual(before.lunora.retirement);
+  const emptyUserId = "diagnostic-empty-experimental";
+  await db
+    .prepare(
+      'INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?, ?, ?, 1, ?, ?)',
+    )
+    .bind(
+      emptyUserId,
+      "Empty fixture",
+      "diagnostic-empty@dotflowy.local",
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    .run();
+  await command("/seed", emptyUserId, {
+    classicNodes: [node("SECRET_CLASSIC_ONLY_TEXT")],
+  });
+  const emptyBefore = await command<Inspection>("/inspect", emptyUserId);
+  const empty = await mf.dispatchFetch(
+    `http://fixture/api/admin/lunora-retirement?diagnostic=1&userId=${emptyUserId}`,
+    { headers: { cookie: adminCookie } },
+  );
+  expect(empty.status).toBe(200);
+  expect(await empty.json()).toMatchObject({
+    nodes: { classic: 1, experimental: 0 },
+    sideCollections: {
+      dailyIndex: { experimental: 0 },
+      tagColors: { experimental: 0 },
+      savedQueries: { experimental: 0 },
+    },
+  });
+  const emptyAfter = await command<Inspection>("/inspect", emptyUserId);
+  expect(emptyAfter.lunora.snapshot).toMatchObject({
+    nodes: [],
+    dailyIndex: [],
+    tagColors: [],
+    savedQueries: [],
+    migrateState: [],
+  });
+  expect(emptyAfter.classic.nodes).toEqual(emptyBefore.classic.nodes);
+  expect(emptyAfter.classic.kv).toEqual(emptyBefore.classic.kv);
+  expect(emptyAfter.classic.seq).toBe(emptyBefore.classic.seq);
+  expect(emptyAfter.status).toEqual(emptyBefore.status);
+  expect(emptyAfter.lunora.retirement).toEqual(emptyBefore.lunora.retirement);
+  expect(
+    (await db.prepare("SELECT * FROM lunora_retirement").all()).results,
+  ).toEqual(auditBefore.results);
+  expect(
+    (await db.prepare("SELECT * FROM lunora_retirement_attempt").all()).results,
+  ).toEqual(attemptsBefore.results);
+  expect((await (await mf.getR2Bucket("BACKUPS")).list()).objects).toEqual(
+    backupsBefore.objects,
+  );
 });
 
 test("production shard shapes deliver outline snapshots and the live retirement signal", async () => {

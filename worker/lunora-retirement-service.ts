@@ -4,14 +4,16 @@ import type { Node } from "../src/data/wire-schema";
 import type { OutlineSnapshot } from "./backup";
 import type { RetirementStatus, UserOutlineDO } from "./outline-do";
 
-import { OutlineSnapshotSchema } from "./backup";
+import { OutlineSnapshotSchema, SNAPSHOT_VERSION } from "./backup";
 import { resolveUserId } from "./identity";
 import { createLunoraRetirementClient } from "./lunora-mcp-store";
 import {
   LunoraRetirementSnapshotSchema,
+  RETIREMENT_SNAPSHOT_VERSION,
   buildClassicTarget,
   classicSnapshotsEquivalent,
   classifyRetirement,
+  compareRetirementSnapshots,
   disableLunoraPreference,
   isLunoraPreferenceEnabled,
   retirementSnapshotKey,
@@ -654,6 +656,45 @@ async function performRetirementOperation(
   record = await migrate(env, record, backends);
   await appendAttempt(env, record, operation);
   return record;
+}
+
+/** Read the two backends without invoking the migration state machine. */
+export async function retirementDiagnostic(
+  env: RetirementEnv,
+  userId: string,
+  backends = retirementBackends(env, userId),
+) {
+  const readStartedAt = Date.now();
+  const classic = Schema.decodeUnknownOption(OutlineSnapshotSchema)(
+    await backends.classic.exportSnapshot(),
+  );
+  const experimental = Schema.decodeUnknownOption(
+    LunoraRetirementSnapshotSchema,
+  )((await backends.lunora.inspect()).snapshot);
+  if (classic._tag === "None" || experimental._tag === "None") {
+    throw new Error("retirement diagnostic snapshot schema rejected");
+  }
+  const snapshot = experimental.value;
+  if (
+    classic.value.version !== SNAPSHOT_VERSION ||
+    snapshot.version !== RETIREMENT_SNAPSHOT_VERSION ||
+    snapshot.userId !== userId ||
+    [
+      snapshot.nodes,
+      snapshot.dailyIndex,
+      snapshot.tagColors,
+      snapshot.savedQueries,
+      snapshot.migrateState,
+    ].some((rows) => rows.some((row) => row.userId !== userId))
+  ) {
+    throw new Error("retirement diagnostic version or ownership rejected");
+  }
+  return {
+    userId,
+    readStartedAt,
+    readFinishedAt: Date.now(),
+    ...compareRetirementSnapshots(classic.value, snapshot),
+  };
 }
 
 export async function retirementReport(

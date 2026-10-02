@@ -446,3 +446,202 @@ export function classicSnapshotsEquivalent(
   });
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
+
+const DIAGNOSTIC_SAMPLE_LIMIT = 50;
+
+function diagnosticSample<A>(rows: readonly A[]) {
+  return {
+    count: rows.length,
+    sample: rows.slice(0, DIAGNOSTIC_SAMPLE_LIMIT),
+    truncated: rows.length > DIAGNOSTIC_SAMPLE_LIMIT,
+  };
+}
+
+function compareSideCollection<A>(
+  classic: readonly OutlineSnapshot["kv"][number][],
+  experimental: readonly A[],
+  schema: Schema.ConstraintDecoder<A>,
+  keyOf: (row: A) => string,
+  valuesOf: (row: A) => readonly unknown[],
+) {
+  const left = new Map<string, string>();
+  const right = new Map(
+    experimental.map((row) => [keyOf(row), JSON.stringify(valuesOf(row))]),
+  );
+  let invalidClassicRows = 0;
+  for (const row of classic) {
+    let value: unknown;
+    try {
+      value = JSON.parse(row.value);
+    } catch {
+      invalidClassicRows++;
+      continue;
+    }
+    const decoded = Schema.decodeUnknownOption(schema)(value);
+    if (decoded._tag === "None" || keyOf(decoded.value) !== row.key) {
+      invalidClassicRows++;
+      continue;
+    }
+    left.set(row.key, JSON.stringify(valuesOf(decoded.value)));
+  }
+  const duplicateClassicKeys =
+    new Set(classic.map((row) => row.key)).size !== classic.length;
+  const duplicateExperimentalKeys = right.size !== experimental.length;
+  const comparable =
+    invalidClassicRows === 0 &&
+    !duplicateClassicKeys &&
+    !duplicateExperimentalKeys;
+  const shared = [...left.keys()].filter((key) => right.has(key));
+  return {
+    classic: classic.length,
+    experimental: experimental.length,
+    comparable,
+    invalidClassicRows,
+    duplicateClassicKeys,
+    duplicateExperimentalKeys,
+    // Do not return natural keys, hashes, or values: tags and queries are content.
+    classicOnly: comparable ? left.size - shared.length : null,
+    experimentalOnly: comparable ? right.size - shared.length : null,
+    shared: comparable ? shared.length : null,
+    changed: comparable
+      ? shared.filter((key) => left.get(key) !== right.get(key)).length
+      : null,
+  };
+}
+
+/** Metadata only. Neither timestamps nor this unfrozen comparison choose a source. */
+export function compareRetirementSnapshots(
+  classic: OutlineSnapshot,
+  experimental: LunoraRetirementSnapshot,
+) {
+  const left = new Map(classic.nodes.map((row) => [row.id, row]));
+  const right = new Map(experimental.nodes.map((row) => [row.id, row]));
+  const comparable =
+    left.size === classic.nodes.length &&
+    right.size === experimental.nodes.length;
+  // SAFETY: NodeSchema's field names are the keys of the decoded wire Node.
+  const fields = Object.keys(NodeSchema.fields) as (keyof Node)[];
+  const changed: Array<{ nodeId: string; fields: (keyof Node)[] }> = [];
+  let shared = 0;
+  for (const [id, node] of left) {
+    const other = right.get(id);
+    if (!other) continue;
+    shared++;
+    const differences = fields.filter((field) => node[field] !== other[field]);
+    if (differences.length) changed.push({ nodeId: id, fields: differences });
+  }
+  const missingReferences = (
+    nodes: readonly Node[],
+    other: ReadonlyMap<string, Node>,
+  ) => {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const missing: Array<{
+      nodeId: string;
+      field: "parentId" | "prevSiblingId" | "mirrorOf";
+      referencedId: string;
+      presentInOtherBackend: boolean;
+      nodePresentInOtherBackend: boolean;
+      otherBackendReference: string | null;
+    }> = [];
+    for (const node of nodes) {
+      for (const field of ["parentId", "prevSiblingId", "mirrorOf"] as const) {
+        const referencedId = node[field];
+        if (referencedId !== null && !byId.has(referencedId)) {
+          missing.push({
+            nodeId: node.id,
+            field,
+            referencedId,
+            presentInOtherBackend: other.has(referencedId),
+            nodePresentInOtherBackend: other.has(node.id),
+            otherBackendReference: other.get(node.id)?.[field] ?? null,
+          });
+        }
+      }
+    }
+    return diagnosticSample(missing);
+  };
+  const preference = classic.kv.filter(
+    (row) => row.collection === "account-prefs" && row.key === "lunora-beta",
+  );
+  let experimentalPreference: "enabled" | "disabled" | "missing" | "invalid" =
+    "missing";
+  if (preference.length) {
+    experimentalPreference = "invalid";
+    const row = preference[0];
+    if (preference.length === 1 && row) {
+      try {
+        const decoded = Schema.decodeUnknownOption(LunoraPreferenceValueSchema)(
+          JSON.parse(row.value),
+        );
+        if (decoded._tag === "Some")
+          experimentalPreference = decoded.value.enabled
+            ? "enabled"
+            : "disabled";
+      } catch {
+        /* Malformed preferences are reported without echoing their value. */
+      }
+    }
+  }
+  return {
+    consistency: "unfrozen-snapshots" as const,
+    sampleLimit: DIAGNOSTIC_SAMPLE_LIMIT,
+    experimentalPreference,
+    classicExportedAt: classic.exportedAt,
+    experimentalExportedAt: experimental.exportedAt,
+    graphs: {
+      classic: {
+        validation: validateNodeGraph(classic.nodes),
+        missingReferences: missingReferences(classic.nodes, right),
+      },
+      experimental: {
+        validation: validateNodeGraph(experimental.nodes),
+        missingReferences: missingReferences(experimental.nodes, left),
+      },
+    },
+    nodes: {
+      classic: classic.nodes.length,
+      experimental: experimental.nodes.length,
+      comparable,
+      shared: comparable ? shared : null,
+      identical: comparable ? shared - changed.length : null,
+      classicOnly: comparable
+        ? diagnosticSample(
+            [...left.keys()].filter((id) => !right.has(id)).sort(),
+          )
+        : null,
+      experimentalOnly: comparable
+        ? diagnosticSample(
+            [...right.keys()].filter((id) => !left.has(id)).sort(),
+          )
+        : null,
+      changed: comparable
+        ? diagnosticSample(
+            changed.sort((a, b) => a.nodeId.localeCompare(b.nodeId)),
+          )
+        : null,
+    },
+    sideCollections: {
+      dailyIndex: compareSideCollection(
+        classic.kv.filter((row) => row.collection === "daily-index"),
+        experimental.dailyIndex,
+        ClassicDailyValueSchema,
+        (row) => row.key,
+        (row) => [row.key, row.nodeId],
+      ),
+      tagColors: compareSideCollection(
+        classic.kv.filter((row) => row.collection === "tag-colors"),
+        experimental.tagColors,
+        ClassicTagColorValueSchema,
+        (row) => row.tag,
+        (row) => [row.tag, row.color],
+      ),
+      savedQueries: compareSideCollection(
+        classic.kv.filter((row) => row.collection === "saved-queries"),
+        experimental.savedQueries,
+        ClassicSavedQueryValueSchema,
+        (row) => row.id,
+        (row) => [row.id, row.name, row.query, row.createdAt],
+      ),
+    },
+  };
+}
