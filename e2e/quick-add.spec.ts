@@ -536,9 +536,9 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
 
 // The FAB is a coarse-pointer surface (ADR 0030's presence seam), so drive it in
 // Chromium mobile emulation where `(pointer: coarse)` actually matches. The
-// keyboard-anchored overlay positioning (visualViewport) is NOT exercisable here
-// (no real software keyboard) -- that's the PR's manual iPhone checklist. This
-// covers the FAB's mount gating: coarse-only, and its not-editing visibility.
+// overlay's geometry is checked with synthetic visualViewport events; real
+// keyboard animation remains on the manual iPhone checklist. Also covers the
+// FAB's coarse-only mount gate and its not-editing visibility.
 test.describe("quick-add mobile FAB (coarse pointer)", () => {
   test.use({ hasTouch: true, isMobile: true });
 
@@ -561,6 +561,44 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
     await expect(fab(page)).toBeVisible();
     await fab(page).tap();
     await expect(dialog(page)).toBeVisible();
+  });
+
+  test("the overlay follows keyboard resize and pan, then restores its bottom anchor", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 412, height: 900 });
+    await load(page);
+    await fab(page).tap();
+    await expect(dialog(page)).toBeVisible();
+
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperties(vv, {
+        height: { configurable: true, value: 537 },
+        offsetTop: { configurable: true, value: 103 },
+      });
+      vv.dispatchEvent(new Event("resize"));
+      vv.dispatchEvent(new Event("scroll"));
+    });
+    await expect
+      .poll(() =>
+        dialog(page).evaluate((el) => el.getBoundingClientRect().bottom),
+      )
+      .toBe(624); // 103 + 537 visible bottom, minus the existing 16px inset.
+
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperties(vv, {
+        height: { configurable: true, value: 900 },
+        offsetTop: { configurable: true, value: 0 },
+      });
+      vv.dispatchEvent(new Event("resize"));
+    });
+    await expect
+      .poll(() =>
+        dialog(page).evaluate((el) => el.getBoundingClientRect().bottom),
+      )
+      .toBe(884);
   });
 
   test("hides the keyboard-shortcut legend on a touch pointer", async ({

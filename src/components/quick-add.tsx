@@ -637,7 +637,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // Position signal (ADR 0030): lift the panel above the software keyboard on a
   // coarse pointer; a fine pointer centers it and ignores the offset.
   const coarse = useCoarsePointer();
-  const keyboardOffset = useKeyboardViewport();
+  const { height, offsetTop } = useKeyboardViewport();
+  const keyboardOffset = hasWindow()
+    ? Math.max(0, window.innerHeight - (height + offsetTop))
+    : 0;
 
   // The destination for the CURRENT draft (resets to the default per node). The
   // default is the LAZY provider (label known now, node created only at born) --

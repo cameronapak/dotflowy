@@ -143,22 +143,26 @@ export function MobileActionsBar({
 }) {
   const coarse = useCoarsePointer();
   const editing = useOutlineEditing(findFocusedId);
-  const keyboardOffset = useKeyboardViewport();
+  const { height, offsetTop } = useKeyboardViewport();
 
   // Presence gate: a mouse user never mounts the bar. Visibility gate: no bar
   // without a focused bullet, so every action has a valid target by construction.
   if (!coarse || !editing) return null;
 
   return (
-    // Outer layer owns positioning: fixed to the bottom, lifted above the software
-    // keyboard by the visualViewport gap, and the safe-area pad when it sits at the
-    // real bottom (no keyboard). The pill inside centers within this.
+    // A fixed frame fits the visible viewport; the pill sits at its bottom.
+    // Only the pill takes pointer events, so the frame never blocks the editor.
+    // Follow viewport changes directly, without a second CSS animation lagging
+    // behind the keyboard's own animation.
     <div
-      className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 transition-transform duration-200 ease-out"
+      className="pointer-events-none fixed inset-x-0 z-40 flex items-end justify-center px-3"
       style={{
-        transform: `translateY(-${keyboardOffset}px)`,
+        top: offsetTop,
+        height,
         paddingBottom:
-          keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined,
+          height + offsetTop >= window.innerHeight
+            ? "env(safe-area-inset-bottom)"
+            : undefined,
       }}
     >
       <div
@@ -172,7 +176,7 @@ export function MobileActionsBar({
           // instead of clipping. Buttons are shrink-0, so they keep their 44px
           // targets and the strip scrolls rather than squashing; justify-start (the
           // flex default) keeps the leftmost button reachable when it does scroll.
-          "flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
+          "pointer-events-auto flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
           // Frosted-glass material: translucent, blurred, hairline edge + soft
           // shadow (depth from shadow, not a hard border) — the iOS accessory
           // pill's grammar, resolved through our own theme tokens so it adapts to
