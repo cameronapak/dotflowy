@@ -1,13 +1,14 @@
 # Dotflowy Privacy Policy
 
-**Effective date:** July 11, 2026
+**Effective date:** October 2, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company. This policy says exactly what data we handle, where it lives, who can see it, and what we will never do with it. We'd rather over-disclose than hide anything.
 
 **The short version:**
 
 - Your notes live in your own isolated database, encrypted at rest and in transit.
-- No analytics, no ads, no trackers. We never sell your data or use it to train AI models.
+- No ads, advertising trackers, session recording, or fingerprinting. We never sell your data or use it to train AI models.
+- Admin reporting uses account and storage metadata, not your note text. Activity collection is not enabled.
 - Your notes are isolated from **other users** — but they are not end-to-end encrypted, so we're not going to pretend we couldn't access them. We don't, outside the narrow cases listed below.
 - You can export everything anytime, and delete your account yourself, in the app.
 
@@ -23,11 +24,21 @@ Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma lim
 
 **Operational logs.** Cloudflare, our hosting provider, processes every request and may transiently log IP addresses and request metadata for security and operations. We don't build profiles from logs.
 
-**What we don't collect:** no third-party analytics, no advertising trackers, no session recording, no fingerprinting. Nothing watches how you use the app. If we ever add analytics — even a privacy-respecting kind — we'll update this policy first, and it will say so plainly.
+**Admin reporting.** Authorized admins can view your account name, email address, registration and verification status, dates from retained login-session records, saved experimental-sync preference, outline node counts, and migration completion dates. This helps us understand account growth and support sync. These reports do not include your note text, links, or other outline contents. A saved preference or stored outline does not tell us whether you recently used the app. Reporting does not create a second copy of these records.
+
+**Activity reporting is not enabled.** We do not currently collect visits or edits for product analytics. Before enabling it, we will notify you in the app and ask you to accept or decline. Declining will not prevent you from using Dotflowy. No collection will start for your account before you accept.
+
+**Your reporting choice.** If you save a choice, we store whether you accepted or declined, the policy version you saw, and when you chose. This record stays with your account even while activity collection is off. You can review your choice and export your usage-reporting records in Settings.
+
+If you accept, reporting will retain daily summaries of whether you opened or edited an outline, which sync backend you used, and whether edits came from your browser or an authorized AI agent. Summaries will be linked to your account and kept for no more than 90 days. You will be able to withdraw your choice in Settings and remove your activity summaries.
+
+Collection will not include note text, node identifiers, URLs, IP addresses, device details, time spent, or a history of individual events.
+
+**What we don't collect:** no third-party analytics, no advertising trackers, no session recording, and no fingerprinting.
 
 ## Where your data lives
 
-Your outline is stored in a **per-user database** (a Cloudflare Durable Object with its own SQLite database) — one per account, keyed to your account alone. Account, waitlist, and subscription records live in Cloudflare D1. All of it is encrypted at rest and all traffic is encrypted in transit (TLS).
+Your outline is stored in a **per-user database** (a Cloudflare Durable Object with its own SQLite database) — one per account, keyed to your account alone. Account, waitlist, subscription, and reporting-choice records live in Cloudflare D1. If activity collection is enabled, its daily summaries will also live in D1. All of it is encrypted at rest and all traffic is encrypted in transit (TLS).
 
 ## Who can see your notes — the honest part
 
@@ -67,7 +78,7 @@ Your outline database has an automatic **30-day point-in-time recovery window** 
 
 ## Deletion and retention
 
-You can **delete your account yourself, in the app**. Deletion removes your account record and your entire outline. Deleted data can persist in the recovery window described above for up to 30 days, after which it's gone for good. To be removed from the waitlist, email us and we'll delete your address.
+You can **delete your account yourself, in the app**. Deletion removes your account record, your entire outline, your reporting choice, and any activity summaries. Withdrawal in Settings removes activity summaries from the app and saves your declined choice so collection stays off. Deleted data can persist in the recovery window described above for up to 30 days, after which it's gone for good. To be removed from the waitlist, email us and we'll delete your address.
 
 ## Your rights
 

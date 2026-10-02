@@ -30,11 +30,12 @@ import {
   oAuthDiscoveryMetadata,
   oAuthProtectedResourceMetadata,
 } from "better-auth/plugins";
-import { Data, Effect, Schema } from "effect";
+import { Clock, Data, Effect, Schema } from "effect";
 
 import type { KvClaim } from "./outline-do";
 import type { Node } from "./wire";
 
+import { handleAdminAnalytics } from "./admin-analytics";
 import {
   pendingAnnounceEmails,
   sendAnnouncements,
@@ -79,6 +80,7 @@ import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, unfurlTitleE } from "./unfurl";
+import { handleUsageConsent } from "./usage-consent";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
@@ -111,6 +113,9 @@ type UserOutlineDO = BaseUserOutlineDO;
 export { ShardDO };
 
 interface Env extends LunoraEnv {
+  /** Set to the current privacy notice version only after publishing it.
+   * This allows an account choice; it does not enable activity collection. */
+  USAGE_NOTICE_VERSION?: string;
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
    *  sentry.ts (ticket #227, decided in #156). */
@@ -748,6 +753,23 @@ function handleApiRequest(
       });
     }
 
+    // Check the admin session before method/input checks or tenant reads.
+    // This must precede the generic /api session gate (404, not 401).
+    if (
+      url.pathname === "/api/admin/analytics" ||
+      url.pathname === "/api/admin/analytics/storage"
+    ) {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      return yield* handleAdminAnalytics(
+        request,
+        env,
+        session,
+        yield* Clock.currentTimeMillis,
+      );
+    }
+
     // Alpha waitlist: POST is PUBLIC (submitters have no account yet) — must
     // sit before the session gate below; its hardening lives in handleWaitlist.
     // GET is the ADMIN view (the /admin/waitlist page): session + the
@@ -1096,6 +1118,15 @@ function handleApiRequest(
       auth.api.getSession({ headers: request.headers }),
     );
     if (!session) return json({ error: "unauthorized" }, 401);
+
+    if (url.pathname.startsWith("/api/usage/")) {
+      return yield* handleUsageConsent(
+        request,
+        env,
+        session.user.id,
+        yield* Clock.currentTimeMillis,
+      );
+    }
 
     const userId = resolveUserId(session.user.id, env);
 

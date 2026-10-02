@@ -23,6 +23,7 @@ import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
+import { UsageConsentSettings } from "../components/usage-consent";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { outlineToMarkdown } from "../data/markdown";
@@ -775,6 +776,7 @@ function SettingsPage() {
         </Section>
 
         <AccountSection />
+        <UsageConsentSettings />
         <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />
