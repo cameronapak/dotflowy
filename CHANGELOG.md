@@ -1,5 +1,18 @@
 # dotflowy
 
+## 1.15.0
+
+### Minor Changes
+
+- 20b9d61: Add a separately packaged CLI with full MCP tool access, browser login, OS credential storage, and JSON output for scripts.
+
+### Patch Changes
+
+- eba7d82: On a phone-sized screen, spotlight focus sits the lit line just under the sticky header instead of the vertical center, so the keyboard no longer covers it. Desktop centering is unchanged.
+- 13d7aad: Returning Home or zooming out preserves your saved expansion choices instead of opening every ancestor. Focus returns to the node you left, or its closest visible ancestor if that node is hidden.
+- 09845b7: Prevent interrupted credential updates from racing login or logout, preserve cleanup state after failed keyring transitions, and redact bearer tokens from JSON error output.
+- 13d7aad: Keyboard filter suggestions keep your selected row when the filter opens, so Enter inserts the suggestion instead of closing the input.
+
 ## 1.14.0
 
 ### Minor Changes
