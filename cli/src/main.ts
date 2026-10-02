@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Effect } from "effect";
+import { Effect, Predicate } from "effect";
 import { createReadStream } from "node:fs";
 
 import { accessToken, login } from "./auth.js";
@@ -39,21 +39,20 @@ const redactJson = (
   value: JsonObject[string],
   token: string,
 ): JsonObject[string] => {
-  if (typeof value === "string") return value.split(token).join("[redacted]");
+  if (Predicate.isString(value)) return value.split(token).join("[redacted]");
   if (Array.isArray(value)) return value.map((item) => redactJson(item, token));
-  if (value !== null && typeof value === "object") {
-    const redacted: JsonObject = {};
-    for (const [key, nested] of Object.entries(value))
-      redacted[key.split(token).join("[redacted]")] = redactJson(nested, token);
-    return redacted;
-  }
-  return value;
+  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value))
+    return value;
+  const redacted: JsonObject = {};
+  for (const [key, nested] of Object.entries<JsonObject[string]>(value))
+    redacted[key.split(token).join("[redacted]")] = redactJson(nested, token);
+  return redacted;
 };
 
 const program = Effect.gen(function* () {
   const parsed = yield* parse(process.argv.slice(2));
   if (!parsed) return 0;
-  const out = (value: unknown, text: string) =>
+  const out = (value: JsonObject, text: string) =>
     console.log(parsed.json ? JSON.stringify(value) : terminalText(text));
   const config = yield* configuration;
   const server = yield* normalizeServer(parsed.server ?? config.server);
@@ -180,7 +179,7 @@ const program = Effect.gen(function* () {
   );
   const text = result.content
     .map((block) =>
-      typeof block.text === "string" ? block.text : JSON.stringify(block),
+      Predicate.isString(block.text) ? block.text : JSON.stringify(block),
     )
     .join("\n");
   if (result.isError) {

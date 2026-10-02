@@ -1,4 +1,4 @@
-import { Config, Effect, Option, Redacted, Schema } from "effect";
+import { Config, Effect, Option, Predicate, Redacted, Schema } from "effect";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -13,13 +13,15 @@ export class CliError extends Schema.TaggedError<CliError>()("CliError", {
 export const fail = (message: string, exitCode = 1) =>
   new CliError({ message, exitCode });
 
-const safeErrorCode = (error: unknown) => {
-  if (typeof error !== "object" || error === null || !("code" in error))
-    return undefined;
-  if (typeof error.code === "number" && Number.isSafeInteger(error.code))
-    return String(error.code);
-  if (typeof error.code === "string" && /^[A-Z][A-Z0-9_]+$/.test(error.code))
-    return error.code;
+const NativeErrorCode = Schema.Struct({
+  code: Schema.Union([Schema.String, Schema.Number]),
+});
+const safeErrorCode = (cause: unknown) => {
+  if (!Schema.is(NativeErrorCode)(cause)) return undefined;
+  if (Predicate.isNumber(cause.code) && Number.isSafeInteger(cause.code))
+    return String(cause.code);
+  if (Predicate.isString(cause.code) && /^[A-Z][A-Z0-9_]+$/.test(cause.code))
+    return cause.code;
   return undefined;
 };
 
@@ -44,6 +46,8 @@ export const decode = <
   S extends Schema.Top & { readonly DecodingServices: never },
 >(
   schema: S,
+  // The decoder is the untrusted-input boundary, not a caller of unparsed data.
+  // eslint-disable-next-line anti-slop/no-unknown-parameters
   value: unknown,
   label: string,
 ) =>
@@ -58,6 +62,8 @@ export type JsonObject = {
 
 export const parseJson = (text: string) =>
   Effect.try({
+    // Keep JSON.parse untrusted until the caller's schema decodes it.
+    // eslint-disable-next-line anti-slop/no-unknown-returns
     try: (): unknown => JSON.parse(text),
     catch: () => fail("Invalid JSON input.", 2),
   });
@@ -118,4 +124,5 @@ export const configuration = Effect.gen(function* () {
 
 // Server-controlled text must not execute terminal escape sequences.
 export const terminalText = (text: string) =>
+  // eslint-disable-next-line no-control-regex -- Removing terminal control characters is intentional.
   text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");

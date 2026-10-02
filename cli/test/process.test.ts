@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { Effect } from "effect";
 import { resolve } from "node:path";
 
+import type { JsonObject } from "../src/core.js";
+
 import { connect, rpc } from "../src/mcp.js";
 
 const executable = resolve(import.meta.dir, "../dist/main.js");
@@ -36,7 +38,7 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
       expect(authorization?.startsWith("Bearer ")).toBe(true);
       const token = authorization?.slice("Bearer ".length) ?? "missing";
       const body = await request.json();
-      const result = (value: unknown) =>
+      const result = (value: JsonObject) =>
         Response.json({ jsonrpc: "2.0", id: body.id, result: value });
       if (body.method === "initialize")
         return result({
@@ -67,6 +69,13 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
             authorization: `Bearer ${token}`,
             [token]: "must redact keys too",
             expiresAt: 1234,
+            nested: [
+              null,
+              false,
+              17,
+              { text: `secret ${token}` },
+              [`Bearer ${token}`],
+            ],
           },
           isError: true,
         });
@@ -125,6 +134,13 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
         authorization: "Bearer [redacted]",
         "[redacted]": "must redact keys too",
         expiresAt: 1234,
+        nested: [
+          null,
+          false,
+          17,
+          { text: "secret [redacted]" },
+          ["Bearer [redacted]"],
+        ],
       },
       isError: true,
     });
@@ -147,6 +163,13 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
         authorization: "Bearer [redacted]",
         "[redacted]": "must redact keys too",
         expiresAt: 1234,
+        nested: [
+          null,
+          false,
+          17,
+          { text: "secret [redacted]" },
+          ["Bearer [redacted]"],
+        ],
       },
       isError: true,
     });
@@ -172,7 +195,7 @@ test("failed writes are never retried and redirects never receive bearer credent
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(request) {
+    fetch() {
       requests++;
       return new Response("bad", { status: 503 });
     },
@@ -223,16 +246,17 @@ test("validates response IDs and paginates tool discovery", async () => {
     port: 0,
     async fetch(request) {
       const body = await request.json();
-      const envelope = (result: unknown) =>
+      const envelope = (result: JsonObject) =>
         Response.json({ jsonrpc: "2.0", id: body.id, result });
       if (body.method === "initialize")
         return envelope({ protocolVersion: "2025-06-18", serverInfo: {} });
       if (body.method === "tools/list") {
         pages++;
-        return envelope({
+        const result: JsonObject = {
           tools: [{ name: `tool${pages}`, inputSchema: {} }],
-          ...(pages === 1 ? { nextCursor: "second" } : {}),
-        });
+        };
+        if (pages === 1) result.nextCursor = "second";
+        return envelope(result);
       }
       return Response.json({ jsonrpc: "2.0", id: "wrong", result: {} });
     },

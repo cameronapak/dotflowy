@@ -41,6 +41,15 @@ test("I/O errors expose safe operation codes without native messages", async () 
     }).pipe(Effect.flip),
   );
   expect(uncoded.message).toBe("Cannot prepare credentials.");
+
+  for (const code of ["EACCES token=secret", 1.5, true, null]) {
+    const rejected = await Effect.runPromise(
+      io("Cannot prepare credentials.", async () => {
+        throw Object.assign(new Error("token=secret"), { code });
+      }).pipe(Effect.flip),
+    );
+    expect(rejected.message).toBe("Cannot prepare credentials.");
+  }
 });
 
 test("covers all twelve current MCP tools", () => {
@@ -92,6 +101,14 @@ test("flags preserve false, empty text, numbers, and global options", async () =
   expect((await parsed(["add", "--", "--literal"])).fields).toEqual({
     text: "--literal",
   });
+  for (const command of ["add", "today", "update"]) {
+    expect(
+      (await parsed([command, "node", "--text-file", "notes.txt"])).textFile,
+    ).toBe("notes.txt");
+  }
+  expect((await parsed(["import-opml", "--file", "outline.opml"])).file).toBe(
+    "outline.opml",
+  );
 });
 
 test("moves keep input order and all tool arguments can arrive as JSON", async () => {
@@ -168,6 +185,8 @@ test("rejects unknown options, extra arguments, malformed flags", async () => {
     ["add", "x", "--typo", "x"],
     ["add", "x", "y"],
     ["outline", "--max-depth", "1.5"],
+    ["outline", "--text-file", "notes.txt"],
+    ["add", "--file", "outline.opml"],
     ["call"],
   ]) {
     await expect(Effect.runPromise(parse(argv))).rejects.toThrow();

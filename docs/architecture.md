@@ -4,6 +4,19 @@ How Dotflowy stores, syncs, and renders an outline. Agent pointers live in
 [`AGENTS.md`](../AGENTS.md). Each load-bearing decision has a write-up in
 [`docs/adr/`](./adr/).
 
+## Task map
+
+Start with the owners and tests for your task. Before changing a shared
+function's contract, find all its callers. Test commands and build modes live
+in [the contributor guide](../CONTRIBUTING.md#package-checks).
+
+| Task                                      | Owners and relationships                                                                                                                                                                                                                                                                               | Focused checks and context                                                                                                                                                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zoom, collapse, and focus                 | [`OutlineEditor.tsx`](../src/components/OutlineEditor.tsx) owns `useZoomNavigation`; [`visible-order.ts`](../src/data/visible-order.ts) builds visible rows; [`virtual-nav.ts`](../src/data/virtual-nav.ts) scrolls visible but unmounted rows. A missing DOM ref alone does not mean a row is hidden. | [`zoom-navigation.spec.ts`](../e2e/zoom-navigation.spec.ts), [`zoom-perf.spec.ts`](../e2e/zoom-perf.spec.ts); ADRs [0019](./adr/0019-virtualized-outline-rendering.md), [0022](./adr/0022-node-mirrors.md).                                         |
+| Mobile keyboard and quick-add positioning | [`use-keyboard-viewport.ts`](../src/hooks/use-keyboard-viewport.ts) is shared by [`MobileActionsBar.tsx`](../src/components/MobileActionsBar.tsx) and [`quick-add.tsx`](../src/components/quick-add.tsx). Preserve window scrolling and check both consumers.                                          | [`mobile-actions-bar.spec.ts`](../e2e/mobile-actions-bar.spec.ts), [`quick-add.spec.ts`](../e2e/quick-add.spec.ts); ADR [0030](./adr/0030-mobile-actions-bar.md).                                                                                   |
+| MCP and CLI                               | [`mcp-tools.ts`](../worker/mcp-tools.ts) owns server contracts; [`commands.ts`](../cli/src/commands.ts) maps CLI commands; [`auth.ts`](../cli/src/auth.ts) handles CLI OAuth.                                                                                                                          | [`mcp.test.ts`](../worker/mcp.test.ts), [`CLI tests`](../cli/test), [`CLI guide`](../cli/README.md); ADRs [0026](./adr/0026-agent-native-mcp-server.md), [0061](./adr/0061-cli-mcp-compatibility.md), [0062](./adr/0062-automated-cli-releases.md). |
+| Landing page                              | [`SiteChrome.tsx`](../landing/src/components/SiteChrome.tsx) owns shared navigation/footer; [`landing/src/routes/`](../landing/src/routes) owns pages. The landing app has its own package and Vite configuration.                                                                                     | Landing typecheck/build and rendered desktop/mobile checks; [local loops](../CONTRIBUTING.md#running-locally).                                                                                                                                      |
+
 ## The shape of the system
 
 Your outline is stored in a TanStack DB collection. By default that's backed by
@@ -206,6 +219,14 @@ worker/               # Cloudflare Worker: serves the SPA + routes /api/nodes + 
   mcp-tools.ts        #   the MCP tool registry (Effect Schema inputs + handlers over the user's DO)
   outline-ops.ts      #   pure server-side outline planners (snapshot -> atomic ChangeOp batch)
   sentry.ts           #   errors-only Sentry options for the Worker + DO (dormant when SENTRY_DSN is unset)
+cli/                  # standalone public npm package (own lockfile, tests, Changesets, and changelog)
+  src/                # commands, OAuth, MCP transport, and credential storage
+  test/               # pure logic and Node executable/loopback integration tests
+  scripts/            # package inspection, changeset gate, and release reconciliation
+landing/              # dotflowy.com marketing site (own package, Vite config, and Worker)
+  src/components/     # shared SiteChrome and page components
+  src/routes/         # landing pages
+e2e/                  # browser behavior tests; fixtures mock the data API
 migrations/           # D1 SQL migrations (0001 nodes, 0002 kv = DO import source; 0003 Better Auth; 0004 OAuth/MCP; 0005 waitlist)
 wrangler.jsonc        # Worker + assets + Durable Object + D1 bindings (+ nodejs_compat)
 docs/adr/             # one ADR per load-bearing decision (history in git log)

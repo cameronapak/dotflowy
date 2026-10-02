@@ -12,8 +12,11 @@ change" guide. Two companion docs go deeper:
 
 ## Prerequisites
 
-- **[Bun](https://bun.com)** ≥ 1.4 — the package manager and script runner.
+- **[Bun](https://bun.com)** — use the version pinned by `packageManager` in
+  `package.json`. Bun is the package manager and script runner.
   npm/pnpm/yarn also work, but every command below assumes Bun.
+- **Node.js** ≥ 22.19.0 — required for the CLI and compatible with the app's
+  Vite and Wrangler toolchains. Installing Bun does not install Node.
 - **Wrangler** — Cloudflare's CLI. It's a dev dependency (`bunx wrangler …`), so
   `bun install` gets it; nothing to install globally.
 - **A Cloudflare account** — only needed to deploy or run migrations against the
@@ -97,6 +100,12 @@ Serves the built SPA and the Worker from a single origin on :8787 — closer to
 prod, slower (~1–2s full build per save). Use it when you're debugging the real
 Worker/DO/asset path rather than UI. See `scripts/cf-dev.ts` for the details.
 
+### Landing page
+
+`bun run --cwd landing dev` serves the separate marketing site on :3100.
+It uses `landing/vite.config.ts`, not the app's Vite configuration. In an orb,
+start a supervised service with `--port 3100` so its portal matches Vite's port.
+
 ### Testing the MCP OAuth flow locally
 
 The MCP endpoint (`/mcp`) is OAuth-gated, and testing it against `wrangler dev`
@@ -160,7 +169,7 @@ local-only — and are the same checks the review process expects to pass:
 
 ```sh
 bun run fmt:check       # oxfmt
-bun run lint            # oxlint (correctness = error) over src + worker
+bun run lint            # oxlint over src + worker + CLI source, tests, and scripts
 bun run typecheck       # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
@@ -173,6 +182,27 @@ Then **run the app**: before calling an observable change done, drive it in
 `bun run cf:dev` — or exercise it through an e2e spec — and confirm the
 behavior. Green gates are necessary, not sufficient. Skip only for changes with
 no runtime surface (docs, types, tooling).
+
+### Package checks
+
+Run the root gate above, plus the checks for the package you changed. Commands
+below run from the repository root. Root CI's `quality` job already runs CLI
+lint through `bun run lint`; `lint:cli` is the focused local command.
+
+| Surface | Additional checks                                                                                                       | Runtime or fixtures                                                                                                                                                                                                 |
+| ------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Editor  | `bun run test:e2e e2e/<name>.spec.ts --workers=1`                                                                       | Playwright starts its own Vite development server on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                          |
+| CLI     | `bun run lint:cli`, `bun run build:cli`, `bun run typecheck:cli`, `bun run test:cli`, `bun run --cwd cli check:package` | Install `cli/` dependencies first with `bun install --cwd cli --frozen-lockfile`. Tests run the Node executable against loopback fixtures. The [live test](./cli/README.md#development-and-verification) is opt-in. |
+| Landing | `bun run --cwd landing typecheck`, `bun run --cwd landing build`                                                        | Install `landing/` dependencies first. Inspect the rendered change at desktop and mobile widths.                                                                                                                    |
+
+E2E tests need **development mode**, not `cf:dev` or `vite preview`.
+Quick-add's deferred-resolve tests use `__quickAddHoldResolve` and
+`__quickAddReleaseResolve`, which exist only when `import.meta.env.DEV` is true.
+The committed Playwright config invokes the installed Vite entry point directly
+to avoid nested Bun script PATH failures. It rejects a busy port instead of
+adopting another checkout's server; set `E2E_PORT` for concurrent runs.
+
+### Review and release conventions
 
 Rules of thumb:
 
@@ -274,9 +304,9 @@ fails rather than moving a conflicting tag.
 
 ## Conventions worth knowing
 
-- **Skills first.** Before substantial work, run `bunx @tanstack/intent@latest list`
-  and load a matching skill if one fits (see the Skill Loading block in
-  `AGENTS.md`).
+- **Skills first.** Use matching skills already listed in context. If none
+  matches, run `bunx @tanstack/intent@latest list` once and load a relevant skill
+  if one fits (see the Skill Loading block in `AGENTS.md`).
 - **The typed-error channel in Effect is the error model.** Effect v4 source
   comes via opensrc — `bunx opensrc path Effect-TS/effect-smol` prints a
   machine-global cached copy (`bun run setup` pre-warms it). Read from it,

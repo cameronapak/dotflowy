@@ -18,7 +18,8 @@ const text = (page: Page, id: string) =>
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
   await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  // The first dev-server visit includes Vite's lazy module transforms.
+  await expect(text(page, "alpha")).toBeVisible({ timeout: 15_000 });
 }
 
 // Focus `id` and drop the caret at absolute offset `col` (copied from

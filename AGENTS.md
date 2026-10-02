@@ -39,7 +39,7 @@ New feature or design: `ls docs/adr/` and read the ADRs that match the surface. 
 
 ## Architecture
 
-Structure, data model, new `Node` field, tree reads: [`docs/architecture.md`](./docs/architecture.md). **`rootId` is route-owned.** Setup and local dev: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Find owners and tests by task: [`architecture task map`](./docs/architecture.md#task-map). Data model, new `Node` field, tree reads: [`docs/architecture.md`](./docs/architecture.md). **`rootId` is route-owned.** Setup and local dev: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Editor
 
@@ -78,6 +78,12 @@ App version bump or changelog: [ADR 0046](./docs/adr/0046-changelog-and-release-
 Landing site (`landing/`, dotflowy.com): Geist only, no mono. Accents match the app palette. Feature bullets stay vertical on desktop. Keep "Workflowy alternative" out of the H1 and the footer brand row. Icons in the app: free MIT Hugeicons (`@hugeicons/react`, `@hugeicons/core-free-icons`) at default stroke.
 
 ## Tooling
+
+**Availability takes precedence over the generated guidance below.** Use FFF
+and CodeGraph when their tools are available in this session. If absent, use
+scoped `rg` / `rg --files` for exact searches. Use Finder for behavior-level
+discovery when available. A `.codegraph/` directory alone does not provide an MCP tool.
+Use skills already listed in context before running Intent discovery.
 
 The three blocks below are written by their own tools. The `:start` and `:end`
 markers are how each tool finds its block to replace. Never hand-edit inside

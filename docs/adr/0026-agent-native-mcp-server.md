@@ -6,12 +6,17 @@ status: accepted
 
 **What.** The Worker exposes the outline to AI agents over the Model Context Protocol: `POST /mcp`
 (the ecosystem-default path clients probe; `/api/mcp` stays a working alias), stateless Streamable
-HTTP, authenticated with real OAuth 2.1, serving eight tools — `get_outline`,
+HTTP, authenticated with real OAuth 2.1. It initially served eight tools — `get_outline`,
 `search_nodes`, `add_node`, `update_node`, `delete_node`, `add_to_today`, `mirror_node`,
 `mirror_to_today`. The posture is **agent-native**: whatever a human can do in the editor an agent can
 do through the same data path, within reason — an agent's write lands in the per-user DO through the
 same atomic `applyBatch` as an editor keystroke and broadcasts over the same sync socket, so a
 connected editor sees the agent's edit live, exactly like a second device.
+
+The current tool contracts live in [the registry](../../worker/mcp-tools.ts);
+clients discover them through `tools/list`. See [the MCP guide](../mcp.md) for
+the current tool surface. The original list above records this decision's scope,
+not a limit on later tools.
 
 ## Decisions
 
