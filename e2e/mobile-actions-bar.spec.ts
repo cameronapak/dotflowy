@@ -5,10 +5,9 @@ import { seedOutline, STANDARD_TREE } from "./fixtures";
 // The mobile actions bar (ADR 0030) is a coarse-pointer, focus-gated toolbar. As
 // in mobile-touch-rows.spec.ts, drive it in a Chromium mobile-emulation context
 // so `(pointer: coarse)` actually matches -- the real signal the bar gates on,
-// not a synthetic class. Positioning (visualViewport keyboard tracking) and iOS
-// focus-preservation are NOT exercisable here (no real software keyboard); those
-// are the PR's manual iPhone checklist. This covers mount gating, focus/blur
-// visibility, and each button's action wiring.
+// not a synthetic class. Geometry is tested with synthetic visualViewport
+// changes. Real keyboard animation and iOS focus-preservation still require the
+// manual iPhone checklist. Also covers focus/blur and each button's action wiring.
 
 const bar = (page: Page) => page.locator("[data-mobile-bar]");
 const btn = (page: Page, label: string) =>
@@ -79,6 +78,97 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(bar(page)).toHaveCount(0);
     await text(page, "alpha").click();
     await expect(bar(page)).toBeVisible();
+  });
+
+  test("fits the visible height and follows viewport panning without blocking editing", async ({
+    page,
+  }) => {
+    await load(page);
+    await text(page, "alpha").click();
+    await expect(bar(page)).toBeVisible();
+
+    // Shrink ONLY the visual viewport, as a keyboard does on current Chrome/iOS.
+    // Resizing the browser window instead would miss the original failure mode.
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperty(vv, "height", { configurable: true, value: 537 });
+      vv.dispatchEvent(new Event("resize"));
+    });
+    await expect
+      .poll(() => bar(page).evaluate((el) => el.getBoundingClientRect().bottom))
+      .toBe(531); // 537px visible height minus the pill's existing 6px margin.
+
+    // A scroll event changes the top edge without changing the visible height.
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperty(vv, "offsetTop", {
+        configurable: true,
+        value: 103,
+      });
+      vv.dispatchEvent(new Event("scroll"));
+    });
+    await expect
+      .poll(() => bar(page).evaluate((el) => el.getBoundingClientRect().bottom))
+      .toBe(634); // 103 + 537 - 6, not just height and not height minus offset.
+    // The full-height positioning frame must not intercept taps on other nodes.
+    await text(page, "alpha-2").click();
+    await expect(text(page, "alpha-2")).toBeFocused();
+    await btn(page, "Indent").click();
+    await expect(text(page, "alpha-2")).toBeFocused();
+    await expect(
+      page.locator('li[data-node-id="alpha-2"][data-parent-id="alpha-1"]'),
+    ).toBeVisible();
+
+    // Closing the keyboard restores the original bottom anchor.
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperty(vv, "height", { configurable: true, value: 900 });
+      Object.defineProperty(vv, "offsetTop", { configurable: true, value: 0 });
+      vv.dispatchEvent(new Event("resize"));
+    });
+    await expect
+      .poll(() => bar(page).evaluate((el) => el.getBoundingClientRect().bottom))
+      .toBe(894);
+  });
+
+  test("pinch zoom does not masquerade as a keyboard resize or pan", async ({
+    page,
+  }) => {
+    await load(page);
+    await text(page, "alpha").click();
+    await expect(bar(page)).toBeVisible();
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperties(vv, {
+        height: { configurable: true, value: 300 },
+        offsetTop: { configurable: true, value: 71 },
+        scale: { configurable: true, value: 2 },
+      });
+      vv.dispatchEvent(new Event("resize"));
+      vv.dispatchEvent(new Event("scroll"));
+    });
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    expect(
+      await bar(page).evaluate((el) => el.getBoundingClientRect().bottom),
+    ).toBe(894);
+  });
+
+  test("falls back to window resizing without the Visual Viewport API", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "visualViewport", { value: null });
+    });
+    await load(page);
+    await text(page, "alpha").click();
+    await expect(bar(page)).toBeVisible();
+    await page.setViewportSize({ width: 412, height: 700 });
+    await expect
+      .poll(() => bar(page).evaluate((el) => el.getBoundingClientRect().bottom))
+      .toBe(694);
   });
 
   test("indent then outdent restructure the focused bullet", async ({
@@ -156,6 +246,7 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await load(page);
     await text(page, "alpha").click();
     await expect(bar(page)).toBeVisible();
+    // SAFETY: text() selects the outline row's contentEditable HTML span.
     await text(page, "alpha").evaluate((el) => (el as HTMLElement).blur());
     await expect(bar(page)).toHaveCount(0);
   });
