@@ -35,6 +35,8 @@ export type Input = {
   userId: string;
   classicNodes?: Node[];
   lunoraNodes?: Node[];
+  classicDailyIndex?: Array<{ key: string; nodeId: string }>;
+  lunoraDailyIndex?: Array<{ key: string; nodeId: string; touchedAt: number }>;
   operation?: RetirementOperation;
   fault?: "retire" | "verify" | "rollback";
   afterRetire?: boolean;
@@ -82,6 +84,11 @@ export default {
               key: "timezone",
               value: { id: "timezone", zone: "America/Chicago" },
             },
+            ...(input.classicDailyIndex ?? []).map((row) => ({
+              collection: "daily-index",
+              key: row.key,
+              value: row,
+            })),
           ],
         });
         // SAFETY: generated input types collapse nullability; runtime validators accept the wire Node fields.
@@ -96,7 +103,11 @@ export default {
         await client.call(api.mutators.importKvRows, {
           userId,
           rows: [
-            { kind: "dailyIndex", key: "2026-10-02", nodeId, touchedAt: 7 },
+            ...(
+              input.lunoraDailyIndex ?? [
+                { key: "2026-10-02", nodeId, touchedAt: 7 },
+              ]
+            ).map((row) => ({ kind: "dailyIndex" as const, ...row })),
             { kind: "tagColor", tag: "work", color: "blue" },
             {
               kind: "savedQuery",
@@ -116,6 +127,18 @@ export default {
           classic: await classic.exportSnapshot(),
           lunora: await lunora.inspect(),
         });
+      }
+      if (url.pathname === "/delete") {
+        await classic.deleteNodes(
+          (input.classicNodes ?? []).map((node) => node.id),
+        );
+        await createLunoraOutlineStore(env, userId).applyBatch(
+          (input.lunoraNodes ?? []).map((node) => ({
+            op: "delete",
+            key: node.id,
+          })),
+        );
+        return Response.json({ deleted: true });
       }
       if (url.pathname === "/inspect") {
         return Response.json({

@@ -325,6 +325,102 @@ test("cutover preserves all collections, rejects stale writes, and resnapshots c
   });
 });
 
+for (const fault of [undefined, "retire"] as const) {
+  test(`deleted daily claims survive ${fault ? "failed cutover rollback" : "cutover and operator restore"}`, async () => {
+    const userId = randomUUID();
+    const classicRoot = node("classic root");
+    const classicDay = node("deleted classic day", classicRoot.id);
+    const lunoraRoot = node("experimental root");
+    const lunoraDay = node("deleted experimental day", lunoraRoot.id);
+    const classicClaim = { key: "2024-02-12", nodeId: classicDay.id };
+    const lunoraClaim = {
+      key: "2024-08-11",
+      nodeId: lunoraDay.id,
+      touchedAt: 7,
+    };
+    await command("/seed", userId, {
+      classicNodes: [classicRoot, classicDay],
+      lunoraNodes: [lunoraRoot, lunoraDay],
+      classicDailyIndex: [classicClaim],
+      lunoraDailyIndex: [lunoraClaim],
+    });
+    await command("/delete", userId, {
+      classicNodes: [classicDay],
+      lunoraNodes: [lunoraDay],
+    });
+    const before = await command<Inspection>("/inspect", userId);
+    expect(before.classic.nodes).toEqual([classicRoot]);
+    expect(before.lunora.snapshot.nodes).toEqual([{ ...lunoraRoot, userId }]);
+    expect(
+      before.classic.kv.filter((row) => row.collection === "daily-index"),
+    ).toEqual([
+      {
+        collection: "daily-index",
+        key: classicClaim.key,
+        value: JSON.stringify(classicClaim),
+        updatedAt: expect.any(Number),
+      },
+    ]);
+    expect(before.lunora.snapshot.dailyIndex).toEqual([
+      { ...lunoraClaim, userId },
+    ]);
+    expect(
+      (
+        await command<RetirementRecord>("/run", userId, {
+          operation: "dry-run",
+        })
+      ).classification,
+    ).toBe("eligible");
+    const migrated = await command<RetirementRecord>("/run", userId, { fault });
+    expect(migrated.state).toBe(fault ? "rolled-back" : "completed");
+    const bucket = await mf.getR2Bucket("BACKUPS");
+    const classicBackup = await bucket.get(migrated.classicSnapshotKey ?? "");
+    expect(await classicBackup?.json()).toMatchObject({
+      nodes: [classicRoot],
+      kv: before.classic.kv,
+    });
+    const lunoraBackup = await bucket.get(migrated.lunoraSnapshotKey ?? "");
+    expect(await lunoraBackup?.json()).toMatchObject({
+      dailyIndex: [{ ...lunoraClaim, userId }],
+    });
+    if (!fault) {
+      const cutover = await command<Inspection>("/inspect", userId);
+      expect(cutover.classic.nodes).toEqual([lunoraRoot]);
+      expect(
+        cutover.classic.kv.filter((row) => row.collection === "daily-index"),
+      ).toEqual([
+        {
+          collection: "daily-index",
+          key: "2024-08-11",
+          value: JSON.stringify({ key: "2024-08-11", nodeId: lunoraDay.id }),
+          updatedAt: 7,
+        },
+      ]);
+      expect(
+        (
+          await command<RetirementRecord>("/run", userId, {
+            operation: "restore",
+          })
+        ).state,
+      ).toBe("restored-pre-migration");
+    }
+    const restored = await command<Inspection>("/inspect", userId);
+    expect(restored.classic.nodes).toEqual([classicRoot]);
+    expect(
+      restored.classic.kv.filter((row) => row.collection === "daily-index"),
+    ).toEqual(
+      before.classic.kv.filter((row) => row.collection === "daily-index"),
+    );
+    expect(restored.lunora.snapshot.dailyIndex).toEqual([
+      { ...lunoraClaim, userId },
+    ]);
+    expect(restored.status.frozenBy).toBeNull();
+    expect(restored.lunora.retirement?.status ?? null).toBe(
+      fault ? null : "retired",
+    );
+  });
+}
+
 for (const afterRetire of [false, true]) {
   test(`retry resumes interruption ${afterRetire ? "after retirement" : "after classic replacement"}`, async () => {
     const { userId, lunoraNodes } = await seed();

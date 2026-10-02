@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test";
 
 import type { Node } from "../src/data/wire-schema";
+import type { OutlineSnapshot } from "./backup";
 
 import {
   buildClassicTarget,
   classifyRetirement,
   retirementSnapshotKey,
+  validateClassicSnapshot,
   validateLunoraSnapshot,
   validateNodeGraph,
 } from "./lunora-retirement";
@@ -67,7 +69,7 @@ describe("retirement snapshot validation", () => {
     ).toBe(false);
   });
 
-  it("rejects missing watermarks, ownership drift, and dangling daily references", () => {
+  it("rejects missing watermarks and ownership drift", () => {
     const base = snapshot([node("a", null, null), node("b", "a", null)]);
     expect(
       validateLunoraSnapshot(
@@ -81,15 +83,130 @@ describe("retirement snapshot validation", () => {
         "u1",
       ).ok,
     ).toBe(false);
+  });
+
+  it("preserves retained day and scaffold claims when their nodes are absent", () => {
+    const base = snapshot([node("a", null, null), node("b", "a", null)]);
+    const dailyIndex = [
+      { key: "2024-08-11", nodeId: "deleted-day", touchedAt: 7, userId: "u1" },
+      {
+        key: "container",
+        nodeId: "undone-container",
+        touchedAt: 9,
+        userId: "u1",
+      },
+      ...base.dailyIndex,
+    ];
+    const lunora = { ...base, dailyIndex };
+    const classic: OutlineSnapshot = {
+      version: 1,
+      exportedAt: 10,
+      seq: 3,
+      nodes: [node("old", null, null)],
+      kv: [
+        {
+          collection: "daily-index",
+          key: "2024-02-12",
+          value: '{ "key": "2024-02-12", "nodeId": "deleted-classic-day" }',
+          updatedAt: 4,
+        },
+      ],
+    };
+    const before = structuredClone({ classic, lunora });
+    expect(validateClassicSnapshot(classic)).toEqual({ ok: true });
+    expect(validateLunoraSnapshot(lunora, "u1")).toEqual({ ok: true });
+    const target = buildClassicTarget(classic, lunora, 99);
+    expect(target.nodes.map((row) => row.id)).toEqual(["a", "b"]);
+    expect(target.kv.filter((row) => row.collection === "daily-index")).toEqual(
+      [
+        {
+          collection: "daily-index",
+          key: "2024-08-11",
+          value: '{"key":"2024-08-11","nodeId":"deleted-day"}',
+          updatedAt: 7,
+        },
+        {
+          collection: "daily-index",
+          key: "container",
+          value: '{"key":"container","nodeId":"undone-container"}',
+          updatedAt: 9,
+        },
+        {
+          collection: "daily-index",
+          key: "today",
+          value: '{"key":"today","nodeId":"b"}',
+          updatedAt: 2,
+        },
+      ],
+    );
+    expect(validateClassicSnapshot({ ...classic, ...target })).toEqual({
+      ok: true,
+    });
+    expect({ classic, lunora }).toEqual(before);
+  });
+
+  it("still rejects malformed and duplicate classic daily claims", () => {
+    const row = {
+      collection: "daily-index",
+      key: "2024-08-11",
+      value: '{"key":"2024-08-11","nodeId":"absent"}',
+      updatedAt: 1,
+    };
+    const classic: OutlineSnapshot = {
+      version: 1,
+      exportedAt: 1,
+      seq: 1,
+      nodes: [node("a", null, null)],
+      kv: [row],
+    };
+    for (const value of [
+      "{",
+      '{"key":"2024-08-11","nodeId":5}',
+      '{"key":"wrong","nodeId":"absent"}',
+    ]) {
+      expect(
+        validateClassicSnapshot({ ...classic, kv: [{ ...row, value }] }).ok,
+      ).toBe(false);
+    }
+    expect(validateClassicSnapshot({ ...classic, kv: [row, row] })).toEqual({
+      ok: false,
+      reason: "classic snapshot has duplicate kv keys",
+    });
+    expect(
+      validateClassicSnapshot({
+        ...classic,
+        nodes: [node("a", "missing", null)],
+      }),
+    ).toEqual({ ok: false, reason: "node a has missing parent" });
+  });
+
+  it("still rejects duplicate and foreign retained Lunora claims and broken node references", () => {
+    const base = snapshot([node("a", null, null), node("b", "a", null)]);
+    const claim = {
+      key: "2024-08-11",
+      nodeId: "absent",
+      touchedAt: 2,
+      userId: "u1",
+    };
+    expect(
+      validateLunoraSnapshot({ ...base, dailyIndex: [claim, claim] }, "u1"),
+    ).toEqual({ ok: false, reason: "duplicate daily key 2024-08-11" });
+    expect(
+      validateLunoraSnapshot(
+        { ...base, dailyIndex: [{ ...claim, userId: "u2" }] },
+        "u1",
+      ),
+    ).toEqual({ ok: false, reason: "Lunora row ownership mismatch" });
     expect(
       validateLunoraSnapshot(
         {
           ...base,
-          dailyIndex: [{ ...base.dailyIndex[0]!, nodeId: "missing" }],
+          dailyIndex: [claim],
+          nodes: [{ ...base.nodes[0]!, mirrorOf: "missing" }, base.nodes[1]!],
         },
         "u1",
-      ).ok,
-    ).toBe(false);
+      ),
+    ).toEqual({ ok: false, reason: "node a has missing mirror source" });
   });
 });
 
