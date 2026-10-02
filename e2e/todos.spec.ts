@@ -28,10 +28,38 @@ const text = (page: Page, id: string) =>
 const checkbox = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .checkbox`);
 
-async function load(page: Page) {
-  await seedOutline(page, TREE);
+async function load(page: Page, tree: SeedNode[] = TREE) {
+  await seedOutline(page, tree);
   await page.goto("/");
   await expect(text(page, "c")).toBeVisible();
+}
+
+async function caretAt(page: Page, id: string, offset: number) {
+  await text(page, id).evaluate((el: HTMLElement, pos) => {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    if (el.firstChild) range.setStart(el.firstChild, pos);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, offset);
+}
+
+// Software keyboards can deliver deletion intent without a Backspace keydown.
+// Dispatch the native event, not a React callback or a keyboard shortcut.
+async function deleteBackward(page: Page, isComposing = false) {
+  return text(page, "c").evaluate((el, composing) => {
+    const event = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "deleteContentBackward",
+      isComposing: composing,
+    });
+    el.dispatchEvent(event);
+    return event.defaultPrevented;
+  }, isComposing);
 }
 
 test.describe("todos plugin", () => {
@@ -120,6 +148,179 @@ test.describe("todos plugin", () => {
     await expect(checkbox(page, "b")).toHaveCount(0);
   });
 
+  test("desktop Backspace removes the checkbox before deleting an empty task", async ({
+    page,
+  }) => {
+    await load(
+      page,
+      TREE.map((n) => (n.id === "c" ? { ...n, text: "" } : n)),
+    );
+    await caretAt(page, "c", 0);
+
+    await page.keyboard.press("Backspace");
+    await expect(checkbox(page, "c")).toHaveCount(0);
+    await expect(text(page, "c")).toBeFocused();
+    await expect(text(page, "c")).toHaveText("");
+
+    // The prevented keydown must not also run the mobile deletion path and
+    // delete the newly-demoted node. A SECOND press retains normal deletion.
+    await page.keyboard.press("Backspace");
+    await expect(text(page, "c")).toHaveCount(0);
+  });
+
+  test.describe("software-keyboard deletion", () => {
+    test.use({
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 844 },
+    });
+
+    test("Backspace alone works immediately on focus, without beforeinput", async ({
+      page,
+    }) => {
+      await load(
+        page,
+        TREE.map((n) => (n.id === "c" ? { ...n, text: "" } : n)),
+      );
+      const prevented = await text(page, "c").evaluate((el: HTMLElement) => {
+        // Keep focus and keydown in the same turn: waiting after focus would
+        // hide a handler that depends on React's focus registration catching up.
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(true);
+        const sel = window.getSelection()!;
+        sel.removeAllRanges();
+        sel.addRange(range);
+        // The iPhone trace contains only keydown/keyup on an empty editor.
+        const event = new KeyboardEvent("keydown", {
+          key: "Backspace",
+          code: "Backspace",
+          keyCode: 8,
+          bubbles: true,
+          cancelable: true,
+        });
+        el.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+      expect(prevented).toBe(true);
+      await expect(checkbox(page, "c")).toHaveCount(0);
+      await expect(text(page, "c")).toBeFocused();
+      await expect(page.locator("li[data-node-id]")).toHaveCount(3);
+
+      // Undo restores the checkbox on the same node.
+      await page.keyboard.press(`${MOD}+z`);
+      await expect(checkbox(page, "c")).toBeVisible();
+    });
+
+    test("Shift+Backspace demotes once, but modified or composing keydowns do not", async ({
+      page,
+    }) => {
+      await load(page);
+      await caretAt(page, "c", 0);
+      const prevented = await text(page, "c").evaluate((el) =>
+        [
+          { ctrlKey: true },
+          { altKey: true },
+          { metaKey: true },
+          { isComposing: true },
+        ].map((modifiers) => {
+          const event = new KeyboardEvent("keydown", {
+            key: "Backspace",
+            bubbles: true,
+            cancelable: true,
+            ...modifiers,
+          });
+          el.dispatchEvent(event);
+          return event.defaultPrevented;
+        }),
+      );
+      expect(prevented).toEqual([false, false, false, false]);
+      await expect(checkbox(page, "c")).toBeVisible();
+
+      await page.keyboard.press("Shift+Backspace");
+      await expect(checkbox(page, "c")).toHaveCount(0);
+      await expect(text(page, "c")).toHaveText("buy milk");
+      await expect(text(page, "c")).toBeFocused();
+      await page.keyboard.press(`${MOD}+z`);
+      await expect(checkbox(page, "c")).toBeVisible();
+      await expect(text(page, "c")).toHaveText("buy milk");
+    });
+
+    test("an empty task becomes a bullet, keeps focus, and undo restores its checkbox", async ({
+      page,
+    }) => {
+      await load(
+        page,
+        TREE.map((n) => (n.id === "c" ? { ...n, text: "" } : n)),
+      );
+      await caretAt(page, "c", 0);
+
+      expect(await deleteBackward(page)).toBe(true);
+      await expect(checkbox(page, "c")).toHaveCount(0);
+      await expect(text(page, "c")).toBeFocused();
+      await expect(text(page, "c")).toHaveText("");
+
+      await page.keyboard.press(`${MOD}+z`);
+      await expect(checkbox(page, "c")).toBeVisible();
+      await expect(text(page, "c")).toHaveText("");
+    });
+
+    test("deleting the last character leaves a task until the next deletion intent", async ({
+      page,
+    }) => {
+      await load(
+        page,
+        TREE.map((n) => (n.id === "c" ? { ...n, text: "x" } : n)),
+      );
+      await caretAt(page, "c", 1);
+
+      // A real browser deletion exercises beforeinput + input together. It
+      // must delete the character without converting the now-empty task.
+      await page.keyboard.press("Backspace");
+      await expect(text(page, "c")).toHaveText("");
+      await expect(checkbox(page, "c")).toBeVisible();
+
+      expect(await deleteBackward(page)).toBe(true);
+      await expect(checkbox(page, "c")).toHaveCount(0);
+      await expect(text(page, "c")).toBeFocused();
+      await page.reload();
+      await expect(text(page, "c")).toBeVisible();
+      await expect(checkbox(page, "c")).toHaveCount(0);
+      await expect(text(page, "c")).toHaveText("");
+    });
+
+    test("only a collapsed caret at the start converts, never a selection or composition", async ({
+      page,
+    }) => {
+      await load(page);
+      await caretAt(page, "c", 3);
+      expect(await deleteBackward(page)).toBe(false);
+      await expect(checkbox(page, "c")).toBeVisible();
+
+      await text(page, "c").evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection()!;
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
+      expect(await deleteBackward(page)).toBe(false);
+      await expect(checkbox(page, "c")).toBeVisible();
+
+      await caretAt(page, "c", 0);
+      expect(await deleteBackward(page, true)).toBe(false);
+      await expect(checkbox(page, "c")).toBeVisible();
+
+      // Match desktop behavior for a nonempty task at the start, too. Text
+      // remains intact, rather than joining this row into its predecessor.
+      expect(await deleteBackward(page)).toBe(true);
+      await expect(checkbox(page, "c")).toHaveCount(0);
+      await expect(text(page, "c")).toHaveText("buy milk");
+      await expect(text(page, "c")).toBeFocused();
+    });
+  });
+
   test("the checkbox hitbox does not reach into the text (ADR 0029)", async ({
     page,
   }) => {
@@ -137,6 +338,7 @@ test.describe("todos plugin", () => {
     // the span's own x=0 legitimately hits the checkbox and proves nothing.
     const hit = await page.evaluate(() => {
       const li = document.querySelector('li[data-node-id="c"]')!;
+      // SAFETY: load waits for this row's .node-text, which renders as an HTML span.
       const span = li.querySelector(".node-text")! as HTMLElement;
       const range = document.createRange();
       range.setStart(span.firstChild!, 0);

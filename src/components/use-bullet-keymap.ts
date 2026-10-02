@@ -94,6 +94,50 @@ export function useBulletKeymap({
     };
   }, [textRef]);
 
+  // Software keyboards can send either Backspace or beforeinput deletion
+  // intent. The iPhone trace has no beforeinput on an empty contentEditable.
+  // Bind checkbox demotion directly, without waiting for focus-gated hotkeys
+  // to register. Only demotion belongs here; node deletion/joining stays below.
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el || !enabled || !node.isTask) return;
+    const demoteTask = (e: Event) => {
+      if (
+        e.defaultPrevented ||
+        !e.cancelable ||
+        document.activeElement !== el ||
+        !isCaretAtStart(el)
+      )
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      commands.onSetTask(node.id, false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key !== "Backspace" ||
+        e.isComposing ||
+        e.ctrlKey ||
+        e.altKey ||
+        e.metaKey
+      )
+        return;
+      // Shift+Backspace is still native backward deletion, not a different
+      // editor command. Capture keeps the hotkey path from acting again.
+      demoteTask(e);
+    };
+    const onBeforeInput = (e: InputEvent) => {
+      if (e.inputType === "deleteContentBackward" && !e.isComposing)
+        demoteTask(e);
+    };
+    el.addEventListener("keydown", onKeyDown, true);
+    el.addEventListener("beforeinput", onBeforeInput);
+    return () => {
+      el.removeEventListener("keydown", onKeyDown, true);
+      el.removeEventListener("beforeinput", onBeforeInput);
+    };
+  }, [textRef, enabled, node.isTask, node.id, commands]);
+
   useHotkeys(
     focused
       ? [
@@ -225,13 +269,9 @@ export function useBulletKeymap({
             hotkey: "Backspace",
             callback: (e) => {
               const el = textRef.current;
-              if (!el || !isCaretAtStart(el)) return;
-              if (node.isTask) {
-                e.preventDefault();
-                e.stopPropagation();
-                commands.onSetTask(node.id, false);
-                return;
-              }
+              // Task demotion uses native events above, including keyboards
+              // that never emit beforeinput on an empty task.
+              if (node.isTask || !el || !isCaretAtStart(el)) return;
               // SOURCE, not textContent (ADR 0005's landmine): a line whose whole
               // text is a folded token renders shorter than it reads, and a widget
               // atom with no plain-text child renders as "" -- which would send a
