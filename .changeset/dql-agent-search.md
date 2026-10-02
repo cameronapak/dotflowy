@@ -1,5 +1,5 @@
 ---
-"dotflowy": major
+"dotflowy": minor
 ---
 
 MCP and CLI search now use DQL, the app filter's query language. Find incomplete tagged tasks with `is:todo -is:complete #dotflowy`, scope searches to a subtree, and retrieve every match through pagination. Mirrors match source content, and spoiler interiors remain redacted before matching.
