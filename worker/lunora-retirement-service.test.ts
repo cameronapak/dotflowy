@@ -70,6 +70,15 @@ function fakeDb() {
   const prepare = (sql: string) => ({
     bind: (...args: unknown[]) => ({
       async first<A>() {
+        if (sql.includes("SET activeOperationId = ?")) {
+          if (!record || record.activeOperationId !== null) return null;
+          // SAFETY: these positions mirror the operation claim's fixed bind list.
+          record = {
+            ...record,
+            activeOperationId: args[0] as string,
+            activeOperationStartedAt: args[1] as number,
+          };
+        }
         // SAFETY: this fake stores only RetirementRecord values and the service requests RetirementRecord here.
         return (record ? clone(record) : null) as A | null;
       },
@@ -92,6 +101,16 @@ function fakeDb() {
               lunoraSnapshotHash: null,
               counts: null,
               failureReason: null,
+              activeOperationId: null,
+              activeOperationStartedAt: null,
+            };
+          }
+        } else if (sql.includes("SET activeOperationId = NULL")) {
+          if (record && record.activeOperationId === args[1]) {
+            record = {
+              ...record,
+              activeOperationId: null,
+              activeOperationStartedAt: null,
             };
           }
         } else if (sql.includes("UPDATE lunora_retirement SET")) {
@@ -172,6 +191,7 @@ function fakeBackends(options?: {
   failPreRestore?: boolean;
 }) {
   let classic = classicSnapshot();
+  let lunora = lunoraSnapshot();
   let classicFrozenBy: string | null = null;
   let appliedMigrationId: string | null = null;
   let lunoraStatus: "frozen" | "retired" | null = null;
@@ -261,7 +281,7 @@ function fakeBackends(options?: {
                 updatedAt: 1,
               }
             : null,
-          snapshot: clone(lunoraSnapshot()),
+          snapshot: clone(lunora),
         };
       },
       async freezeAndExport(migrationId: string) {
@@ -269,7 +289,7 @@ function fakeBackends(options?: {
           throw new Error("Lunora fenced by another migration");
         lunoraMigrationId = migrationId;
         lunoraStatus = "frozen";
-        return clone(lunoraSnapshot());
+        return clone(lunora);
       },
       async releaseFreeze(migrationId: string) {
         if (lunoraMigrationId && lunoraMigrationId !== migrationId)
@@ -315,6 +335,21 @@ function fakeBackends(options?: {
     },
     failNextPreRetirementRestore() {
       failPreRestore = true;
+    },
+    editLunora(text: string) {
+      if (lunoraStatus) throw new Error("Lunora is frozen");
+      lunora = {
+        ...lunora,
+        nodes: lunora.nodes.map((row) => ({ ...row, text })),
+      };
+    },
+    replaceLunora(snapshot: LunoraRetirementSnapshot) {
+      if (lunoraStatus) throw new Error("Lunora is frozen");
+      lunora = clone(snapshot);
+    },
+    replaceClassic(snapshot: OutlineSnapshot) {
+      if (classicFrozenBy) throw new Error("classic is frozen");
+      classic = clone(snapshot);
     },
   };
 }
@@ -486,5 +521,233 @@ describe("Lunora retirement coordinator", () => {
     expect(result.failureReason).toBe("pre-migration restore failed");
     expect(f.backend.classicFrozenBy).toBe(migrated.migrationId);
     expect(f.backend.lunoraStatus).toBe("retired");
+  });
+
+  it("refuses a stale backup after rollback and preserves newer Lunora edits", async () => {
+    const f = fixture();
+    const markRetired = f.backend.backends.lunora.markRetired;
+    f.backend.backends.lunora.markRetired = async () => {
+      throw new Error("transient retirement failure");
+    };
+    const first = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "migrate",
+      f.backend.backends,
+    );
+    expect(first.state).toBe("rolled-back");
+    const backups = clone([...f.bucket.objects]);
+    f.backend.editLunora("edit accepted after rollback");
+    f.backend.backends.lunora.markRetired = markRetired;
+
+    const retried = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "retry",
+      f.backend.backends,
+    );
+    expect(retried.result).toBe("failed-before-restore");
+    expect(retried.failureReason).toContain("Lunora content changed");
+    expect(f.backend.restoreCalls).toBe(1);
+    expect(f.backend.classic.nodes[0]?.text).toBe("classic");
+    expect(
+      (await f.backend.backends.lunora.inspect()).snapshot.nodes[0]?.text,
+    ).toBe("edit accepted after rollback");
+    expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBeNull();
+    expect([...f.bucket.objects]).toEqual(backups);
+  });
+
+  it("keeps completion durable through repeated population dry-runs and retries", async () => {
+    const f = fixture();
+    const completed = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "migrate",
+      f.backend.backends,
+    );
+    const calls = f.backend.classicFreezeCalls;
+    for (let i = 0; i < 2; i++) {
+      const preview = await runRetirementOperation(
+        f.env,
+        USER_ID,
+        "dry-run",
+        f.backend.backends,
+      );
+      expect(preview.state).toBe("completed");
+      expect(preview.result).toBe("migrated");
+      expect(f.db.record).toEqual(completed);
+      await runRetirementOperation(f.env, USER_ID, "retry", f.backend.backends);
+    }
+    expect(f.backend.classicFreezeCalls).toBe(calls);
+  });
+
+  it("keeps uncertain recovery state and fences through dry-run and retry", async () => {
+    const f = fixture();
+    await runRetirementOperation(f.env, USER_ID, "migrate", f.backend.backends);
+    f.backend.failNextPreRetirementRestore();
+    const uncertain = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "restore",
+      f.backend.backends,
+    );
+    const calls = f.backend.classicFreezeCalls;
+    await runRetirementOperation(f.env, USER_ID, "dry-run", f.backend.backends);
+    expect(f.db.record).toEqual(uncertain);
+    await runRetirementOperation(f.env, USER_ID, "retry", f.backend.backends);
+    expect(f.db.record).toEqual(uncertain);
+    expect(f.backend.classicFreezeCalls).toBe(calls);
+    expect(f.backend.classicFrozenBy).toBe(uncertain.migrationId);
+  });
+
+  it.each(["nodes", "preferences"])(
+    "rejects changed classic %s after rollback before restoring",
+    async (content) => {
+      const f = fixture({ failMarkRetired: true });
+      await runRetirementOperation(
+        f.env,
+        USER_ID,
+        "migrate",
+        f.backend.backends,
+      );
+      if (content === "nodes") {
+        f.backend.replaceClassic({
+          ...f.backend.classic,
+          nodes: f.backend.classic.nodes.map((row) => ({
+            ...row,
+            text: "new classic edit",
+          })),
+        });
+      } else {
+        f.backend.replaceClassic({
+          ...f.backend.classic,
+          kv: [
+            ...f.backend.classic.kv,
+            {
+              collection: "account-prefs",
+              key: "timezone",
+              value: '{"zone":"Pacific/Auckland"}',
+              updatedAt: 27,
+            },
+          ],
+        });
+      }
+      const edited = clone(f.backend.classic);
+      const result = await runRetirementOperation(
+        f.env,
+        USER_ID,
+        "retry",
+        f.backend.backends,
+      );
+      expect(result.failureReason).toContain("classic content changed");
+      expect(f.backend.restoreCalls).toBe(1);
+      expect(f.backend.classic).toEqual(edited);
+      expect(f.backend.classicFrozenBy).toBeNull();
+      expect(f.backend.lunoraStatus).toBeNull();
+    },
+  );
+
+  it.each(["dailyIndex", "tagColors", "savedQueries", "migrateState"] as const)(
+    "rejects changed Lunora %s even when nodes are unchanged",
+    async (table) => {
+      const f = fixture({ failMarkRetired: true });
+      await runRetirementOperation(
+        f.env,
+        USER_ID,
+        "migrate",
+        f.backend.backends,
+      );
+      const snapshot = (await f.backend.backends.lunora.inspect()).snapshot;
+      const edited = {
+        ...snapshot,
+        dailyIndex:
+          table === "dailyIndex"
+            ? [
+                {
+                  userId: USER_ID,
+                  key: "2026-10-02",
+                  nodeId: "lunora",
+                  touchedAt: 4,
+                },
+              ]
+            : snapshot.dailyIndex,
+        tagColors:
+          table === "tagColors"
+            ? [{ userId: USER_ID, tag: "work", color: "red" }]
+            : snapshot.tagColors,
+        savedQueries:
+          table === "savedQueries"
+            ? [
+                {
+                  userId: USER_ID,
+                  id: "query",
+                  name: "Work",
+                  query: "#work",
+                  createdAt: 5,
+                },
+              ]
+            : snapshot.savedQueries,
+        migrateState:
+          table === "migrateState"
+            ? [{ userId: USER_ID, nodesAt: 1, kvAt: 6 }]
+            : snapshot.migrateState,
+      };
+      f.backend.replaceLunora(edited);
+      const backups = clone([...f.bucket.objects]);
+      const result = await runRetirementOperation(
+        f.env,
+        USER_ID,
+        "retry",
+        f.backend.backends,
+      );
+      expect(result.failureReason).toContain("Lunora content changed");
+      expect(f.backend.restoreCalls).toBe(1);
+      expect((await f.backend.backends.lunora.inspect()).snapshot).toEqual(
+        edited,
+      );
+      expect([...f.bucket.objects]).toEqual(backups);
+      expect(f.backend.classicFrozenBy).toBeNull();
+      expect(f.backend.lunoraStatus).toBeNull();
+    },
+  );
+
+  it("allows unchanged re-exports with different timestamps and row order", async () => {
+    const f = fixture();
+    f.backend.replaceLunora({
+      ...lunoraSnapshot(),
+      nodes: [
+        { ...node("lunora"), userId: USER_ID },
+        { ...node("second"), prevSiblingId: "lunora", userId: USER_ID },
+      ],
+    });
+    const retire = f.backend.backends.lunora.markRetired;
+    f.backend.backends.lunora.markRetired = async () => {
+      throw new Error("transient failure");
+    };
+    await runRetirementOperation(f.env, USER_ID, "migrate", f.backend.backends);
+    const snapshot = (await f.backend.backends.lunora.inspect()).snapshot;
+    f.backend.replaceLunora({
+      ...snapshot,
+      exportedAt: 900,
+      nodes: [...snapshot.nodes].reverse(),
+    });
+    f.backend.replaceClassic({
+      ...f.backend.classic,
+      exportedAt: 800,
+      seq: 12,
+    });
+    f.backend.backends.lunora.markRetired = retire;
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "retry",
+      f.backend.backends,
+    );
+    expect(result.state).toBe("completed");
+    expect(f.backend.classic.nodes.map((row) => row.id)).toEqual([
+      "lunora",
+      "second",
+    ]);
   });
 });

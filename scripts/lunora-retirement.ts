@@ -3,6 +3,15 @@
  * command requires --execute. Batches are deliberately sequential.
  */
 
+import { Schema } from "effect";
+
+const OperationResultSchema = Schema.Struct({
+  state: Schema.String,
+  classification: Schema.optional(Schema.NullOr(Schema.String)),
+  dryRun: Schema.optional(Schema.Struct({ classification: Schema.String })),
+});
+type OperationResult = Schema.Schema.Type<typeof OperationResultSchema>;
+
 type Command =
   | "dry-run"
   | "migrate"
@@ -47,7 +56,7 @@ export function normalizeRetirementApiOrigin(input: string): string {
   return url.origin;
 }
 
-function usage(): never {
+function usage(): void {
   console.error(`Usage:
   bun run lunora:retire [dry-run] (--user ID | --email EMAIL | --all)
   bun run lunora:retire migrate (--user ID | --email EMAIL | --all) --execute
@@ -61,18 +70,19 @@ Options: --api URL (default DOTFLOWY_API or https://app.dotflowy.com)`);
 }
 
 function parseArgs(argv: string[]): Args {
-  const commands = new Set<Command>([
+  const commands: Command[] = [
     "dry-run",
     "migrate",
     "retry",
     "status",
     "restore",
     "report",
-  ]);
+  ];
   let command: Command = "dry-run";
   let index = 0;
-  if (commands.has(argv[0] as Command)) {
-    command = argv[0] as Command;
+  const selected = commands.find((candidate) => candidate === argv[0]);
+  if (selected) {
+    command = selected;
     index++;
   }
   const args: Args = {
@@ -109,12 +119,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 function collectCookies(response: Response): string {
-  const values =
-    typeof response.headers.getSetCookie === "function"
-      ? response.headers.getSetCookie()
-      : [response.headers.get("set-cookie")].filter(
-          (value): value is string => value !== null,
-        );
+  const values = response.headers.getSetCookie();
   return values
     .map((value) => value.split(";")[0]!.trim())
     .filter(Boolean)
@@ -152,24 +157,28 @@ async function resolveCookie(api: string): Promise<string> {
   return cookie;
 }
 
-async function requestJson(
+async function requestJson<A>(
   api: string,
   cookie: string,
   path: string,
+  schema: Schema.ConstraintDecoder<A>,
   init?: RequestInit,
-): Promise<unknown> {
+): Promise<A> {
+  const headers = new Headers({ cookie });
+  if (init?.body) headers.set("content-type", "application/json");
   const response = await fetch(`${api}${path}`, {
     ...init,
     redirect: "error",
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      cookie,
-    },
+    headers,
   });
   if (!response.ok) {
     throw new Error(`${response.status} ${await response.text()}`);
   }
-  return response.json();
+  // Validate decision fields without removing audit metadata from CLI output.
+  const value: unknown = await response.json();
+  Schema.decodeUnknownSync(schema)(value);
+  // SAFETY: callers use non-transforming schemas; validation proves A while the original value retains audit fields.
+  return value as A;
 }
 
 function targetBody(args: Args): { userId?: string; email?: string } {
@@ -177,12 +186,13 @@ function targetBody(args: Args): { userId?: string; email?: string } {
 }
 
 async function population(api: string, cookie: string): Promise<string[]> {
-  const data = (await requestJson(
+  const data = await requestJson(
     api,
     cookie,
     "/api/admin/lunora-retirement?population=1",
-  )) as { userIds: string[] };
-  return data.userIds;
+    Schema.Struct({ userIds: Schema.Array(Schema.String) }),
+  );
+  return [...data.userIds];
 }
 
 async function operate(
@@ -190,11 +200,17 @@ async function operate(
   cookie: string,
   operation: "dry-run" | "migrate" | "retry" | "restore",
   target: { userId?: string; email?: string },
-): Promise<unknown> {
-  return requestJson(args.api, cookie, "/api/admin/lunora-retirement", {
-    method: "POST",
-    body: JSON.stringify({ ...target, operation }),
-  });
+): Promise<OperationResult> {
+  return requestJson(
+    args.api,
+    cookie,
+    "/api/admin/lunora-retirement",
+    OperationResultSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...target, operation }),
+    },
+  );
 }
 
 async function main(): Promise<void> {
@@ -208,6 +224,8 @@ async function main(): Promise<void> {
       args.api,
       cookie,
       `/api/admin/lunora-retirement${query}`,
+      // Reports are printed verbatim; no fields drive migration decisions.
+      Schema.Unknown,
     );
     const output = `${JSON.stringify(report, null, 2)}\n`;
     if (args.command === "report" && args.out)
@@ -222,20 +240,31 @@ async function main(): Promise<void> {
   const results: unknown[] = [];
   for (const target of targets) {
     if (args.command === "migrate") {
-      const preview = (await operate(args, cookie, "dry-run", target)) as {
-        classification?: string;
-        dryRun?: { classification?: string };
-      };
+      const preview = await operate(args, cookie, "dry-run", target);
+      const classification =
+        preview.dryRun?.classification ?? preview.classification;
       if (
-        (preview.dryRun?.classification ?? preview.classification) !==
-        "eligible"
+        preview.state === "completed" ||
+        (preview.state === "classified" && classification === "already-classic")
       ) {
         results.push(preview);
         continue;
       }
+      if (preview.state === "uncertain" || classification !== "eligible") {
+        results.push(preview);
+        console.error("Migration batch stopped: operator review required.");
+        process.exitCode = 1;
+        break;
+      }
     }
     const operation = args.command === "dry-run" ? "dry-run" : args.command;
-    results.push(await operate(args, cookie, operation, target));
+    const result = await operate(args, cookie, operation, target);
+    results.push(result);
+    if (args.command === "migrate" && result.state !== "completed") {
+      console.error("Migration batch stopped: migration did not complete.");
+      process.exitCode = 1;
+      break;
+    }
   }
   process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
 }

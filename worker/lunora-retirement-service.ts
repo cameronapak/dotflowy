@@ -87,7 +87,14 @@ export interface RetirementRecord {
   lunoraSnapshotHash: string | null;
   counts: string | null;
   failureReason: string | null;
+  activeOperationId: string | null;
+  activeOperationStartedAt: number | null;
 }
+
+export class RetirementOperationInProgress extends Schema.TaggedError<RetirementOperationInProgress>()(
+  "RetirementOperationInProgress",
+  { userId: Schema.String },
+) {}
 
 interface AttemptRecord {
   id: number;
@@ -247,6 +254,24 @@ async function storeImmutable<A>(
   return readVerifiedObject(env, key, schema);
 }
 
+function lunoraSnapshotsEquivalent(
+  left: LunoraRetirementSnapshot,
+  right: LunoraRetirementSnapshot,
+): boolean {
+  const rows = (values: readonly unknown[]) =>
+    values.map((row) => JSON.stringify(row)).sort();
+  const normalize = (snapshot: LunoraRetirementSnapshot) => ({
+    version: snapshot.version,
+    userId: snapshot.userId,
+    nodes: rows(snapshot.nodes),
+    dailyIndex: rows(snapshot.dailyIndex),
+    tagColors: rows(snapshot.tagColors),
+    savedQueries: rows(snapshot.savedQueries),
+    migrateState: rows(snapshot.migrateState),
+  });
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
 async function inspect(
   env: RetirementEnv,
   userId: string,
@@ -341,8 +366,8 @@ async function migrate(
   const stub = backends.classic;
   const lunoraClient = backends.lunora;
   try {
-    const classicExport = await stub.freezeAndExportRetirement(
-      record.migrationId,
+    const classicExport = Schema.decodeUnknownSync(OutlineSnapshotSchema)(
+      await stub.freezeAndExportRetirement(record.migrationId),
     );
     const classicKey = retirementSnapshotKey(
       record.userId,
@@ -361,16 +386,24 @@ async function migrate(
     ) {
       throw new Error("classic retirement backup hash changed");
     }
+    const classicStatus = await stub.retirementStatus();
+    if (
+      classicStatus.appliedMigrationId !== record.migrationId &&
+      !classicSnapshotsEquivalent(classicBackup.value, classicExport)
+    ) {
+      throw new Error(
+        "classic content changed since the immutable backup; operator review required",
+      );
+    }
     record = await updateRecord(env, record, {
       state: "classic-backed-up",
       classicSnapshotKey: classicKey,
       classicSnapshotHash: classicBackup.hash,
     });
 
-    const lunoraExport = await lunoraClient.freezeAndExport(
-      record.migrationId,
-      Date.now(),
-    );
+    const lunoraExport = Schema.decodeUnknownSync(
+      LunoraRetirementSnapshotSchema,
+    )(await lunoraClient.freezeAndExport(record.migrationId, Date.now()));
     const lunoraKey = retirementSnapshotKey(
       record.userId,
       record.migrationId,
@@ -387,6 +420,11 @@ async function migrate(
       record.lunoraSnapshotHash !== lunoraBackup.hash
     ) {
       throw new Error("Lunora retirement backup hash changed");
+    }
+    if (!lunoraSnapshotsEquivalent(lunoraBackup.value, lunoraExport)) {
+      throw new Error(
+        "Lunora content changed since the immutable backup; operator review required",
+      );
     }
     record = await updateRecord(env, record, {
       state: "backups-verified",
@@ -499,16 +537,68 @@ export async function runRetirementOperation(
   operation: RetirementOperation,
   backends = retirementBackends(env, userId),
 ): Promise<RetirementRecord & { dryRun?: unknown }> {
-  let record = await ensureRecord(env, userId, Date.now());
+  await ensureRecord(env, userId, Date.now());
+  const operationId = crypto.randomUUID();
+  const record = await env.DB.prepare(
+    `UPDATE lunora_retirement
+     SET activeOperationId = ?, activeOperationStartedAt = ?
+     WHERE userId = ? AND activeOperationId IS NULL
+     RETURNING *`,
+  )
+    .bind(operationId, Date.now(), userId)
+    .first<RetirementRecord>();
+  if (!record) throw new RetirementOperationInProgress({ userId });
+
+  // Keep ownership through recovery and audit writes. A terminated executor
+  // cannot run finally, so its durable claim remains held without a timeout.
+  try {
+    const result = await performRetirementOperation(
+      env,
+      record,
+      operation,
+      backends,
+    );
+    return {
+      ...result,
+      activeOperationId: null,
+      activeOperationStartedAt: null,
+    };
+  } finally {
+    await env.DB.prepare(
+      `UPDATE lunora_retirement
+       SET activeOperationId = NULL, activeOperationStartedAt = NULL
+       WHERE userId = ? AND activeOperationId = ?`,
+    )
+      .bind(userId, operationId)
+      .run();
+  }
+}
+
+async function performRetirementOperation(
+  env: RetirementEnv,
+  record: RetirementRecord,
+  operation: RetirementOperation,
+  backends: RetirementBackends,
+): Promise<RetirementRecord & { dryRun?: unknown }> {
+  const userId = record.userId;
+  if (
+    operation !== "restore" &&
+    (record.state === "completed" || record.state === "uncertain")
+  ) {
+    await appendAttempt(env, record, operation);
+    return record;
+  }
   if (operation === "dry-run") {
     const report = await inspect(env, userId, backends);
-    record = await updateRecord(env, record, {
-      state: "classified",
-      classification: report.classification,
-      result: "dry-run",
-      counts: JSON.stringify(snapshotCounts(report.lunora)),
-      failureReason: report.reasons.classic ?? report.reasons.lunora ?? null,
-    });
+    if (record.state === "created" || record.state === "classified") {
+      record = await updateRecord(env, record, {
+        state: "classified",
+        classification: report.classification,
+        result: "dry-run",
+        counts: JSON.stringify(snapshotCounts(report.lunora)),
+        failureReason: report.reasons.classic ?? report.reasons.lunora ?? null,
+      });
+    }
     await appendAttempt(env, record, operation);
     return {
       ...record,

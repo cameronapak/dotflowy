@@ -69,6 +69,7 @@ import {
   isLunoraOutlineEnabledForUser,
 } from "./lunora-mcp-store";
 import {
+  RetirementOperationInProgress,
   retirementPopulation,
   retirementReport,
   runRetirementOperation,
@@ -721,6 +722,7 @@ function handleApiRequest(
   | RouteNotFound
   | BadRequest
   | NodeLimitExceeded
+  | RetirementOperationInProgress
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -990,8 +992,15 @@ function handleApiRequest(
       const body = yield* decodeBody(request, AdminLunoraRetirementPostBody);
       const targetUserId = yield* resolveRestoreUserId(env, body);
       return json(
-        yield* Effect.promise(() =>
-          runRetirementOperation(env, targetUserId, body.operation),
+        yield* Effect.tryPromise({
+          try: () => runRetirementOperation(env, targetUserId, body.operation),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.catch((cause) =>
+            cause instanceof RetirementOperationInProgress
+              ? Effect.fail(cause)
+              : Effect.die(cause),
+          ),
         ),
       );
     }
@@ -1225,6 +1234,11 @@ const handler = {
         ),
         Effect.catchTag("RouteNotFound", () =>
           Effect.succeed(json({ error: "not found" }, 404)),
+        ),
+        Effect.catchTag("RetirementOperationInProgress", () =>
+          Effect.succeed(
+            json({ error: "retirement_operation_in_progress" }, 409),
+          ),
         ),
         // 403 with a machine-readable body the client keys on to show an upgrade
         // prompt (src/data/nodes-client-effect.ts NodesLimitError).

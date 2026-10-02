@@ -71,6 +71,8 @@ function lunoraTrustedOrigins(env: LunoraEnv): string[] {
 
 const app = defineApp<LunoraEnv>()
   .shard((env) => env.SHARD)
+  // Owner shapes, including the retirement signal, require the shard changelog.
+  .cdc()
   .extend((env) => {
     const trustedOrigins = lunoraTrustedOrigins(env);
     return {
