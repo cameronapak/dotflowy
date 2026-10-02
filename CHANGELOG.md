@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.15.3
+
+### Patch Changes
+
+- 70e8725: Backspace at the start of a task now removes its checkbox on mobile, matching desktop behavior while keeping the node and its text.
+
 ## 1.15.2
 
 ### Patch Changes
