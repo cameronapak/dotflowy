@@ -57,9 +57,9 @@ import {
   planReparent,
   planUpdateNode,
   redactSpoilerIndex,
-  searchNodes,
   trueSourceOf,
 } from "./outline-ops";
+import { SearchInput, SearchPage, searchPage } from "./search";
 
 // Re-exported so worker/index.ts can hand the DO stub over without importing
 // the planner module directly.
@@ -91,6 +91,12 @@ export class ToolError extends Data.TaggedError("ToolError")<{
   }
 }
 
+export interface ToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent?: SearchPage;
+  isError?: boolean;
+}
+
 export interface ToolDef {
   name: string;
   description: string;
@@ -98,6 +104,8 @@ export interface ToolDef {
    *  the decode-ready schema seam (never services) so consumers of the
    *  registry don't inherit `any` from an erased `Schema.Struct<any>`. */
   input: Schema.Top & { readonly DecodingServices: never };
+  /** Published contract for tools that return structuredContent. */
+  output?: Schema.Top & { readonly DecodingServices: never };
   /** MCP `readOnlyHint` — true for tools that never write. */
   readOnly: boolean;
   /** `origin` is the caller's provenance stamp — the OAuth client's harness name
@@ -108,7 +116,7 @@ export interface ToolDef {
     input: any,
     store: OutlineStore,
     origin: string | null,
-  ) => Effect.Effect<string, ToolError>;
+  ) => Effect.Effect<string | ToolResult, ToolError>;
 }
 
 // --- Shared plumbing ----------------------------------------------------------
@@ -467,12 +475,6 @@ const GetOutlineInput = Schema.Struct({
   ),
 });
 
-const SearchNodesInput = Schema.Struct({
-  query: Schema.String.annotate({
-    description: "Case-insensitive text to find in node text.",
-  }),
-});
-
 const AddNodeInput = Schema.Struct({
   text: Schema.String.annotate({ description: "The bullet text." }),
   parentId: optional(
@@ -681,7 +683,6 @@ const ExportOpmlInput = Schema.Struct({
 // --- The tools ----------------------------------------------------------------
 
 const MAX_OUTLINE_NODES = 500;
-const MAX_SEARCH_HITS = 25;
 /** One `add_subtree` batch = one DO `transactionSync` = one sync frame; cap the
  *  forest at the same ceiling an agent hits reading back (ADR 0028). */
 const MAX_BATCH_NODES = 500;
@@ -812,25 +813,38 @@ export const tools: ReadonlyArray<ToolDef> = [
   {
     name: "search_nodes",
     description:
-      "Find nodes by text (case-insensitive substring). Returns each match with its id and breadcrumb path.",
-    input: SearchNodesInput,
+      "Find nodes with DQL, the same grammar as the app filter: is:todo -is:complete #dotflowy, has:link, highlight:red, is:agent, is:mirror, phrases, negation, and adjacent-term OR. Tags are exact and case-sensitive; text is case-insensitive. Mirrors match source content. Spoiler interiors cannot match. Returns readable text and structured nodes with ids and breadcrumbs. Pages default to 25 matches; use nextCursor until null for a complete list. Restart if searchable data changes.",
+    input: SearchInput,
+    output: SearchPage,
     readOnly: true,
-    handle: (input: typeof SearchNodesInput.Type, store) =>
+    handle: (input: typeof SearchInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
-        const hits = searchNodes(index, input.query, MAX_SEARCH_HITS);
-        if (!hits.length) return `No nodes match "${input.query}".`;
-        const body = hits
+        const page = yield* searchPage(index, input).pipe(
+          Effect.mapError((error) => new ToolError({ reason: error.reason })),
+        );
+        const body = page.nodes
           .map((h) => {
             const path = h.path.length ? ` — in: ${h.path.join(" > ")}` : "";
-            const meta =
-              h.kind === "paragraph" ? `id: ${h.id}, paragraph` : `id: ${h.id}`;
-            return `- "${h.text}" (${meta})${path}`;
+            const meta = [`id: ${h.id}`];
+            if (h.kind === "paragraph") meta.push("paragraph");
+            if (h.mirrorOf) meta.push(`mirror of ${h.mirrorOf}`);
+            if (h.completed) meta.push("completed");
+            return `- ${h.isTask ? (h.completed ? "[x] " : "[ ] ") : ""}"${h.text}" (${meta.join(", ")})${path}`;
           })
           .join("\n");
-        return hits.length >= MAX_SEARCH_HITS
-          ? `${body}\n\n(first ${MAX_SEARCH_HITS} matches)`
-          : body;
+        const content: ToolResult["content"] = [
+          {
+            type: "text",
+            text: body || `No nodes match "${input.query}".`,
+          },
+        ];
+        if (page.nextCursor)
+          content.push({
+            type: "text",
+            text: `More matches remain. Repeat the same query, scope, and limit with cursor: ${page.nextCursor}`,
+          });
+        return { content, structuredContent: page };
       }),
   },
   {

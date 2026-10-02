@@ -17,6 +17,7 @@ import type { OutlineStore } from "./mcp-tools";
 import { createNode } from "../src/data/tree";
 import { handleMcp } from "./mcp";
 import { setClock } from "./mcp-tools";
+import { SearchPage } from "./search";
 
 // --- In-memory store fake -----------------------------------------------------
 
@@ -100,6 +101,7 @@ async function callTool(store: OutlineStore, name: string, args: RpcParams) {
   const json = (await res.json()) as {
     result?: {
       content: Array<{ type: string; text: string }>;
+      structuredContent?: SearchPage;
       isError?: boolean;
     };
     error?: { code: number; message: string };
@@ -326,6 +328,121 @@ describe("MCP tools", () => {
     );
     expect(hits).toContain("(id: a1)");
     expect(hits).toContain("in: alpha");
+  });
+
+  test("DQL search returns validated structured pages and explicit continuation", async () => {
+    const fake = makeStore([
+      createNode({
+        id: "p",
+        text: "Project ||hidden-parent||",
+        collapsed: true,
+      }),
+      ...Array.from({ length: 3 }, (_, i) =>
+        createNode({
+          id: `t${i}`,
+          parentId: "p",
+          prevSiblingId: i === 0 ? null : `t${i - 1}`,
+          text: `Ship ${i} #dotflowy ||secret-${i}||`,
+          isTask: true,
+        }),
+      ),
+      createNode({
+        id: "done",
+        parentId: "p",
+        prevSiblingId: "t2",
+        text: "Done #dotflowy",
+        isTask: true,
+        completed: true,
+      }),
+    ]);
+    const input = {
+      query: "is:todo -is:complete #dotflowy",
+      nodeId: "p",
+      limit: 2,
+    };
+    const first = await callTool(fake.store, "search_nodes", input);
+    const data = Schema.decodeUnknownSync(SearchPage)(
+      first.result?.structuredContent,
+    );
+    expect(first.error).toBeUndefined();
+    expect(data.nodes.map((node) => node.id)).toEqual(["t0", "t1"]);
+    expect(data.nodes[0]?.path).toEqual(["Project [spoiler]"]);
+    expect(toolText(first)).toContain('[ ] "Ship 0 #dotflowy [spoiler]"');
+    expect(first.result?.content[1]?.text).toContain("More matches remain");
+    expect(JSON.stringify(first)).not.toContain("secret-");
+    expect(JSON.stringify(first)).not.toContain("hidden-parent");
+    if (!data.nextCursor) throw new Error("Expected continuation");
+    const second = await callTool(fake.store, "search_nodes", {
+      ...input,
+      cursor: data.nextCursor,
+    });
+    expect(
+      second.result?.structuredContent?.nodes.map((node) => node.id),
+    ).toEqual(["t2"]);
+    expect(second.result?.structuredContent?.nextCursor).toBeNull();
+    expect(second.result?.content).toHaveLength(1);
+    const changed = fake.nodes.get("t2");
+    if (!changed) throw new Error("Missing fixture node");
+    fake.nodes.set("t2", { ...changed, completed: true });
+    const stale = await callTool(fake.store, "search_nodes", {
+      ...input,
+      cursor: data.nextCursor,
+    });
+    expect(stale.result?.isError).toBe(true);
+    expect(toolText(stale)).toContain("Restart");
+    expect(stale.result?.structuredContent).toBeUndefined();
+    expect(fake.batches).toEqual([]);
+  });
+
+  test("DQL search publishes both contracts and rejects invalid page bounds", async () => {
+    const { store } = makeStore(fixture());
+    const listed = Schema.decodeUnknownSync(
+      Schema.Struct({
+        result: Schema.Struct({
+          tools: Schema.Array(
+            Schema.Struct({
+              name: Schema.String,
+              inputSchema: Schema.Struct({
+                required: Schema.optionalKey(Schema.Array(Schema.String)),
+                properties: Schema.Record(Schema.String, Schema.Json),
+              }),
+              outputSchema: Schema.optionalKey(
+                Schema.Struct({ required: Schema.Array(Schema.String) }),
+              ),
+            }),
+          ),
+        }),
+      }),
+    )(await (await rpc(store, "tools/list")).json());
+    const tool = listed.result.tools.find(
+      (entry) => entry.name === "search_nodes",
+    );
+    if (!tool) throw new Error("Missing search tool");
+    expect(tool.inputSchema.required).toEqual(["query"]);
+    expect(tool.inputSchema.properties.limit).toMatchObject({
+      minimum: 1,
+      maximum: 100,
+    });
+    expect(tool.inputSchema.properties.nodeId).toBeDefined();
+    expect(tool.inputSchema.properties.cursor).toBeDefined();
+    expect(tool.outputSchema?.required).toEqual(["nodes", "nextCursor"]);
+    for (const limit of [0, 101, 2.5]) {
+      expect(
+        (await callTool(store, "search_nodes", { query: "alpha", limit })).error
+          ?.code,
+      ).toBe(-32602);
+    }
+    const empty = await callTool(store, "search_nodes", { query: "unmatched" });
+    expect(empty.result?.structuredContent).toEqual({
+      nodes: [],
+      nextCursor: null,
+    });
+    expect(toolText(empty)).toContain("No nodes match");
+    const missing = await callTool(store, "search_nodes", {
+      query: "alpha",
+      nodeId: "missing",
+    });
+    expect(missing.result?.isError).toBe(true);
   });
 
   test("add_node writes one atomic batch and reports the new id", async () => {

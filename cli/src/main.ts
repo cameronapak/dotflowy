@@ -16,7 +16,7 @@ import {
   terminalText,
 } from "./core.js";
 import { credentialStore } from "./credentials.js";
-import { connect } from "./mcp.js";
+import { connect, invokeAllSearch } from "./mcp.js";
 
 const readInput = (path: string) =>
   io("Cannot read input file or stdin.", async () => {
@@ -172,11 +172,19 @@ const program = Effect.gen(function* () {
     return yield* Effect.fail(
       fail("This tool is destructive. Pass --yes to confirm.", 2),
     );
-  const result = yield* client.invoke(
-    tool.name,
-    args,
-    tool.annotations?.readOnlyHint !== true,
-  );
+  const result =
+    parsed.command === "search" && parsed.all
+      ? yield* invokeAllSearch(client.invoke, args).pipe(
+          Effect.mapError((error) =>
+            fail(error.message.split(token).join("[redacted]"), error.exitCode),
+          ),
+          Effect.map((raw) => ({ raw, isError: false, content: raw.content })),
+        )
+      : yield* client.invoke(
+          tool.name,
+          args,
+          tool.annotations?.readOnlyHint !== true,
+        );
   const text = result.content
     .map((block) =>
       Predicate.isString(block.text) ? block.text : JSON.stringify(block),

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { queryOperators } from "../plugins/filter-operators";
 import { CORE_FILTER_OPERATORS } from "./core-filter-operators";
 import {
   buildFilterOperatorMap,
@@ -12,6 +13,7 @@ import {
   tokenizeQuery,
 } from "./filter-query";
 import { buildTreeIndex, createNode, type Node } from "./tree";
+import { rowKeyFor } from "./visible-order";
 
 const index = (nodes: Node[]) => buildTreeIndex(nodes);
 const never = () => false;
@@ -71,6 +73,81 @@ describe("tokenizeQuery", () => {
 
   test("an unterminated quote runs to end of string", () => {
     expect(tokenizeQuery('a "b c')).toEqual(["a", '"b c']);
+  });
+});
+
+describe("mirror-aware DQL view filtering", () => {
+  const tree = index([
+    createNode({
+      id: "source",
+      text: "Task #dotflowy",
+      isTask: true,
+      origin: "Agent",
+    }),
+    createNode({
+      id: "child",
+      parentId: "source",
+      text: "Nested match #child",
+    }),
+    createNode({ id: "today", prevSiblingId: "source", text: "Today" }),
+    createNode({
+      id: "mirror",
+      parentId: "today",
+      mirrorOf: "source",
+      text: "stale",
+      completed: true,
+    }),
+  ]);
+
+  test("mirror conditions read source content but retain instance identity", () => {
+    const filter = buildQueryFilter(
+      tree,
+      null,
+      "is:todo -is:complete #dotflowy is:agent is:mirror",
+      never,
+      queryOperators,
+    );
+    expect(filter?.visibleIds).toEqual(
+      new Set(["today", "mirror", rowKeyFor("mirror", "child")]),
+    );
+    expect(filter?.matchIds).toEqual(
+      new Set(["mirror", rowKeyFor("mirror", "child")]),
+    );
+    expect(filter?.visibleIds.has("source")).toBe(false);
+  });
+
+  test("zoom-scoped matches reached through a mirror reveal view ancestors, not stored ancestors", () => {
+    const filter = buildQueryFilter(
+      tree,
+      "today",
+      "#child",
+      never,
+      queryOperators,
+    );
+    expect(filter?.visibleIds).toEqual(
+      new Set(["mirror", rowKeyFor("mirror", "child")]),
+    );
+    expect(filter?.matchIds).toEqual(new Set([rowKeyFor("mirror", "child")]));
+  });
+
+  test("hidden and rollback-flag behavior follow the displayed content", () => {
+    const hidden = buildQueryFilter(
+      tree,
+      "today",
+      "#child",
+      (node) => node.isTask,
+      queryOperators,
+    );
+    expect(hidden?.visibleIds.size).toBe(0);
+    const off = buildQueryFilter(
+      tree,
+      "today",
+      "#dotflowy",
+      never,
+      queryOperators,
+      false,
+    );
+    expect(off?.visibleIds.size).toBe(0);
   });
 });
 

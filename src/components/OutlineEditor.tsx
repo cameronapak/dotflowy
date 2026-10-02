@@ -478,14 +478,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           if (getViewFilter()) {
             const fresh = buildTreeIndex(getLiveNodes());
             const recomputed = buildViewFilter(fresh, viewCtx, isHidden);
-            // The render gates a row's filter-visibility on its CONTENT id (a
-            // mirror instance is shown iff its source is in visibleIds, ADR
-            // 0022), so test that key -- else dragging a still-visible mirror
-            // row fires a spurious toast. Equals instanceId off the flag.
-            const contentId = isMirrorsEnabled()
-              ? (fresh.byId.get(instanceId)?.mirrorOf ?? instanceId)
-              : instanceId;
-            if (recomputed && !recomputed.visibleIds.has(contentId)) {
+            // Test the post-move render address, not another copy of this node.
+            if (recomputed && !recomputed.visibleIds.has(key)) {
               toast("Moved — hidden by the current filter.");
             }
           }

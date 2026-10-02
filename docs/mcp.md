@@ -12,6 +12,59 @@ lands through the same atomic per-user Durable Object path as the editor, so
 open tabs see agent edits live. Design + rejected alternatives:
 [the agent-native MCP server](./adr/0026-agent-native-mcp-server.md).
 
+## Search with DQL
+
+`search_nodes` uses DQL (Dotflowy Query Language), the same grammar as the app's
+filter. For example, these arguments find incomplete tasks tagged `#dotflowy`:
+
+```json
+{ "query": "is:todo -is:complete #dotflowy" }
+```
+
+Spaces mean AND, `-` negates a term, and uppercase `OR` joins adjacent terms.
+Quotes preserve a phrase: `release notes` matches both words anywhere in the same
+node; `"release notes"` matches the phrase. **Existing substring-search callers
+must quote multiword phrases to keep their previous behavior.** Text matching is
+case-insensitive and uses flattened reading text. Tags are exact and
+case-sensitive, and do not inherit from parents. Unknown operators match literal
+text.
+
+Supported operators include `is:todo`, `is:bullet`, `is:paragraph`, `is:complete`,
+`is:mirror`, `is:agent`, `has:link`, `highlight:`, and `highlight:COLOR`.
+Colors are `red`, `orange`, `yellow`, `green`, `blue`, and `purple`.
+Date ranges, sorting expressions, and parentheses are not supported.
+
+Search covers the whole outline by default. Supply `nodeId` to include that node
+and its reachable descendants, including mirrored subtrees. Collapse and
+hide-completed settings do not restrict agent search. Mirrors match source
+content, while `is:mirror` tests the instance. Each node ID appears once, with
+breadcrumbs from the first path encountered in outline order.
+
+Results contain readable `content` and
+`structuredContent: { nodes, nextCursor }`. Each node includes `id`, `text`,
+`kind`, `isTask`, `completed`, `mirrorOf`, and a `path` of ancestor text.
+Spoilers are redacted before all matching and in both result formats and
+breadcrumbs. Unlike the app's contextual filter rows, only matches are returned.
+
+Pages default to 25 matches; `limit` accepts 1 through 100. When `nextCursor` is
+not null, repeat the same query, scope, and limit with that value as `cursor`.
+A null cursor means the result is complete. If searchable data or the day used
+to evaluate date labels changes, the server rejects continuation and asks you
+to restart without the cursor. Edits confined to spoiler interiors do not
+invalidate continuation.
+
+The [CLI](../cli/README.md) uses this same tool:
+
+```sh
+dotflowy search 'is:todo -is:complete #dotflowy'
+dotflowy search 'is:todo -is:complete #dotflowy' --node NODE_ID --limit 100 --all --json
+```
+
+The first command returns one page. `--cursor` continues a page; `--all` starts
+from the beginning and validates every page before printing a combined result.
+It fails without partial output if continuation fails.
+Design: [ADR 0063](./adr/0063-dql-search-parity.md).
+
 ## OPML over MCP
 
 The OPML pair speaks the Workflowy dialect through the same shared core as the

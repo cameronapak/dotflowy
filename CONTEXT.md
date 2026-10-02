@@ -68,6 +68,9 @@ _Avoid_: search (that word implies going to a result; a filter stays put)
 A typed term in a filter query that tests something other than the node's text — `is:todo`, `#tag`, `highlight:red`, `-is:complete`. Each operator's meaning belongs to the feature that owns the thing it tests.
 _Avoid_: keyword, flag, modifier
 
+**DQL (Dotflowy Query Language)**:
+The query language for selecting nodes by text, tags, and operators. A query describes the conditions a node must satisfy, not how its matches are presented.
+
 **Match**:
 A node the active filter selects. A match shows undimmed with its subtree reachable as normal; its ancestors render dimmed, as context that says where the match lives rather than as results themselves.
 _Avoid_: result, hit

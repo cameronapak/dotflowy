@@ -111,6 +111,33 @@ test("flags preserve false, empty text, numbers, and global options", async () =
   );
 });
 
+test("friendly search maps pagination flags and keeps --all CLI-only", async () => {
+  const search = await parsed([
+    "search",
+    "project",
+    "--node",
+    "parent",
+    "--limit",
+    "100",
+    "--cursor",
+    "next",
+  ]);
+  expect(search.fields).toEqual({
+    query: "project",
+    nodeId: "parent",
+    limit: 100,
+    cursor: "next",
+  });
+  expect(search.all).toBe(false);
+
+  const all = await parsed(["search", "project", "--all"]);
+  expect(all.fields).toEqual({ query: "project" });
+  expect(all.all).toBe(true);
+  expect(() => mergeInput(all, { cursor: "from-json" }, "UTC")).toThrow(
+    "first page",
+  );
+});
+
 test("moves keep input order and all tool arguments can arrive as JSON", async () => {
   const move = await parsed([
     "move",

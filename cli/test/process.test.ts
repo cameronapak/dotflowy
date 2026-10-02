@@ -278,3 +278,143 @@ test("validates response IDs and paginates tool discovery", async () => {
     server.stop(true);
   }
 });
+
+test("search --all validates and buffers real pages while raw search stays single-page", async () => {
+  type Mode =
+    | "success"
+    | "empty"
+    | "stale"
+    | "malformed"
+    | "repeat"
+    | "duplicate";
+  let mode: Mode = "success";
+  const searchCalls: JsonObject[] = [];
+  const node = (id: string) => ({
+    id,
+    text: `text ${id}`,
+    kind: null,
+    isTask: false,
+    completed: false,
+    mirrorOf: null,
+    path: ["Root", `text ${id}`],
+  });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = await request.json();
+      const result = (value: JsonObject) =>
+        Response.json({ jsonrpc: "2.0", id: body.id, result: value });
+      if (body.method === "initialize")
+        return result({ protocolVersion: "2025-06-18", serverInfo: {} });
+      if (body.method === "tools/list")
+        return result({
+          tools: [
+            {
+              name: "search_nodes",
+              inputSchema: {},
+              annotations: { readOnlyHint: true },
+            },
+          ],
+        });
+      const args: JsonObject = body.params.arguments;
+      searchCalls.push(args);
+      if (mode === "empty")
+        return result({
+          content: [{ type: "text", text: 'No nodes match "project".' }],
+          structuredContent: { nodes: [], nextCursor: null },
+        });
+      if (args.cursor === undefined)
+        return result({
+          content: [
+            { type: "text", text: "first body" },
+            { type: "text", text: "Continue with cursor second" },
+          ],
+          structuredContent: { nodes: [node("a")], nextCursor: "second" },
+        });
+      if (mode === "stale")
+        return result({
+          content: [
+            {
+              type: "text",
+              text: "Search changed. Restart without the cursor. test-token",
+            },
+          ],
+          isError: true,
+        });
+      if (mode === "malformed")
+        return result({
+          content: [{ type: "text", text: "bad" }],
+          structuredContent: { nodes: [{ id: "b" }], nextCursor: null },
+        });
+      return result({
+        content: [{ type: "text", text: "second body" }],
+        structuredContent: {
+          nodes: [node(mode === "duplicate" ? "a" : "b")],
+          nextCursor: mode === "repeat" ? "second" : null,
+        },
+      });
+    },
+  });
+  try {
+    const success = await cli(server.url.origin, [
+      "search",
+      "project",
+      "--node",
+      "root",
+      "--limit",
+      "1",
+      "--all",
+      "--json",
+    ]);
+    expect(success.code).toBe(0);
+    expect(success.stderr).toBe("");
+    expect(JSON.parse(success.stdout)).toEqual({
+      content: [{ type: "text", text: "first body\nsecond body" }],
+      structuredContent: { nodes: [node("a"), node("b")], nextCursor: null },
+    });
+    expect(searchCalls).toEqual([
+      { query: "project", nodeId: "root", limit: 1 },
+      { query: "project", nodeId: "root", limit: 1, cursor: "second" },
+    ]);
+
+    searchCalls.length = 0;
+    const raw = await cli(server.url.origin, [
+      "call",
+      "search_nodes",
+      "--args",
+      '{"query":"project"}',
+      "--json",
+    ]);
+    expect(raw.code).toBe(0);
+    expect(searchCalls).toHaveLength(1);
+    expect(JSON.parse(raw.stdout).structuredContent.nextCursor).toBe("second");
+
+    mode = "empty";
+    const empty = await cli(server.url.origin, ["search", "project", "--all"]);
+    expect(empty.code).toBe(0);
+    expect(empty.stdout.trim()).toBe('No nodes match "project".');
+
+    for (const [failureMode, message] of [
+      ["stale", "Restart without the cursor."],
+      ["malformed", "Invalid search page"],
+      ["repeat", "repeated a search cursor"],
+      ["duplicate", "duplicate search node"],
+    ] as const) {
+      mode = failureMode;
+      searchCalls.length = 0;
+      const failed = await cli(server.url.origin, [
+        "search",
+        "project",
+        "--all",
+      ]);
+      expect(failed.code).toBe(1);
+      expect(failed.stdout).toBe("");
+      expect(failed.stderr).toContain(message);
+      expect(failed.stderr).not.toContain("test-token");
+      expect(searchCalls).toHaveLength(2);
+    }
+  } finally {
+    server.stop(true);
+  }
+}, 30_000);

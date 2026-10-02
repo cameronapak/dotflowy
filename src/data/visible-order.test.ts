@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { queryOperators } from "../plugins/filter-operators";
 import { buildFilterOperatorMap, buildQueryFilter } from "./filter-query";
 import { buildTreeIndex, createNode } from "./tree";
 import {
@@ -490,4 +491,116 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
     expect(findVisibleNeighbor(index, null, "K", "down", show)).toBe("B");
     expect(lastVisibleDescendant(index, "P2", show)).toBe("P2");
   });
+});
+
+test("mirror-only filtering gates render and caret navigation by instance ID", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "source", text: "Task #dotflowy", isTask: true }),
+    createNode({ id: "child", parentId: "source", text: "child" }),
+    createNode({ id: "today", prevSiblingId: "source", text: "Today" }),
+    createNode({ id: "mirror", parentId: "today", mirrorOf: "source" }),
+  ]);
+  const filter = buildQueryFilter(
+    index,
+    null,
+    "is:todo is:mirror",
+    show,
+    queryOperators,
+  );
+  expect(
+    buildVisibleRows(index, null, show, filter, true).map((row) => row.id),
+  ).toEqual(["today", "mirror", "child"]);
+  expect(
+    findVisibleNeighbor(index, null, "today", "down", show, filter, true),
+  ).toBe("mirror");
+  expect(
+    findVisibleNeighbor(index, null, "mirror", "down", show, filter, true),
+  ).toBe(rowKeyFor("mirror", "child"));
+});
+
+test("filtered descendant revelation respects each source and mirror's collapse state", () => {
+  for (const sourceCollapsed of [true, false]) {
+    const index = buildTreeIndex([
+      createNode({
+        id: "source",
+        text: "Project #project",
+        collapsed: sourceCollapsed,
+      }),
+      createNode({
+        id: "child",
+        parentId: "source",
+        text: "Nonmatching child",
+      }),
+      createNode({
+        id: "mirror",
+        prevSiblingId: "source",
+        mirrorOf: "source",
+        collapsed: !sourceCollapsed,
+      }),
+    ]);
+    const filter = buildQueryFilter(
+      index,
+      null,
+      "#project",
+      show,
+      queryOperators,
+    );
+    const keys = buildVisibleRows(index, null, show, filter, true).map(
+      (row) => row.key,
+    );
+    expect(keys).toEqual(
+      sourceCollapsed
+        ? ["source", "mirror", rowKeyFor("mirror", "child")]
+        : ["source", "child", "mirror"],
+    );
+    expect(
+      findVisibleNeighbor(index, null, "source", "down", show, filter, true),
+    ).toBe(sourceCollapsed ? "mirror" : "child");
+    expect(filter?.matchIds).toEqual(new Set(keys));
+  }
+});
+
+test("nested mirrors keep revealed children separate from dimmed context on another path", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "source", text: "Project #project", collapsed: true }),
+    createNode({ id: "child", parentId: "source", text: "Child #child" }),
+    createNode({
+      id: "container",
+      prevSiblingId: "source",
+      text: "Container #project",
+    }),
+    createNode({
+      id: "nested",
+      parentId: "container",
+      mirrorOf: "source",
+      collapsed: true,
+    }),
+    createNode({
+      id: "outer",
+      prevSiblingId: "container",
+      mirrorOf: "container",
+    }),
+  ]);
+  const filter = buildQueryFilter(
+    index,
+    null,
+    "#child OR is:mirror",
+    show,
+    queryOperators,
+  );
+  const nestedKey = rowKeyFor("outer", "nested");
+  expect(
+    buildVisibleRows(index, null, show, filter, true).map((row) => row.key),
+  ).toEqual([
+    "source",
+    "child",
+    "container",
+    "nested",
+    rowKeyFor("nested", "child"),
+    "outer",
+    nestedKey,
+    rowKeyFor(nestedKey, "child"),
+  ]);
+  expect(filter?.matchIds.has("container")).toBe(false);
+  expect(filter?.matchIds.has(nestedKey)).toBe(true);
 });

@@ -22,6 +22,7 @@ import {
   useNode,
   useVisibleChildIds,
 } from "../data/tree-store";
+import { rowKeyFor } from "../data/visible-order";
 import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
@@ -204,18 +205,23 @@ function RowChrome({
   // With windowing only ~viewport rows call this, so the per-parent fan-out
   // stays a viewport's worth, never the whole tree.
   const childIds = useVisibleChildIds(content.id, isHidden);
+  const childKeyPrefix = isMirror || rowKey !== instance.id ? rowKey : null;
+  const hasVisibleChildren = filter
+    ? childIds.some((id) =>
+        filter.visibleIds.has(rowKeyFor(childKeyPrefix, id)),
+      )
+    : childIds.length > 0;
   // Only the boolean is needed here (a leaf row has no children list to pass
   // down), so test emptiness without materializing the filtered array. A capped
   // mirror is never expandable (it would loop), so it shows no chevron.
   const hasChildren = capped
     ? false
-    : filter
-      ? childIds.some((id) => filter.visibleIds.has(id))
-      : childIds.length > 0;
-  // Collapse is LOCAL to the instance (a mirror collapsed here leaves the source
-  // open elsewhere); fade/match follow the CONTENT.
-  const effectiveCollapsed = filter ? false : instance.collapsed;
-  const isContext = filter ? !filter.matchIds.has(content.id) : false;
+    : hasVisibleChildren ||
+      (filter ? filter.matchIds.has(rowKey) && childIds.length > 0 : false);
+  // Matches stay expandable when their nonmatching children are collapsed.
+  // Ancestor context remains visually expanded when the filter reveals a match.
+  const effectiveCollapsed = filter ? !hasVisibleChildren : instance.collapsed;
+  const isContext = filter ? !filter.matchIds.has(rowKey) : false;
   // The zoom morph (`view-transition-name: zoom-target`) must name exactly ONE
   // element -- the browser aborts the transition on a duplicate name. pivotId is
   // a node id, but it addresses the row by KEY, not content: a source and every

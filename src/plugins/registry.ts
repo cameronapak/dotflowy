@@ -42,6 +42,7 @@ import {
   buildQueryFilter,
   collectOperatorKeyInfos,
 } from "../data/filter-query";
+import { isMirrorsEnabled } from "../data/flags";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
 import { plugins } from "./index";
 
@@ -297,6 +298,7 @@ export function buildViewFilter(
     q,
     isHidden,
     filterOperatorMap,
+    isMirrorsEnabled(),
   );
   if (queryFilter) return queryFilter;
   for (const t of viewTransforms) {

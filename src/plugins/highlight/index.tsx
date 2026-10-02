@@ -29,6 +29,7 @@ import {
 } from "../../data/highlight";
 import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
+import { HIGHLIGHT_FILTER_OPERATORS } from "./filter-operators";
 import { openHighlightColorMenu } from "./highlight-color-menu";
 
 const HIGHLIGHT_MARKER = { pre: "==", post: "==" };
@@ -212,32 +213,5 @@ export default definePlugin({
   // so the predicate re-uses `parseHighlight` -- a bare/default run counts as
   // blue (its own default color), so `highlight:blue` finds it. The `bare` flag
   // claims the value-less `highlight:` form (the (key, null) pair).
-  filterOperators: [
-    {
-      key: "highlight",
-      values: ["red", "orange", "yellow", "green", "blue", "purple"],
-      bare: true,
-      // Values are palette color names, so autocomplete paints a swatch per row.
-      swatch: true,
-      description: "Filter to highlighted nodes (optionally by color)",
-      predicate: (node, _index, value) => {
-        const colors = highlightColorsIn(node.text);
-        if (value === null) return colors.length > 0;
-        // SAFETY: the filter's declared values are the HighlightColor palette names
-        return colors.includes(value as HighlightColor);
-      },
-    },
-  ],
+  filterOperators: HIGHLIGHT_FILTER_OPERATORS,
 });
-
-/** The color of every highlight run in `text`, in order. Bails before any regex
- *  on `==`-free text (the `stripHighlights` guard). A bare run resolves to blue
- *  via `parseHighlight`'s default. */
-function highlightColorsIn(text: string): HighlightColor[] {
-  if (!text.includes("==")) return [];
-  const out: HighlightColor[] = [];
-  for (const m of text.matchAll(new RegExp(HIGHLIGHT_PATTERN, "gu"))) {
-    out.push(parseHighlight(m[0]).color);
-  }
-  return out;
-}

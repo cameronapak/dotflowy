@@ -279,3 +279,191 @@ test.describe("resident filter input (ADR 0047 §6)", () => {
     await expect(input(page)).toHaveCount(0);
   });
 });
+
+test.describe("DQL mirror parity", () => {
+  const tree: SeedNode[] = [
+    {
+      id: "project",
+      parentId: null,
+      prevSiblingId: null,
+      text: "Project #dotflowy",
+      collapsed: true,
+    },
+    {
+      id: "source",
+      parentId: "project",
+      prevSiblingId: null,
+      text: "Ship search #dotflowy",
+      isTask: true,
+    },
+    {
+      id: "child",
+      parentId: "source",
+      prevSiblingId: null,
+      text: "Verify mirror traversal #child",
+    },
+    {
+      id: "done",
+      parentId: "project",
+      prevSiblingId: "source",
+      text: "Completed task #dotflowy",
+      isTask: true,
+      completed: true,
+    },
+    {
+      id: "untagged",
+      parentId: "project",
+      prevSiblingId: "done",
+      text: "Untagged task",
+      isTask: true,
+    },
+    {
+      id: "scope",
+      parentId: null,
+      prevSiblingId: "project",
+      text: "Today",
+      collapsed: true,
+    },
+    {
+      id: "mirror",
+      parentId: "scope",
+      prevSiblingId: null,
+      text: "stale mirror fields",
+      mirrorOf: "source",
+      completed: true,
+    },
+  ];
+
+  test("the same query selects source and mirror content, while is:mirror excludes the source", async ({
+    page,
+  }, testInfo) => {
+    await seedOutline(page, tree);
+    await page.goto("/");
+    await expect(row(page, "project")).toBeVisible();
+    await summon(page);
+    await input(page).fill("is:todo -is:complete #dotflowy");
+    await expect(row(page, "source")).toBeVisible();
+    await expect(row(page, "mirror")).toBeVisible();
+    await expect(row(page, "mirror").locator(".node-text")).toContainText(
+      "Ship search",
+    );
+    await expect(row(page, "done")).toHaveCount(0);
+    await expect(row(page, "untagged")).toHaveCount(0);
+
+    await input(page).fill("is:todo -is:complete #dotflowy is:mirror");
+    await expect(row(page, "source")).toHaveCount(0);
+    await expect(row(page, "project")).toHaveCount(0);
+    await expect(row(page, "mirror")).toBeVisible();
+    await expect(row(page, "child")).toHaveCount(1);
+    await expect(row(page, "mirror").locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "false",
+    );
+    await expect(row(page, "scope").locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "true",
+    );
+    await input(page).press("Enter");
+    await page.screenshot({
+      path: testInfo.outputPath("dql-mirror-filter.png"),
+    });
+  });
+
+  test("a zoomed view finds descendants through a mirror with contextual ancestors", async ({
+    page,
+  }) => {
+    await seedOutline(page, tree);
+    await page.goto("/scope?q=%23child");
+    await expect(input(page)).toHaveValue("#child");
+    await expect(row(page, "mirror")).toBeVisible();
+    await expect(row(page, "mirror").locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "true",
+    );
+    await expect(row(page, "child")).toHaveCount(1);
+    await expect(row(page, "child").locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "false",
+    );
+    await expect(row(page, "source")).toHaveCount(0);
+    await expect(row(page, "project")).toHaveCount(0);
+  });
+
+  test("collapse affects only the selected source or mirror path under a filter", async ({
+    page,
+  }, testInfo) => {
+    await seedOutline(page, [
+      {
+        id: "source",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Project #project",
+        collapsed: true,
+      },
+      {
+        id: "child",
+        parentId: "source",
+        prevSiblingId: null,
+        text: "Nonmatching child",
+      },
+      {
+        id: "mirror",
+        parentId: null,
+        prevSiblingId: "source",
+        text: "",
+        mirrorOf: "source",
+      },
+    ]);
+    await page.goto("/?q=%23project");
+    const child = row(page, "child");
+    await expect(row(page, "source")).toBeVisible();
+    await expect(row(page, "mirror")).toBeVisible();
+    await expect(child).toHaveCount(1);
+    await expect(child).toHaveAttribute("data-index", "2");
+    await expect(child).toHaveAttribute("data-depth", "1");
+    await expect(child.locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "false",
+    );
+    await expect(
+      row(page, "source").getByRole("button", { name: "Expand", exact: true }),
+    ).toHaveAttribute("data-has-children", "true");
+    await expect(
+      row(page, "mirror").getByRole("button", {
+        name: "Collapse",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("dql-local-collapse.png"),
+    });
+
+    await row(page, "source")
+      .getByRole("button", { name: "Expand", exact: true })
+      .click();
+    await expect(child).toHaveCount(2);
+    await row(page, "mirror")
+      .getByRole("button", { name: "Collapse", exact: true })
+      .click();
+    await expect(child).toHaveCount(1);
+    await expect(child).toHaveAttribute("data-index", "1");
+    await expect(
+      row(page, "mirror").getByRole("button", { name: "Expand", exact: true }),
+    ).toHaveAttribute("data-has-children", "true");
+    await expect(
+      row(page, "source").getByRole("button", {
+        name: "Collapse",
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await row(page, "source")
+      .getByRole("button", { name: "Collapse", exact: true })
+      .click();
+    await expect(child).toHaveCount(0);
+    await row(page, "mirror")
+      .getByRole("button", { name: "Expand", exact: true })
+      .click();
+    await expect(child).toHaveCount(1);
+  });
+});

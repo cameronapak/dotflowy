@@ -22,9 +22,14 @@
  * non-store defects collapse to -32603.
  */
 
-import { Effect, JsonSchema as EffectJsonSchema, Schema } from "effect";
+import {
+  Effect,
+  JsonSchema as EffectJsonSchema,
+  Predicate,
+  Schema,
+} from "effect";
 
-import { type OutlineStore, tools } from "./mcp-tools";
+import { type OutlineStore, type ToolResult, tools } from "./mcp-tools";
 import { APP_VERSION } from "./version";
 
 // --- Protocol constants -------------------------------------------------------
@@ -150,6 +155,7 @@ interface ToolDescriptor {
   name: string;
   description: string;
   inputSchema: EffectJsonSchema.JsonSchema;
+  outputSchema?: EffectJsonSchema.JsonSchema;
   annotations: { readOnlyHint: boolean };
 }
 
@@ -163,20 +169,26 @@ type RpcResult =
       instructions: string;
     }
   | { tools: ToolDescriptor[] }
-  | { content: Array<{ type: "text"; text: string }>; isError?: boolean }
+  | ToolResult
   | Record<string, never>;
 
-const toolList: ToolDescriptor[] = tools.map((tool) => {
-  const doc = Schema.toJsonSchemaDocument(tool.input);
-  const inputSchema = { ...doc.schema };
+function publishedSchema(schema: Schema.Top): EffectJsonSchema.JsonSchema {
+  const doc = Schema.toJsonSchemaDocument(schema);
+  const jsonSchema = { ...doc.schema };
   if (Object.keys(doc.definitions).length)
-    inputSchema["$defs"] = doc.definitions;
-  return {
+    jsonSchema["$defs"] = doc.definitions;
+  return jsonSchema;
+}
+
+const toolList: ToolDescriptor[] = tools.map((tool) => {
+  const descriptor: ToolDescriptor = {
     name: tool.name,
     description: tool.description,
-    inputSchema,
+    inputSchema: publishedSchema(tool.input),
     annotations: { readOnlyHint: tool.readOnly },
   };
+  if (tool.output) descriptor.outputSchema = publishedSchema(tool.output);
+  return descriptor;
 });
 
 // --- Dispatch --------------------------------------------------------------------
@@ -229,8 +241,13 @@ function handleToolCall(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>
       tool.handle(input, store, origin).pipe(
-        Effect.map((text) =>
-          rpcResult(id, { content: [{ type: "text", text }] }),
+        Effect.map((result) =>
+          rpcResult(
+            id,
+            Predicate.isString(result)
+              ? { content: [{ type: "text", text: result }] }
+              : result,
+          ),
         ),
         Effect.catchTag("ToolError", (e) =>
           Effect.succeed(

@@ -21,8 +21,9 @@ tool discovery exposes server schemas so new tools remain callable without a CLI
 release. No duplicate outline API or local mutation implementation is introduced.
 
 Human output prints MCP text content. JSON output preserves the MCP result object
-instead of parsing prose into invented structured records. Structured node results
-would require a separate server-contract change.
+instead of parsing prose into invented structured records. Search now includes
+server-defined structured nodes and continuation, with CLI-only `--all`
+aggregation ([ADR 0063](./0063-dql-search-parity.md)).
 
 Deletion requires `--yes`, including through `call delete_node`; scripts never
 wait for a confirmation prompt. Other writes execute immediately. OPML import

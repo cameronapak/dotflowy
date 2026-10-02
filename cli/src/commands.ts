@@ -24,7 +24,15 @@ export const commands = {
     positional: "nodeId",
     fields: { "max-depth": { wire: "maxDepth", type: "integer" } },
   },
-  search: { tool: "search_nodes", positional: "query", fields: {} },
+  search: {
+    tool: "search_nodes",
+    positional: "query",
+    fields: {
+      node: string("nodeId"),
+      limit: { wire: "limit", type: "integer" },
+      cursor: string("cursor"),
+    },
+  },
   add: {
     tool: "add_node",
     positional: "text",
@@ -82,6 +90,7 @@ export interface Parsed {
   yes: boolean;
   insecure: boolean;
   noBrowser: boolean;
+  all: boolean;
   toolHelp?: string;
 }
 
@@ -89,6 +98,7 @@ const optionalString = (name: string) => Flag.String(name).pipe(Flag.optional);
 type FileFlags = {
   textFile?: ReturnType<typeof optionalString>;
   file?: ReturnType<typeof optionalString>;
+  all?: ReturnType<typeof switchFlag>;
 };
 const switchFlag = (name: string) =>
   Flag.Boolean(name).pipe(Flag.withDefault(false));
@@ -130,6 +140,7 @@ export const parse = Effect.fn("CLI.parse")(function* (
       fields: {},
       insecure: false,
       noBrowser: false,
+      all: false,
       ...global,
       server: Option.getOrUndefined(global.server),
       ...values,
@@ -154,6 +165,7 @@ export const parse = Effect.fn("CLI.parse")(function* (
       if (["add", "today", "update"].includes(name))
         files.textFile = optionalString("text-file");
       if (name === "import-opml") files.file = optionalString("file");
+      if (name === "search") files.all = switchFlag("all");
       return Command.make(
         name,
         {
@@ -186,6 +198,7 @@ export const parse = Effect.fn("CLI.parse")(function* (
             file: values.files.file
               ? Option.getOrUndefined(values.files.file)
               : undefined,
+            all: values.files.all ?? false,
           });
         }),
       ).pipe(
@@ -261,6 +274,11 @@ export function mergeInput(
       throw fail(`Supply ${name} only once (input or command argument).`, 2);
     args[name] = value;
   }
+  if (parsed.command === "search" && parsed.all && args.cursor !== undefined)
+    throw fail(
+      "--all starts from the first page and cannot be used with cursor.",
+      2,
+    );
   if (
     ["today", "mirror-today"].includes(parsed.command) &&
     args.timeZone == null &&

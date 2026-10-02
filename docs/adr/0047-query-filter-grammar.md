@@ -22,7 +22,7 @@ Filtering by tag exists (`?q=#a #b`, click-driven, AND-only) but nothing else is
 
 9. **Explicit non-goals**, each with a reason, not just scope-trimming:
    - ~~**Saved searches**~~ — _promoted 2026-07-11:_ designed in [ADR 0048](./0048-saved-filter-queries.md).
-   - **MCP parity** — `search_nodes` stays substring-only; the parser's purity is the recorded constraint that makes "Worker imports the grammar like it imports `tree.ts`" a clean follow-up, after its spoiler-redaction interaction (ADR 0043) gets its own pass.
+   - ~~**MCP parity**~~ — _promoted 2026-10-02:_ [ADR 0063](./0063-dql-search-parity.md) shares this grammar through MCP and CLI, with redaction before matching and bounded pagination.
    - **`created:`/`changed:`** — the only axis needing Node timestamps (wire-schema + DO migration + fixtures + `withNodeDefaults`); its own ADR when wanted.
    - **`A > B` nested search** — real parser complexity; zoom-scoping covers the common case.
    - **Date search, `text:bold`, `is:backlinks`** — natural-language date parsing wants design time; nobody filters by italic; "is a backlink" vs "has backlinks" is ambiguous.

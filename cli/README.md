@@ -97,6 +97,7 @@ tools; `dotflowy tools TOOL_NAME` prints its description and complete input sche
 ```sh
 dotflowy today "Follow up with Alex" --task --time-zone America/Chicago
 dotflowy add "Project notes" --parent NODE_ID --kind paragraph
+dotflowy search 'is:todo -is:complete #dotflowy' --node NODE_ID --limit 100 --all --json
 dotflowy update NODE_ID --completed
 dotflowy update NODE_ID --no-completed --text "Revised text"
 dotflowy move FIRST_ID SECOND_ID --parent DESTINATION_ID --position first
@@ -111,6 +112,21 @@ like `{"nodes":[{"text":"Parent","children":[{"text":"Child"}]}]}`.
 Use `call TOOL_NAME` for a tool added after this CLI version. Explicit `null`,
 `false`, empty strings, arrays, and nested objects are preserved in raw calls.
 Do not supply the same field in both JSON input and command flags.
+
+Search uses DQL, the app filter's grammar. Spaces mean AND, `-` negates, uppercase
+`OR` joins adjacent terms, and quotes preserve phrases. Text is case-insensitive;
+tags are exact, case-sensitive, and do not inherit. Existing phrase searches must
+include DQL quotes, for example `dotflowy search '"release notes"'`.
+Mirrors match source content; `is:mirror` tests the instance. Spoiler interiors
+cannot influence matching or appear in results.
+
+Search returns one page by default. Use `--node NODE_ID` to scope it, `--limit`
+(default 25, maximum 100) to choose the page size, and `--cursor` to request the
+next page. `--all` starts at the first page, so it cannot be combined with a
+cursor. It validates and buffers every page before writing output; failures never
+print partial results. Raw `call search_nodes` remains a single unchanged call.
+In `--json` mode, `--all` returns one MCP-shaped result containing all node
+records and a null `nextCursor`.
 
 For multiline text, use `add`, `today`, or `update` with `--text-file FILE|-`.
 OPML import accepts `--file FILE|-`. Only one input can consume stdin per command.
@@ -152,7 +168,7 @@ behavior. Subtree and OPML daily targeting require an explicit `date`.
 | 5         | Paid plan required                                     |
 | 130       | Interrupted                                            |
 
-The server currently caps outline reads at 500 nodes, search at 25 matches,
+The server currently caps outline reads at 500 nodes, search pages at 100 matches,
 subtree creation at 500 nodes, and OPML operations at 5,000 nodes. The CLI does
 not bypass these caps. Read smaller subtrees when an outline result is truncated.
 
