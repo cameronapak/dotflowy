@@ -206,7 +206,6 @@ export function validateClassicSnapshot(
   if (duplicateKey) {
     return { ok: false, reason: "classic snapshot has duplicate kv keys" };
   }
-  const nodeIds = new Set(decoded.value.nodes.map((node) => node.id));
   for (const row of decoded.value.kv) {
     let value: unknown;
     try {
@@ -221,11 +220,9 @@ export function validateClassicSnapshot(
       const decodedValue = Schema.decodeUnknownOption(ClassicDailyValueSchema)(
         value,
       );
-      if (
-        decodedValue._tag === "None" ||
-        decodedValue.value.key !== row.key ||
-        !nodeIds.has(decodedValue.value.nodeId)
-      ) {
+      // Daily mappings are retained claims, not node-graph edges. Deletion or
+      // undo can remove the node; daily get-or-create reuses its claimed id.
+      if (decodedValue._tag === "None" || decodedValue.value.key !== row.key) {
         return { ok: false, reason: `classic daily key ${row.key} is invalid` };
       }
     }
@@ -296,7 +293,8 @@ export function validateLunoraSnapshot(
   const nodeGraph = validateNodeGraph(snapshot.nodes);
   if (!nodeGraph.ok) return nodeGraph;
 
-  const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
+  // As on classic, daily claims can outlive their nodes. Keep every claim in
+  // the export and restored target, including ids that will be materialized later.
   const duplicateDaily = duplicate(snapshot.dailyIndex.map((row) => row.key));
   if (duplicateDaily)
     return { ok: false, reason: `duplicate daily key ${duplicateDaily}` };
@@ -306,14 +304,6 @@ export function validateLunoraSnapshot(
   const duplicateQuery = duplicate(snapshot.savedQueries.map((row) => row.id));
   if (duplicateQuery)
     return { ok: false, reason: `duplicate saved query id ${duplicateQuery}` };
-  for (const row of snapshot.dailyIndex) {
-    if (!nodeIds.has(row.nodeId)) {
-      return {
-        ok: false,
-        reason: `daily key ${row.key} references a missing node`,
-      };
-    }
-  }
   return { ok: true };
 }
 
