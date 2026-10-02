@@ -70,6 +70,7 @@ import {
 } from "./lunora-mcp-store";
 import {
   RetirementOperationInProgress,
+  retirementDiagnostic,
   retirementPopulation,
   retirementReport,
   runRetirementOperation,
@@ -971,7 +972,31 @@ function handleApiRequest(
       if (!isAdminSession(session, env)) {
         return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
       }
+      if (
+        url.searchParams.get("diagnostic") === "1" &&
+        request.method !== "GET"
+      ) {
+        return json({ error: "diagnostic requires GET" }, 405);
+      }
       if (request.method === "GET") {
+        if (url.searchParams.get("diagnostic") === "1") {
+          const userId = yield* resolveRestoreUserId(env, {
+            userId: url.searchParams.get("userId") ?? undefined,
+            email: url.searchParams.get("email") ?? undefined,
+          });
+          const target = yield* Effect.promise(() =>
+            env.DB.prepare('SELECT id FROM "user" WHERE id = ?')
+              .bind(userId)
+              .first<{ id: string }>(),
+          );
+          if (!target)
+            return yield* Effect.fail(
+              new BadRequest({ reason: "unknown user id" }),
+            );
+          return json(
+            yield* Effect.promise(() => retirementDiagnostic(env, userId)),
+          );
+        }
         if (url.searchParams.get("population") === "1") {
           return json({
             userIds: yield* Effect.promise(() => retirementPopulation(env)),
@@ -1248,16 +1273,26 @@ const handler = {
           ),
         ),
       ),
-    ).catch((err) => {
-      // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
-      // the internal error string (audit #159, finding 1) — it goes to Workers
-      // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
-      // `withSentry` never sees this rejection on its own: the `.catch`
-      // swallows it before it escapes the handler, so capture it here.
-      console.error(err);
-      Sentry.captureException(err);
-      return json({ error: "internal error" }, 500);
-    });
+    )
+      .catch((err) => {
+        // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
+        // the internal error string (audit #159, finding 1) — it goes to Workers
+        // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
+        // `withSentry` never sees this rejection on its own: the `.catch`
+        // swallows it before it escapes the handler, so capture it here.
+        console.error(err);
+        Sentry.captureException(err);
+        return json({ error: "internal error" }, 500);
+      })
+      .then((response) => {
+        if (
+          url.pathname === "/api/admin/lunora-retirement" &&
+          url.searchParams.get("diagnostic") === "1"
+        ) {
+          response.headers.set("cache-control", "private, no-store");
+        }
+        return response;
+      });
   },
 } satisfies ExportedHandler<Env>;
 

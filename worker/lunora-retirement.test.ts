@@ -6,6 +6,7 @@ import type { OutlineSnapshot } from "./backup";
 import {
   buildClassicTarget,
   classifyRetirement,
+  compareRetirementSnapshots,
   retirementSnapshotKey,
   validateClassicSnapshot,
   validateLunoraSnapshot,
@@ -307,4 +308,296 @@ it("builds a classic target without merging stale shared rows", () => {
       (row) => row.collection === "daily-index" && row.key === "today",
     ),
   ).toBe(true);
+});
+
+describe("read-only retirement comparison", () => {
+  it("reports asymmetric differences and missing references without content or mutations", () => {
+    const classic: OutlineSnapshot = {
+      version: 1,
+      exportedAt: 20,
+      seq: 3,
+      nodes: [
+        node("r", null, null),
+        node("p", "r", null),
+        node("b", "p", null),
+        node("s", null, "r"),
+        node("x", null, "s"),
+      ],
+      kv: [
+        {
+          collection: "daily-index",
+          key: "2024-01-01",
+          value: '{"nodeId":"r","key":"2024-01-01"}',
+          updatedAt: 1,
+        },
+        {
+          collection: "daily-index",
+          key: "2024-01-02",
+          value: '{"key":"2024-01-02","nodeId":"x"}',
+          updatedAt: 2,
+        },
+        {
+          collection: "tag-colors",
+          key: "SECRET_TAG",
+          value: '{"color":"SECRET_COLOR","tag":"SECRET_TAG"}',
+          updatedAt: 3,
+        },
+        {
+          collection: "saved-queries",
+          key: "q1",
+          value:
+            '{"query":"SECRET_QUERY","createdAt":1,"name":"SECRET_NAME","id":"q1"}',
+          updatedAt: 4,
+        },
+      ],
+    };
+    const experimental = snapshot([
+      node("r", null, null),
+      { ...node("b", "p", null), text: "SECRET_TEXT", updatedAt: 99 },
+      node("s", null, "r"),
+      { ...node("e", null, "s"), mirrorOf: "lost-source" },
+    ]);
+    experimental.dailyIndex = [
+      { key: "2024-01-01", nodeId: "b", touchedAt: 99, userId: "u1" },
+      { key: "2024-01-03", nodeId: "e", touchedAt: 100, userId: "u1" },
+    ];
+    experimental.tagColors = [
+      { tag: "SECRET_TAG", color: "SECRET_OTHER_COLOR", userId: "u1" },
+    ];
+    experimental.savedQueries = [
+      {
+        id: "q1",
+        name: "SECRET_NAME",
+        query: "SECRET_QUERY",
+        createdAt: 1,
+        userId: "u1",
+      },
+    ];
+    const before = structuredClone({ classic, experimental });
+    const report = compareRetirementSnapshots(classic, experimental);
+    expect(report.consistency).toBe("unfrozen-snapshots");
+    expect(report.nodes).toMatchObject({
+      classic: 5,
+      experimental: 4,
+      shared: 3,
+      identical: 2,
+      classicOnly: { count: 2, sample: ["p", "x"] },
+      experimentalOnly: { count: 1, sample: ["e"] },
+      changed: {
+        count: 1,
+        sample: [{ nodeId: "b", fields: ["text", "updatedAt"] }],
+      },
+    });
+    expect(report.graphs.experimental.missingReferences).toEqual({
+      count: 2,
+      truncated: false,
+      sample: [
+        {
+          nodeId: "b",
+          field: "parentId",
+          referencedId: "p",
+          presentInOtherBackend: true,
+          nodePresentInOtherBackend: true,
+          otherBackendReference: "p",
+        },
+        {
+          nodeId: "e",
+          field: "mirrorOf",
+          referencedId: "lost-source",
+          presentInOtherBackend: false,
+          nodePresentInOtherBackend: false,
+          otherBackendReference: null,
+        },
+      ],
+    });
+    expect(report.graphs.classic.validation).toEqual({ ok: true });
+    expect(report.graphs.experimental.validation).toEqual({
+      ok: false,
+      reason: "node b has missing parent",
+    });
+    expect(report.sideCollections.dailyIndex).toMatchObject({
+      classic: 2,
+      experimental: 2,
+      comparable: true,
+      shared: 1,
+      changed: 1,
+      classicOnly: 1,
+      experimentalOnly: 1,
+    });
+    expect(report.sideCollections.tagColors.changed).toBe(1);
+    // Property order, export ownership, and KV write times do not change query content.
+    expect(report.sideCollections.savedQueries.changed).toBe(0);
+    expect(JSON.stringify(report)).not.toContain("SECRET_");
+    expect({ classic, experimental }).toEqual(before);
+  });
+
+  it("marks malformed or duplicate side collections uncomparable without echoing values", () => {
+    const classic: OutlineSnapshot = {
+      version: 1,
+      exportedAt: 1,
+      seq: 1,
+      nodes: [],
+      kv: [
+        {
+          collection: "tag-colors",
+          key: "SECRET_TAG",
+          value: "{SECRET_VALUE",
+          updatedAt: 1,
+        },
+        {
+          collection: "tag-colors",
+          key: "SECRET_TAG",
+          value: '{"tag":"mismatch","color":"SECRET_COLOR"}',
+          updatedAt: 2,
+        },
+      ],
+    };
+    const experimental = snapshot([node("a", null, null)]);
+    experimental.tagColors = [
+      { tag: "SECRET_TAG", color: "red", userId: "u1" },
+      { tag: "SECRET_TAG", color: "blue", userId: "u1" },
+    ];
+    const report = compareRetirementSnapshots(classic, experimental);
+    expect(report.sideCollections.tagColors).toEqual({
+      classic: 2,
+      experimental: 2,
+      comparable: false,
+      invalidClassicRows: 2,
+      duplicateClassicKeys: true,
+      duplicateExperimentalKeys: true,
+      classicOnly: null,
+      experimentalOnly: null,
+      shared: null,
+      changed: null,
+    });
+    expect(JSON.stringify(report)).not.toContain("SECRET_");
+  });
+
+  it("does not compare arbitrary winners when either backend has duplicate node ids", () => {
+    const base = node("a", null, null);
+    for (const backend of ["classic", "experimental"]) {
+      const classic: OutlineSnapshot = {
+        version: 1,
+        exportedAt: 1,
+        seq: 1,
+        nodes:
+          backend === "classic"
+            ? [base, { ...base, text: "SECRET_OTHER_TEXT" }]
+            : [base],
+        kv: [],
+      };
+      const experimental = snapshot(
+        backend === "experimental"
+          ? [base, { ...base, text: "SECRET_OTHER_TEXT" }]
+          : [base],
+      );
+      const report = compareRetirementSnapshots(classic, experimental);
+      expect(report.nodes).toMatchObject({
+        comparable: false,
+        shared: null,
+        identical: null,
+        classicOnly: null,
+        experimentalOnly: null,
+        changed: null,
+      });
+      expect(JSON.stringify(report)).not.toContain("SECRET_");
+    }
+  });
+
+  it("identifies a missing previous sibling and compares its counterpart reference", () => {
+    const a = node("a", null, null);
+    const b = node("b", null, "a");
+    const classic: OutlineSnapshot = {
+      version: 1,
+      exportedAt: 1,
+      seq: 1,
+      nodes: [a, b],
+      kv: [],
+    };
+    const report = compareRetirementSnapshots(classic, snapshot([b]));
+    expect(report.graphs.experimental.missingReferences).toEqual({
+      count: 1,
+      truncated: false,
+      sample: [
+        {
+          nodeId: "b",
+          field: "prevSiblingId",
+          referencedId: "a",
+          presentInOtherBackend: true,
+          nodePresentInOtherBackend: true,
+          otherBackendReference: "a",
+        },
+      ],
+    });
+  });
+
+  it("distinguishes disabled, absent, and malformed preferences", () => {
+    const experimental = snapshot([node("a", null, null)]);
+    for (const [value, expected] of [
+      [null, "missing"],
+      ['{"enabled":false}', "disabled"],
+      ['{"enabled":true}', "enabled"],
+      ['{"enabled":"false"}', "invalid"],
+      ["{", "invalid"],
+    ] as const) {
+      const classic: OutlineSnapshot = {
+        version: 1,
+        exportedAt: 1,
+        seq: 1,
+        nodes: [],
+        kv:
+          value === null
+            ? []
+            : [
+                {
+                  collection: "account-prefs",
+                  key: "lunora-beta",
+                  value,
+                  updatedAt: 1,
+                },
+              ],
+      };
+      expect(
+        compareRetirementSnapshots(classic, experimental)
+          .experimentalPreference,
+      ).toBe(expected);
+    }
+  });
+
+  it("bounds samples but counts every difference on both sides of the limit", () => {
+    for (const count of [50, 51]) {
+      const nodes = Array.from({ length: count }, (_, i) =>
+        node(`n${i}`, null, i === 0 ? null : `n${i - 1}`),
+      );
+      const classic: OutlineSnapshot = {
+        version: 1,
+        exportedAt: 1,
+        seq: 1,
+        nodes,
+        kv: [],
+      };
+      const experimental = snapshot([]);
+      const report = compareRetirementSnapshots(classic, experimental);
+      expect(report.nodes.classicOnly?.count).toBe(count);
+      expect(report.nodes.classicOnly?.sample).toHaveLength(50);
+      expect(report.nodes.classicOnly?.truncated).toBe(count > 50);
+      experimental.nodes = nodes.map((row) => ({
+        ...row,
+        parentId: "missing",
+        text: "SECRET_CHANGED_TEXT",
+        userId: "u1",
+      }));
+      const changed = compareRetirementSnapshots(classic, experimental);
+      expect(changed.nodes.changed?.count).toBe(count);
+      expect(changed.nodes.changed?.sample).toHaveLength(50);
+      expect(changed.nodes.changed?.truncated).toBe(count > 50);
+      expect(changed.graphs.experimental.missingReferences.count).toBe(count);
+      expect(changed.graphs.experimental.missingReferences.sample).toHaveLength(
+        50,
+      );
+      expect(changed.graphs.experimental.missingReferences.truncated).toBe(
+        count > 50,
+      );
+    }
+  });
 });
