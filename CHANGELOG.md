@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.15.2
+
+### Patch Changes
+
+- 24beedd: Center the command menu in the visible viewport and keep it above the mobile keyboard, with scrollable results.
+
 ## 1.15.1
 
 ### Patch Changes
