@@ -187,8 +187,8 @@ test.describe("Structural markdown paste", () => {
     await pasteInto(text(page, "n"), "alpha\n  bravo\n    charlie\ndelta");
     expect(await rows(page)).toHaveLength(4);
 
-    await page.keyboard.press("Meta+z");
-    expect(await rows(page)).toEqual(["0:"]);
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect.poll(() => rows(page)).toEqual(["0:"]);
   });
 
   test("a single-line paste is untouched (the links plugin still wraps a URL)", async ({
@@ -357,7 +357,7 @@ test.describe("Mod+Shift+V pastes literal", () => {
 
     // Same bullet, same clipboard, caret still at the end -- only the chord
     // differs, and now the links plugin's Seam I wrap fires.
-    await page.keyboard.press("Meta+V");
+    await page.keyboard.press("ControlOrMeta+V");
     await expect(page.locator('li[data-node-id="n"] a')).toHaveAttribute(
       "href",
       "https://example.com",

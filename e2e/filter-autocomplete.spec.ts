@@ -83,10 +83,22 @@ test.describe("filter autocomplete (ADR 0047 §7)", () => {
     page,
   }) => {
     await load(page);
-    await summon(page);
+    await page.clock.install();
+    await page.clock.pauseAt(new Date());
+    await page.keyboard.press("ControlOrMeta+f");
+    await page.clock.runFor(32);
+    await expect(input(page)).toBeFocused();
 
     await input(page).fill("is:");
     await input(page).press("ArrowDown"); // -> first row (is:todo)
+    await expect(option(page, "is:todo")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // Settling the initial subheader animation must not clear a choice made
+    // while it was opening. Advance past its deferred popover reveal.
+    await page.clock.runFor(250);
     await expect(option(page, "is:todo")).toHaveAttribute(
       "aria-selected",
       "true",

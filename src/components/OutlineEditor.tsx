@@ -73,7 +73,6 @@ import {
   childrenOf,
   countSubtreeNodes,
   type Node,
-  type TreeIndex,
 } from "../data/tree";
 import {
   getTreeIndex,
@@ -1211,10 +1210,7 @@ function useZoomNavigation({
    */
   const navigateZoom = useCallback(
     (toRootId: string | null, pivot: string) => {
-      // Zooming out reveals the trail: expand any collapsed ancestor between the
-      // node we're leaving and the destination root, so the pivot is actually
-      // visible when we land (otherwise a collapsed parent hides where you were).
-      revealAncestorsToRoot(getTreeIndex(), pivot, toRootId);
+      // Navigation changes the view root, never saved expansion state.
       if (prefersReducedMotion()) {
         // No morph, but still carry the pivot so the new view restores focus.
         const state = { pivotId: pivot };
@@ -1264,7 +1260,7 @@ function useZoomNavigation({
   // After a zoom, drop focus where the user is most likely to continue:
   //  - Zooming IN (pivotId === rootId): the first visible child of the opened
   //    node, or its title when childless.
-  //  - Zooming OUT: the node you came from.
+  //  - Zooming OUT: the node you came from, or its closest visible ancestor.
   // Then scroll the target into view if it landed below the fold. Mount-only by
   // design (the editor remounts per zoom view) and passive: each bullet's text
   // is written in OutlineRow's own passive effect, so only by now is the list
@@ -1291,23 +1287,32 @@ function useZoomNavigation({
       return;
     }
     if (!pivotId) return;
-    let targetId = pivotId;
+    const index = getTreeIndex();
+    let targetId: string | null = pivotId;
     if (pivotId === rootId) {
-      const firstChild = childrenOf(getTreeIndex(), rootId).find(
-        (n) => !isHidden(n),
-      );
+      const firstChild = childrenOf(index, rootId).find((n) => !isHidden(n));
       if (firstChild) targetId = firstChild.id;
     }
-    const el = refs.get(targetId);
-    if (!el) {
-      // Windowed + off-screen (zoom-out can land on a deep node): scroll it in
-      // and let OutlineRow claim focus on mount.
-      if (scrollRowIntoView(targetId)) pendingFocus.current = targetId;
-      return;
+    // A missing DOM ref can mean either off-screen or hidden. The virtualizer
+    // knows which rows are visible: try scrolling before walking to a parent,
+    // so an off-screen pivot keeps focus instead of handing it to an ancestor.
+    let guard = index.byId.size + 1;
+    while (targetId !== null && guard-- > 0) {
+      const el = refs.get(targetId);
+      if (el) {
+        el.focus({ preventScroll: true });
+        placeCaretAtEnd(el);
+        el.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      if (scrollRowIntoView(targetId)) {
+        pendingFocus.current = targetId;
+        return;
+      }
+      // Only zoom-out walks ancestors, and never past the destination title.
+      if (pivotId === rootId || targetId === rootId) return;
+      targetId = index.byId.get(targetId)?.parentId ?? null;
     }
-    el.focus({ preventScroll: true });
-    placeCaretAtEnd(el);
-    el.scrollIntoView({ block: "nearest" });
     // Mount-only by design: the editor remounts per zoom view (route key), so
     // the captured values are current at mount. Re-running on any of them would
     // re-steal focus mid-edit -- not a staleness bug.
@@ -2504,37 +2509,6 @@ function CollapsedCrumbs({
       </DropdownMenu>
     </span>
   );
-}
-
-/**
- * On zoom-out, expand every collapsed ancestor on the path from `pivot` (the
- * node we're leaving) up to — but not including — `toRootId` (the destination
- * root, or null for Home). This makes the trail that led to `pivot` visible in
- * the view we're navigating to.
- *
- * No-op unless `pivot` is actually a descendant of `toRootId` — so zooming IN
- * (pivot === toRootId) and any non-ancestral jump leave collapse state alone.
- */
-function revealAncestorsToRoot(
-  index: TreeIndex,
-  pivot: string,
-  toRootId: string | null,
-) {
-  if (pivot === toRootId) return;
-  const collapsedOnPath: string[] = [];
-  let current = index.byId.get(pivot)?.parentId ?? null;
-  // Guard against corrupted parent chains, mirroring buildTrail.
-  let guard = index.byId.size + 1;
-  while (current && current !== toRootId && guard-- > 0) {
-    const node = index.byId.get(current);
-    if (!node) break;
-    if (node.collapsed) collapsedOnPath.push(current);
-    current = node.parentId ?? null;
-  }
-  // Only expand if we walked all the way up to the destination root; otherwise
-  // pivot wasn't below it and we'd be mangling an unrelated branch.
-  if (current !== toRootId) return;
-  for (const id of collapsedOnPath) toggleCollapsed(id, false);
 }
 
 function prefersReducedMotion(): boolean {

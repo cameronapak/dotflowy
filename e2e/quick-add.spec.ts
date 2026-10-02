@@ -29,9 +29,10 @@ async function load(page: Page) {
  *  guarded on "not typing", so blur any focused bullet first -- otherwise the "q"
  *  just types into the outline. */
 async function pressQuickAddKey(page: Page) {
-  await page.evaluate(() =>
-    (document.activeElement as HTMLElement | null)?.blur(),
-  );
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+  });
   await page.keyboard.press("q");
 }
 
@@ -64,18 +65,20 @@ const toastByText = (page: Page, text: string) =>
 // to exercise the in-flight-born window (clear/retarget/slash while borning),
 // which the seedOutline Map mock otherwise resolves in a microtask.
 async function holdResolve(page: Page) {
-  await page.evaluate(() =>
+  await page.evaluate(() => {
+    // SAFETY: Vite's dev build installs this hook before the outline is ready.
     (
-      window as unknown as { __quickAddHoldResolve: () => void }
-    ).__quickAddHoldResolve(),
-  );
+      window as Window & { __quickAddHoldResolve: () => void }
+    ).__quickAddHoldResolve();
+  });
 }
 async function releaseResolve(page: Page) {
-  await page.evaluate(() =>
+  await page.evaluate(() => {
+    // SAFETY: Vite's dev build installs this hook before the outline is ready.
     (
-      window as unknown as { __quickAddReleaseResolve: () => void }
-    ).__quickAddReleaseResolve(),
-  );
+      window as Window & { __quickAddReleaseResolve: () => void }
+    ).__quickAddReleaseResolve();
+  });
 }
 
 /** The `data-parent-id` of the (first) row whose text matches, or null. */
@@ -148,16 +151,18 @@ test.describe("quick-add capture", () => {
     await expect(firstRow).toBeVisible({ timeout: 10_000 });
     await expect(secondRow).toBeVisible({ timeout: 10_000 });
 
-    // first-capture precedes second-capture (chronological log).
-    const firstIdx = await firstRow.evaluate((el) => {
-      const rows = Array.from(document.querySelectorAll("li[data-node-id]"));
-      return rows.indexOf(el.closest("li[data-node-id]")!);
-    });
-    const secondIdx = await secondRow.evaluate((el) => {
-      const rows = Array.from(document.querySelectorAll("li[data-node-id]"));
-      return rows.indexOf(el.closest("li[data-node-id]")!);
-    });
-    expect(firstIdx).toBeLessThan(secondIdx);
+    // Read both captures from one live DOM snapshot: virtualized rows can
+    // remount between separate locator evaluations while navigation settles.
+    await expect
+      .poll(async () => {
+        const texts = await page
+          .locator("li[data-node-id] > .outline-row .node-text")
+          .allTextContents();
+        return texts.filter(
+          (text) => text === "first-capture" || text === "second-capture",
+        );
+      })
+      .toEqual(["first-capture", "second-capture"]);
   });
 
   test("Enter commits the single node and closes the overlay", async ({
@@ -514,17 +519,18 @@ test.describe("quick-add async-born lifecycle (deferred resolve)", () => {
     const second = rowWithText(page, "beta-cap");
     await expect(first).toBeVisible({ timeout: 10_000 });
     await expect(second).toBeVisible({ timeout: 10_000 });
-    const firstIdx = await first.evaluate((el) =>
-      Array.from(document.querySelectorAll("li[data-node-id]")).indexOf(
-        el.closest("li[data-node-id]")!,
-      ),
-    );
-    const secondIdx = await second.evaluate((el) =>
-      Array.from(document.querySelectorAll("li[data-node-id]")).indexOf(
-        el.closest("li[data-node-id]")!,
-      ),
-    );
-    expect(firstIdx).toBeLessThan(secondIdx);
+    // Compare a single live snapshot, not row handles that can detach while
+    // the virtualized Today view settles.
+    await expect
+      .poll(async () => {
+        const texts = await page
+          .locator("li[data-node-id] > .outline-row .node-text")
+          .allTextContents();
+        return texts.filter(
+          (text) => text === "alpha-cap" || text === "beta-cap",
+        );
+      })
+      .toEqual(["alpha-cap", "beta-cap"]);
   });
 });
 
@@ -581,7 +587,9 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
     await expect(bullet).toBeFocused();
     await expect(fab(page)).toBeHidden();
     // Blur back out -> the FAB returns.
-    await bullet.evaluate((el) => (el as HTMLElement).blur());
+    await bullet.evaluate((el) => {
+      if (el instanceof HTMLElement) el.blur();
+    });
     await expect(fab(page)).toBeVisible();
   });
 });

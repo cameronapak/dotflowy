@@ -26,7 +26,7 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await text(page, id).evaluate((el, target) => {
     const sel = window.getSelection();
     if (!sel) return;
-    let remaining = target as number;
+    let remaining = target;
     let placed = false;
     const visit = (node: Node): void => {
       if (placed) return;
@@ -42,11 +42,8 @@ async function caretAtSource(page: Page, id: string, target: number) {
         } else remaining -= len;
         return;
       }
-      if (
-        node.nodeType === 1 &&
-        (node as HTMLElement).hasAttribute("data-src")
-      ) {
-        const e = node as HTMLElement;
+      if (node instanceof Element && node.hasAttribute("data-src")) {
+        const e = node;
         const len =
           Number(e.getAttribute("data-src-len")) ||
           (e.getAttribute("data-src") ?? "").length;
@@ -178,8 +175,8 @@ test.describe("Highlight: creation", () => {
       { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
     ]);
     await text(page, "n").click();
-    await page.keyboard.press("Meta+a");
-    await page.keyboard.press("Meta+Shift+h");
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("ControlOrMeta+Shift+h");
     // The caret sits in the fresh run, so it's REVEALED: fences inside the mark.
     await expect(mark(page, "n")).toHaveText("==alphabravo==");
     await expect(mark(page, "n")).toHaveAttribute("data-highlight", "blue");
