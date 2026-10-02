@@ -62,6 +62,7 @@ export interface RegisteredLunoraFunction {
 export const LUNORA_FUNCTIONS: Record<string, RegisteredLunoraFunction> = {
     "mcp:applyChangeOps": lunora_mcp_0.applyChangeOps as unknown as RegisteredLunoraFunction,
     "mcp:claimDailyMapping": lunora_mcp_0.claimDailyMapping as unknown as RegisteredLunoraFunction,
+    "mcp:freezeAndExportArchiveRetirement": lunora_mcp_0.freezeAndExportArchiveRetirement as unknown as RegisteredLunoraFunction,
     "mcp:freezeAndExportRetirement": lunora_mcp_0.freezeAndExportRetirement as unknown as RegisteredLunoraFunction,
     "mcp:inspectRetirement": lunora_mcp_0.inspectRetirement as unknown as RegisteredLunoraFunction,
     "mcp:listDailyIndex": lunora_mcp_0.listDailyIndex as unknown as RegisteredLunoraFunction,
@@ -120,6 +121,14 @@ if (typeof source["key"] !== "string") return DEFER;
 if (typeof source["nodeId"] !== "string") return DEFER;
 if (typeof source["touchedAt"] !== "number" || !Number.isFinite(source["touchedAt"])) return DEFER;
 return { "userId": source["userId"], "key": source["key"], "nodeId": source["nodeId"], "touchedAt": source["touchedAt"] };
+});
+installCompiledValidatorMap(lunora_mcp_0.freezeAndExportArchiveRetirement.args, (source) => {
+if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
+if (Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) return DEFER;
+if (typeof source["userId"] !== "string") return DEFER;
+if (typeof source["migrationId"] !== "string") return DEFER;
+if (typeof source["now"] !== "number" || !Number.isFinite(source["now"])) return DEFER;
+return { "userId": source["userId"], "migrationId": source["migrationId"], "now": source["now"] };
 });
 installCompiledValidatorMap(lunora_mcp_0.freezeAndExportRetirement.args, (source) => {
 if (typeof source !== "object" || source === null || Array.isArray(source)) return DEFER;
@@ -238,6 +247,7 @@ export interface Caller {
     mcp: {
         applyChangeOps: (args: { userId: string; ops: Array<{ op: "insert"; value: { id: string; parentId: string; prevSiblingId: string; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number; mirrorOf: string; createdAt: number; updatedAt: number; origin: string; kind: "paragraph" } } | { op: "update"; value: { id: string; parentId: string; prevSiblingId: string; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number; mirrorOf: string; createdAt: number; updatedAt: number; origin: string; kind: "paragraph" } } | { op: "delete"; key: string }> }) => Promise<{ count: number; deletes: number; inserts: number; patches: number; }>;
         claimDailyMapping: (args: { userId: string; key: string; nodeId: string; touchedAt: number }) => Promise<{ nodeId: string; won: boolean; }>;
+        freezeAndExportArchiveRetirement: (args: { userId: string; migrationId: string; now: number }) => Promise<unknown>;
         freezeAndExportRetirement: (args: { userId: string; migrationId: string; now: number }) => Promise<{ version: number; exportedAt: number; userId: string; nodes: { userId: string; id: string; parentId: string | null; prevSiblingId: string | null; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number | null; mirrorOf: string | null; createdAt: number; updatedAt: number; origin: string | null; kind: "paragraph" | null; }[]; dailyIndex: { key: string; nodeId: string; touchedAt: number; userId: string; }[]; tagColors: { tag: string; color: string; userId: string; }[]; savedQueries: { id: string; name: string; query: string; createdAt: number; userId: string; }[]; migrateState: { nodesAt: number | null; kvAt: number | null; userId: string; }[]; }>;
         inspectRetirement: (args: { userId: string }) => Promise<{ retirement: { migrationId: string; status: string; updatedAt: number; } | null; snapshot: { version: number; exportedAt: number; userId: string; nodes: { userId: string; id: string; parentId: string | null; prevSiblingId: string | null; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number | null; mirrorOf: string | null; createdAt: number; updatedAt: number; origin: string | null; kind: "paragraph" | null; }[]; dailyIndex: { key: string; nodeId: string; touchedAt: number; userId: string; }[]; tagColors: { tag: string; color: string; userId: string; }[]; savedQueries: { id: string; name: string; query: string; createdAt: number; userId: string; }[]; migrateState: { nodesAt: number | null; kvAt: number | null; userId: string; }[]; }; }>;
         listDailyIndex: (args: { userId: string }) => Promise<{ key: string; nodeId: string; }[]>;
@@ -284,6 +294,7 @@ export const createCaller = (context: CallerCtx): Caller => ({
     mcp: {
         applyChangeOps: (args) => callRegistered(context, "mcp:applyChangeOps", args),
         claimDailyMapping: (args) => callRegistered(context, "mcp:claimDailyMapping", args),
+        freezeAndExportArchiveRetirement: (args) => callRegistered(context, "mcp:freezeAndExportArchiveRetirement", args),
         freezeAndExportRetirement: (args) => callRegistered(context, "mcp:freezeAndExportRetirement", args),
         inspectRetirement: (args) => callRegistered(context, "mcp:inspectRetirement", args),
         listDailyIndex: (args) => callRegistered(context, "mcp:listDailyIndex", args),

@@ -40,7 +40,17 @@ export type Input = {
   classicDailyIndex?: Array<{ key: string; nodeId: string }>;
   lunoraDailyIndex?: Array<{ key: string; nodeId: string; touchedAt: number }>;
   operation?: RetirementOperation;
-  fault?: "retire" | "verify" | "rollback";
+  approvedManifestHash?: string;
+  preferenceEnabled?: boolean;
+  preserveRawUnknownField?: boolean;
+  fault?:
+    | "retire"
+    | "verify"
+    | "rollback"
+    | "preserve-ack"
+    | "retire-ack"
+    | "unlock-ack"
+    | "import-ack";
   afterRetire?: boolean;
 };
 
@@ -83,6 +93,24 @@ export default {
     );
     const lunora = createLunoraRetirementClient(env, userId);
     const client = createShardClient(env.SHARD).as({ userId }).forShard(userId);
+    const classicBackend: RetirementBackends["classic"] = {
+      preserveClassicReceipt: () => classic.preserveClassicReceipt(),
+      preserveClassicRetirement: (data) =>
+        classic.preserveClassicRetirement(data),
+      finalizeRetirementRouting: (id) => classic.finalizeRetirementRouting(id),
+      isLunoraRetired: () => classic.isLunoraRetired(),
+      classicRecoveryReceipt: () => classic.classicRecoveryReceipt(),
+      importClassicRecovery: (data) => classic.importClassicRecovery(data),
+      exportSnapshot: () => classic.exportSnapshot(),
+      freezeAndExportRetirement: (id) => classic.freezeAndExportRetirement(id),
+      getNodes: () => classic.getNodes(),
+      releaseRetirementFreeze: (id) => classic.releaseRetirementFreeze(id),
+      restorePreRetirementSnapshot: (data) =>
+        classic.restorePreRetirementSnapshot(data),
+      restoreRetirementSnapshot: (data) =>
+        classic.restoreRetirementSnapshot(data),
+      retirementStatus: () => classic.retirementStatus(),
+    };
     try {
       if (url.pathname === "/seed") {
         await classic.seed({
@@ -91,7 +119,10 @@ export default {
             {
               collection: "account-prefs",
               key: "lunora-beta",
-              value: { id: "lunora-beta", enabled: true },
+              value: {
+                id: "lunora-beta",
+                enabled: input.preferenceEnabled ?? true,
+              },
             },
             {
               collection: "account-prefs",
@@ -157,6 +188,33 @@ export default {
         );
         return Response.json({ deleted: true });
       }
+      if (url.pathname === "/classic-write") {
+        await classic.upsertNodes(input.classicNodes ?? []);
+        return Response.json({ written: true });
+      }
+      if (url.pathname === "/classic-delete") {
+        await classic.deleteNodes(
+          (input.classicNodes ?? []).map((value) => value.id),
+        );
+        return Response.json({ deleted: true });
+      }
+      if (url.pathname === "/pitr") {
+        await classic.restoreToTime({ kind: "time", at: Date.now() });
+        return Response.json({ restored: true });
+      }
+      if (url.pathname === "/snapshot-replace") {
+        await classic.restoreSnapshot({
+          nodes: input.classicNodes ?? [],
+          kv: [],
+        });
+        return Response.json({ restored: true });
+      }
+      if (url.pathname === "/reenable") {
+        await classic.upsertKv("account-prefs", [
+          { key: "lunora-beta", value: { id: "lunora-beta", enabled: true } },
+        ]);
+        return Response.json({ enabled: true });
+      }
       if (url.pathname === "/inspect") {
         return Response.json({
           classic: await classic.exportSnapshot(),
@@ -218,6 +276,7 @@ export default {
             input.operation ?? "restore",
             {
               classic: {
+                ...classicBackend,
                 exportSnapshot: unexpectedBackendCall,
                 freezeAndExportRetirement: unexpectedBackendCall,
                 getNodes: unexpectedBackendCall,
@@ -227,6 +286,7 @@ export default {
                 retirementStatus: unexpectedBackendCall,
               },
               lunora: {
+                ...lunora,
                 inspect: unexpectedBackendCall,
                 freezeAndExport: unexpectedBackendCall,
                 releaseFreeze: unexpectedBackendCall,
@@ -297,7 +357,10 @@ export default {
         return Response.json({ migrationId: record.migrationId });
       }
       if (url.pathname === "/run") {
-        const backends: RetirementBackends = { classic, lunora };
+        const backends: RetirementBackends = {
+          classic: classicBackend,
+          lunora,
+        };
         let mismatch = input.fault === "verify" || input.fault === "rollback";
         if (input.fault === "retire") {
           backends.lunora = {
@@ -309,6 +372,7 @@ export default {
         }
         if (mismatch) {
           backends.classic = {
+            ...classicBackend,
             exportSnapshot: async () => {
               const snapshot = await classic.exportSnapshot();
               if (
@@ -341,12 +405,78 @@ export default {
             },
           };
         }
+        if (input.preserveRawUnknownField || input.fault?.endsWith("-ack")) {
+          let preserveAck = input.fault === "preserve-ack";
+          let retireAck = input.fault === "retire-ack";
+          let unlockAck = input.fault === "unlock-ack";
+          let importAck = input.fault === "import-ack";
+          backends.classic = {
+            ...classicBackend,
+            preserveClassicRetirement: async (data) => {
+              const receipt = await classic.preserveClassicRetirement(data);
+              if (preserveAck) {
+                preserveAck = false;
+                throw new Error("injected lost preserve acknowledgement");
+              }
+              return receipt;
+            },
+            releaseRetirementFreeze: async (id) => {
+              await classic.releaseRetirementFreeze(id);
+              if (unlockAck) {
+                unlockAck = false;
+                throw new Error("injected lost unlock acknowledgement");
+              }
+            },
+            importClassicRecovery: async (data) => {
+              const receipt = await classic.importClassicRecovery(data);
+              if (importAck) {
+                importAck = false;
+                throw new Error("injected lost import acknowledgement");
+              }
+              return receipt;
+            },
+          };
+          backends.lunora = {
+            ...lunora,
+            freezeAndExportArchive: async (id, now) => {
+              const archive = await lunora.freezeAndExportArchive(id, now);
+              if (input.preserveRawUnknownField && archive.raw.nodes[0]) {
+                return {
+                  ...archive,
+                  raw: {
+                    ...archive.raw,
+                    nodes: archive.raw.nodes.map((row, index) =>
+                      index === 0
+                        ? {
+                            ...row,
+                            futureUnknownField: {
+                              nested: [1, "retained", true],
+                            },
+                          }
+                        : row,
+                    ),
+                  },
+                };
+              }
+              return archive;
+            },
+            markRetired: async (id, now) => {
+              const receipt = await lunora.markRetired(id, now);
+              if (retireAck) {
+                retireAck = false;
+                throw new Error("injected lost retire acknowledgement");
+              }
+              return receipt;
+            },
+          };
+        }
         return Response.json(
           await runRetirementOperation(
             env,
             userId,
             input.operation ?? "migrate",
             backends,
+            input.approvedManifestHash,
           ),
         );
       }

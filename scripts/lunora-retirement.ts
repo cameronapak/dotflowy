@@ -18,6 +18,8 @@ type Command =
   | "retry"
   | "status"
   | "restore"
+  | "preserve-classic"
+  | "recover-classic"
   | "report";
 
 interface Args {
@@ -28,6 +30,7 @@ interface Args {
   all: boolean;
   execute: boolean;
   out?: string;
+  manifestHash?: string;
 }
 
 const DEFAULT_API = "https://app.dotflowy.com";
@@ -63,6 +66,8 @@ function usage(): void {
   bun run lunora:retire retry (--user ID | --email EMAIL) --execute
   bun run lunora:retire status [--user ID | --email EMAIL | --all]
   bun run lunora:retire restore (--user ID | --email EMAIL) --execute
+  bun run lunora:retire preserve-classic (--user ID | --email EMAIL) --execute
+  bun run lunora:retire recover-classic (--user ID | --email EMAIL) --manifest-hash HASH --execute
   bun run lunora:retire report [--user ID | --email EMAIL | --all] [--out FILE]
 
 Options: --api URL (default DOTFLOWY_API or https://app.dotflowy.com)`);
@@ -76,6 +81,8 @@ function parseArgs(argv: string[]): Args {
     "retry",
     "status",
     "restore",
+    "preserve-classic",
+    "recover-classic",
     "report",
   ];
   let command: Command = "dry-run";
@@ -99,6 +106,7 @@ function parseArgs(argv: string[]): Args {
     else if (flag === "--execute") args.execute = true;
     else if (flag === "--api") args.api = argv[index++] ?? "";
     else if (flag === "--out") args.out = argv[index++];
+    else if (flag === "--manifest-hash") args.manifestHash = argv[index++];
     else usage();
   }
   const targets =
@@ -109,8 +117,24 @@ function parseArgs(argv: string[]): Args {
   ) {
     args.all = true;
   } else if (targets !== 1) usage();
-  if ((command === "retry" || command === "restore") && args.all) usage();
-  if (["migrate", "retry", "restore"].includes(command) && !args.execute) {
+  if (
+    ["retry", "restore", "preserve-classic", "recover-classic"].includes(
+      command,
+    ) &&
+    args.all
+  )
+    usage();
+  if (command === "recover-classic" && !args.manifestHash) usage();
+  if (
+    [
+      "migrate",
+      "retry",
+      "restore",
+      "preserve-classic",
+      "recover-classic",
+    ].includes(command) &&
+    !args.execute
+  ) {
     console.error(`${command} changes data and requires --execute`);
     process.exit(1);
   }
@@ -198,7 +222,13 @@ async function population(api: string, cookie: string): Promise<string[]> {
 async function operate(
   args: Args,
   cookie: string,
-  operation: "dry-run" | "migrate" | "retry" | "restore",
+  operation:
+    | "dry-run"
+    | "migrate"
+    | "retry"
+    | "restore"
+    | "preserve-classic"
+    | "recover-classic",
   target: { userId?: string; email?: string },
 ): Promise<OperationResult> {
   return requestJson(
@@ -208,7 +238,11 @@ async function operate(
     OperationResultSchema,
     {
       method: "POST",
-      body: JSON.stringify({ ...target, operation }),
+      body: JSON.stringify({
+        ...target,
+        operation,
+        approvedManifestHash: args.manifestHash,
+      }),
     },
   );
 }
@@ -260,8 +294,11 @@ async function main(): Promise<void> {
     const operation = args.command === "dry-run" ? "dry-run" : args.command;
     const result = await operate(args, cookie, operation, target);
     results.push(result);
-    if (args.command === "migrate" && result.state !== "completed") {
-      console.error("Migration batch stopped: migration did not complete.");
+    if (
+      ["migrate", "preserve-classic"].includes(args.command) &&
+      result.state !== "completed"
+    ) {
+      console.error(`${args.command} stopped: operation did not complete.`);
       process.exitCode = 1;
       break;
     }

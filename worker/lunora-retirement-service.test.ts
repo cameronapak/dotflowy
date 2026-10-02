@@ -2,7 +2,10 @@ import { describe, expect, it } from "bun:test";
 
 import type { Node } from "../src/data/wire-schema";
 import type { OutlineSnapshot } from "./backup";
-import type { LunoraRetirementSnapshot } from "./lunora-retirement";
+import type {
+  LunoraRetirementArchive,
+  LunoraRetirementSnapshot,
+} from "./lunora-retirement";
 import type {
   RetirementBackends,
   RetirementRecord,
@@ -92,6 +95,9 @@ function fakeDb() {
             record = {
               userId: args[0] as string,
               migrationId: args[1] as string,
+              policy: "lunora-to-classic-v1",
+              recoveryManifestKey: null,
+              recoveryManifestHash: null,
               state: "created",
               classification: null,
               result: null,
@@ -118,6 +124,29 @@ function fakeDb() {
           }
         } else if (sql.includes("UPDATE lunora_retirement SET")) {
           if (!record) throw new Error("missing fake retirement record");
+          if (sql.includes("policy = 'preserve-classic-v1'")) {
+            // SAFETY: these positions mirror selectPreserveClassicPolicy's fixed bind list.
+            record = {
+              ...record,
+              migrationId: args[0] as string,
+              policy: "preserve-classic-v1",
+              state: "created",
+              classification: null,
+              result: null,
+              startedAt: args[1] as number,
+              updatedAt: args[2] as number,
+              completedAt: null,
+              classicSnapshotKey: null,
+              classicSnapshotHash: null,
+              lunoraSnapshotKey: null,
+              lunoraSnapshotHash: null,
+              recoveryManifestKey: null,
+              recoveryManifestHash: null,
+              counts: null,
+              failureReason: null,
+            };
+            return { success: true };
+          }
           // SAFETY: these positions mirror updateRecord's fixed D1 bind list.
           record = {
             ...record,
@@ -132,6 +161,8 @@ function fakeDb() {
             lunoraSnapshotHash: args[8] as string | null,
             counts: args[9] as string | null,
             failureReason: args[10] as string | null,
+            recoveryManifestKey: args[11] as string | null,
+            recoveryManifestHash: args[12] as string | null,
           };
         } else if (sql.includes("INSERT INTO lunora_retirement_attempt")) {
           attempts++;
@@ -201,10 +232,63 @@ function fakeBackends(options?: {
   let lunoraMigrationId: string | null = null;
   let classicFreezeCalls = 0;
   let restoreCalls = 0;
+  let preserveCalls = 0;
+  let recoveryCalls = 0;
+  let retiredRoutingBy: string | null = null;
+  let preserveReceipt: Awaited<
+    ReturnType<RetirementBackends["classic"]["preserveClassicReceipt"]>
+  > = null;
+  let recoveryReceipt: Awaited<
+    ReturnType<RetirementBackends["classic"]["classicRecoveryReceipt"]>
+  > = null;
   let failPreRestore = options?.failPreRestore ?? false;
 
   const backends: RetirementBackends = {
     classic: {
+      async preserveClassicReceipt() {
+        return preserveReceipt;
+      },
+      async preserveClassicRetirement(input) {
+        preserveCalls++;
+        if (classicFrozenBy !== input.migrationId)
+          throw new Error("preservation requires classic fence");
+        preserveReceipt ??= {
+          policy: "preserve-classic-v1",
+          migrationId: input.migrationId,
+          classicSnapshotHash: input.classicSnapshotHash,
+          lunoraSnapshotHash: input.lunoraSnapshotHash,
+        };
+        return preserveReceipt;
+      },
+      async finalizeRetirementRouting(migrationId: string) {
+        if (
+          classicFrozenBy !== migrationId ||
+          (appliedMigrationId !== migrationId &&
+            preserveReceipt?.migrationId !== migrationId)
+        )
+          throw new Error(
+            "finalization requires applied migration or preservation",
+          );
+        retiredRoutingBy = migrationId;
+      },
+      async isLunoraRetired() {
+        return retiredRoutingBy !== null;
+      },
+      async classicRecoveryReceipt() {
+        return recoveryReceipt;
+      },
+      async importClassicRecovery(input) {
+        recoveryCalls++;
+        recoveryReceipt ??= {
+          migrationId: input.migrationId,
+          manifestHash: input.manifestHash,
+          applied: true,
+          seq: classic.seq,
+          rootId: input.rootId,
+          nodes: input.nodes.length,
+        };
+        return recoveryReceipt;
+      },
       async exportSnapshot() {
         return clone(classic);
       },
@@ -275,6 +359,42 @@ function fakeBackends(options?: {
       },
     },
     lunora: {
+      async freezeAndExportArchive(migrationId: string, now: number) {
+        const snapshot = await this.freezeAndExport(migrationId, now);
+        return {
+          version: 1,
+          userId: USER_ID,
+          exportedAt: snapshot.exportedAt,
+          snapshot,
+          raw: {
+            nodes: snapshot.nodes.map((row) => ({
+              ...clone(row),
+              _id: row.id,
+              _creationTime: row.createdAt,
+            })),
+            dailyIndex: snapshot.dailyIndex.map((row) => ({
+              ...clone(row),
+              _id: `daily-${row.key}`,
+              _creationTime: row.touchedAt,
+            })),
+            tagColors: snapshot.tagColors.map((row) => ({
+              ...clone(row),
+              _id: `tag-${row.tag}`,
+              _creationTime: 1,
+            })),
+            savedQueries: snapshot.savedQueries.map((row) => ({
+              ...clone(row),
+              _id: row.id,
+              _creationTime: row.createdAt,
+            })),
+            migrateState: snapshot.migrateState.map((row) => ({
+              ...clone(row),
+              _id: `migration-${row.userId}`,
+              _creationTime: 1,
+            })),
+          },
+        } satisfies LunoraRetirementArchive;
+      },
       async inspect() {
         return {
           retirement: lunoraStatus
@@ -329,6 +449,15 @@ function fakeBackends(options?: {
     },
     get restoreCalls() {
       return restoreCalls;
+    },
+    get preserveCalls() {
+      return preserveCalls;
+    },
+    get recoveryCalls() {
+      return recoveryCalls;
+    },
+    get retiredRoutingBy() {
+      return retiredRoutingBy;
     },
     simulateCrashAfterRestore(migrationId: string) {
       classicFrozenBy = migrationId;
@@ -473,6 +602,101 @@ describe("read-only retirement diagnostic", () => {
 });
 
 describe("Lunora retirement coordinator", () => {
+  async function preserveClassicFixture() {
+    const f = fixture();
+    const current = classicSnapshot();
+    const before = {
+      ...current,
+      kv: current.kv.map((row) => ({
+        ...row,
+        value: '{"id":"lunora-beta","enabled":false}',
+      })),
+    };
+    f.backend.replaceClassic(before);
+    const completed = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "preserve-classic",
+      f.backend.backends,
+    );
+    expect(completed.failureReason).toBeNull();
+    expect(completed.state).toBe("completed");
+    expect(completed.policy).toBe("preserve-classic-v1");
+    expect(f.backend.classic).toEqual(before);
+    expect(f.backend.retiredRoutingBy).toBe(completed.migrationId);
+    return { ...f, before, completed };
+  }
+
+  it("audits only when retrying completed preserve-Classic retirement", async () => {
+    const f = await preserveClassicFixture();
+    const backendState = {
+      classic: clone(f.backend.classic),
+      freezes: f.backend.classicFreezeCalls,
+      preserves: f.backend.preserveCalls,
+      routing: f.backend.retiredRoutingBy,
+      lunora: await f.backend.backends.lunora.inspect(),
+    };
+    const attempts = f.db.attempts;
+
+    const retried = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "retry",
+      f.backend.backends,
+    );
+
+    expect(retried.state).toBe("completed");
+    expect(f.db.attempts).toBe(attempts + 1);
+    expect(f.backend.classic).toEqual(backendState.classic);
+    expect(f.backend.classicFreezeCalls).toBe(backendState.freezes);
+    expect(f.backend.preserveCalls).toBe(backendState.preserves);
+    expect(f.backend.retiredRoutingBy).toBe(backendState.routing);
+    expect(await f.backend.backends.lunora.inspect()).toEqual(
+      backendState.lunora,
+    );
+  });
+
+  it.each(["migrate", "restore"] as const)(
+    "forbids %s after preserve-Classic policy is chosen",
+    async (operation) => {
+      const f = await preserveClassicFixture();
+      const before = clone(f.backend.classic);
+      await expect(
+        runRetirementOperation(f.env, USER_ID, operation, f.backend.backends),
+      ).rejects.toThrow(
+        "replacement and rollback operations cannot overwrite chosen Classic",
+      );
+      expect(f.backend.classic).toEqual(before);
+      expect(f.backend.restoreCalls).toBe(0);
+    },
+  );
+
+  it("requires the exact reviewed recovery manifest hash", async () => {
+    const f = await preserveClassicFixture();
+    await expect(
+      runRetirementOperation(
+        f.env,
+        USER_ID,
+        "recover-classic",
+        f.backend.backends,
+        "wrong-manifest-hash",
+      ),
+    ).rejects.toThrow(
+      "recovery requires completed preservation and exact reviewed manifest hash",
+    );
+    expect(f.backend.recoveryCalls).toBe(0);
+
+    const recovered = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "recover-classic",
+      f.backend.backends,
+      f.completed.recoveryManifestHash!,
+    );
+    expect(recovered.result).toBe("classic-recovery-imported");
+    expect(f.backend.recoveryCalls).toBe(1);
+  });
+
   it("installs both write fences before restore and leaves only Lunora retired", async () => {
     const f = fixture();
     const result = await runRetirementOperation(
@@ -482,7 +706,7 @@ describe("Lunora retirement coordinator", () => {
       f.backend.backends,
     );
 
-    expect(result.state).toBe("completed");
+    expect(result.state, result.failureReason ?? "").toBe("completed");
     expect(f.backend.classic.nodes.map((row) => row.id)).toEqual(["lunora"]);
     expect(f.backend.classicFrozenBy).toBeNull();
     expect(f.backend.lunoraStatus).toBe("retired");

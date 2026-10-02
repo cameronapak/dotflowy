@@ -10,7 +10,7 @@ Also exercise a disposable local account with the app running: enable upgraded s
 
 ## Before running
 
-1. Obtain approval to apply `migrations/0010_lunora_retirement.sql` and `migrations/0011_lunora_retirement_operation_claim.sql` to production D1, then deploy the Worker code. Apply only missing migrations. Do not assume deployment applies them or migrates users.
+1. Obtain approval to apply the missing retirement migrations (`0010_lunora_retirement.sql`, `0011_lunora_retirement_operation_claim.sql`, and `0013_preserve_classic_retirement.sql`) to production D1, then deploy the Worker code. Migration 0012 belongs to the separate consent release; it is not required here. Apply only explicitly approved missing migrations. Do not assume deployment applies them or migrates users.
 2. Keep the `BACKUPS` R2 binding. Retirement objects use `lunora-retirement/`, outside the `backups/` lifecycle prefix.
 3. Authenticate with `DOTFLOWY_ADMIN_EMAIL` plus `DOTFLOWY_ADMIN_PASSWORD`, or set `DOTFLOWY_SESSION_COOKIE` to a current admin cookie.
 4. Start with a report and dry run. Do not use `--execute` until every classification has been reviewed.
@@ -92,7 +92,32 @@ For sequential requests, completed dry-runs and retries are no-ops. An uncertain
 
 Browsers opened before this release may lack the retirement subscription. The retired shard rejects their writes, but they may need a reload to pick up classic. Verify that a fresh load uses classic; do not reopen Lunora to accommodate an old client.
 
+Enabled accounts still receive their complete validated experimental outline and shared side-collections, not a recovery folder. Both complete snapshots remain archived, including a raw experimental envelope at `<lunoraSnapshotKey>.archive` whose hash appears in `counts.rawArchiveHash`. Invalid or conflicting enabled accounts stay blocked for individual review.
+
 Rollback can reopen writes. If fresh frozen classic or Lunora content differs from the immutable backup, retry refuses to restore and reports `operator review required`. This includes preferences, shared side-collections, and migration watermarks. Review both current backends and retained backups; do not delete or replace the immutable objects to force a retry. Unchanged re-exports may differ in export timestamps or row order.
+
+## Preserve an explicitly chosen Classic outline
+
+Use this only for one reviewed user who has explicitly disabled experimental sync and chosen to keep Classic. Obtain approval for that user's production operation. Enabled users are rejected; the toggle alone is not evidence that either backend contains every newer edit.
+
+```sh
+bun run lunora:retire preserve-classic --user REVIEWED_USER_ID --execute
+bun run lunora:retire report --user REVIEWED_USER_ID
+```
+
+This freezes both backends, verifies complete immutable Classic and raw experimental archives, and saves a private recovery manifest. Classic nodes and KV remain unchanged. Missing experimental graph references remain in the archive; only detached recovery copies adapt them. A receipt binds the archives before experimental writes are permanently retired and Classic reopens. Confirm `state: completed`, `result: classic-preserved`, both archive hashes, and `recoveryManifestHash`; check that fresh browser and MCP reads use Classic and editing still works.
+
+Review `counts.recovery`: experimental-only nodes, substantive alternatives, archived metadata-only differences, copy count, structure adaptations, and link outcomes. The admin response does not return outline text or the content-bearing manifest. Experimental side-collections remain archived and never replace Classic's collections.
+
+The additive recovery import is optional and separately approved. Pass the exact reviewed hash, not a newly fetched value that silently authorizes a different plan:
+
+```sh
+bun run lunora:retire recover-classic --user REVIEWED_USER_ID --manifest-hash REVIEWED_HASH --execute
+```
+
+This atomically appends **Recovered experimental content** to the current Classic root tail, using persisted fresh ids. Verify the folder, selected text/task alternatives, adapted placement, and inert mirror placeholders. Existing Classic nodes and side-collections remain unchanged. Repeated requests return the import receipt without overwriting edited copies or recreating deleted ones. Missing/corrupt archives or manifests and current-id collisions reject the import without partial writes.
+
+Neither manual operation accepts `--all`. A lost response is not permission to start another executor or clear its claim. After confirming the invocation stopped and following exact-token claim recovery below, `retry` can finish a preserve operation with a receipt without restoring old content. Before preservation commits, a safely failed operation releases both fences. If edits invalidate its archive, obtain approval for a new reviewed `preserve-classic` revision; the old objects and attempts remain. Never use `migrate`, `restore`, generic snapshot replacement, or PITR to overwrite preserved Classic. Generic snapshot replacement and PITR are blocked after permanent retirement; explicit automatic-policy rollback is not a manual-preservation recovery tool.
 
 ## Recover an interrupted operation claim
 
@@ -110,7 +135,7 @@ WHERE userId = 'REVIEWED_USER_ID'
   AND activeOperationId = 'REVIEWED_OPERATION_ID';
 ```
 
-Verify that exactly one row changed and that the claim is now null. This does not release either backend's write fence or change lifecycle state. Retry the same migration only when its state permits; `uncertain` still requires explicit recovery. Do not assign a new migration id or delete retained backups.
+Verify that exactly one row changed and that the claim is now null. This does not release either backend's write fence or change lifecycle state. Retry the same migration only when its policy permits: automatic-policy `uncertain` requires explicit restore review; preserve-policy `uncertain` can resume receipt-bound finalization. Do not assign a new migration id manually or delete retained backups.
 
 ## Restore the pre-migration classic snapshot
 

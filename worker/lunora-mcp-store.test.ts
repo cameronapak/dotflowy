@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   createLunoraOutlineStore,
+  createLunoraRetirementClient,
   decodeClaimDailyResult,
   decodeDailyClaimValue,
   decodeDailyIndexRows,
@@ -64,6 +65,36 @@ describe("isLunoraOutlineEnabledSync", () => {
 });
 
 describe("isLunoraOutlineEnabledForUser", () => {
+  test("permanent retirement overrides forced-on and stale preferences; failed checks fall back to Classic", async () => {
+    const enabled = async () => [{ id: "lunora-beta", enabled: true }];
+    expect(
+      await isLunoraOutlineEnabledForUser(
+        { LUNORA_OUTLINE: "1" },
+        enabled,
+        async () => true,
+      ),
+    ).toBe(false);
+    expect(
+      await isLunoraOutlineEnabledForUser({}, enabled, async () => true),
+    ).toBe(false);
+    expect(
+      await isLunoraOutlineEnabledForUser(
+        { LUNORA_OUTLINE: "1" },
+        enabled,
+        async () => {
+          throw new Error("DO unavailable");
+        },
+      ),
+    ).toBe(false);
+    expect(
+      await isLunoraOutlineEnabledForUser(
+        { LUNORA_OUTLINE: "1" },
+        enabled,
+        async () => false,
+      ),
+    ).toBe(true);
+  });
+
   test("env force on skips preference lookup", async () => {
     let called = false;
     expect(
@@ -139,6 +170,32 @@ describe("shard payload decode (Worker→Lunora trust boundary)", () => {
 });
 
 describe("shard client identity", () => {
+  test("malformed private archive replies expose only a constant schema error", async () => {
+    const stub = {
+      fetch: async () =>
+        Response.json({
+          result: {
+            version: 1,
+            userId: "u1",
+            exportedAt: 1,
+            snapshot: { nodes: [{ text: "PRIVATE_ARCHIVE_CONTENT" }] },
+            raw: {},
+          },
+        }),
+    };
+    const shard: ShardNamespaceLike = {
+      get: () => stub,
+      getByName: () => stub,
+      idFromName: (name) => name,
+    };
+    await expect(
+      createLunoraRetirementClient(
+        { SHARD: shard },
+        "u1",
+      ).freezeAndExportArchive("migration", 1),
+    ).rejects.toThrow(/^experimental retirement archive schema rejected$/);
+  });
+
   test("normal calls run user-as; wipe runs pure system", async () => {
     const identities: Array<{ system: string | null; userId: string | null }> =
       [];

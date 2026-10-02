@@ -18,7 +18,11 @@ import type { RetirementRecord } from "../worker/lunora-retirement-service";
 import type { Input } from "./retirement-worker";
 
 import { ServerMessageSchema } from "../src/data/wire-schema";
-import { compareRetirementSnapshots } from "../worker/lunora-retirement";
+import { ClassicRecoveryManifestSchema } from "../worker/lunora-recovery";
+import {
+  compareRetirementSnapshots,
+  LunoraRetirementArchiveSchema,
+} from "../worker/lunora-retirement";
 
 // Real local Workerd storage, no production credentials or remote bindings.
 test.describe.configure({ mode: "serial" });
@@ -185,6 +189,7 @@ test.beforeAll(async () => {
     "0003_create_auth.sql",
     "0010_lunora_retirement.sql",
     "0011_lunora_retirement_operation_claim.sql",
+    "0013_preserve_classic_retirement.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/^--.*$/gm, "").replaceAll("\n", " "));
@@ -401,6 +406,93 @@ test("production diagnostic is admin-only, content-free, and leaves outline and 
   );
 });
 
+test("production manual operations enforce admin, manifest approval and content-free responses", async () => {
+  const signedIn = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({
+        email: "diagnostic-admin@dotflowy.local",
+        password: "disposable-test-password",
+      }),
+    },
+  );
+  expect(signedIn.status).toBe(200);
+  const cookie = signedIn.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const userId = randomUUID();
+  const current = node("PRIVATE_CLASSIC_SENTINEL");
+  await (
+    await mf.getD1Database("DB")
+  )
+    .prepare(
+      'INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?, ?, ?, 1, ?, ?)',
+    )
+    .bind(
+      userId,
+      "Manual fixture",
+      `${userId}@dotflowy.local`,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    .run();
+  await command("/seed", userId, {
+    classicNodes: [current],
+    lunoraNodes: [node("PRIVATE_EXPERIMENTAL_SENTINEL", randomUUID())],
+    preferenceEnabled: false,
+  });
+  const request = (
+    operation: string,
+    sessionCookie = cookie,
+    approvedManifestHash?: string,
+  ) =>
+    mf.dispatchFetch("http://fixture/api/admin/lunora-retirement", {
+      method: "POST",
+      headers: {
+        cookie: sessionCookie,
+        "content-type": "application/json",
+        origin: "http://fixture",
+      },
+      body: JSON.stringify({ userId, operation, approvedManifestHash }),
+    });
+  for (const operation of ["preserve-classic", "recover-classic"])
+    expect((await request(operation, "")).status).toBe(404);
+  const preserved = await request("preserve-classic");
+  expect(preserved.status).toBe(200);
+  expect(preserved.headers.get("cache-control")).toBe("private, no-store");
+  const body = await preserved.text();
+  expect(body).not.toContain("PRIVATE_CLASSIC_SENTINEL");
+  expect(body).not.toContain("PRIVATE_EXPERIMENTAL_SENTINEL");
+  const record = Schema.decodeUnknownSync(
+    Schema.Struct({
+      state: Schema.String,
+      recoveryManifestHash: Schema.String,
+    }),
+  )(JSON.parse(body));
+  expect(record.state).toBe("completed");
+  expect((await request("recover-classic")).status).toBe(409);
+  expect((await request("recover-classic", cookie, "wrong-hash")).status).toBe(
+    409,
+  );
+  expect((await request("migrate")).status).toBe(409);
+  expect((await request("restore")).status).toBe(409);
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    [current],
+  );
+  const recovered = await request(
+    "recover-classic",
+    cookie,
+    record.recoveryManifestHash!,
+  );
+  expect(recovered.status).toBe(200);
+  expect(await recovered.json()).toMatchObject({
+    result: "classic-recovery-imported",
+  });
+});
+
 test("production shard shapes deliver outline snapshots and the live retirement signal", async () => {
   const { userId, lunoraNodes } = await seed();
   const response = await mf.dispatchFetch(
@@ -475,6 +567,270 @@ test("production shard shapes deliver outline snapshots and the live retirement 
   } finally {
     ws.close();
   }
+});
+
+test("preserve-Classic keeps Classic byte semantics, archives raw unknown fields, and recovers only the exact reviewed manifest", async () => {
+  const userId = randomUUID();
+  const classicRoot = node("chosen Classic");
+  const missingParent = randomUUID();
+  const experimental = node("orphaned experimental", missingParent);
+  await command("/seed", userId, {
+    classicNodes: [classicRoot],
+    lunoraNodes: [experimental],
+    preferenceEnabled: false,
+  });
+  const before = await command<Inspection>("/inspect", userId);
+  const preserved = await command<RetirementRecord>("/run", userId, {
+    operation: "preserve-classic",
+    preserveRawUnknownField: true,
+  });
+  expect(preserved).toMatchObject({
+    policy: "preserve-classic-v1",
+    state: "completed",
+    result: "classic-preserved",
+    recoveryManifestHash: expect.any(String),
+  });
+  const after = await command<Inspection>("/inspect", userId);
+  expect(after.classic.nodes).toEqual(before.classic.nodes);
+  expect(after.classic.kv).toEqual(before.classic.kv);
+  expect(after.lunora.retirement?.status).toBe("retired");
+  const bucket = await mf.getR2Bucket("BACKUPS");
+  const archiveObject = await bucket.get(preserved.lunoraSnapshotKey ?? "");
+  const archive = Schema.decodeUnknownSync(LunoraRetirementArchiveSchema)(
+    JSON.parse((await archiveObject?.text()) ?? "null"),
+  );
+  expect(archive?.raw.nodes[0].futureUnknownField).toEqual({
+    nested: [1, "retained", true],
+  });
+  expect(archive?.snapshot.nodes[0]).toMatchObject({
+    id: experimental.id,
+    parentId: missingParent,
+  });
+  const wrongHash = await mf.dispatchFetch("http://fixture/run", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      operation: "recover-classic",
+      approvedManifestHash: `wrong-${preserved.recoveryManifestHash}`,
+    }),
+  });
+  expect(wrongHash.status).toBe(409);
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    [classicRoot],
+  );
+  const recovered = await command<RetirementRecord>("/run", userId, {
+    operation: "recover-classic",
+    approvedManifestHash: preserved.recoveryManifestHash ?? undefined,
+  });
+  expect(recovered.result).toBe("classic-recovery-imported");
+  const imported = (await command<Inspection>("/inspect", userId)).classic
+    .nodes;
+  expect(imported).toEqual(expect.arrayContaining([classicRoot]));
+  expect(imported.some((value) => value.text === experimental.text)).toBe(true);
+
+  const edit = node("Classic edit after unlock", classicRoot.id);
+  await command("/classic-write", userId, { classicNodes: [edit] });
+  const importedCopy = imported.find(
+    (value) => value.text === experimental.text,
+  );
+  expect(importedCopy).toBeDefined();
+  await command("/classic-delete", userId, {
+    classicNodes: [importedCopy!],
+  });
+  await command("/run", userId, {
+    operation: "recover-classic",
+    approvedManifestHash: preserved.recoveryManifestHash ?? undefined,
+  });
+  const repeated = await command<Inspection>("/inspect", userId);
+  expect(repeated.classic.nodes).toEqual(
+    expect.arrayContaining([classicRoot, edit]),
+  );
+  expect(repeated.classic.nodes).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: importedCopy!.id })]),
+  );
+  const pitr = await mf.dispatchFetch("http://fixture/pitr", {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+  expect(pitr.status).toBe(409);
+  for (const path of [
+    "/snapshot-replace",
+    "/reenable",
+    "/write",
+    "/browser-write",
+  ]) {
+    const rejected = await mf.dispatchFetch(`http://fixture${path}`, {
+      method: "POST",
+      body: JSON.stringify({
+        userId,
+        classicNodes: [node("must not replace Classic")],
+        lunoraNodes: [experimental],
+      }),
+    });
+    expect(rejected.status).toBe(409);
+  }
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    repeated.classic.nodes,
+  );
+});
+
+test("preserve-Classic rejects enabled preference before fencing or archiving", async () => {
+  const { userId, classicNodes } = await seed();
+  const response = await mf.dispatchFetch("http://fixture/run", {
+    method: "POST",
+    body: JSON.stringify({ userId, operation: "preserve-classic" }),
+  });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    error:
+      "enabled accounts require full experimental migration, not preserve-Classic",
+  });
+  const after = await command<Inspection>("/inspect", userId);
+  expect(after.classic.nodes).toEqual(classicNodes);
+  expect(after.status.frozenBy).toBeNull();
+  expect(after.lunora.retirement).toBeNull();
+  expect(after.record.policy).toBe("lunora-to-classic-v1");
+});
+
+for (const fault of [
+  "preserve-ack",
+  "retire-ack",
+  "unlock-ack",
+] satisfies Input["fault"][]) {
+  test(`preserve retry converges after lost ${fault}`, async () => {
+    const userId = randomUUID();
+    const classic = node("Classic remains authoritative");
+    const experimental = node("experimental archive row");
+    await command("/seed", userId, {
+      classicNodes: [classic],
+      lunoraNodes: [experimental],
+      preferenceEnabled: false,
+    });
+    const first = await command<RetirementRecord>("/run", userId, {
+      operation: "preserve-classic",
+      fault,
+    });
+    expect(first.state).toBe("uncertain");
+    const retried = await command<RetirementRecord>("/run", userId, {
+      operation: "retry",
+    });
+    expect(retried).toMatchObject({
+      state: "completed",
+      result: "classic-preserved",
+      migrationId: first.migrationId,
+      classicSnapshotHash: first.classicSnapshotHash,
+      lunoraSnapshotHash: first.lunoraSnapshotHash,
+    });
+    const final = await command<Inspection>("/inspect", userId);
+    expect(final.classic.nodes).toEqual([classic]);
+    expect(final.status.frozenBy).toBeNull();
+    expect(final.lunora.retirement?.status).toBe("retired");
+  });
+}
+
+test("lost recovery ACK is idempotent and does not duplicate imports", async () => {
+  const userId = randomUUID();
+  await command("/seed", userId, {
+    classicNodes: [node("Classic")],
+    lunoraNodes: [node("experimental only")],
+    preferenceEnabled: false,
+  });
+  const preserved = await command<RetirementRecord>("/run", userId, {
+    operation: "preserve-classic",
+  });
+  const failed = await mf.dispatchFetch("http://fixture/run", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      operation: "recover-classic",
+      approvedManifestHash: preserved.recoveryManifestHash,
+      fault: "import-ack",
+    }),
+  });
+  expect(failed.status).toBe(409);
+  const once = await command<Inspection>("/inspect", userId);
+  await command("/run", userId, {
+    operation: "recover-classic",
+    approvedManifestHash: preserved.recoveryManifestHash ?? undefined,
+  });
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    once.classic.nodes,
+  );
+});
+
+test("recovery collision and corrupt immutable objects fail atomically", async () => {
+  const userId = randomUUID();
+  const classic = node("Classic");
+  await command("/seed", userId, {
+    classicNodes: [classic],
+    lunoraNodes: [node("recover me")],
+    preferenceEnabled: false,
+  });
+  const preserved = await command<RetirementRecord>("/run", userId, {
+    operation: "preserve-classic",
+  });
+  const bucket = await mf.getR2Bucket("BACKUPS");
+  const manifestObject = await bucket.get(preserved.recoveryManifestKey ?? "");
+  const manifestText = await manifestObject?.text();
+  const manifest = Schema.decodeUnknownSync(ClassicRecoveryManifestSchema)(
+    JSON.parse(manifestText ?? "null"),
+  );
+  await command("/classic-write", userId, {
+    classicNodes: [
+      { ...manifest.nodes[0]!, parentId: null, prevSiblingId: classic.id },
+    ],
+  });
+  const before = await command<Inspection>("/inspect", userId);
+  const collision = await mf.dispatchFetch("http://fixture/run", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      operation: "recover-classic",
+      approvedManifestHash: preserved.recoveryManifestHash,
+    }),
+  });
+  expect(collision.status).toBe(409);
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    before.classic.nodes,
+  );
+  await bucket.put(preserved.recoveryManifestKey ?? "", "{corrupt-json");
+  const corrupt = await mf.dispatchFetch("http://fixture/run", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      operation: "recover-classic",
+      approvedManifestHash: preserved.recoveryManifestHash,
+    }),
+  });
+  expect(corrupt.status).toBe(409);
+  const error = Schema.decodeUnknownSync(
+    Schema.Struct({ error: Schema.String }),
+  )(await corrupt.json());
+  expect(error.error).toContain("is not JSON");
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    before.classic.nodes,
+  );
+
+  const archiveUserId = randomUUID();
+  await command("/seed", archiveUserId, {
+    classicNodes: [node("Classic archive corruption control")],
+    lunoraNodes: [node("archived experimental")],
+    preferenceEnabled: false,
+  });
+  const interrupted = await command<RetirementRecord>("/run", archiveUserId, {
+    operation: "preserve-classic",
+    fault: "preserve-ack",
+  });
+  expect(interrupted.state).toBe("uncertain");
+  await bucket.put(interrupted.lunoraSnapshotKey ?? "", "{corrupt-json");
+  const archiveRetry = await command<RetirementRecord>("/run", archiveUserId, {
+    operation: "retry",
+  });
+  expect(archiveRetry).toMatchObject({
+    state: "uncertain",
+    result: "operator-recovery-required",
+  });
+  expect(archiveRetry.failureReason).toContain("is not JSON");
 });
 
 test("cutover preserves all collections, rejects stale writes, and resnapshots classic sockets", async () => {
@@ -729,6 +1085,8 @@ for (const operation of [
   "migrate",
   "retry",
   "dry-run",
+  "preserve-classic",
+  "recover-classic",
 ] satisfies Input["operation"][]) {
   test(`rejects overlapping ${operation} before any backend call`, async () => {
     const { userId, lunoraNodes } = await seed();
