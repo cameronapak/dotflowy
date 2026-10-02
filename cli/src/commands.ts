@@ -18,7 +18,7 @@ const kind = { task: boolean("isTask"), kind: string("kind") };
 const daily = { date: string("date"), "time-zone": string("timeZone") };
 const position = { position: string("position") };
 
-export const commands: Record<string, Definition> = {
+export const commands = {
   outline: {
     tool: "get_outline",
     positional: "nodeId",
@@ -67,7 +67,7 @@ export const commands: Record<string, Definition> = {
     fields: { ...parent, ...daily, "dry-run": boolean("dryRun") },
   },
   "export-opml": { tool: "export_opml", positional: "nodeId", fields: {} },
-};
+} satisfies Record<string, Definition>;
 
 export interface Parsed {
   command: string;
@@ -86,6 +86,10 @@ export interface Parsed {
 }
 
 const optionalString = (name: string) => Flag.String(name).pipe(Flag.optional);
+type FileFlags = {
+  textFile?: ReturnType<typeof optionalString>;
+  file?: ReturnType<typeof optionalString>;
+};
 const switchFlag = (name: string) =>
   Flag.Boolean(name).pipe(Flag.withDefault(false));
 const inputs = {
@@ -131,65 +135,66 @@ export const parse = Effect.fn("CLI.parse")(function* (
       ...values,
     };
   });
-  const friendly = Object.entries(commands).map(([name, definition]) => {
-    const fields: Record<
-      string,
-      Flag.Flag<Option.Option<string | boolean | number>>
-    > = {};
-    for (const [flag, field] of Object.entries(definition.fields)) {
-      const parameter: Flag.Flag<string | boolean | number> =
-        field.type === "boolean"
-          ? Flag.Boolean(flag)
-          : field.type === "integer"
-            ? Flag.Int(flag)
-            : Flag.String(flag);
-      fields[field.wire] = parameter.pipe(Flag.optional);
-    }
-    return Command.make(
-      name,
-      {
-        ...inputs,
-        fields,
-        positional: Argument.String(definition.positional ?? "value").pipe(
-          Argument.variadic({
-            max: definition.many ? undefined : definition.positional ? 1 : 0,
-          }),
-        ),
-        files: {
-          ...(["add", "today", "update"].includes(name)
-            ? { textFile: optionalString("text-file") }
-            : {}),
-          ...(name === "import-opml" ? { file: optionalString("file") } : {}),
+  const friendly = Object.entries<Definition>(commands).map(
+    ([name, definition]) => {
+      const fields: Record<
+        string,
+        Flag.Flag<Option.Option<string | boolean | number>>
+      > = {};
+      for (const [flag, field] of Object.entries(definition.fields)) {
+        const parameter: Flag.Flag<string | boolean | number> =
+          field.type === "boolean"
+            ? Flag.Boolean(flag)
+            : field.type === "integer"
+              ? Flag.Int(flag)
+              : Flag.String(flag);
+        fields[field.wire] = parameter.pipe(Flag.optional);
+      }
+      const files: FileFlags = {};
+      if (["add", "today", "update"].includes(name))
+        files.textFile = optionalString("text-file");
+      if (name === "import-opml") files.file = optionalString("file");
+      return Command.make(
+        name,
+        {
+          ...inputs,
+          fields,
+          positional: Argument.String(definition.positional ?? "value").pipe(
+            Argument.variadic({
+              max: definition.many ? undefined : definition.positional ? 1 : 0,
+            }),
+          ),
+          files,
         },
-      },
-      Effect.fnUntraced(function* (values) {
-        const args: JsonObject = {};
-        for (const [wire, value] of Object.entries(values.fields))
-          if (Option.isSome(value)) args[wire] = value.value;
-        if (definition.positional && values.positional[0] !== undefined) {
-          args[definition.positional] = definition.many
-            ? [...values.positional]
-            : values.positional[0];
-        }
-        yield* capture(name, {
-          tool: definition.tool,
-          fields: args,
-          input: Option.getOrUndefined(values.input),
-          args: Option.getOrUndefined(values.args),
-          textFile: values.files.textFile
-            ? Option.getOrUndefined(values.files.textFile)
-            : undefined,
-          file: values.files.file
-            ? Option.getOrUndefined(values.files.file)
-            : undefined,
-        });
-      }),
-    ).pipe(
-      Command.withDescription(
-        `Call ${definition.tool}. Use dotflowy tools ${definition.tool} for the full server schema.`,
-      ),
-    );
-  });
+        Effect.fnUntraced(function* (values) {
+          const args: JsonObject = {};
+          for (const [wire, value] of Object.entries(values.fields))
+            if (Option.isSome(value)) args[wire] = value.value;
+          if (definition.positional && values.positional[0] !== undefined) {
+            args[definition.positional] = definition.many
+              ? [...values.positional]
+              : values.positional[0];
+          }
+          yield* capture(name, {
+            tool: definition.tool,
+            fields: args,
+            input: Option.getOrUndefined(values.input),
+            args: Option.getOrUndefined(values.args),
+            textFile: values.files.textFile
+              ? Option.getOrUndefined(values.files.textFile)
+              : undefined,
+            file: values.files.file
+              ? Option.getOrUndefined(values.files.file)
+              : undefined,
+          });
+        }),
+      ).pipe(
+        Command.withDescription(
+          `Call ${definition.tool}. Use dotflowy tools ${definition.tool} for the full server schema.`,
+        ),
+      );
+    },
+  );
   const cli = root.pipe(
     Command.withSubcommands([
       ...friendly,

@@ -28,7 +28,7 @@ const credential = {
 interface Deferred {
   promise: Promise<void>;
   resolve: () => void;
-  reject: (reason?: unknown) => void;
+  reject: (cause?: unknown) => void;
 }
 
 const keyring = new Map<string, string>();

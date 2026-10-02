@@ -1,4 +1,4 @@
-import { Clock, Effect, Fiber, Schema } from "effect";
+import { Clock, Effect, Fiber, Predicate, Schema } from "effect";
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -132,7 +132,7 @@ export const login = Effect.fn("OAuth.login")(
         }),
     );
     const address = listener.address();
-    if (!address || typeof address === "string")
+    if (!address || Predicate.isString(address))
       return yield* Effect.fail(fail("No OAuth callback address."));
     const redirectUri = `http://127.0.0.1:${address.port}/callback`;
     const registered = yield* decode(

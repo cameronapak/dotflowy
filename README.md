@@ -49,8 +49,8 @@ Not built yet: sharing.
 ## Command-line access
 
 The [Dotflowy CLI](./cli/README.md) provides all MCP tools, browser login, and
-JSON output for scripts. It is prepared as the unscoped `dotflowy` npm package;
-the one-time `0.1.0` publication bootstrap is still pending.
+JSON output for scripts. Install the published `dotflowy` npm package with
+`npm install --global dotflowy`. Use Node.js 22.19.0 or newer.
 
 ## Run it locally
 

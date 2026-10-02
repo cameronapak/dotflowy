@@ -38,11 +38,8 @@ const entry = (server: string) =>
 const pathFor = (directory: string, server: string) =>
   join(directory, `${createHash("sha256").update(server).digest("hex")}.json`);
 
-const missing = (error: unknown) =>
-  typeof error === "object" &&
-  error !== null &&
-  "code" in error &&
-  error.code === "ENOENT";
+const MissingFile = Schema.Struct({ code: Schema.Literal("ENOENT") });
+const missing = (cause: unknown) => Schema.is(MissingFile)(cause);
 
 // The native bridge is deliberately small; sequencing and failures stay in Effect.
 const readRecord = Effect.fn("Credentials.readRecord")(function* (

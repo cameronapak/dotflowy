@@ -4,10 +4,19 @@ Use Dotflowy from your terminal or an agent script. The CLI calls the same MCP
 endpoint as an agent connector, including its paid-plan requirement and limits.
 It supports all 12 current tools and can discover and call future server tools.
 
-## Install from this checkout
+## Install
 
-The package is prepared for npm distribution but has not been published by this
-change. From the repository root:
+Use Node.js 22.19.0 or newer. Bun is used for development, not required to run
+the installed executable.
+
+```sh
+npm install --global dotflowy
+dotflowy --help
+```
+
+### Install from this checkout
+
+From the repository root:
 
 ```sh
 bun install --cwd cli
@@ -15,9 +24,8 @@ bun run build:cli
 node cli/dist/main.js --help
 ```
 
-To install the executable locally, run `npm pack` inside `cli/`, then
-`npm install --global ./dotflowy-0.1.0.tgz`. Use Node.js 22.19.0 or newer.
-Bun is used for development, not required to run the installed executable.
+To install a local build, run `npm pack` inside `cli/`, then pass the tarball
+path that it prints to `npm install --global`.
 
 ## Sign in
 
