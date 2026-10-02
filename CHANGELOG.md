@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.15.1
+
+### Patch Changes
+
+- c8bc774: Keep the mobile editing toolbar aligned with the visible viewport as the keyboard opens, closes, or pans the page.
+
 ## 1.15.0
 
 ### Minor Changes
