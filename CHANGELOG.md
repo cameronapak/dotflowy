@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.16.1
+
+### Patch Changes
+
+- f1ec3f8: Add a reviewed recovery path that keeps your chosen Classic outline unchanged, archives both sync copies, and can add separate editable copies of experimental content without replacing your current notes.
+
 ## 1.16.0
 
 ### Minor Changes
