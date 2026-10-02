@@ -70,6 +70,7 @@ import {
 } from "./lunora-mcp-store";
 import {
   RetirementOperationInProgress,
+  RetirementOperationRejected,
   retirementDiagnostic,
   retirementPopulation,
   retirementReport,
@@ -724,6 +725,7 @@ function handleApiRequest(
   | BadRequest
   | NodeLimitExceeded
   | RetirementOperationInProgress
+  | RetirementOperationRejected
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -1018,11 +1020,19 @@ function handleApiRequest(
       const targetUserId = yield* resolveRestoreUserId(env, body);
       return json(
         yield* Effect.tryPromise({
-          try: () => runRetirementOperation(env, targetUserId, body.operation),
+          try: () =>
+            runRetirementOperation(
+              env,
+              targetUserId,
+              body.operation,
+              undefined,
+              body.approvedManifestHash,
+            ),
           catch: (cause) => cause,
         }).pipe(
           Effect.catch((cause) =>
-            cause instanceof RetirementOperationInProgress
+            cause instanceof RetirementOperationInProgress ||
+            cause instanceof RetirementOperationRejected
               ? Effect.fail(cause)
               : Effect.die(cause),
           ),
@@ -1074,8 +1084,10 @@ function handleApiRequest(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
       const useLunora = yield* Effect.promise(() =>
-        isLunoraOutlineEnabledForUser(env, () =>
-          classicStub.getKv("account-prefs"),
+        isLunoraOutlineEnabledForUser(
+          env,
+          () => classicStub.getKv("account-prefs"),
+          () => classicStub.isLunoraRetired(),
         ),
       );
       const mcpStore = useLunora
@@ -1265,6 +1277,9 @@ const handler = {
             json({ error: "retirement_operation_in_progress" }, 409),
           ),
         ),
+        Effect.catchTag("RetirementOperationRejected", (e) =>
+          Effect.succeed(json({ error: e.message }, 409)),
+        ),
         // 403 with a machine-readable body the client keys on to show an upgrade
         // prompt (src/data/nodes-client-effect.ts NodesLimitError).
         Effect.catchTag("NodeLimitExceeded", () =>
@@ -1285,10 +1300,7 @@ const handler = {
         return json({ error: "internal error" }, 500);
       })
       .then((response) => {
-        if (
-          url.pathname === "/api/admin/lunora-retirement" &&
-          url.searchParams.get("diagnostic") === "1"
-        ) {
+        if (url.pathname === "/api/admin/lunora-retirement") {
           response.headers.set("cache-control", "private, no-store");
         }
         return response;

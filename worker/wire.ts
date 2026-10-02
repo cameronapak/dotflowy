@@ -125,5 +125,13 @@ export const AdminSnapshotRestorePostBody = Schema.Struct({
 export const AdminLunoraRetirementPostBody = Schema.Struct({
   email: Schema.optional(Schema.String),
   userId: Schema.optional(Schema.String),
-  operation: Schema.Literals(["dry-run", "migrate", "retry", "restore"]),
+  operation: Schema.Literals([
+    "dry-run",
+    "migrate",
+    "retry",
+    "restore",
+    "preserve-classic",
+    "recover-classic",
+  ]),
+  approvedManifestHash: Schema.optional(Schema.String),
 });

@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { DurableObject } from "cloudflare:workers";
+import { Schema } from "effect";
 
 import type {
   ChangeFrame,
@@ -9,11 +10,20 @@ import type {
   ServerMessage,
 } from "../src/data/wire-schema";
 import type { OutlineSnapshot, SnapshotKvRow } from "./backup";
+import type {
+  ClassicRecoveryReceipt,
+  PreserveClassicReceipt,
+} from "./lunora-recovery";
 import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
+import { parseNodeLinks } from "../src/data/node-links";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
+import {
+  classicSnapshotsEquivalent,
+  validateNodeGraph,
+} from "./lunora-retirement";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 
@@ -401,6 +411,46 @@ export class UserOutlineDO extends DurableObject<Env> {
     if (row) throw new Error("OUTLINE_FROZEN");
   }
 
+  private metaValue(key: string): string | null {
+    return (
+      this.sql
+        .exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key)
+        .toArray()[0]?.value ?? null
+    );
+  }
+
+  private putImmutableMeta(key: string, value: string): void {
+    this.sql.exec("INSERT INTO meta (key, value) VALUES (?, ?)", key, value);
+  }
+
+  private disabledStoredPreference(value: string): boolean {
+    try {
+      return (
+        Schema.decodeUnknownOption(
+          Schema.Struct({ enabled: Schema.Literal(false) }),
+        )(JSON.parse(value))._tag === "Some"
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private forceRetiredPreferenceOff(): void {
+    if (!this.isLunoraRetired()) return;
+    const current = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'account-prefs' AND key = 'lunora-beta'",
+      )
+      .toArray()[0];
+    if (current && this.disabledStoredPreference(current.value)) return;
+    this.sql.exec(
+      `INSERT INTO kv (collection, key, value, updatedAt) VALUES ('account-prefs', 'lunora-beta', ?, ?)
+       ON CONFLICT(collection, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+      JSON.stringify({ id: "lunora-beta", enabled: false }),
+      Date.now(),
+    );
+  }
+
   /**
    * `applyBatch`, gated by a free-tier node ceiling. Returns the committed seq,
    * or `null` when the batch would grow the outline past `limit` (the Worker maps
@@ -756,6 +806,19 @@ export class UserOutlineDO extends DurableObject<Env> {
     rows: readonly { key: string; value: unknown }[],
   ): void {
     this.assertWritable();
+    if (
+      this.isLunoraRetired() &&
+      collection === "account-prefs" &&
+      rows.some(
+        (row) =>
+          row.key === "lunora-beta" &&
+          Schema.decodeUnknownOption(
+            Schema.Struct({ enabled: Schema.Literal(false) }),
+          )(row.value)._tag === "None",
+      )
+    ) {
+      throw new Error("retired Lunora preference must remain disabled");
+    }
     const ts = Date.now();
     for (const r of rows) {
       this.sql.exec(
@@ -904,16 +967,34 @@ export class UserOutlineDO extends DurableObject<Env> {
   async restoreToTime(
     point: RestorePoint,
   ): Promise<{ previousBookmark: string; targetBookmark: string }> {
-    this.assertWritable();
-    // The pre-recovery handle FIRST — this is "now", the undo target.
-    const previousBookmark = await this.ctx.storage.getCurrentBookmark();
-    const targetBookmark =
-      point.kind === "bookmark"
-        ? point.bookmark
-        : await this.ctx.storage.getBookmarkForTime(point.at);
-    await this.ctx.storage.onNextSessionRestoreBookmark(targetBookmark);
+    const result = await this.ctx.blockConcurrencyWhile(async () => {
+      this.assertWritable();
+      if (
+        this.metaValue("preserve_classic_receipt") ||
+        this.metaValue("applied_retirement_migration") ||
+        this.metaValue("lunora_retired")
+      ) {
+        throw new Error("PITR is unavailable after retirement has begun");
+      }
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('pitr_armed', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+      );
+      try {
+        // These are local Durable Object storage operations, not remote I/O.
+        const previousBookmark = await this.ctx.storage.getCurrentBookmark();
+        const targetBookmark =
+          point.kind === "bookmark"
+            ? point.bookmark
+            : await this.ctx.storage.getBookmarkForTime(point.at);
+        await this.ctx.storage.onNextSessionRestoreBookmark(targetBookmark);
+        return { previousBookmark, targetBookmark };
+      } catch (error) {
+        this.sql.exec("DELETE FROM meta WHERE key = 'pitr_armed'");
+        throw error;
+      }
+    });
     this.deferredAbort("point-in-time restore");
-    return { previousBookmark, targetBookmark };
+    return result;
   }
 
   /** Restart the DO shortly after the current RPC reply has left, kicking
@@ -975,32 +1056,41 @@ export class UserOutlineDO extends DurableObject<Env> {
     nodes: readonly Node[];
     kv: readonly SnapshotKvRow[];
   }): Promise<{ previousBookmark: string | null; nodes: number; kv: number }> {
-    this.assertWritable();
-    let previousBookmark: string | null = null;
-    try {
-      previousBookmark = await this.ctx.storage.getCurrentBookmark();
-    } catch {
-      // PITR (and its bookmarks) don't exist in local dev; a sync throw from a
-      // missing API must not block the restore itself, which is plain SQL.
-    }
-    this.ctx.storage.transactionSync(() => {
-      this.sql.exec("DELETE FROM nodes");
-      this.sql.exec("DELETE FROM kv");
-      this.sql.exec("DELETE FROM changelog");
-      for (const n of data.nodes) this.putNode(n);
-      for (const r of data.kv) {
-        this.sql.exec(
-          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
-          r.collection,
-          r.key,
-          r.value,
-          r.updatedAt,
+    const previousBookmark = await this.ctx.blockConcurrencyWhile(async () => {
+      this.assertWritable();
+      if (this.preserveClassicReceipt() || this.isLunoraRetired()) {
+        throw new Error(
+          "snapshot replacement is unavailable after permanent retirement",
         );
       }
-      this.setSeq(this.currentSeq() + 1);
-      this.sql.exec(
-        "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
-      );
+      let bookmark: string | null = null;
+      try {
+        bookmark = await this.ctx.storage.getCurrentBookmark();
+      } catch {
+        // PITR bookmarks are unavailable in local development.
+      }
+      this.ctx.storage.transactionSync(() => {
+        this.assertWritable();
+        this.sql.exec("DELETE FROM nodes");
+        this.sql.exec("DELETE FROM kv");
+        this.sql.exec("DELETE FROM changelog");
+        for (const n of data.nodes) this.putNode(n);
+        for (const r of data.kv) {
+          this.sql.exec(
+            "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+            r.collection,
+            r.key,
+            r.value,
+            r.updatedAt,
+          );
+        }
+        this.setSeq(this.currentSeq() + 1);
+        this.sql.exec(
+          "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+        );
+        this.forceRetiredPreferenceOff();
+      });
+      return bookmark;
     });
     this.deferredAbort("snapshot restore");
     return { previousBookmark, nodes: data.nodes.length, kv: data.kv.length };
@@ -1009,6 +1099,9 @@ export class UserOutlineDO extends DurableObject<Env> {
   /** Freeze classic writes and return one atomic pre-migration snapshot. */
   freezeAndExportRetirement(migrationId: string): OutlineSnapshot {
     return this.ctx.storage.transactionSync(() => {
+      if (this.metaValue("pitr_armed")) {
+        throw new Error("retirement cannot begin while PITR is armed");
+      }
       const existing = this.sql
         .exec<{ value: string }>(
           "SELECT value FROM meta WHERE key = 'write_freeze'",
@@ -1064,6 +1157,198 @@ export class UserOutlineDO extends DurableObject<Env> {
     };
   }
 
+  preserveClassicReceipt(): PreserveClassicReceipt | null {
+    const value = this.metaValue("preserve_classic_receipt");
+    // SAFETY: this immutable private meta value is written only below from a PreserveClassicReceipt.
+    return value ? (JSON.parse(value) as PreserveClassicReceipt) : null;
+  }
+
+  preserveClassicRetirement(data: {
+    migrationId: string;
+    classicSnapshotHash: string;
+    lunoraSnapshotHash: string;
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): PreserveClassicReceipt {
+    return this.ctx.storage.transactionSync(() => {
+      const receipt: PreserveClassicReceipt = {
+        policy: "preserve-classic-v1",
+        migrationId: data.migrationId,
+        classicSnapshotHash: data.classicSnapshotHash,
+        lunoraSnapshotHash: data.lunoraSnapshotHash,
+      };
+      const existing = this.preserveClassicReceipt();
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(receipt)) {
+          throw new Error(
+            "classic preservation is already bound to another manifest",
+          );
+        }
+        return existing;
+      }
+      if (this.retirementStatus().frozenBy !== data.migrationId) {
+        throw new Error("matching classic write fence is required");
+      }
+      const actualNodes = this.getNodes();
+      const actualKv = this.readRows<SnapshotKvRow>(
+        "SELECT collection, key, value, updatedAt FROM kv",
+      );
+      if (
+        !classicSnapshotsEquivalent({ nodes: actualNodes, kv: actualKv }, data)
+      ) {
+        throw new Error(
+          "classic content does not match the preserved snapshot",
+        );
+      }
+      const preference = actualKv.find(
+        (row) =>
+          row.collection === "account-prefs" && row.key === "lunora-beta",
+      );
+      if (!preference || !this.disabledStoredPreference(preference.value)) {
+        throw new Error("classic preservation requires disabled preference");
+      }
+      this.putImmutableMeta(
+        "preserve_classic_receipt",
+        JSON.stringify(receipt),
+      );
+      return receipt;
+    });
+  }
+
+  finalizeRetirementRouting(migrationId: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const existing = this.metaValue("lunora_retired");
+      if (existing) {
+        if (existing !== migrationId)
+          throw new Error("Lunora retirement is bound to another migration");
+        return;
+      }
+      const status = this.retirementStatus();
+      const preserved = this.preserveClassicReceipt();
+      if (
+        status.frozenBy !== migrationId ||
+        (status.appliedMigrationId !== migrationId &&
+          preserved?.migrationId !== migrationId)
+      ) {
+        throw new Error("matching fenced retirement is required");
+      }
+      this.putImmutableMeta("lunora_retired", migrationId);
+      this.forceRetiredPreferenceOff();
+    });
+  }
+
+  isLunoraRetired(): boolean {
+    return this.metaValue("lunora_retired") !== null;
+  }
+
+  classicRecoveryReceipt(): ClassicRecoveryReceipt | null {
+    const value = this.metaValue("classic_recovery_receipt");
+    // SAFETY: this immutable private meta value is written only below from a ClassicRecoveryReceipt.
+    return value ? (JSON.parse(value) as ClassicRecoveryReceipt) : null;
+  }
+
+  importClassicRecovery(data: {
+    migrationId: string;
+    manifestHash: string;
+    rootId: string | null;
+    nodes: readonly Node[];
+  }): ClassicRecoveryReceipt {
+    const committed = this.ctx.storage.transactionSync(() => {
+      const existing = this.classicRecoveryReceipt();
+      if (existing) {
+        if (
+          existing.migrationId !== data.migrationId ||
+          existing.manifestHash !== data.manifestHash
+        ) {
+          throw new Error(
+            "classic recovery is already bound to another manifest",
+          );
+        }
+        const frames: ChangeFrame[] = [];
+        return { receipt: existing, frames };
+      }
+      const preserved = this.preserveClassicReceipt();
+      if (
+        preserved?.migrationId !== data.migrationId ||
+        this.metaValue("lunora_retired") !== data.migrationId
+      ) {
+        throw new Error("recovery requires preserved and retired Classic");
+      }
+      this.assertWritable();
+      if (
+        (data.rootId === null && data.nodes.length !== 0) ||
+        (data.rootId !== null &&
+          (data.nodes.filter((node) => node.parentId === null).length !== 1 ||
+            !data.nodes.some(
+              (node) => node.id === data.rootId && node.parentId === null,
+            ))) ||
+        !validateNodeGraph(data.nodes).ok
+      ) {
+        throw new Error("recovery payload is not a detached rooted graph");
+      }
+      const current = this.getNodes();
+      if (!validateNodeGraph(current).ok)
+        throw new Error("current Classic graph is invalid");
+      const reserved = new Set<string>();
+      for (const node of current) {
+        reserved.add(node.id);
+        for (const id of [
+          node.parentId,
+          node.prevSiblingId,
+          node.mirrorOf,
+          ...parseNodeLinks(node.text),
+        ])
+          if (id !== null) reserved.add(id);
+      }
+      for (const row of this.readRows<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'daily-index'",
+      )) {
+        try {
+          const claim = Schema.decodeUnknownOption(
+            Schema.Struct({ nodeId: Schema.String }),
+          )(JSON.parse(row.value));
+          if (claim._tag === "Some") reserved.add(claim.value.nodeId);
+        } catch {
+          // Malformed side data claims no usable id.
+        }
+      }
+      if (data.nodes.some((node) => reserved.has(node.id)))
+        throw new Error("recovery node id collides with Classic");
+
+      let imported = [...data.nodes];
+      if (data.rootId !== null) {
+        const roots = current.filter((node) => node.parentId === null);
+        const followed = new Set(roots.map((node) => node.prevSiblingId));
+        const tail = roots.find((node) => !followed.has(node.id)) ?? null;
+        imported = imported.map((node) =>
+          node.id === data.rootId
+            ? { ...node, parentId: null, prevSiblingId: tail?.id ?? null }
+            : node,
+        );
+      }
+      if (!validateNodeGraph([...current, ...imported]).ok)
+        throw new Error("recovery cannot attach to current Classic graph");
+      const frames = this.recordChange(
+        imported.map((node) => this.putNode(node)),
+      );
+      const receipt: ClassicRecoveryReceipt = {
+        migrationId: data.migrationId,
+        manifestHash: data.manifestHash,
+        applied: true,
+        seq: frames.at(-1)?.seq ?? this.currentSeq(),
+        rootId: data.rootId,
+        nodes: imported.length,
+      };
+      this.putImmutableMeta(
+        "classic_recovery_receipt",
+        JSON.stringify(receipt),
+      );
+      return { receipt, frames };
+    });
+    this.broadcastChange(committed.frames);
+    return committed.receipt;
+  }
+
   /** Replace content while retaining classic changelog and migration fence. */
   restoreRetirementSnapshot(data: {
     migrationId: string;
@@ -1071,6 +1356,11 @@ export class UserOutlineDO extends DurableObject<Env> {
     kv: readonly SnapshotKvRow[];
   }): { applied: boolean; nodes: number; kv: number } {
     return this.ctx.storage.transactionSync(() => {
+      if (this.preserveClassicReceipt() || this.isLunoraRetired()) {
+        throw new Error(
+          "replacement cannot overwrite permanently retired Classic",
+        );
+      }
       const status = this.retirementStatus();
       if (status.appliedMigrationId === data.migrationId) {
         return { applied: false, nodes: this.nodeCount(), kv: data.kv.length };
@@ -1114,6 +1404,9 @@ export class UserOutlineDO extends DurableObject<Env> {
     kv: readonly SnapshotKvRow[];
   }): { nodes: number; kv: number } {
     return this.ctx.storage.transactionSync(() => {
+      if (this.preserveClassicReceipt()) {
+        throw new Error("rollback cannot overwrite preserved Classic");
+      }
       const status = this.retirementStatus();
       if (status.frozenBy !== data.migrationId) {
         throw new Error("matching classic write fence is required");
@@ -1139,6 +1432,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       this.sql.exec(
         "DELETE FROM meta WHERE key = 'applied_retirement_migration'",
       );
+      this.forceRetiredPreferenceOff();
       return { nodes: data.nodes.length, kv: data.kv.length };
     });
   }

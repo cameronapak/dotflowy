@@ -8,6 +8,11 @@ import { OutlineSnapshotSchema, SNAPSHOT_VERSION } from "./backup";
 import { resolveUserId } from "./identity";
 import { createLunoraRetirementClient } from "./lunora-mcp-store";
 import {
+  ClassicRecoveryManifestSchema,
+  planClassicRecovery,
+} from "./lunora-recovery";
+import {
+  LunoraRetirementArchiveSchema,
   LunoraRetirementSnapshotSchema,
   RETIREMENT_SNAPSHOT_VERSION,
   buildClassicTarget,
@@ -21,6 +26,8 @@ import {
   snapshotCounts,
   validateClassicSnapshot,
   validateLunoraSnapshot,
+  validateLunoraRetirementArchive,
+  type LunoraRetirementArchive,
   type LunoraRetirementSnapshot,
   type RetirementClassification,
 } from "./lunora-retirement";
@@ -35,6 +42,20 @@ type RetirementEnv = {
 
 export interface RetirementBackends {
   classic: {
+    preserveClassicReceipt(): Promise<
+      ReturnType<UserOutlineDO["preserveClassicReceipt"]>
+    >;
+    preserveClassicRetirement(
+      data: Parameters<UserOutlineDO["preserveClassicRetirement"]>[0],
+    ): Promise<ReturnType<UserOutlineDO["preserveClassicRetirement"]>>;
+    finalizeRetirementRouting(migrationId: string): Promise<void>;
+    isLunoraRetired(): Promise<boolean>;
+    classicRecoveryReceipt(): Promise<
+      ReturnType<UserOutlineDO["classicRecoveryReceipt"]>
+    >;
+    importClassicRecovery(
+      data: Parameters<UserOutlineDO["importClassicRecovery"]>[0],
+    ): Promise<ReturnType<UserOutlineDO["importClassicRecovery"]>>;
     exportSnapshot(): Promise<OutlineSnapshot>;
     freezeAndExportRetirement(migrationId: string): Promise<OutlineSnapshot>;
     getNodes(): Promise<readonly Node[]>;
@@ -52,6 +73,10 @@ export interface RetirementBackends {
     retirementStatus(): Promise<RetirementStatus>;
   };
   lunora: {
+    freezeAndExportArchive(
+      migrationId: string,
+      now: number,
+    ): Promise<LunoraRetirementArchive>;
     inspect(): Promise<{
       retirement: {
         migrationId: string;
@@ -72,11 +97,20 @@ export interface RetirementBackends {
   };
 }
 
-export type RetirementOperation = "dry-run" | "migrate" | "retry" | "restore";
+export type RetirementOperation =
+  | "dry-run"
+  | "migrate"
+  | "retry"
+  | "restore"
+  | "preserve-classic"
+  | "recover-classic";
 
 export interface RetirementRecord {
   userId: string;
   migrationId: string;
+  policy: "lunora-to-classic-v1" | "preserve-classic-v1";
+  recoveryManifestKey: string | null;
+  recoveryManifestHash: string | null;
   state: string;
   classification: RetirementClassification | null;
   result: string | null;
@@ -96,6 +130,11 @@ export interface RetirementRecord {
 export class RetirementOperationInProgress extends Schema.TaggedError<RetirementOperationInProgress>()(
   "RetirementOperationInProgress",
   { userId: Schema.String },
+) {}
+
+export class RetirementOperationRejected extends Schema.TaggedError<RetirementOperationRejected>()(
+  "RetirementOperationRejected",
+  { message: Schema.String },
 ) {}
 
 interface AttemptRecord {
@@ -166,7 +205,7 @@ async function updateRecord(
     `UPDATE lunora_retirement SET
       state = ?, classification = ?, result = ?, updatedAt = ?, completedAt = ?,
       classicSnapshotKey = ?, classicSnapshotHash = ?, lunoraSnapshotKey = ?,
-      lunoraSnapshotHash = ?, counts = ?, failureReason = ?
+      lunoraSnapshotHash = ?, counts = ?, failureReason = ?, recoveryManifestKey = ?, recoveryManifestHash = ?
      WHERE userId = ? AND migrationId = ?`,
   )
     .bind(
@@ -181,6 +220,8 @@ async function updateRecord(
       next.lunoraSnapshotHash,
       next.counts,
       next.failureReason,
+      next.recoveryManifestKey,
+      next.recoveryManifestHash,
       next.userId,
       next.migrationId,
     )
@@ -229,7 +270,10 @@ async function readVerifiedObject<A>(
   } catch {
     throw new Error(`retirement snapshot ${key} is not JSON`);
   }
-  return { value: Schema.decodeUnknownSync(schema)(raw), hash };
+  const decoded = Schema.decodeUnknownOption(schema)(raw);
+  if (decoded._tag === "None")
+    throw new Error(`retirement snapshot ${key} schema rejected`);
+  return { value: decoded.value, hash };
 }
 
 async function storeImmutable<A>(
@@ -272,6 +316,18 @@ function lunoraSnapshotsEquivalent(
     migrateState: rows(snapshot.migrateState),
   });
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+function rawArchivesEquivalent(
+  left: LunoraRetirementArchive,
+  right: LunoraRetirementArchive,
+): boolean {
+  const rows = (raw: LunoraRetirementArchive["raw"]) =>
+    Object.entries(raw).map(([table, values]) => [
+      table,
+      values.map((value) => JSON.stringify(value)).sort(),
+    ]);
+  return JSON.stringify(rows(left.raw)) === JSON.stringify(rows(right.raw));
 }
 
 async function inspect(
@@ -428,11 +484,40 @@ async function migrate(
         "Lunora content changed since the immutable backup; operator review required",
       );
     }
+    // Retain exact source documents as well as the strict replacement projection.
+    const currentArchive = Schema.decodeUnknownSync(
+      LunoraRetirementArchiveSchema,
+    )(
+      await lunoraClient.freezeAndExportArchive(
+        record.migrationId,
+        record.startedAt,
+      ),
+    );
+    const archive = await storeImmutable(
+      env,
+      `${lunoraKey}.archive`,
+      currentArchive,
+      LunoraRetirementArchiveSchema,
+    );
+    if (
+      !validateLunoraRetirementArchive(archive.value, record.userId).ok ||
+      !lunoraSnapshotsEquivalent(archive.value.snapshot, lunoraBackup.value) ||
+      !validateLunoraRetirementArchive(currentArchive, record.userId).ok ||
+      !lunoraSnapshotsEquivalent(currentArchive.snapshot, lunoraBackup.value) ||
+      !rawArchivesEquivalent(archive.value, currentArchive)
+    ) {
+      throw new Error(
+        "raw experimental archive does not match the replacement snapshot",
+      );
+    }
     record = await updateRecord(env, record, {
       state: "backups-verified",
       lunoraSnapshotKey: lunoraKey,
       lunoraSnapshotHash: lunoraBackup.hash,
-      counts: JSON.stringify(snapshotCounts(lunoraBackup.value)),
+      counts: JSON.stringify({
+        ...snapshotCounts(lunoraBackup.value),
+        rawArchiveHash: archive.hash,
+      }),
     });
 
     const classicValidation = validateClassicSnapshot(classicBackup.value);
@@ -489,6 +574,7 @@ async function migrate(
 
     await lunoraClient.markRetired(record.migrationId, Date.now());
     record = await updateRecord(env, record, { state: "lunora-retired" });
+    await stub.finalizeRetirementRouting(record.migrationId);
     await stub.releaseRetirementFreeze(record.migrationId);
     return updateRecord(env, record, {
       state: "completed",
@@ -533,11 +619,304 @@ async function migrate(
   }
 }
 
+/** Explicit policy revision. Old immutable objects and attempt records remain. */
+async function selectPreserveClassicPolicy(
+  env: RetirementEnv,
+  record: RetirementRecord,
+  backends: RetirementBackends,
+): Promise<RetirementRecord> {
+  if (record.policy === "preserve-classic-v1" && record.state !== "failed")
+    return record;
+  const status = await backends.classic.retirementStatus();
+  const receipt = await backends.classic.preserveClassicReceipt();
+  const experimental = await backends.lunora.inspect();
+  if (
+    record.state === "completed" ||
+    status.frozenBy ||
+    status.appliedMigrationId ||
+    receipt ||
+    experimental.retirement
+  ) {
+    throw new RetirementOperationRejected({
+      message:
+        "a new preserve-Classic revision requires unfenced, unmodified backends",
+    });
+  }
+  if (isLunoraPreferenceEnabled(await backends.classic.exportSnapshot()))
+    throw new RetirementOperationRejected({
+      message:
+        "enabled accounts require full experimental migration, not preserve-Classic",
+    });
+  const now = Date.now();
+  await env.DB.prepare(
+    `UPDATE lunora_retirement SET migrationId = ?, policy = 'preserve-classic-v1', state = 'created', classification = NULL, result = NULL, startedAt = ?, updatedAt = ?, completedAt = NULL, classicSnapshotKey = NULL, classicSnapshotHash = NULL, lunoraSnapshotKey = NULL, lunoraSnapshotHash = NULL, recoveryManifestKey = NULL, recoveryManifestHash = NULL, counts = NULL, failureReason = NULL WHERE userId = ? AND activeOperationId = ?`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      now,
+      now,
+      record.userId,
+      record.activeOperationId,
+    )
+    .run();
+  const selected = await getRecord(env, record.userId);
+  if (!selected) throw new Error("preserve-Classic record missing");
+  return selected;
+}
+
+async function recoveryManifest(env: RetirementEnv, record: RetirementRecord) {
+  if (!record.recoveryManifestKey || !record.recoveryManifestHash)
+    throw new Error("verified recovery manifest is unavailable");
+  const manifest = await readVerifiedObject(
+    env,
+    record.recoveryManifestKey,
+    ClassicRecoveryManifestSchema,
+  );
+  if (
+    manifest.hash !== record.recoveryManifestHash ||
+    manifest.value.userId !== record.userId ||
+    manifest.value.migrationId !== record.migrationId ||
+    manifest.value.classicSnapshotHash !== record.classicSnapshotHash ||
+    manifest.value.lunoraSnapshotHash !== record.lunoraSnapshotHash
+  )
+    throw new Error("recovery manifest binding rejected");
+  return manifest;
+}
+
+async function preserveClassic(
+  env: RetirementEnv,
+  initial: RetirementRecord,
+  backends: RetirementBackends,
+): Promise<RetirementRecord> {
+  let record = initial;
+  const stub = backends.classic;
+  const experimental = backends.lunora;
+  try {
+    let receipt = await stub.preserveClassicReceipt();
+    if (!receipt) {
+      const current = await stub.freezeAndExportRetirement(record.migrationId);
+      const validation = validateClassicSnapshot(current);
+      if (!validation.ok) throw new Error(validation.reason);
+      const classicKey = retirementSnapshotKey(
+        record.userId,
+        record.migrationId,
+        "classic",
+      );
+      const classic = await storeImmutable(
+        env,
+        classicKey,
+        current,
+        OutlineSnapshotSchema,
+      );
+      if (
+        (record.classicSnapshotHash &&
+          classic.hash !== record.classicSnapshotHash) ||
+        !classicSnapshotsEquivalent(classic.value, current)
+      )
+        throw new Error(
+          "Classic changed since archive; a new reviewed revision is required",
+        );
+      record = await updateRecord(env, record, {
+        state: "classic-backed-up",
+        classicSnapshotKey: classicKey,
+        classicSnapshotHash: classic.hash,
+      });
+      const currentArchive = Schema.decodeUnknownSync(
+        LunoraRetirementArchiveSchema,
+      )(
+        await experimental.freezeAndExportArchive(
+          record.migrationId,
+          record.startedAt,
+        ),
+      );
+      const rawValidation = validateLunoraRetirementArchive(
+        currentArchive,
+        record.userId,
+      );
+      if (!rawValidation.ok) throw new Error(rawValidation.reason);
+      const archiveKey = `${retirementSnapshotKey(record.userId, record.migrationId, "lunora")}.archive`;
+      const archive = await storeImmutable(
+        env,
+        archiveKey,
+        currentArchive,
+        LunoraRetirementArchiveSchema,
+      );
+      if (
+        (record.lunoraSnapshotHash &&
+          archive.hash !== record.lunoraSnapshotHash) ||
+        !rawArchivesEquivalent(archive.value, currentArchive)
+      )
+        throw new Error(
+          "experimental data changed since archive; a new reviewed revision is required",
+        );
+      const archiveValidation = validateLunoraRetirementArchive(
+        archive.value,
+        record.userId,
+      );
+      if (!archiveValidation.ok) throw new Error(archiveValidation.reason);
+      const plan = planClassicRecovery(classic.value, archive.value.snapshot, {
+        userId: record.userId,
+        timestamp: record.startedAt,
+        newId: () => crypto.randomUUID(),
+      });
+      const manifestValue = ClassicRecoveryManifestSchema.make({
+        ...plan,
+        version: 1,
+        userId: record.userId,
+        migrationId: record.migrationId,
+        createdAt: record.startedAt,
+        classicSnapshotHash: classic.hash,
+        lunoraSnapshotHash: archive.hash,
+      });
+      const manifest = await storeImmutable(
+        env,
+        `${classicKey}.recovery`,
+        manifestValue,
+        ClassicRecoveryManifestSchema,
+      );
+      record = await updateRecord(env, record, {
+        state: "backups-verified",
+        lunoraSnapshotKey: archiveKey,
+        lunoraSnapshotHash: archive.hash,
+        recoveryManifestKey: `${classicKey}.recovery`,
+        recoveryManifestHash: manifest.hash,
+        counts: JSON.stringify({
+          ...snapshotCounts(archive.value.snapshot),
+          recovery: {
+            ...manifest.value.summary,
+            copies: manifest.value.nodes.length,
+            adaptations: manifest.value.adaptations.length,
+            links: manifest.value.links,
+          },
+        }),
+      });
+      await recoveryManifest(env, record);
+      receipt = await stub.preserveClassicRetirement({
+        migrationId: record.migrationId,
+        classicSnapshotHash: classic.hash,
+        lunoraSnapshotHash: archive.hash,
+        nodes: classic.value.nodes,
+        kv: classic.value.kv,
+      });
+    }
+    if (
+      receipt.migrationId !== record.migrationId ||
+      receipt.classicSnapshotHash !== record.classicSnapshotHash ||
+      receipt.lunoraSnapshotHash !== record.lunoraSnapshotHash
+    )
+      throw new Error("preserve-Classic receipt binding rejected");
+    // Once this receipt exists, never export/replace/replan current Classic on retry.
+    const classic = await readVerifiedObject(
+      env,
+      record.classicSnapshotKey ?? "",
+      OutlineSnapshotSchema,
+    );
+    const archive = await readVerifiedObject(
+      env,
+      record.lunoraSnapshotKey ?? "",
+      LunoraRetirementArchiveSchema,
+    );
+    if (
+      classic.hash !== receipt.classicSnapshotHash ||
+      archive.hash !== receipt.lunoraSnapshotHash
+    )
+      throw new Error("preserved archive hash mismatch");
+    await recoveryManifest(env, record);
+    await experimental.markRetired(record.migrationId, Date.now());
+    await stub.finalizeRetirementRouting(record.migrationId);
+    await stub.releaseRetirementFreeze(record.migrationId);
+    return updateRecord(env, record, {
+      state: "completed",
+      result: "classic-preserved",
+      completedAt: Date.now(),
+      failureReason: null,
+    });
+  } catch (error) {
+    try {
+      const receipt = await stub.preserveClassicReceipt();
+      const status = (await experimental.inspect()).retirement;
+      if (receipt || status?.status === "retired")
+        return updateRecord(env, record, {
+          state: "uncertain",
+          result: "operator-recovery-required",
+          failureReason: failureReason(error),
+        });
+      await experimental.releaseFreeze(record.migrationId);
+      await stub.releaseRetirementFreeze(record.migrationId);
+      return updateRecord(env, record, {
+        state: "failed",
+        result: "failed-before-preservation",
+        failureReason: failureReason(error),
+      });
+    } catch {
+      return updateRecord(env, record, {
+        state: "uncertain",
+        result: "operator-recovery-required",
+        failureReason:
+          "preserve-Classic recovery state could not be established",
+      });
+    }
+  }
+}
+
+async function recoverClassic(
+  env: RetirementEnv,
+  record: RetirementRecord,
+  backends: RetirementBackends,
+  approvedManifestHash?: string,
+): Promise<RetirementRecord> {
+  if (
+    record.state !== "completed" ||
+    record.policy !== "preserve-classic-v1" ||
+    !approvedManifestHash ||
+    approvedManifestHash !== record.recoveryManifestHash
+  )
+    throw new RetirementOperationRejected({
+      message:
+        "recovery requires completed preservation and exact reviewed manifest hash",
+    });
+  const manifest = await recoveryManifest(env, record);
+  const classic = await readVerifiedObject(
+    env,
+    record.classicSnapshotKey ?? "",
+    OutlineSnapshotSchema,
+  );
+  const archive = await readVerifiedObject(
+    env,
+    record.lunoraSnapshotKey ?? "",
+    LunoraRetirementArchiveSchema,
+  );
+  if (
+    classic.hash !== record.classicSnapshotHash ||
+    archive.hash !== record.lunoraSnapshotHash ||
+    !validateLunoraRetirementArchive(archive.value, record.userId).ok
+  )
+    throw new Error("recovery archives could not be verified");
+  const receipt = await backends.classic.importClassicRecovery({
+    migrationId: record.migrationId,
+    manifestHash: manifest.hash,
+    rootId: manifest.value.rootId,
+    nodes: manifest.value.nodes,
+  });
+  if (
+    receipt.migrationId !== record.migrationId ||
+    receipt.manifestHash !== manifest.hash ||
+    receipt.rootId !== manifest.value.rootId ||
+    receipt.nodes !== manifest.value.nodes.length
+  )
+    throw new Error("recovery import receipt rejected");
+  return updateRecord(env, record, {
+    result: "classic-recovery-imported",
+    failureReason: null,
+  });
+}
+
 export async function runRetirementOperation(
   env: RetirementEnv,
   userId: string,
   operation: RetirementOperation,
   backends = retirementBackends(env, userId),
+  approvedManifestHash?: string,
 ): Promise<RetirementRecord & { dryRun?: unknown }> {
   await ensureRecord(env, userId, Date.now());
   const operationId = crypto.randomUUID();
@@ -556,9 +935,12 @@ export async function runRetirementOperation(
   try {
     const result = await performRetirementOperation(
       env,
-      record,
+      operation === "preserve-classic"
+        ? await selectPreserveClassicPolicy(env, record, backends)
+        : record,
       operation,
       backends,
+      approvedManifestHash,
     );
     return {
       ...result,
@@ -581,8 +963,33 @@ async function performRetirementOperation(
   record: RetirementRecord,
   operation: RetirementOperation,
   backends: RetirementBackends,
+  approvedManifestHash?: string,
 ): Promise<RetirementRecord & { dryRun?: unknown }> {
   const userId = record.userId;
+  if (operation === "recover-classic") {
+    const result = await recoverClassic(
+      env,
+      record,
+      backends,
+      approvedManifestHash,
+    );
+    await appendAttempt(env, result, operation);
+    return result;
+  }
+  if (record.policy === "preserve-classic-v1") {
+    if (operation === "migrate" || operation === "restore")
+      throw new RetirementOperationRejected({
+        message:
+          "replacement and rollback operations cannot overwrite chosen Classic",
+      });
+    if (record.state === "completed" || operation === "dry-run") {
+      await appendAttempt(env, record, operation);
+      return record;
+    }
+    const result = await preserveClassic(env, record, backends);
+    await appendAttempt(env, result, operation);
+    return result;
+  }
   if (
     operation !== "restore" &&
     (record.state === "completed" || record.state === "uncertain")

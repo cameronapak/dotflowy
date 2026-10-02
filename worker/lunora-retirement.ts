@@ -9,6 +9,7 @@ export const RETIREMENT_SNAPSHOT_VERSION = 1;
 export const RETIREMENT_PREFIX = "lunora-retirement";
 
 const OwnedRow = { userId: Schema.String };
+const { id: _nodeId, ...NodeSourceFields } = NodeSchema.fields;
 
 export const LunoraNodeSchema = Schema.Struct({
   ...NodeSchema.fields,
@@ -55,6 +56,29 @@ export const LunoraRetirementSnapshotSchema = Schema.Struct({
 });
 export type LunoraRetirementSnapshot = Schema.Schema.Type<
   typeof LunoraRetirementSnapshotSchema
+>;
+
+/** Exact Lunora documents. JsonObject validates JSON while retaining every key. */
+export const LunoraRawDocumentSchema = Schema.JsonObject;
+export type LunoraRawDocument = Schema.Schema.Type<
+  typeof LunoraRawDocumentSchema
+>;
+
+export const LunoraRetirementArchiveSchema = Schema.Struct({
+  version: Schema.Literal(1),
+  userId: Schema.String,
+  exportedAt: Schema.Number,
+  snapshot: LunoraRetirementSnapshotSchema,
+  raw: Schema.Struct({
+    nodes: Schema.Array(LunoraRawDocumentSchema),
+    dailyIndex: Schema.Array(LunoraRawDocumentSchema),
+    tagColors: Schema.Array(LunoraRawDocumentSchema),
+    savedQueries: Schema.Array(LunoraRawDocumentSchema),
+    migrateState: Schema.Array(LunoraRawDocumentSchema),
+  }),
+});
+export type LunoraRetirementArchive = Schema.Schema.Type<
+  typeof LunoraRetirementArchiveSchema
 >;
 
 export type RetirementClassification =
@@ -304,6 +328,196 @@ export function validateLunoraSnapshot(
   const duplicateQuery = duplicate(snapshot.savedQueries.map((row) => row.id));
   if (duplicateQuery)
     return { ok: false, reason: `duplicate saved query id ${duplicateQuery}` };
+  return { ok: true };
+}
+
+/** Validate archive authority and raw/projected identity without validating raw graph edges. */
+export function validateLunoraRetirementArchive(
+  value: LunoraRetirementArchive,
+  expectedUserId: string,
+): ValidationResult {
+  const decoded = Schema.decodeUnknownOption(LunoraRetirementArchiveSchema)(
+    value,
+  );
+  if (decoded._tag === "None") {
+    return { ok: false, reason: "Lunora retirement archive schema rejected" };
+  }
+  const archive = decoded.value;
+  if (
+    archive.userId !== expectedUserId ||
+    archive.snapshot.userId !== expectedUserId
+  ) {
+    return { ok: false, reason: "Lunora archive user does not match target" };
+  }
+  if (archive.snapshot.exportedAt !== archive.exportedAt) {
+    return { ok: false, reason: "Lunora archive export timestamps differ" };
+  }
+  if (archive.snapshot.version !== archive.version) {
+    return { ok: false, reason: "Lunora archive versions differ" };
+  }
+  for (const rows of [
+    archive.snapshot.nodes,
+    archive.snapshot.dailyIndex,
+    archive.snapshot.tagColors,
+    archive.snapshot.savedQueries,
+    archive.snapshot.migrateState,
+  ]) {
+    if (rows.some((row) => row.userId !== expectedUserId)) {
+      return { ok: false, reason: "Lunora projected row ownership mismatch" };
+    }
+  }
+
+  for (const [table, rows] of Object.entries(archive.raw)) {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (row.userId !== expectedUserId) {
+        return { ok: false, reason: `raw ${table} row ownership mismatch` };
+      }
+      const documentId = Schema.decodeUnknownOption(Schema.String)(row._id);
+      if (documentId._tag === "None" || documentId.value.length === 0) {
+        return { ok: false, reason: `raw ${table} row has no document id` };
+      }
+      if (ids.has(documentId.value)) {
+        return {
+          ok: false,
+          reason: `duplicate raw ${table} document id ${documentId.value}`,
+        };
+      }
+      ids.add(documentId.value);
+    }
+  }
+
+  const { raw, snapshot } = archive;
+  if (
+    raw.nodes.length !== snapshot.nodes.length ||
+    raw.dailyIndex.length !== snapshot.dailyIndex.length ||
+    raw.tagColors.length !== snapshot.tagColors.length ||
+    raw.savedQueries.length !== snapshot.savedQueries.length ||
+    raw.migrateState.length !== snapshot.migrateState.length
+  ) {
+    return { ok: false, reason: "raw and projected populations differ" };
+  }
+  // Validate each raw row as the exact source shape for its projection. This
+  // deliberately does not validate parent/sibling/mirror graph references.
+  const projectedSchemas = {
+    nodes: Schema.Struct({
+      _id: Schema.String,
+      _creationTime: Schema.Number,
+      ...NodeSourceFields,
+      ...OwnedRow,
+    }),
+    dailyIndex: Schema.Struct({
+      _id: Schema.String,
+      _creationTime: Schema.Number,
+      key: Schema.String,
+      nodeId: Schema.String,
+      touchedAt: Schema.Number,
+      ...OwnedRow,
+    }),
+    tagColors: Schema.Struct({
+      _id: Schema.String,
+      _creationTime: Schema.Number,
+      tag: Schema.String,
+      color: Schema.String,
+      ...OwnedRow,
+    }),
+    savedQueries: Schema.Struct({
+      _id: Schema.String,
+      _creationTime: Schema.Number,
+      name: Schema.String,
+      query: Schema.String,
+      createdAt: Schema.Number,
+      ...OwnedRow,
+    }),
+    migrateState: Schema.Struct({
+      _id: Schema.String,
+      _creationTime: Schema.Number,
+      nodesAt: Schema.NullOr(Schema.Number),
+      kvAt: Schema.NullOr(Schema.Number),
+      ...OwnedRow,
+    }),
+  } as const;
+  for (const table of [
+    "nodes",
+    "dailyIndex",
+    "tagColors",
+    "savedQueries",
+    "migrateState",
+  ] as const) {
+    if (
+      raw[table].some(
+        (row) =>
+          Schema.decodeUnknownOption(projectedSchemas[table])(row)._tag ===
+          "None",
+      )
+    ) {
+      return { ok: false, reason: `raw ${table} row cannot be projected` };
+    }
+  }
+
+  const projectionsCorrespond =
+    snapshot.nodes.every((row, index) => {
+      const source = raw.nodes[index];
+      if (!source) return false;
+      return (
+        row.id === source._id &&
+        row.parentId === source.parentId &&
+        row.prevSiblingId === source.prevSiblingId &&
+        row.text === source.text &&
+        row.isTask === source.isTask &&
+        row.completed === source.completed &&
+        row.collapsed === source.collapsed &&
+        row.bookmarkedAt === source.bookmarkedAt &&
+        row.mirrorOf === source.mirrorOf &&
+        row.createdAt === source.createdAt &&
+        row.updatedAt === source.updatedAt &&
+        row.origin === source.origin &&
+        row.kind === source.kind &&
+        row.userId === source.userId
+      );
+    }) &&
+    snapshot.dailyIndex.every((row, index) => {
+      const source = raw.dailyIndex[index];
+      return (
+        source !== undefined &&
+        row.key === source.key &&
+        row.nodeId === source.nodeId &&
+        row.touchedAt === source.touchedAt &&
+        row.userId === source.userId
+      );
+    }) &&
+    snapshot.tagColors.every((row, index) => {
+      const source = raw.tagColors[index];
+      return (
+        source !== undefined &&
+        row.tag === source.tag &&
+        row.color === source.color &&
+        row.userId === source.userId
+      );
+    }) &&
+    snapshot.savedQueries.every((row, index) => {
+      const source = raw.savedQueries[index];
+      return (
+        source !== undefined &&
+        row.id === source._id &&
+        row.name === source.name &&
+        row.query === source.query &&
+        row.createdAt === source.createdAt &&
+        row.userId === source.userId
+      );
+    }) &&
+    snapshot.migrateState.every((row, index) => {
+      const source = raw.migrateState[index];
+      return (
+        source !== undefined &&
+        row.nodesAt === source.nodesAt &&
+        row.kvAt === source.kvAt &&
+        row.userId === source.userId
+      );
+    });
+  if (!projectionsCorrespond) {
+    return { ok: false, reason: "raw and projected values differ" };
+  }
   return { ok: true };
 }
 

@@ -21,6 +21,10 @@ import type { KvClaim } from "./outline-do";
 
 import { internal } from "../lunora/_generated/api";
 import { NodeSchema, type ChangeOp, type Node } from "../src/data/wire-schema";
+import {
+  LunoraRetirementArchiveSchema,
+  type LunoraRetirementArchive,
+} from "./lunora-retirement";
 
 /** Generated applyChangeOps ops input — codegen drops .nullable() to non-null. */
 type GeneratedApplyChangeOps = ArgsOf<
@@ -97,6 +101,21 @@ export function createLunoraRetirementClient(
         migrationId,
         now,
       }),
+    freezeAndExportArchive: async (
+      migrationId: string,
+      now: number,
+    ): Promise<LunoraRetirementArchive> => {
+      const decoded = Schema.decodeUnknownOption(LunoraRetirementArchiveSchema)(
+        await client.call(internal.mcp.freezeAndExportArchiveRetirement, {
+          userId,
+          migrationId,
+          now,
+        }),
+      );
+      if (decoded._tag === "None")
+        throw new Error("experimental retirement archive schema rejected");
+      return decoded.value;
+    },
     releaseFreeze: (migrationId: string) =>
       client.call(internal.mcp.releaseRetirementFreeze, {
         userId,
@@ -223,7 +242,8 @@ export function isLunoraOutlineEnabledSync(env: LunoraOutlineEnv): boolean {
 /**
  * Whether Worker MCP should use the Lunora shard for this user.
  *
- * Kill-switch pairing (ADR 0058): env force first; else synced
+ * Permanent retirement takes precedence over the env force (ADR 0061).
+ * Otherwise use env force first; else synced
  * `account-prefs` on classic DO; browser reads mirrored localStorage after
  * {@link AccountPrefsController} sync.
  *
@@ -232,15 +252,17 @@ export function isLunoraOutlineEnabledSync(env: LunoraOutlineEnv): boolean {
  * abort the request before a store is even chosen, breaking MCP for every user
  * (including the ones not in the beta) whenever the DO hiccups. Classic is the
  * default for everyone anyway, so an unreadable preference is a downgrade, not
- * a failure. An explicit env force never reaches the read at all.
+ * a failure. An explicit env force skips the preference read, not retirement.
  */
 export async function isLunoraOutlineEnabledForUser(
   env: LunoraOutlineEnv,
   getAccountPrefs: () => Promise<unknown[]>,
+  isRetired: () => Promise<boolean> = async () => false,
 ): Promise<boolean> {
-  const forced = resolveLunoraOutlineEnvForce(env);
-  if (forced !== null) return forced;
   try {
+    if (await isRetired()) return false;
+    const forced = resolveLunoraOutlineEnvForce(env);
+    if (forced !== null) return forced;
     return parseLunoraBetaPref(await getAccountPrefs());
   } catch {
     return false;

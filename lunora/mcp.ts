@@ -6,6 +6,8 @@
  * editor keeps using fine-grained mutators; MCP keeps outline-ops planners.
  */
 
+import { Schema } from "effect";
+
 import type { Id } from "./_generated/dataModel";
 
 import {
@@ -15,6 +17,11 @@ import {
   type OutlinePlan,
 } from "../src/data/outline-plans";
 import { resolveDailyClaim } from "../src/plugins/daily/claim-mapping";
+import {
+  LunoraRetirementArchiveSchema,
+  validateLunoraRetirementArchive,
+  type LunoraRetirementArchive,
+} from "../worker/lunora-retirement";
 import {
   internalMutation,
   internalQuery,
@@ -62,12 +69,14 @@ async function commitPlan(ctx: MutationCtx, plan: OutlinePlan): Promise<void> {
   // Workerd SQLite's compound-SELECT limit ("too many terms in compound
   // SELECT"). `asId` is compile-time branding only and does not scope.
   for (const id of plan.deletes) {
+    // SAFETY: planner ids address nodes; the table facade scopes the runtime lookup.
     await ctx.db.nodes.delete(id as Id<"nodes">);
   }
   for (const patch of plan.patches) {
+    // SAFETY: planner fields match the nullable node schema; generated Doc types omit nullability.
     await ctx.db.nodes.patch(
       patch.id as Id<"nodes">,
-      patch.fields as Record<string, unknown>,
+      patch.fields as Parameters<typeof ctx.db.nodes.patch>[1],
     );
   }
   for (const node of plan.inserts) {
@@ -143,13 +152,15 @@ export const claimDailyMapping = internalMutation
       .withIndex("by_key", (q) => q.eq("key", args.key))
       .first();
     const current =
-      existing && typeof existing.nodeId === "string" ? existing.nodeId : null;
+      existing && Schema.is(Schema.String)(existing.nodeId)
+        ? existing.nodeId
+        : null;
     const { winner, won } = resolveDailyClaim(current, args.nodeId);
     if (existing) {
       // Facade patch, not bare `ctx.db.patch` — see commitPlan. This site is
       // the one every date-resolving MCP tool hits (the "container" key always
       // exists after first use), so an unscoped patch here broke them all.
-      await ctx.db.dailyIndex.patch(existing._id as Id<"dailyIndex">, {
+      await ctx.db.dailyIndex.patch(existing._id, {
         nodeId: winner,
         touchedAt: args.touchedAt,
       });
@@ -188,6 +199,7 @@ export const wipeUserShard = internalMutation
 async function exportRetirementSnapshot(
   ctx: QueryCtx | MutationCtx,
   userId: string,
+  exportedAt = Date.now(),
 ) {
   const [nodes, dailyIndex, tagColors, savedQueries, migrateState] =
     await Promise.all([
@@ -199,7 +211,7 @@ async function exportRetirementSnapshot(
     ]);
   return {
     version: 1,
-    exportedAt: Date.now(),
+    exportedAt,
     userId,
     nodes: nodes.map((row) => ({ ...docToNode(row), userId })),
     dailyIndex: dailyIndex.map((row) => ({
@@ -221,11 +233,50 @@ async function exportRetirementSnapshot(
       userId: String(row.userId),
     })),
     migrateState: migrateState.map((row) => ({
-      nodesAt: typeof row.nodesAt === "number" ? row.nodesAt : null,
-      kvAt: typeof row.kvAt === "number" ? row.kvAt : null,
+      nodesAt: Schema.is(Schema.Number)(row.nodesAt) ? row.nodesAt : null,
+      kvAt: Schema.is(Schema.Number)(row.kvAt) ? row.kvAt : null,
       userId: String(row.userId),
     })),
   };
+}
+
+async function exportArchiveRetirement(
+  ctx: MutationCtx,
+  userId: string,
+  exportedAt: number,
+): Promise<
+  Omit<LunoraRetirementArchive, "raw"> & {
+    raw: Record<keyof LunoraRetirementArchive["raw"], readonly unknown[]>;
+  }
+> {
+  // Keep the RPC boundary's open documents unstructured. The Worker decodes
+  // the JSON envelope; codegen cannot import Effect's recursive Schema.Json.
+  // Internal procedures in this module do not install ownedBy/RLS middleware;
+  // collect therefore sees every physical row in this shard, including a
+  // misplaced foreign-owned row. That is required for this authority check.
+  const [nodes, dailyIndex, tagColors, savedQueries, migrateState] =
+    await Promise.all([
+      ctx.db.query("nodes").collect(),
+      ctx.db.query("dailyIndex").collect(),
+      ctx.db.query("tagColors").collect(),
+      ctx.db.query("savedQueries").collect(),
+      ctx.db.query("migrateState").collect(),
+    ]);
+  const raw = { nodes, dailyIndex, tagColors, savedQueries, migrateState };
+  const snapshot = await exportRetirementSnapshot(ctx, userId, exportedAt);
+  const decoded = Schema.decodeUnknownOption(LunoraRetirementArchiveSchema)({
+    version: 1,
+    userId,
+    exportedAt,
+    snapshot,
+    raw,
+  });
+  if (decoded._tag === "None")
+    throw new Error("experimental retirement archive schema rejected");
+  const archive = decoded.value;
+  const validation = validateLunoraRetirementArchive(archive, userId);
+  if (!validation.ok) throw new Error(validation.reason);
+  return archive;
 }
 
 /** Consistent dry-run export. No write fence is installed. */
@@ -267,6 +318,30 @@ export const freezeAndExportRetirement = internalMutation
     return exportRetirementSnapshot(ctx, args.userId);
   });
 
+/** Install the existing fence and retain the exact stored documents atomically. */
+export const freezeAndExportArchiveRetirement = internalMutation
+  .input({ userId: v.string(), migrationId: v.string(), now: v.number() })
+  .mutation(async ({ ctx, args }) => {
+    const rows = await ctx.db.query("retirementState").collect();
+    const existing = rows[0];
+    if (rows.length > 1) throw new Error("multiple Lunora retirement rows");
+    if (existing && existing.migrationId !== args.migrationId) {
+      throw new Error("Lunora shard is fenced by another migration");
+    }
+    // Export and validate before installing a new fence: malformed or foreign
+    // physical rows must not authorize retirement.
+    const archive = await exportArchiveRetirement(ctx, args.userId, args.now);
+    if (!existing) {
+      await ctx.db.insert("retirementState", {
+        userId: args.userId,
+        migrationId: args.migrationId,
+        status: "frozen",
+        updatedAt: args.now,
+      });
+    }
+    return archive;
+  });
+
 export const releaseRetirementFreeze = internalMutation
   .input({ userId: v.string(), migrationId: v.string() })
   .mutation(async ({ ctx, args }) => {
@@ -279,7 +354,7 @@ export const releaseRetirementFreeze = internalMutation
     if (existing.status === "retired") {
       throw new Error("retired Lunora shard cannot be unfrozen");
     }
-    await ctx.db.retirementState.delete(existing._id as Id<"retirementState">);
+    await ctx.db.retirementState.delete(existing._id);
     return { released: true };
   });
 
@@ -291,7 +366,7 @@ export const markRetirementVerified = internalMutation
     if (!existing || existing.migrationId !== args.migrationId) {
       throw new Error("matching Lunora retirement fence is required");
     }
-    await ctx.db.retirementState.patch(existing._id as Id<"retirementState">, {
+    await ctx.db.retirementState.patch(existing._id, {
       status: "retired",
       updatedAt: args.now,
     });

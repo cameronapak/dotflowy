@@ -381,6 +381,24 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Bare Error thrown instead of a coded LunoraError"
     },
     {
+        "cacheKey": "error_without_catalog:mcp:freezeAndExportArchiveRetirement",
+        "categories": [
+            "SCHEMA"
+        ],
+        "description": "A procedure throws a bare `new Error(...)`. It reaches the client as an opaque message the caller cannot branch on, and error grouping cannot fingerprint it into a stable issue.",
+        "detail": "mutation `freezeAndExportArchiveRetirement` (mcp) throws a bare `new Error(...)`. Use `LunoraError` with a catalog code so the client can branch on it and Studio can group it.",
+        "facing": "EXTERNAL",
+        "level": "WARN",
+        "metadata": {
+            "exportName": "freezeAndExportArchiveRetirement",
+            "file": "mcp",
+            "kind": "mutation"
+        },
+        "name": "error_without_catalog",
+        "remediation": "Throw a coded error instead: `throw new LunoraError(\"<CODE>\", { … })` from `@lunora/errors`, adding the code to `ERROR_CATALOG` if it is new.",
+        "title": "Bare Error thrown instead of a coded LunoraError"
+    },
+    {
         "cacheKey": "error_without_catalog:mcp:releaseRetirementFreeze",
         "categories": [
             "SCHEMA"
@@ -417,18 +435,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Bare Error thrown instead of a coded LunoraError"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:51:retirementState",
+        "cacheKey": "unbounded_collect:mcp:58:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:51 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:58 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 51,
+            "line": 58,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -437,18 +455,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:85:nodes",
+        "cacheKey": "unbounded_collect:mcp:94:nodes",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"nodes\" at mcp:85 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"nodes\" at mcp:94 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "listNodes",
             "file": "mcp",
-            "line": 85,
+            "line": 94,
             "shardKind": "shardBy",
             "table": "nodes"
         },
@@ -457,18 +475,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:98:dailyIndex",
+        "cacheKey": "unbounded_collect:mcp:107:dailyIndex",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"dailyIndex\" at mcp:98 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"dailyIndex\" at mcp:107 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "listDailyIndex",
             "file": "mcp",
-            "line": 98,
+            "line": 107,
             "shardKind": "shardBy",
             "table": "dailyIndex"
         },
@@ -477,18 +495,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:194:nodes",
+        "cacheKey": "unbounded_collect:mcp:206:nodes",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"nodes\" at mcp:194 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"nodes\" at mcp:206 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 194,
+            "line": 206,
             "shardKind": "shardBy",
             "table": "nodes"
         },
@@ -497,18 +515,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:195:dailyIndex",
+        "cacheKey": "unbounded_collect:mcp:207:dailyIndex",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"dailyIndex\" at mcp:195 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"dailyIndex\" at mcp:207 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 195,
+            "line": 207,
             "shardKind": "shardBy",
             "table": "dailyIndex"
         },
@@ -517,18 +535,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:196:tagColors",
+        "cacheKey": "unbounded_collect:mcp:208:tagColors",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"tagColors\" at mcp:196 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"tagColors\" at mcp:208 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 196,
+            "line": 208,
             "shardKind": "shardBy",
             "table": "tagColors"
         },
@@ -537,18 +555,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:197:savedQueries",
+        "cacheKey": "unbounded_collect:mcp:209:savedQueries",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"savedQueries\" at mcp:197 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"savedQueries\" at mcp:209 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 197,
+            "line": 209,
             "shardKind": "shardBy",
             "table": "savedQueries"
         },
@@ -557,18 +575,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:198:migrateState",
+        "cacheKey": "unbounded_collect:mcp:210:migrateState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"migrateState\" at mcp:198 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"migrateState\" at mcp:210 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 198,
+            "line": 210,
             "shardKind": "shardBy",
             "table": "migrateState"
         },
@@ -577,18 +595,118 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:235:retirementState",
+        "cacheKey": "unbounded_collect:mcp:259:nodes",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:235 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"nodes\" at mcp:259 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "<module>",
+            "file": "mcp",
+            "line": 259,
+            "shardKind": "shardBy",
+            "table": "nodes"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:260:dailyIndex",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"dailyIndex\" at mcp:260 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "<module>",
+            "file": "mcp",
+            "line": 260,
+            "shardKind": "shardBy",
+            "table": "dailyIndex"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:261:tagColors",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"tagColors\" at mcp:261 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "<module>",
+            "file": "mcp",
+            "line": 261,
+            "shardKind": "shardBy",
+            "table": "tagColors"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:262:savedQueries",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"savedQueries\" at mcp:262 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "<module>",
+            "file": "mcp",
+            "line": 262,
+            "shardKind": "shardBy",
+            "table": "savedQueries"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:263:migrateState",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"migrateState\" at mcp:263 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "<module>",
+            "file": "mcp",
+            "line": 263,
+            "shardKind": "shardBy",
+            "table": "migrateState"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:286:retirementState",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"retirementState\" at mcp:286 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "inspectRetirement",
             "file": "mcp",
-            "line": 235,
+            "line": 286,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -597,18 +715,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:252:retirementState",
+        "cacheKey": "unbounded_collect:mcp:303:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:252 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:303 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "freezeAndExportRetirement",
             "file": "mcp",
-            "line": 252,
+            "line": 303,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -617,18 +735,38 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:273:retirementState",
+        "cacheKey": "unbounded_collect:mcp:325:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:273 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:325 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "freezeAndExportArchiveRetirement",
+            "file": "mcp",
+            "line": 325,
+            "shardKind": "shardBy",
+            "table": "retirementState"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:348:retirementState",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"retirementState\" at mcp:348 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "releaseRetirementFreeze",
             "file": "mcp",
-            "line": 273,
+            "line": 348,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -637,18 +775,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:289:retirementState",
+        "cacheKey": "unbounded_collect:mcp:364:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:289 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:364 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "markRetirementVerified",
             "file": "mcp",
-            "line": 289,
+            "line": 364,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -717,19 +855,40 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "owner_field_from_args_not_auth:mcp:260:userId",
+        "cacheKey": "owner_field_from_args_not_auth:mcp:311:userId",
         "categories": [
             "SECURITY"
         ],
         "description": "A `ctx.db` write sets an ownership/identity column (`userId`, `ownerId`, `tenantId`, …) from the handler's `args`. The caller controls who the row belongs to, so any caller can write rows owned by another user or tenant — an act-as-any-user / cross-tenant IDOR.",
-        "detail": "`insert` in `freezeAndExportRetirement` (mcp:260) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
+        "detail": "`insert` in `freezeAndExportRetirement` (mcp:311) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
         "facing": "INTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "freezeAndExportRetirement",
             "field": "userId",
             "file": "mcp",
-            "line": 260,
+            "line": 311,
+            "method": "insert",
+            "visibility": "internal"
+        },
+        "name": "owner_field_from_args_not_auth",
+        "remediation": "Stamp the ownership column from the server-trusted identity (`ctx.auth.userId` / `ctx.identity`), never from request input. Drop the field from the accepted `args` so a caller cannot supply it.",
+        "title": "Ownership field written from args, not server identity"
+    },
+    {
+        "cacheKey": "owner_field_from_args_not_auth:mcp:335:userId",
+        "categories": [
+            "SECURITY"
+        ],
+        "description": "A `ctx.db` write sets an ownership/identity column (`userId`, `ownerId`, `tenantId`, …) from the handler's `args`. The caller controls who the row belongs to, so any caller can write rows owned by another user or tenant — an act-as-any-user / cross-tenant IDOR.",
+        "detail": "`insert` in `freezeAndExportArchiveRetirement` (mcp:335) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
+        "facing": "INTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "freezeAndExportArchiveRetirement",
+            "field": "userId",
+            "file": "mcp",
+            "line": 335,
             "method": "insert",
             "visibility": "internal"
         },
@@ -930,6 +1089,31 @@ const LUNORA_ADVISOR_PROCEDURES: AdvisorProcedure[] = [
         "usesRls": false,
         "analyzableBody": true,
         "exportName": "freezeAndExportRetirement",
+        "file": "mcp",
+        "hasEmailArg": false,
+        "kind": "mutation",
+        "visibility": "internal"
+    },
+    {
+        "callsMail": false,
+        "emitsEvent": false,
+        "fanOut": false,
+        "handlesErrors": false,
+        "reachesOutbound": false,
+        "runsAiGeneration": false,
+        "throwsBareError": true,
+        "unboundedAiGeneration": false,
+        "usesInsertManyUnsafe": false,
+        "writesUserTable": false,
+        "exempt": false,
+        "exemptReason": "",
+        "usesCaptcha": false,
+        "usesEmailGate": false,
+        "usesMask": false,
+        "usesRateLimit": false,
+        "usesRls": false,
+        "analyzableBody": true,
+        "exportName": "freezeAndExportArchiveRetirement",
         "file": "mcp",
         "hasEmailArg": false,
         "kind": "mutation",
