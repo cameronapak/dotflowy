@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit selected for deployment
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   quality:
@@ -11,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.sha }}
           # `changeset status --since` diffs against the base branch, so the
           # shallow default clone isn't enough.
           fetch-depth: 0
@@ -30,6 +40,10 @@ jobs:
         run: bun run typecheck:test
       - name: Unit tests
         run: bun run test
+      - name: Release automation tests
+        run: |
+          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts
+          bun test scripts/release.test.ts
       # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
       # rest. That trade is only safe while every pointer resolves: an agent
       # reads a miss, shrugs, and proceeds without the constraint it was meant

@@ -1,0 +1,113 @@
+name: App Release and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Finish the active run. GitHub replaces intermediate pending runs; the next
+# run selects current main, including on a rerun of an older failed workflow.
+concurrency:
+  group: app-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.commit.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - id: commit
+        run: echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  quality:
+    needs: select
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.select.outputs.ref }}
+
+  deploy:
+    needs: [select, quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      TZ: America/Chicago
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.select.outputs.ref }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Check deployment configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+      - run: bun install --frozen-lockfile
+      - run: bun install --cwd landing --frozen-lockfile
+      - name: Prepare release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B main
+          bun scripts/release.ts --ci
+      - name: Typecheck landing
+        run: bun run --cwd landing typecheck
+      - name: Build app
+        run: bun run build:cf
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      - name: Build landing
+        run: bun run --cwd landing build
+      - name: Push release commit and tag atomically
+        run: |
+          tag="v$(bun -p 'require("./package.json").version')"
+          # A concurrent merge rejects this push. Never force or rebase a built
+          # release: the waiting run will validate and build the newer main.
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag:refs/tags/$tag"
+      - name: Publish GitHub Release
+        run: bun run release:publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Deploy landing
+        working-directory: landing
+        run: bunx --no-install wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Deploy app
+        run: bunx --no-install wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Check production release
+        run: |
+          version=$(bun -p 'require("./package.json").version')
+          for origin in https://dotflowy.com https://app.dotflowy.com; do
+            # Retry stale successful responses too, not just HTTP errors.
+            for attempt in {1..6}; do
+              if curl --fail --silent --show-error "$origin/changelog.json" -o /tmp/changelog.json && \
+                jq --exit-status --arg version "$version" '.releases[0].version == $version' /tmp/changelog.json; then
+                break
+              fi
+              test "$attempt" -lt 6 || exit 1
+              sleep 5
+            done
+            curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 "$origin/" -o /dev/null
+          done
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 \
+            https://app.dotflowy.com/api/auth-config -o /tmp/auth-config.json
+          jq --exit-status 'type == "object" and has("signupOpen")' /tmp/auth-config.json

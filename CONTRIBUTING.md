@@ -330,11 +330,15 @@ fails rather than moving a conflicting tag.
 
 ## Deploying
 
-Covered in [`docs/deploying.md`](./docs/deploying.md). The short version: `wrangler login`,
-set the prod secret once (`wrangler secret put BETTER_AUTH_SECRET`), run
-`bun run db:migrate:remote` **before** the first `bun run deploy`, then
-`bun run deploy`. Deploys ship whatever's checked out — prefer merging to `main`
-first so prod tracks `main`.
+Merging to `main` approves automatic app release and deployment: quality checks,
+both builds, GitHub Release, landing deploy, then app deploy. Pending runs use the
+newest `main`; failures stop without automatic rollback. Setup and retry steps:
+[`docs/deploying.md`](./docs/deploying.md#automatic-production-deployment).
+
+For a manual or self-hosted deploy: `wrangler login`, set the production secrets,
+run `bun run db:migrate:remote` **before** the first deploy, then `bun run deploy`.
+The separate landing command is `bun run --cwd landing deploy`. Manual deploys
+ship whatever is checked out. CI does not run D1 migrations or data backfills.
 
 ## Questions
 
