@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.16.3
+
+### Patch Changes
+
+- c576c5c: Add guarded recovery for older outlines with broken parent or sibling links, preserving notes and daily mappings.
+
 ## 1.16.2
 
 ### Patch Changes
