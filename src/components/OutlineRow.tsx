@@ -102,6 +102,9 @@ export interface OutlineRowProps {
   // True when an ancestor within the view is completed (fade inheritance, ADR
   // 0002). Carried by the flat list, not threaded through a parent row.
   ancestorCompleted: boolean;
+  // Retained only for the brief hide-completed exit; never persisted.
+  exiting: boolean;
+  exitInert: boolean;
   commands: NodeCommands;
   pluginCtx: () => PluginContext;
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
@@ -186,6 +189,8 @@ function RowChrome({
   capped,
   depth,
   ancestorCompleted,
+  exiting,
+  exitInert,
   commands,
   pluginCtx,
   registerRef,
@@ -386,6 +391,8 @@ function RowChrome({
     <li
       className="outline-node"
       data-node-id={instance.id}
+      data-completion-exit={exiting || undefined}
+      inert={exitInert}
       data-parent-id={instance.parentId ?? undefined}
       data-depth={depth}
       data-mirror={
