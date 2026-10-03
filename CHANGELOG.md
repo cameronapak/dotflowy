@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.16.2
+
+### Patch Changes
+
+- 54f6c88: Add a one-account migration option that keeps the experimental outline as the working outline and preserves Classic-only notes and meaningful alternatives as separate editable recovery copies. Both original snapshots remain archived.
+
 ## 1.16.1
 
 ### Patch Changes
