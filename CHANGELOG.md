@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.16.5
+
+### Patch Changes
+
+- b16a040: Keep a focused node visible while editing under a filter, even when it stops matching. Apply the filter again when the node loses focus.
+
 ## 1.16.4
 
 ### Patch Changes
