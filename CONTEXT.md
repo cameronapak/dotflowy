@@ -82,3 +82,25 @@ _Avoid_: saved search (a filter stays put; see Filter), smart view
 **Quick-add**:
 Capturing a thought as a real node in one uninterrupted gesture, without looking at where it lands. The node commits immediately to a default destination (today's note) and is relocatable afterward; the whole point is to write the thing down before the destination's existing content distracts you out of remembering it. Distinct from navigation (Cmd+K takes you somewhere) and from an ordinary new node (which is authored in place, in view of its siblings).
 _Avoid_: quick capture (fine as a synonym, but the action is "quick-add"), inbox (the default is today, not a holding bucket), compose
+
+## Usage reporting
+
+**Opened outline**:
+A visit where the outline has loaded in a visible, focused browser tab. Evidence of opening, not proof of reading or time spent.
+_Avoid_: read, session, online
+
+**Editing user**:
+A user whose intentional browser action commits a content or structural change. Agent edits, automatic setup, migration, operator restore, and view-only changes do not establish human editing.
+_Avoid_: registered user, connected user
+
+**Experimental preference**:
+A user's saved choice about experimental sync. Distinct from the backend a particular device uses, stored outline data, and recent activity.
+_Avoid_: experimental adoption, active experimental user
+
+**Activity coverage**:
+The extent to which activity has actually been measured. Missing coverage or a declined collection choice means unknown activity, not inactivity.
+_Avoid_: zero activity, inactive
+
+**Reporting choice**:
+An account's explicit acceptance or decline of the disclosed usage reporting. Acceptance gives permission to measure future activity; it does not establish activity or participation in experimental sync. Withdrawal ends that acceptance, and a later acceptance is a new permission interval.
+_Avoid_: experimental preference, active user

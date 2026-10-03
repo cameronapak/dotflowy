@@ -17,6 +17,7 @@ import type {
 import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
+import { savedExperimentalPreference } from "../src/data/admin-analytics-schema";
 import { parseNodeLinks } from "../src/data/node-links";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
@@ -321,6 +322,19 @@ export class UserOutlineDO extends DurableObject<Env> {
     return this.readRows<NodeRow>(
       "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes",
     ).map(rowToNode);
+  }
+
+  /** Admin inventory: count in SQL, read only the one beta preference. */
+  getAnalyticsMetadata() {
+    const row = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'account-prefs' AND key = 'lunora-beta'",
+      )
+      .toArray()[0];
+    return {
+      nodeCount: this.nodeCount(),
+      experimentalPreference: savedExperimentalPreference(row?.value),
+    };
   }
 
   /** Upsert one node into SQLite and return the change op describing it (insert

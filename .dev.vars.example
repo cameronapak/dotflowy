@@ -54,3 +54,9 @@ INVITE_CODES=dev-invite
 # prod: `wrangler secret put GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 # GOOGLE_CLIENT_ID=
 # GOOGLE_CLIENT_SECRET=
+
+# Optional usage-reporting advance notice (ADR 0063). Set only AFTER publishing
+# the matching privacy revision. Exact version enables accept/decline UI, NOT
+# activity collection. Leave unset for ordinary local development and production
+# until the publication/notification rollout is approved.
+# USAGE_NOTICE_VERSION=2026-10-02

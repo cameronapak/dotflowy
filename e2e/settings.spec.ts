@@ -150,7 +150,7 @@ test.describe("Settings page", () => {
     await page.getByRole("menuitem", { name: "Settings" }).click();
     await expect(page).toHaveURL(/\/settings$/);
 
-    await page.getByRole("button", { name: "Export" }).click();
+    await page.getByRole("button", { name: "Export", exact: true }).click();
     await expect
       .poll(() => page.evaluate(() => window.__downloads!.length))
       .toBeGreaterThan(0);

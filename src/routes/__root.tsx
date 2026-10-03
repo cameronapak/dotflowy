@@ -28,6 +28,10 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
+import {
+  UsageConsentNotice,
+  UsageConsentProvider,
+} from "../components/usage-consent";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -208,7 +212,12 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
     hardReset();
     return null;
   }
-  return <>{children}</>;
+  return (
+    <UsageConsentProvider>
+      <UsageConsentNotice />
+      {children}
+    </UsageConsentProvider>
+  );
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {

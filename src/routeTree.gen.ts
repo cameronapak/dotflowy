@@ -16,6 +16,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TodayRouteImport } from './routes/today'
+import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
 import { Route as AdminRestoreRouteImport } from './routes/admin.restore'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
 
@@ -54,6 +55,11 @@ const TodayRoute = TodayRouteImport.update({
   path: '/today',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
+  id: '/admin/analytics',
+  path: '/admin/analytics',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRestoreRoute = AdminRestoreRouteImport.update({
   id: '/admin/restore',
   path: '/admin/restore',
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
@@ -84,6 +91,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
@@ -96,6 +104,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
@@ -109,6 +118,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/terms'
     | '/today'
+    | '/admin/analytics'
     | '/admin/restore'
     | '/admin/waitlist'
   fileRoutesByTo: FileRoutesByTo
@@ -120,6 +130,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/terms'
     | '/today'
+    | '/admin/analytics'
     | '/admin/restore'
     | '/admin/waitlist'
   id:
@@ -131,6 +142,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/terms'
     | '/today'
+    | '/admin/analytics'
     | '/admin/restore'
     | '/admin/waitlist'
   fileRoutesById: FileRoutesById
@@ -143,6 +155,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   TermsRoute: typeof TermsRoute
   TodayRoute: typeof TodayRoute
+  AdminAnalyticsRoute: typeof AdminAnalyticsRoute
   AdminRestoreRoute: typeof AdminRestoreRoute
   AdminWaitlistRoute: typeof AdminWaitlistRoute
 }
@@ -198,6 +211,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TodayRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/analytics': {
+      id: '/admin/analytics'
+      path: '/admin/analytics'
+      fullPath: '/admin/analytics'
+      preLoaderRoute: typeof AdminAnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/restore': {
       id: '/admin/restore'
       path: '/admin/restore'
@@ -223,6 +243,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   TermsRoute: TermsRoute,
   TodayRoute: TodayRoute,
+  AdminAnalyticsRoute: AdminAnalyticsRoute,
   AdminRestoreRoute: AdminRestoreRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,
 }

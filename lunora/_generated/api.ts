@@ -49,6 +49,9 @@ export const api = anyApi as unknown as ApiTypes;
 
 /** Internal functions — callable only server-side via `ctx.run*`, never from a client. */
 export interface InternalApiTypes {
+    admin: {
+        outlineMetadata: FunctionReference<"query", { userId: string }, { nodeCount: number; nodesMigratedAt: number | null; kvMigratedAt: number | null; }>;
+    };
     mcp: {
         applyChangeOps: FunctionReference<"mutation", { userId: string; ops: Array<{ op: "insert"; value: { id: string; parentId: string; prevSiblingId: string; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number; mirrorOf: string; createdAt: number; updatedAt: number; origin: string; kind: "paragraph" } } | { op: "update"; value: { id: string; parentId: string; prevSiblingId: string; text: string; isTask: boolean; completed: boolean; collapsed: boolean; bookmarkedAt: number; mirrorOf: string; createdAt: number; updatedAt: number; origin: string; kind: "paragraph" } } | { op: "delete"; key: string }> }, { count: number; deletes: number; inserts: number; patches: number; }>;
         claimDailyMapping: FunctionReference<"mutation", { userId: string; key: string; nodeId: string; touchedAt: number }, { nodeId: string; won: boolean; }>;
