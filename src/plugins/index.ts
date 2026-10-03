@@ -5,6 +5,7 @@
 // (D7). Dogfooded: code/links/tags are themselves entries, built on the same
 // public API, so the core can't grow feature-specific branches.
 
+import type { EditorFeature } from "../data/editor-features";
 import type { PluginDef } from "./types";
 
 import code from "./code";
@@ -36,3 +37,10 @@ export const plugins: PluginDef[] = [
   spoiler,
   daily,
 ];
+
+// Only these reviewed plugins have optional editor conveniences (ADR 0064).
+// The registry projects their seams generically; protection is never optional.
+export const editorFeaturePlugins = new Map<PluginDef, EditorFeature>([
+  [routeBible, "bible"],
+  [daily, "daily"],
+]);

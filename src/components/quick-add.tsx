@@ -72,6 +72,7 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
+import { loadEditorFeatures, useEditorFeatures } from "../data/editor-features";
 import {
   capture,
   drop,
@@ -108,7 +109,7 @@ import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import {
   getCaptureDestination,
   keymapSpecs,
-  slotsAt,
+  usePluginChrome,
 } from "../plugins/registry";
 import {
   captureTextHistory,
@@ -121,13 +122,14 @@ import {
   setSelectionOffsets,
   readSource,
   revealLinkAtCaret,
+  useEditorFeatureDecoration,
   watchCaretReveal,
 } from "./inline-code";
 import { typingDrawerHeight } from "./menu-drawer";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
-  TARGET_SEARCH_OPTIONS,
+  targetSearchOptions,
 } from "./node-target-search";
 import {
   copySourceSelection,
@@ -236,6 +238,8 @@ const MiniNodeEditor = forwardRef<
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  useEditorFeatureDecoration(ref, composingRef);
+  const { slotsByPosition } = usePluginChrome();
 
   useImperativeHandle(
     handle,
@@ -317,7 +321,7 @@ const MiniNodeEditor = forwardRef<
   // sets no checkbox yet -- it appears the instant the node is real (ADR 0049).
   const born = node.id !== PLACEHOLDER_NODE.id;
   const beforeTextSlots: readonly SlotSpec[] = born
-    ? slotsAt("title:before-text")
+    ? (slotsByPosition.get("title:before-text") ?? [])
     : [];
 
   return (
@@ -440,6 +444,7 @@ function CaptureTargetPicker({
   onPick: (target: PickTarget) => void;
   onCancel: () => void;
 }) {
+  const { aliasProviders } = usePluginChrome();
   const [query, setQuery] = useState("");
   const candidates = useMemo(
     () =>
@@ -450,8 +455,8 @@ function CaptureTargetPicker({
     [index, excludeId],
   );
   const fuse = useMemo(
-    () => new Fuse(candidates, TARGET_SEARCH_OPTIONS),
-    [candidates],
+    () => new Fuse(candidates, targetSearchOptions(aliasProviders)),
+    [candidates, aliasProviders],
   );
   const q = query.trim();
   const results = q
@@ -681,6 +686,7 @@ if (import.meta.env.DEV && hasWindow()) {
 }
 
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
+  const { daily } = useEditorFeatures();
   const editorRef = useRef<MiniEditorHandle | null>(null);
   // The off-page toast's "Go there" zooms to the destination (ADR 0049
   // amendment). Quick-add is mounted in `__root.tsx`, inside the router, so the
@@ -711,6 +717,23 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // finishes against its OWN object.
   const draftRef = useRef<DraftState | null>(null);
   draftRef.current ??= makeDraft(destRef.current.resolve);
+  useEffect(() => {
+    const previous = defaultRef.current;
+    const next = getCaptureDestination();
+    defaultRef.current = next;
+    const draft = draftRef.current!;
+    // Change only an untouched default. A chosen target or already-started
+    // capture keeps its location; the next capture uses the new default.
+    if (
+      !draft.id &&
+      !draft.promise &&
+      draft.resolveParent === previous.resolve
+    ) {
+      draft.resolveParent = next.resolve;
+      destRef.current = next;
+      setDest(next);
+    }
+  }, [daily]);
   // `draftId` mirrors the CURRENT draft's settled id, for rendering its node.
   const [draftId, setDraftId] = useState<string | null>(null);
 
@@ -920,13 +943,15 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   );
 
   // Start a FRESH draft for the next capture: destination back to the DEFAULT
-  // (bug 2 -- read defaultRef directly, not destRef, which setDest hasn't flushed
-  // yet), editor cleared and refocused. The just-committed draft lives on until
+  // (read the live provider, not destRef, which setDest hasn't flushed yet),
+  // editor cleared and refocused. The just-committed draft lives on until
   // its own born settles (referenced by the caller), untouched by this.
   const resetDraft = useCallback(() => {
-    draftRef.current = makeDraft(defaultRef.current.resolve);
+    const destination = getCaptureDestination();
+    defaultRef.current = destination;
+    draftRef.current = makeDraft(destination.resolve);
     setDraftId(null);
-    setDest(defaultRef.current);
+    setDest(destination);
     editorRef.current?.clear();
     editorRef.current?.focus();
   }, []);
@@ -1347,11 +1372,24 @@ export function QuickAdd() {
   );
   const openRef = useRef(open);
   openRef.current = open;
+  const requestOpen = useCallback(() => {
+    void Effect.runPromise(
+      Effect.tryPromise(() => loadEditorFeatures()).pipe(
+        Effect.match({
+          onSuccess: () => setOpen(true),
+          onFailure: () =>
+            toast.error(
+              "Couldn't load your feature settings. Try again in Settings.",
+            ),
+        }),
+      ),
+    );
+  }, []);
 
   useEffect(() => {
-    setQuickAddOpener(() => setOpen(true));
+    setQuickAddOpener(requestOpen);
     return () => setQuickAddOpener(null);
-  }, []);
+  }, [requestOpen]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1371,17 +1409,17 @@ export function QuickAdd() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (document.querySelector('[role="dialog"]')) return;
       e.preventDefault();
-      setOpen(true);
+      requestOpen();
     }
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, []);
+  }, [requestOpen]);
 
   if (!mounted) return null;
   return (
     <>
-      {!open && <QuickAddFab onOpen={() => setOpen(true)} />}
+      {!open && <QuickAddFab onOpen={requestOpen} />}
       {open && <QuickAddOverlay onClose={() => setOpen(false)} />}
     </>
   );

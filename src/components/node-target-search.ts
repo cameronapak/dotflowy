@@ -1,7 +1,8 @@
 import type { IFuseOptions } from "fuse.js";
 
+import type { PluginDef } from "../plugins/types";
+
 import { childrenOf, type Node, type TreeIndex } from "../data/tree";
-import { searchAliases } from "../plugins/registry";
 
 /**
  * Shared Fuse config for the node-destination pickers (`/move` + quick-add's
@@ -11,12 +12,22 @@ import { searchAliases } from "../plugins/registry";
  * that highlights matches (the move dialog) spreads it on top; a caller that
  * doesn't (quick-add) skips the per-keystroke match-range allocation.
  */
-export const TARGET_SEARCH_OPTIONS: IFuseOptions<Node> = {
-  keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
-  ignoreLocation: true,
-  threshold: 0.3,
-  minMatchCharLength: 2,
-};
+export function targetSearchOptions(
+  aliasProviders: readonly NonNullable<PluginDef["searchAliases"]>[],
+): IFuseOptions<Node> {
+  return {
+    keys: [
+      "text",
+      {
+        name: "aliases",
+        getFn: (node) => aliasProviders.flatMap((provider) => provider(node)),
+      },
+    ],
+    ignoreLocation: true,
+    threshold: 0.3,
+    minMatchCharLength: 2,
+  };
+}
 
 /** A node plus every descendant -- the set a node can't be moved into. */
 export function subtreeIds(index: TreeIndex, rootId: string): Set<string> {

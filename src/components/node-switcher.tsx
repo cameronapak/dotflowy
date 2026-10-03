@@ -18,7 +18,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import type { SearchAction } from "../plugins/types";
+import type { PluginDef, SearchAction } from "../plugins/types";
 
 import { getNodeActionBridge } from "../data/command-bridge";
 import {
@@ -33,7 +33,7 @@ import { matchSavedQuery } from "../data/saved-queries-core";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { useTree } from "../data/useTree";
 import {
-  searchAliases,
+  usePluginChrome,
   searchActions,
   searchAnnotation,
 } from "../plugins/registry";
@@ -102,7 +102,11 @@ const SAVED_FILTERS_HEADING = (
   </div>
 );
 
-function buildFuse(index: TreeIndex, nodes: Node[]): Fuse<Searchable> {
+function buildFuse(
+  index: TreeIndex,
+  nodes: Node[],
+  aliasProviders: readonly NonNullable<PluginDef["searchAliases"]>[],
+): Fuse<Searchable> {
   const mirrorsOn = isMirrorsEnabled();
   const searchable: Searchable[] = [];
   for (const n of nodes) {
@@ -111,7 +115,7 @@ function buildFuse(index: TreeIndex, nodes: Node[]): Fuse<Searchable> {
     searchable.push({
       node: n,
       text: flattenNodeText(index, n.text),
-      aliases: searchAliases(n),
+      aliases: aliasProviders.flatMap((provider) => provider(n)),
     });
   }
   return new Fuse(searchable, FUSE_OPTIONS);
@@ -244,14 +248,15 @@ function SwitcherDialog({
   // opt-out (ADR 0019). The list is rebuilt from cheap state each render anyway.
   "use no memo";
   const { index } = useTree();
+  const { aliasProviders } = usePluginChrome();
   const navigate = useNavigate();
   const bridge = getNodeActionBridge();
 
   const nodes = useMemo(() => Array.from(index.byId.values()), [index]);
 
   const fuse = useMemo(
-    () => (open ? buildFuse(index, nodes) : null),
-    [open, index, nodes],
+    () => (open ? buildFuse(index, nodes, aliasProviders) : null),
+    [open, index, nodes, aliasProviders],
   );
 
   const q = query.trim();
@@ -271,11 +276,9 @@ function SwitcherDialog({
     () => (open ? resolveAmbientTargetId(targetFocusedId) : null),
     [open, targetFocusedId],
   );
-  const ambientActions = useMemo(
-    () =>
-      ambientTargetId ? buildNodeActions(ambientTargetId, index, bridge) : [],
-    [ambientTargetId, index, bridge],
-  );
+  const ambientActions = ambientTargetId
+    ? buildNodeActions(ambientTargetId, index, bridge)
+    : [];
   const ambientLabel = ambientTargetId
     ? flattenNodeText(
         index,
@@ -292,10 +295,9 @@ function SwitcherDialog({
 
   // Per-result "actions for this node" sub-view (ADR 0034 / #83's `->` path).
   const [actionNodeId, setActionNodeId] = useState<string | null>(null);
-  const subActions = useMemo(
-    () => (actionNodeId ? buildNodeActions(actionNodeId, index, bridge) : []),
-    [actionNodeId, index, bridge],
-  );
+  const subActions = actionNodeId
+    ? buildNodeActions(actionNodeId, index, bridge)
+    : [];
   const subLabel = actionNodeId
     ? flattenNodeText(index, index.byId.get(actionNodeId)?.text ?? "").trim() ||
       "Untitled"

@@ -23,10 +23,29 @@
 // it off `data-src` generically, so every consumer keeps speaking source
 // offsets -- with no per-token special-casing (the unlock in ADR 0001 D6).
 
+import { useEffect, type RefObject } from "react";
+
 import type { El, WidgetEl } from "../plugins/types";
 
+import { useEditorFeatures } from "../data/editor-features";
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
+
+/** Repaint optional tokens without replacing local text or moving the caret.
+ * Shared by rows, zoomed titles, and quick-add. IME completion uses the current
+ * registry in each editor's existing composition-end handler. */
+export function useEditorFeatureDecoration(
+  ref: RefObject<HTMLElement | null>,
+  composing: RefObject<boolean>,
+) {
+  const { bible, daily, ready } = useEditorFeatures();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || composing.current) return;
+    const focused = document.activeElement === el;
+    decorate(el, readSource(el), focused ? getCaretOffset(el) : null, focused);
+  }, [bible, daily, ready, ref, composing]);
+}
 
 /** True for a widget descriptor (Seam A's React mode -- ADR 0006) vs an `El`. */
 function isWidgetEl(el: El | WidgetEl): el is WidgetEl {

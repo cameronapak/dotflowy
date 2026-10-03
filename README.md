@@ -51,6 +51,8 @@ Not built yet: sharing.
 The [Dotflowy CLI](./cli/README.md) provides all MCP tools, browser login, and
 JSON output for scripts. Install the published `dotflowy` npm package with
 `npm install --global dotflowy`. Use Node.js 22.19.0 or newer.
+In the app, open Settings → Connections → Command line (CLI) for setup
+commands that target your deployment.
 
 ## Run it locally
 
@@ -72,6 +74,7 @@ you deploy. [`CONTRIBUTING.md`](./CONTRIBUTING.md) has the full setup guide.
 | [Architecture](./docs/architecture.md)   | The data model, persistence + sync design, the plugin system, the stack, and the project layout |
 | [Deploying](./docs/deploying.md)         | Self-hosting on Cloudflare Workers, auth + signup configuration                                 |
 | [Agents (MCP)](./docs/mcp.md)            | Connecting AI agents to your outline over the Model Context Protocol                            |
+| [Command line (CLI)](./cli/README.md)    | Installation, browser login, commands, and scripting                                            |
 | [Keyboard shortcuts](./docs/keyboard.md) | The full key reference                                                                          |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md)   | Setup, the dev loops, the pre-PR check matrix, repo conventions                                 |
 | [`AGENTS.md`](./AGENTS.md)               | Always-on identity, guardrails, and pointers for coding agents                                  |

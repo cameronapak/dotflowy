@@ -83,19 +83,86 @@ test.describe("Settings page", () => {
     ).toBeVisible();
   });
 
-  test("all Settings sections render", async ({ page }) => {
+  test("CLI setup explains install, login, and a safe read against this deployment", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await seedOutline(page, TREE);
+    await mockFreePlan(page);
+    await page.goto("/settings");
+    await page
+      .getByRole("button", { name: "Set up command line (CLI)" })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Use Dotflowy from your terminal",
+    });
+    await expect(dialog).toBeVisible();
+    const origin = new URL(page.url()).origin;
+    await expect(dialog.locator("code")).toHaveText([
+      "npm install --global dotflowy",
+      `dotflowy login --server ${origin}`,
+      `dotflowy outline --server ${origin}`,
+    ]);
+    await expect(dialog).toContainText("Node.js 22.19.0 or newer");
+    await expect(dialog).toContainText("Unlimited");
+    await expect(dialog).toContainText("Spoiler text stays redacted");
+    await expect(
+      dialog.getByRole("link", { name: "CLI documentation" }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/cameronapak/dotflowy/blob/main/cli/README.md",
+    );
+    for (const [name, command] of [
+      ["Copy install command", "npm install --global dotflowy"],
+      ["Copy login command", `dotflowy login --server ${origin}`],
+      ["Copy outline command", `dotflowy outline --server ${origin}`],
+    ]) {
+      await dialog.getByRole("button", { name }).click();
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe(command);
+    }
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = async () => {
+        throw new Error("Clipboard denied");
+      };
+    });
+    await dialog.getByRole("button", { name: "Copy install command" }).click();
+    await expect(
+      page.getByText("Couldn't copy. Select the command and copy it manually."),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await page.getByRole("button", { name: "Set up", exact: true }).click();
+    const mcp = page.getByRole("dialog", { name: "Connect to your AI apps" });
+    await expect(mcp).toBeVisible();
+    await expect(mcp.getByRole("textbox").first()).toHaveValue(`${origin}/mcp`);
+    await expect(
+      mcp.getByRole("tab", { name: "Claude Claude", exact: true }),
+    ).toBeVisible();
+  });
+
+  test("primary sections render and Other settings reveals billing, account, and data", async ({
+    page,
+  }) => {
     await seedOutline(page, TREE);
     await mockFreePlan(page);
     await page.goto("/settings");
 
     for (const name of [
-      "Plan & billing",
-      "Account",
       "Connections",
-      "Data",
+      "Editor features",
       "Appearance",
       "Experimental",
     ]) {
+      await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
+    }
+    await expect(
+      page.getByRole("heading", { name: "Plan & billing" }),
+    ).toBeHidden();
+    await page.locator("summary", { hasText: "Other settings" }).click();
+    for (const name of ["Plan & billing", "Account", "Data"]) {
       await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
     }
   });
@@ -107,6 +174,7 @@ test.describe("Settings page", () => {
     await mockFreePlan(page);
     await page.goto("/settings");
 
+    await page.locator("summary", { hasText: "Other settings" }).click();
     // Current-plan card reads "Free" and shows the usage meter.
     await expect(page.getByText("Current plan")).toBeVisible();
     await expect(page.getByText("Nodes used")).toBeVisible();
@@ -242,6 +310,7 @@ test.describe("Settings page", () => {
     await page.getByRole("menuitem", { name: "Settings" }).click();
     await expect(page).toHaveURL(/\/settings$/);
 
+    await page.locator("summary", { hasText: "Other settings" }).click();
     await page.getByRole("button", { name: "Export" }).click();
     await expect
       .poll(() => page.evaluate(() => window.__downloads!.length))

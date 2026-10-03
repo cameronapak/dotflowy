@@ -24,7 +24,11 @@ import {
   useVisibleChildIds,
 } from "../data/tree-store";
 import { rowKeyFor } from "../data/visible-order";
-import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
+import {
+  autoformat,
+  usePluginChrome,
+  useIsProtected,
+} from "../plugins/registry";
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
@@ -35,6 +39,7 @@ import {
   readSource,
   revealLinkAtCaret,
   setCaretOffset,
+  useEditorFeatureDecoration,
   watchCaretReveal,
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
@@ -199,6 +204,8 @@ function RowChrome({
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  useEditorFeatureDecoration(textRef, composingRef);
+  const { slotsByPosition } = usePluginChrome();
 
   // Direct visible children of the CONTENT -- a mirror windows its source's
   // subtree, so the chevron + collapsed dot follow the source's children. No
@@ -266,7 +273,7 @@ function RowChrome({
   // (registering them in plugins/index.ts would misrepresent them), but they
   // share the same {id, render} shape, so a slot-list `.map()` covers all of it.
   const beforeTextSlots: SlotSpec[] = [
-    ...slotsAt("row:before-text"),
+    ...(slotsByPosition.get("row:before-text") ?? []),
     {
       id: "core:protected-lock",
       position: "row:before-text",

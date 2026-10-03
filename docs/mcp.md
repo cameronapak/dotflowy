@@ -12,6 +12,11 @@ lands through the same atomic per-user Durable Object path as the editor, so
 open tabs see agent edits live. Design + rejected alternatives:
 [the agent-native MCP server](./adr/0026-agent-native-mcp-server.md).
 
+For terminal access, use the [Dotflowy CLI](../cli/README.md). Settings →
+Connections has separate setup actions for MCP apps and the CLI. Both require
+Unlimited or Founding and preserve spoiler redaction. Turning Daily notes off
+in Editor features does not disable explicit MCP or CLI daily operations.
+
 ## Search with DQL
 
 `search_nodes` uses DQL (Dotflowy Query Language), the same grammar as the app's

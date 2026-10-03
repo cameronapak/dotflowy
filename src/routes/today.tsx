@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { whenNodesSyncReady } from "../data/collection";
+import { getEditorFeatures, loadEditorFeatures } from "../data/editor-features";
 import { subscribeTree } from "../data/tree-store";
 import { getOrCreateDay } from "../plugins/daily";
 import { localDateKey } from "../plugins/daily/daily-index";
@@ -27,6 +28,12 @@ function TodayRedirect() {
 
     void (async () => {
       try {
+        await loadEditorFeatures();
+        if (!getEditorFeatures().daily) {
+          toast.info("Daily notes is off");
+          navigate({ to: "/", replace: true });
+          return;
+        }
         await whenNodesSyncReady();
         // /today is a write-intent surface (ADR 0041): seed an empty entry line
         // so the caret has somewhere to land, and focus=last puts it there.

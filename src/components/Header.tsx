@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from "react";
 
 import type { PluginContext } from "../plugins/types";
 
-import { headerSlots } from "../plugins/registry";
+import { usePluginChrome } from "../plugins/registry";
 import { BookmarkStar } from "./bookmarks";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { CommandCenterButton } from "./node-switcher";
@@ -31,6 +31,7 @@ export function Header({
   children?: ReactNode;
   getCtx?: () => PluginContext;
 }) {
+  const { headerSlots } = usePluginChrome();
   return (
     <header className="border-b bg-background">
       {/* Border spans the full viewport; inner row is centered to match the
