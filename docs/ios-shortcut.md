@@ -13,12 +13,13 @@ was hand-written plist data and shipped two actions Shortcuts does not know:
 template now uses `is.workflow.actions.text.match` and a built-in random number
 for its attempt ID.
 
-The experimental installer still uses
-[Cam's shared shortcut](https://www.icloud.com/shortcuts/73918f14013646a1a36252939c26db46),
-which was signed from the broken template. Re-sign the compiled template and
-share it again before calling the installer fixed; until then the shared copy
-keeps the unrecognized actions. Its credential-free contents and end-to-end
-capture still need real-device verification before general release.
+The experimental installer uses
+[Cam's replacement sharing link](https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927).
+The corrected template has been signed and imported on macOS, including both
+setup questions. The shared copy's credential-free contents and end-to-end
+capture still need verification before release. A reported `invalid_input`
+response remains unresolved; keep External quick-add default-off until the
+replacement passes real-device testing.
 
 Import asks for:
 
