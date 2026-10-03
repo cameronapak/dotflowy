@@ -7,6 +7,7 @@ import {
   asDict,
   asNumber,
   asString,
+  normalizeImportQuestions,
   OUTPUT,
   type Plist,
   parsePlist,
@@ -56,6 +57,53 @@ test("every action is one Shortcuts recognizes", () => {
   expect(identifiers).toContain("is.workflow.actions.number.random");
 });
 
+test("the attempt ID uses two six-digit numbers within Shortcuts' integer range", () => {
+  const randomActions = actions.filter(
+    (action) => identifierOf(action) === "is.workflow.actions.number.random",
+  );
+  expect(
+    randomActions.map((action) => {
+      const parameters = parametersOf(actions.indexOf(action));
+      return [
+        parameters.WFRandomNumberMinimum,
+        parameters.WFRandomNumberMaximum,
+      ];
+    }),
+  ).toEqual([
+    [100_000, 999_999],
+    [100_000, 999_999],
+  ]);
+  const idAction = actions.findIndex(
+    (action) =>
+      asDict(asDict(action)?.WFWorkflowActionParameters)?.CustomOutputName ===
+      "attemptId",
+  );
+  const text = required(
+    asDict(asDict(parametersOf(idAction).WFTextActionText)?.Value),
+    "attempt ID text",
+  );
+  expect(text.string).toBe("00000000-0000-4000-8000-\uFFFC\uFFFC");
+});
+
+test("conditional blocks have distinct IDs and balanced nested boundaries", () => {
+  const groups = new Set<string>();
+  const stack: string[] = [];
+  for (const action of actions) {
+    if (identifierOf(action) !== "is.workflow.actions.conditional") continue;
+    const parameters = parametersOf(actions.indexOf(action));
+    const group = required(asString(parameters.GroupingIdentifier), "group ID");
+    if (parameters.WFControlFlowMode === 0) {
+      expect(groups.has(group)).toBe(false);
+      groups.add(group);
+      stack.push(group);
+    } else {
+      expect(group).toBe(stack.at(-1));
+      if (parameters.WFControlFlowMode === 2) stack.pop();
+    }
+  }
+  expect(stack).toEqual([]);
+});
+
 test("import questions target the key and endpoint parameters", () => {
   const questions = required(
     asArray(workflow.WFWorkflowImportQuestions),
@@ -67,6 +115,7 @@ test("import questions target the key and endpoint parameters", () => {
     const key = required(asString(entry.ParameterKey), "question key");
     return {
       key,
+      target: parametersOf(index).CustomOutputName,
       value: parametersOf(index)[key],
       defaultValue: entry.DefaultValue,
     };
@@ -74,15 +123,47 @@ test("import questions target the key and endpoint parameters", () => {
   expect(bound).toEqual([
     {
       key: "WFTextActionText",
+      target: "captureKey",
       value: "PASTE_CAPTURE_KEY_DURING_IMPORT",
       defaultValue: "PASTE_CAPTURE_KEY_DURING_IMPORT",
     },
     {
       key: "WFURL",
+      target: "response",
       value: "https://app.dotflowy.com/api/capture",
       defaultValue: "https://app.dotflowy.com/api/capture",
     },
   ]);
+});
+
+test("setup questions stay bound when Cherri emits them in reverse order", () => {
+  const fixture = structuredClone(workflow);
+  const questions = required(
+    asArray(fixture.WFWorkflowImportQuestions),
+    "questions",
+  );
+  const fixtureActions = required(
+    asArray(fixture.WFWorkflowActions),
+    "actions",
+  );
+  for (const question of questions) {
+    const entry = required(asDict(question), "question");
+    const index = required(asNumber(entry.ActionIndex), "action index");
+    const parameters = required(
+      asDict(asDict(fixtureActions[index])?.WFWorkflowActionParameters),
+      "parameters",
+    );
+    const key = required(asString(entry.ParameterKey), "parameter key");
+    parameters[key] = "";
+  }
+  questions.reverse();
+  normalizeImportQuestions(fixture);
+  const defaults = questions.map((question) => asDict(question)?.DefaultValue);
+  expect(defaults).toEqual([
+    "PASTE_CAPTURE_KEY_DURING_IMPORT",
+    "https://app.dotflowy.com/api/capture",
+  ]);
+  validateWorkflow(fixture);
 });
 
 test("the flow is one nonblank gate, a JSON POST, and a receipt check", () => {
@@ -94,7 +175,7 @@ test("the flow is one nonblank gate, a JSON POST, and a receipt check", () => {
     asString(parametersOf(actions.indexOf(action)).WFMatchTextPattern),
   );
   expect(patterns).toContain(String.raw`\S`);
-  expect(patterns).toContain(String.raw`(?s)^true\n.+\n.+\n\d{4}-\d{2}-\d{2}$`);
+  expect(patterns).toContain(String.raw`(?s)^.+\n.+\n\d{4}-\d{2}-\d{2}$`);
 
   const requestAt = actions.findIndex(
     (action) => identifierOf(action) === "is.workflow.actions.downloadurl",
@@ -123,6 +204,28 @@ test("the flow is one nonblank gate, a JSON POST, and a receipt check", () => {
   expect(parametersOf(dateAt).WFDateFormat).toBe("yyyy-MM-dd");
 });
 
+test("receipt fields keep their newlines and saved uses a numeric comparison", () => {
+  const receiptAt = actions.findIndex(
+    (action) =>
+      asDict(asDict(action)?.WFWorkflowActionParameters)?.CustomOutputName ===
+      "receipt",
+  );
+  const receipt = required(
+    asDict(asDict(parametersOf(receiptAt).WFTextActionText)?.Value),
+    "receipt text",
+  );
+  expect(receipt.string).toBe("\uFFFC\n\uFFFC\n\uFFFC");
+  const numericGate = actions.findIndex(
+    (action) =>
+      identifierOf(action) === "is.workflow.actions.conditional" &&
+      parametersOf(actions.indexOf(action)).WFNumberValue === 1,
+  );
+  const parameters = parametersOf(numericGate);
+  expect(parameters.WFCondition).toBe(4);
+  expect(parameters.WFConditionalActionString).toBeUndefined();
+  expect(JSON.stringify(parameters.WFInput)).toContain("ReceiptSaved");
+});
+
 test("dictionary field items are sorted, not left in map order", () => {
   const dictionary: Plist = {
     WFSerializationType: "WFDictionaryFieldValue",
@@ -148,6 +251,14 @@ test("dictionary field items are sorted, not left in map order", () => {
     asString(asDict(required(asDict(item).WFKey, "item key").Value)?.string),
   );
   expect(keys).toEqual(["a", "z"]);
+});
+
+test("parsePlist decodes numeric entities without decoding escaped entities twice", () => {
+  expect(
+    parsePlist(
+      '<plist version="1.0"><string>a&#xA;b&#10;c &amp;#xA; &amp;#10;</string></plist>',
+    ),
+  ).toBe("a\nb\nc &#xA; &#10;");
 });
 
 test("parsePlist reads the XML subset Cherri emits", () => {

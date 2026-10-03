@@ -8,8 +8,7 @@
  * plist identifiers are how the first template shipped an unrecognized Match
  * Text action and a "Generate UUID" action that does not exist as a built-in.
  *
- * Two normalizations run after compilation, both because Cherri v2.3.0 writes
- * import questions that Shortcuts cannot use as-is:
+ * Compilation repairs Cherri v2.3.0's import questions and control-flow IDs:
  *
  *   - `ActionIndex` is rebound to the action holding the question's parameter.
  *     Cherri records a stale index, and a question bound to the wrong action
@@ -17,6 +16,8 @@
  *   - The bound parameter is pre-filled with the question's default, so a
  *     skipped setup question still runs and reports the server's clear
  *     "invalid key" instead of failing on an empty parameter.
+ *   - Each conditional block gets a distinct deterministic grouping ID;
+ *     Cherri's derived UUID mode reuses one ID across every block.
  *
  * Usage:
  *   bun scripts/shortcut.ts --build     compile the source into the artifact
@@ -94,6 +95,7 @@ export const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
   "is.workflow.actions.getvalueforkey",
   "is.workflow.actions.nothing",
   "is.workflow.actions.notification",
+  "is.workflow.actions.number",
   "is.workflow.actions.number.random",
   "is.workflow.actions.setvariable",
   "is.workflow.actions.showresult",
@@ -160,6 +162,7 @@ export function compile(): Workflow {
     }
     const workflow = asDict(parsePlist(readFileSync(artifact, "utf8")));
     if (!workflow) throw new Error("compiled output is not a plist dict");
+    normalizeConditionalGroups(workflow);
     normalizeImportQuestions(workflow);
     sortDictionaryItems(workflow);
     return workflow;
@@ -169,6 +172,37 @@ export function compile(): Workflow {
 }
 
 /* --- Determinism ----------------------------------------------------------- */
+
+/** Cherri's derived UUID mode reuses one ID for every conditional block. */
+function normalizeConditionalGroups(workflow: Workflow): void {
+  const actions = asArray(workflow.WFWorkflowActions) ?? [];
+  const stack: string[] = [];
+  actions.forEach((action, index) => {
+    const entry = asDict(action);
+    if (
+      entry?.WFWorkflowActionIdentifier !== "is.workflow.actions.conditional"
+    ) {
+      return;
+    }
+    const parameters = asDict(entry.WFWorkflowActionParameters);
+    if (!parameters) throw new Error("conditional has no parameters");
+    const mode = parameters.WFControlFlowMode;
+    if (mode === 0) {
+      stack.push(
+        `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+      );
+    }
+    const group = stack.at(-1);
+    if (!group) throw new Error("conditional boundary has no opening block");
+    parameters.GroupingIdentifier = group;
+    if (mode === 2) {
+      parameters.UUID = group;
+      stack.pop();
+    }
+  });
+  if (stack.length)
+    throw new Error("conditional block has no closing boundary");
+}
 
 /**
  * Cherri emits dictionary field items in Go map order, so the same source can
@@ -309,7 +343,7 @@ export function validateWorkflow(workflow: Workflow): void {
   if (!serialized.includes("yyyy-MM-dd")) {
     throw new Error("local date format missing");
   }
-  if (!serialized.includes("(?s)^true")) {
+  if (!serialized.includes("(?s)^.+")) {
     throw new Error("success receipt validation missing");
   }
   for (const key of [
@@ -372,10 +406,13 @@ export function parsePlist(xml: string): Plist {
       .replaceAll("&gt;", ">")
       .replaceAll("&quot;", '"')
       .replaceAll("&apos;", "'")
-      .replaceAll("&amp;", "&")
+      .replaceAll(/&#x([0-9a-f]+);/gi, (_, code: string) =>
+        String.fromCodePoint(Number.parseInt(code, 16)),
+      )
       .replaceAll(/&#(\d+);/g, (_, code: string) =>
         String.fromCodePoint(Number(code)),
-      );
+      )
+      .replaceAll("&amp;", "&");
 
   const parseValue = (): Plist => {
     skipSpace();

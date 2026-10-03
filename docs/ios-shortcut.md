@@ -10,16 +10,17 @@ with the [Cherri](https://cherrilang.org) compiler. The template this replaced
 was hand-written plist data and shipped two actions Shortcuts does not know:
 `is.workflow.actions.matchtext` (macOS rendered “Unknown Action” there) and
 `is.workflow.actions.generateuuid`, which is not a built-in action at all. The
-template now uses `is.workflow.actions.text.match` and a built-in random number
+template now uses `is.workflow.actions.text.match` and two bounded random numbers
 for its attempt ID.
 
-The experimental installer uses
+The experimental installer currently points to
 [Cam's replacement sharing link](https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927).
-The corrected template has been signed and imported on macOS, including both
-setup questions. The shared copy's credential-free contents and end-to-end
-capture still need verification before release. A reported `invalid_input`
-response remains unresolved; keep External quick-add default-off until the
-replacement passes real-device testing.
+That share predates the latest runtime fixes, and its credential-free contents
+have not been verified. Replace it with a fresh clean master before release.
+The latest template passes macOS runtime checks against a local endpoint for
+text, URLs, blank input, and success/error receipts. Import-answer persistence
+and end-to-end iPhone capture still need verification. Keep External quick-add
+default-off until the replacement passes those checks.
 
 Import asks for:
 
@@ -63,7 +64,9 @@ The source of truth is `shortcuts/add-to-dotflowy-today.cherri`;
 `scripts/shortcut.ts` compiles it and normalizes the two import questions (Cherri
 v2.3.0 writes them without a usable `ActionIndex` and leaves their parameters
 empty, which is what made a shared copy fail with “Please choose a value for each
-parameter in this action”). A signed export of the clean master can be retained
+parameter in this action”). It also assigns distinct conditional grouping IDs
+and decodes XML newline entities so receipt variable offsets stay correct.
+A signed export of the clean master can be retained
 with the release, but never commit or upload a personalized shortcut containing
 a working key.
 
@@ -75,7 +78,7 @@ new link. Re-import that link to verify what recipients receive.
 
 ## Behavior and protocol
 
-Each nonblank invocation creates a UUID-shaped attempt ID from a built-in random number and formats the phone's current local date as `yyyy-MM-dd` immediately before submission. It sends:
+Each nonblank invocation creates a UUID-shaped attempt ID by joining two six-digit outputs from the built-in Random Number action. This avoids Shortcuts' signed 32-bit limit, which clamps a single 12-digit random number to `2147483647` and produces an invalid attempt ID. The shortcut formats the phone's current local date as `yyyy-MM-dd` immediately before submission. It sends:
 
 ```http
 POST /api/capture

@@ -37,10 +37,11 @@ if !@CaptureText {
 const nonblank = matchText('\S', @CaptureText)
 if nonblank {
 	/* No built-in action generates a UUID, so the attempt ID is a UUID-shaped
-	 * random number: 12 digits is always 12 digits, and the server only needs an
-	 * opaque per-invocation token for retry idempotency. */
-	const attemptTail = randomNumber(100000000000, 999999999999)
-	const attemptId = "00000000-0000-4000-8000-{attemptTail}"
+	 * opaque per-invocation token. Shortcuts clamps Random Number to a signed
+	 * 32-bit integer, so join two six-digit numbers for the 12-digit tail. */
+	const attemptFirst = randomNumber(100000, 999999)
+	const attemptLast = randomNumber(100000, 999999)
+	const attemptId = "00000000-0000-4000-8000-{attemptFirst}{attemptLast}"
 	const captureDate = formatTimestamp(CurrentDate, "Custom", "None", "yyyy-MM-dd")
 	const captureKey = text(key)
 	const response = jsonRequest(endpoint, "POST", {
@@ -55,9 +56,15 @@ if nonblank {
 	const nodeId = getValue(response, "nodeId")
 	const dailyNoteId = getValue(response, "dailyNoteId")
 	const receiptDate = getValue(response, "date")
-	const receipt = "{saved}\n{nodeId}\n{dailyNoteId}\n{receiptDate}"
-	const receiptMatch = matchText('(?s)^true\n.+\n.+\n\d{4}-\d{2}-\d{2}$', receipt)
+	const receipt = "{nodeId}\n{dailyNoteId}\n{receiptDate}"
+	const receiptMatch = matchText('(?s)^.+\n.+\n\d{4}-\d{2}-\d{2}$', receipt)
+	/* A Boolean renders as localized text ("Yes" on English macOS), not "true".
+	 * Check its numeric value only after the other receipt fields are present. */
+	@ReceiptSaved = 0
 	if receiptMatch {
+		@ReceiptSaved = number(saved)
+	}
+	if @ReceiptSaved == 1 {
 		showNotification("Added one bullet to today's note.", "Saved to Dotflowy")
 	} else {
 		const errorCode = getValue(response, "error")

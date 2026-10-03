@@ -2,4 +2,4 @@
 "dotflowy": patch
 ---
 
-Compile the experimental Apple Shortcut template from Cherri source so every action is one Shortcuts recognizes. The previous template used an unrecognized Match Text identifier and a Generate UUID action that does not exist, which made macOS show "Unknown Action" and refuse to run it. The setup questions are now bound to their parameters, and the attempt ID comes from a built-in random number. The shared shortcut still needs re-signing.
+Fix the experimental Apple Shortcut's unrecognized actions, invalid attempt IDs, and success receipts. Compile from Cherri, use two six-digit random numbers within Shortcuts' supported range, preserve receipt newlines, and compare the saved Boolean numerically rather than as localized text. Bind setup questions to their parameters and give conditional blocks distinct IDs. A fresh credential-free iCloud share and iPhone verification are still required before release.
