@@ -129,6 +129,7 @@ export const AdminLunoraRetirementPostBody = Schema.Struct({
     "dry-run",
     "migrate",
     "migrate-with-recovery",
+    "repair-classic",
     "retry",
     "restore",
     "preserve-classic",

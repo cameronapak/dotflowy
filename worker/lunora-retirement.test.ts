@@ -5,8 +5,10 @@ import type { OutlineSnapshot } from "./backup";
 
 import {
   buildClassicTarget,
+  classicLinkRepairSourceHash,
   classifyRetirement,
   compareRetirementSnapshots,
+  planClassicLinkRepair,
   retirementSnapshotKey,
   validateClassicSnapshot,
   validateLunoraSnapshot,
@@ -599,5 +601,113 @@ describe("read-only retirement comparison", () => {
         count > 50,
       );
     }
+  });
+});
+
+describe("explicit Classic link repair", () => {
+  const classic = (nodes: Node[]): OutlineSnapshot => ({
+    version: 1,
+    exportedAt: 10,
+    seq: 3,
+    nodes,
+    kv: [],
+  });
+
+  it("keeps existing root order and node payloads while rescuing a stranded subtree", () => {
+    const orphan = {
+      ...node("orphan", "deleted", null),
+      text: "retain exactly",
+      kind: "paragraph" as const,
+      isTask: true,
+      completed: true,
+      updatedAt: 17,
+    };
+    const rows = [
+      orphan,
+      node("child", "orphan", null),
+      node("root", null, null),
+      node("tail", null, "root"),
+      node("a", "root", null),
+      node("b", "root", null),
+    ];
+    const plan = planClassicLinkRepair(classic(rows));
+    expect(plan.nodes).toEqual(
+      rows.map((row) =>
+        row.id === "orphan"
+          ? { ...row, parentId: null, prevSiblingId: "tail" }
+          : row.id === "b"
+            ? { ...row, prevSiblingId: "a" }
+            : row,
+      ),
+    );
+    expect(plan.summary).toEqual({ nodes: 6, parentLinks: 1, siblingLinks: 2 });
+    expect(validateNodeGraph(plan.nodes)).toEqual({ ok: true });
+    expect(rows[0]).toEqual(orphan);
+  });
+
+  it("repairs a sibling fan without discarding its losing branch", () => {
+    const rows = [
+      node("r", null, null),
+      node("a", "r", null),
+      node("b", "r", "a"),
+      node("c", "r", "a"),
+    ];
+    const plan = planClassicLinkRepair(classic(rows));
+    expect(plan.nodes).toEqual(
+      rows.map((row) =>
+        row.id === "c" ? { ...row, prevSiblingId: "b" } : row,
+      ),
+    );
+    expect(plan.summary).toEqual({ nodes: 4, parentLinks: 0, siblingLinks: 1 });
+  });
+
+  it("rejects healthy graphs and anomalies outside the authorized link repair", () => {
+    for (const rows of [
+      [node("r", null, null)],
+      [node("r", null, null), node("r", null, null)],
+      [node("a", "b", null), node("b", "a", null)],
+      [{ ...node("r", null, null), mirrorOf: "missing" }],
+    ])
+      expect(() => planClassicLinkRepair(classic(rows))).toThrow();
+    const malformed = {
+      ...classic([node("a", null, null), node("b", null, null)]),
+      kv: [
+        { collection: "daily-index", key: "day", value: "{}", updatedAt: 1 },
+      ],
+    };
+    expect(() => planClassicLinkRepair(malformed)).toThrow();
+  });
+
+  it("binds identity, edits, side data and sequence, but not export clocks", async () => {
+    const source = classic([node("a", null, null), node("b", null, null)]);
+    const experimental = {
+      ...snapshot([]),
+      dailyIndex: [],
+      tagColors: [],
+      savedQueries: [],
+      migrateState: [],
+    };
+    const hash = await classicLinkRepairSourceHash("u1", source, experimental);
+    expect(
+      await classicLinkRepairSourceHash(
+        "u1",
+        { ...source, exportedAt: 99 },
+        { ...experimental, exportedAt: 87 },
+      ),
+    ).toBe(hash);
+    for (const changed of [
+      { ...source, seq: 4 },
+      { ...source, nodes: source.nodes.map((n) => ({ ...n, text: "edited" })) },
+      {
+        ...source,
+        kv: [{ collection: "prefs", key: "x", value: "false", updatedAt: 9 }],
+      },
+    ])
+      expect(
+        await classicLinkRepairSourceHash("u1", changed, experimental),
+      ).not.toBe(hash);
+    expect(
+      await classicLinkRepairSourceHash("u2", source, experimental),
+    ).not.toBe(hash);
   });
 });

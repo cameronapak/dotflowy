@@ -73,6 +73,7 @@ import {
   RetirementOperationRejected,
   retirementDiagnostic,
   retirementPopulation,
+  retirementRepairPreview,
   retirementReport,
   runRetirementOperation,
 } from "./lunora-retirement-service";
@@ -975,13 +976,17 @@ function handleApiRequest(
         return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
       }
       if (
-        url.searchParams.get("diagnostic") === "1" &&
+        (url.searchParams.get("diagnostic") === "1" ||
+          url.searchParams.get("repairPreview") === "1") &&
         request.method !== "GET"
       ) {
         return json({ error: "diagnostic requires GET" }, 405);
       }
       if (request.method === "GET") {
-        if (url.searchParams.get("diagnostic") === "1") {
+        if (
+          url.searchParams.get("diagnostic") === "1" ||
+          url.searchParams.get("repairPreview") === "1"
+        ) {
           const userId = yield* resolveRestoreUserId(env, {
             userId: url.searchParams.get("userId") ?? undefined,
             email: url.searchParams.get("email") ?? undefined,
@@ -995,9 +1000,13 @@ function handleApiRequest(
             return yield* Effect.fail(
               new BadRequest({ reason: "unknown user id" }),
             );
-          return json(
-            yield* Effect.promise(() => retirementDiagnostic(env, userId)),
-          );
+          const report =
+            url.searchParams.get("repairPreview") === "1"
+              ? yield* Effect.promise(() =>
+                  retirementRepairPreview(env, userId),
+                )
+              : yield* Effect.promise(() => retirementDiagnostic(env, userId));
+          return json(report);
         }
         if (url.searchParams.get("population") === "1") {
           return json({
