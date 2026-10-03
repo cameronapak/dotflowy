@@ -832,8 +832,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     });
     return m;
   }, [renderedRows, presentation.exiting]);
+  const presentationReady = useMemo(
+    () => rows.every((row) => rowIndex.has(row.key)),
+    [rows, rowIndex],
+  );
   const rowIndexRef = useRef(rowIndex);
-  useEffect(() => {
+  useLayoutEffect(() => {
     rowIndexRef.current = rowIndex;
   }, [rowIndex]);
   // useLayoutEffect (not useEffect): the post-navigation focus/flash effects in
@@ -842,8 +846,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // "/move Go" (or zoom-out) the prior editor's cleanup already nulled `nav`;
   // wiring it in the layout phase guarantees it's set before those passive
   // effects run, so an off-screen target is actually scrolled in rather than
-  // silently dropped. rowIndexRef is seeded by useRef on mount, so indexOf works
-  // here even before its own (passive) sync effect runs.
+  // silently dropped. The row index is also published in the layout phase,
+  // before a focus pass can resolve a newly inserted or reparented address.
   useLayoutEffect(() => {
     setVirtualNav({
       scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
@@ -867,6 +871,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   return (
     <>
       <FocusPass
+        ready={presentationReady}
         refs={refs}
         pendingFocus={pendingFocus}
         pendingFocusAtStart={pendingFocusAtStart}
@@ -1213,11 +1218,13 @@ function useOutlineFocus(): OutlineFocus {
  * subscription keeps the pass correct without re-rendering the expensive shell.
  */
 function FocusPass({
+  ready,
   refs,
   pendingFocus,
   pendingFocusAtStart,
   pendingFlash,
 }: {
+  ready: boolean;
   refs: Map<string, HTMLSpanElement | null>;
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
@@ -1225,6 +1232,10 @@ function FocusPass({
 }) {
   useTreeIndex();
   useEffect(() => {
+    // Completion presentation reconciles in a layout effect. A structural
+    // insert can reach this pass before its row is in the presentation list;
+    // leave its pending focus/flash for the next commit and mount claim.
+    if (!ready) return;
     const fid = pendingFocus.current;
     if (fid) {
       const el = refs.get(fid);

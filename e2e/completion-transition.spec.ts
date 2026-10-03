@@ -241,6 +241,27 @@ test("checkbox completion uses the same exit and undo during the fade restores i
   await expect(row(page, "task")).toHaveCount(0);
 });
 
+test("inserting a surviving row during an exit keeps its pending focus", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "task").focus();
+  await page.keyboard.press(`${MOD}+Enter`);
+  await page.clock.runFor(100);
+  await expect(text(page, "after")).toBeFocused();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.clock.runFor(32);
+  const inserted = page.locator(".node-text:focus");
+  await expect(inserted).toHaveText("");
+  await expect(inserted).not.toHaveAttribute("data-history-key", "after");
+  await expect(row(page, "task")).toBeAttached();
+  await page.clock.runFor(108);
+  await expect(row(page, "task")).toHaveCount(0);
+  await expect(page.locator("li[data-node-id]")).toHaveCount(3);
+  await expect(inserted).toHaveText("");
+});
+
 test("switching hide completed on hides all completed subtrees together and keeps surviving focus", async ({
   page,
 }) => {
@@ -489,9 +510,10 @@ test("overlapping completions keep independent deadlines without snapping a movi
   await row(page, "after").evaluate((el) => {
     const animation = el.getAnimations()[0]!;
     animation.pause();
-    animation.currentTime = 80;
+    animation.currentTime = 40;
   });
   const movingTop = (await row(page, "after").boundingBox())!.y;
+  expect(movingTop).toBeGreaterThan(taskTop);
   await page.keyboard.press(`${MOD}+Enter`);
   await page.clock.runFor(80);
   expect((await row(page, "after").boundingBox())!.y).toBeCloseTo(movingTop, 2);
