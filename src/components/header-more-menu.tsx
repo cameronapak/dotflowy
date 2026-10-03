@@ -1,3 +1,5 @@
+import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronsDownUpIcon,
@@ -21,6 +23,7 @@ import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
+import { useExperimentalCaptureEnabled } from "../data/flags";
 import { flattenInline } from "../data/inline-text";
 import { outlineToMarkdown } from "../data/markdown";
 import { toggleCollapsed } from "../data/mutations";
@@ -30,6 +33,7 @@ import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
+import { openAppleShortcut } from "./apple-shortcut-opener";
 import { openChangelog } from "./changelog-opener";
 import { restoreHistory, useHistoryState } from "./history-restore";
 import { useShowCompleted } from "./show-completed-provider";
@@ -170,8 +174,8 @@ export function setViewCollapsed(collapsed: boolean) {
  * Google, Delete account), connections (MCP), data (import/export), and
  * appearance (theme, text size) controls all live on the dedicated `/settings`
  * page -- so this menu is outline-view actions first (copy, collapse/expand,
- * show completed, spotlight), then read-only links (What's new, Report a bug,
- * GitHub, legal) + Settings, with Sign out last.
+ * show completed, spotlight), then Apple Shortcut setup (ADR 0065), read-only
+ * links (What's new, Report a bug, GitHub, legal) + Settings, with Sign out last.
  *
  * This is the static v1 of the header-action overflow: the pinned/overflow
  * split is a fixed default. User-customizable pinning (Chrome-extension style)
@@ -181,6 +185,7 @@ export function HeaderMoreMenu() {
   const navigate = useNavigate();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
+  const experimentalCapture = useExperimentalCaptureEnabled();
   // Unread-changelog signal (ADR 0046): a quiet dot on this trigger replaces the
   // old loud header CTA. Presence IS the signal; opening the dialog marks
   // everything read, so both the dot and the item emphasis clear themselves.
@@ -259,6 +264,13 @@ export function HeaderMoreMenu() {
         </DropdownMenuCheckboxItem>
 
         <DropdownMenuSeparator />
+
+        {experimentalCapture && (
+          <DropdownMenuItem onClick={() => openAppleShortcut()}>
+            <HugeiconsIcon icon={SmartPhone01Icon} />
+            Add Apple Shortcut
+          </DropdownMenuItem>
+        )}
 
         <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
           <SettingsIcon />

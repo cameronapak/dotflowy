@@ -82,3 +82,7 @@ _Avoid_: saved search (a filter stays put; see Filter), smart view
 **Quick-add**:
 Capturing a thought as a real node in one uninterrupted gesture, without looking at where it lands. The node commits immediately to a default destination (today's note) and is relocatable afterward; the whole point is to write the thing down before the destination's existing content distracts you out of remembering it. Distinct from navigation (Cmd+K takes you somewhere) and from an ordinary new node (which is authored in place, in view of its siblings).
 _Avoid_: quick capture (fine as a synonym, but the action is "quick-add"), inbox (the default is today, not a holding bucket), compose
+
+**Capture key**:
+A revocable credential that permits Quick-add to its owner's daily notes from outside the editor, without permission to read, edit, or delete existing outline content.
+_Avoid_: account key (implies broader access), MCP token (a different credential)

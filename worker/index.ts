@@ -50,6 +50,7 @@ import {
   backupTargets,
   isBackupDateKey,
 } from "./backup";
+import { handleCaptureKeys, handleCaptureRequest } from "./capture";
 import {
   OWNER_DO_ID,
   isAdminSession,
@@ -133,6 +134,8 @@ interface Env extends LunoraEnv {
   BACKUPS: R2Bucket;
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
   UNFURL_LIMIT: RateLimit;
+  /** Account-scoped external Quick-add and key-management abuse limit. */
+  CAPTURE_LIMIT: RateLimit;
   /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
   WAITLIST_LIMIT: RateLimit;
   /** Comma-separated Better Auth `user.id`s allowed on admin surfaces — the
@@ -1115,12 +1118,26 @@ function handleApiRequest(
     }
 
     // Identity = the validated session's stable user id. No session → 401.
+    // Capture keys authorize exactly this route, never MCP or browser APIs.
+    if (url.pathname === "/api/capture") {
+      return yield* handleCaptureRequest(request, env, executionCtx);
+    }
+
     const session = yield* Effect.promise(() =>
       auth.api.getSession({ headers: request.headers }),
     );
     if (!session) return json({ error: "unauthorized" }, 401);
 
     const userId = resolveUserId(session.user.id, env);
+
+    if (url.pathname === "/api/capture-keys") {
+      return yield* handleCaptureKeys(
+        request,
+        env,
+        session.user.id,
+        session.session.createdAt,
+      );
+    }
 
     // Link title unfurl (ADR 0016): fetch a pasted URL's <title> server-side so
     // a bare-url link can upgrade its label. DO-independent, so it runs before

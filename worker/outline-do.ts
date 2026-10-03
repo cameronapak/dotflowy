@@ -11,19 +11,27 @@ import type {
 } from "../src/data/wire-schema";
 import type { OutlineSnapshot, SnapshotKvRow } from "./backup";
 import type {
+  CaptureInput,
+  CaptureReceipt,
+  CaptureResult,
+} from "./capture-input";
+import type {
   ClassicRecoveryReceipt,
   PreserveClassicReceipt,
 } from "./lunora-recovery";
 import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
+import { dayKeyToScaffoldChain } from "../src/data/date-links";
 import { parseNodeLinks } from "../src/data/node-links";
+import { buildTreeIndex } from "../src/data/tree";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
 import {
   classicSnapshotsEquivalent,
   validateNodeGraph,
 } from "./lunora-retirement";
+import { planAddToDaily } from "./outline-ops";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 
@@ -276,6 +284,22 @@ export class UserOutlineDO extends DurableObject<Env> {
       version: 4,
       up: (sql) => {
         sql.exec(`ALTER TABLE changelog ADD COLUMN clientId TEXT`);
+      },
+    },
+    {
+      // Exactly-once capture attempts (ADR 0065): one row per attemptId so a
+      // retried shortcut captures once, with the fingerprint that detects an
+      // attempt ID reused for different content.
+      version: 5,
+      up: (sql) => {
+        sql.exec(`CREATE TABLE capture_receipt (
+          attemptId TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL,
+          nodeId TEXT NOT NULL,
+          dailyNoteId TEXT NOT NULL,
+          date TEXT NOT NULL,
+          createdAt INTEGER NOT NULL
+        )`);
       },
     },
   ];
@@ -569,6 +593,160 @@ export class UserOutlineDO extends DurableObject<Env> {
         return this.recordChange(out);
       }),
     );
+  }
+
+  /** Claims, current-tail planning, quota, nodes, receipt, and changelog share
+   *  one synchronous transaction. No stale Worker snapshot or per-level RPCs. */
+  captureDaily(input: CaptureInput, limit: number | null): CaptureResult {
+    this.assertWritable();
+    const committed = this.ctx.storage.transactionSync<{
+      result: CaptureResult;
+      frames: ChangeFrame[];
+    }>(() => {
+      const prior = this.sql
+        .exec<{
+          fingerprint: string;
+          nodeId: string;
+          dailyNoteId: string;
+          date: string;
+        }>(
+          "SELECT fingerprint, nodeId, dailyNoteId, date FROM capture_receipt WHERE attemptId = ?",
+          input.attemptId,
+        )
+        .toArray()[0];
+      if (prior) {
+        const result: CaptureResult =
+          prior.fingerprint !== input.fingerprint
+            ? { error: "attempt_conflict" }
+            : {
+                receipt: {
+                  saved: true,
+                  nodeId: prior.nodeId,
+                  dailyNoteId: prior.dailyNoteId,
+                  date: prior.date,
+                },
+                replayed: true,
+              };
+        return { result, frames: [] };
+      }
+      const now = Date.now();
+      const index = buildTreeIndex(this.getNodes());
+      const rows = this.getKv("daily-index").map((row) =>
+        Schema.decodeUnknownSync(
+          Schema.Struct({ key: Schema.String, nodeId: Schema.String }),
+        )(row),
+      );
+      const ids = new Map(rows.map((row) => [row.key, row.nodeId]));
+      const pending: KvRow[] = [];
+      const claim = (key: string) => {
+        const existing = ids.get(key);
+        if (existing) return existing;
+        const nodeId = crypto.randomUUID();
+        ids.set(key, nodeId);
+        pending.push({
+          collection: "daily-index",
+          key,
+          value: { key, nodeId },
+        });
+        return nodeId;
+      };
+      const containerId = claim("container");
+      const dayId = claim(input.date);
+      const chain = dayKeyToScaffoldChain(input.date);
+      if (!chain) throw new Error("invalid capture date");
+      const levels = index.byId.has(dayId)
+        ? {}
+        : {
+            yearId: claim(chain.yearKey),
+            monthId: claim(chain.monthKey),
+            weekId: claim(chain.weekKey),
+          };
+      const plan = planAddToDaily(index, {
+        dateKey: input.date,
+        containerId,
+        dayId,
+        ...levels,
+        keyByNodeId: new Map([...ids].map(([key, id]) => [id, key])),
+        newNodeId: crypto.randomUUID(),
+        text: input.text,
+        isTask: false,
+        origin: null,
+        timestamp: now,
+      });
+      const growth = countNetGrowth(plan.ops, (id) => this.nodeExists(id));
+      if (
+        batchExceedsNodeLimit(
+          this.nodeCount(),
+          growth.inserts,
+          growth.deletes,
+          limit,
+        )
+      ) {
+        const result: CaptureResult = { error: "node_limit" };
+        return { result, frames: [] };
+      }
+      for (const row of pending) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          JSON.stringify(row.value),
+          now,
+        );
+      }
+      const frames = this.recordChange(
+        plan.ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+      );
+      const receipt: CaptureReceipt = {
+        saved: true,
+        nodeId: plan.nodeId,
+        dailyNoteId: dayId,
+        date: input.date,
+      };
+      this.sql.exec(
+        "INSERT INTO capture_receipt (attemptId, fingerprint, nodeId, dailyNoteId, date, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+        input.attemptId,
+        input.fingerprint,
+        receipt.nodeId,
+        dayId,
+        input.date,
+        now,
+      );
+      const result: CaptureResult = { receipt, replayed: false };
+      return { result, frames };
+    });
+    this.broadcastChange(committed.frames);
+    return committed.result;
+  }
+
+  /** Only the untouched node created by this receipt may receive enrichment.
+   *  Replays/deletion never recreate it; the compare and patch are atomic. */
+  upgradeCaptureText(
+    attemptId: string,
+    expected: string,
+    text: string,
+  ): boolean {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const row = this.sql
+        .exec<NodeRow & Record<string, SqlStorageValue>>(
+          `SELECT n.* FROM nodes n JOIN capture_receipt r ON n.id = r.nodeId
+         WHERE r.attemptId = ? AND n.text = ? AND n.updatedAt = r.createdAt`,
+          attemptId,
+          expected,
+        )
+        .toArray()[0];
+      if (!row) return [];
+      return this.recordChange([
+        this.putNode({ ...rowToNode(row), text, updatedAt: Date.now() }),
+      ]);
+    });
+    this.broadcastChange(frames);
+    return frames.length > 0;
   }
 
   patchNodes(updates: readonly PatchUpdate[], clientId?: string): number {
