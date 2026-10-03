@@ -11,18 +11,11 @@
 
 import { toast } from "sonner";
 
-import type { ChangeOpLike, OutlineNode } from "../data/outline-plans";
-
 import { nodesCollection } from "../data/collection";
-import { isLunoraSyncEnabled, isMirrorsEnabled } from "../data/flags";
+import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop, RESTORE_SLICE_OPS } from "../data/history";
-import { getLiveNodes, getLiveOutlineNodes } from "../data/live-nodes";
-import {
-  getLunoraOutlineContext,
-  trackLunoraMutation,
-  type LunoraOutlineContext,
-} from "../data/lunora-sync";
+import { getLiveNodes } from "../data/live-nodes";
 import {
   countForest,
   parseMarkdownForest,
@@ -136,46 +129,6 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   const timestamp = now();
   const opCount = 1 + plan.insertCount + plan.repoints.length;
 
-  // Lunora flag-ON: classic `nodesCollection` is idle — land via
-  // `applyChangeOps` watermarks (delta only: anchor + inserts + repoints). A
-  // full-outline `restoreNodes` payload hits "Body too large" on real outlines.
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (!lunora) {
-      toast.error("Sync is still starting — try pasting again in a moment.");
-      return true;
-    }
-    capture(index, activeKey);
-    if (opCount < RESTORE_SLICE_OPS) {
-      let landed = false;
-      try {
-        landed = runStructural(() =>
-          applyMarkdownPasteViaChangeOps(plan, anchorId, timestamp, lunora),
-        );
-      } catch {
-        drop();
-        toast.error("Couldn't paste there — try again.");
-        return true;
-      }
-      if (!landed) {
-        drop();
-        toast.error("Couldn't paste there — try again.");
-        return true;
-      }
-      const seam = resolveSeam(plan, anchorId, count);
-      if (seam.id === anchorId)
-        focus.placeCaretHere(plan.anchor.text, seam.offset);
-      else {
-        const key = focusKeyFor(seam.id, activeKey);
-        focus.setPendingFocus(key, seam.offset);
-        scrollRowIntoView(key);
-      }
-      return true;
-    }
-    void runLunoraSlicedPaste(plan, anchorId, timestamp, lunora, count);
-    return true;
-  }
-
   const writeAnchor = () => {
     nodesCollection.update(anchorId, (draft) => {
       draft.text = plan.anchor.text;
@@ -251,180 +204,6 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   return true;
 }
 
-/** Drop Lunora `userId` for the wire ChangeOp value validator. */
-function toWireNode(n: OutlineNode): Omit<OutlineNode, "userId"> {
-  const { userId: _u, ...wire } = n;
-  return wire;
-}
-
-/**
- * Commit a markdown paste as a classic-shaped `{ops}` delta via Lunora
- * `applyChangeOps` (one watermark). O(touched rows), not O(outline) — a
- * full-outline `restoreNodes` hit "Body too large" on ~5k-node dogfood outlines.
- *
- * Returns whether anything was written — `false` means the anchor vanished
- * between planning and writing, and the caller owns the disclosure (see the
- * `landed` check at the call site). The context is passed IN rather than
- * re-read: the caller already resolved it, and re-reading here would invent a
- * second, silent failure mode for the same condition.
- */
-function applyMarkdownPasteViaChangeOps(
-  plan: MdPastePlan,
-  anchorId: string,
-  timestamp: number,
-  lunora: LunoraOutlineContext,
-): boolean {
-  const ops = buildMarkdownPasteOps(plan, anchorId, timestamp);
-  if (!ops) return false;
-  trackLunoraMutation(
-    lunora.store.mutators.applyChangeOps({
-      userId: lunora.userId,
-      ops,
-    }),
-  );
-  return true;
-}
-
-/** Build classic-shaped `{ops}` for a markdown paste, or null if anchor gone. */
-function buildMarkdownPasteOps(
-  plan: MdPastePlan,
-  anchorId: string,
-  timestamp: number,
-): ChangeOpLike[] | null {
-  // SAFETY: getLiveOutlineNodes returns OutlineNode[], the spread only copies it
-  const byId = new Map(
-    getLiveOutlineNodes().map((n) => [n.id, { ...n } as OutlineNode]),
-  );
-  const anchor = byId.get(anchorId);
-  if (!anchor) return null;
-
-  // A kind demotion forces the plain-paragraph shape (never a task); a bare
-  // isTask promotion clears the kind. Otherwise each field keeps the anchor's
-  // value, matching the old conditional spreads.
-  const nextAnchor: OutlineNode = {
-    ...anchor,
-    text: plan.anchor.text,
-    updatedAt: timestamp,
-    isTask:
-      plan.anchor.kind !== null ? false : (plan.anchor.isTask ?? anchor.isTask),
-    completed: plan.anchor.completed ?? anchor.completed,
-    kind:
-      plan.anchor.kind !== null
-        ? plan.anchor.kind
-        : plan.anchor.isTask
-          ? null
-          : anchor.kind,
-  };
-
-  const ops: ChangeOpLike[] = [{ op: "update", value: toWireNode(nextAnchor) }];
-
-  for (const ins of plan.inserts) {
-    ops.push({
-      op: "insert",
-      value: {
-        id: ins.id,
-        parentId: ins.parentId,
-        prevSiblingId: ins.prevSiblingId,
-        text: ins.text,
-        isTask: ins.isTask,
-        completed: ins.completed,
-        collapsed: false,
-        bookmarkedAt: null,
-        mirrorOf: null,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        origin: null,
-        kind: ins.kind,
-      },
-    });
-  }
-  for (const r of plan.repoints) {
-    const n = byId.get(r.id);
-    if (!n) continue;
-    ops.push({
-      op: "update",
-      value: toWireNode({
-        ...n,
-        prevSiblingId: r.prevSiblingId,
-        updatedAt: timestamp,
-      }),
-    });
-  }
-  return ops;
-}
-
-/** Slice paste ops for yielding apply — anchor, insert chunks, repoints last. */
-function slicePasteOps(
-  ops: ChangeOpLike[],
-  insertCount: number,
-): ChangeOpLike[][] {
-  const slices: ChangeOpLike[][] = [[ops[0]!]];
-  const insertOps = ops.slice(1, 1 + insertCount);
-  for (let i = 0; i < insertOps.length; i += RESTORE_SLICE_OPS) {
-    slices.push(insertOps.slice(i, i + RESTORE_SLICE_OPS));
-  }
-  const repointOps = ops.slice(1 + insertCount);
-  if (repointOps.length > 0) slices.push(repointOps);
-  return slices;
-}
-
-/**
- * Large Lunora paste: sequential `applyChangeOps` chunks behind the shared
- * progress modal (ADR 0044). Chunks persist independently — partial failure
- * keeps the undo point when anything landed (OPML import pattern).
- */
-async function runLunoraSlicedPaste(
-  plan: MdPastePlan,
-  anchorId: string,
-  timestamp: number,
-  lunora: LunoraOutlineContext,
-  count: number,
-): Promise<void> {
-  const ops = buildMarkdownPasteOps(plan, anchorId, timestamp);
-  if (!ops) {
-    drop();
-    toast.error("Couldn't paste there — try again.");
-    return;
-  }
-
-  const opCount = ops.length;
-  const slices = slicePasteOps(ops, plan.insertCount);
-  let applied = 0;
-
-  const show = () =>
-    setRestoreProgress({
-      kind: "restoring",
-      label: "Pasting",
-      total: opCount,
-      applied,
-    });
-  show();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  try {
-    for (const chunk of slices) {
-      const tx = lunora.store.mutators.applyChangeOps({
-        userId: lunora.userId,
-        ops: chunk,
-      });
-      await tx.isPersisted.promise;
-      applied += chunk.length;
-      show();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    setRestoreProgress({ kind: "closed" });
-    toast.success(`Pasted ${count.toLocaleString()} bullets.`);
-  } catch {
-    if (applied === 0) drop();
-    setRestoreProgress({ kind: "closed" });
-    toast.error(
-      applied === 0
-        ? "The paste could not be saved. Nothing was pasted."
-        : "The paste could not be fully saved. Earlier chunks landed — press Cmd+Z to remove them.",
-    );
-  }
-}
-
 /**
  * Where the caret actually lands, once the tree is on screen.
  *
@@ -443,8 +222,7 @@ function resolveSeam(plan: MdPastePlan, anchorId: string, count: number) {
   // synchronously current after `runStructural` -- not `getTreeIndex()`, whose
   // change-notify can lag the optimistic apply and drop the just-inserted seam
   // node from the walk (the exact reason `focusKeyFor`, called right after this,
-  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c). Classic =
-  // `nodesCollection`; Lunora = `wholeOutline` via `getLiveNodes`.
+  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c).
   const visible = new Set(
     buildVisibleRows(
       buildTreeIndex(getLiveNodes()),

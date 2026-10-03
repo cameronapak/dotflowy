@@ -26,10 +26,8 @@ import {
   scaffoldLabel,
   weekKeyToMonthKey,
 } from "../../data/date-links";
-import { isLunoraSyncEnabled } from "../../data/flags";
 import { RESTORE_SLICE_OPS, capture } from "../../data/history";
 import { getLiveNodes } from "../../data/live-nodes";
-import { getLunoraOutlineContext } from "../../data/lunora-sync";
 import {
   appendChild,
   insertChildAtStart,
@@ -38,21 +36,13 @@ import {
   setText,
 } from "../../data/mutations";
 import { isNodesLimitError } from "../../data/nodes-client-effect";
-import {
-  applyPlan,
-  buildTreeIndex,
-  childrenOf,
-  planInsertSibling,
-  rowToNode,
-  type OutlineNode,
-} from "../../data/outline-plans";
+import { buildTreeIndex, childrenOf } from "../../data/outline-plans";
 import {
   runStructural,
   runStructuralSliced,
   runStructuralTracked,
 } from "../../data/structural";
 import { createId } from "../../data/tree";
-import { getTreeIndex } from "../../data/tree-store";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
@@ -75,56 +65,8 @@ import {
 
 // --- get-or-create ----------------------------------------------------------
 
-function liveOutlineNodes(): OutlineNode[] | null {
-  if (!isLunoraSyncEnabled()) return null;
-  const lunora = getLunoraOutlineContext();
-  if (!lunora) return null;
-  return lunora.store.collection.toArray.map(rowToNode);
-}
-
 function hasNode(id: string): boolean {
-  const lunoraNodes = liveOutlineNodes();
-  if (lunoraNodes) return lunoraNodes.some((n) => n.id === id);
   return getLiveNodes().some((n) => n.id === id);
-}
-
-/**
- * Resolve once `id` is readable from the Lunora collection, or false on timeout.
- *
- * `await tx.isPersisted.promise` is NOT enough on its own. TanStack DB drops a
- * mutator's optimistic overlay the moment the server confirms the write, and the
- * confirmed rows arrive from the sync stream on a LATER tick -- so there is a
- * window, one macrotask wide, in which the row this mutator just wrote is in
- * neither the overlay nor the synced base. Measured on the day-creation path:
- * `hasNode()` reads true before the await, false immediately after it, and true
- * again one macrotask later. Reading straight through the await therefore
- * reports a failure for a write that in fact landed.
- *
- * Mirrors `waitForNode` in `data/collection.ts`, which does the same job on the
- * classic path. Kept local because that one reads `nodesCollection`, which is
- * ready-and-empty while the Lunora flag is ON (ADR 0058).
- */
-function waitForLunoraNode(id: string, timeoutMs = 3000): Promise<boolean> {
-  if (hasNode(id)) return Promise.resolve(true);
-  const lunora = getLunoraOutlineContext();
-  if (!lunora) return Promise.resolve(false);
-  return new Promise<boolean>((resolve) => {
-    let done = false;
-    const finish = (ok: boolean) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      sub.unsubscribe();
-      resolve(ok);
-    };
-    const timer = setTimeout(() => finish(hasNode(id)), timeoutMs);
-    const sub = lunora.store.collection.subscribeChanges(() => {
-      if (hasNode(id)) finish(true);
-    });
-    // Guard the registration gap: a delta applied between the check above and
-    // the subscribe would otherwise wait out the full timeout.
-    if (hasNode(id)) finish(true);
-  });
 }
 
 /** One atomic claim for a scaffold/day key: the authoritative id, whether this
@@ -180,23 +122,14 @@ function healExistingDay(
   key: string,
   seedEntryLine: boolean,
 ): void {
-  const lunoraNodes = liveOutlineNodes();
-  const node = lunoraNodes
-    ? lunoraNodes.find((n) => n.id === dayId)
-    : getLiveNodes().find((n) => n.id === dayId);
+  const node = getLiveNodes().find((n) => n.id === dayId);
   if (node && !node.text.trim()) setText(dayId, formatDayText(key));
   // Seeding is opt-in at the OPEN boundary (ADR 0041): only a write-intent
   // surface (/today, Today button, Cmd+K "Go to Today") asks for an empty line.
   // A reopened-but-emptied day re-seeds in its own isolated batch. No capture()
   // -- stays out of undo like day creation.
   if (seedEntryLine && !hasChildInLiveCollection(dayId)) {
-    // Lunora: insertChildAtStart is already a watermarked mutator; classic
-    // path keeps runStructural + appendChild (last-child when empty = same).
-    if (isLunoraSyncEnabled()) {
-      insertChildAtStart(getTreeIndex(), dayId, false, "");
-    } else {
-      runStructural(() => appendChild(dayId, null, ""));
-    }
+    runStructural(() => appendChild(dayId, null, ""));
   }
 }
 
@@ -248,22 +181,6 @@ async function materializeNewDay(
   if (claimed.some((c) => !c.won && !c.present)) resyncNodes();
 
   const parentId = chain && week ? week.id : container.id;
-
-  // ADR 0058: flag ON → one Lunora mutator for all node writes (kv claims
-  // already done above). Classic path keeps runStructuralTracked + applyBatch.
-  if (isLunoraSyncEnabled()) {
-    return materializeNewDayLunora({
-      container,
-      day,
-      key,
-      seedEntryLine,
-      chain,
-      year,
-      month,
-      week,
-      parentId,
-    });
-  }
 
   const { persisted } = runStructuralTracked(() => {
     // Container: appended at the end of the top level (special, not sorted).
@@ -326,131 +243,9 @@ async function materializeNewDay(
   return { id: null, cause: null };
 }
 
-/** Lunora flag-ON materialize: plan inserts client-side (sorted afterIds), one
- *  `materializeDailyNodes` mutator, await watermark. Ids claimed via Lunora
- *  `claimDailyMapping` (daily-index bind) before this runs. */
-async function materializeNewDayLunora(args: {
-  container: { id: string; won: boolean; present: boolean };
-  day: { id: string; won: boolean; present: boolean };
-  key: string;
-  seedEntryLine: boolean;
-  chain: ReturnType<typeof dayKeyToScaffoldChain>;
-  year: { id: string; won: boolean; present: boolean } | null;
-  month: { id: string; won: boolean; present: boolean } | null;
-  week: { id: string; won: boolean; present: boolean } | null;
-  parentId: string;
-}): Promise<GetOrCreateResult> {
-  const lunora = getLunoraOutlineContext();
-  if (!lunora) return { id: null, cause: null };
-
-  const t = Date.now();
-  let working = lunora.store.collection.toArray.map(rowToNode);
-  const inserts: Array<{
-    id: string;
-    parentId: string | null;
-    afterId: string | null;
-    text: string;
-  }> = [];
-
-  const pushInsert = (
-    id: string,
-    parentId: string | null,
-    afterId: string | null,
-    text: string,
-  ) => {
-    if (working.some((n) => n.id === id)) return;
-    const step = planInsertSibling(buildTreeIndex(working), {
-      id,
-      userId: lunora.userId,
-      parentId,
-      afterId,
-      text,
-      createdAt: t,
-      updatedAt: t,
-    });
-    if (!step) return;
-    inserts.push({ id, parentId, afterId, text });
-    working = applyPlan(working, step);
-  };
-
-  const pushSorted = (
-    parentNodeId: string,
-    scaffoldKey: string,
-    text: string,
-    id: string,
-  ) => {
-    if (working.some((n) => n.id === id)) return;
-    const index = buildTreeIndex(working);
-    const siblings = childrenOf(index, parentNodeId).map((n) => ({
-      id: n.id,
-      key: getKeyForNode(n.id),
-    }));
-    const afterId = sortedInsertAfterId(siblings, scaffoldKey);
-    pushInsert(id, parentNodeId, afterId, text);
-  };
-
-  if (!working.some((n) => n.id === args.container.id)) {
-    const tops = childrenOf(buildTreeIndex(working), null);
-    const after = tops.length ? tops[tops.length - 1]!.id : null;
-    pushInsert(args.container.id, null, after, DAILY_CONTAINER_TEXT);
-  }
-
-  if (args.chain && args.year && args.month && args.week) {
-    pushSorted(
-      args.container.id,
-      args.chain.yearKey,
-      scaffoldLabel(args.chain.yearKey),
-      args.year.id,
-    );
-    pushSorted(
-      args.year.id,
-      args.chain.monthKey,
-      scaffoldLabel(args.chain.monthKey),
-      args.month.id,
-    );
-    pushSorted(
-      args.month.id,
-      args.chain.weekKey,
-      scaffoldLabel(args.chain.weekKey),
-      args.week.id,
-    );
-  }
-
-  pushSorted(args.parentId, args.key, formatDayText(args.key), args.day.id);
-
-  // ADR 0041 seedEntryLine: empty child in the SAME mutator when asked.
-  if (args.seedEntryLine && !working.some((n) => n.parentId === args.day.id)) {
-    pushInsert(createId(), args.day.id, null, "");
-  }
-
-  if (inserts.length === 0) {
-    // Day already present after concurrent heal — treat as success.
-    return hasNode(args.day.id)
-      ? { id: args.day.id }
-      : { id: null, cause: null };
-  }
-
-  const tx = lunora.store.mutators.materializeDailyNodes({
-    userId: lunora.userId,
-    inserts,
-    createdAt: t,
-    updatedAt: t,
-  });
-  try {
-    await tx.isPersisted.promise;
-  } catch (err) {
-    return { id: null, cause: err };
-  }
-  if (await waitForLunoraNode(args.day.id)) return { id: args.day.id };
-  resyncNodes();
-  return { id: null, cause: null };
-}
-
 /** Does `parentId` have any child in the LIVE nodes collection? Used for the
  *  reopen-seed check, which must not trust a possibly-stale tree index. */
 function hasChildInLiveCollection(parentId: string): boolean {
-  const lunoraNodes = liveOutlineNodes();
-  if (lunoraNodes) return lunoraNodes.some((n) => n.parentId === parentId);
   return getLiveNodes().some((n) => n.parentId === parentId);
 }
 

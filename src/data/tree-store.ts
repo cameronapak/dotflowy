@@ -8,7 +8,7 @@ import { hasWindow } from "../env";
 import { collectBacklinkReferrerIds } from "./backlinks";
 import { isSyncReady, nodesCollection, subscribeSyncReady } from "./collection";
 import { parseDateLinkKeys } from "./date-links";
-import { isLunoraSyncEnabled, isMirrorsEnabled } from "./flags";
+import { isMirrorsEnabled } from "./flags";
 import { parseNodeLinks } from "./node-links";
 import { parseTags } from "./tags";
 import {
@@ -410,30 +410,13 @@ function removeTagOccurrence(tag: string) {
  * first read is already populated; every later change is folded into the shared
  * index incrementally and notifies. Skipped on the server (SPA + prerender, no
  * socket) -- see ADR 0004.
- *
- * Lunora flag-swap (ADR 0058): `lunora-sync.ts` owns the subscription and calls
- * {@link resetTreeFromNodes} — do not also subscribe to the idle `nodesCollection`.
  */
 function ensureStarted() {
   if (started || !hasWindow()) return;
   started = true;
-  if (isLunoraSyncEnabled()) return;
   nodesCollection.subscribeChanges((changes) => applyChanges(changes), {
     includeInitialState: true,
   });
-}
-
-/**
- * Replace the shared index from a full node list (Lunora `wholeOutline` feed).
- * Used when the Lunora sync flag is ON — a full rebuild is fine for dogfood
- * outlines; the incremental `applyChanges` path stays on the custom-DO flag-OFF
- * path.
- */
-export function resetTreeFromNodes(nodes: readonly Node[]): void {
-  ensureStarted();
-  index = buildTreeIndex([...nodes]);
-  structureRev++;
-  notify();
 }
 
 /**

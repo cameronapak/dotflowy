@@ -4,7 +4,6 @@ import { Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
 import { hasCryptoRandomUuid, hasWindow } from "../env";
-import { isLunoraSyncEnabled } from "./flags";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
 import {
@@ -73,17 +72,7 @@ export const savedQueriesCollection = createCollection(
 
 // --- Mutations --------------------------------------------------------------
 
-type LunoraSavedQueryWrites = {
-  list: () => SavedQueryRow[];
-  upsert: (row: SavedQueryRow) => void;
-  patchName: (id: string, name: string) => void;
-  remove: (id: string) => void;
-};
-
-let lunoraWrites: LunoraSavedQueryWrites | null = null;
-
 function liveRows(): SavedQueryRow[] {
-  if (lunoraWrites) return lunoraWrites.list();
   return savedQueriesCollection.toArray;
 }
 
@@ -108,10 +97,6 @@ export function saveQuery(query: string, name?: string): string | null {
     query: q,
     createdAt,
   };
-  if (lunoraWrites) {
-    lunoraWrites.upsert(row);
-    return id;
-  }
   savedQueriesCollection.insert(row);
   return id;
 }
@@ -122,10 +107,6 @@ export function unsaveQuery(query: string): void {
   if (!q) return;
   for (const row of liveRows()) {
     if (normalizeQuery(row.query) !== q) continue;
-    if (lunoraWrites) {
-      lunoraWrites.remove(row.id);
-      continue;
-    }
     savedQueriesCollection.delete(row.id);
   }
 }
@@ -142,20 +123,12 @@ export function renameSavedQuery(id: string, name: string): void {
   const n = name.trim();
   if (!n) return;
   if (!liveRows().some((r) => r.id === id)) return;
-  if (lunoraWrites) {
-    lunoraWrites.patchName(id, n);
-    return;
-  }
   savedQueriesCollection.update(id, (draft) => void (draft.name = n));
 }
 
 /** Delete a saved query by id (the popover row's X). */
 export function deleteSavedQuery(id: string): void {
   if (!liveRows().some((r) => r.id === id)) return;
-  if (lunoraWrites) {
-    lunoraWrites.remove(id);
-    return;
-  }
   savedQueriesCollection.delete(id);
 }
 
@@ -169,7 +142,6 @@ let rows: SavedQueryRow[] = EMPTY;
 let sorted: SavedQueryRow[] = EMPTY;
 const listeners = new Set<() => void>();
 let started = false;
-let lunoraUnsub: (() => void) | null = null;
 
 function rebuildFrom(source: SavedQueryRow[]) {
   rows = source;
@@ -181,57 +153,8 @@ function rebuild() {
   rebuildFrom(savedQueriesCollection.toArray);
 }
 
-/**
- * Called from `lunora-sync` when flag ON — subscribe to the Lunora shape and
- * skip `/api/kv` for this collection.
- */
-export function bindLunoraSavedQueries(
-  collection: {
-    toArray: Array<{
-      _id: string;
-      name?: unknown;
-      query?: unknown;
-      createdAt?: unknown;
-    }>;
-    subscribeChanges: (
-      cb: () => void,
-      opts?: { includeInitialState?: boolean },
-    ) => { unsubscribe: () => void };
-  },
-  writes: Omit<LunoraSavedQueryWrites, "list">,
-): void {
-  lunoraUnsub?.();
-  const mapRows = (): SavedQueryRow[] =>
-    collection.toArray.map((r) => ({
-      id: r._id,
-      name: String(r.name ?? ""),
-      query: String(r.query ?? ""),
-      createdAt: Number(r.createdAt ?? 0),
-    }));
-  lunoraWrites = {
-    list: mapRows,
-    ...writes,
-  };
-  const sub = collection.subscribeChanges(() => rebuildFrom(mapRows()), {
-    includeInitialState: true,
-  });
-  lunoraUnsub = () => sub.unsubscribe();
-  started = true;
-}
-
-/** Tear down Lunora feed (flag OFF / account switch). */
-export function unbindLunoraSavedQueries(): void {
-  lunoraUnsub?.();
-  lunoraUnsub = null;
-  lunoraWrites = null;
-  rows = EMPTY;
-  sorted = EMPTY;
-  started = false;
-}
-
 function ensureStarted() {
   if (started || !hasWindow()) return;
-  if (isLunoraSyncEnabled()) return;
   started = true;
   savedQueriesCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,

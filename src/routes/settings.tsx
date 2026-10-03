@@ -23,8 +23,6 @@ import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
-import { Switch } from "../components/ui/switch";
-import { setLunoraBetaEnabled, useLunoraBetaPref } from "../data/account-prefs";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { outlineToMarkdown } from "../data/markdown";
@@ -739,55 +737,6 @@ function AppearanceSection() {
   );
 }
 
-function BetaSection() {
-  const { ready, enabled } = useLunoraBetaPref();
-  // The write is a synced `kvPut` followed by a `hardReset`, so it has two
-  // failure modes worth owning: an offline toggle would otherwise be an
-  // unhandled rejection with no explanation (the switch just snaps back), and
-  // a double tap would fire two writes plus two reloads.
-  const [saving, setSaving] = useState(false);
-  const onToggle = useCallback((checked: boolean) => {
-    setSaving(true);
-    setLunoraBetaEnabled(checked).catch(() => {
-      setSaving(false);
-      toast.error("Couldn't save that. Check your connection and try again.");
-    });
-    // No `finally`: on success `hardReset` tears this tree down, so leaving
-    // the switch disabled through the reload is the honest state.
-  }, []);
-  return (
-    <Section
-      title="Beta"
-      description="Optional early features. The current sync stays the default until you opt in."
-    >
-      <RowGroup>
-        <SettingRow
-          title="Upgraded outline sync"
-          description={
-            <>
-              Try Dotflowy&apos;s next sync engine. Your outline stays yours —
-              we never claim your data. Opting in helps us harden it before
-              everyone gets it. May have rough edges; your choice syncs across
-              devices, and toggling reloads the app. Turning it off returns you
-              to your last classic snapshot — edits you make while this is on
-              stay on the upgraded backend until you turn it back on (one-way
-              for now; they do not copy back automatically).
-            </>
-          }
-          action={
-            <Switch
-              checked={ready ? enabled : false}
-              disabled={!ready || saving}
-              onCheckedChange={onToggle}
-              aria-label="Upgraded outline sync beta"
-            />
-          }
-        />
-      </RowGroup>
-    </Section>
-  );
-}
-
 function SettingsPage() {
   // One subscription fetch for the whole page; Plan & billing and the
   // Connections nudge both read it (no double request, no divergent state).
@@ -826,7 +775,6 @@ function SettingsPage() {
         </Section>
 
         <AccountSection />
-        <BetaSection />
         <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />

@@ -70,10 +70,7 @@ function snapshot(index: TreeIndex): Node[] {
  *
  * REFUSES an empty index. `planRestore` diffs the snapshot against the LIVE
  * tree, so a zero-node snapshot classifies every live node as a delete -- one
- * Cmd+Z away from wiping the outline. That only ever happens when the caller
- * read a starved node source: `nodesCollection` is ready-and-empty for the
- * whole session while the Lunora flag is ON (ADR 0058), so it reads as a
- * legitimately empty outline.
+ * Cmd+Z away from wiping the outline if a caller captured an incomplete read.
  *
  * The cost on a GENUINELY empty outline is one lost undo step: a user who
  * empties their outline and then types the first bullet cannot Cmd+Z back to
@@ -146,14 +143,10 @@ export const RESTORE_SLICE_OPS = 500;
  * small case, one `runStructuralSliced` call for the big one -- or call
  * `revert` if the apply failed and rolled back.
  *
- * When Lunora sync is ON, prefer `targetNodes` + `restoreNodes` mutator (one
- * watermark) over `slices` writing `nodesCollection`.
  */
 export interface RestorePlan {
   /** Total collection writes the restore will make. */
   opCount: number;
-  /** Full target outline (history snapshot) — Lunora `restoreNodes` input. */
-  targetNodes: readonly Node[];
   /** Apply closures in order; each makes at most RESTORE_SLICE_OPS writes. */
   slices: ReadonlyArray<() => void>;
   /** Writes applied so far -- the sliced path's progress read. */
@@ -240,7 +233,6 @@ function planRestore(
 
   return {
     opCount: deletes.length + upserts.length,
-    targetNodes: entry.nodes,
     slices,
     applied: () => applied,
     // Only focus if the focused node still exists in the restored state. The focus

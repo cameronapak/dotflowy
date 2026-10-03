@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { Schema } from "effect";
 
 import {
   dayKeyToWeekKey,
@@ -9,12 +10,8 @@ import {
   weekLabel,
   yearLabel,
 } from "../src/data/date-links";
-import {
-  seedOutline,
-  STANDARD_TREE,
-  isE2eLunora,
-  type SeedNode,
-} from "./fixtures";
+import { KvClaimBody } from "../worker/wire";
+import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // Cmd on macOS, Control elsewhere.
 function modifier() {
@@ -683,10 +680,6 @@ test.describe("daily notes", () => {
   }) => {
     // Classic-only: fakes a stale `/api/kv` replica + `?op=claim` winner ack.
     // Lunora delivers daily-index via shapes (no empty-GET + claim override).
-    test.skip(
-      isE2eLunora(),
-      "claim-race simulation is classic /api/kv transport",
-    );
     // Simulate the race: this device's local daily-index replica is empty (it
     // GETs an empty /api/kv below), so it thinks today is absent and CLAIMS --
     // but another device already created the container + today's note, so the
@@ -698,10 +691,10 @@ test.describe("daily notes", () => {
       2,
       "0",
     )}-${String(d.getDate()).padStart(2, "0")}`;
-    const winners: Record<string, string> = {
-      container: "race-container",
-      [todayKey]: "race-today",
-    };
+    const winners = new Map([
+      ["container", "race-container"],
+      [todayKey, "race-today"],
+    ]);
 
     await seedOutline(page, [
       ...STANDARD_TREE,
@@ -730,8 +723,10 @@ test.describe("daily notes", () => {
           req.method() === "POST" &&
           new URL(req.url()).searchParams.get("op") === "claim"
         ) {
-          const { key } = req.postDataJSON() as { key: string };
-          const nodeId = winners[key];
+          const { key } = Schema.decodeUnknownSync(KvClaimBody)(
+            req.postDataJSON(),
+          );
+          const nodeId = winners.get(key);
           if (nodeId) {
             return route.fulfill({
               status: 200,

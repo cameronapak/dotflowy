@@ -19,7 +19,7 @@ Keep this file brief. Put task-specific guidance behind a pointer.
 - **Send all transactional email through `worker/email.ts`.** Park sends on `ctx.waitUntil`.
 - **Decode request bodies against Effect Schema.**
 - **The app is a pure static SPA.** Code that touches `nodesCollection` stays off the server and render pass.
-- **Lunora sync stays opt-in.** User-facing copy must not name Lunora. Turning it off returns the last classic snapshot.
+- **Classic is the only browser and MCP backend.** Retain Lunora's internal retirement exports, bindings, shards, and backups through observation. User-facing copy must not name Lunora.
 - **Documentation Freshness.** If `AGENTS.md` or `README.md` becomes false about a path, command, or tool, correct it in the same change. Ask first before changing policy, philosophy, or positioning.
 - **Run the app before calling an observable change done.** Drive it in `bun run cf:dev` or an e2e spec.
 
@@ -35,7 +35,7 @@ New feature or design: `ls docs/adr/` and read the ADRs that match the surface. 
 | Effect: errore removal, sync socket, schemas, fiber    | 0012, 0013, 0021, 0053                                 |
 | Touch targets, reading size, and the bullet dot        | 0029                                                   |
 | Spotlight dim + breathing room                         | 0033, 0060                                             |
-| Lunora sync (experimental, flag-gated)                 | 0058                                                   |
+| Lunora retirement and retained exports                 | 0061-retire-lunora-through-per-user-cutover            |
 
 ## Architecture
 
@@ -63,7 +63,7 @@ Entitlements and checkout: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Lunora
 
-Experimental sync, live reads, `isPersisted`, `expectedTable`: [ADR 0058](./docs/adr/0058-lunora-replaces-custom-outline-sync.md).
+Retirement, recovery, and retained internal exports: [ADR 0061](./docs/adr/0061-retire-lunora-through-per-user-cutover.md). The historical sync design is [ADR 0058](./docs/adr/0058-lunora-replaces-custom-outline-sync.md).
 
 ## Review
 

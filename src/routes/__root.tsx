@@ -15,7 +15,6 @@ import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
 import { HistoryRestoreDialog } from "../components/history-restore";
-import { LunoraSyncHost } from "../components/lunora-sync-host";
 import { MirrorPlaces } from "../components/mirror-places";
 import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
@@ -29,7 +28,6 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
-import { AccountPrefsController } from "../data/account-prefs";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -147,33 +145,29 @@ function RootComponent() {
         ) : (
           <TextSizeProvider>
             <AuthGate>
-              <AccountPrefsController />
-              {/* ADR 0058: no-op when lunora-sync flag OFF (default). */}
-              <LunoraSyncHost>
-                <ShowCompletedProvider>
-                  <Outlet />
-                  <NodeSwitcher />
-                  <QuickAdd />
-                  {/* Registers openSettings() so the node-limit toast's "Upgrade"
+              <ShowCompletedProvider>
+                <Outlet />
+                <NodeSwitcher />
+                <QuickAdd />
+                {/* Registers openSettings() so the node-limit toast's "Upgrade"
                     action can SPA-navigate to /settings from non-React code. */}
-                  <SettingsNavRegistrar />
-                  <MoveDialog />
-                  <OpmlImportDialog />
-                  <DeleteConfirmDialog />
-                  <HistoryRestoreDialog />
-                  <ChangelogDialog />
-                  <MirrorPlaces />
-                  <TagColorStyles />
-                  <SpotlightController />
-                  {/* A distinct mechanism from the changelog (ADR 0046): the
+                <SettingsNavRegistrar />
+                <MoveDialog />
+                <OpmlImportDialog />
+                <DeleteConfirmDialog />
+                <HistoryRestoreDialog />
+                <ChangelogDialog />
+                <MirrorPlaces />
+                <TagColorStyles />
+                <SpotlightController />
+                {/* A distinct mechanism from the changelog (ADR 0046): the
                     changelog says WHAT changed; this says THIS TAB is stale. */}
-                  <UpdateAvailableToast />
-                  {/* Inside the gate: surfaces a failed "Connect Google" round
+                <UpdateAvailableToast />
+                {/* Inside the gate: surfaces a failed "Connect Google" round
                     trip (signed-in). Signed-out failures render inline in
                     AuthScreen via the same consume helper. */}
-                  <OAuthCallbackErrorToast />
-                </ShowCompletedProvider>
-              </LunoraSyncHost>
+                <OAuthCallbackErrorToast />
+              </ShowCompletedProvider>
             </AuthGate>
           </TextSizeProvider>
         )}

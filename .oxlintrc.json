@@ -56,7 +56,7 @@
               {
                 "group": ["**/data/collection", "@/data/collection"],
                 "importNames": ["nodesCollection"],
-                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes). nodesCollection is ready-and-empty while the Lunora flag is ON (ADR 0058)."
+                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes) so event-time reads see optimistic writes."
               }
             ]
           }
@@ -78,7 +78,7 @@
               {
                 "group": ["**/data/collection", "@/data/collection"],
                 "importNames": ["nodesCollection"],
-                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes). nodesCollection is ready-and-empty while the Lunora flag is ON (ADR 0058). The three excluded files WRITE to it behind an isLunoraSyncEnabled() gate."
+                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes). The three excluded files write to nodesCollection."
               }
             ]
           }
@@ -95,7 +95,7 @@
               {
                 "group": ["**/data/collection", "@/data/collection"],
                 "importNames": ["nodesCollection"],
-                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes), and wait for sync with whenNodesSyncReady() -- NOT nodesCollection.toArrayWhenReady(), which resolves instantly while the Lunora flag is ON (ADR 0058)."
+                "message": "Read live nodes through getLiveNodes() (@/data/live-nodes), and wait for sync with whenNodesSyncReady()."
               }
             ]
           }

@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { Schema } from "effect";
 import { readFileSync } from "node:fs";
 
-import { isE2eLunora, seedOutline, STANDARD_TREE } from "./fixtures";
+import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 /**
  * The changelog (ADR 0046): a "What's new" dialog reached from the More menu and
@@ -32,7 +33,7 @@ const whatsNewItem = (page: Page) =>
 type Kv = Record<string, { key: string; value: unknown }[]>;
 
 /** The kv row shape `changelog-cursor.ts` reads. */
-const cursor = (lastSeenVersion: string): Kv => ({
+const cursor = (lastSeenVersion: string) => ({
   changelog: [{ key: "cursor", value: { id: "cursor", lastSeenVersion } }],
 });
 
@@ -55,9 +56,15 @@ async function load(page: Page, kv?: Kv): Promise<string[]> {
       url.searchParams.get("collection") === "changelog",
     async (route) => {
       if (route.request().method() === "POST") {
-        const body = route.request().postDataJSON() as {
-          rows?: { value?: { lastSeenVersion?: string } }[];
-        };
+        const body = Schema.decodeUnknownSync(
+          Schema.Struct({
+            rows: Schema.Array(
+              Schema.Struct({
+                value: Schema.Struct({ lastSeenVersion: Schema.String }),
+              }),
+            ),
+          }),
+        )(route.request().postDataJSON());
         for (const row of body.rows ?? []) {
           if (row.value?.lastSeenVersion)
             writes.push(row.value.lastSeenVersion);
@@ -88,10 +95,6 @@ test.describe("changelog", () => {
   test("a caught-up account shows no badge, and does not re-seed", async ({
     page,
   }) => {
-    test.skip(
-      isE2eLunora(),
-      "seeds the cursor through the classic /api/kv mock",
-    );
     const writes = await load(page, cursor(LATEST));
 
     // Open + close the More menu so the header has demonstrably settled: "not
@@ -128,10 +131,6 @@ test.describe("changelog", () => {
   test("opening it advances the cursor to the latest release", async ({
     page,
   }) => {
-    test.skip(
-      isE2eLunora(),
-      "asserts cursor writes through the classic /api/kv mock",
-    );
     // A cursor this build has never heard of: no badge (an unknown version stays
     // quiet) and no silent seed (a row already exists) -- so the only write that
     // can happen is the one the dialog itself makes.

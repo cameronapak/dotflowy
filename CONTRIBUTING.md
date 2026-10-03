@@ -78,7 +78,7 @@ still exist if you want the two servers in separate terminals with isolated logs
 
 On Cam's machine `bun run dev` on :3000 has a broken database. Agents use
 `bun run cf:dev` on :8787 (one origin, closer to prod). Vite proxies for `/api`
-and `/_lunora` need `ws: true` — the string shorthand does not upgrade WebSockets
+need `ws: true` — the string shorthand does not upgrade WebSockets
 (`vite.config.ts` already sets this).
 
 ### Sign in

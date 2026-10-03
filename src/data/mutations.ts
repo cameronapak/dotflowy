@@ -1,14 +1,5 @@
 import { nodesCollection } from "./collection";
-import { isLunoraSyncEnabled } from "./flags";
 import { getLiveNodes } from "./live-nodes";
-import { getLunoraOutlineContext, trackLunoraMutation } from "./lunora-sync";
-import {
-  planIndent,
-  planIndentMany,
-  planMoveMany,
-  planOutdentMany,
-  rowToNode,
-} from "./outline-plans";
 import {
   type Node,
   type NodeKind,
@@ -66,28 +57,6 @@ export function insertSibling(
   kind: NodeKind = null,
   id = createId(),
 ): string {
-  // ADR 0058: Lunora mutator owns optimistic plan + watermark (dogfood surface).
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const t = now();
-      trackLunoraMutation(
-        lunora.store.mutators.insertSibling({
-          id,
-          userId: lunora.userId,
-          parentId,
-          afterId,
-          text,
-          isTask,
-          kind,
-          createdAt: t,
-          updatedAt: t,
-        }),
-      );
-      return id;
-    }
-  }
-
   const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.
@@ -136,26 +105,6 @@ export function insertChildAtStart(
   id = createId(),
   kind: NodeKind = null,
 ): string {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const t = now();
-      trackLunoraMutation(
-        lunora.store.mutators.insertChildAtStart({
-          id,
-          userId: lunora.userId,
-          parentId,
-          text,
-          isTask,
-          kind,
-          createdAt: t,
-          updatedAt: t,
-        }),
-      );
-      return id;
-    }
-  }
-
   const head = childrenOf(index, parentId)[0] ?? null;
 
   nodesCollection.insert(
@@ -189,29 +138,6 @@ export function splitNode(
   const newId = args.newId ?? createId();
   const isTask = args.isTask ?? false;
   const kind = args.kind ?? null;
-
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const t = now();
-      trackLunoraMutation(
-        lunora.store.mutators.splitNode({
-          id: args.nodeId,
-          newId,
-          userId: lunora.userId,
-          parentId: args.parentId,
-          afterId: args.afterId,
-          leftText: args.leftText,
-          rightText: args.rightText,
-          isTask,
-          kind,
-          createdAt: t,
-          updatedAt: t,
-        }),
-      );
-      return newId;
-    }
-  }
 
   insertSibling(
     index,
@@ -275,26 +201,6 @@ export function appendChild(
   id = createId(),
   opts?: { isTask?: boolean; kind?: NodeKind },
 ): string {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const t = now();
-      trackLunoraMutation(
-        lunora.store.mutators.appendChild({
-          id,
-          userId: lunora.userId,
-          parentId,
-          text,
-          isTask: opts?.isTask,
-          kind: opts?.kind,
-          createdAt: t,
-          updatedAt: t,
-        }),
-      );
-      return id;
-    }
-  }
-
   nodesCollection.insert(
     createNode({
       id,
@@ -363,38 +269,6 @@ export function mirrorNode(
 
   const id = createId();
 
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      // Resolve destination + cycle on the server planner (trueSourceOf parent).
-      // Pre-check above matches the legacy client path for early no-op.
-      const t = now();
-      const resolvedParent =
-        targetId !== null ? trueSourceOf(index, targetId) : null;
-      if (wouldMirrorCycle(index, trueSourceId, resolvedParent)) {
-        if (import.meta.env.DEV) {
-          console.warn(
-            "[mirrorNode] refused: the destination RESOLVED through " +
-              "trueSourceOf sits inside the source's subtree",
-            { sourceId, trueSourceId, targetId, resolvedParent },
-          );
-        }
-        return null;
-      }
-      trackLunoraMutation(
-        lunora.store.mutators.mirrorNode({
-          id,
-          userId: lunora.userId,
-          sourceId,
-          targetParentId: targetId,
-          createdAt: t,
-          updatedAt: t,
-        }),
-      );
-      return id;
-    }
-  }
-
   const siblings = childrenOf(index, targetId);
   const after = siblings.length ? siblings[siblings.length - 1]!.id : null;
   nodesCollection.insert(
@@ -453,24 +327,6 @@ export function indent(
 ): boolean {
   const node = index.byId.get(nodeId);
   if (!node || !node.prevSiblingId) return false;
-
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const updatedAt = now();
-      // Match classic false on no-op / mirror cycle (ADR 0022).
-      if (!planIndent(index, nodeId, updatedAt, resolveMirror)) return false;
-      trackLunoraMutation(
-        lunora.store.mutators.indent({
-          id: nodeId,
-          userId: lunora.userId,
-          updatedAt,
-          resolveMirror,
-        }),
-      );
-      return true;
-    }
-  }
 
   const newParent = index.byId.get(node.prevSiblingId);
   if (!newParent) return false;
@@ -546,20 +402,6 @@ export function indent(
 export function outdent(index: TreeIndex, nodeId: string): boolean {
   const node = index.byId.get(nodeId);
   if (!node || node.parentId === null) return false;
-
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.outdent({
-          id: nodeId,
-          userId: lunora.userId,
-          updatedAt: now(),
-        }),
-      );
-      return true;
-    }
-  }
 
   const oldParent = index.byId.get(node.parentId);
   if (!oldParent) return false;
@@ -815,23 +657,6 @@ export function moveNode(
     return false;
   }
 
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.moveNode({
-          id: nodeId,
-          userId: lunora.userId,
-          newParentId,
-          afterSiblingId,
-          updatedAt: now(),
-          expandIds: expandIds.length ? [...expandIds] : undefined,
-        }),
-      );
-      return true;
-    }
-  }
-
   for (const expandId of expandIds) {
     update(expandId, { collapsed: false });
   }
@@ -890,29 +715,6 @@ export function moveNode(
 export function moveManyNodes(targetId: string | null, ids: string[]): number {
   if (ids.length === 0) return 0;
 
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const updatedAt = now();
-      const nodes = lunora.store.collection.toArray.map(rowToNode);
-      const plan = planMoveMany(nodes, {
-        targetId,
-        nodeIds: ids,
-        updatedAt,
-      });
-      if (!plan) return 0;
-      trackLunoraMutation(
-        lunora.store.mutators.moveMany({
-          userId: lunora.userId,
-          targetId,
-          nodeIds: [...ids],
-          updatedAt,
-        }),
-      );
-      return ids.length;
-    }
-  }
-
   let moved = 0;
   // `after` walks forward: start at the target's current last child, then each
   // successful move becomes the predecessor of the next.
@@ -944,25 +746,6 @@ export function indentManyNodes(
   resolveMirror = false,
 ): number {
   if (rootIds.length === 0) return 0;
-
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const updatedAt = now();
-      const nodes = lunora.store.collection.toArray.map(rowToNode);
-      const plan = planIndentMany(nodes, rootIds, updatedAt, resolveMirror);
-      if (!plan) return 0;
-      trackLunoraMutation(
-        lunora.store.mutators.indentMany({
-          userId: lunora.userId,
-          nodeIds: [...rootIds],
-          updatedAt,
-          resolveMirror,
-        }),
-      );
-      return rootIds.length;
-    }
-  }
 
   const index = buildTreeIndex(getLiveNodes());
   // The run is contiguous, so the first root's prev sibling sits OUTSIDE it --
@@ -1004,24 +787,6 @@ export function indentManyNodes(
 export function outdentManyNodes(rootIds: string[]): number {
   if (rootIds.length === 0) return 0;
 
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const updatedAt = now();
-      const nodes = lunora.store.collection.toArray.map(rowToNode);
-      const plan = planOutdentMany(nodes, rootIds, updatedAt);
-      if (!plan) return 0;
-      trackLunoraMutation(
-        lunora.store.mutators.outdentMany({
-          userId: lunora.userId,
-          nodeIds: [...rootIds],
-          updatedAt,
-        }),
-      );
-      return rootIds.length;
-    }
-  }
-
   const start = buildTreeIndex(getLiveNodes());
   const oldParentId = start.byId.get(rootIds[0]!)?.parentId;
   if (!oldParentId) return 0; // already top-level -> can't outdent
@@ -1062,20 +827,6 @@ export function removeNode(index: TreeIndex, nodeId: string): string | null {
     focusId = node.parentId;
   }
 
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.removeNode({
-          id: nodeId,
-          userId: lunora.userId,
-          updatedAt: now(),
-        }),
-      );
-      return focusId;
-    }
-  }
-
   // Collect subtree ids (depth-first).
   const toDelete: string[] = [];
   const stack = [nodeId];
@@ -1112,58 +863,16 @@ export function removeNode(index: TreeIndex, nodeId: string): string | null {
 export function removeManyNodes(ids: string[]): void {
   if (ids.length === 0) return;
 
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.removeMany({
-          userId: lunora.userId,
-          nodeIds: [...ids],
-          updatedAt: now(),
-        }),
-      );
-      return;
-    }
-  }
-
   for (const id of ids) {
     removeNode(buildTreeIndex(getLiveNodes()), id);
   }
 }
 
 export function setText(nodeId: string, text: string) {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.setText({
-          id: nodeId,
-          userId: lunora.userId,
-          text,
-          updatedAt: now(),
-        }),
-      );
-      return;
-    }
-  }
   update(nodeId, { text });
 }
 
 export function toggleCompleted(nodeId: string, completed: boolean) {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.setCompleted({
-          id: nodeId,
-          userId: lunora.userId,
-          completed,
-          updatedAt: now(),
-        }),
-      );
-      return;
-    }
-  }
   update(nodeId, { completed });
 }
 
@@ -1181,20 +890,6 @@ export function toggleCompleted(nodeId: string, completed: boolean) {
  * forgotten at a call site.
  */
 export function setIsTask(nodeId: string, isTask: boolean) {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.setIsTask({
-          id: nodeId,
-          userId: lunora.userId,
-          isTask,
-          updatedAt: now(),
-        }),
-      );
-      return;
-    }
-  }
   update(nodeId, { isTask, kind: null });
 }
 
@@ -1207,38 +902,10 @@ export function setIsTask(nodeId: string, isTask: boolean) {
  * wrap it in `runStructural`.
  */
 export function setKind(nodeId: string, kind: NodeKind) {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.setKind({
-          id: nodeId,
-          userId: lunora.userId,
-          kind,
-          updatedAt: now(),
-        }),
-      );
-      return;
-    }
-  }
   update(nodeId, { kind, isTask: false });
 }
 
 export function toggleCollapsed(nodeId: string, collapsed: boolean) {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      trackLunoraMutation(
-        lunora.store.mutators.setCollapsed({
-          id: nodeId,
-          userId: lunora.userId,
-          collapsed,
-          updatedAt: now(),
-        }),
-      );
-      return;
-    }
-  }
   update(nodeId, { collapsed });
 }
 
@@ -1247,20 +914,5 @@ export function toggleCollapsed(nodeId: string, collapsed: boolean) {
  * bookmarks list sorts by it) or `null` to unpin. See ADR 0011.
  */
 export function toggleBookmark(nodeId: string, bookmarked: boolean) {
-  if (isLunoraSyncEnabled()) {
-    const lunora = getLunoraOutlineContext();
-    if (lunora) {
-      const t = now();
-      trackLunoraMutation(
-        lunora.store.mutators.setBookmarkedAt({
-          id: nodeId,
-          userId: lunora.userId,
-          bookmarkedAt: bookmarked ? t : null,
-          updatedAt: t,
-        }),
-      );
-      return;
-    }
-  }
   update(nodeId, { bookmarkedAt: bookmarked ? now() : null });
 }

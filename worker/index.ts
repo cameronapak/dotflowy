@@ -63,11 +63,7 @@ import {
   pendingWaitlistEmails,
   type InviteBatchResult,
 } from "./invites";
-import { lunoraApp, ShardDO, type LunoraEnv } from "./lunora-app";
-import {
-  createLunoraOutlineStore,
-  isLunoraOutlineEnabledForUser,
-} from "./lunora-mcp-store";
+import { ShardDO, type LunoraEnv } from "./lunora-app";
 import {
   RetirementOperationInProgress,
   RetirementOperationRejected,
@@ -1092,17 +1088,7 @@ function handleApiRequest(
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
-      const useLunora = yield* Effect.promise(() =>
-        isLunoraOutlineEnabledForUser(
-          env,
-          () => classicStub.getKv("account-prefs"),
-          () => classicStub.isLunoraRetired(),
-        ),
-      );
-      const mcpStore = useLunora
-        ? createLunoraOutlineStore(env, token.userId)
-        : classicStub;
-      return yield* handleMcp(request, mcpStore, origin, mcpPlan !== "free");
+      return yield* handleMcp(request, classicStub, origin, mcpPlan !== "free");
     }
 
     // Identity = the validated session's stable user id. No session → 401.
@@ -1249,11 +1235,10 @@ const handler = {
       );
     }
 
-    // Lunora reserved paths (ADR 0058 Phase-2 compose). Product Better Auth
-    // stays on `/api/auth/*`; Lunora has no dual signup here — identity is
-    // bridged from the product session inside `worker/lunora-app.ts`.
+    // The retired experimental HTTP namespace stays reserved rather than
+    // falling through to the SPA. Shard access is Worker-internal only.
     if (url.pathname === "/_lunora" || url.pathname.startsWith("/_lunora/")) {
-      return lunoraApp.fetch(request, env, ctx);
+      return new Response("not found", { status: 404 });
     }
 
     // The static shell + assets are PUBLIC so the login screen can load. Serve
