@@ -124,6 +124,17 @@ function fakeDb() {
           }
         } else if (sql.includes("UPDATE lunora_retirement SET")) {
           if (!record) throw new Error("missing fake retirement record");
+          if (sql.includes("policy = 'experimental-primary-recovery-v1'")) {
+            if (
+              record.userId === args[0] &&
+              record.activeOperationId === args[1]
+            )
+              record = {
+                ...record,
+                policy: "experimental-primary-recovery-v1",
+              };
+            return { success: true };
+          }
           if (sql.includes("policy = 'preserve-classic-v1'")) {
             // SAFETY: these positions mirror selectPreserveClassicPolicy's fixed bind list.
             record = {
@@ -602,6 +613,115 @@ describe("read-only retirement diagnostic", () => {
 });
 
 describe("Lunora retirement coordinator", () => {
+  it("atomically installs experimental nodes with detached Classic alternatives only when requested", async () => {
+    const f = fixture();
+    const original = clone(f.backend.classic);
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "migrate-with-recovery",
+      f.backend.backends,
+    );
+    expect(result.state, result.failureReason ?? "").toBe("completed");
+    expect(result.result).toBe("migrated-with-classic-recovery");
+    expect(result.policy).toBe("experimental-primary-recovery-v1");
+    expect(f.backend.classic.nodes[0]).toEqual(node("lunora"));
+    const root = f.backend.classic.nodes.find(
+      (row) => row.text === "Recovered Classic content",
+    );
+    expect(root?.prevSiblingId).toBe("lunora");
+    const recovered = f.backend.classic.nodes.find(
+      (row) => row.text === "classic",
+    );
+    expect(recovered?.id).not.toBe("classic");
+    expect(recovered?.parentId).not.toBeNull();
+    expect(JSON.parse(result.counts ?? "{}").recovery).toMatchObject({
+      classicOnly: 1,
+      copies: 4,
+    });
+    expect(JSON.stringify(result)).not.toContain("Recovered Classic content");
+    expect(
+      JSON.parse(
+        new TextDecoder().decode(
+          f.bucket.objects.get(result.classicSnapshotKey!)!,
+        ),
+      ).nodes,
+    ).toEqual(original.nodes);
+    expect(f.backend.restoreCalls).toBe(1);
+    expect(f.backend.recoveryCalls).toBe(0); // Copies are in the replacement transaction, not a second import.
+    expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBe("retired");
+    const edited = {
+      ...clone(f.backend.classic),
+      nodes: [
+        {
+          ...node("lunora"),
+          text: "new live edit after deleting the recovery folder",
+        },
+      ],
+    };
+    f.backend.replaceClassic(edited);
+    await runRetirementOperation(f.env, USER_ID, "retry", f.backend.backends);
+    expect(f.backend.classic).toEqual(edited);
+    expect(f.backend.restoreCalls).toBe(1);
+  });
+
+  it("reuses persisted copy ids after rollback and rejects a changed recovery manifest", async () => {
+    const f = fixture({ failMarkRetired: true });
+    const first = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "migrate-with-recovery",
+      f.backend.backends,
+    );
+    expect(first.state).toBe("rolled-back");
+    const key = first.recoveryManifestKey!;
+    const bytes = f.bucket.objects.get(key)!;
+    const manifest = JSON.parse(new TextDecoder().decode(bytes));
+    const again = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "retry",
+      f.backend.backends,
+    );
+    expect(again.state).toBe("rolled-back");
+    expect(again.recoveryManifestHash).toBe(first.recoveryManifestHash);
+    expect(f.bucket.objects.get(key)).toEqual(bytes);
+    f.bucket.objects.set(
+      key,
+      new TextEncoder().encode(
+        JSON.stringify({ ...manifest, createdAt: manifest.createdAt + 1 }),
+      ),
+    );
+    const restores = f.backend.restoreCalls;
+    const rejected = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "retry",
+      f.backend.backends,
+    );
+    expect(rejected.failureReason).toContain("manifest hash changed");
+    expect(f.backend.restoreCalls).toBe(restores);
+    expect(f.backend.classic.nodes).toEqual([node("classic")]);
+  });
+
+  it("rejects changing migration policy after an ordinary migration completed", async () => {
+    const f = fixture();
+    await runRetirementOperation(f.env, USER_ID, "migrate", f.backend.backends);
+    const before = clone(f.backend.classic);
+    await expect(
+      runRetirementOperation(
+        f.env,
+        USER_ID,
+        "migrate-with-recovery",
+        f.backend.backends,
+      ),
+    ).rejects.toThrow("new, unmodified automatic migration");
+    expect(f.backend.classic).toEqual(before);
+    expect(f.backend.restoreCalls).toBe(1);
+    expect(f.db.record?.activeOperationId).toBeNull();
+  });
+
   async function preserveClassicFixture() {
     const f = fixture();
     const current = classicSnapshot();

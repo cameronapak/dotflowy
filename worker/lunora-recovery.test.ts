@@ -4,7 +4,10 @@ import type { Node } from "../src/data/wire-schema";
 import type { OutlineSnapshot } from "./backup";
 import type { LunoraRetirementSnapshot } from "./lunora-retirement";
 
-import { planClassicRecovery } from "./lunora-recovery";
+import {
+  planClassicRecovery,
+  planExperimentalPrimaryRecovery,
+} from "./lunora-recovery";
 import { validateNodeGraph } from "./lunora-retirement";
 
 const node = (id: string, fields: Partial<Node> = {}): Node => ({
@@ -56,7 +59,7 @@ function plan(left: OutlineSnapshot, right: LunoraRetirementSnapshot) {
   });
 }
 function copy(
-  result: ReturnType<typeof plan>,
+  result: Pick<ReturnType<typeof plan>, "copies" | "nodes">,
   id: string,
   contextOnly = false,
 ) {
@@ -428,5 +431,165 @@ describe("preserve-Classic detached recovery plan", () => {
         plan({ ...left, kv: [{ ...left.kv[0]!, value }] }, right),
       ).toThrow("explicitly disabled");
     }
+  });
+});
+
+describe("experimental-primary detached Classic recovery", () => {
+  function inputs(left: Node[], right: Node[]) {
+    return {
+      left: {
+        ...classic(left),
+        kv: [{ ...classic(left).kv[0]!, value: '{"enabled":true}' }],
+      },
+      right: {
+        ...experimental(right),
+        migrateState: [{ userId: "u1", nodesAt: 1, kvAt: 1 }],
+      },
+    };
+  }
+  function recover(left: OutlineSnapshot, right: LunoraRetirementSnapshot) {
+    let counter = 0;
+    return planExperimentalPrimaryRecovery(left, right, {
+      userId: "u1",
+      timestamp: 200,
+      newId: () => `n_copy_${++counter}`,
+    });
+  }
+
+  it("copies all ten disjoint Classic nodes, not the sixteen authoritative nodes", () => {
+    const chain = (prefix: string, size: number) =>
+      Array.from({ length: size }, (_, i) =>
+        node(`${prefix}-${i}`, {
+          prevSiblingId: i === 0 ? null : `${prefix}-${i - 1}`,
+        }),
+      );
+    const { left, right } = inputs(
+      chain("classic", 10),
+      chain("experimental", 16),
+    );
+    const before = structuredClone({ left, right });
+    const result = recover(left, right);
+    expect(result.summary.classicOnly).toBe(10);
+    expect(result.summary.substantiveAlternatives).toBe(0);
+    expect(result.copies.map((row) => row.sourceId).sort()).toEqual(
+      left.nodes.map((row) => row.id).sort(),
+    );
+    expect(result.nodes).toHaveLength(13); // Root, warning, section, ten copies.
+    expect(result.nodes.find((row) => row.id === result.rootId)?.text).toBe(
+      "Recovered Classic content",
+    );
+    expect(
+      result.nodes.every(
+        (row) =>
+          ![...left.nodes, ...right.nodes].some((old) => old.id === row.id),
+      ),
+    ).toBe(true);
+    expect(validateNodeGraph(result.nodes)).toEqual({ ok: true });
+    expect({ left, right }).toEqual(before);
+  });
+
+  it("retains Classic alternatives and forward links without selecting newer timestamps", () => {
+    const shared = "n_shared_1",
+      extra = "n_extra_1",
+      primary = "n_primary_1";
+    const { left, right } = inputs(
+      [
+        node(shared, {
+          text: "Older Classic wording",
+          completed: true,
+          updatedAt: 1,
+        }),
+        node(extra, {
+          prevSiblingId: shared,
+          text: `[[${shared}]] [[${primary}]]`,
+        }),
+        node("time", { prevSiblingId: extra, updatedAt: 999 }),
+      ],
+      [
+        node(shared, { text: "Current experimental wording", updatedAt: 100 }),
+        node(primary, { prevSiblingId: shared }),
+        node("time", { prevSiblingId: primary }),
+      ],
+    );
+    const result = recover(left, right);
+    expect(result.summary).toMatchObject({
+      classicOnly: 1,
+      substantiveAlternatives: 1,
+    });
+    const copiedShared = copy(result, shared);
+    expect(copiedShared).toMatchObject({
+      text: "Older Classic wording",
+      completed: true,
+    });
+    expect(copy(result, extra).text).toBe(
+      `[[${copiedShared.id}]] [[${primary}]]`,
+    );
+    expect(result.copies.some((row) => row.sourceId === "time")).toBe(false);
+    expect(result.links).toEqual({ remapped: 1, classic: 1, unresolved: 0 });
+    expect(right.nodes[0]!.text).toBe("Current experimental wording");
+  });
+
+  it("keeps Classic mirrors inert and reserves both backends' retained daily claims", () => {
+    const { left, right } = inputs(
+      [
+        node("source"),
+        node("mirror", { prevSiblingId: "source", mirrorOf: "source" }),
+      ],
+      [node("primary")],
+    );
+    left.kv.push({
+      collection: "daily-index",
+      key: "day",
+      value: '{"key":"day","nodeId":"classic-claim"}',
+      updatedAt: 1,
+    });
+    const withClaim = {
+      ...right,
+      dailyIndex: [
+        {
+          key: "day",
+          nodeId: "experimental-claim",
+          touchedAt: 1,
+          userId: "u1",
+        },
+      ],
+    };
+    const result = recover(left, withClaim);
+    expect(copy(result, "mirror").mirrorOf).toBeNull();
+    expect(copy(result, "mirror").text).toContain("Mirror reference:");
+    for (const id of [
+      "classic-claim",
+      "experimental-claim",
+      "primary",
+      "source",
+    ])
+      expect(() =>
+        planExperimentalPrimaryRecovery(left, withClaim, {
+          userId: "u1",
+          timestamp: 200,
+          newId: () => id,
+        }),
+      ).toThrow("allocation collided");
+  });
+
+  it("omits an empty folder and rejects disabled preferences or invalid experimental sources", () => {
+    const { left, right } = inputs([node("same")], [node("same")]);
+    expect(recover(left, right).nodes).toEqual([]);
+    expect(recover(left, right).rootId).toBeNull();
+    expect(() => recover(classic([...left.nodes]), right)).toThrow(
+      "explicitly enabled",
+    );
+    expect(() => recover({ ...left, kv: [] }, right)).toThrow(
+      "explicitly enabled",
+    );
+    expect(() => recover(left, { ...right, migrateState: [] })).toThrow(
+      "valid experimental",
+    );
+    expect(() =>
+      recover(left, {
+        ...right,
+        nodes: [{ ...right.nodes[0]!, parentId: "missing" }],
+      }),
+    ).toThrow("valid experimental");
   });
 });

@@ -92,9 +92,23 @@ For sequential requests, completed dry-runs and retries are no-ops. An uncertain
 
 Browsers opened before this release may lack the retirement subscription. The retired shard rejects their writes, but they may need a reload to pick up classic. Verify that a fresh load uses classic; do not reopen Lunora to accommodate an old client.
 
-Enabled accounts still receive their complete validated experimental outline and shared side-collections, not a recovery folder. Both complete snapshots remain archived, including a raw experimental envelope at `<lunoraSnapshotKey>.archive` whose hash appears in `counts.rawArchiveHash`. Invalid or conflicting enabled accounts stay blocked for individual review.
+Ordinary migration of enabled accounts still restores their complete validated experimental outline and shared side-collections, without a recovery folder. Both complete snapshots remain archived, including a raw experimental envelope at `<lunoraSnapshotKey>.archive` whose hash appears in `counts.rawArchiveHash`. The separate operation below also includes reviewed Classic recovery copies. Invalid or conflicting enabled accounts stay blocked for individual review.
 
 Rollback can reopen writes. If fresh frozen classic or Lunora content differs from the immutable backup, retry refuses to restore and reports `operator review required`. This includes preferences, shared side-collections, and migration watermarks. Review both current backends and retained backups; do not delete or replace the immutable objects to force a retry. Unchanged re-exports may differ in export timestamps or row order.
+
+## Migrate an enabled account with Classic recovery copies
+
+Use this only for one reviewed, eligible account whose experimental outline you explicitly choose as authoritative. Obtain separate approval for the production operation. Compare both backends first; enabled preference and small node counts do not establish that Classic-only content is disposable.
+
+```sh
+bun run lunora:retire migrate-with-recovery --user REVIEWED_USER_ID --execute
+```
+
+This operation freezes both backends and verifies both complete archives, then saves an immutable, source-hash-bound recovery manifest. The complete experimental outline remains the working outline. **Recovered Classic content** contains fresh copies of Classic-only nodes and substantive alternatives, with the same context, inert-mirror, and link safeguards as experimental recovery. Classic side-collections remain archived; they do not overwrite experimental daily mappings, tag colors, or saved queries.
+
+The existing atomic Classic replacement installs the experimental outline and recovery copies together. Confirm `state: completed`, `result: migrated-with-classic-recovery`, `policy: experimental-primary-recovery-v1`, both archive hashes, `counts.rawArchiveHash`, and `recoveryManifestHash`. Review `counts.recovery.classicOnly`, `substantiveAlternatives`, `copies`, `adaptations`, and `links`. An empty recovery plan adds no folder. Check that the working outline, recovery folder, and new edits persist after reload without sharing personal content.
+
+This command rejects `--all`. It cannot change the policy of an in-progress or completed ordinary migration, or replace a preserved Classic outline. No additional D1 migration is required after 0013. The existing `retry` command follows the stored policy and reuses its allocated ids; it never overwrites edits or recreates deleted copies after completion. Corrupt manifests, mismatched source hashes, collisions, validation failures, and uncertain states remain blockers. Do not use a retry to bypass them.
 
 ## Preserve an explicitly chosen Classic outline
 

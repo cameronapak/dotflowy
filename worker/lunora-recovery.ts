@@ -12,7 +12,9 @@ import { type OutlineSnapshot, SNAPSHOT_VERSION } from "./backup";
 import {
   type LunoraRetirementSnapshot,
   RETIREMENT_SNAPSHOT_VERSION,
+  isLunoraPreferenceEnabled,
   validateClassicSnapshot,
+  validateLunoraSnapshot,
   validateNodeGraph,
 } from "./lunora-retirement";
 
@@ -77,6 +79,24 @@ export const ClassicRecoveryManifestSchema = Schema.Struct({
   }),
 });
 
+export const ExperimentalPrimaryRecoveryManifestSchema = Schema.Struct({
+  ...ClassicRecoveryManifestSchema.fields,
+  policy: Schema.Literal("experimental-primary-recovery-copies-v1"),
+  summary: Schema.Struct({
+    classicOnly: Schema.Number,
+    substantiveAlternatives:
+      ClassicRecoveryManifestSchema.fields.summary.fields
+        .substantiveAlternatives,
+    timestampOnly:
+      ClassicRecoveryManifestSchema.fields.summary.fields.timestampOnly,
+    archiveOnlyDifferences:
+      ClassicRecoveryManifestSchema.fields.summary.fields
+        .archiveOnlyDifferences,
+    fieldDifferences:
+      ClassicRecoveryManifestSchema.fields.summary.fields.fieldDifferences,
+  }),
+});
+
 // Exhaustive: adding a wire field requires deciding how recovery treats it.
 const FIELD_ROLE = {
   id: "identity",
@@ -109,22 +129,7 @@ export function planClassicRecovery(
   experimental: LunoraRetirementSnapshot,
   args: { userId: string; timestamp: number; newId: () => string },
 ) {
-  if (
-    classic.version !== SNAPSHOT_VERSION ||
-    experimental.version !== RETIREMENT_SNAPSHOT_VERSION ||
-    experimental.userId !== args.userId ||
-    [
-      experimental.nodes,
-      experimental.dailyIndex,
-      experimental.tagColors,
-      experimental.savedQueries,
-      experimental.migrateState,
-    ].some((rows) => rows.some((row) => row.userId !== args.userId))
-  ) {
-    throw new Error("recovery snapshot version or ownership rejected");
-  }
-  if (!validateClassicSnapshot(classic).ok)
-    throw new Error("recovery requires valid Classic");
+  validateRecoveryInputs(classic, experimental, args.userId);
   const preference = classic.kv.find(
     (row) => row.collection === "account-prefs" && row.key === "lunora-beta",
   );
@@ -136,10 +141,81 @@ export function planClassicRecovery(
       "recovery requires explicitly disabled experimental preference",
     );
   }
-  const classicById = new Map(classic.nodes.map((node) => [node.id, node]));
-  const source = new Map(experimental.nodes.map((node) => [node.id, node]));
-  if (source.size !== experimental.nodes.length)
+  const {
+    summary: { sourceOnly, ...summary },
+    ...plan
+  } = planRecoveryCopies(classic, experimental, args, "experimental");
+  return {
+    ...plan,
+    policy: "classic-recovery-copies-v1" as const,
+    summary: { experimentalOnly: sourceOnly, ...summary },
+  };
+}
+
+/** Detached Classic alternatives alongside a complete authoritative experimental outline. */
+export function planExperimentalPrimaryRecovery(
+  classic: OutlineSnapshot,
+  experimental: LunoraRetirementSnapshot,
+  args: { userId: string; timestamp: number; newId: () => string },
+) {
+  validateRecoveryInputs(classic, experimental, args.userId);
+  if (!isLunoraPreferenceEnabled(classic))
+    throw new Error(
+      "recovery requires explicitly enabled experimental preference",
+    );
+  if (!validateLunoraSnapshot(experimental, args.userId).ok)
+    throw new Error("recovery requires valid experimental snapshot");
+  const {
+    summary: { sourceOnly, ...summary },
+    ...plan
+  } = planRecoveryCopies(classic, experimental, args, "Classic");
+  return {
+    ...plan,
+    policy: "experimental-primary-recovery-copies-v1" as const,
+    summary: { classicOnly: sourceOnly, ...summary },
+  };
+}
+
+function validateRecoveryInputs(
+  classic: OutlineSnapshot,
+  experimental: LunoraRetirementSnapshot,
+  userId: string,
+) {
+  if (
+    classic.version !== SNAPSHOT_VERSION ||
+    experimental.version !== RETIREMENT_SNAPSHOT_VERSION ||
+    experimental.userId !== userId ||
+    [
+      experimental.nodes,
+      experimental.dailyIndex,
+      experimental.tagColors,
+      experimental.savedQueries,
+      experimental.migrateState,
+    ].some((rows) => rows.some((row) => row.userId !== userId))
+  ) {
+    throw new Error("recovery snapshot version or ownership rejected");
+  }
+  if (!validateClassicSnapshot(classic).ok)
+    throw new Error("recovery requires valid Classic");
+  if (
+    new Set(experimental.nodes.map((node) => node.id)).size !==
+    experimental.nodes.length
+  )
     throw new Error("recovery has duplicate experimental node ids");
+}
+
+function planRecoveryCopies(
+  classic: OutlineSnapshot,
+  experimental: LunoraRetirementSnapshot,
+  args: { timestamp: number; newId: () => string },
+  sourceName: "Classic" | "experimental",
+) {
+  const primaryNodes =
+    sourceName === "Classic" ? experimental.nodes : classic.nodes;
+  const sourceNodes =
+    sourceName === "Classic" ? classic.nodes : experimental.nodes;
+  const primaryById = new Map(primaryNodes.map((node) => [node.id, node]));
+  const source = new Map(sourceNodes.map((node) => [node.id, node]));
 
   const selected: [string[], string[]] = [[], []];
   // SAFETY: NodeSchema is the source of truth for every key of the wire Node.
@@ -150,8 +226,8 @@ export function planClassicRecovery(
   ) as Record<keyof Node, number>;
   let timestampOnly = 0;
   let archiveOnlyDifferences = 0;
-  for (const node of experimental.nodes) {
-    const existing = classicById.get(node.id);
+  for (const node of sourceNodes) {
+    const existing = primaryById.get(node.id);
     if (!existing) {
       selected[0].push(node.id);
       continue;
@@ -167,7 +243,7 @@ export function planClassicRecovery(
     else if (differences.length) archiveOnlyDifferences++;
   }
   const summary = {
-    experimentalOnly: selected[0].length,
+    sourceOnly: selected[0].length,
     substantiveAlternatives: selected[1].length,
     timestampOnly,
     archiveOnlyDifferences,
@@ -189,7 +265,6 @@ export function planClassicRecovery(
   const links = { remapped: 0, classic: 0, unresolved: 0 };
   if (!selected[0].length && !selected[1].length) {
     return {
-      policy: "classic-recovery-copies-v1" as const,
       rootId: null,
       nodes,
       copies,
@@ -246,7 +321,7 @@ export function planClassicRecovery(
       origin: null,
       kind: null,
     });
-  const root = synthetic("Recovered experimental content", null, null);
+  const root = synthetic(`Recovered ${sourceName} content`, null, null);
   nodes.push(root);
   const about = synthetic(
     "Editable copies, not automatically newer or lost items. Selected descendants only; placement and order may be adapted. Mirrors remain in the private archive. Links outside these copies may open Classic or be unresolved. The complete original snapshots remain in the private archive.",
@@ -264,7 +339,7 @@ export function planClassicRecovery(
     if (!selectedIds.length) continue;
     const heading = synthetic(
       section === 0
-        ? "Present only in experimental"
+        ? `Present only in ${sourceName}`
         : "Alternative text and task state",
       root.id,
       previousSection,
@@ -327,9 +402,7 @@ export function planClassicRecovery(
     }
     for (const [parent, childIds] of groups) {
       // Establish source order INCLUDING unselected siblings, then prune it.
-      const siblings = experimental.nodes.filter(
-        (row) => row.parentId === parent,
-      );
+      const siblings = sourceNodes.filter((row) => row.parentId === parent);
       const next = new Map<string | null, Node>();
       let valid = siblings.every((row) => {
         if (next.has(row.prevSiblingId)) return false;
@@ -372,7 +445,7 @@ export function planClassicRecovery(
             links.remapped++;
             return `[[${mapped}]]`;
           }
-          if (classicById.has(target)) links.classic++;
+          if (primaryById.has(target)) links.classic++;
           else links.unresolved++;
           return token;
         });
@@ -407,7 +480,6 @@ export function planClassicRecovery(
   if (!validateNodeGraph(nodes).ok)
     throw new Error("recovery produced an invalid copy graph");
   return {
-    policy: "classic-recovery-copies-v1" as const,
     rootId: root.id,
     nodes,
     copies,

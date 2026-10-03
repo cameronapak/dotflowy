@@ -9,7 +9,9 @@ import { resolveUserId } from "./identity";
 import { createLunoraRetirementClient } from "./lunora-mcp-store";
 import {
   ClassicRecoveryManifestSchema,
+  ExperimentalPrimaryRecoveryManifestSchema,
   planClassicRecovery,
+  planExperimentalPrimaryRecovery,
 } from "./lunora-recovery";
 import {
   LunoraRetirementArchiveSchema,
@@ -27,6 +29,7 @@ import {
   validateClassicSnapshot,
   validateLunoraSnapshot,
   validateLunoraRetirementArchive,
+  validateNodeGraph,
   type LunoraRetirementArchive,
   type LunoraRetirementSnapshot,
   type RetirementClassification,
@@ -100,6 +103,7 @@ export interface RetirementBackends {
 export type RetirementOperation =
   | "dry-run"
   | "migrate"
+  | "migrate-with-recovery"
   | "retry"
   | "restore"
   | "preserve-classic"
@@ -108,7 +112,10 @@ export type RetirementOperation =
 export interface RetirementRecord {
   userId: string;
   migrationId: string;
-  policy: "lunora-to-classic-v1" | "preserve-classic-v1";
+  policy:
+    | "lunora-to-classic-v1"
+    | "preserve-classic-v1"
+    | "experimental-primary-recovery-v1";
   recoveryManifestKey: string | null;
   recoveryManifestHash: string | null;
   state: string;
@@ -546,11 +553,73 @@ async function migrate(
       });
     }
 
-    const target = buildClassicTarget(
+    let target = buildClassicTarget(
       classicBackup.value,
       lunoraBackup.value,
       record.startedAt,
     );
+    if (record.policy === "experimental-primary-recovery-v1") {
+      const key = `${classicKey}.experimental-primary-recovery`;
+      const manifest = (await env.BACKUPS.get(key))
+        ? await readVerifiedObject(
+            env,
+            key,
+            ExperimentalPrimaryRecoveryManifestSchema,
+          )
+        : await storeImmutable(
+            env,
+            key,
+            ExperimentalPrimaryRecoveryManifestSchema.make({
+              ...planExperimentalPrimaryRecovery(
+                classicBackup.value,
+                lunoraBackup.value,
+                {
+                  userId: record.userId,
+                  timestamp: record.startedAt,
+                  newId: () => crypto.randomUUID(),
+                },
+              ),
+              version: 1,
+              userId: record.userId,
+              migrationId: record.migrationId,
+              createdAt: record.startedAt,
+              classicSnapshotHash: classicBackup.hash,
+              lunoraSnapshotHash: lunoraBackup.hash,
+            }),
+            ExperimentalPrimaryRecoveryManifestSchema,
+          );
+      if (
+        record.recoveryManifestHash &&
+        record.recoveryManifestHash !== manifest.hash
+      )
+        throw new Error("experimental-primary recovery manifest hash changed");
+      record = await updateRecord(env, record, {
+        recoveryManifestKey: key,
+        recoveryManifestHash: manifest.hash,
+        counts: JSON.stringify({
+          ...snapshotCounts(lunoraBackup.value),
+          rawArchiveHash: archive.hash,
+          recovery: {
+            ...manifest.value.summary,
+            copies: manifest.value.nodes.length,
+            adaptations: manifest.value.adaptations.length,
+            links: manifest.value.links,
+          },
+        }),
+      });
+      await recoveryManifest(env, record);
+      const roots = target.nodes.filter((node) => node.parentId === null);
+      const followed = new Set(roots.map((node) => node.prevSiblingId));
+      const tail = roots.find((node) => !followed.has(node.id));
+      const copies = manifest.value.nodes.map((node) =>
+        node.id === manifest.value.rootId
+          ? { ...node, prevSiblingId: tail?.id ?? null }
+          : node,
+      );
+      target = { ...target, nodes: [...target.nodes, ...copies] };
+      if (!validateNodeGraph(target.nodes).ok)
+        throw new Error("experimental-primary recovery target graph rejected");
+    }
     await stub.restoreRetirementSnapshot({
       migrationId: record.migrationId,
       ...target,
@@ -578,7 +647,10 @@ async function migrate(
     await stub.releaseRetirementFreeze(record.migrationId);
     return updateRecord(env, record, {
       state: "completed",
-      result: "migrated",
+      result:
+        record.policy === "experimental-primary-recovery-v1"
+          ? "migrated-with-classic-recovery"
+          : "migrated",
       completedAt: Date.now(),
       failureReason: null,
     });
@@ -664,20 +736,61 @@ async function selectPreserveClassicPolicy(
   return selected;
 }
 
+async function selectExperimentalPrimaryPolicy(
+  env: RetirementEnv,
+  record: RetirementRecord,
+  backends: RetirementBackends,
+): Promise<RetirementRecord> {
+  if (record.policy === "experimental-primary-recovery-v1") return record;
+  if (
+    record.policy !== "lunora-to-classic-v1" ||
+    !["created", "classified"].includes(record.state) ||
+    record.classicSnapshotHash ||
+    record.lunoraSnapshotHash
+  )
+    throw new RetirementOperationRejected({
+      message:
+        "recovery migration requires a new, unmodified automatic migration",
+    });
+  const status = await backends.classic.retirementStatus();
+  const experimental = await backends.lunora.inspect();
+  if (status.frozenBy || status.appliedMigrationId || experimental.retirement)
+    throw new RetirementOperationRejected({
+      message: "recovery migration requires unfenced, unmodified backends",
+    });
+  await env.DB.prepare(
+    `UPDATE lunora_retirement SET policy = 'experimental-primary-recovery-v1'
+     WHERE userId = ? AND activeOperationId = ?`,
+  )
+    .bind(record.userId, record.activeOperationId)
+    .run();
+  const selected = await getRecord(env, record.userId);
+  if (selected?.policy !== "experimental-primary-recovery-v1")
+    throw new Error("experimental-primary policy selection failed");
+  return selected;
+}
+
 async function recoveryManifest(env: RetirementEnv, record: RetirementRecord) {
   if (!record.recoveryManifestKey || !record.recoveryManifestHash)
     throw new Error("verified recovery manifest is unavailable");
   const manifest = await readVerifiedObject(
     env,
     record.recoveryManifestKey,
-    ClassicRecoveryManifestSchema,
+    Schema.Union([
+      ClassicRecoveryManifestSchema,
+      ExperimentalPrimaryRecoveryManifestSchema,
+    ]),
   );
   if (
     manifest.hash !== record.recoveryManifestHash ||
     manifest.value.userId !== record.userId ||
     manifest.value.migrationId !== record.migrationId ||
     manifest.value.classicSnapshotHash !== record.classicSnapshotHash ||
-    manifest.value.lunoraSnapshotHash !== record.lunoraSnapshotHash
+    manifest.value.lunoraSnapshotHash !== record.lunoraSnapshotHash ||
+    manifest.value.policy !==
+      (record.policy === "experimental-primary-recovery-v1"
+        ? "experimental-primary-recovery-copies-v1"
+        : "classic-recovery-copies-v1")
   )
     throw new Error("recovery manifest binding rejected");
   return manifest;
@@ -933,11 +1046,15 @@ export async function runRetirementOperation(
   // Keep ownership through recovery and audit writes. A terminated executor
   // cannot run finally, so its durable claim remains held without a timeout.
   try {
-    const result = await performRetirementOperation(
-      env,
+    const selected =
       operation === "preserve-classic"
         ? await selectPreserveClassicPolicy(env, record, backends)
-        : record,
+        : operation === "migrate-with-recovery"
+          ? await selectExperimentalPrimaryPolicy(env, record, backends)
+          : record;
+    const result = await performRetirementOperation(
+      env,
+      selected,
       operation,
       backends,
       approvedManifestHash,
@@ -977,7 +1094,11 @@ async function performRetirementOperation(
     return result;
   }
   if (record.policy === "preserve-classic-v1") {
-    if (operation === "migrate" || operation === "restore")
+    if (
+      operation === "migrate" ||
+      operation === "migrate-with-recovery" ||
+      operation === "restore"
+    )
       throw new RetirementOperationRejected({
         message:
           "replacement and rollback operations cannot overwrite chosen Classic",
