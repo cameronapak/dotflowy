@@ -217,7 +217,11 @@ function RowChrome({
   const hasChildren = capped
     ? false
     : hasVisibleChildren ||
-      (filter ? filter.matchIds.has(rowKey) && childIds.length > 0 : false);
+      (filter
+        ? filter.matchIds.has(rowKey) &&
+          filter.retainedKey !== rowKey &&
+          childIds.length > 0
+        : false);
   // Matches stay expandable when their nonmatching children are collapsed.
   // Ancestor context remains visually expanded when the filter reveals a match.
   const effectiveCollapsed = filter ? !hasVisibleChildren : instance.collapsed;

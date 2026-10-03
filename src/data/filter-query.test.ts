@@ -149,6 +149,70 @@ describe("mirror-aware DQL view filtering", () => {
     );
     expect(off?.visibleIds.size).toBe(0);
   });
+
+  test("focus retains only its render path, without revealing unrelated descendants", () => {
+    const focusedKey = rowKeyFor("mirror", "child");
+    const expanded = index([
+      ...tree.byId.values(),
+      createNode({ id: "grandchild", parentId: "child", text: "Unrelated" }),
+    ]);
+    const filter = buildQueryFilter(
+      expanded,
+      null,
+      "absent",
+      never,
+      ops,
+      true,
+      focusedKey,
+    );
+    expect(filter?.visibleIds).toEqual(
+      new Set(["today", "mirror", focusedKey]),
+    );
+    expect(filter?.matchIds).toEqual(new Set([focusedKey]));
+    expect(filter?.retainedKey).toBe(focusedKey);
+    expect(filter?.emptyMessage).toBeUndefined();
+
+    const matching = buildQueryFilter(
+      expanded,
+      null,
+      "#child",
+      never,
+      ops,
+      true,
+      focusedKey,
+    );
+    expect(matching?.retainedKey).toBeUndefined();
+    expect(matching?.visibleIds.has(rowKeyFor(focusedKey, "grandchild"))).toBe(
+      true,
+    );
+    const blurred = buildQueryFilter(expanded, null, "absent", never, ops);
+    expect(blurred?.visibleIds.size).toBe(0);
+    expect(blurred?.retainedKey).toBeUndefined();
+    expect(blurred?.emptyMessage).toBe('No matches for "absent" here.');
+    // Focus never overrides a separate visibility prune or a zoom scope.
+    expect(
+      buildQueryFilter(
+        expanded,
+        null,
+        "absent",
+        (n) => n.isTask,
+        ops,
+        true,
+        focusedKey,
+      )?.visibleIds.size,
+    ).toBe(0);
+    expect(
+      buildQueryFilter(
+        expanded,
+        "source",
+        "absent",
+        never,
+        ops,
+        true,
+        focusedKey,
+      )?.visibleIds.size,
+    ).toBe(0);
+  });
 });
 
 describe("parseFilterQuery", () => {

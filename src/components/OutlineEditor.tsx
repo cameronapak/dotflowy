@@ -598,7 +598,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // useViewFilter so the shell re-renders on a keystroke ONLY while a filter is
   // live; with no filter its snapshot stays a stable null. Render-time only,
   // never mutates a node (ADR 0015).
-  const filter = useViewFilter(viewCtx, isHidden);
+  const [focusedFilterKey, setFocusedFilterKey] = useState<string | null>(null);
+  const filter = useViewFilter(viewCtx, isHidden, focusedFilterKey);
   // Mirrored for event-time reads: a structural paste asks, after it lands,
   // whether the bullets it created are actually on screen (ADR 0044).
   useSyncViewFilter(filter);
@@ -730,6 +731,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       ? { width: window.innerWidth, height: window.innerHeight }
       : undefined,
   });
+  const virtualItems = virtualizer.getVirtualItems();
+  // A virtualized row can disconnect without bubbling blur. Reconcile after
+  // refs finish detaching/reattaching, not during an inline ref's transient null.
+  useLayoutEffect(() => {
+    if (focusedFilterKey !== null && findFocusedId() !== focusedFilterKey) {
+      setFocusedFilterKey(null);
+    }
+  }, [focusedFilterKey, findFocusedId, filter, virtualItems]);
   // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
   // render ADDRESS (row.key), not the bare id: a source descendant appears under
   // every instance, so scrollRowIntoView/virtualRowRect must resolve the exact
@@ -810,6 +819,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onClick={onContentClick}
         onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}
+        onFocus={() => setFocusedFilterKey(findFocusedId())}
+        onBlur={() => setFocusedFilterKey(null)}
       >
         {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
             pointer and only while a bullet is focused (both gated inside the
@@ -884,7 +895,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     height: virtualizer.getTotalSize(),
                   }}
                 >
-                  {virtualizer.getVirtualItems().map((vi) => {
+                  {virtualItems.map((vi) => {
                     const row = rows[vi.index];
                     if (!row) return null;
                     return (
