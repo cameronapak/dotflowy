@@ -18,7 +18,10 @@ import type { RetirementRecord } from "../worker/lunora-retirement-service";
 import type { Input } from "./retirement-worker";
 
 import { ServerMessageSchema } from "../src/data/wire-schema";
-import { ClassicRecoveryManifestSchema } from "../worker/lunora-recovery";
+import {
+  ClassicRecoveryManifestSchema,
+  ExperimentalPrimaryRecoveryManifestSchema,
+} from "../worker/lunora-recovery";
 import {
   compareRetirementSnapshots,
   LunoraRetirementArchiveSchema,
@@ -458,7 +461,11 @@ test("production manual operations enforce admin, manifest approval and content-
       },
       body: JSON.stringify({ userId, operation, approvedManifestHash }),
     });
-  for (const operation of ["preserve-classic", "recover-classic"])
+  for (const operation of [
+    "preserve-classic",
+    "recover-classic",
+    "migrate-with-recovery",
+  ])
     expect((await request(operation, "")).status).toBe(404);
   const preserved = await request("preserve-classic");
   expect(preserved.status).toBe(200);
@@ -478,6 +485,7 @@ test("production manual operations enforce admin, manifest approval and content-
     409,
   );
   expect((await request("migrate")).status).toBe(409);
+  expect((await request("migrate-with-recovery")).status).toBe(409);
   expect((await request("restore")).status).toBe(409);
   expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
     [current],
@@ -567,6 +575,183 @@ test("production shard shapes deliver outline snapshots and the live retirement 
   } finally {
     ws.close();
   }
+});
+
+test("experimental-primary recovery atomically preserves sixteen live nodes and copies ten disjoint Classic nodes", async () => {
+  const userId = randomUUID();
+  const chain = (name: string, count: number) => {
+    const rows: Node[] = [];
+    for (let i = 0; i < count; i++)
+      rows.push(node(`${name} ${i}`, null, rows.at(-1)?.id ?? null));
+    return rows;
+  };
+  const classicNodes = chain("PRIVATE_CLASSIC_FIXTURE", 10);
+  const lunoraNodes = chain("PRIVATE_EXPERIMENTAL_FIXTURE", 16);
+  await command("/seed", userId, {
+    classicNodes: [...classicNodes].reverse(),
+    lunoraNodes: [...lunoraNodes].reverse(),
+  });
+  const before = await command<Inspection>("/inspect", userId);
+  const completed = await command<RetirementRecord>("/run", userId, {
+    operation: "migrate-with-recovery",
+  });
+  expect(completed).toMatchObject({
+    state: "completed",
+    result: "migrated-with-classic-recovery",
+    policy: "experimental-primary-recovery-v1",
+    failureReason: null,
+    activeOperationId: null,
+  });
+  expect(JSON.stringify(completed)).not.toContain("PRIVATE_");
+  const after = await command<Inspection>("/inspect", userId);
+  expect(after.classic.nodes).toHaveLength(29);
+  expect(after.classic.nodes).toEqual(expect.arrayContaining(lunoraNodes));
+  const root = after.classic.nodes.find(
+    (row) => row.text === "Recovered Classic content",
+  );
+  expect(root?.prevSiblingId).toBe(lunoraNodes.at(-1)?.id);
+  expect(after.lunora.retirement?.status).toBe("retired");
+  expect(after.status.frozenBy).toBeNull();
+  expect(JSON.parse(completed.counts ?? "{}").recovery).toMatchObject({
+    classicOnly: 10,
+    substantiveAlternatives: 0,
+    copies: 13,
+    adaptations: 0,
+  });
+  const bucket = await mf.getR2Bucket("BACKUPS");
+  const manifestObject = await bucket.get(completed.recoveryManifestKey ?? "");
+  const manifest = Schema.decodeUnknownSync(
+    ExperimentalPrimaryRecoveryManifestSchema,
+  )(JSON.parse((await manifestObject?.text()) ?? "null"));
+  for (const original of classicNodes) {
+    const copy = manifest.copies.find((row) => row.sourceId === original.id);
+    expect(copy).toBeDefined();
+    expect(
+      after.classic.nodes.find((row) => row.id === copy?.copyId)?.text,
+    ).toBe(original.text);
+    expect(after.classic.nodes.some((row) => row.id === original.id)).toBe(
+      false,
+    );
+  }
+  const classicArchive = await bucket.get(completed.classicSnapshotKey ?? "");
+  expect(JSON.parse((await classicArchive?.text()) ?? "null").nodes).toEqual(
+    before.classic.nodes,
+  );
+  const liveDaily = after.classic.kv
+    .filter((row) => row.collection === "daily-index")
+    .map((row) => JSON.parse(row.value));
+  expect(liveDaily).toEqual(
+    before.lunora.snapshot.dailyIndex.map(({ key, nodeId }) => ({
+      key,
+      nodeId,
+    })),
+  );
+  const recovered = after.classic.nodes.find(
+    (row) => row.text === classicNodes[0]?.text,
+  )!;
+  await command("/classic-write", userId, {
+    classicNodes: [{ ...recovered, text: "Edited recovered Classic note" }],
+  });
+  await command("/classic-write", userId, {
+    classicNodes: [
+      { ...lunoraNodes[0]!, text: "New working-outline edit after migration" },
+    ],
+  });
+  const editedCopy = await command<Inspection>("/inspect", userId);
+  expect(
+    editedCopy.classic.nodes.find((row) => row.id === recovered.id)?.text,
+  ).toBe("Edited recovered Classic note");
+  await command("/classic-delete", userId, {
+    classicNodes: after.classic.nodes.filter(
+      (row) => !lunoraNodes.some((primary) => primary.id === row.id),
+    ),
+  });
+  const edited = await command<Inspection>("/inspect", userId);
+  await command("/run", userId, { operation: "retry" });
+  const repeated = await command<Inspection>("/inspect", userId);
+  expect(repeated.classic.nodes).toEqual(edited.classic.nodes);
+  expect(repeated.classic.nodes).toHaveLength(16);
+  expect(repeated.record.recoveryManifestHash).toBe(
+    completed.recoveryManifestHash,
+  );
+});
+
+for (const fault of ["retire", "verify"] as const) {
+  test(`experimental-primary recovery rolls back ${fault} failure and reuses its persisted copies`, async () => {
+    const { userId } = await seed();
+    const before = await command<Inspection>("/inspect", userId);
+    const failed = await command<RetirementRecord>("/run", userId, {
+      operation: "migrate-with-recovery",
+      fault,
+    });
+    expect(failed.state).toBe("rolled-back");
+    const rollback = await command<Inspection>("/inspect", userId);
+    expect(rollback.classic.nodes).toEqual(before.classic.nodes);
+    const bucket = await mf.getR2Bucket("BACKUPS");
+    const manifest = await bucket.get(failed.recoveryManifestKey ?? "");
+    const saved = await manifest?.text();
+    expect(saved).toBeDefined();
+    const retried = await command<RetirementRecord>("/run", userId, {
+      operation: "retry",
+    });
+    expect(retried.state, retried.failureReason ?? "").toBe("completed");
+    expect(retried.result).toBe("migrated-with-classic-recovery");
+    expect(retried.recoveryManifestHash).toBe(failed.recoveryManifestHash);
+    expect(
+      await (await bucket.get(retried.recoveryManifestKey ?? ""))?.text(),
+    ).toBe(saved);
+    const recovered = await command<Inspection>("/inspect", userId);
+    const plan = Schema.decodeUnknownSync(
+      ExperimentalPrimaryRecoveryManifestSchema,
+    )(JSON.parse(saved!));
+    expect(recovered.classic.nodes).toEqual(
+      expect.arrayContaining(
+        plan.nodes.map((row) =>
+          row.id === plan.rootId
+            ? {
+                ...row,
+                prevSiblingId: before.lunora.snapshot.nodes.find(
+                  (n) => n.text === "Lunora sibling",
+                )!.id,
+              }
+            : row,
+        ),
+      ),
+    );
+  });
+}
+
+test("experimental-primary recovery keeps post-unlock edits through a lost acknowledgement and uncertain retry", async () => {
+  const { userId, lunoraNodes } = await seed();
+  const uncertain = await command<RetirementRecord>("/run", userId, {
+    operation: "migrate-with-recovery",
+    fault: "unlock-ack",
+  });
+  expect(uncertain.state).toBe("uncertain");
+  const committed = await command<Inspection>("/inspect", userId);
+  expect(committed.status.frozenBy).toBeNull();
+  expect(committed.lunora.retirement?.status).toBe("retired");
+  expect(
+    committed.classic.nodes.some(
+      (row) => row.text === "Recovered Classic content",
+    ),
+  ).toBe(true);
+  await command("/classic-write", userId, {
+    classicNodes: [
+      {
+        ...lunoraNodes[0]!,
+        text: "Edit after unlock but before audit completion",
+      },
+    ],
+  });
+  const edited = await command<Inspection>("/inspect", userId);
+  const retry = await command<RetirementRecord>("/run", userId, {
+    operation: "retry",
+  });
+  expect(retry.state).toBe("uncertain");
+  expect((await command<Inspection>("/inspect", userId)).classic.nodes).toEqual(
+    edited.classic.nodes,
+  );
 });
 
 test("preserve-Classic keeps Classic byte semantics, archives raw unknown fields, and recovers only the exact reviewed manifest", async () => {
@@ -1083,6 +1268,7 @@ test("verification mismatch rolls back exactly; an uncertain rollback stays fenc
 for (const operation of [
   "restore",
   "migrate",
+  "migrate-with-recovery",
   "retry",
   "dry-run",
   "preserve-classic",

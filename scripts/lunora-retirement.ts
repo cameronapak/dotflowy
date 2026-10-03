@@ -15,6 +15,7 @@ type OperationResult = Schema.Schema.Type<typeof OperationResultSchema>;
 type Command =
   | "dry-run"
   | "migrate"
+  | "migrate-with-recovery"
   | "retry"
   | "status"
   | "restore"
@@ -63,6 +64,7 @@ function usage(): void {
   console.error(`Usage:
   bun run lunora:retire [dry-run] (--user ID | --email EMAIL | --all)
   bun run lunora:retire migrate (--user ID | --email EMAIL | --all) --execute
+  bun run lunora:retire migrate-with-recovery (--user ID | --email EMAIL) --execute
   bun run lunora:retire retry (--user ID | --email EMAIL) --execute
   bun run lunora:retire status [--user ID | --email EMAIL | --all]
   bun run lunora:retire restore (--user ID | --email EMAIL) --execute
@@ -78,6 +80,7 @@ function parseArgs(argv: string[]): Args {
   const commands: Command[] = [
     "dry-run",
     "migrate",
+    "migrate-with-recovery",
     "retry",
     "status",
     "restore",
@@ -118,9 +121,13 @@ function parseArgs(argv: string[]): Args {
     args.all = true;
   } else if (targets !== 1) usage();
   if (
-    ["retry", "restore", "preserve-classic", "recover-classic"].includes(
-      command,
-    ) &&
+    [
+      "retry",
+      "restore",
+      "preserve-classic",
+      "recover-classic",
+      "migrate-with-recovery",
+    ].includes(command) &&
     args.all
   )
     usage();
@@ -128,6 +135,7 @@ function parseArgs(argv: string[]): Args {
   if (
     [
       "migrate",
+      "migrate-with-recovery",
       "retry",
       "restore",
       "preserve-classic",
@@ -225,6 +233,7 @@ async function operate(
   operation:
     | "dry-run"
     | "migrate"
+    | "migrate-with-recovery"
     | "retry"
     | "restore"
     | "preserve-classic"
@@ -273,7 +282,10 @@ async function main(): Promise<void> {
     : [targetBody(args)];
   const results: unknown[] = [];
   for (const target of targets) {
-    if (args.command === "migrate") {
+    if (
+      args.command === "migrate" ||
+      args.command === "migrate-with-recovery"
+    ) {
       const preview = await operate(args, cookie, "dry-run", target);
       const classification =
         preview.dryRun?.classification ?? preview.classification;
@@ -295,7 +307,9 @@ async function main(): Promise<void> {
     const result = await operate(args, cookie, operation, target);
     results.push(result);
     if (
-      ["migrate", "preserve-classic"].includes(args.command) &&
+      ["migrate", "migrate-with-recovery", "preserve-classic"].includes(
+        args.command,
+      ) &&
       result.state !== "completed"
     ) {
       console.error(`${args.command} stopped: operation did not complete.`);
