@@ -20,10 +20,15 @@ import { buildTreeIndex, childrenOf } from "./tree";
  * (the optimistic insert reverts, so the outline never visibly grows past cap).
  * A fixed toast `id` de-dupes a burst of blocked inserts into one notice.
  */
-async function persistStructuralBatch(ops: ChangeOp[]): Promise<void> {
+async function persistStructuralBatch(
+  ops: ChangeOp[],
+  expectedSeq?: number,
+): Promise<void> {
   try {
     await runPromise(
-      persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
+      persistBatchE(ops, expectedSeq).pipe(
+        Effect.flatMap(({ seq }) => waitForSeqE(seq)),
+      ),
     );
   } catch (err) {
     if (err instanceof NodesLimitError) {
@@ -98,7 +103,10 @@ export interface StructuralRun<T> {
   persisted: Promise<void>;
 }
 
-export function runStructuralTracked<T>(body: () => T): StructuralRun<T> {
+export function runStructuralTracked<T>(
+  body: () => T,
+  expectedSeq?: number,
+): StructuralRun<T> {
   // Nesting guard: a compound flow (e.g. the daily get-or-create, which creates
   // a container then a day) may call runStructural while already inside one.
   // Join the outer transaction so the whole flow is ONE frame; never open a
@@ -123,7 +131,7 @@ export function runStructuralTracked<T>(body: () => T): StructuralRun<T> {
       // rolls the transaction back — comes from the batch send (incl. the free
       // node-ceiling 403, which also toasts). A chunked >500-op batch replies
       // with its FINAL seq (worker/outline-do.ts), so the wait spans every frame.
-      await persistStructuralBatch(ops);
+      await persistStructuralBatch(ops, expectedSeq);
     },
   });
   tx.mutate(() => {
@@ -152,6 +160,7 @@ export function runStructuralTracked<T>(body: () => T): StructuralRun<T> {
 export async function runStructuralSliced(
   slices: ReadonlyArray<() => void>,
   onProgress?: () => void,
+  expectedSeq?: number,
 ): Promise<void> {
   // Nesting guard (same as runStructuralTracked): inside an ambient
   // transaction, apply synchronously — the outer transaction owns persistence,
@@ -165,7 +174,7 @@ export async function runStructuralSliced(
     mutationFn: async ({ transaction }) => {
       const ops = transaction.mutations.map(toChangeOp);
       if (ops.length === 0) return;
-      await persistStructuralBatch(ops);
+      await persistStructuralBatch(ops, expectedSeq);
     },
   });
   try {

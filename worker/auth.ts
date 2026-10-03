@@ -27,6 +27,7 @@ import {
   deleteResidualUserRows,
   isOwnerAccount,
 } from "./account-deletion";
+import { revokeCaptureKeys } from "./capture-keys";
 import { sendEmail } from "./email";
 import { isSignupOpen, matchesSharedInviteCode } from "./identity";
 import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
@@ -198,6 +199,9 @@ export function createAuth(
       // A reset is the "my password leaked" move: kill every existing session
       // so a stolen one dies with the old password.
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }) => {
+        await revokeCaptureKeys(env.DB, user.id);
+      },
     },
     // Email verification (#293). `sendOnSignUp` is left at its default
     // (undefined = follow requireEmailVerification), so a verification email
@@ -393,6 +397,14 @@ export function createAuth(
         });
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (
+          ctx.path === "/change-password" &&
+          !(ctx.context.returned instanceof APIError)
+        ) {
+          const userId = ctx.context.session?.user.id;
+          if (userId) await revokeCaptureKeys(env.DB, userId);
+          return;
+        }
         if (ctx.path !== "/sign-up/email") return;
         // Only burn the code on a genuine account creation. On failure the
         // endpoint's result — surfaced here as `ctx.context.returned` — is an

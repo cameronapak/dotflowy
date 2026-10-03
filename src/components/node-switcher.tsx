@@ -329,6 +329,7 @@ function SwitcherDialog({
   }
 
   function runAction(action: CommandCenterAction) {
+    if (action.disabled) return;
     // Run BEFORE close: verbs like Delete prefer `findFocusedId() ?? id`, and
     // closing the dialog first lets Radix restore focus onto an unrelated row
     // (Lunora tree remounts make this common) — deleting the wrong bullet.
@@ -564,7 +565,7 @@ function ActionCommandRow({
 }) {
   const Icon = action.icon;
   return (
-    <CommandItem value={action.id} onSelect={onRun}>
+    <CommandItem value={action.id} onSelect={onRun} disabled={action.disabled}>
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="truncate">{action.label}</span>

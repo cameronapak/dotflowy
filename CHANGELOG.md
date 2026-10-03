@@ -1,5 +1,32 @@
 # dotflowy
 
+## 1.18.1
+
+### Patch Changes
+
+- 7d4d088: On narrow screens, commands, suggestions, More actions, calendar, breadcrumbs, and quick-add destinations open in bottom drawers with larger touch targets. Typing suggestions keep your caret in the editor, and closing a drawer leaves your text unchanged.
+
+## 1.18.0
+
+### Minor Changes
+
+- 4b2b1d2: Add opt-in experimental capture keys and Apple Shortcut setup on every plan, for appending thoughts and links to daily notes. Enable External quick-add in Settings → Experimental. End-to-end real-iPhone verification remains pending.
+
+## 1.17.0
+
+### Minor Changes
+
+- 8e033ff: Undo and redo are available in More, the command center, and the mobile editing
+  bar, with familiar text grouping and restored caret or node selection. Quick-add
+  keeps undo within the current thought. Hidden changes show a brief confirmation;
+  edits from another tab, device, or app clear history to protect newer work.
+
+## 1.16.5
+
+### Patch Changes
+
+- b16a040: Keep a focused node visible while editing under a filter, even when it stops matching. Apply the filter again when the node loses focus.
+
 ## 1.16.4
 
 ### Patch Changes

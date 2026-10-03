@@ -105,6 +105,29 @@ describe("ServerMessageSchema (DO → client frames)", () => {
     ).toBe(true);
   });
 
+  it("accepts correlation on live and resumed change frames", () => {
+    const change = Schema.decodeUnknownSync(ServerMessageSchema)({
+      type: "change",
+      seq: 6,
+      ops: [{ op: "update", value: a }],
+      clientId: "page-1",
+    });
+    const resume = Schema.decodeUnknownSync(ServerMessageSchema)({
+      type: "resume",
+      seq: 6,
+      changes: [
+        {
+          seq: 6,
+          ops: [{ op: "update", value: a }],
+          clientId: "page-1",
+        },
+      ],
+    });
+
+    expect(change).toHaveProperty("clientId", "page-1");
+    expect(resume).toHaveProperty("changes.0.clientId", "page-1");
+  });
+
   it("rejects an unknown frame type", () => {
     expect(decodes(ServerMessageSchema, { type: "bogus", seq: 1 })).toBe(false);
   });

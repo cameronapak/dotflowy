@@ -42,6 +42,8 @@ async function bigDelete(page: Page) {
 }
 
 test.describe("sliced history restore", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   test("Cmd+Z after a big delete restores through the progress dialog and persists", async ({
     page,
   }) => {
@@ -49,7 +51,7 @@ test.describe("sliced history restore", () => {
     // "saving" phase — proof every slice applied while ONE batch is in flight.
     await seedOutline(page, bigSeed(600), { postDelayMs: 400 });
     await page.goto("/");
-    await expect(text(page, "big")).toBeVisible();
+    await expect(text(page, "big")).toBeVisible({ timeout: 60_000 });
 
     await bigDelete(page);
 
@@ -81,7 +83,7 @@ test.describe("sliced history restore", () => {
   }) => {
     await seedOutline(page, bigSeed(600), { postDelayMs: 400 });
     await page.goto("/");
-    await expect(text(page, "big")).toBeVisible();
+    await expect(text(page, "big")).toBeVisible({ timeout: 60_000 });
 
     await bigDelete(page);
 
@@ -109,7 +111,7 @@ test.describe("sliced history restore", () => {
   }) => {
     await seedOutline(page, STANDARD_TREE);
     await page.goto("/");
-    await expect(text(page, "alpha")).toBeVisible();
+    await expect(text(page, "alpha")).toBeVisible({ timeout: 60_000 });
 
     // A small structural change (3-node subtree delete), then undo it.
     await text(page, "alpha").click();

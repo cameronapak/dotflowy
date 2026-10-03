@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // The `?q=` filter input (ADR 0047 §6, amended 2026-07-11): CORE subheader
 // chrome opened by Cmd+F / the header magnifier / the Cmd+K "Filter this view"
@@ -33,8 +33,7 @@ const input = (page: Page) => page.locator('[aria-label="Filter query"]');
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(row(page, "milk").first()).toBeVisible();
+  await openSeededOutline(page, { anchorId: "milk" });
 }
 
 async function summon(page: Page) {
@@ -161,6 +160,150 @@ test.describe("resident filter input (ADR 0047 §6)", () => {
     await expect(row(page, "milk").first()).toBeVisible();
     await expect(row(page, "mom")).toHaveCount(0);
     await expect(row(page, "ship")).toHaveCount(0);
+  });
+
+  for (const query of ["#work", "work"]) {
+    test(`editing out ${query} keeps focus until moving to another row`, async ({
+      page,
+    }) => {
+      await seedOutline(page, TREE);
+      await page.goto(`/?q=${encodeURIComponent(query)}`);
+      const editor = row(page, "milk").locator(".node-text");
+      await expect(editor).toBeVisible();
+      await editor.focus();
+      await editor.press("End");
+      await editor.press("Backspace");
+
+      await expect(editor).toHaveText("Buy milk #wor");
+      await expect(editor).toBeFocused();
+      await expect(row(page, "mom")).toHaveCount(0);
+      // Continue typing after crossing the matching boundary.
+      await editor.press("Backspace");
+      await expect(editor).toHaveText("Buy milk #wo");
+      await expect(editor).toBeFocused();
+
+      await editor.press("Escape"); // close tag autocomplete before navigating
+      await editor.press("ArrowDown");
+      await expect(row(page, "ship").locator(".node-text")).toBeFocused();
+      await expect(row(page, "milk")).toHaveCount(0);
+      await expect(input(page)).toHaveValue(query);
+    });
+  }
+
+  test("editing the last match keeps the row until blur outside the outline", async ({
+    page,
+  }, testInfo) => {
+    await seedOutline(page, TREE);
+    await page.goto("/?q=milk");
+    const editor = row(page, "milk").locator(".node-text");
+    await expect(editor).toBeVisible();
+    await editor.fill("Buy mil #work");
+    await expect(editor).toHaveText("Buy mil #work");
+    await expect(editor).toBeFocused();
+    await expect(page.locator(".outline-empty")).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath("focused-nonmatch.png"),
+    });
+
+    await input(page).focus();
+    await expect(row(page, "milk")).toHaveCount(0);
+    await expect(page.locator(".outline-empty")).toHaveText(
+      'No matches for "milk" here.',
+    );
+    await page.screenshot({
+      path: testInfo.outputPath("blurred-nonmatch.png"),
+    });
+  });
+
+  test("a row that still matches after editing stays visible on blur", async ({
+    page,
+  }) => {
+    await seedOutline(page, TREE);
+    await page.goto("/?q=milk");
+    const editor = row(page, "milk").locator(".node-text");
+    await expect(editor).toBeVisible();
+    await editor.fill("Buy more milk #work");
+    await input(page).focus();
+    await expect(editor).toHaveText("Buy more milk #work");
+    await expect(editor).toBeVisible();
+    await expect(editor).not.toBeFocused();
+  });
+
+  test("a retained row stays filtered out after its focused editor unmounts", async ({
+    page,
+  }) => {
+    const nodes: SeedNode[] = Array.from({ length: 200 }, (_, i) => ({
+      id: `node-${i}`,
+      parentId: null,
+      prevSiblingId: i === 0 ? null : `node-${i - 1}`,
+      text: `Match ${i}`,
+    }));
+    await seedOutline(page, nodes);
+    await openSeededOutline(page, { path: "/?q=match", anchorId: "node-0" });
+    const editor = row(page, "node-0").locator(".node-text");
+    await editor.fill("Edited");
+    await editor.press("End");
+    await editor.press("!");
+    await expect(editor).toHaveText("Edited!");
+    await expect(editor).toBeFocused();
+
+    await page.evaluate(() => window.scrollTo(0, 4000));
+    await expect(row(page, "node-0")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page
+          .locator("li[data-node-id]")
+          .first()
+          .getAttribute("data-index")
+          .then(Number),
+      )
+      .toBeGreaterThan(50);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(row(page, "node-1")).toBeVisible();
+    await expect(row(page, "node-0")).toHaveCount(0);
+    await expect(input(page)).toHaveValue("match");
+  });
+
+  test("a focus-only retained parent has no ineffective expand control", async ({
+    page,
+  }, testInfo) => {
+    await seedOutline(page, [
+      {
+        id: "parent",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Project #work",
+      },
+      {
+        id: "child",
+        parentId: "parent",
+        prevSiblingId: null,
+        text: "Unrelated child",
+      },
+    ]);
+    await openSeededOutline(page, { path: "/?q=%23work", anchorId: "parent" });
+    await expect(row(page, "child")).toBeVisible();
+    const editor = row(page, "parent").locator(".node-text");
+    await editor.fill("Project");
+    await expect(editor).toBeFocused();
+    await expect(row(page, "child")).toHaveCount(0);
+    await expect(
+      row(page, "parent").locator(".collapse-toggle"),
+    ).toHaveAttribute("data-has-children", "false");
+    await expect(
+      row(page, "parent").locator(".collapse-toggle svg"),
+    ).toHaveCount(0);
+    await expect(row(page, "parent").locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "false",
+    );
+    await page.screenshot({ path: testInfo.outputPath("retained-parent.png") });
+
+    await editor.fill("Project #work");
+    await expect(row(page, "child")).toBeVisible();
+    await expect(
+      row(page, "parent").locator(".collapse-toggle"),
+    ).toHaveAttribute("data-has-children", "true");
   });
 
   test("Enter commits, blurs, and the input stays resident", async ({
@@ -333,6 +476,34 @@ test.describe("DQL mirror parity", () => {
       completed: true,
     },
   ];
+
+  test("editing a mirrored descendant keeps only the focused path and its context until blur", async ({
+    page,
+  }) => {
+    await seedOutline(page, tree);
+    await page.goto("/?q=%23child");
+    await expect(row(page, "child")).toHaveCount(2);
+    const editor = row(page, "child").last().locator(".node-text");
+    await editor.fill("Verify mirror traversal");
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveText("Verify mirror traversal");
+    await expect(row(page, "child")).toHaveCount(1);
+    await expect(row(page, "project")).toHaveCount(0);
+    await expect(row(page, "scope")).toBeVisible();
+    await expect(row(page, "mirror")).toBeVisible();
+    await expect(row(page, "scope").locator(".outline-row")).toHaveAttribute(
+      "data-context",
+      "true",
+    );
+
+    await input(page).focus();
+    await expect(row(page, "child")).toHaveCount(0);
+    await expect(row(page, "scope")).toHaveCount(0);
+    await expect(row(page, "mirror")).toHaveCount(0);
+    await expect(page.locator(".outline-empty")).toHaveText(
+      'No matches for "#child" here.',
+    );
+  });
 
   test("the same query selects source and mirror content, while is:mirror excludes the source", async ({
     page,

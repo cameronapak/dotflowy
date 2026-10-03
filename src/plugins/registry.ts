@@ -290,6 +290,7 @@ export function buildViewFilter(
   index: TreeIndex,
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
+  focusedKey: string | null = null,
 ): ViewFilter | null {
   const q = ctx.search.q;
   const queryFilter = buildQueryFilter(
@@ -299,6 +300,7 @@ export function buildViewFilter(
     isHidden,
     filterOperatorMap,
     isMirrorsEnabled(),
+    focusedKey,
   );
   if (queryFilter) return queryFilter;
   for (const t of viewTransforms) {
@@ -322,20 +324,30 @@ export function buildViewFilter(
 export function useViewFilter(
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
+  focusedKey: string | null = null,
 ): ViewFilter | null {
   const cache = useRef<{
     index: TreeIndex;
     ctx: ViewContext;
+    isHidden: (node: Node) => boolean;
+    focusedKey: string | null;
     filter: ViewFilter | null;
   } | null>(null);
   const getSnapshot = useCallback(() => {
     const index = getTreeIndex();
     const prev = cache.current;
-    if (prev && prev.index === index && prev.ctx === ctx) return prev.filter;
-    const filter = buildViewFilter(index, ctx, isHidden);
-    cache.current = { index, ctx, filter };
+    if (
+      prev &&
+      prev.index === index &&
+      prev.ctx === ctx &&
+      prev.isHidden === isHidden &&
+      prev.focusedKey === focusedKey
+    )
+      return prev.filter;
+    const filter = buildViewFilter(index, ctx, isHidden, focusedKey);
+    cache.current = { index, ctx, isHidden, focusedKey, filter };
     return filter;
-  }, [ctx, isHidden]);
+  }, [ctx, isHidden, focusedKey]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => null);
 }
 

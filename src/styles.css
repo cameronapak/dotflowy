@@ -135,10 +135,41 @@
 
   body {
     @apply bg-background text-foreground;
+    position: relative;
   }
   html {
     @apply font-sans;
     overscroll-behavior: none;
+  }
+}
+
+/* A caret drawer reserves space in the visible viewport. Quick-add's
+   draft stays above it, including while the software keyboard pans the page. */
+@media (width < 768px) {
+  /* A short outline may fill only the layout viewport, leaving no scroll range
+     to lift its caret above a keyboard-open drawer. Release this on dismissal. */
+  body:has([data-slot="drawer-viewport"][data-modal="false"]) {
+    padding-bottom: 50vh;
+  }
+
+  /* Let chrome scroll away rather than cover the narrow band above suggestions. */
+  body:has([data-slot="drawer-viewport"][data-modal="false"]) .outline-chrome {
+    position: relative;
+  }
+
+  .quick-add-popup:has([data-typing-menu-open]) {
+    top: calc(var(--capture-viewport-top) + 1rem);
+    bottom: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    max-height: min(
+      calc(var(--capture-viewport-height) * 0.45 - 1rem),
+      calc(
+        var(--capture-viewport-height) - var(--capture-typing-drawer-height) -
+          2rem
+      )
+    );
+    transform: none !important;
   }
 }
 

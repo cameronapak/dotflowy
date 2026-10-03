@@ -6,6 +6,8 @@
  * deleted with their fallbacks once dogfooded.
  */
 
+import { useSyncExternalStore } from "react";
+
 import { hasWindow } from "../env";
 
 const MIRRORS_KEY = "dotflowy:flag:mirrors";
@@ -31,4 +33,43 @@ export function isMirrorsEnabled(): boolean {
     // localStorage can throw (private mode / disabled); fall back to the default.
   }
   return MIRRORS_DEFAULT;
+}
+
+// Temporary, default-off discovery gate for external Quick-add (ADR 0065).
+// This hides UI, not the API, and does not revoke previously issued keys.
+const CAPTURE_KEY = "dotflowy:flag:external-capture";
+const captureListeners = new Set<() => void>();
+
+function captureEnabled(): boolean {
+  if (!hasWindow()) return false;
+  try {
+    return window.localStorage.getItem(CAPTURE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function subscribeCapture(listener: () => void): () => void {
+  captureListeners.add(listener);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === CAPTURE_KEY || event.key === null) listener();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    captureListeners.delete(listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+export function useExperimentalCaptureEnabled(): boolean {
+  return useSyncExternalStore(subscribeCapture, captureEnabled, () => false);
+}
+
+export function setExperimentalCaptureEnabled(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(CAPTURE_KEY, enabled ? "on" : "off");
+  } catch {
+    // If storage is unavailable, discovery stays off.
+  }
+  for (const listener of captureListeners) listener();
 }

@@ -1,3 +1,5 @@
+import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronsDownUpIcon,
@@ -9,6 +11,8 @@ import {
   LogOutIcon,
   MessageSquareWarningIcon,
   MoreHorizontalIcon,
+  Undo2Icon,
+  Redo2Icon,
   SettingsIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -19,7 +23,7 @@ import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
-import { capture } from "../data/history";
+import { useExperimentalCaptureEnabled } from "../data/flags";
 import { flattenInline } from "../data/inline-text";
 import { outlineToMarkdown } from "../data/markdown";
 import { toggleCollapsed } from "../data/mutations";
@@ -29,18 +33,20 @@ import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
+import { openAppleShortcut } from "./apple-shortcut-opener";
 import { openChangelog } from "./changelog-opener";
+import { restoreHistory, useHistoryState } from "./history-restore";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+  ResponsiveMenu as DropdownMenu,
+  ResponsiveMenuCheckboxItem as DropdownMenuCheckboxItem,
+  ResponsiveMenuContent as DropdownMenuContent,
+  ResponsiveMenuItem as DropdownMenuItem,
+  ResponsiveMenuSeparator as DropdownMenuSeparator,
+  ResponsiveMenuTrigger as DropdownMenuTrigger,
+} from "./ui/responsive-menu";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -148,19 +154,16 @@ function collapsibleTargets(collapsed: boolean) {
 /**
  * Collapse or expand every collapsible node under the current view in ONE
  * atomic batch. Wrapped in `runStructural` so N `collapsed` field edits ship as
- * a single DO frame (one round-trip, one broadcast) instead of N PATCHes, and a
- * single `capture` before the batch makes it one undo step -- mirroring how the
- * per-row `onToggleCollapsed` command captures once. `runStructural` is generic
- * over any `nodesCollection` write; these are field edits, not chain relinks, so
- * the sibling chain is untouched.
+ * a single DO frame (one round-trip, one broadcast) instead of N PATCHes.
+ * Browsing does not enter authoring history (ADR 0064). These are field edits,
+ * not chain relinks, so the sibling chain is untouched.
  */
 export function setViewCollapsed(collapsed: boolean) {
-  const { ids, rootId } = collapsibleTargets(collapsed);
+  const { ids } = collapsibleTargets(collapsed);
   if (ids.length === 0) {
     toast(collapsed ? "Already collapsed" : "Already expanded");
     return;
   }
-  capture(getTreeIndex(), rootId);
   runStructural(() => {
     for (const id of ids) toggleCollapsed(id, collapsed);
   });
@@ -171,8 +174,8 @@ export function setViewCollapsed(collapsed: boolean) {
  * Google, Delete account), connections (MCP), data (import/export), and
  * appearance (theme, text size) controls all live on the dedicated `/settings`
  * page -- so this menu is outline-view actions first (copy, collapse/expand,
- * show completed, spotlight), then read-only links (What's new, Report a bug,
- * GitHub, legal) + Settings, with Sign out last.
+ * show completed, spotlight), then Apple Shortcut setup (ADR 0065), read-only
+ * links (What's new, Report a bug, GitHub, legal) + Settings, with Sign out last.
  *
  * This is the static v1 of the header-action overflow: the pinned/overflow
  * split is a fixed default. User-customizable pinning (Chrome-extension style)
@@ -182,13 +185,15 @@ export function HeaderMoreMenu() {
   const navigate = useNavigate();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
+  const experimentalCapture = useExperimentalCaptureEnabled();
   // Unread-changelog signal (ADR 0046): a quiet dot on this trigger replaces the
   // old loud header CTA. Presence IS the signal; opening the dialog marks
   // everything read, so both the dot and the item emphasis clear themselves.
   const unseen = useUnseenReleaseCount();
+  const history = useHistoryState();
 
   return (
-    <DropdownMenu>
+    <DropdownMenu title="More actions">
       <DropdownMenuTrigger
         render={
           <Button
@@ -212,6 +217,21 @@ export function HeaderMoreMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem
+          disabled={!history.canUndo}
+          onClick={() => restoreHistory("undo")}
+        >
+          <Undo2Icon />
+          {history.undoLabel}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!history.canRedo}
+          onClick={() => restoreHistory("redo")}
+        >
+          <Redo2Icon />
+          {history.redoLabel}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
           <ClipboardCopyIcon />
           Copy as Markdown
@@ -244,6 +264,13 @@ export function HeaderMoreMenu() {
         </DropdownMenuCheckboxItem>
 
         <DropdownMenuSeparator />
+
+        {experimentalCapture && (
+          <DropdownMenuItem onClick={() => openAppleShortcut()}>
+            <HugeiconsIcon icon={SmartPhone01Icon} />
+            Add Apple Shortcut
+          </DropdownMenuItem>
+        )}
 
         <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
           <SettingsIcon />

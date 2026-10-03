@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { ChangeOp } from "./realtime";
 
-import { persistBatch, updateNodes } from "./api";
+import { persistBatch, updateNodes, waitForPendingWrites } from "./api";
 
 // Pins the structural-batch serialization (the `writeSem` semaphore in api.ts):
 // rapid batches must NOT overlap on the wire (else the DO can reorder them and
@@ -39,6 +39,25 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
 const ok = (seq: number): Response =>
   new Response(JSON.stringify({ seq }), { status: 200 });
 const op = (key: string): ChangeOp => ({ op: "delete", key });
+
+test("history's write barrier waits for coalesced fields and structural sends", async () => {
+  installControlledFetch();
+  const field = updateNodes([{ id: "a", changes: { text: "new" } }]);
+  const batch = persistBatch([op("b")]);
+  let settled = false;
+  const barrier = waitForPendingWrites().then(() => {
+    settled = true;
+  });
+  await tick();
+  expect(pending.length).toBe(2);
+  expect(settled).toBe(false);
+  at(0).resolve(ok(8));
+  await tick();
+  expect(settled).toBe(false);
+  at(1).resolve(ok(9));
+  await Promise.all([field, batch, barrier]);
+  expect(settled).toBe(true);
+});
 
 afterEach(() => {
   globalThis.fetch = realFetch;
@@ -91,7 +110,7 @@ describe("persistBatch serialization (writeSem)", () => {
 // invariant -- every caller that merged into a failed generation rolls back
 // together (shared-fate). A field PATCH is `void`-shaped (no `{seq}` body to
 // read), so a 200 with any body is success and a 5xx rejects without retrying.
-const okField = (): Response => new Response(null, { status: 200 });
+const okField = (): Response => ok(10);
 
 describe("updateNodes field coalescer (fieldSem generations)", () => {
   test("shared-fate: both callers of a failed generation reject", async () => {
@@ -134,9 +153,10 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
     // One PATCH for the whole burst; last-write-wins on `a`, `b` carried along.
     expect(pending.length).toBe(2);
     const body = at(1).body;
-    expect(body).toContain("a3");
-    expect(body).not.toContain("a2"); // superseded by a3
-    expect(body).toContain("b1");
+    expect(JSON.parse(body).updates).toEqual([
+      { id: "a", changes: { text: "a3" } },
+      { id: "b", changes: { text: "b1" } },
+    ]);
 
     at(1).resolve(okField());
     await expect(pA).resolves.toBeUndefined();

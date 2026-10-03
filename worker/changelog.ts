@@ -52,13 +52,16 @@ export function planChangeFrames(
   ops: readonly ChangeOp[],
   lastSeq: number,
   maxOps: number = MAX_FRAME_OPS,
+  clientId?: string,
 ): ChangeFrame[] {
   const frames: ChangeFrame[] = [];
   for (let i = 0; i < ops.length; i += maxOps) {
-    frames.push({
-      seq: lastSeq + frames.length + 1,
-      ops: ops.slice(i, i + maxOps),
-    });
+    const seq = lastSeq + frames.length + 1;
+    const frame: ChangeFrame =
+      clientId === undefined
+        ? { seq, ops: ops.slice(i, i + maxOps) }
+        : { seq, ops: ops.slice(i, i + maxOps), clientId };
+    frames.push(frame);
   }
   return frames;
 }

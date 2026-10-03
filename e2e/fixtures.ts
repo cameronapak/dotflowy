@@ -51,7 +51,7 @@ export interface SeedNode {
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
  *  fields present. Mirrors the client `Node` type (src/data/schema.ts). */
-interface ApiNode {
+export interface ApiNode {
   id: string;
   parentId: string | null;
   prevSiblingId: string | null;
@@ -69,7 +69,7 @@ interface ApiNode {
 
 /** One op in a change frame, as the DO broadcasts and the batch POST carries.
  *  Mirrors `ChangeOp` in src/data/realtime.ts. */
-type ApiChangeOp =
+export type ApiChangeOp =
   | { op: "insert"; value: ApiNode }
   | { op: "update"; value: ApiNode }
   | { op: "delete"; key: string };
@@ -96,6 +96,15 @@ function toNode(n: SeedNode): ApiNode {
     // so it must be present on every row the mock emits.
     kind: n.kind ?? null,
   };
+}
+
+export interface SeedOutlineController {
+  /** Commit and broadcast a change not made by this page. */
+  injectExternalChange(ops: readonly ApiChangeOp[]): Promise<number>;
+  /** Reconcile the socket, optionally replacing server truth without deltas. */
+  sendSnapshot(nodes?: readonly ApiNode[]): void;
+  /** Reject the next structural REST write before it mutates the store. */
+  failNextWrite(): void;
 }
 
 /**
@@ -148,7 +157,7 @@ export async function seedOutline(
      *  the failure lands immediately. */
     failStructuralWrites?: boolean;
   } = {},
-): Promise<void> {
+): Promise<SeedOutlineController> {
   const echoDelayMs = opts.echoDelayMs ?? 0;
   // Delay only the structural-batch POST *response* (not its echo). Opens a
   // window to prove the client serializes batches: a second batch must not be
@@ -165,10 +174,18 @@ export async function seedOutline(
   // seq so the client can hold its optimistic overlay until the echo lands.
   let seq = 0;
   let socket: WebSocketRoute | null = null;
-  const broadcast = (ops: readonly ApiChangeOp[], extraDelayMs = 0): number => {
+  const broadcast = (
+    ops: readonly ApiChangeOp[],
+    extraDelayMs = 0,
+    clientId?: string,
+  ): number => {
     seq += 1;
     const at = seq;
-    const frame = JSON.stringify({ type: "change", seq: at, ops });
+    const frame = JSON.stringify(
+      clientId === undefined
+        ? { type: "change", seq: at, ops }
+        : { type: "change", seq: at, ops, clientId },
+    );
     const deliver = () => socket?.send(frame);
     const delay = echoDelayMs + extraDelayMs;
     if (delay > 0) setTimeout(deliver, delay);
@@ -176,6 +193,7 @@ export async function seedOutline(
     return at;
   };
   const echoChunks = opts.echoChunks ?? 1;
+  let failNextStructuralWrite = false;
 
   const reply = <T>(route: Route, data: T) =>
     route.fulfill({
@@ -224,10 +242,18 @@ export async function seedOutline(
           // Atomic structural batch: apply every op, commit ONE frame, reply with
           // its seq (mirrors the DO's applyBatch -> { seq }).
           if (body.ops) {
+            if (body.expectedSeq !== undefined && body.expectedSeq !== seq) {
+              return route.fulfill({
+                status: 409,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "stale_outline" }),
+              });
+            }
             // Injected failure (#230): reject the batch BEFORE touching the
             // store, so the optimistic overlay rolls back and the save-failure
             // toast fires.
-            if (opts.failStructuralWrites) {
+            if (opts.failStructuralWrites || failNextStructuralWrite) {
+              failNextStructuralWrite = false;
               return route.fulfill({
                 status: 500,
                 contentType: "application/json",
@@ -246,10 +272,11 @@ export async function seedOutline(
                 at = broadcast(
                   body.ops.slice(i * size, (i + 1) * size),
                   i * echoDelayMs,
+                  body.clientId,
                 );
               }
             } else {
-              at = broadcast(body.ops);
+              at = broadcast(body.ops, 0, body.clientId);
             }
             if (postDelayMs > 0) {
               await new Promise((r) => setTimeout(r, postDelayMs));
@@ -262,13 +289,13 @@ export async function seedOutline(
             value: n,
           }));
           for (const n of body.nodes ?? []) store.set(n.id, n);
-          if (ops.length) broadcast(ops);
+          if (ops.length) broadcast(ops, 0, body.clientId);
           return reply(route, { ok: true });
         }
         case "PATCH": {
-          const { updates } = Schema.decodeUnknownSync(NodesPatchBody)(
-            req.postDataJSON(),
-          );
+          const { updates, clientId } = Schema.decodeUnknownSync(
+            NodesPatchBody,
+          )(req.postDataJSON());
           const ops: ApiChangeOp[] = [];
           for (const u of updates ?? []) {
             const cur = store.get(u.id);
@@ -278,11 +305,11 @@ export async function seedOutline(
               ops.push({ op: "update", value: next });
             }
           }
-          if (ops.length) broadcast(ops);
-          return reply(route, { ok: true });
+          if (ops.length) broadcast(ops, 0, clientId);
+          return reply(route, { ok: true, seq });
         }
         case "DELETE": {
-          const { ids } = Schema.decodeUnknownSync(NodesDeleteBody)(
+          const { ids, clientId } = Schema.decodeUnknownSync(NodesDeleteBody)(
             req.postDataJSON(),
           );
           const ops: ApiChangeOp[] = [];
@@ -290,7 +317,7 @@ export async function seedOutline(
             store.delete(id);
             ops.push({ op: "delete", key: id });
           }
-          if (ops.length) broadcast(ops);
+          if (ops.length) broadcast(ops, 0, clientId);
           return reply(route, { ok: true });
         }
         default:
@@ -376,6 +403,34 @@ export async function seedOutline(
       );
     },
   );
+
+  return {
+    async injectExternalChange(ops) {
+      for (const op of ops) {
+        if (op.op === "delete") store.delete(op.key);
+        else store.set(op.value.id, op.value);
+      }
+      return broadcast(ops);
+    },
+    sendSnapshot(nodes) {
+      if (nodes) {
+        store.clear();
+        for (const node of nodes) store.set(node.id, node);
+        seq++;
+      }
+      socket?.send(
+        JSON.stringify({
+          type: "snapshot",
+          seq,
+          nodes: [...store.values()],
+          serverVersion: opts.serverVersion,
+        }),
+      );
+    },
+    failNextWrite() {
+      failNextStructuralWrite = true;
+    },
+  };
 }
 
 /**

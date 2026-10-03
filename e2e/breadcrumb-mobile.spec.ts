@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
@@ -28,6 +29,8 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await page.setViewportSize({ width: 375, height: 700 });
   await seedOutline(page, deepChain());
   await page.goto("/n7"); // zoom into the leaf; parent is n6
+  // A leaf has an empty list. Wait for its title while the lazy editor loads.
+  await page.locator(".zoomed-title .node-text").waitFor({ state: "visible" });
 
   const nav = page.locator("nav.breadcrumb");
   await expect(nav).toBeVisible();
@@ -45,14 +48,25 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   expect(fits).toBe(true);
 
   // The "…" holds every ancestor between Home and the parent (n0..n5 = 6).
-  await page.getByRole("button", { name: "Show hidden breadcrumbs" }).click();
+  const trigger = page.getByRole("button", { name: "Show hidden breadcrumbs" });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
   const items = page.getByRole("menuitem");
   await expect(items).toHaveCount(6);
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.last()).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(items).toHaveCount(6);
 
-  // Menu is near-full-viewport wide and labels ellipsis-truncate.
-  const box = await page
-    .locator('[data-slot="dropdown-menu-content"]')
-    .boundingBox();
+  // The drawer spans the narrow viewport and labels ellipsis-truncate.
+  const box = await page.locator('[data-slot="drawer-popup"]').boundingBox();
   expect(box!.width).toBeGreaterThan(300);
   const overflow = await items
     .first()
@@ -60,6 +74,17 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
     .first()
     .evaluate((el) => getComputedStyle(el).textOverflow);
   expect(overflow).toBe("ellipsis");
+  await expect
+    .poll(() =>
+      page
+        .locator('[data-slot="drawer-popup"]')
+        .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
+    )
+    .toBe(700);
+  await mkdir(".amp/in/artifacts", { recursive: true });
+  await page.screenshot({
+    path: ".amp/in/artifacts/mobile-breadcrumb-drawer.png",
+  });
 
   // Picking an intermediate ancestor navigates to it.
   await items.nth(2).click(); // n2
@@ -74,6 +99,7 @@ test("desktop trail keeps first + last-two crumbs around the …", async ({
   await page.setViewportSize({ width: 1280, height: 800 });
   await seedOutline(page, deepChain());
   await page.goto("/n7");
+  await page.locator(".zoomed-title .node-text").waitFor({ state: "visible" });
 
   const nav = page.locator("nav.breadcrumb");
   await expect(nav).toBeVisible();
@@ -105,6 +131,7 @@ test("a crumb flattens inline markup to its reading text", async ({ page }) => {
     { id: "leaf", parentId: "marked", prevSiblingId: null, text: "Leaf" },
   ]);
   await page.goto("/leaf");
+  await page.locator(".zoomed-title .node-text").waitFor({ state: "visible" });
 
   const crumb = page.locator("nav.breadcrumb .crumb-link").first();
   // EXACT textContent, not `toHaveText` (which whitespace-normalizes): a

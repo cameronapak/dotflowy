@@ -1,3 +1,5 @@
+import { Key01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -17,14 +19,21 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
+import { openAppleShortcut } from "../components/apple-shortcut-opener";
+import { CaptureKeysDialog } from "../components/capture-keys-dialog";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
+import { Switch } from "../components/ui/switch";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
+import {
+  setExperimentalCaptureEnabled,
+  useExperimentalCaptureEnabled,
+} from "../data/flags";
 import { outlineToMarkdown } from "../data/markdown";
 import { useNodeCount } from "../data/node-count";
 import { exportOpml } from "../data/opml-export";
@@ -612,7 +621,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
   return (
     <Section
       title="Connections"
-      description="Read and edit your outline from AI apps over MCP — no API key, you just sign in."
+      description="Connect AI apps to your outline over MCP."
     >
       <RowGroup>
         <SettingRow
@@ -638,6 +647,74 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
         </p>
       )}
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+    </Section>
+  );
+}
+
+function ExperimentalSection() {
+  const enabled = useExperimentalCaptureEnabled();
+  const [captureOpen, setCaptureOpen] = useState(false);
+
+  return (
+    <Section
+      title="Experimental"
+      description="Opt in to features that are still being tested."
+    >
+      <RowGroup>
+        <SettingRow
+          title="External quick-add"
+          description="Try Apple Shortcuts and capture keys. Available on every plan. Off by default on this device."
+          action={
+            <Switch
+              aria-label="Enable experimental quick-add"
+              checked={enabled}
+              onCheckedChange={setExperimentalCaptureEnabled}
+            />
+          }
+        />
+        {enabled && (
+          <>
+            <SettingRow
+              icon={<HugeiconsIcon icon={SmartPhone01Icon} />}
+              title="Apple Shortcut"
+              description="Add text and links to today's note from your iPhone."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Set up Apple Shortcut"
+                  onClick={openAppleShortcut}
+                >
+                  Set up
+                </Button>
+              }
+            />
+            <div id="capture-keys" className="scroll-mt-20">
+              <SettingRow
+                icon={<HugeiconsIcon icon={Key01Icon} />}
+                title="Capture keys"
+                description="Let shortcuts and scripts add to daily notes, without access to existing content."
+                action={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCaptureOpen(true)}
+                  >
+                    Manage
+                  </Button>
+                }
+              />
+            </div>
+          </>
+        )}
+      </RowGroup>
+      <p className="text-xs text-muted-foreground">
+        Turning this off hides setup on this device. Existing keys and shortcuts
+        keep working; revoke keys to stop their access.
+      </p>
+      {enabled && (
+        <CaptureKeysDialog open={captureOpen} onOpenChange={setCaptureOpen} />
+      )}
     </Section>
   );
 }
@@ -778,6 +855,7 @@ function SettingsPage() {
         <ConnectionsSection plan={plan} />
         <DataSection />
         <AppearanceSection />
+        <ExperimentalSection />
       </div>
     </main>
   );

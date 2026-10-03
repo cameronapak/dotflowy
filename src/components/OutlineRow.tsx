@@ -15,6 +15,7 @@ import type { NodeCommands } from "./node-commands";
 
 import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
+import { getHistoryState } from "../data/history";
 import { useSelectionFill } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import {
@@ -222,7 +223,11 @@ function RowChrome({
   const hasChildren = capped
     ? false
     : hasVisibleChildren ||
-      (filter ? filter.matchIds.has(rowKey) && childIds.length > 0 : false);
+      (filter
+        ? filter.matchIds.has(rowKey) &&
+          filter.retainedKey !== rowKey &&
+          childIds.length > 0
+        : false);
   // Matches stay expandable when their nonmatching children are collapsed.
   // Ancestor context remains visually expanded when the filter reveals a match.
   const effectiveCollapsed = filter ? !hasVisibleChildren : instance.collapsed;
@@ -340,6 +345,7 @@ function RowChrome({
     // prefix guard here swallowed legitimate shrinks such as undo-to-empty.
     if (
       document.activeElement === el &&
+      !getHistoryState().busy &&
       echoedTextFor(content.id) === content.text
     ) {
       return;
@@ -470,6 +476,8 @@ function RowChrome({
             aria-label={content.text.trim() || "Empty bullet"}
             aria-multiline="true"
             data-completed={content.completed}
+            data-history-key={rowKey}
+            data-history-node-id={content.id}
             onInput={(e) => {
               const el = e.currentTarget;
               const text = readSource(el);

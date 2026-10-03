@@ -11,19 +11,27 @@ import type {
 } from "../src/data/wire-schema";
 import type { OutlineSnapshot, SnapshotKvRow } from "./backup";
 import type {
+  CaptureInput,
+  CaptureReceipt,
+  CaptureResult,
+} from "./capture-input";
+import type {
   ClassicRecoveryReceipt,
   PreserveClassicReceipt,
 } from "./lunora-recovery";
 import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
+import { dayKeyToScaffoldChain } from "../src/data/date-links";
 import { parseNodeLinks } from "../src/data/node-links";
+import { buildTreeIndex } from "../src/data/tree";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
 import {
   classicSnapshotsEquivalent,
   validateNodeGraph,
 } from "./lunora-retirement";
+import { planAddToDaily } from "./outline-ops";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 
@@ -270,6 +278,30 @@ export class UserOutlineDO extends DurableObject<Env> {
         sql.exec(`ALTER TABLE nodes ADD COLUMN kind TEXT`);
       },
     },
+    {
+      // Per-page write correlation. NULL marks retained rows written by old
+      // clients and non-browser callers, which remain genuine external changes.
+      version: 4,
+      up: (sql) => {
+        sql.exec(`ALTER TABLE changelog ADD COLUMN clientId TEXT`);
+      },
+    },
+    {
+      // Exactly-once capture attempts (ADR 0065): one row per attemptId so a
+      // retried shortcut captures once, with the fingerprint that detects an
+      // attempt ID reused for different content.
+      version: 5,
+      up: (sql) => {
+        sql.exec(`CREATE TABLE capture_receipt (
+          attemptId TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL,
+          nodeId TEXT NOT NULL,
+          dailyNoteId TEXT NOT NULL,
+          date TEXT NOT NULL,
+          createdAt INTEGER NOT NULL
+        )`);
+      },
+    },
   ];
 
   /** Run every migration newer than the recorded schema version, each atomically
@@ -469,9 +501,16 @@ export class UserOutlineDO extends DurableObject<Env> {
   applyBatchGated(
     ops: readonly ChangeOp[],
     limit: number | null,
-  ): number | null {
+    clientId?: string,
+    expectedSeq?: number,
+  ): number | null | "stale" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
+      // History replay is conditional on exactly the state it was planned
+      // against. This check is inside the write transaction and precedes both
+      // cap probes and node writes, so rejection has no observable side effect.
+      if (expectedSeq !== undefined && this.currentSeq() !== expectedSeq)
+        return "stale" as const;
       if (limit !== null) {
         const { inserts, deletes } = countNetGrowth(ops, (id) =>
           this.nodeExists(id),
@@ -485,9 +524,10 @@ export class UserOutlineDO extends DurableObject<Env> {
             ? this.deleteNodeRow(op.key)
             : this.putNode(op.value),
         ),
+        clientId,
       );
     });
-    if (frames === null) return null;
+    if (frames === null || frames === "stale") return frames;
     return this.broadcastChange(frames);
   }
 
@@ -495,7 +535,11 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  path — a raw POST could otherwise bypass the cap the batch path enforces).
    *  Every node is an upsert, so growth = ids not already present; returns false
    *  when applying would exceed the cap (nothing written), true otherwise. */
-  upsertNodesGated(nodes: readonly Node[], limit: number | null): boolean {
+  upsertNodesGated(
+    nodes: readonly Node[],
+    limit: number | null,
+    clientId?: string,
+  ): boolean {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       if (limit !== null) {
@@ -504,7 +548,10 @@ export class UserOutlineDO extends DurableObject<Env> {
         if (batchExceedsNodeLimit(this.nodeCount(), newIds.size, 0, limit))
           return null;
       }
-      return this.recordChange(nodes.map((n) => this.putNode(n)));
+      return this.recordChange(
+        nodes.map((n) => this.putNode(n)),
+        clientId,
+      );
     });
     if (frames === null) return false;
     this.broadcastChange(frames);
@@ -548,9 +595,163 @@ export class UserOutlineDO extends DurableObject<Env> {
     );
   }
 
-  patchNodes(updates: readonly PatchUpdate[]): void {
+  /** Claims, current-tail planning, quota, nodes, receipt, and changelog share
+   *  one synchronous transaction. No stale Worker snapshot or per-level RPCs. */
+  captureDaily(input: CaptureInput, limit: number | null): CaptureResult {
     this.assertWritable();
-    this.broadcastChange(
+    const committed = this.ctx.storage.transactionSync<{
+      result: CaptureResult;
+      frames: ChangeFrame[];
+    }>(() => {
+      const prior = this.sql
+        .exec<{
+          fingerprint: string;
+          nodeId: string;
+          dailyNoteId: string;
+          date: string;
+        }>(
+          "SELECT fingerprint, nodeId, dailyNoteId, date FROM capture_receipt WHERE attemptId = ?",
+          input.attemptId,
+        )
+        .toArray()[0];
+      if (prior) {
+        const result: CaptureResult =
+          prior.fingerprint !== input.fingerprint
+            ? { error: "attempt_conflict" }
+            : {
+                receipt: {
+                  saved: true,
+                  nodeId: prior.nodeId,
+                  dailyNoteId: prior.dailyNoteId,
+                  date: prior.date,
+                },
+                replayed: true,
+              };
+        return { result, frames: [] };
+      }
+      const now = Date.now();
+      const index = buildTreeIndex(this.getNodes());
+      const rows = this.getKv("daily-index").map((row) =>
+        Schema.decodeUnknownSync(
+          Schema.Struct({ key: Schema.String, nodeId: Schema.String }),
+        )(row),
+      );
+      const ids = new Map(rows.map((row) => [row.key, row.nodeId]));
+      const pending: KvRow[] = [];
+      const claim = (key: string) => {
+        const existing = ids.get(key);
+        if (existing) return existing;
+        const nodeId = crypto.randomUUID();
+        ids.set(key, nodeId);
+        pending.push({
+          collection: "daily-index",
+          key,
+          value: { key, nodeId },
+        });
+        return nodeId;
+      };
+      const containerId = claim("container");
+      const dayId = claim(input.date);
+      const chain = dayKeyToScaffoldChain(input.date);
+      if (!chain) throw new Error("invalid capture date");
+      const levels = index.byId.has(dayId)
+        ? {}
+        : {
+            yearId: claim(chain.yearKey),
+            monthId: claim(chain.monthKey),
+            weekId: claim(chain.weekKey),
+          };
+      const plan = planAddToDaily(index, {
+        dateKey: input.date,
+        containerId,
+        dayId,
+        ...levels,
+        keyByNodeId: new Map([...ids].map(([key, id]) => [id, key])),
+        newNodeId: crypto.randomUUID(),
+        text: input.text,
+        isTask: false,
+        origin: null,
+        timestamp: now,
+      });
+      const growth = countNetGrowth(plan.ops, (id) => this.nodeExists(id));
+      if (
+        batchExceedsNodeLimit(
+          this.nodeCount(),
+          growth.inserts,
+          growth.deletes,
+          limit,
+        )
+      ) {
+        const result: CaptureResult = { error: "node_limit" };
+        return { result, frames: [] };
+      }
+      for (const row of pending) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          JSON.stringify(row.value),
+          now,
+        );
+      }
+      const frames = this.recordChange(
+        plan.ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+      );
+      const receipt: CaptureReceipt = {
+        saved: true,
+        nodeId: plan.nodeId,
+        dailyNoteId: dayId,
+        date: input.date,
+      };
+      this.sql.exec(
+        "INSERT INTO capture_receipt (attemptId, fingerprint, nodeId, dailyNoteId, date, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+        input.attemptId,
+        input.fingerprint,
+        receipt.nodeId,
+        dayId,
+        input.date,
+        now,
+      );
+      const result: CaptureResult = { receipt, replayed: false };
+      return { result, frames };
+    });
+    this.broadcastChange(committed.frames);
+    return committed.result;
+  }
+
+  /** Only the untouched node created by this receipt may receive enrichment.
+   *  Replays/deletion never recreate it; the compare and patch are atomic. */
+  upgradeCaptureText(
+    attemptId: string,
+    expected: string,
+    text: string,
+  ): boolean {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const row = this.sql
+        .exec<NodeRow & Record<string, SqlStorageValue>>(
+          `SELECT n.* FROM nodes n JOIN capture_receipt r ON n.id = r.nodeId
+         WHERE r.attemptId = ? AND n.text = ? AND n.updatedAt = r.createdAt`,
+          attemptId,
+          expected,
+        )
+        .toArray()[0];
+      if (!row) return [];
+      return this.recordChange([
+        this.putNode({ ...rowToNode(row), text, updatedAt: Date.now() }),
+      ]);
+    });
+    this.broadcastChange(frames);
+    return frames.length > 0;
+  }
+
+  patchNodes(updates: readonly PatchUpdate[], clientId?: string): number {
+    this.assertWritable();
+    return this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
         const ops: ChangeOp[] = [];
         for (const u of updates) {
@@ -576,16 +777,19 @@ export class UserOutlineDO extends DurableObject<Env> {
           )[0] as NodeRow | undefined;
           if (row) ops.push({ op: "update", value: rowToNode(row) });
         }
-        return this.recordChange(ops);
+        return this.recordChange(ops, clientId);
       }),
     );
   }
 
-  deleteNodes(ids: readonly string[]): void {
+  deleteNodes(ids: readonly string[], clientId?: string): void {
     this.assertWritable();
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
-        this.recordChange(ids.map((id) => this.deleteNodeRow(id))),
+        this.recordChange(
+          ids.map((id) => this.deleteNodeRow(id)),
+          clientId,
+        ),
       ),
     );
   }
@@ -622,14 +826,20 @@ export class UserOutlineDO extends DurableObject<Env> {
    * (committed seqs + ops) for `broadcastChange` to emit, in order, once the
    * transaction has committed.
    */
-  private recordChange(ops: ChangeOp[]): ChangeFrame[] {
-    const frames = planChangeFrames(ops, this.currentSeq());
+  private recordChange(ops: ChangeOp[], clientId?: string): ChangeFrame[] {
+    const frames = planChangeFrames(
+      ops,
+      this.currentSeq(),
+      undefined,
+      clientId,
+    );
     if (!frames.length) return frames;
     for (const f of frames) {
       this.sql.exec(
-        "INSERT INTO changelog (seq, ops) VALUES (?, ?)",
+        "INSERT INTO changelog (seq, ops, clientId) VALUES (?, ?, ?)",
         f.seq,
         JSON.stringify(f.ops),
+        f.clientId ?? null,
       );
     }
     const finalSeq = frames[frames.length - 1]?.seq;
@@ -657,11 +867,16 @@ export class UserOutlineDO extends DurableObject<Env> {
     if (!frames.length) return this.currentSeq();
     const sockets = this.ctx.getWebSockets();
     for (const frame of frames) {
-      const data = JSON.stringify({
-        type: "change",
-        seq: frame.seq,
-        ops: frame.ops,
-      } satisfies ServerMessage);
+      const message: ServerMessage =
+        frame.clientId === undefined
+          ? { type: "change", seq: frame.seq, ops: frame.ops }
+          : {
+              type: "change",
+              seq: frame.seq,
+              ops: frame.ops,
+              clientId: frame.clientId,
+            };
+      const data = JSON.stringify(message);
       for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
         try {
@@ -764,19 +979,21 @@ export class UserOutlineDO extends DurableObject<Env> {
       const canResume = canResumeChangelog(since, seq, oldest, resumeFloor);
       if (canResume) {
         const rows = this.sql
-          .exec<{ seq: number; ops: string }>(
-            "SELECT seq, ops FROM changelog WHERE seq > ? ORDER BY seq",
+          .exec<{ seq: number; ops: string; clientId: string | null }>(
+            "SELECT seq, ops, clientId FROM changelog WHERE seq > ? ORDER BY seq",
             since,
           )
           .toArray();
         return {
           type: "resume",
           seq,
-          changes: rows.map((r) => ({
-            seq: r.seq,
+          changes: rows.map((r) => {
             // SAFETY: the ops column is only ever written by recordChange as JSON.stringify(ChangeOp[]).
-            ops: JSON.parse(r.ops) as ChangeOp[],
-          })),
+            const ops = JSON.parse(r.ops) as ChangeOp[];
+            return r.clientId === null
+              ? { seq: r.seq, ops }
+              : { seq: r.seq, ops, clientId: r.clientId };
+          }),
           serverVersion: APP_VERSION,
         };
       }

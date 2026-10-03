@@ -72,7 +72,7 @@ export function DeleteConfirmDialog() {
     await new Promise((r) => setTimeout(r, 0));
 
     // ONE undo point BEFORE the batch: a single Cmd+Z restores everything.
-    capture(index, captureKey);
+    capture(index, captureKey, null, { label: "delete" });
 
     let applied = 0;
     const slices: Array<() => void> = [];

@@ -17,6 +17,8 @@ import {
   MoonIcon,
   PlugZapIcon,
   PlusIcon,
+  Undo2Icon,
+  Redo2Icon,
   SparklesIcon,
   SunIcon,
 } from "lucide-react";
@@ -25,7 +27,6 @@ import { useMemo } from "react";
 import type { CommandCenterAction } from "../data/command-center";
 
 import { openFeedbackReport } from "../data/feedback";
-import { capture } from "../data/history";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
@@ -35,6 +36,7 @@ import {
   exportOutlineAsOpml,
   setViewCollapsed,
 } from "./header-more-menu";
+import { restoreHistory, useHistoryState } from "./history-restore";
 import { openOpmlImport } from "./opml-import-opener";
 import { openFilterInput } from "./query-filter-nav";
 import { openQuickAdd } from "./quick-add-opener";
@@ -68,9 +70,32 @@ export function useGlobalActions(opts: {
   const { index } = useTree();
   const rootId = useParams({ strict: false }).nodeId ?? null;
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
+  const history = useHistoryState();
 
   return useMemo(() => {
     const a: CommandCenterAction[] = [
+      {
+        id: "g:undo",
+        label: history.undoLabel,
+        description: "Undo your last outline edit",
+        icon: Undo2Icon,
+        scope: "global",
+        keywords: ["undo", "history"],
+        hotkey: ["⌘", "Z"],
+        disabled: !history.canUndo,
+        run: () => restoreHistory("undo"),
+      },
+      {
+        id: "g:redo",
+        label: history.redoLabel,
+        description: "Redo your last undone edit",
+        icon: Redo2Icon,
+        scope: "global",
+        keywords: ["redo", "history"],
+        hotkey: ["⌘", "⇧", "Z"],
+        disabled: !history.canRedo,
+        run: () => restoreHistory("redo"),
+      },
       {
         id: "g:quick-add",
         label: "Quick add",
@@ -168,7 +193,6 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["bookmark", "save", "pin", "star"],
         run: () => {
-          capture(index, null);
           toggleBookmark(rootNode.id, !isBookmarked);
         },
       });
@@ -278,6 +302,7 @@ export function useGlobalActions(opts: {
 
     return a;
   }, [
+    history,
     theme,
     setTheme,
     textSize,
@@ -286,7 +311,6 @@ export function useGlobalActions(opts: {
     setShowCompleted,
     spotlight,
     rootNode,
-    index,
     openConnect,
   ]);
 }

@@ -201,7 +201,7 @@ function makeSelectionOps({
       mirrorsOn,
     );
     runStructural(() => {
-      capture(getTreeIndex(), deletable[0]!);
+      capture(getTreeIndex(), deletable[0]!, null, { label: "delete" });
       removeManyNodes(deletable);
     });
     pendingFocus.current = above ?? below ?? rootId;
@@ -236,7 +236,7 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!);
+      capture(getTreeIndex(), ids[0]!, null, { label: "indent" });
       if (indentManyNodes(ids, isMirrorsEnabled())) refreshSelection();
       else drop();
     });
@@ -252,7 +252,7 @@ function makeSelectionOps({
     if (!state || state.parentId === null || state.parentId === getViewRootId())
       return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!);
+      capture(getTreeIndex(), ids[0]!, null, { label: "outdent" });
       if (outdentManyNodes(ids)) refreshSelection();
       else drop();
     });

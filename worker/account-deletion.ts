@@ -180,6 +180,7 @@ export function deleteResidualUserRows(
 ): Promise<D1Result[]> {
   const normalized = normalizeEmail(email);
   return db.batch([
+    db.prepare("DELETE FROM capture_key WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthAccessToken WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthConsent WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthApplication WHERE userId = ?").bind(userId),

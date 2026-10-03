@@ -447,7 +447,8 @@ export function* walkQueryNodes(
  *
  * `isHidden` is the composed Seam-G prune (hide-completed today), so a node
  * absent from the DOM is absent here too. `operators` is the registry-composed
- * (key, value) -> predicate map.
+ * (key, value) -> predicate map. `focusedKey` retains the editing row and its
+ * ancestor context until blur, without revealing extra descendants.
  */
 export function buildQueryFilter(
   index: TreeIndex,
@@ -456,6 +457,7 @@ export function buildQueryFilter(
   isHidden: (node: Node) => boolean,
   operators: FilterOperatorMap,
   mirrorsEnabled = true,
+  focusedKey: string | null = null,
 ): QueryFilter | null {
   const parsed = parseFilterQuery(query);
   if (parsed.groups.length === 0) return null;
@@ -486,9 +488,26 @@ export function buildQueryFilter(
       visibleIds.add(key);
       for (const ancestorKey of ancestorKeys) visibleIds.add(ancestorKey);
     }
+    // Keep the editing instance reachable even after its text stops matching.
+    // Use its render key so other copies of mirrored content still filter live.
+    if (key === focusedKey) {
+      visibleIds.add(key);
+      for (const ancestorKey of ancestorKeys) visibleIds.add(ancestorKey);
+    }
   }
 
   const result: QueryFilter = { visibleIds, matchIds };
+  // Keep the editor undimmed without revealing its otherwise-pruned descendants.
+  // Adding this after the walk avoids treating focus as a subtree match. Track
+  // focus-only retention separately so it cannot expose an expand affordance.
+  if (
+    focusedKey !== null &&
+    visibleIds.has(focusedKey) &&
+    !matchIds.has(focusedKey)
+  ) {
+    result.retainedKey = focusedKey;
+    matchIds.add(focusedKey);
+  }
   if (matchIds.size === 0) {
     result.emptyMessage = `No matches for "${(query ?? "").trim()}" here.`;
   }
@@ -502,14 +521,16 @@ export function buildQueryFilter(
  *
  * These sets store render keys (bare node IDs until a mirror is crossed).
  * - `visibleIds`: every row that renders (matches + ancestor context + a
- *   match's revealed descendants).
- * - `matchIds`: the UNDIMMED subset (matches + their descendants); the rest of
- *   `visibleIds` (ancestor context) renders dimmed.
- * - `emptyMessage`: shown when nothing matched.
+ *   match's revealed descendants + the focused row and its context).
+ * - `matchIds`: the UNDIMMED subset (matches + their descendants + the focused
+ *   row); the rest of `visibleIds` (ancestor context) renders dimmed.
+ * - `emptyMessage`: shown when nothing matched and no focused row is retained.
  */
 export interface QueryFilter {
   visibleIds: Set<string>;
   matchIds: Set<string>;
+  /** Undimmed solely for focus, not a match that can reveal more children. */
+  retainedKey?: string;
   emptyMessage?: string;
 }
 
