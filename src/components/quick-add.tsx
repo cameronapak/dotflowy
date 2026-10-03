@@ -50,6 +50,7 @@ import {
 import {
   forwardRef,
   Fragment,
+  type CSSProperties,
   type ReactNode,
   useCallback,
   useEffect,
@@ -122,6 +123,7 @@ import {
   revealLinkAtCaret,
   watchCaretReveal,
 } from "./inline-code";
+import { typingDrawerHeight } from "./menu-drawer";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
@@ -143,7 +145,11 @@ import {
 } from "./ui/command";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { Kbd, KbdGroup } from "./ui/kbd";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import {
+  ResponsivePopover as Popover,
+  ResponsivePopoverContent as PopoverContent,
+  ResponsivePopoverTrigger as PopoverTrigger,
+} from "./ui/responsive-popover";
 
 /** A concrete destination a target pick yields: the parent node id (null = top
  *  level) plus its label. The overlay wraps it into a lazy {@link
@@ -315,7 +321,10 @@ const MiniNodeEditor = forwardRef<
     : [];
 
   return (
-    <div className="quick-add-editor">
+    <div
+      className="quick-add-editor"
+      data-typing-menu-open={slash.isOpen || menus.isOpen ? "" : undefined}
+    >
       {beforeTextSlots.map((slot) => (
         <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
       ))}
@@ -453,7 +462,7 @@ function CaptureTargetPicker({
   const label = (n: Node) => n.text.trim() || "Untitled";
 
   return (
-    <Command shouldFilter={false}>
+    <Command shouldFilter={false} className="max-md:[&_[cmdk-item]]:min-h-11">
       <CommandInput
         autoFocus
         value={query}
@@ -526,7 +535,7 @@ function DestinationButton({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover title="Capture destination" open={open} onOpenChange={setOpen}>
       <PopoverTrigger className={triggerClassName} title={title} {...dataProps}>
         {children}
       </PopoverTrigger>
@@ -1109,6 +1118,21 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       <HomeIcon className="size-3.5 text-muted-foreground" />
     ) : null;
 
+  const captureStyle: CSSProperties & {
+    "--capture-viewport-top": string;
+    "--capture-viewport-height": string;
+    "--capture-typing-drawer-height": string;
+  } = {
+    "--capture-viewport-top": `${offsetTop}px`,
+    "--capture-viewport-height": `${height}px`,
+    "--capture-typing-drawer-height": `${typingDrawerHeight(height)}px`,
+  };
+  if (coarse) {
+    captureStyle.transform = `translateY(-${keyboardOffset}px)`;
+    captureStyle.marginBottom =
+      keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined;
+  }
+
   // The shadcn Dialog owns focus-trap, Escape, backdrop, and a11y (ADR 0049 now
   // adopts the Cmd+K command-center frame). `onOpenChange(false)` routes both the
   // Escape and the backdrop tap through the engine's `close()` so discard-if-empty
@@ -1131,20 +1155,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
           // `sm:max-w-lg` (not a bare `max-w-*`): the DialogContent base carries
           // `sm:max-w-sm`, which outlives any unprefixed max-width at that
           // breakpoint -- the wider capture surface must override it in kind.
-          "flex max-h-[85vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
+          "quick-add-popup flex max-h-[85vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
           coarse ? "top-auto bottom-4 translate-y-0" : "top-1/3 translate-y-0",
         )}
-        style={
-          coarse
-            ? {
-                transform: `translateY(-${keyboardOffset}px)`,
-                marginBottom:
-                  keyboardOffset === 0
-                    ? "env(safe-area-inset-bottom)"
-                    : undefined,
-              }
-            : undefined
-        }
+        style={captureStyle}
       >
         {/* Escape guard: a caret menu (slash / # / [[) or the target picker owns
             Escape to close ITSELF, but Base UI's Dialog listens for Escape on

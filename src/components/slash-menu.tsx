@@ -5,10 +5,13 @@ import type { Node } from "../data/schema";
 import type { CommandSpec, PluginContext } from "../plugins/types";
 
 import { CORE_COMMANDS } from "../data/core-commands";
+import { useIsMobile } from "../hooks/use-mobile";
 import { commandSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
+import { MenuDrawerContent } from "./menu-drawer";
 import { SlashMenuList } from "./slash-menu-list";
+import { Drawer } from "./ui/drawer";
 import { useClampedMenuPosition } from "./use-menu-position";
 
 /** The composed command list driving the `/` palette: plugin commands (Seam C,
@@ -69,6 +72,7 @@ export function useSlashMenu({
   commandFilter?: (spec: CommandSpec) => boolean;
 }) {
   const [state, setState] = useState<SlashState | null>(null);
+  const mobile = useIsMobile();
 
   const items = state ? filterCommands(node, state.query, commandFilter) : [];
 
@@ -148,6 +152,7 @@ export function useSlashMenu({
         return true;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         setState(null);
         return true;
       default:
@@ -155,8 +160,28 @@ export function useSlashMenu({
     }
   };
 
-  const menu = state
-    ? createPortal(
+  const menu = state ? (
+    mobile ? (
+      <Drawer
+        open
+        modal={false}
+        showSwipeHandle
+        onOpenChange={(next) => {
+          if (!next) close();
+        }}
+      >
+        <MenuDrawerContent title="Commands" typing>
+          <SlashMenuList
+            items={items}
+            activeIndex={state.activeIndex}
+            inDrawer
+            onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
+            onSelect={select}
+          />
+        </MenuDrawerContent>
+      </Drawer>
+    ) : (
+      createPortal(
         <SlashMenuList
           items={items}
           activeIndex={state.activeIndex}
@@ -167,7 +192,8 @@ export function useSlashMenu({
         />,
         document.body,
       )
-    : null;
+    )
+  ) : null;
 
   return { handleInput, handleKeyDown, close, isOpen: !!state, menu };
 }

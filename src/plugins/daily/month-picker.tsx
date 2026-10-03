@@ -6,7 +6,11 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { Popover, PopoverContent, PopoverTrigger } from "@/plugins/kit";
+import {
+  ResponsivePopover as Popover,
+  ResponsivePopoverContent as PopoverContent,
+  ResponsivePopoverTrigger as PopoverTrigger,
+} from "@/plugins/kit";
 
 import type { PluginContext } from "../types";
 
@@ -51,6 +55,7 @@ export function MonthPickerButton({
 
   return (
     <Popover
+      title="Calendar"
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
@@ -77,7 +82,7 @@ export function MonthPickerButton({
             type="button"
             aria-label="Previous month"
             data-testid="month-picker-prev"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:size-11"
             onClick={() => {
               const next = shiftMonthKey(viewMonth, -1);
               if (next) setViewMonth(next);
@@ -92,7 +97,7 @@ export function MonthPickerButton({
             type="button"
             aria-label="Next month"
             data-testid="month-picker-next"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:size-11"
             onClick={() => {
               const next = shiftMonthKey(viewMonth, 1);
               if (next) setViewMonth(next);
@@ -142,7 +147,7 @@ export function MonthPickerButton({
                     onPicked();
                   }}
                   className={cn(
-                    "relative flex w-full flex-col items-center gap-0.5 rounded-md px-0.5 py-1 text-xs transition-colors",
+                    "relative flex w-full flex-col items-center justify-center gap-0.5 rounded-md px-0.5 py-1 text-xs transition-colors max-md:min-h-11 max-md:text-sm",
                     !inMonth && "invisible",
                     selected
                       ? "bg-primary text-primary-foreground"

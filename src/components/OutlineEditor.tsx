@@ -173,11 +173,11 @@ import { useSpotlightEnabled } from "./spotlight-mode";
 import { Subheader } from "./Subheader";
 import { Button } from "./ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+  ResponsiveMenu as DropdownMenu,
+  ResponsiveMenuContent as DropdownMenuContent,
+  ResponsiveMenuItem as DropdownMenuItem,
+  ResponsiveMenuTrigger as DropdownMenuTrigger,
+} from "./ui/responsive-menu";
 import { Sheet, SheetContent } from "./ui/sheet";
 import { useDragReorder } from "./use-drag-reorder";
 import {
@@ -798,7 +798,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFlash={pendingFlash}
       />
       <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
-      <div className="relative sticky top-0 z-10" ref={headerRef}>
+      <div
+        className="outline-chrome relative sticky top-0 z-10"
+        ref={headerRef}
+      >
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}
@@ -2496,7 +2499,7 @@ function CollapsedCrumbs({
   return (
     <span className="crumb crumb-collapsed">
       <ChevronRight className="sep" size={13} strokeWidth={2} />
-      <DropdownMenu>
+      <DropdownMenu title="Breadcrumbs">
         <DropdownMenuTrigger
           render={
             <button

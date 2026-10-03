@@ -40,13 +40,13 @@ import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+  ResponsiveMenu as DropdownMenu,
+  ResponsiveMenuCheckboxItem as DropdownMenuCheckboxItem,
+  ResponsiveMenuContent as DropdownMenuContent,
+  ResponsiveMenuItem as DropdownMenuItem,
+  ResponsiveMenuSeparator as DropdownMenuSeparator,
+  ResponsiveMenuTrigger as DropdownMenuTrigger,
+} from "./ui/responsive-menu";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -193,7 +193,7 @@ export function HeaderMoreMenu() {
   const history = useHistoryState();
 
   return (
-    <DropdownMenu>
+    <DropdownMenu title="More actions">
       <DropdownMenuTrigger
         render={
           <Button

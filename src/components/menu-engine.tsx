@@ -9,10 +9,13 @@ import type {
   PluginContext,
 } from "../plugins/types";
 
+import { useIsMobile } from "../hooks/use-mobile";
 import { menuSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
+import { MenuDrawerContent } from "./menu-drawer";
 import { MenuList } from "./menu-list";
+import { Drawer } from "./ui/drawer";
 import { useClampedMenuPosition } from "./use-menu-position";
 
 /**
@@ -65,6 +68,7 @@ export function useMenus({
   onTextChange: (text: string) => void;
 }) {
   const [open, setOpen] = useState<MenuOpen | null>(null);
+  const mobile = useIsMobile();
 
   const spec: MenuSpec | null = open
     ? (menuSpecs.find((s) => s.id === open.specId) ?? null)
@@ -169,6 +173,7 @@ export function useMenus({
         return true;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         setOpen(null);
         return true;
       default:
@@ -177,8 +182,31 @@ export function useMenus({
   };
 
   const menu =
-    isOpen && open
-      ? createPortal(
+    isOpen && open ? (
+      mobile ? (
+        <Drawer
+          open
+          modal={false}
+          showSwipeHandle
+          onOpenChange={(next) => {
+            if (!next) close();
+          }}
+        >
+          <MenuDrawerContent title="Suggestions" typing>
+            <MenuList
+              entries={entries}
+              activeIndex={open.activeIndex}
+              emptyLabel={spec?.emptyLabel}
+              inDrawer
+              onHover={(i) =>
+                setOpen((s) => (s ? { ...s, activeIndex: i } : s))
+              }
+              onSelect={pick}
+            />
+          </MenuDrawerContent>
+        </Drawer>
+      ) : (
+        createPortal(
           <MenuList
             entries={entries}
             activeIndex={open.activeIndex}
@@ -190,7 +218,8 @@ export function useMenus({
           />,
           document.body,
         )
-      : null;
+      )
+    ) : null;
 
   return { handleInput, handleKeyDown, close, isOpen, menu };
 }
