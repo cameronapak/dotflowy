@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.16.4
+
+### Patch Changes
+
+- 86d6316: Use Classic outline sync for all browser and agent access. Remove the upgraded-sync beta toggle and experimental runtime while retaining migration archives and recovery tooling.
+
 ## 1.16.3
 
 ### Patch Changes
