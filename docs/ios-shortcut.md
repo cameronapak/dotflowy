@@ -4,12 +4,21 @@ The official template is [`/shortcuts/add-to-dotflowy-today.shortcut`](../public
 
 ## Release state
 
-The checked-in file is currently an **unsigned XML property-list template**.
-Cam reports successful Mac signing and import. The experimental installer uses
-[Cam's shared shortcut](https://www.icloud.com/shortcuts/73918f14013646a1a36252939c26db46).
-The orb could not inspect the shared payload: Apple's record request returned
-HTTP 503. Its credential-free contents and end-to-end capture still need
-real-device verification before general release.
+The checked-in file is currently an **unsigned XML property-list template**,
+compiled from [`shortcuts/add-to-dotflowy-today.cherri`](../shortcuts/add-to-dotflowy-today.cherri)
+with the [Cherri](https://cherrilang.org) compiler. The template this replaced
+was hand-written plist data and shipped two actions Shortcuts does not know:
+`is.workflow.actions.matchtext` (macOS rendered “Unknown Action” there) and
+`is.workflow.actions.generateuuid`, which is not a built-in action at all. The
+template now uses `is.workflow.actions.text.match` and a built-in random number
+for its attempt ID.
+
+The experimental installer still uses
+[Cam's shared shortcut](https://www.icloud.com/shortcuts/73918f14013646a1a36252939c26db46),
+which was signed from the broken template. Re-sign the compiled template and
+share it again before calling the installer fixed; until then the shared copy
+keeps the unrecognized actions. Its credential-free contents and end-to-end
+capture still need real-device verification before general release.
 
 Import asks for:
 
@@ -48,10 +57,14 @@ key field as `PASTE_CAPTURE_KEY_DURING_IMPORT`. Duplicate it for personal use
 and put your real key only in that private copy. Generate the public iCloud
 link from the clean master, not the configured personal copy.
 
-The repository's `scripts/shortcut.ts` remains the canonical action definition;
-`public/shortcuts/add-to-dotflowy-today.shortcut` is its generated artifact. A
-signed export of the clean master can be retained with the release, but never
-commit or upload a personalized shortcut containing a working key.
+The source of truth is `shortcuts/add-to-dotflowy-today.cherri`;
+`public/shortcuts/add-to-dotflowy-today.shortcut` is its generated artifact, and
+`scripts/shortcut.ts` compiles it and normalizes the two import questions (Cherri
+v2.3.0 writes them without a usable `ActionIndex` and leaves their parameters
+empty, which is what made a shared copy fail with “Please choose a value for each
+parameter in this action”). A signed export of the clean master can be retained
+with the release, but never commit or upload a personalized shortcut containing
+a working key.
 
 In the iPhone shortcut editor, tap the icon beside its name to choose a glyph
 and color, then tap **Done**. A custom image is a separate **Add to Home Screen**
@@ -61,7 +74,7 @@ new link. Re-import that link to verify what recipients receive.
 
 ## Behavior and protocol
 
-Each nonblank invocation creates an attempt UUID and formats the phone's current local date as `yyyy-MM-dd` immediately before submission. It sends:
+Each nonblank invocation creates a UUID-shaped attempt ID from a built-in random number and formats the phone's current local date as `yyyy-MM-dd` immediately before submission. It sends:
 
 ```http
 POST /api/capture
@@ -73,11 +86,21 @@ Content-Type: application/json
 
 The optional `title` field is intentionally omitted by this stock template; the server may unfurl a URL after saving. A run reports success only when the JSON response has `saved: true` and nonempty `nodeId`, `dailyNoteId`, and `date`. Otherwise it displays the response's `error` and `message`. There is no persistent queue: it is online-only, and one run can create at most one bullet.
 
-The UUID, date, and text are action outputs created before the request. A retry added around only the request/receipt actions must reuse those outputs. Starting the shortcut again is a fresh invocation and creates a fresh UUID. The stock template does not automatically retry.
+The attempt ID, date, and text are action outputs created before the request. A retry added around only the request/receipt actions must reuse those outputs. Starting the shortcut again is a fresh invocation and creates a fresh attempt ID. The stock template does not automatically retry.
 
 ## Author and validate (Linux or Mac)
 
-The TypeScript source is the canonical template; generated XML is deterministic.
+The Cherri source is the canonical template; `--build` compiles it and the
+generated XML is deterministic.
+
+Install the pinned compiler once (the orb setup script does the same):
+
+```sh
+curl -fsSL -o /tmp/cherri.zip \
+  https://github.com/electrikmilk/cherri/releases/download/v2.3.0/cherri_linux-x86_64.zip
+unzip -o /tmp/cherri.zip -d /tmp/cherri-bin
+install -m 0755 /tmp/cherri-bin/cherri "$HOME/.local/bin/cherri"
+```
 
 ```sh
 bun scripts/shortcut.ts --build
@@ -85,11 +108,17 @@ bun scripts/shortcut.ts --validate
 bun test scripts/shortcut.test.ts
 ```
 
-Validation checks required action structure, import-question targets, deterministic output, receipt gates, and common credential markers. It is not a substitute for Apple's parser or real-device testing. The action plist schema is an Apple implementation detail rather than a documented stable authoring API.
+`CHERRI_BIN` points the build at a specific compiler binary. Validation checks
+that every action identifier is one Shortcuts knows, that the import questions
+target the capture key and endpoint parameters, that the artifact is current and
+reproducible, that the receipt gates and date format survive, and that no
+credential marker is present. It is not a substitute for Apple's parser or
+real-device testing: the action plist schema is an Apple implementation detail
+rather than a documented stable authoring API.
 
 ## Sign and release (Mac required)
 
-Use a Mac signed in to iCloud with Shortcuts enabled and network access. Apple's CLI sends the shortcut to Apple for validation. From the repository root:
+Use a Mac signed in to iCloud with Shortcuts enabled and network access. Apple's CLI sends the shortcut to Apple for validation. The build step also needs the Cherri compiler on `PATH`; only `--sign` is Apple's CLI. From the repository root:
 
 ```sh
 bun scripts/shortcut.ts --build

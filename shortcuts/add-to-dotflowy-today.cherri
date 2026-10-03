@@ -1,0 +1,67 @@
+/*
+ * Add to Dotflowy Today (ADR 0065): the credential-free Apple Shortcut template.
+ *
+ * Authoring and build:
+ *   bun scripts/shortcut.ts --build    compile this source into the public artifact
+ *   bun scripts/shortcut.ts --sign     macOS only: Apple `shortcuts sign`
+ *
+ * Cherri (https://cherrilang.org) owns the action schemas, so the template can
+ * only contain actions Shortcuts actually knows. Hand-written plist identifiers
+ * were how the first template shipped an unrecognized Match Text action and a
+ * "Generate UUID" action that does not exist as a built-in.
+ *
+ * The capture key is an import question, never a real credential in this file
+ * or in the compiled template. The endpoint question exists for self-hosting.
+ */
+
+#define name Add to Dotflowy Today
+#define color red
+#define glyph globe
+#define inputs text, url
+#define from sharesheet
+
+#include 'actions/calendar'
+#include 'actions/text'
+#include 'actions/web'
+
+#question key "Paste your Dotflowy capture key. It is stored only in your copy of this shortcut." "PASTE_CAPTURE_KEY_DURING_IMPORT"
+#question endpoint "Capture endpoint (change only when self-hosting Dotflowy)." "https://app.dotflowy.com/api/capture"
+
+/* A shared text/URL wins; otherwise ask, with keyboard dictation available. */
+@CaptureText = ShortcutInput
+if !@CaptureText {
+	@CaptureText = prompt("What do you want to add to today? You can type or use keyboard dictation.")
+}
+
+/* One capture, one bullet: blank input creates nothing, including no scaffold. */
+const nonblank = matchText('\S', @CaptureText)
+if nonblank {
+	/* No built-in action generates a UUID, so the attempt ID is a UUID-shaped
+	 * random number: 12 digits is always 12 digits, and the server only needs an
+	 * opaque per-invocation token for retry idempotency. */
+	const attemptTail = randomNumber(100000000000, 999999999999)
+	const attemptId = "00000000-0000-4000-8000-{attemptTail}"
+	const captureDate = formatTimestamp(CurrentDate, "Custom", "None", "yyyy-MM-dd")
+	const captureKey = text(key)
+	const response = jsonRequest(endpoint, "POST", {
+		"attemptId": "{attemptId}",
+		"date": "{captureDate}",
+		"text": "{@CaptureText}"
+	}, {
+		"Authorization": "Bearer {captureKey}",
+		"Content-Type": "application/json"
+	})
+	const saved = getValue(response, "saved")
+	const nodeId = getValue(response, "nodeId")
+	const dailyNoteId = getValue(response, "dailyNoteId")
+	const receiptDate = getValue(response, "date")
+	const receipt = "{saved}\n{nodeId}\n{dailyNoteId}\n{receiptDate}"
+	const receiptMatch = matchText('(?s)^true\n.+\n.+\n\d{4}-\d{2}-\d{2}$', receipt)
+	if receiptMatch {
+		showNotification("Added one bullet to today's note.", "Saved to Dotflowy")
+	} else {
+		const errorCode = getValue(response, "error")
+		const errorMessage = getValue(response, "message")
+		show("Capture failed ({errorCode}): {errorMessage}")
+	}
+}

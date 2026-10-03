@@ -42,8 +42,9 @@ jobs:
         run: bun run test
       - name: Release automation tests
         run: |
-          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts
+          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts
           bun test scripts/release.test.ts
+          bun test scripts/shortcut.test.ts
       # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
       # rest. That trade is only safe while every pointer resolves: an agent
       # reads a miss, shrugs, and proceeds without the constraint it was meant
