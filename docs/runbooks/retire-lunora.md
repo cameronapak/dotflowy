@@ -133,6 +133,25 @@ This atomically appends **Recovered experimental content** to the current Classi
 
 Neither manual operation accepts `--all`. A lost response is not permission to start another executor or clear its claim. After confirming the invocation stopped and following exact-token claim recovery below, `retry` can finish a preserve operation with a receipt without restoring old content. Before preservation commits, a safely failed operation releases both fences. If edits invalidate its archive, obtain approval for a new reviewed `preserve-classic` revision; the old objects and attempts remain. Never use `migrate`, `restore`, generic snapshot replacement, or PITR to overwrite preserved Classic. Generic snapshot replacement and PITR are blocked after permanent retirement; explicit automatic-policy rollback is not a manual-preservation recovery tool.
 
+## Repair a reviewed Classic-only outline
+
+Use this only after approval to repair one Classic outline whose experimental tables are all empty. A missing or disabled preference is required. Ordinary classification remains strict.
+
+1. Read `GET /api/admin/lunora-retirement?repairPreview=1&userId=REVIEWED_USER_ID`. This does not create an audit record, backup, or fence. Require `eligible: true` and review `counts.nodes`, `parentLinks`, and `siblingLinks`. Keep the returned `approvalHash` from this exact preview.
+2. Run the approved one-user operation:
+
+   ```sh
+   bun run lunora:retire repair-classic --user REVIEWED_USER_ID --manifest-hash REVIEWED_APPROVAL_HASH --execute
+   ```
+
+   The HTTP equivalent is a POST to the operator endpoint with `userId`, `operation: "repair-classic"`, and `approvedManifestHash` set to that preview's `approvalHash`. It rejects `--all` and missing approval. Changed source data invalidates the preview; do not retry a failed request automatically.
+
+3. Confirm `state: completed`, `result: classic-links-repaired`, `policy: classic-link-repair-v1`, both snapshot hashes, `counts.rawArchiveHash`, and `recoveryManifestHash`. Review `counts.repair` against the preview. Check the live Classic graph, preserved node count, and side-collections. The experimental snapshot stays empty and retired.
+
+This repairs sibling pointers in the order the editor already renders. Nodes with a missing parent append at the root, retaining their subtrees. No nodes are dropped or recreated, and node content and timestamps stay unchanged. Invalid mirrors, parent cycles, duplicate ids, nonempty experimental tables, and malformed side data reject the operation. Complete original data remains archived.
+
+`retry` follows the stored policy and retained manifest. Completed retries are no-ops. A verified rollback retains the original invalid graph; an uncertain result stays fenced for explicit operator recovery. Follow the claim-recovery rules below before considering an interrupted invocation stopped.
+
 ## Recover an interrupted operation claim
 
 Every operation, including dry-run and restore, holds a durable D1 claim distinct from the migration id. Overlapping requests return 409 with `retirement_operation_in_progress`, without calling either backend. Reports remain available and include `activeOperationId` and `activeOperationStartedAt`.

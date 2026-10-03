@@ -2,8 +2,13 @@ import { Schema } from "effect";
 
 import type { Node } from "../src/data/wire-schema";
 
+import { chainDisagreements, orderSiblings } from "../src/data/sibling-chain";
 import { NodeSchema } from "../src/data/wire-schema";
-import { OutlineSnapshotSchema, type OutlineSnapshot } from "./backup";
+import {
+  OutlineSnapshotSchema,
+  SNAPSHOT_VERSION,
+  type OutlineSnapshot,
+} from "./backup";
 
 export const RETIREMENT_SNAPSHOT_VERSION = 1;
 export const RETIREMENT_PREFIX = "lunora-retirement";
@@ -659,6 +664,136 @@ export function classicSnapshotsEquivalent(
     ),
   });
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+export const ClassicLinkRepairManifestSchema = Schema.Struct({
+  version: Schema.Literal(1),
+  policy: Schema.Literal("classic-link-repair-v1"),
+  userId: Schema.String,
+  migrationId: Schema.String,
+  classicSnapshotHash: Schema.String,
+  lunoraSnapshotHash: Schema.String,
+  approvedSourceHash: Schema.String,
+  nodes: Schema.Array(NodeSchema),
+  summary: Schema.Struct({
+    nodes: Schema.Number,
+    parentLinks: Schema.Number,
+    siblingLinks: Schema.Number,
+  }),
+});
+
+/** Explicit repair only: preserve payloads and the editor's existing order. */
+export function planClassicLinkRepair(classic: OutlineSnapshot) {
+  if (
+    classic.version !== SNAPSHOT_VERSION ||
+    validateClassicSnapshot(classic).ok
+  )
+    throw new Error("link repair requires an invalid Classic graph");
+  const byId = new Map(classic.nodes.map((node) => [node.id, node]));
+  if (byId.size !== classic.nodes.length)
+    throw new Error("link repair cannot resolve duplicate node ids");
+  const groups = new Map<string | null, Node[]>();
+  for (const node of classic.nodes) {
+    const siblings = groups.get(node.parentId) ?? [];
+    siblings.push(node);
+    groups.set(node.parentId, siblings);
+  }
+  const repaired = new Map(byId);
+  const roots = orderSiblings(groups.get(null) ?? []);
+  let parentLinks = 0;
+  for (const [parentId, siblings] of groups) {
+    if (parentId === null) continue;
+    const ordered = orderSiblings(siblings);
+    if (!byId.has(parentId)) {
+      // Append stranded runs after existing roots; descendants keep their parent.
+      for (const node of ordered) {
+        const rescued = { ...node, parentId: null };
+        repaired.set(node.id, rescued);
+        roots.push(rescued);
+        parentLinks++;
+      }
+    } else {
+      for (const fix of chainDisagreements(ordered)) {
+        const node = repaired.get(fix.id);
+        if (node)
+          repaired.set(fix.id, { ...node, prevSiblingId: fix.expectedPrev });
+      }
+    }
+  }
+  for (const fix of chainDisagreements(roots)) {
+    const node = repaired.get(fix.id);
+    if (node)
+      repaired.set(fix.id, { ...node, prevSiblingId: fix.expectedPrev });
+  }
+  const nodes = classic.nodes.map((node) => repaired.get(node.id) ?? node);
+  if (!validateClassicSnapshot({ ...classic, nodes }).ok)
+    throw new Error("Classic has anomalies outside parent and sibling links");
+  return {
+    nodes,
+    summary: {
+      nodes: nodes.length,
+      parentLinks,
+      siblingLinks: nodes.filter(
+        (node) => node.prevSiblingId !== byId.get(node.id)?.prevSiblingId,
+      ).length,
+    },
+  };
+}
+
+/** Excludes export clocks, but binds edits, row order, side data and identity. */
+export function classicLinkRepairSourceHash(
+  userId: string,
+  classic: OutlineSnapshot,
+  experimental: LunoraRetirementSnapshot,
+) {
+  const { exportedAt: _classicClock, ...classicData } = classic;
+  const { exportedAt: _experimentalClock, ...experimentalData } = experimental;
+  return sha256Hex(
+    new TextEncoder().encode(
+      JSON.stringify({
+        userId,
+        classic: classicData,
+        experimental: experimentalData,
+      }),
+    ),
+  );
+}
+
+export function validateClassicLinkRepairSources(
+  classic: OutlineSnapshot,
+  experimental: LunoraRetirementSnapshot,
+  userId: string,
+) {
+  const preference = classic.kv.find(
+    (row) => row.collection === "account-prefs" && row.key === "lunora-beta",
+  );
+  if (preference) {
+    const value = Schema.decodeUnknownOption(LunoraPreferenceValueSchema)(
+      JSON.parse(preference.value),
+    );
+    if (value._tag === "None" || value.value.enabled)
+      throw new Error(
+        "link repair requires a missing or disabled experimental preference",
+      );
+  }
+  const decoded = Schema.decodeUnknownOption(LunoraRetirementSnapshotSchema)(
+    experimental,
+  );
+  if (
+    decoded._tag === "None" ||
+    experimental.version !== RETIREMENT_SNAPSHOT_VERSION ||
+    experimental.userId !== userId ||
+    [
+      experimental.nodes,
+      experimental.dailyIndex,
+      experimental.tagColors,
+      experimental.savedQueries,
+      experimental.migrateState,
+    ].some((rows) => rows.length !== 0)
+  )
+    throw new Error(
+      "link repair requires an empty validated experimental outline",
+    );
 }
 
 const DIAGNOSTIC_SAMPLE_LIMIT = 50;

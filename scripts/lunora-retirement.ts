@@ -16,6 +16,7 @@ type Command =
   | "dry-run"
   | "migrate"
   | "migrate-with-recovery"
+  | "repair-classic"
   | "retry"
   | "status"
   | "restore"
@@ -65,6 +66,7 @@ function usage(): void {
   bun run lunora:retire [dry-run] (--user ID | --email EMAIL | --all)
   bun run lunora:retire migrate (--user ID | --email EMAIL | --all) --execute
   bun run lunora:retire migrate-with-recovery (--user ID | --email EMAIL) --execute
+  bun run lunora:retire repair-classic (--user ID | --email EMAIL) --manifest-hash HASH --execute
   bun run lunora:retire retry (--user ID | --email EMAIL) --execute
   bun run lunora:retire status [--user ID | --email EMAIL | --all]
   bun run lunora:retire restore (--user ID | --email EMAIL) --execute
@@ -81,6 +83,7 @@ function parseArgs(argv: string[]): Args {
     "dry-run",
     "migrate",
     "migrate-with-recovery",
+    "repair-classic",
     "retry",
     "status",
     "restore",
@@ -127,15 +130,21 @@ function parseArgs(argv: string[]): Args {
       "preserve-classic",
       "recover-classic",
       "migrate-with-recovery",
+      "repair-classic",
     ].includes(command) &&
     args.all
   )
     usage();
-  if (command === "recover-classic" && !args.manifestHash) usage();
+  if (
+    ["recover-classic", "repair-classic"].includes(command) &&
+    !args.manifestHash
+  )
+    usage();
   if (
     [
       "migrate",
       "migrate-with-recovery",
+      "repair-classic",
       "retry",
       "restore",
       "preserve-classic",
@@ -234,6 +243,7 @@ async function operate(
     | "dry-run"
     | "migrate"
     | "migrate-with-recovery"
+    | "repair-classic"
     | "retry"
     | "restore"
     | "preserve-classic"
@@ -307,9 +317,12 @@ async function main(): Promise<void> {
     const result = await operate(args, cookie, operation, target);
     results.push(result);
     if (
-      ["migrate", "migrate-with-recovery", "preserve-classic"].includes(
-        args.command,
-      ) &&
+      [
+        "migrate",
+        "migrate-with-recovery",
+        "preserve-classic",
+        "repair-classic",
+      ].includes(args.command) &&
       result.state !== "completed"
     ) {
       console.error(`${args.command} stopped: operation did not complete.`);

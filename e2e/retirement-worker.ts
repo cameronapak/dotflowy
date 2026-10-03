@@ -26,6 +26,7 @@ import {
 } from "../worker/lunora-retirement";
 import {
   RetirementOperationInProgress,
+  retirementRepairPreview,
   runRetirementOperation,
 } from "../worker/lunora-retirement-service";
 
@@ -227,6 +228,9 @@ export default {
             .first(),
         });
       }
+      if (url.pathname === "/repair-preview") {
+        return Response.json(await retirementRepairPreview(env, userId));
+      }
       if (url.pathname === "/write") {
         await createLunoraOutlineStore(env, userId).applyBatch(
           (input.lunoraNodes ?? []).map((value) => ({ op: "update", value })),
@@ -293,6 +297,7 @@ export default {
                 markRetired: unexpectedBackendCall,
               },
             },
+            input.approvedManifestHash,
           );
         } catch (error) {
           if (!(error instanceof RetirementOperationInProgress)) throw error;

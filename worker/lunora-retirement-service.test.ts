@@ -13,6 +13,7 @@ import type {
 
 import {
   retirementDiagnostic,
+  retirementRepairPreview,
   runRetirementOperation,
 } from "./lunora-retirement-service";
 
@@ -124,14 +125,16 @@ function fakeDb() {
           }
         } else if (sql.includes("UPDATE lunora_retirement SET")) {
           if (!record) throw new Error("missing fake retirement record");
-          if (sql.includes("policy = 'experimental-primary-recovery-v1'")) {
+          if (sql.includes("SET policy = ?")) {
             if (
-              record.userId === args[0] &&
-              record.activeOperationId === args[1]
+              record.userId === args[1] &&
+              record.activeOperationId === args[2] &&
+              (args[0] === "experimental-primary-recovery-v1" ||
+                args[0] === "classic-link-repair-v1")
             )
               record = {
                 ...record,
-                policy: "experimental-primary-recovery-v1",
+                policy: args[0],
               };
             return { success: true };
           }
@@ -1196,5 +1199,207 @@ describe("Lunora retirement coordinator", () => {
       "lunora",
       "second",
     ]);
+  });
+});
+
+describe("guarded Classic link repair", () => {
+  function repairFixture(options?: Parameters<typeof fixture>[0]) {
+    const f = fixture(options);
+    f.backend.replaceClassic({
+      ...classicSnapshot(),
+      nodes: [
+        node("a"),
+        { ...node("b"), text: "KEEP_PRIVATE_PAYLOAD", completed: true },
+      ],
+      kv: [
+        {
+          collection: "daily-index",
+          key: "day",
+          value: '{"key":"day","nodeId":"retained-claim"}',
+          updatedAt: 12,
+        },
+      ],
+    });
+    f.backend.replaceLunora({
+      ...lunoraSnapshot(),
+      nodes: [],
+      migrateState: [],
+    });
+    return f;
+  }
+
+  it("previews without writing, then archives and repairs all payloads and side data", async () => {
+    const f = repairFixture();
+    const original = clone(f.backend.classic);
+    const preview = await retirementRepairPreview(
+      f.env,
+      USER_ID,
+      f.backend.backends,
+    );
+    expect(preview).toMatchObject({
+      eligible: true,
+      counts: { nodes: 2, parentLinks: 0, siblingLinks: 1 },
+    });
+    expect(f.db.record).toBeNull();
+    expect(f.db.attempts).toBe(0);
+    expect(f.bucket.objects.size).toBe(0);
+    expect(f.backend.classicFreezeCalls).toBe(0);
+    expect(JSON.stringify(preview)).not.toContain("KEEP_PRIVATE_PAYLOAD");
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "repair-classic",
+      f.backend.backends,
+      preview.approvalHash,
+    );
+    expect(result).toMatchObject({
+      state: "completed",
+      policy: "classic-link-repair-v1",
+      result: "classic-links-repaired",
+      activeOperationId: null,
+      failureReason: null,
+    });
+    expect(f.backend.classic.nodes).toEqual(
+      original.nodes.map((row) =>
+        row.id === "b" ? { ...row, prevSiblingId: "a" } : row,
+      ),
+    );
+    expect(
+      f.backend.classic.kv.filter((r) => r.collection !== "account-prefs"),
+    ).toEqual([...original.kv]);
+    expect(JSON.parse(result.counts ?? "{}").repair).toEqual({
+      nodes: 2,
+      parentLinks: 0,
+      siblingLinks: 1,
+    });
+    expect(result.recoveryManifestHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(f.bucket.objects.size).toBe(4);
+    expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBe("retired");
+  });
+
+  it("rejects a missing approval before creating an audit record", async () => {
+    const f = repairFixture();
+    await expect(
+      runRetirementOperation(
+        f.env,
+        USER_ID,
+        "repair-classic",
+        f.backend.backends,
+      ),
+    ).rejects.toThrow("approved preview hash");
+    expect(f.db.record).toBeNull();
+    expect(f.backend.restoreCalls).toBe(0);
+  });
+
+  it("rejects edits between preview and freeze without replacing them", async () => {
+    const f = repairFixture();
+    const preview = await retirementRepairPreview(
+      f.env,
+      USER_ID,
+      f.backend.backends,
+    );
+    const edited = {
+      ...clone(f.backend.classic),
+      seq: 9,
+      nodes: f.backend.classic.nodes.map((n) => ({ ...n, text: "fresh edit" })),
+    };
+    f.backend.replaceClassic(edited);
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "repair-classic",
+      f.backend.backends,
+      preview.approvalHash,
+    );
+    expect(result.state).toBe("failed");
+    expect(result.failureReason).toContain("stale");
+    expect(f.backend.restoreCalls).toBe(0);
+    expect(f.backend.classic).toEqual(edited);
+    expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBeNull();
+  });
+
+  it("rejects enabled preference and experimental side data even with zero experimental nodes", async () => {
+    for (const conflict of ["enabled", "side-data"] as const) {
+      const f = repairFixture();
+      if (conflict === "enabled")
+        f.backend.replaceClassic({
+          ...f.backend.classic,
+          kv: classicSnapshot().kv,
+        });
+      else
+        f.backend.replaceLunora({
+          ...lunoraSnapshot(),
+          nodes: [],
+          migrateState: [],
+          tagColors: [{ userId: USER_ID, tag: "private", color: "red" }],
+        });
+      const before = clone(f.backend.classic);
+      expect(
+        await retirementRepairPreview(f.env, USER_ID, f.backend.backends),
+      ).toEqual({ userId: USER_ID, eligible: false });
+      const result = await runRetirementOperation(
+        f.env,
+        USER_ID,
+        "repair-classic",
+        f.backend.backends,
+        "a".repeat(64),
+      );
+      expect(result.state).toBe("failed");
+      expect(f.backend.restoreCalls).toBe(0);
+      expect(f.backend.classic).toEqual(before);
+    }
+  });
+
+  it("rolls back the exact original graph on verification or retirement failure", async () => {
+    const f = repairFixture({ failMarkRetired: true });
+    const original = clone(f.backend.classic);
+    const preview = await retirementRepairPreview(
+      f.env,
+      USER_ID,
+      f.backend.backends,
+    );
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "repair-classic",
+      f.backend.backends,
+      preview.approvalHash,
+    );
+    expect(result.state).toBe("rolled-back");
+    expect(f.backend.classic).toEqual(original);
+    expect(f.backend.classicFrozenBy).toBeNull();
+    expect(f.backend.lunoraStatus).toBeNull();
+  });
+
+  it("does not overwrite later edits on a completed retry", async () => {
+    const f = repairFixture();
+    const preview = await retirementRepairPreview(
+      f.env,
+      USER_ID,
+      f.backend.backends,
+    );
+    await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "repair-classic",
+      f.backend.backends,
+      preview.approvalHash,
+    );
+    const edited = {
+      ...clone(f.backend.classic),
+      nodes: [{ ...f.backend.classic.nodes[0]!, text: "later edit" }],
+    };
+    f.backend.replaceClassic(edited);
+    const result = await runRetirementOperation(
+      f.env,
+      USER_ID,
+      "retry",
+      f.backend.backends,
+    );
+    expect(result.state).toBe("completed");
+    expect(f.backend.classic).toEqual(edited);
+    expect(f.backend.restoreCalls).toBe(1);
   });
 });

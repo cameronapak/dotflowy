@@ -14,19 +14,23 @@ import {
   planExperimentalPrimaryRecovery,
 } from "./lunora-recovery";
 import {
+  ClassicLinkRepairManifestSchema,
   LunoraRetirementArchiveSchema,
   LunoraRetirementSnapshotSchema,
   RETIREMENT_SNAPSHOT_VERSION,
   buildClassicTarget,
   classicSnapshotsEquivalent,
+  classicLinkRepairSourceHash,
   classifyRetirement,
   compareRetirementSnapshots,
   disableLunoraPreference,
   isLunoraPreferenceEnabled,
+  planClassicLinkRepair,
   retirementSnapshotKey,
   sha256Hex,
   snapshotCounts,
   validateClassicSnapshot,
+  validateClassicLinkRepairSources,
   validateLunoraSnapshot,
   validateLunoraRetirementArchive,
   validateNodeGraph,
@@ -104,6 +108,7 @@ export type RetirementOperation =
   | "dry-run"
   | "migrate"
   | "migrate-with-recovery"
+  | "repair-classic"
   | "retry"
   | "restore"
   | "preserve-classic"
@@ -115,6 +120,7 @@ export interface RetirementRecord {
   policy:
     | "lunora-to-classic-v1"
     | "preserve-classic-v1"
+    | "classic-link-repair-v1"
     | "experimental-primary-recovery-v1";
   recoveryManifestKey: string | null;
   recoveryManifestHash: string | null;
@@ -425,6 +431,7 @@ async function migrate(
   env: RetirementEnv,
   initial: RetirementRecord,
   backends: RetirementBackends,
+  approvedSourceHash?: string,
 ): Promise<RetirementRecord> {
   if (initial.state === "completed") return initial;
   let record = initial;
@@ -539,7 +546,10 @@ async function migrate(
       lunoraNodeCount: lunoraBackup.value.nodes.length,
     });
     record = await updateRecord(env, record, { classification });
-    if (classification !== "eligible") {
+    if (
+      classification !== "eligible" &&
+      record.policy !== "classic-link-repair-v1"
+    ) {
       await lunoraClient.releaseFreeze(record.migrationId);
       await stub.releaseRetirementFreeze(record.migrationId);
       return updateRecord(env, record, {
@@ -553,11 +563,77 @@ async function migrate(
       });
     }
 
-    let target = buildClassicTarget(
-      classicBackup.value,
-      lunoraBackup.value,
-      record.startedAt,
-    );
+    let target;
+    if (record.policy === "classic-link-repair-v1") {
+      validateClassicLinkRepairSources(
+        classicBackup.value,
+        lunoraBackup.value,
+        record.userId,
+      );
+      const plan = planClassicLinkRepair(classicBackup.value);
+      const sourceHash = await classicLinkRepairSourceHash(
+        record.userId,
+        classicBackup.value,
+        lunoraBackup.value,
+      );
+      const key = `${classicKey}.link-repair`;
+      const retained = await env.BACKUPS.get(key);
+      if (
+        (!retained && approvedSourceHash !== sourceHash) ||
+        (approvedSourceHash !== undefined && approvedSourceHash !== sourceHash)
+      )
+        throw new Error("link repair preview is missing or stale");
+      const manifest = retained
+        ? await readVerifiedObject(env, key, ClassicLinkRepairManifestSchema)
+        : await storeImmutable(
+            env,
+            key,
+            ClassicLinkRepairManifestSchema.make({
+              version: 1,
+              policy: "classic-link-repair-v1",
+              userId: record.userId,
+              migrationId: record.migrationId,
+              classicSnapshotHash: classicBackup.hash,
+              lunoraSnapshotHash: lunoraBackup.hash,
+              approvedSourceHash: sourceHash,
+              ...plan,
+            }),
+            ClassicLinkRepairManifestSchema,
+          );
+      if (
+        manifest.value.userId !== record.userId ||
+        manifest.value.migrationId !== record.migrationId ||
+        manifest.value.classicSnapshotHash !== classicBackup.hash ||
+        manifest.value.lunoraSnapshotHash !== lunoraBackup.hash ||
+        manifest.value.approvedSourceHash !== sourceHash ||
+        (record.recoveryManifestHash &&
+          record.recoveryManifestHash !== manifest.hash) ||
+        !classicSnapshotsEquivalent(
+          { nodes: manifest.value.nodes, kv: classicBackup.value.kv },
+          { nodes: plan.nodes, kv: classicBackup.value.kv },
+        )
+      )
+        throw new Error("link repair manifest binding rejected");
+      target = {
+        nodes: manifest.value.nodes,
+        kv: disableLunoraPreference(classicBackup.value.kv, record.startedAt),
+      };
+      record = await updateRecord(env, record, {
+        recoveryManifestKey: key,
+        recoveryManifestHash: manifest.hash,
+        counts: JSON.stringify({
+          ...snapshotCounts(lunoraBackup.value),
+          rawArchiveHash: archive.hash,
+          repair: manifest.value.summary,
+        }),
+      });
+    } else {
+      target = buildClassicTarget(
+        classicBackup.value,
+        lunoraBackup.value,
+        record.startedAt,
+      );
+    }
     if (record.policy === "experimental-primary-recovery-v1") {
       const key = `${classicKey}.experimental-primary-recovery`;
       const manifest = (await env.BACKUPS.get(key))
@@ -647,10 +723,16 @@ async function migrate(
     await stub.releaseRetirementFreeze(record.migrationId);
     return updateRecord(env, record, {
       state: "completed",
+      classification:
+        record.policy === "classic-link-repair-v1"
+          ? "already-classic"
+          : record.classification,
       result:
-        record.policy === "experimental-primary-recovery-v1"
-          ? "migrated-with-classic-recovery"
-          : "migrated",
+        record.policy === "classic-link-repair-v1"
+          ? "classic-links-repaired"
+          : record.policy === "experimental-primary-recovery-v1"
+            ? "migrated-with-classic-recovery"
+            : "migrated",
       completedAt: Date.now(),
       failureReason: null,
     });
@@ -736,12 +818,13 @@ async function selectPreserveClassicPolicy(
   return selected;
 }
 
-async function selectExperimentalPrimaryPolicy(
+async function selectReplacementPolicy(
   env: RetirementEnv,
   record: RetirementRecord,
   backends: RetirementBackends,
+  policy: "experimental-primary-recovery-v1" | "classic-link-repair-v1",
 ): Promise<RetirementRecord> {
-  if (record.policy === "experimental-primary-recovery-v1") return record;
+  if (record.policy === policy) return record;
   if (
     record.policy !== "lunora-to-classic-v1" ||
     !["created", "classified"].includes(record.state) ||
@@ -759,14 +842,14 @@ async function selectExperimentalPrimaryPolicy(
       message: "recovery migration requires unfenced, unmodified backends",
     });
   await env.DB.prepare(
-    `UPDATE lunora_retirement SET policy = 'experimental-primary-recovery-v1'
+    `UPDATE lunora_retirement SET policy = ?
      WHERE userId = ? AND activeOperationId = ?`,
   )
-    .bind(record.userId, record.activeOperationId)
+    .bind(policy, record.userId, record.activeOperationId)
     .run();
   const selected = await getRecord(env, record.userId);
-  if (selected?.policy !== "experimental-primary-recovery-v1")
-    throw new Error("experimental-primary policy selection failed");
+  if (selected?.policy !== policy)
+    throw new Error("replacement policy selection failed");
   return selected;
 }
 
@@ -1031,6 +1114,13 @@ export async function runRetirementOperation(
   backends = retirementBackends(env, userId),
   approvedManifestHash?: string,
 ): Promise<RetirementRecord & { dryRun?: unknown }> {
+  if (
+    operation === "repair-classic" &&
+    !/^[a-f0-9]{64}$/.test(approvedManifestHash ?? "")
+  )
+    throw new RetirementOperationRejected({
+      message: "link repair requires an approved preview hash",
+    });
   await ensureRecord(env, userId, Date.now());
   const operationId = crypto.randomUUID();
   const record = await env.DB.prepare(
@@ -1049,8 +1139,16 @@ export async function runRetirementOperation(
     const selected =
       operation === "preserve-classic"
         ? await selectPreserveClassicPolicy(env, record, backends)
-        : operation === "migrate-with-recovery"
-          ? await selectExperimentalPrimaryPolicy(env, record, backends)
+        : operation === "migrate-with-recovery" ||
+            operation === "repair-classic"
+          ? await selectReplacementPolicy(
+              env,
+              record,
+              backends,
+              operation === "repair-classic"
+                ? "classic-link-repair-v1"
+                : "experimental-primary-recovery-v1",
+            )
           : record;
     const result = await performRetirementOperation(
       env,
@@ -1097,6 +1195,7 @@ async function performRetirementOperation(
     if (
       operation === "migrate" ||
       operation === "migrate-with-recovery" ||
+      operation === "repair-classic" ||
       operation === "restore"
     )
       throw new RetirementOperationRejected({
@@ -1181,9 +1280,40 @@ async function performRetirementOperation(
     await appendAttempt(env, record, operation);
     return record;
   }
-  record = await migrate(env, record, backends);
+  record = await migrate(env, record, backends, approvedManifestHash);
   await appendAttempt(env, record, operation);
   return record;
+}
+
+/** Read-only approval preview, deliberately separate from ordinary classification. */
+export async function retirementRepairPreview(
+  env: RetirementEnv,
+  userId: string,
+  backends = retirementBackends(env, userId),
+) {
+  const classic = Schema.decodeUnknownSync(OutlineSnapshotSchema)(
+    await backends.classic.exportSnapshot(),
+  );
+  const experimental = await backends.lunora.inspect();
+  const status = await backends.classic.retirementStatus();
+  if (status.frozenBy || status.appliedMigrationId || experimental.retirement)
+    return { userId, eligible: false };
+  try {
+    validateClassicLinkRepairSources(classic, experimental.snapshot, userId);
+    const plan = planClassicLinkRepair(classic);
+    return {
+      userId,
+      eligible: true,
+      approvalHash: await classicLinkRepairSourceHash(
+        userId,
+        classic,
+        experimental.snapshot,
+      ),
+      counts: plan.summary,
+    };
+  } catch {
+    return { userId, eligible: false };
+  }
 }
 
 /** Read the two backends without invoking the migration state machine. */

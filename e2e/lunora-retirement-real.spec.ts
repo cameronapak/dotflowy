@@ -23,6 +23,7 @@ import {
   ExperimentalPrimaryRecoveryManifestSchema,
 } from "../worker/lunora-recovery";
 import {
+  ClassicLinkRepairManifestSchema,
   compareRetirementSnapshots,
   LunoraRetirementArchiveSchema,
 } from "../worker/lunora-retirement";
@@ -465,6 +466,7 @@ test("production manual operations enforce admin, manifest approval and content-
     "preserve-classic",
     "recover-classic",
     "migrate-with-recovery",
+    "repair-classic",
   ])
     expect((await request(operation, "")).status).toBe(404);
   const preserved = await request("preserve-classic");
@@ -500,6 +502,236 @@ test("production manual operations enforce admin, manifest approval and content-
     result: "classic-recovery-imported",
   });
 });
+
+test("production repair preview and execution require an admin session and return no node content", async () => {
+  const login = async (email: string) => {
+    const response = await mf.dispatchFetch(
+      "http://fixture/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://fixture",
+        },
+        body: JSON.stringify({ email, password: "disposable-test-password" }),
+      },
+    );
+    expect(response.status).toBe(200);
+    return response.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+  };
+  const admin = await login("diagnostic-admin@dotflowy.local");
+  const nonadmin = await login("diagnostic-nonadmin@dotflowy.local");
+  const userId = randomUUID();
+  const db = await mf.getD1Database("DB");
+  await db
+    .prepare(
+      'INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?, ?, ?, 1, ?, ?)',
+    )
+    .bind(
+      userId,
+      "Repair fixture",
+      `${userId}@dotflowy.local`,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    .run();
+  await command("/seed", userId, {
+    classicNodes: [node("PRIVATE_REPAIR_SENTINEL"), node("second")],
+    preferenceEnabled: false,
+  });
+  const before = await command<Inspection>("/inspect", userId);
+  const path = `http://fixture/api/admin/lunora-retirement?repairPreview=1&userId=${userId}`;
+  for (const cookie of ["", nonadmin])
+    expect((await mf.dispatchFetch(path, { headers: { cookie } })).status).toBe(
+      404,
+    );
+  const response = await mf.dispatchFetch(path, { headers: { cookie: admin } });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  const text = await response.text();
+  expect(text).not.toContain("PRIVATE_REPAIR_SENTINEL");
+  const preview = Schema.decodeUnknownSync(
+    Schema.Struct({
+      userId: Schema.String,
+      eligible: Schema.Boolean,
+      approvalHash: Schema.String,
+    }),
+  )(JSON.parse(text));
+  expect(preview).toMatchObject({ userId, eligible: true });
+  const afterPreview = await command<Inspection>("/inspect", userId);
+  expect(afterPreview.classic).toEqual({
+    ...before.classic,
+    exportedAt: afterPreview.classic.exportedAt,
+  });
+  expect(afterPreview.lunora).toEqual({
+    ...before.lunora,
+    snapshot: {
+      ...before.lunora.snapshot,
+      exportedAt: afterPreview.lunora.snapshot.exportedAt,
+    },
+  });
+  expect(afterPreview.status).toEqual(before.status);
+  expect(afterPreview.record).toEqual(before.record);
+  const repair = (cookie: string, approvedManifestHash?: string) =>
+    mf.dispatchFetch("http://fixture/api/admin/lunora-retirement", {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        origin: "http://fixture",
+      },
+      body: JSON.stringify({
+        userId,
+        operation: "repair-classic",
+        approvedManifestHash,
+      }),
+    });
+  expect((await repair(nonadmin, preview.approvalHash)).status).toBe(404);
+  expect((await repair(admin)).status).toBe(409);
+  const repaired = await repair(admin, preview.approvalHash);
+  expect(repaired.status).toBe(200);
+  const result = await repaired.text();
+  expect(result).not.toContain("PRIVATE_REPAIR_SENTINEL");
+  expect(JSON.parse(result)).toMatchObject({
+    state: "completed",
+    policy: "classic-link-repair-v1",
+    result: "classic-links-repaired",
+  });
+});
+
+for (const corruption of ["fan", "heads", "orphan"] as const) {
+  test(`Classic link repair archives and preserves ${corruption} payloads and forces a fresh socket snapshot`, async () => {
+    const userId = randomUUID();
+    const root = node("retained root");
+    const a = node(
+      "retained task",
+      corruption === "heads"
+        ? null
+        : corruption === "orphan"
+          ? randomUUID()
+          : root.id,
+    );
+    a.isTask = true;
+    a.completed = true;
+    const b = node(
+      "retained descendant",
+      corruption === "orphan" ? a.id : root.id,
+      corruption === "fan" ? a.id : null,
+    );
+    const c = node("retained losing branch", root.id, a.id);
+    const rows =
+      corruption === "fan"
+        ? [root, a, b, c]
+        : corruption === "heads"
+          ? [root, a]
+          : [root, a, b];
+    const original = await command<{ classic: OutlineSnapshot }>(
+      "/seed",
+      userId,
+      {
+        classicNodes: rows,
+        preferenceEnabled: false,
+        classicDailyIndex: [
+          { key: "2026-10-03", nodeId: "retained-deleted-claim" },
+        ],
+      },
+    );
+    const preview = await command<{ eligible: boolean; approvalHash: string }>(
+      "/repair-preview",
+      userId,
+    );
+    expect(preview.eligible).toBe(true);
+    const result = await command<RetirementRecord>("/run", userId, {
+      operation: "repair-classic",
+      approvedManifestHash: preview.approvalHash,
+    });
+    expect(result).toMatchObject({
+      state: "completed",
+      result: "classic-links-repaired",
+      policy: "classic-link-repair-v1",
+      classification: "already-classic",
+      activeOperationId: null,
+    });
+    const after = await command<Inspection>("/inspect", userId);
+    const expected = rows.map((row) =>
+      row.id === c.id && corruption === "fan"
+        ? { ...row, prevSiblingId: b.id }
+        : row.id === a.id && corruption !== "fan"
+          ? { ...row, parentId: null, prevSiblingId: root.id }
+          : row,
+    );
+    expect(after.classic.nodes).toEqual(expected);
+    expect(after.classic.kv.filter((row) => row.key !== "lunora-beta")).toEqual(
+      original.classic.kv.filter((row) => row.key !== "lunora-beta"),
+    );
+    expect(after.status.frozenBy).toBeNull();
+    expect(after.lunora.retirement?.status).toBe("retired");
+    const bucket = await mf.getR2Bucket("BACKUPS");
+    const backup = await bucket.get(result.classicSnapshotKey!);
+    expect((await backup?.json<OutlineSnapshot>())?.nodes).toEqual(rows);
+    const manifest = Schema.decodeUnknownSync(ClassicLinkRepairManifestSchema)(
+      await (await bucket.get(result.recoveryManifestKey!))?.json(),
+    );
+    expect(manifest.nodes).toEqual(expected);
+    const ws = await connect(userId);
+    const snapshot = await frame(ws, original.classic.seq);
+    expect(snapshot.type).toBe("snapshot");
+    if (snapshot.type === "snapshot") expect(snapshot.nodes).toEqual(expected);
+    ws.close();
+  });
+}
+
+for (const fault of ["verify", "rollback"] as const) {
+  test(`Classic link repair ${fault === "verify" ? "restores exact original data" : "retains both fences on uncertain rollback"}`, async () => {
+    const userId = randomUUID();
+    const rows = [node("first"), node("second")];
+    const original = await command<{ classic: OutlineSnapshot }>(
+      "/seed",
+      userId,
+      { classicNodes: rows, preferenceEnabled: false },
+    );
+    const preview = await command<{ approvalHash: string }>(
+      "/repair-preview",
+      userId,
+    );
+    const result = await command<RetirementRecord>("/run", userId, {
+      operation: "repair-classic",
+      approvedManifestHash: preview.approvalHash,
+      fault,
+    });
+    expect(result.state).toBe(fault === "verify" ? "rolled-back" : "uncertain");
+    const after = await command<Inspection>("/inspect", userId);
+    if (fault === "verify") {
+      expect(after.classic.nodes).toEqual(rows);
+      expect(after.classic.kv).toEqual(original.classic.kv);
+      expect(after.status.frozenBy).toBeNull();
+      expect(after.lunora.retirement).toBeNull();
+      const resumed = await command<RetirementRecord>("/run", userId, {
+        operation: "retry",
+      });
+      expect(resumed.state).toBe("completed");
+      expect(resumed.recoveryManifestHash).toBe(result.recoveryManifestHash);
+      expect(resumed.classicSnapshotHash).toBe(result.classicSnapshotHash);
+      expect(
+        (await command<Inspection>("/inspect", userId)).classic.nodes,
+      ).toEqual(
+        rows.map((row, i) =>
+          i === 1 ? { ...row, prevSiblingId: rows[0]!.id } : row,
+        ),
+      );
+    } else {
+      expect(after.status.frozenBy).toBe(result.migrationId);
+      expect(after.lunora.retirement?.status).toBe("frozen");
+      const retried = await command<RetirementRecord>("/run", userId, {
+        operation: "retry",
+      });
+      expect(retried.state).toBe("uncertain");
+    }
+  });
+}
 
 test("production shard shapes deliver outline snapshots and the live retirement signal", async () => {
   const { userId, lunoraNodes } = await seed();
@@ -1269,6 +1501,7 @@ for (const operation of [
   "restore",
   "migrate",
   "migrate-with-recovery",
+  "repair-classic",
   "retry",
   "dry-run",
   "preserve-classic",
@@ -1282,7 +1515,7 @@ for (const operation of [
         rejected: boolean;
         backendCalls: number;
       }
-    >("/race", userId, { operation });
+    >("/race", userId, { operation, approvedManifestHash: "a".repeat(64) });
     expect(raced.rejected).toBe(true);
     expect(raced.backendCalls).toBe(0);
     expect(raced.migration.state).toBe("completed");
