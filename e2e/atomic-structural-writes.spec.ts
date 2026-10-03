@@ -2,7 +2,12 @@ import { expect, test, type Page, type Request } from "@playwright/test";
 import { Schema } from "effect";
 
 import { NodesPostBody } from "../worker/wire";
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  STANDARD_TREE,
+  type SeedNode,
+} from "./fixtures";
 
 // Regression suite for the atomic-structural-writes cure (PLAN.md):
 //  - P1: one structural edit = exactly ONE /api/nodes request carrying every op.
@@ -105,7 +110,7 @@ test.describe("atomic structural writes", () => {
   }) => {
     const writes = captureNodesWrites(page);
     await seedOutline(page, STANDARD_TREE);
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "alpha" });
     await expect(text(page, "alpha")).toBeVisible();
 
     // Enter at the end of an expanded parent dives in: insertChildAtStart(alpha)
@@ -145,7 +150,7 @@ test.describe("atomic structural writes", () => {
     // window where, pre-cure, the overlay could revert and a fast follow-up read
     // a stale chain. P2 holds the overlay across it.
     await seedOutline(page, STANDARD_TREE, { echoDelayMs: 500 });
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "alpha" });
     await expect(text(page, "alpha")).toBeVisible();
 
     // Two inserts in quick succession, each repointing the same follower
@@ -198,7 +203,7 @@ test.describe("atomic structural writes", () => {
     });
 
     await seedOutline(page, STANDARD_TREE, { postDelayMs: 300 });
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "alpha" });
     await expect(text(page, "alpha")).toBeVisible();
 
     // Same two rapid inserts as the echo-gap test, but here we watch the wire.

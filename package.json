@@ -83,7 +83,7 @@
     "cmdk": "^1.1.1",
     "cnfast": "^0.2.0",
     "date-fns": "^4.4.0",
-    "effect": "4.0.0-rc.115",
+    "effect": "4.0.0",
     "fuse.js": "^7.5.0",
     "grab-bcv": "^0.1.7",
     "lucide-react": "^1.46.0",

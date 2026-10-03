@@ -1,4 +1,4 @@
-import type { Socket } from "effect/unstable/socket";
+import type { Socket } from "effect/socket";
 
 import { createCollection } from "@tanstack/react-db";
 import { Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";

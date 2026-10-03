@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Sign-out must tear the page down with a FULL document navigation — the data
 // layer is module singletons and the /api/sync socket authenticates only at
@@ -18,10 +18,10 @@ const text = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
   await page.evaluate(() => {
-    (window as unknown as { __preNavMarker?: boolean }).__preNavMarker = true;
+    Object.assign(window, { __preNavMarker: true });
   });
 }
 
@@ -33,9 +33,7 @@ async function clickSignOut(page: Page) {
 const hasMarker = (page: Page) =>
   page
     .evaluate(
-      () =>
-        (window as unknown as { __preNavMarker?: boolean }).__preNavMarker ===
-        true,
+      () => "__preNavMarker" in window && window.__preNavMarker === true,
     )
     // Mid-navigation the execution context is destroyed — that's the very
     // reload under test, not a failure; report "unknown" and let poll retry.
