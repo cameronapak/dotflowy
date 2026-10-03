@@ -4,7 +4,9 @@ import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { VisibleRow } from "../data/visible-order";
 
 const CHECKED_MS = 80;
-const EXIT_MS = 160;
+const FADE_MS = 80;
+const MOVE_MS = 80;
+const EXIT_MS = FADE_MS + MOVE_MS;
 const EXIT_EASE = "cubic-bezier(0.23, 1, 0.32, 1)";
 const MOVE_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
@@ -194,7 +196,9 @@ export function useCompletionTransition({
       presentation.rows.forEach((row, i) => {
         const exit = presentation.exiting.get(row.key);
         if (exit?.fading) {
-          const ownStart = exit.start + CHECKED_MS;
+          // Fade first, then close the gap so surviving text never moves
+          // through a still-visible descendant. Total exit time stays 160ms.
+          const ownStart = exit.start + CHECKED_MS + FADE_MS;
           // A subtree completed together fades in place. Only an earlier,
           // separate completion moves a row that is itself now exiting.
           const otherShift = shift - (groups.get(ownStart) ?? 0);
@@ -223,7 +227,8 @@ export function useCompletionTransition({
       start: number,
       opacity = false,
     ) => {
-      const deadline = start + EXIT_MS;
+      const duration = opacity ? FADE_MS : MOVE_MS;
+      const deadline = start + duration;
       const property = opacity ? "opacity" : "transform";
       const properties = motions.current.get(el) ?? {};
       const old = properties[property];
@@ -254,7 +259,9 @@ export function useCompletionTransition({
               { transform: target },
             ],
         {
-          duration: old ? Math.max(0, deadline - now) : EXIT_MS,
+          duration: old
+            ? Math.max(0, deadline - Math.max(now, start))
+            : duration,
           easing: opacity ? EXIT_EASE : MOVE_EASE,
           fill: "forwards",
         },
@@ -264,7 +271,7 @@ export function useCompletionTransition({
       // cannot leave movement behind the fixed visual-removal deadline.
       animation.startTime =
         Number(document.timeline.currentTime) -
-        (old ? 0 : Math.max(0, now - start));
+        (old ? Math.min(0, now - start) : now - start);
       properties[property] = { animation, target, deadline, base };
       motions.current.set(el, properties);
       active.add(animation);

@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
+test.use({ deviceScaleFactor: 2 });
+
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 const TREE: SeedNode[] = [
   { id: "before", parentId: null, prevSiblingId: null, text: "Plan the week" },
@@ -85,7 +87,9 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
     )) {
       for (const animation of li.getAnimations()) {
         animation.pause();
-        animation.currentTime = 80;
+        animation.currentTime = li.hasAttribute("data-completion-exit")
+          ? 40
+          : -40;
       }
     }
   });
@@ -94,6 +98,23 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
   );
   expect(opacity).toBeGreaterThan(0);
   expect(opacity).toBeLessThan(1);
+  expect((await row(page, "after").boundingBox())!.y).toBeCloseTo(afterTop, 2);
+  expect((await add.boundingBox())!.y).toBeCloseTo(addTop, 2);
+  await page.screenshot({ path: info.outputPath("completion-fade.png") });
+  await page.evaluate(() => {
+    for (const li of document.querySelectorAll(
+      "li[data-node-id], [data-outline-add]",
+    ))
+      for (const animation of li.getAnimations())
+        animation.currentTime = li.hasAttribute("data-completion-exit")
+          ? 80
+          : 40;
+  });
+  expect(
+    await row(page, "child").evaluate((el) =>
+      Number(getComputedStyle(el).opacity),
+    ),
+  ).toBe(0);
   const movingTop = (await row(page, "after").boundingBox())!.y;
   expect(movingTop).toBeGreaterThan(taskTop);
   expect(movingTop).toBeLessThan(afterTop);
@@ -102,7 +123,7 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
     for (const li of document.querySelectorAll(
       "li[data-node-id], [data-outline-add]",
     ))
-      for (const animation of li.getAnimations()) animation.currentTime = 160;
+      for (const animation of li.getAnimations()) animation.currentTime = 80;
   });
   expect((await row(page, "after").boundingBox())!.y).toBeCloseTo(taskTop, 0);
   expect((await add.boundingBox())!.y).toBeCloseTo(
@@ -169,6 +190,17 @@ test("native animation frames move surviving rows and Add node before the subtre
   expect(
     frames.some((f) => f.present && f.rowProgress > 0.1 && f.rowProgress < 0.9),
   ).toBe(true);
+  // Moving through a still-visible wrapped descendant makes the text overlap.
+  // Finish the fade before closing its gap, including on native compositor time.
+  expect(
+    frames
+      .filter((f) => f.present && f.opacity > 0.001)
+      .every(
+        (f) =>
+          Math.abs(f.rowProgress) < 0.001 && Math.abs(f.addProgress) < 0.001,
+      ),
+    JSON.stringify(frames),
+  ).toBe(true);
   expect(
     frames.some((f) => f.present && f.rowProgress > 0.9 && f.addProgress > 0.9),
     JSON.stringify(frames),
@@ -190,6 +222,9 @@ test("checkbox completion uses the same exit and undo during the fade restores i
   await page.clock.runFor(100);
   await expect(text(page, "after")).toBeFocused();
   await page.keyboard.press(`${MOD}+z`);
+  // History replay now yields before draining writes; the paused clock must
+  // advance its scheduler as well as the completion presentation timeout.
+  await page.clock.runFor(32);
   await expect(text(page, "task")).toHaveAttribute("data-completed", "false");
   await expect(row(page, "task")).not.toHaveAttribute("data-completion-exit");
   expect(
