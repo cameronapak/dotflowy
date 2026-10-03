@@ -530,8 +530,8 @@ function sign(): void {
   if (process.platform !== "darwin") {
     throw new Error("Apple's `shortcuts sign` is available only on macOS");
   }
-  const unsigned = `${OUTPUT}.unsigned`;
-  const signed = `${OUTPUT}.signed`;
+  const unsigned = `${OUTPUT}.unsigned.shortcut`;
+  const signed = `${OUTPUT}.signed.shortcut`;
   writeFileSync(unsigned, readFileSync(OUTPUT));
   rmSync(signed, { force: true });
   const result = Bun.spawnSync([

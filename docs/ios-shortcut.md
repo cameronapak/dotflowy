@@ -131,8 +131,8 @@ bun scripts/shortcut.ts --validate
 
 ```sh
 shortcuts sign --mode anyone \
-  --input public/shortcuts/add-to-dotflowy-today.shortcut.unsigned \
-  --output public/shortcuts/add-to-dotflowy-today.shortcut.signed
+  --input public/shortcuts/add-to-dotflowy-today.shortcut.unsigned.shortcut \
+  --output public/shortcuts/add-to-dotflowy-today.shortcut.signed.shortcut
 ```
 
 It then moves the signed output to `/shortcuts/add-to-dotflowy-today.shortcut`. Do not run `--build` afterward, because that deliberately restores the unsigned source artifact.
