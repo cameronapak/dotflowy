@@ -74,6 +74,8 @@ export type ChangeOp = Schema.Schema.Type<typeof ChangeOpSchema>;
 export const ChangeFrameSchema = Schema.Struct({
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
+  /** Transport correlation only: absent means an old client or external writer. */
+  clientId: Schema.optional(Schema.String),
 });
 export type ChangeFrame = Schema.Schema.Type<typeof ChangeFrameSchema>;
 
@@ -111,6 +113,7 @@ const ChangeMessage = Schema.Struct({
   type: Schema.Literal("change"),
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
+  clientId: Schema.optional(Schema.String),
 });
 
 /** The union of every DO→client frame. `realtime.ts` decodes inbound frames

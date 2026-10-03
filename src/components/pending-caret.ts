@@ -9,13 +9,20 @@
 // row consumes it, and a stale offset can never leak onto a later focus.
 
 import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
-import { setCaretOffset } from "./inline-code";
+import { setSelectionOffsets } from "./inline-code";
 
-let pending: { key: string; offset: number } | null = null;
+let pending: { key: string; start: number; end: number } | null = null;
 
 /** Queue a source-space caret offset for the row `key` about to take focus. */
 export function setPendingCaretOffset(key: string, offset: number): void {
-  pending = { key, offset };
+  pending = { key, start: offset, end: offset };
+}
+
+export function setPendingCaretSelection(
+  key: string,
+  range: { start: number; end: number },
+): void {
+  pending = { key, ...range };
 }
 
 export function clearPendingCaretOffset(): void {
@@ -33,9 +40,9 @@ export function applyPendingCaret(
   atStart: boolean,
 ): void {
   if (pending && pending.key === key) {
-    const { offset } = pending;
+    const { start, end } = pending;
     pending = null;
-    setCaretOffset(el, offset);
+    setSelectionOffsets(el, start, end);
     return;
   }
   if (atStart) placeCaretAtStart(el);

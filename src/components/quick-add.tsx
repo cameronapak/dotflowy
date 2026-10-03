@@ -71,8 +71,14 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { capture, drop } from "../data/history";
+import {
+  capture,
+  drop,
+  finishHistoryScope,
+  trackPendingCapture,
+} from "../data/history";
 import { hasLink } from "../data/links";
+import { getLiveNodes } from "../data/live-nodes";
 import {
   appendChild,
   moveNode,
@@ -86,6 +92,7 @@ import { isNodesLimitError } from "../data/nodes-client-effect";
 import { appRuntime } from "../data/runtime";
 import { runStructural } from "../data/structural";
 import {
+  buildTreeIndex,
   childrenOf,
   createId,
   createNode,
@@ -103,8 +110,14 @@ import {
   slotsAt,
 } from "../plugins/registry";
 import {
+  captureTextHistory,
+  runHistoryRestoreE,
+  takeTextHistory,
+} from "./history-restore";
+import {
   decorate,
   getCaretOffset,
+  setSelectionOffsets,
   readSource,
   revealLinkAtCaret,
   watchCaretReveal,
@@ -171,6 +184,7 @@ export interface MiniEditorHandle {
   focus(): void;
   clear(): void;
   readText(): string;
+  restore(text: string, caret?: { start: number; end: number } | null): void;
 }
 
 /** The contentEditable capture surface for ONE node. A curated, text-authoring
@@ -206,9 +220,10 @@ const MiniNodeEditor = forwardRef<
     /** Cmd+Enter: commit & keep going -- clear the editor, overlay stays open. */
     onCommitNext: () => void;
     onEscape: () => void;
+    onHistory: (kind: "undo" | "redo") => void;
   }
 >(function MiniNodeEditor(
-  { node, getCtx, onText, onCommit, onCommitNext, onEscape },
+  { node, getCtx, onText, onCommit, onCommitNext, onEscape, onHistory },
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -226,6 +241,18 @@ const MiniNodeEditor = forwardRef<
         syncedRef.current = "";
       },
       readText: () => (ref.current ? readSource(ref.current) : ""),
+      restore: (text, caret) => {
+        const el = ref.current;
+        if (!el) return;
+        decorate(el, text, caret?.start ?? text.length, true);
+        syncedRef.current = text;
+        el.focus();
+        setSelectionOffsets(
+          el,
+          caret?.start ?? text.length,
+          caret?.end ?? text.length,
+        );
+      },
     }),
     [],
   );
@@ -301,6 +328,8 @@ const MiniNodeEditor = forwardRef<
         role="textbox"
         aria-label="Quick add"
         aria-multiline="true"
+        data-history-key={node.id}
+        data-history-node-id={node.id}
         data-placeholder="Capture a thought…"
         onInput={(e) => {
           const el = e.currentTarget;
@@ -365,6 +394,12 @@ const MiniNodeEditor = forwardRef<
           }
         }}
         onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+            e.preventDefault();
+            e.stopPropagation();
+            onHistory(e.shiftKey ? "redo" : "undo");
+            return;
+          }
           if (menus.handleKeyDown(e)) return;
           slash.handleKeyDown(e);
         }}
@@ -561,6 +596,10 @@ interface Capture {
  *  mutable overlay state, so concurrent drafts and a slow resolve can't corrupt
  *  each other. */
 interface DraftState {
+  scope: string;
+  finished: boolean;
+  lastId: string | null;
+  birthHistory: ReturnType<typeof takeTextHistory> | null;
   /** The settled node id, or null until born resolves. */
   id: string | null;
   /** The latest typed text (read by an in-flight born at CREATE time, so it
@@ -585,6 +624,10 @@ interface DraftState {
 
 function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
   return {
+    scope: createId(),
+    finished: false,
+    lastId: null,
+    birthHistory: null,
     id: null,
     text: "",
     promise: null,
@@ -687,16 +730,19 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // undo point when nothing actually moved (re-picking the same parent), via the
   // move-dialog drop-on-no-op pattern -- SAFE here because the capture we just
   // pushed is guaranteed the stack top (relocate is atomic, nothing between).
-  const relocate = useCallback((id: string, parentId: string | null) => {
-    const index = getTreeIndex();
-    const kids = childrenOf(index, parentId);
-    const after = kids.length ? kids[kids.length - 1]!.id : null;
-    const moved = runStructural(() => {
-      capture(index, id);
-      return moveNode(index, id, parentId, after);
-    });
-    if (!moved) drop();
-  }, []);
+  const relocate = useCallback(
+    (id: string, parentId: string | null, scope?: string) => {
+      const index = getTreeIndex();
+      const kids = childrenOf(index, parentId);
+      const after = kids.length ? kids[kids.length - 1]!.id : null;
+      const moved = runStructural(() => {
+        capture(index, id, null, { label: "move", scope });
+        return moveNode(index, id, parentId, after);
+      });
+      if (!moved) drop();
+    },
+    [],
+  );
 
   // Kick off a draft's born. Serialized through `createChainRef` so the CREATE
   // steps run in submission order (chronological log). Resolves the draft's
@@ -749,15 +795,27 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       const intents = d.intents;
       d.intents = [];
       runStructural(() => {
-        capture(index, target);
+        capture(index, null, d.birthHistory?.tag ?? null, {
+          label: "capture",
+          scope: d.scope,
+          location: d.birthHistory?.location ?? {
+            rootId: getViewRootId(),
+            rowKey: null,
+            caret: null,
+            selection: null,
+          },
+        });
         appendChild(target, after, d.text, newId);
         for (const intent of intents) intent(newId);
       });
       d.id = newId;
+      d.lastId = newId;
+      if (d.finished) finishHistoryScope(d.scope);
       if (mountedRef.current && draftRef.current === d) setDraftId(newId);
       return newId;
     })();
     d.promise = p;
+    trackPendingCapture(p);
     createChainRef.current = p.then(
       () => {},
       () => {},
@@ -779,10 +837,13 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       const d = draftRef.current!;
       d.text = text;
       if (d.id) {
+        if (getTreeIndex().byId.get(d.id)?.text === text) return;
+        captureTextHistory(d.id, d.scope);
         setText(d.id, text);
         return;
       }
       if (text.trim() === "") return;
+      d.birthHistory ??= takeTextHistory(PLACEHOLDER_NODE.id);
       void startBorn(d);
     },
     [startBorn],
@@ -796,6 +857,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     (apply: (id: string) => void) => {
       const d = draftRef.current!;
       if (d.id) {
+        capture(getTreeIndex(), d.id, null, { label: "kind", scope: d.scope });
         apply(d.id);
         return;
       }
@@ -816,12 +878,37 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     if (!n || n.text.trim() === "") {
       const id = d.id;
       runStructural(() => {
-        capture(index, null);
+        capture(index, null, null, { label: "capture", scope: d.scope });
         removeNode(index, id);
       });
     }
     d.id = null;
   }, []);
+
+  const finishDraft = useCallback((d: DraftState) => {
+    d.finished = true;
+    finishHistoryScope(d.scope, buildTreeIndex(getLiveNodes()));
+  }, []);
+
+  const replayDraft = useCallback(
+    (kind: "undo" | "redo") =>
+      Effect.gen(function* () {
+        const d = draftRef.current!;
+        const birth = d.promise;
+        if (birth) yield* Effect.promise(() => birth);
+        if (draftRef.current !== d || !mountedRef.current) return;
+        const plan = yield* runHistoryRestoreE(kind, d.id, () => {}, d.scope);
+        if (!plan) return;
+        if (draftRef.current !== d || !mountedRef.current) return;
+        const restored = d.lastId ? getTreeIndex().byId.get(d.lastId) : null;
+        d.id = restored?.id ?? null;
+        d.text = restored?.text ?? "";
+        if (!d.id) d.promise = null;
+        setDraftId(d.id);
+        editorRef.current?.restore(d.text, plan.location?.caret);
+      }),
+    [],
+  );
 
   // Start a FRESH draft for the next capture: destination back to the DEFAULT
   // (bug 2 -- read defaultRef directly, not destRef, which setDest hasn't flushed
@@ -848,6 +935,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     resetDraft();
     if (text.trim() === "") {
       discardDraftIfEmpty(d);
+      finishDraft(d);
       return;
     }
     // `startBorn` only creates a node when the draft's text is non-empty, so a
@@ -857,9 +945,14 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       if (!id || !mountedRef.current) return;
       setCaptures((c) => [...c, { id, label }]);
     };
-    if (d.id) file(d.id);
-    else void startBorn(d).then(file);
-  }, [discardDraftIfEmpty, resetDraft, startBorn]);
+    if (d.id) {
+      file(d.id);
+      finishDraft(d);
+    } else {
+      d.finished = true;
+      void startBorn(d).then(file);
+    }
+  }, [discardDraftIfEmpty, finishDraft, resetDraft, startBorn]);
 
   const close = useCallback(() => {
     // A non-empty draft is already committed to its destination; only an empty
@@ -869,9 +962,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     const d = draftRef.current!;
     if (!d.id && d.text.trim() !== "") void startBorn(d);
     discardDraftIfEmpty(d);
+    finishDraft(d);
     setCaptures([]);
     onClose();
-  }, [discardDraftIfEmpty, startBorn, onClose]);
+  }, [discardDraftIfEmpty, finishDraft, startBorn, onClose]);
 
   // Enter = commit & CLOSE (ADR 0049 amendment). Files the SINGLE current draft,
   // then dismisses the overlay. When the destination isn't the view you're on
@@ -926,7 +1020,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       const d = draftRef.current!;
       d.resolveParent = async () => target.parentId;
       d.desiredParent = { value: target.parentId };
-      if (d.id) relocate(d.id, target.parentId);
+      if (d.id) relocate(d.id, target.parentId, d.scope);
       requestAnimationFrame(() => editorRef.current?.focus());
     },
     [relocate],
@@ -1088,6 +1182,9 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                   onCommit={commitAndClose}
                   onCommitNext={commitAndNext}
                   onEscape={close}
+                  onHistory={(kind) => {
+                    appRuntime.runFork(replayDraft(kind));
+                  }}
                 />
               </div>
             </div>

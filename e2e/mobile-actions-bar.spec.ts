@@ -200,13 +200,13 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(indented).toBeVisible();
 
     // Undo puts it back under alpha; redo re-applies the indent.
-    await btn(page, "Undo").click();
+    await btn(page, "Undo indent").click();
     await expect(indented).toHaveCount(0);
     await expect(
       page.locator('li[data-node-id="alpha-2"][data-parent-id="alpha"]'),
     ).toBeVisible();
 
-    await btn(page, "Redo").click();
+    await btn(page, "Redo indent").click();
     await expect(indented).toBeVisible();
   });
 

@@ -217,7 +217,7 @@ function MoveDialogInner({
     const ids = nodeIds;
     onOpenChange(false);
     const made = runStructural(() => {
-      capture(index, ids[0]!);
+      capture(index, ids[0]!, null, { label: "mirror" });
       return mirrorManyNodes(targetId, ids);
     });
     // Nothing created => every source would have cycled (or vanished); the
@@ -241,7 +241,7 @@ function MoveDialogInner({
     // for Home), in ONE atomic batch (moveManyNodes keeps their relative order
     // and rebuilds the index per move so the sibling chain stays intact).
     const moved = runStructural(() => {
-      capture(index, ids[0]!);
+      capture(index, ids[0]!, null, { label: "move" });
       return moveManyNodes(targetId, ids);
     });
     // A no-op move (already at the exact destination) still captured an undo

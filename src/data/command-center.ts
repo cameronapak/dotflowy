@@ -65,6 +65,7 @@ export interface CommandCenterAction {
   keywords?: string[];
   /** Display-only shortcut, one string per key cap (e.g. `["⌘", "⇧", "↑"]`). */
   hotkey?: string[];
+  disabled?: boolean;
   run: () => void;
 }
 

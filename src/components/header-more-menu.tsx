@@ -9,6 +9,8 @@ import {
   LogOutIcon,
   MessageSquareWarningIcon,
   MoreHorizontalIcon,
+  Undo2Icon,
+  Redo2Icon,
   SettingsIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -19,7 +21,6 @@ import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
-import { capture } from "../data/history";
 import { flattenInline } from "../data/inline-text";
 import { outlineToMarkdown } from "../data/markdown";
 import { toggleCollapsed } from "../data/mutations";
@@ -30,6 +31,7 @@ import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
 import { openChangelog } from "./changelog-opener";
+import { restoreHistory, useHistoryState } from "./history-restore";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";
@@ -148,19 +150,16 @@ function collapsibleTargets(collapsed: boolean) {
 /**
  * Collapse or expand every collapsible node under the current view in ONE
  * atomic batch. Wrapped in `runStructural` so N `collapsed` field edits ship as
- * a single DO frame (one round-trip, one broadcast) instead of N PATCHes, and a
- * single `capture` before the batch makes it one undo step -- mirroring how the
- * per-row `onToggleCollapsed` command captures once. `runStructural` is generic
- * over any `nodesCollection` write; these are field edits, not chain relinks, so
- * the sibling chain is untouched.
+ * a single DO frame (one round-trip, one broadcast) instead of N PATCHes.
+ * Browsing does not enter authoring history (ADR 0064). These are field edits,
+ * not chain relinks, so the sibling chain is untouched.
  */
 export function setViewCollapsed(collapsed: boolean) {
-  const { ids, rootId } = collapsibleTargets(collapsed);
+  const { ids } = collapsibleTargets(collapsed);
   if (ids.length === 0) {
     toast(collapsed ? "Already collapsed" : "Already expanded");
     return;
   }
-  capture(getTreeIndex(), rootId);
   runStructural(() => {
     for (const id of ids) toggleCollapsed(id, collapsed);
   });
@@ -186,6 +185,7 @@ export function HeaderMoreMenu() {
   // old loud header CTA. Presence IS the signal; opening the dialog marks
   // everything read, so both the dot and the item emphasis clear themselves.
   const unseen = useUnseenReleaseCount();
+  const history = useHistoryState();
 
   return (
     <DropdownMenu>
@@ -212,6 +212,21 @@ export function HeaderMoreMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem
+          disabled={!history.canUndo}
+          onClick={() => restoreHistory("undo")}
+        >
+          <Undo2Icon />
+          {history.undoLabel}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!history.canRedo}
+          onClick={() => restoreHistory("redo")}
+        >
+          <Redo2Icon />
+          {history.redoLabel}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
           <ClipboardCopyIcon />
           Copy as Markdown

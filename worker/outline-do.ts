@@ -270,6 +270,14 @@ export class UserOutlineDO extends DurableObject<Env> {
         sql.exec(`ALTER TABLE nodes ADD COLUMN kind TEXT`);
       },
     },
+    {
+      // Per-page write correlation. NULL marks retained rows written by old
+      // clients and non-browser callers, which remain genuine external changes.
+      version: 4,
+      up: (sql) => {
+        sql.exec(`ALTER TABLE changelog ADD COLUMN clientId TEXT`);
+      },
+    },
   ];
 
   /** Run every migration newer than the recorded schema version, each atomically
@@ -469,9 +477,16 @@ export class UserOutlineDO extends DurableObject<Env> {
   applyBatchGated(
     ops: readonly ChangeOp[],
     limit: number | null,
-  ): number | null {
+    clientId?: string,
+    expectedSeq?: number,
+  ): number | null | "stale" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
+      // History replay is conditional on exactly the state it was planned
+      // against. This check is inside the write transaction and precedes both
+      // cap probes and node writes, so rejection has no observable side effect.
+      if (expectedSeq !== undefined && this.currentSeq() !== expectedSeq)
+        return "stale" as const;
       if (limit !== null) {
         const { inserts, deletes } = countNetGrowth(ops, (id) =>
           this.nodeExists(id),
@@ -485,9 +500,10 @@ export class UserOutlineDO extends DurableObject<Env> {
             ? this.deleteNodeRow(op.key)
             : this.putNode(op.value),
         ),
+        clientId,
       );
     });
-    if (frames === null) return null;
+    if (frames === null || frames === "stale") return frames;
     return this.broadcastChange(frames);
   }
 
@@ -495,7 +511,11 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  path — a raw POST could otherwise bypass the cap the batch path enforces).
    *  Every node is an upsert, so growth = ids not already present; returns false
    *  when applying would exceed the cap (nothing written), true otherwise. */
-  upsertNodesGated(nodes: readonly Node[], limit: number | null): boolean {
+  upsertNodesGated(
+    nodes: readonly Node[],
+    limit: number | null,
+    clientId?: string,
+  ): boolean {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       if (limit !== null) {
@@ -504,7 +524,10 @@ export class UserOutlineDO extends DurableObject<Env> {
         if (batchExceedsNodeLimit(this.nodeCount(), newIds.size, 0, limit))
           return null;
       }
-      return this.recordChange(nodes.map((n) => this.putNode(n)));
+      return this.recordChange(
+        nodes.map((n) => this.putNode(n)),
+        clientId,
+      );
     });
     if (frames === null) return false;
     this.broadcastChange(frames);
@@ -548,9 +571,9 @@ export class UserOutlineDO extends DurableObject<Env> {
     );
   }
 
-  patchNodes(updates: readonly PatchUpdate[]): void {
+  patchNodes(updates: readonly PatchUpdate[], clientId?: string): number {
     this.assertWritable();
-    this.broadcastChange(
+    return this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
         const ops: ChangeOp[] = [];
         for (const u of updates) {
@@ -576,16 +599,19 @@ export class UserOutlineDO extends DurableObject<Env> {
           )[0] as NodeRow | undefined;
           if (row) ops.push({ op: "update", value: rowToNode(row) });
         }
-        return this.recordChange(ops);
+        return this.recordChange(ops, clientId);
       }),
     );
   }
 
-  deleteNodes(ids: readonly string[]): void {
+  deleteNodes(ids: readonly string[], clientId?: string): void {
     this.assertWritable();
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
-        this.recordChange(ids.map((id) => this.deleteNodeRow(id))),
+        this.recordChange(
+          ids.map((id) => this.deleteNodeRow(id)),
+          clientId,
+        ),
       ),
     );
   }
@@ -622,14 +648,20 @@ export class UserOutlineDO extends DurableObject<Env> {
    * (committed seqs + ops) for `broadcastChange` to emit, in order, once the
    * transaction has committed.
    */
-  private recordChange(ops: ChangeOp[]): ChangeFrame[] {
-    const frames = planChangeFrames(ops, this.currentSeq());
+  private recordChange(ops: ChangeOp[], clientId?: string): ChangeFrame[] {
+    const frames = planChangeFrames(
+      ops,
+      this.currentSeq(),
+      undefined,
+      clientId,
+    );
     if (!frames.length) return frames;
     for (const f of frames) {
       this.sql.exec(
-        "INSERT INTO changelog (seq, ops) VALUES (?, ?)",
+        "INSERT INTO changelog (seq, ops, clientId) VALUES (?, ?, ?)",
         f.seq,
         JSON.stringify(f.ops),
+        f.clientId ?? null,
       );
     }
     const finalSeq = frames[frames.length - 1]?.seq;
@@ -657,11 +689,16 @@ export class UserOutlineDO extends DurableObject<Env> {
     if (!frames.length) return this.currentSeq();
     const sockets = this.ctx.getWebSockets();
     for (const frame of frames) {
-      const data = JSON.stringify({
-        type: "change",
-        seq: frame.seq,
-        ops: frame.ops,
-      } satisfies ServerMessage);
+      const message: ServerMessage =
+        frame.clientId === undefined
+          ? { type: "change", seq: frame.seq, ops: frame.ops }
+          : {
+              type: "change",
+              seq: frame.seq,
+              ops: frame.ops,
+              clientId: frame.clientId,
+            };
+      const data = JSON.stringify(message);
       for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
         try {
@@ -764,19 +801,21 @@ export class UserOutlineDO extends DurableObject<Env> {
       const canResume = canResumeChangelog(since, seq, oldest, resumeFloor);
       if (canResume) {
         const rows = this.sql
-          .exec<{ seq: number; ops: string }>(
-            "SELECT seq, ops FROM changelog WHERE seq > ? ORDER BY seq",
+          .exec<{ seq: number; ops: string; clientId: string | null }>(
+            "SELECT seq, ops, clientId FROM changelog WHERE seq > ? ORDER BY seq",
             since,
           )
           .toArray();
         return {
           type: "resume",
           seq,
-          changes: rows.map((r) => ({
-            seq: r.seq,
+          changes: rows.map((r) => {
             // SAFETY: the ops column is only ever written by recordChange as JSON.stringify(ChangeOp[]).
-            ops: JSON.parse(r.ops) as ChangeOp[],
-          })),
+            const ops = JSON.parse(r.ops) as ChangeOp[];
+            return r.clientId === null
+              ? { seq: r.seq, ops }
+              : { seq: r.seq, ops, clientId: r.clientId };
+          }),
           serverVersion: APP_VERSION,
         };
       }

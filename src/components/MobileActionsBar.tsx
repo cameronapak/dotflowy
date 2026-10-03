@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
+import { useHistoryState } from "./history-restore";
 
 /**
  * The zero-arg command surface the bar drives. Each method resolves the focused
@@ -74,10 +75,12 @@ function BarButton({
   label,
   onRun,
   children,
+  disabled = false,
 }: {
   label: string;
   onRun: () => void;
   children: ReactNode;
+  disabled?: boolean;
 }) {
   const start = useRef<{ x: number; y: number } | null>(null);
   const moved = useRef(false);
@@ -85,10 +88,12 @@ function BarButton({
     <button
       type="button"
       aria-label={label}
+      disabled={disabled}
       className={cn(
         "flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-foreground/80",
         "transition-transform duration-100 ease-out active:scale-[0.96]",
         "active:bg-accent active:text-accent-foreground",
+        "disabled:opacity-35 disabled:active:scale-100",
       )}
       onPointerDown={(e) => {
         // Keep focus on the contentEditable — see the component doc.
@@ -106,7 +111,7 @@ function BarButton({
         }
       }}
       onPointerUp={() => {
-        if (start.current && !moved.current) onRun();
+        if (!disabled && start.current && !moved.current) onRun();
         start.current = null;
       }}
       onPointerCancel={() => {
@@ -144,6 +149,7 @@ export function MobileActionsBar({
   const coarse = useCoarsePointer();
   const editing = useOutlineEditing(findFocusedId);
   const { height, offsetTop } = useKeyboardViewport();
+  const history = useHistoryState();
 
   // Presence gate: a mouse user never mounts the bar. Visibility gate: no bar
   // without a focused bullet, so every action has a valid target by construction.
@@ -193,10 +199,18 @@ export function MobileActionsBar({
           <Indent className="size-5" />
         </BarButton>
         <Divider />
-        <BarButton label="Undo" onRun={actions.undo}>
+        <BarButton
+          label={history.undoLabel}
+          onRun={actions.undo}
+          disabled={!history.canUndo}
+        >
           <Undo2 className="size-5" />
         </BarButton>
-        <BarButton label="Redo" onRun={actions.redo}>
+        <BarButton
+          label={history.redoLabel}
+          onRun={actions.redo}
+          disabled={!history.canRedo}
+        >
           <Redo2 className="size-5" />
         </BarButton>
         <Divider />

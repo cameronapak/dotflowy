@@ -63,6 +63,25 @@ describe("NodesPostBody (POST /api/nodes)", () => {
     });
   });
 
+  it("accepts optional write correlation and history precondition metadata", () => {
+    const post = Schema.decodeUnknownSync(NodesPostBody)({
+      ops: [{ op: "delete", key: "a" }],
+      clientId: "page-1",
+      expectedSeq: 12,
+    });
+    accepts(NodesPatchBody, {
+      updates: [{ id: "a", changes: { text: "x" } }],
+      clientId: "page-1",
+    });
+    accepts(NodesDeleteBody, { ids: ["a"], clientId: "page-1" });
+    expect(post.clientId).toBe("page-1");
+    expect(post.expectedSeq).toBe(12);
+  });
+
+  it("rejects a non-integer expectedSeq", () => {
+    rejects(NodesPostBody, { ops: [], expectedSeq: 1.5 });
+  });
+
   it("accepts the legacy nodes-upsert / seed shape", () => {
     accepts(NodesPostBody, { nodes: [node("a"), node("b")] });
   });

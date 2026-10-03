@@ -35,7 +35,7 @@ import {
 } from "../data/view-state";
 import { scrollRowIntoView } from "../data/virtual-nav";
 import { buildVisibleRows } from "../data/visible-order";
-import { setRestoreProgress } from "./history-restore";
+import { setRestoreProgress } from "./history-restore-opener";
 import { guardProtected } from "./protection";
 
 /** How the editor hands the caret back once the tree has landed. `offset` is a
@@ -163,7 +163,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   };
 
   // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole paste.
-  capture(index, activeKey);
+  capture(index, activeKey, null, { label: "paste" });
 
   if (opCount < RESTORE_SLICE_OPS) {
     // The keystroke-adjacent path. It must stay synchronous: no confirm step, no

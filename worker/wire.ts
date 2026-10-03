@@ -33,6 +33,10 @@ export type { ChangeOp, Node } from "../src/data/wire-schema";
 export const NodesPostBody = Schema.Struct({
   ops: Schema.optional(Schema.Array(ChangeOpSchema)),
   nodes: Schema.optional(Schema.Array(NodeSchema)),
+  clientId: Schema.optional(Schema.String),
+  expectedSeq: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
 });
 
 /** PATCH /api/nodes — single-field edits. `changes` stays an open record; the DO
@@ -44,11 +48,13 @@ export const NodesPatchBody = Schema.Struct({
       changes: Schema.Record(Schema.String, Schema.Unknown),
     }),
   ),
+  clientId: Schema.optional(Schema.String),
 });
 
 /** DELETE /api/nodes. */
 export const NodesDeleteBody = Schema.Struct({
   ids: Schema.Array(Schema.String),
+  clientId: Schema.optional(Schema.String),
 });
 
 /** POST /api/kv?op=claim — atomic get-or-create on one key. */

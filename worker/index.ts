@@ -290,6 +290,9 @@ class RouteNotFound extends Data.TaggedError("RouteNotFound")<{
  */
 class NodeLimitExceeded extends Data.TaggedError("NodeLimitExceeded")<{}> {}
 
+/** A history replay was planned against an older authoritative sequence. */
+class StaleOutlineWrite extends Data.TaggedError("StaleOutlineWrite")<{}> {}
+
 // --- ensureSeededE ----------------------------------------------------------
 
 /**
@@ -411,13 +414,16 @@ function handleNodes(
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
   billingUserId: string,
-): Effect.Effect<Response, BadRequest | NodeLimitExceeded> {
+): Effect.Effect<Response, BadRequest | NodeLimitExceeded | StaleOutlineWrite> {
   return Effect.gen(function* () {
     switch (request.method) {
       case "GET":
         return json(yield* Effect.promise(() => stub.getNodes()));
       case "POST": {
-        const { ops, nodes } = yield* decodeBody(request, NodesPostBody);
+        const { ops, nodes, clientId, expectedSeq } = yield* decodeBody(
+          request,
+          NodesPostBody,
+        );
         // Atomic-batch path: a single structural mutation arrives as a list of
         // ops and persists as ONE DO frame (one seq, one broadcast). Reply with
         // that seq so the client can hold its optimistic overlay until the frame
@@ -442,9 +448,20 @@ function handleNodes(
                 yield* Effect.promise(() => getPlan(billingUserId, env)),
               )
             : null;
-          const seq = yield* Effect.promise(() =>
-            stub.applyBatchGated(ops, limit),
+          const seq = yield* Effect.promise(
+            () =>
+              // Cloudflare's RPC mapped type distributes a Promise over this
+              // scalar union; normalize it back to the method's actual promise.
+              // SAFETY: this is the declared return union of applyBatchGated.
+              stub.applyBatchGated(
+                ops,
+                limit,
+                clientId,
+                expectedSeq,
+              ) as Promise<number | null | "stale">,
           );
+          if (seq === "stale")
+            return yield* Effect.fail(new StaleOutlineWrite());
           if (seq === null) return yield* Effect.fail(new NodeLimitExceeded());
           return json({ seq });
         }
@@ -456,21 +473,26 @@ function handleNodes(
             yield* Effect.promise(() => getPlan(billingUserId, env)),
           );
           const applied = yield* Effect.promise(() =>
-            stub.upsertNodesGated(nodes, limit),
+            stub.upsertNodesGated(nodes, limit, clientId),
           );
           if (!applied) return yield* Effect.fail(new NodeLimitExceeded());
         }
         return json({ ok: true });
       }
       case "PATCH": {
-        const { updates } = yield* decodeBody(request, NodesPatchBody);
-        if (updates.length)
-          yield* Effect.promise(() => stub.patchNodes(updates));
-        return json({ ok: true });
+        const { updates, clientId } = yield* decodeBody(
+          request,
+          NodesPatchBody,
+        );
+        const seq = yield* Effect.promise(() =>
+          stub.patchNodes(updates, clientId),
+        );
+        return json({ ok: true, seq });
       }
       case "DELETE": {
-        const { ids } = yield* decodeBody(request, NodesDeleteBody);
-        if (ids.length) yield* Effect.promise(() => stub.deleteNodes(ids));
+        const { ids, clientId } = yield* decodeBody(request, NodesDeleteBody);
+        if (ids.length)
+          yield* Effect.promise(() => stub.deleteNodes(ids, clientId));
         return json({ ok: true });
       }
       default:
@@ -721,6 +743,7 @@ function handleApiRequest(
   | RouteNotFound
   | BadRequest
   | NodeLimitExceeded
+  | StaleOutlineWrite
   | RetirementOperationInProgress
   | RetirementOperationRejected
 > {
@@ -1280,6 +1303,9 @@ const handler = {
           Effect.succeed(
             json({ error: "node_limit", limit: FREE_NODE_LIMIT }, 403),
           ),
+        ),
+        Effect.catchTag("StaleOutlineWrite", () =>
+          Effect.succeed(json({ error: "stale_outline" }, 409)),
         ),
       ),
     )

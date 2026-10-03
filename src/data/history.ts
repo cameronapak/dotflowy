@@ -1,8 +1,39 @@
+import { Effect, Latch } from "effect";
+
 import type { Node } from "./schema";
 import type { TreeIndex } from "./tree";
 
-import { nodesCollection } from "./collection";
+import { isSyncReady, nodesCollection, nodesLoadError } from "./collection";
+import { appRuntime } from "./runtime";
 import { instanceIdForKey } from "./visible-order";
+
+export interface HistoryLocation {
+  rootId: string | null;
+  rowKey: string | null;
+  caret: { start: number; end: number } | null;
+  selection: { anchorId: string; focusId: string } | null;
+}
+
+export type HistoryLabel =
+  | "edit"
+  | "typing"
+  | "create"
+  | "delete"
+  | "move"
+  | "indent"
+  | "outdent"
+  | "join"
+  | "completion"
+  | "kind"
+  | "mirror"
+  | "paste"
+  | "import"
+  | "capture";
+
+let readLocation: ((focusId: string | null) => HistoryLocation) | null = null;
+export function setHistoryLocationReader(reader: typeof readLocation): void {
+  readLocation = reader;
+}
 
 /**
  * Undo/redo history for the outline.
@@ -35,6 +66,9 @@ import { instanceIdForKey } from "./visible-order";
 
 interface Entry {
   nodes: Node[];
+  label: HistoryLabel;
+  scope: string | null;
+  location: HistoryLocation | null;
   /** Node to focus after this entry is restored (the pre-action focus). */
   focusId: string | null;
   /** Coalesces consecutive same-tag captures (e.g. a typing run) into one. */
@@ -44,6 +78,101 @@ interface Entry {
 const undoStack: Entry[] = [];
 const redoStack: Entry[] = [];
 const MAX_ENTRIES = 100;
+const listeners = new Set<() => void>();
+let pendingCaptures = 0;
+const capturesDrained = Latch.makeUnsafe(true);
+
+/** Quick-add can finish its destination claim after its editor has closed. */
+export function trackPendingCapture(promise: Promise<unknown>): void {
+  pendingCaptures++;
+  capturesDrained.closeUnsafe();
+  appRuntime.runFork(
+    Effect.promise(() => promise).pipe(
+      Effect.exit,
+      Effect.ensuring(
+        Effect.sync(() => {
+          pendingCaptures--;
+          if (!pendingCaptures) capturesDrained.openUnsafe();
+        }),
+      ),
+    ),
+  );
+}
+
+export const waitForPendingCapturesE = capturesDrained.await;
+
+let epoch = 0;
+let busy = false;
+let state = {
+  canUndo: false,
+  canRedo: false,
+  undoLabel: "Undo",
+  redoLabel: "Redo",
+  busy: false,
+};
+
+export function getHistoryState() {
+  return state;
+}
+export function subscribeHistory(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function notify() {
+  const u = undoStack.at(-1);
+  const r = redoStack.at(-1);
+  state = {
+    canUndo: !busy && !!u,
+    canRedo: !busy && !!r,
+    undoLabel: u ? `Undo ${u.label}` : "Undo",
+    redoLabel: r ? `Redo ${r.label}` : "Redo",
+    busy,
+  };
+  for (const listener of listeners) listener();
+}
+export function setHistoryBusy(next: boolean) {
+  busy = next;
+  notify();
+}
+
+/** Clear both directions on external edits or session replacement. */
+export function clearHistory(): boolean {
+  const hadHistory = undoStack.length + redoStack.length > 0;
+  epoch++;
+  undoStack.length = redoStack.length = 0;
+  redoBackup = null;
+  lastCaptureRefused = false;
+  notify();
+  return hadHistory;
+}
+
+/** Fold contiguous draft steps; never reorder an independent outline action. */
+export function finishHistoryScope(scope: string, index?: TreeIndex): void {
+  for (let first = 0; first < undoStack.length; first++) {
+    const entry = undoStack[first]!;
+    if (entry.scope !== scope) continue;
+    let end = first + 1;
+    while (undoStack[end]?.scope === scope) end++;
+    undoStack.splice(first + 1, end - first - 1);
+    entry.scope = null;
+    entry.tag = null;
+    if (
+      index &&
+      first === undoStack.length - 1 &&
+      entry.nodes.length === index.byId.size &&
+      entry.nodes.every((node) => {
+        const live = index.byId.get(node.id);
+        return live && sameAuthoring(node, live);
+      })
+    )
+      undoStack.splice(first, 1);
+  }
+  for (let i = redoStack.length - 1; i >= 0; i--)
+    if (redoStack[i]!.scope === scope) redoStack.splice(i, 1);
+  notify();
+}
 
 // The redo stack as it stood just before the most recent `capture` cleared it,
 // so a captured-then-dropped no-op can put it back (see `drop`).
@@ -68,26 +197,28 @@ function snapshot(index: TreeIndex): Node[] {
  * bullet collapses to a single undo step; pass null for discrete structural
  * actions so each is independently undoable.
  *
- * REFUSES an empty index. `planRestore` diffs the snapshot against the LIVE
- * tree, so a zero-node snapshot classifies every live node as a delete -- one
- * Cmd+Z away from wiping the outline if a caller captured an incomplete read.
- *
- * The cost on a GENUINELY empty outline is one lost undo step: a user who
- * empties their outline and then types the first bullet cannot Cmd+Z back to
- * empty. Near-zero, not zero, and the right side of the trade -- the failure it
- * replaces silently deletes everything the user has.
+ * An empty snapshot is valid only after successful sync and when the live
+ * collection is also empty. Refuse incomplete reads rather than classifying
+ * every live node as a delete; genuinely empty outlines can undo creation.
  */
 export function capture(
   index: TreeIndex,
   focusId: string | null = null,
   tag: string | null = null,
+  options: {
+    label?: HistoryLabel;
+    scope?: string | null;
+    location?: HistoryLocation;
+  } = {},
 ): void {
-  if (index.byId.size === 0) {
+  if (
+    index.byId.size === 0 &&
+    (!isSyncReady() || nodesLoadError() || nodesCollection.size !== 0)
+  ) {
     lastCaptureRefused = true;
     if (import.meta.env.DEV) {
       console.error(
-        "[history] capture() refused an empty index -- wrong node source? " +
-          "Live nodes come from getLiveNodes(), never nodesCollection.toArray.",
+        "[history] capture() refused an unsynced or inconsistent empty index.",
         { focusId, tag },
       );
     }
@@ -96,13 +227,22 @@ export function capture(
   lastCaptureRefused = false;
 
   const top = undoStack[undoStack.length - 1];
-  if (tag !== null && top && top.tag === tag) return;
-  undoStack.push({ nodes: snapshot(index), focusId, tag });
+  if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;
+  const location = options.location ?? readLocation?.(focusId) ?? null;
+  undoStack.push({
+    nodes: snapshot(index),
+    focusId: location?.rowKey ?? focusId,
+    tag,
+    scope: options.scope ?? null,
+    location,
+    label: options.label ?? (tag?.startsWith("text:") ? "typing" : "edit"),
+  });
   if (undoStack.length > MAX_ENTRIES) undoStack.shift();
   // A fresh action forks the timeline: the forward history no longer applies.
   // Stash it first so a no-op that gets dropped can restore it.
   redoBackup = redoStack.slice();
   redoStack.length = 0;
+  notify();
 }
 
 /**
@@ -127,6 +267,7 @@ export function drop(): void {
     redoStack.push(...redoBackup);
     redoBackup = null;
   }
+  notify();
 }
 
 /**
@@ -145,6 +286,9 @@ export const RESTORE_SLICE_OPS = 500;
  *
  */
 export interface RestorePlan {
+  label: HistoryLabel;
+  location: HistoryLocation | null;
+  changedIds: readonly string[];
   /** Total collection writes the restore will make. */
   opCount: number;
   /** Apply closures in order; each makes at most RESTORE_SLICE_OPS writes. */
@@ -157,25 +301,19 @@ export interface RestorePlan {
   revert: () => void;
 }
 
-/** Node is a flat record; a string-keyed view of its field values lets the
- *  shallow compare below reach every field without widening to unknown. */
-interface NodeFieldView {
-  [key: string]: Node[keyof Node];
-}
+/** Only authoring fields participate in undo. Browsing and metadata remain live. */
+const AUTHORING_FIELDS = [
+  "parentId",
+  "prevSiblingId",
+  "text",
+  "isTask",
+  "completed",
+  "mirrorOf",
+  "kind",
+] as const satisfies readonly (keyof Node)[];
 
-/**
- * Two snapshots of a node are equal when every field matches; nodes are flat
- * records, so a shallow field compare is a full compare.
- */
-function sameNode(a: Node, b: Node): boolean {
-  // SAFETY: Node is a flat record, so the view reaches every field.
-  const ra = a as NodeFieldView;
-  // SAFETY: Node is a flat record, so the view reaches every field.
-  const rb = b as NodeFieldView;
-  const keys = Object.keys(ra);
-  if (keys.length !== Object.keys(rb).length) return false;
-  for (const key of keys) if (ra[key] !== rb[key]) return false;
-  return true;
+export function sameAuthoring(a: Node, b: Node): boolean {
+  return AUTHORING_FIELDS.every((key) => a[key] === b[key]);
 }
 
 /**
@@ -201,7 +339,7 @@ function planRestore(
   const upserts: Node[] = [];
   for (const [id, node] of target) {
     const live = current.get(id);
-    if (!live || !sameNode(live, node)) upserts.push(node);
+    if (!live || !sameAuthoring(live, node)) upserts.push(node);
   }
 
   let applied = 0;
@@ -220,9 +358,13 @@ function planRestore(
       // surrounding transaction) may already have written the row.
       for (const node of chunk) {
         if (nodesCollection.has(node.id)) {
-          nodesCollection.update(node.id, (draft) =>
-            Object.assign(draft, node),
-          );
+          nodesCollection.update(node.id, (draft) => {
+            for (const key of AUTHORING_FIELDS) {
+              // Each value comes from the same field on a schema-validated row.
+              Object.assign(draft, { [key]: node[key] });
+            }
+            draft.updatedAt = Date.now();
+          });
         } else {
           nodesCollection.insert({ ...node });
         }
@@ -232,6 +374,9 @@ function planRestore(
   }
 
   return {
+    label: entry.label,
+    location: entry.location,
+    changedIds: [...deletes, ...upserts.map((n) => n.id)],
     opCount: deletes.length + upserts.length,
     slices,
     applied: () => applied,
@@ -256,18 +401,31 @@ function planRestore(
 export function undo(
   index: TreeIndex,
   focusId: string | null = null,
+  scope?: string,
 ): RestorePlan | null {
+  if (scope !== undefined && undoStack.at(-1)?.scope !== scope) return null;
   const entry = undoStack.pop();
   if (!entry) return null;
 
-  redoStack.push({ nodes: snapshot(index), focusId, tag: null });
+  const atEpoch = epoch;
+  redoStack.push({
+    nodes: snapshot(index),
+    focusId,
+    tag: null,
+    label: entry.label,
+    scope: entry.scope,
+    location: readLocation?.(focusId) ?? null,
+  });
   const overflow =
     redoStack.length > MAX_ENTRIES ? redoStack.shift() : undefined;
+  notify();
 
   return planRestore(index, entry, () => {
+    if (epoch !== atEpoch) return;
     redoStack.pop();
     if (overflow) redoStack.unshift(overflow);
     undoStack.push(entry);
+    notify();
   });
 }
 
@@ -279,17 +437,30 @@ export function undo(
 export function redo(
   index: TreeIndex,
   focusId: string | null = null,
+  scope?: string,
 ): RestorePlan | null {
+  if (scope !== undefined && redoStack.at(-1)?.scope !== scope) return null;
   const entry = redoStack.pop();
   if (!entry) return null;
 
-  undoStack.push({ nodes: snapshot(index), focusId, tag: null });
+  const atEpoch = epoch;
+  undoStack.push({
+    nodes: snapshot(index),
+    focusId,
+    tag: null,
+    label: entry.label,
+    scope: entry.scope,
+    location: readLocation?.(focusId) ?? null,
+  });
   const overflow =
     undoStack.length > MAX_ENTRIES ? undoStack.shift() : undefined;
+  notify();
 
   return planRestore(index, entry, () => {
+    if (epoch !== atEpoch) return;
     undoStack.pop();
     if (overflow) undoStack.unshift(overflow);
     redoStack.push(entry);
+    notify();
   });
 }

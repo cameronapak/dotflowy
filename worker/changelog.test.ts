@@ -91,6 +91,11 @@ describe("planChangeFrames", () => {
     expect(frames[1]!.ops).toEqual([ops[2]!]);
   });
 
+  test("preserves one client correlation id across every chunk", () => {
+    const frames = planChangeFrames(deletes(3), 5, 2, "page-1");
+    expect(frames.map((frame) => frame.clientId)).toEqual(["page-1", "page-1"]);
+  });
+
   test("pure: the input batch is not mutated", () => {
     const ops = deletes(750);
     const snapshot = [...ops];
