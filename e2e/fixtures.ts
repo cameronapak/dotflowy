@@ -17,6 +17,15 @@ export async function openSeededOutline(
   opts: { path?: string; anchorId?: string } = {},
 ): Promise<void> {
   await page.goto(opts.path ?? "/");
+  // The document load finishes before the lazy editor graph and initial sync.
+  // Wait for this page's outline within the test budget, not an interaction's
+  // 5s assertion budget. A cold dev server can still be compiling at that point.
+  const ready = opts.anchorId
+    ? page.locator(
+        `li[data-node-id="${opts.anchorId}"] > .outline-row .node-text`,
+      )
+    : page.locator(".outline-list");
+  await ready.waitFor({ state: "visible" });
 }
 
 // A node as the test author cares about it -- structural fields only. Everything

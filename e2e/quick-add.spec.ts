@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { openSeededOutline, seedOutline, STANDARD_TREE } from "./fixtures";
 
 // Cmd on macOS, Control elsewhere (mirrors daily-notes.spec.ts).
 function modifier() {
@@ -19,7 +19,7 @@ const rowWithText = (page: Page, t: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(
     page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
   ).toBeVisible();
