@@ -92,7 +92,12 @@ import {
   useSyncViewState,
 } from "../data/view-state";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
-import { findVisibleNeighbor, instanceIdForKey } from "../data/visible-order";
+import {
+  buildVisibleRows,
+  findVisibleNeighbor,
+  instanceIdForKey,
+  type VisibleRow,
+} from "../data/visible-order";
 import { hasMatchMedia, hasResizeObserver, hasWindow } from "../env";
 import { useIsMobile } from "../hooks/use-mobile";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
@@ -179,6 +184,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Sheet, SheetContent } from "./ui/sheet";
+import { useCompletionTransition } from "./use-completion-transition";
 import { useDragReorder } from "./use-drag-reorder";
 import {
   toggleHighlightSelection,
@@ -641,6 +647,69 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
   const rows = useVisibleRows(rootId, isHidden, filter);
+  const measurements = useRef<readonly { start: number; size: number }[]>([]);
+  const onHiddenFocus = useCallback(
+    (previous: VisibleRow[], next: VisibleRow[], exiting: Set<string>) => {
+      const active = document.activeElement;
+      const focused = previous.findIndex((row) => {
+        const el = refs.get(row.key);
+        return exiting.has(row.key) && !!el?.closest("li")?.contains(active);
+      });
+      if (focused < 0) return;
+      const nextKeys = new Set(next.map((row) => row.key));
+      const target =
+        previous.slice(focused + 1).find((row) => nextKeys.has(row.key)) ??
+        previous
+          .slice(0, focused)
+          .reverse()
+          .find((row) => nextKeys.has(row.key));
+      const key = target?.key ?? rootId;
+      if (key) {
+        const el = refs.get(key);
+        if (el) {
+          el.focus({ preventScroll: true });
+          placeCaretAtStart(el);
+        } else {
+          pendingFocus.current = key;
+          pendingFocusAtStart.current = true;
+          scrollRowIntoView(key);
+        }
+      } else {
+        // A genuinely empty Home still has its add control. A filtered empty
+        // view instead returns focus to the filter, which can reveal more nodes.
+        const add =
+          listRef.current?.parentElement?.querySelector<HTMLButtonElement>(
+            "[data-outline-add]",
+          );
+        const input = document.querySelector<HTMLInputElement>(
+          'input[aria-label="Filter query"]',
+        );
+        (add ?? input)?.focus({ preventScroll: true });
+      }
+    },
+    [refs, rootId, pendingFocus, pendingFocusAtStart],
+  );
+  const eligibleRows = useCallback(() => {
+    const index = getTreeIndex();
+    const neverHidden = () => false;
+    return buildVisibleRows(
+      index,
+      rootId,
+      neverHidden,
+      buildViewFilter(index, viewCtx, neverHidden),
+      isMirrorsEnabled(),
+    );
+  }, [rootId, viewCtx]);
+  const presentation = useCompletionTransition({
+    rows,
+    eligibleRows,
+    query: routeSearch.q,
+    elements: refs,
+    listRef,
+    measurements,
+    onHiddenFocus,
+  });
+  const renderedRows = presentation.rows;
   // Mirror `rows` into the selection-fill module (2e-2) so each row's own
   // `useSelectionFill` read covers its visible descendants, not just a selected
   // root -- the flat list has no DOM nesting for a root's tint to paint behind
@@ -712,7 +781,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
-    count: rows.length,
+    count: renderedRows.length,
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
     scrollMargin,
@@ -721,7 +790,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
     // the 99% outline keeps today's identity and the virtualizer's measurement
     // cache is unaffected.
-    getItemKey: (i) => rows[i]?.key ?? i,
+    getItemKey: (i) => renderedRows[i]?.key ?? i,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
     // Without it the window virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
@@ -729,6 +798,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     initialRect: hasWindow()
       ? { width: window.innerWidth, height: window.innerHeight }
       : undefined,
+  });
+  useLayoutEffect(() => {
+    measurements.current = virtualizer.measurementsCache;
+    presentation.animateMounted();
   });
   // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
   // render ADDRESS (row.key), not the bare id: a source descendant appears under
@@ -738,9 +811,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // identity (structure), not on keystrokes.
   const rowIndex = useMemo(() => {
     const m = new Map<string, number>();
-    rows.forEach((r, i) => m.set(r.key, i));
+    renderedRows.forEach((r, i) => {
+      if (!presentation.exiting.has(r.key)) m.set(r.key, i);
+    });
     return m;
-  }, [rows]);
+  }, [renderedRows, presentation.exiting]);
   const rowIndexRef = useRef(rowIndex);
   useEffect(() => {
     rowIndexRef.current = rowIndex;
@@ -870,7 +945,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
               </>
             )}
 
-            {noMatches && filter?.emptyMessage ? (
+            {noMatches && renderedRows.length === 0 && filter?.emptyMessage ? (
               <div className="outline-empty">{filter.emptyMessage}</div>
             ) : (
               <>
@@ -885,7 +960,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   }}
                 >
                   {virtualizer.getVirtualItems().map((vi) => {
-                    const row = rows[vi.index];
+                    const row = renderedRows[vi.index];
                     if (!row) return null;
                     return (
                       <OutlineRow
@@ -898,6 +973,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                         broken={row.broken}
                         depth={row.depth}
                         ancestorCompleted={row.ancestorCompleted}
+                        exiting={presentation.exiting.has(row.key)}
+                        exitInert={
+                          presentation.exiting.get(row.key)?.fading ?? false
+                        }
                         commands={commands}
                         pluginCtx={pluginCtx}
                         registerRef={registerRef}
@@ -924,6 +1003,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     type="button"
                     size="icon"
                     variant="ghost"
+                    aria-label="Add node"
+                    data-outline-add=""
                     onClick={() =>
                       runStructural(() => {
                         const siblings = childrenOf(getTreeIndex(), rootId);
