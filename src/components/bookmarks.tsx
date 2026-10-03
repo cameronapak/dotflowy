@@ -1,7 +1,6 @@
 import { useParams } from "@tanstack/react-router";
 import { BookmarkIcon } from "lucide-react";
 
-import { capture } from "../data/history";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { Button } from "./ui/button";
@@ -42,8 +41,6 @@ export function BookmarkStar() {
         className="data-[state=on]:bg-muted data-[state=on]:text-foreground"
         aria-pressed={isBookmarked}
         onClick={() => {
-          // One undo step; no focus change (bookmarking isn't an edit).
-          capture(index, null);
           toggleBookmark(current.id, !isBookmarked);
         }}
       >

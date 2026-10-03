@@ -2,7 +2,16 @@ import { beforeEach, describe, expect, test } from "bun:test";
 
 import type { Node } from "./tree";
 
-import { capture, drop, redo, RESTORE_SLICE_OPS, undo } from "./history";
+import {
+  capture,
+  clearHistory,
+  drop,
+  finishHistoryScope,
+  getHistoryState,
+  redo,
+  RESTORE_SLICE_OPS,
+  undo,
+} from "./history";
 import { buildTreeIndex, createNode } from "./tree";
 import { rowKeyFor } from "./visible-order";
 
@@ -35,6 +44,57 @@ function createNodes(count: number, prefix = "n"): Node[] {
 }
 
 beforeEach(resetHistory);
+
+test("a draft scope cannot undo older edits and collapses to one capture on close", () => {
+  const base = buildTreeIndex([createNode({ id: "a", text: "before" })]);
+  const edited = buildTreeIndex([createNode({ id: "a", text: "after" })]);
+  const born = buildTreeIndex([
+    ...edited.byId.values(),
+    createNode({ id: "draft", text: "first" }),
+  ]);
+  const typed = buildTreeIndex([
+    ...edited.byId.values(),
+    createNode({ id: "draft", text: "finished" }),
+  ]);
+  capture(base, "a");
+  expect(undo(edited, null, "draft-1")).toBeNull();
+  capture(edited, null, null, { scope: "draft-1", label: "capture" });
+  capture(born, "draft", null, { scope: "draft-1", label: "typing" });
+  finishHistoryScope("draft-1");
+  expect(getHistoryState().undoLabel).toBe("Undo capture");
+  expect(undo(typed)?.opCount).toBe(1);
+  expect(undo(edited)?.opCount).toBe(1);
+});
+
+test("finishing a draft does not fold across an independent move", () => {
+  const a = createNode({ id: "a" });
+  const draft = createNode({ id: "draft", text: "first" });
+  const moved = createNode({ ...a, parentId: "draft" });
+  capture(buildTreeIndex([a]), null, null, {
+    scope: "draft-1",
+    label: "capture",
+  });
+  capture(buildTreeIndex([a, draft]), "a", null, { label: "move" });
+  capture(buildTreeIndex([moved, draft]), "draft", null, {
+    scope: "draft-1",
+    label: "typing",
+  });
+  finishHistoryScope("draft-1");
+  const live = buildTreeIndex([moved, { ...draft, text: "finished" }]);
+  expect(undo(live)?.changedIds).toEqual(["draft"]);
+  expect(undo(buildTreeIndex([moved, draft]))?.changedIds).toEqual(["a"]);
+});
+
+test("history exposes action labels and clearing removes both directions", () => {
+  const idx = buildTreeIndex([createNode({ id: "a" })]);
+  capture(idx, "a", null, { label: "move" });
+  expect(getHistoryState().undoLabel).toBe("Undo move");
+  undo(idx);
+  expect(getHistoryState().redoLabel).toBe("Redo move");
+  clearHistory();
+  expect(getHistoryState().canUndo).toBe(false);
+  expect(getHistoryState().canRedo).toBe(false);
+});
 
 describe("capture / undo / redo / drop stack transfer", () => {
   const idx = buildTreeIndex([createNode({ id: "a" })]);
@@ -201,14 +261,14 @@ describe("capture tag-coalescing", () => {
     expect(undoDepth()).toBe(3);
   });
 
-  test("a coalesced capture does not clear the redo stack", () => {
+  test("typing after undo clears redo even when the previous tag matches", () => {
     // Set the undo stack up so its TOP shares the tag we re-capture, while a
     // redo entry is live underneath.
     capture(idx, "a", "text:a");
     capture(idx, "a", "text:b");
     undo(idx); // pops 'text:b'; redo stack now holds one entry; top is 'text:a'
-    capture(idx, "a", "text:a"); // coalesced -> early return, redo untouched
-    expect(redo(idx)).not.toBeNull();
+    capture(idx, "a", "text:a");
+    expect(redo(idx)).toBeNull();
   });
 });
 
@@ -404,16 +464,19 @@ describe("sameNode field comparison boundaries", () => {
     { field: "prevSiblingId", override: { prevSiblingId: "s" } },
     { field: "isTask", override: { isTask: true } },
     { field: "completed", override: { completed: true } },
-    { field: "collapsed", override: { collapsed: true } },
-    { field: "bookmarkedAt", override: { bookmarkedAt: 123 } },
     { field: "mirrorOf", override: { mirrorOf: "m" } },
     { field: "kind", override: { kind: "paragraph" } },
-    { field: "origin", override: { origin: "agent" } },
-    { field: "createdAt", override: { createdAt: 2 } },
-    { field: "updatedAt", override: { updatedAt: 2 } },
   ];
 
   const base = { id: "n", createdAt: 1, updatedAt: 1 } as const;
+
+  test("browsing and timestamps alone do not create restore writes", () => {
+    capture(buildTreeIndex([createNode(base)]), "n");
+    const live = buildTreeIndex([
+      createNode({ ...base, collapsed: true, bookmarkedAt: 123, updatedAt: 9 }),
+    ]);
+    expect(undo(live)!.opCount).toBe(0);
+  });
 
   for (const { field, override } of fieldChanges) {
     test(`a change to ${field} registers as one op`, () => {

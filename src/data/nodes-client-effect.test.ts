@@ -17,6 +17,7 @@ import {
 
 const realFetch = globalThis.fetch;
 let calls = 0;
+let requestBodies: Array<{ clientId?: string; expectedSeq?: number }> = [];
 
 /** The preconnect member the Workers fetch type carries; no-op in tests. */
 const stubPreconnect = {
@@ -34,13 +35,18 @@ const stubPreconnect = {
 /** Install a fetch that returns `make()` and counts invocations. */
 function stubFetch(make: () => Response): void {
   calls = 0;
+  requestBodies = [];
   // Test stub, not a real fetch: it ignores all arguments, and the code under
   // test only needs a response promise. preconnect is a no-op to satisfy the
   // full fetch type.
-  globalThis.fetch = Object.assign(() => {
-    calls += 1;
-    return Promise.resolve(make());
-  }, stubPreconnect);
+  globalThis.fetch = Object.assign(
+    (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      requestBodies.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(make());
+    },
+    stubPreconnect,
+  );
 }
 
 afterEach(() => {
@@ -51,6 +57,38 @@ describe("sendBatchE", () => {
   test("returns { seq } on a valid envelope", async () => {
     stubFetch(() => new Response(JSON.stringify({ seq: 7 }), { status: 200 }));
     expect(await runPromise(sendBatchE([]))).toEqual({ seq: 7 });
+    expect(calls).toBe(1);
+  });
+
+  test("correlates every write from this page and sends expectedSeq only for history batches", async () => {
+    stubFetch(() => new Response(JSON.stringify({ seq: 8 }), { status: 200 }));
+    await runPromise(createNodesE([]));
+    await runPromise(deleteNodesE([]));
+    await runPromise(sendBatchE([], 7));
+
+    const clientIds = requestBodies.map((body) => body.clientId);
+    expect(clientIds[0]).toEqual(expect.any(String));
+    expect(new Set(clientIds).size).toBe(1);
+    expect(requestBodies[0]).not.toHaveProperty("expectedSeq");
+    expect(requestBodies[1]).not.toHaveProperty("expectedSeq");
+    expect(requestBodies[2]).toHaveProperty("expectedSeq", 7);
+  });
+
+  test("surfaces stale expectedSeq as NodesResponseError 409 without retry", async () => {
+    stubFetch(() => new Response("stale", { status: 409 }));
+    const err = await Effect.runPromise(Effect.flip(sendBatchE([], 6)));
+    expect(err).toBeInstanceOf(NodesResponseError);
+    if (!(err instanceof NodesResponseError)) throw err;
+    expect(err.status).toBe(409);
+    expect(calls).toBe(1);
+  });
+
+  test("does not retry a guarded restore after losing its acknowledgement", async () => {
+    stubFetch(() => {
+      throw new TypeError("connection lost after commit");
+    });
+    const err = await Effect.runPromise(Effect.flip(sendBatchE([], 6)));
+    expect(err._tag).toBe("NodesTransportError");
     expect(calls).toBe(1);
   });
 

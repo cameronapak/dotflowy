@@ -40,7 +40,7 @@ import { echoedTextFor } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
-import { capture, drop } from "../data/history";
+import { capture, drop, getHistoryState } from "../data/history";
 import { planJoinPrevious } from "../data/join-previous";
 import { hasLink } from "../data/links";
 import { getLiveNodes } from "../data/live-nodes";
@@ -125,7 +125,7 @@ import {
 } from "./delete-confirm-opener";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
-import { runHistoryRestore } from "./history-restore";
+import { captureTextHistory, runHistoryRestore } from "./history-restore";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
 import {
   decorate,
@@ -453,7 +453,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             ? (index.byId.get(newParentInstanceId)?.mirrorOf ??
               newParentInstanceId)
             : newParentInstanceId;
-        capture(index, instanceId);
+        capture(index, instanceId, null, { label: "move" });
         const moved = moveNode(index, instanceId, newParentId, afterSiblingId);
         if (moved) {
           // Land focus + flash in the instance that was dragged (re-derived from
@@ -557,7 +557,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   useEffect(() => {
     const focusNode = (id: string) => {
       pendingFocus.current = id;
-      requestAnimationFrame(() => refs.get(id)?.focus());
+      requestAnimationFrame(() => {
+        const el = refs.get(id);
+        if (el) {
+          el.focus({ preventScroll: true });
+          el.scrollIntoView({ block: "nearest" });
+          pendingFocus.current = null;
+        } else if (!scrollRowIntoView(id)) pendingFocus.current = null;
+      });
     };
     setNodeActionBridge({
       commands,
@@ -861,9 +868,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   registerRef={registerRef}
                   getCtx={pluginCtx}
                   setPendingFocus={commands.setPendingFocus}
-                  onTextChange={(text) => setText(zoomedNode.id, text)}
+                  onTextChange={(text) =>
+                    commands.onTextChange(zoomedNode.id, text)
+                  }
                   onAddChild={() =>
                     runStructural(() => {
+                      capture(getTreeIndex(), zoomedNode.id, null, {
+                        label: "create",
+                      });
                       const newId = insertChildAtStart(
                         getTreeIndex(),
                         zoomedNode.id,
@@ -937,6 +949,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     variant="ghost"
                     onClick={() =>
                       runStructural(() => {
+                        capture(getTreeIndex(), null, null, {
+                          label: "create",
+                        });
                         const siblings = childrenOf(getTreeIndex(), rootId);
                         const afterId = siblings.length
                           ? siblings[siblings.length - 1]!.id
@@ -1502,9 +1517,8 @@ function useNodeCommands({
         refs.get(id)?.closest(".outline-row") ?? null;
       return {
         onTextChange: (id, text) => {
-          // Coalesce a run of keystrokes on one bullet into a single undo step,
-          // capturing the pre-typing state on the first keystroke of the run.
-          capture(getTreeIndex(), id, `text:${id}`);
+          if (getTreeIndex().byId.get(id)?.text === text) return;
+          captureTextHistory(id);
           setText(id, text);
         },
 
@@ -1535,7 +1549,7 @@ function useNodeCommands({
               const content = idx.byId.get(contentId);
               if (!content) return null;
               const isMirrorRow = contentId !== instanceId;
-              capture(idx, activeKey);
+              capture(idx, activeKey, null, { label: "create" });
               const offset = Math.max(
                 0,
                 Math.min(caretOffset, content.text.length),
@@ -1642,7 +1656,7 @@ function useNodeCommands({
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
               // Moving the node reparents it, which drops focus. Re-focus after render.
-              capture(getTreeIndex(), activeKey);
+              capture(getTreeIndex(), activeKey, null, { label: "indent" });
               if (indent(getTreeIndex(), instanceId, isMirrorsEnabled()))
                 return { instanceId, activeKey };
               drop(); // no move happened; discard the redundant undo point
@@ -1666,7 +1680,7 @@ function useNodeCommands({
               const node = getTreeIndex().byId.get(instanceId);
               if (node && node.parentId === getViewRootId()) return null;
               // Same remount-drops-focus issue as indent; re-focus on a real move.
-              capture(getTreeIndex(), activeKey);
+              capture(getTreeIndex(), activeKey, null, { label: "outdent" });
               if (outdent(getTreeIndex(), instanceId))
                 return { instanceId, activeKey };
               drop();
@@ -1688,7 +1702,7 @@ function useNodeCommands({
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
               // Reorder/outdent remounts the contentEditable; re-focus on a real move.
-              capture(getTreeIndex(), activeKey);
+              capture(getTreeIndex(), activeKey, null, { label: "move" });
               const moved = moveUp(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
@@ -1715,7 +1729,7 @@ function useNodeCommands({
             (): { instanceId: string; activeKey: string } | null => {
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
-              capture(getTreeIndex(), activeKey);
+              capture(getTreeIndex(), activeKey, null, { label: "move" });
               const moved = moveDown(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
@@ -1787,7 +1801,7 @@ function useNodeCommands({
             return;
           }
           runStructural(() => {
-            capture(idx, activeKey);
+            capture(idx, activeKey, null, { label: "delete" });
             // Focus the row directly ABOVE the deleted one (Workflowy backspace
             // behavior), computed before the mutation so the neighbor still
             // exists. Fall back to removeNode's structural pick (next sibling /
@@ -1875,7 +1889,7 @@ function useNodeCommands({
             )
               return;
             runStructural(() => {
-              capture(idx, activeKey); // ONE undo point
+              capture(idx, activeKey, null, { label: "delete" });
               removeNode(idx, plan.targetId);
               // The row keeps its identity but SHIFTS in the flat windowed list,
               // so focus is re-claimed rather than assumed (ADR 0019) -- with the
@@ -1903,7 +1917,7 @@ function useNodeCommands({
 
           const targetText = idx.byId.get(plan.targetContentId)?.text ?? "";
           runStructural(() => {
-            capture(idx, activeKey); // ONE undo point: text + node together
+            capture(idx, activeKey, null, { label: "join" });
             joinIntoPrevious(idx, {
               targetContentId: plan.targetContentId,
               sourceInstanceId: instanceId,
@@ -1923,7 +1937,8 @@ function useNodeCommands({
           // (Mod+Enter / Mod+D on a bullet OR the zoomed title, the todos
           // checkbox). Un-marking (completed=false) is always allowed. See ADR 0015.
           if (completed && guardProtected(id, "complete", rowOf(id))) return;
-          capture(getTreeIndex(), id);
+          if (getTreeIndex().byId.get(id)?.completed === completed) return;
+          capture(getTreeIndex(), id, null, { label: "completion" });
           toggleCompleted(id, completed);
         },
 
@@ -1932,7 +1947,9 @@ function useNodeCommands({
           // This funnel catches every task-creation path (`/todo`, the `[]`
           // autoformat). Un-tasking (isTask=false) is always allowed. See ADR 0015.
           if (isTask && guardProtected(id, "task", rowOf(id))) return;
-          capture(getTreeIndex(), id);
+          const node = getTreeIndex().byId.get(id);
+          if (node?.isTask === isTask && node.kind === null) return;
+          capture(getTreeIndex(), id, null, { label: "kind" });
           setIsTask(id, isTask);
         },
 
@@ -1941,7 +1958,9 @@ function useNodeCommands({
         // gate -- a paragraph is still a plain text node, so none of the four
         // protected-node rules (delete/blank/to-do/complete) are in play.
         onSetKind: (id, kind) => {
-          capture(getTreeIndex(), id);
+          const node = getTreeIndex().byId.get(id);
+          if (node?.kind === kind && !node.isTask) return;
+          capture(getTreeIndex(), id, null, { label: "kind" });
           setKind(id, kind);
         },
 
@@ -1953,7 +1972,6 @@ function useNodeCommands({
         onRequestMirror: (id) => openMoveDialog(id, "mirror"),
 
         onToggleCollapsed: (id, collapsed) => {
-          capture(getTreeIndex(), id);
           toggleCollapsed(id, collapsed);
           // The windowed list toggles instantly (ADR 0019 dropped the reveal
           // animation), so flash the toggled row to signal something happened --
@@ -2102,7 +2120,7 @@ function ZoomedTitle({
     if (syncedRef.current === node.text) return;
     // Same focused-skip as OutlineRow: don't paint a lagging/stale store over
     // local typing (classic echoedText + Lunora overlay gap).
-    if (document.activeElement === el) {
+    if (document.activeElement === el && !getHistoryState().busy) {
       if (echoedTextFor(node.id) === node.text) return;
       const dom = readSource(el);
       if (dom !== node.text && dom.startsWith(node.text)) return;
@@ -2190,6 +2208,8 @@ function ZoomedTitle({
           aria-label="Title"
           aria-multiline="true"
           data-completed={node.completed}
+          data-history-key={node.id}
+          data-history-node-id={node.id}
           onInput={(e) => {
             const el = e.currentTarget;
             const text = readSource(el);

@@ -3,6 +3,8 @@ import { Data, Duration, Effect, Schedule } from "effect";
 import type { ChangeOp } from "./realtime";
 import type { Node } from "./schema";
 
+import { getWriteClientId } from "./write-origin";
+
 /**
  * The Effect transport core for the /api/nodes Worker (which routes to the
  * user's Durable Object) — a typed-error, retrying, time-bounded REST client,
@@ -26,7 +28,9 @@ import type { Node } from "./schema";
  *    NOT retried (a 500 is deterministic; retrying amplifies a broken write).
  *    Retrying the committed-but-lost-ack case is safe: every DO op is an
  *    absolute upsert/delete keyed by id (worker/outline-do.ts putNode/
- *    deleteNodeRow), so re-applying a batch is idempotent on state.
+ *    deleteNodeRow), so re-applying a batch is idempotent on state. Guarded
+ *    history restores do NOT retry: a committed first attempt advances seq,
+ *    so retrying its precondition would misreport success as a stale failure.
  *  - Timeout: `Effect.timeoutOrElse` turns a stall into a typed `NodesTimeoutError`.
  */
 
@@ -43,10 +47,10 @@ type JsonValue =
 
 /** Request bodies /api/nodes accepts, one shape per verb. */
 type NodesRequestBody =
-  | { nodes: Node[] }
-  | { updates: { id: string; changes: Partial<Node> }[] }
-  | { ids: string[] }
-  | { ops: ChangeOp[] };
+  | { nodes: Node[]; clientId: string }
+  | { updates: { id: string; changes: Partial<Node> }[]; clientId: string }
+  | { ids: string[]; clientId: string }
+  | { ops: ChangeOp[]; clientId: string; expectedSeq?: number };
 
 /** Type-guard predicate for the `{ seq }` batch envelope. */
 const hasSeqField = (data: JsonValue | undefined): data is { seq: JsonValue } =>
@@ -154,7 +158,10 @@ function request(
     // attempt, a wedged endpoint would get 8s PER attempt (~40s across 5) and
     // hold the writeSem permit that long; outside, the entire request — every
     // retry included — can't exceed 8s, and the timeout itself isn't retried.
-    Effect.retry(retryPolicy),
+    (effect) =>
+      "expectedSeq" in body && body.expectedSeq !== undefined
+        ? effect
+        : effect.pipe(Effect.retry(retryPolicy)),
     Effect.timeoutOrElse({
       duration: Duration.seconds(8),
       orElse: () => Effect.fail(new NodesTimeoutError()),
@@ -203,17 +210,19 @@ function isNodeLimitBody(
 
 /** Seed/create nodes (first-run + non-structural creates). */
 export const createNodesE = (nodes: Node[]): Effect.Effect<void, NodesError> =>
-  request("POST", { nodes }).pipe(Effect.asVoid);
+  request("POST", { nodes, clientId: getWriteClientId() }).pipe(Effect.asVoid);
 
 /** Field-edit PATCH (text, completed, …) — one or more `{ id, changes }`. */
 export const updateNodesE = (
   updates: { id: string; changes: Partial<Node> }[],
-): Effect.Effect<void, NodesError> =>
-  request("PATCH", { updates }).pipe(Effect.asVoid);
+): Effect.Effect<{ seq: number }, NodesError> =>
+  request("PATCH", { updates, clientId: getWriteClientId() }).pipe(
+    Effect.flatMap(decodeSeq),
+  );
 
 /** Delete nodes by id. */
 export const deleteNodesE = (ids: string[]): Effect.Effect<void, NodesError> =>
-  request("DELETE", { ids }).pipe(Effect.asVoid);
+  request("DELETE", { ids, clientId: getWriteClientId() }).pipe(Effect.asVoid);
 
 /**
  * Persist a structural batch and return the committed frame's seq. Validates
@@ -224,15 +233,22 @@ export const deleteNodesE = (ids: string[]): Effect.Effect<void, NodesError> =>
  */
 export const sendBatchE = (
   ops: ChangeOp[],
-): Effect.Effect<{ seq: number }, NodesError> =>
-  request("POST", { ops }).pipe(
-    Effect.flatMap((res) =>
-      Effect.tryPromise({
-        // SAFETY: widening Promise<any> to Promise<JsonValue>; the seq field is validated immediately below.
-        try: () => res.json() as Promise<JsonValue>,
-        catch: (cause) => new NodesTransportError({ cause }),
-      }),
-    ),
+  expectedSeq?: number,
+): Effect.Effect<{ seq: number }, NodesError> => {
+  const body: Extract<NodesRequestBody, { ops: ChangeOp[] }> = {
+    ops,
+    clientId: getWriteClientId(),
+  };
+  if (expectedSeq !== undefined) body.expectedSeq = expectedSeq;
+  return request("POST", body).pipe(Effect.flatMap(decodeSeq));
+};
+
+function decodeSeq(res: Response): Effect.Effect<{ seq: number }, NodesError> {
+  return Effect.tryPromise({
+    // SAFETY: widening Promise<any> to Promise<JsonValue>; the seq field is validated immediately below.
+    try: () => res.json() as Promise<JsonValue>,
+    catch: (cause) => new NodesTransportError({ cause }),
+  }).pipe(
     Effect.flatMap((data) => {
       // A DO frame seq is a monotonic non-negative integer counter, so reject
       // anything that isn't one — a typeof-string check alone would also admit
@@ -252,6 +268,7 @@ export const sendBatchE = (
           );
     }),
   );
+}
 
 // --- Unsafe escape hatch ----------------------------------------------------
 

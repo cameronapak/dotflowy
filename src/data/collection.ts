@@ -2,6 +2,7 @@ import type { Socket } from "effect/socket";
 
 import { createCollection } from "@tanstack/react-db";
 import { Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
+import { toast } from "sonner";
 
 import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
 import type { Node } from "./schema";
@@ -10,6 +11,7 @@ import { hasWindow } from "../env";
 import { createNodes, deleteNodes, updateNodes } from "./api";
 import { noteServerVersion } from "./app-version";
 import { isMirrorsEnabled } from "./flags";
+import { clearHistory, sameAuthoring } from "./history";
 import { runPromise } from "./nodes-client-effect";
 import { createSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
@@ -22,6 +24,7 @@ import {
   notifySyncInterrupted,
 } from "./sync-supervision";
 import { buildTreeIndex, childrenOf, now } from "./tree";
+import { getWriteClientId } from "./write-origin";
 
 /**
  * Single source of truth for all outline nodes.
@@ -123,6 +126,17 @@ export function resyncNodes(): void {
  * awaited from outside the sync closure. Starts at 0 (nothing applied).
  */
 let appliedSeq = 0;
+export function getAppliedSeq(): number {
+  return appliedSeq;
+}
+
+function resetExternalHistory(): void {
+  if (clearHistory())
+    toast("History cleared", {
+      id: "history-cleared",
+      description: "Your outline changed in another tab, device, or app.",
+    });
+}
 type SeqWaiter = { seq: number; resolve: () => void };
 const seqWaiters = new Set<SeqWaiter>();
 
@@ -455,14 +469,35 @@ export const nodesCollection = createCollection({
       const getCursor = (): number | null =>
         (metadata?.collection.get("cursor") as number | undefined) ?? null;
 
-      const applyOps = (ops: readonly ChangeOp[], seq: number): void => {
+      // Compare snapshots with acknowledged server state, not optimistic rows:
+      // an unchanged resync can arrive while a local write is still pending.
+      const syncedNodes = new Map<string, Node>();
+      const applyOps = (
+        ops: readonly ChangeOp[],
+        seq: number,
+        clientId?: string,
+      ): void => {
+        if (
+          clientId !== getWriteClientId() &&
+          ops.some((op) => {
+            if (op.op === "delete") return syncedNodes.has(op.key);
+            const previous = syncedNodes.get(op.value.id);
+            return (
+              !previous || !sameAuthoring(previous, withNodeDefaults(op.value))
+            );
+          })
+        )
+          resetExternalHistory();
         begin();
         for (const op of ops) {
           if (op.op === "delete") {
             write({ type: "delete", key: op.key });
             echoedText.delete(op.key);
+            syncedNodes.delete(op.key);
           } else {
-            write({ type: op.op, value: withNodeDefaults(op.value) });
+            const value = withNodeDefaults(op.value);
+            write({ type: op.op, value });
+            syncedNodes.set(value.id, value);
             echoedText.set(op.value.id, op.value.text);
           }
         }
@@ -480,13 +515,28 @@ export const nodesCollection = createCollection({
         // frames don't carry it -- a reconnect is when the deploy gap appears.
         if (msg.type !== "change") noteServerVersion(msg.serverVersion);
         if (msg.type === "snapshot") {
+          if (
+            !ready ||
+            msg.nodes.length !== syncedNodes.size ||
+            msg.nodes.some((node) => {
+              const previous = syncedNodes.get(node.id);
+              return (
+                !previous || !sameAuthoring(previous, withNodeDefaults(node))
+              );
+            })
+          )
+            resetExternalHistory();
           // Replace the whole collection: truncate, then write the full set.
           // Idempotent on first connect (empty) and on a resync past the
           // changelog window. The cursor survives truncate (separate store).
           begin();
           truncate();
-          for (const n of msg.nodes)
-            write({ type: "insert", value: withNodeDefaults(n) });
+          syncedNodes.clear();
+          for (const node of msg.nodes) {
+            const value = withNodeDefaults(node);
+            write({ type: "insert", value });
+            syncedNodes.set(value.id, value);
+          }
           metadata?.collection.set("cursor", msg.seq);
           commit();
           // A fresh snapshot supersedes every earlier seq (and may be the
@@ -507,12 +557,13 @@ export const nodesCollection = createCollection({
         } else if (msg.type === "resume") {
           // The gap since our cursor. Empty = already current; the cursor is
           // unchanged so there's nothing to write.
-          for (const frame of msg.changes) applyOps(frame.ops, frame.seq);
+          for (const frame of msg.changes)
+            applyOps(frame.ops, frame.seq, frame.clientId);
           initialError = null;
           ensureReady();
         } else {
           // A live change broadcast from this or another device.
-          applyOps(msg.ops, msg.seq);
+          applyOps(msg.ops, msg.seq, msg.clientId);
         }
       };
 

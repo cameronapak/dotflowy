@@ -230,7 +230,7 @@ export function OpmlImportDialog() {
     }
 
     // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole import.
-    capture(index, null);
+    capture(index, null, null, { label: "import" });
 
     // The plan is insert-only, emitted depth-first pre-order with the sibling
     // chain wired by construction — replayed verbatim into the collection, in

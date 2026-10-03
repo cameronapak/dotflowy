@@ -16,7 +16,7 @@ import { toast } from "sonner";
 
 import type { PluginContext } from "../types";
 
-import { setRestoreProgress } from "../../components/history-restore";
+import { setRestoreProgress } from "../../components/history-restore-opener";
 import { resyncNodes } from "../../data/collection";
 import {
   dayKeyToScaffoldChain,
@@ -343,8 +343,9 @@ async function runDailyMigration(
   // scaffold mappings point at deleted nodes, and serial claims paid a full RTT
   // per key). No per-key `waitForNode`: phase 2 materializes any missing node
   // under its claimed id regardless, so waiting is pure loss. A single resync
-  // (when anything is missing) nudges genuinely-remote nodes in for the NEXT
-  // touch without stalling this one.
+  // for a missing lost-claim node nudges genuinely-remote nodes in for the NEXT
+  // touch without stalling this one. Winning claims need no resync: a snapshot
+  // would invalidate the migration's own undo point.
   // Parents-first (plan.scaffoldKeys order): when claiming each key we can look
   // under an already-resolved parent for a same-label child and adopt it —
   // recovers hand-reattached / MCP-repaired scaffolds that never got a
@@ -352,6 +353,7 @@ async function runDailyMigration(
   const indexAtClaim = buildTreeIndex(getLiveNodes());
   const claims: Array<{ key: string; id: string; present: boolean }> = [];
   const claimedIds = new Map<string, string>();
+  let needsResync = false;
   for (const key of plan.scaffoldKeys) {
     const existing = getMappedId(key);
     if (existing && hasNode(existing)) {
@@ -372,14 +374,16 @@ async function runDailyMigration(
       adoptable && (adoptKey === null || adoptKey === key)
         ? adoptable
         : createId();
-    const { winner } = await claimMapping(key, candidate);
+    const { winner, won } = await claimMapping(key, candidate);
     setMapping(key, winner);
     claimedIds.set(key, winner);
-    claims.push({ key, id: winner, present: hasNode(winner) });
+    const present = hasNode(winner);
+    claims.push({ key, id: winner, present });
+    if (!won && !present) needsResync = true;
   }
   const keymap = new Map(claims.map((c) => [c.key, c.id]));
   const toCreate = new Set(claims.filter((c) => !c.present).map((c) => c.key));
-  if (toCreate.size > 0) resyncNodes();
+  if (needsResync) resyncNodes();
 
   // Phase 2: build the synchronous steps (parents-first creates, then day moves).
   const createSteps: Array<() => void> = [];
