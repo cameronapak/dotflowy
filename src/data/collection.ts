@@ -9,7 +9,7 @@ import type { Node } from "./schema";
 import { hasWindow } from "../env";
 import { createNodes, deleteNodes, updateNodes } from "./api";
 import { noteServerVersion } from "./app-version";
-import { isLunoraSyncEnabled, isMirrorsEnabled } from "./flags";
+import { isMirrorsEnabled } from "./flags";
 import { runPromise } from "./nodes-client-effect";
 import { createSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
@@ -91,23 +91,10 @@ function markSyncReady(): void {
   for (const listener of syncReadyListeners) listener();
 }
 
-/** Lunora flag-swap path marks the shell ready once `wholeOutline` has seeded. */
-export function markNodesSyncReady(): void {
-  markSyncReady();
-}
-
 /**
- * Resolve once the outline is ready to read, on EITHER sync path.
- *
- * Never `await nodesCollection.toArrayWhenReady()` for this. That waits on the
- * COLLECTION's own readiness, and this collection's sync adapter calls
- * `markReady()` and returns immediately while the Lunora flag is ON (ADR 0058),
- * so the wait resolves instantly and gates nothing. `syncReady` is the
- * flag-agnostic signal: the classic socket fires it on its first frame, and the
- * Lunora bootstrap fires it once `wholeOutline` has landed and auto-migrate has
- * settled. It also fires on the initial-load ERROR path, so this never hangs on
- * an unreachable server -- the caller sees the same empty-and-ready state the
- * shell renders.
+ * Resolve once the classic outline is ready to read. The socket fires this on
+ * its first frame and on initial-load error, so callers never hang forever on
+ * an unreachable server.
  *
  * The single implementation of that rule. `seed.ts` and `routes/today.tsx` both
  * call it; do not grow a private copy in a third place.
@@ -452,15 +439,6 @@ export const nodesCollection = createCollection({
       // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
       // any defensive server-side read resolves empty instead of hanging.
       if (!hasWindow()) {
-        markReady();
-        return () => {};
-      }
-
-      // ADR 0058 flag-swap: Lunora owns outline sync. Keep this collection idle
-      // (ready+empty) so e2e / default OFF path is unchanged; tree-store feeds
-      // from the Lunora collection instead. Don't markSyncReady here — Lunora
-      // bootstrap does once `wholeOutline` lands.
-      if (isLunoraSyncEnabled()) {
         markReady();
         return () => {};
       }

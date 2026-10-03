@@ -34,15 +34,9 @@ export default defineConfig({
     // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
     // `ws: true` is required — Vite's string shorthand only sets
     // `{ target, changeOrigin }` and skips the upgrade listener, so
-    // `/api/sync` and `/_lunora/ws` never reach wrangler (outline stuck on
-    // "Loading outline"). See ADR 0058 dogfood hang.
+    // `/api/sync` never reaches wrangler (outline stuck on "Loading outline").
     proxy: {
       "/api": {
-        target: "http://localhost:8787",
-        changeOrigin: true,
-        ws: true,
-      },
-      "/_lunora": {
         target: "http://localhost:8787",
         changeOrigin: true,
         ws: true,

@@ -6,13 +6,8 @@
  * tree index + sync-ready signal, NEVER `useLiveQuery` (which hard-fails the
  * `/` prerender, and Settings shares the same bundle).
  *
- * Count comes from `getTreeIndex().byId.size` so both sync backends agree:
- * classic DO feeds the tree via `nodesCollection`, Lunora (ADR 0058) via
- * `resetTreeFromNodes`. Reading classic `nodesCollection` alone shows 0 when
- * the Lunora flag is ON (that collection stays idle + empty).
- *
- * `byId.size` is the same basis the free-tier wall measures (every live row,
- * including the daily scaffold).
+ * Count comes from `getTreeIndex().byId.size`, the same basis the free-tier wall
+ * measures (every live row, including the daily scaffold).
  */
 
 import { useSyncExternalStore } from "react";
@@ -47,8 +42,7 @@ function rebuild() {
 function ensureStarted() {
   if (started || !hasWindow()) return;
   started = true;
-  // Tree subscription starts classic collection sync when the Lunora flag is
-  // OFF; when ON, LunoraSyncHost feeds the tree and marks sync ready.
+  // Tree subscription starts Classic collection sync.
   subscribeTree(() => rebuild());
   subscribeSyncReady(() => rebuild());
   rebuild();

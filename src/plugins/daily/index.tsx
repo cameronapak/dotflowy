@@ -112,15 +112,11 @@ function scaffoldProtection(
 // --- undo capture for the daily commands ------------------------------------
 
 /**
- * Record an undo point from the LIVE store (classic OR Lunora), focused on
+ * Record an undo point from the live store, focused on
  * `focusId`.
  *
- * `nodesCollection` is ready-and-empty for the whole session while the Lunora
- * flag is ON (ADR 0058), so building the capture index from it would snapshot
- * ZERO nodes -- and a later undo replays a zero-node snapshot as
- * delete-everything. `getLiveNodes()` is the flag-aware read; every daily
- * command captures through this one helper so a fourth call site can't drift
- * back onto the starved collection.
+ * Every daily command captures through this helper so it sees optimistic
+ * changes synchronously rather than waiting for the tree-store notification.
  */
 function captureLive(focusId: string): void {
   capture(buildTreeIndex(getLiveNodes()), focusId);

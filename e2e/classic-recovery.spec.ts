@@ -96,7 +96,7 @@ for (const authority of ["classic", "experimental"] as const) {
           ? { ...value, prevSiblingId: current.id }
           : value,
       );
-      await seedOutline(page, [current, ...imported], { lunora: false });
+      await seedOutline(page, [current, ...imported]);
       await page.goto("/");
       const text = (id: string) =>
         page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);

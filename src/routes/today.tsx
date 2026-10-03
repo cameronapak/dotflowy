@@ -22,16 +22,11 @@ function TodayRedirect() {
     // Subscribe to the tree store so the classic nodes collection's sync starts
     // (the WebSocket opens on the first subscribeChanges call, gated by
     // tree-store's ensureStarted). Without this, the readiness wait below hangs
-    // -- no other component on this route touches the store. A no-op with the
-    // Lunora flag ON: ensureStarted returns early, and LunoraSyncHost (mounted
-    // above this route, inside AuthGate) owns starting that sync.
+    // -- no other component on this route touches the store.
     const unsub = subscribeTree(() => {});
 
     void (async () => {
       try {
-        // NOT nodesCollection.toArrayWhenReady(): that resolves instantly while
-        // the Lunora flag is ON, so getOrCreateDay would run against an outline
-        // that has not loaded yet (ADR 0058).
         await whenNodesSyncReady();
         // /today is a write-intent surface (ADR 0041): seed an empty entry line
         // so the caret has somewhere to land, and focus=last puts it there.

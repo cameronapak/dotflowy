@@ -4,7 +4,6 @@ import { Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
 import { hasWindow } from "../env";
-import { isLunoraSyncEnabled } from "./flags";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
 import { normalizeTag } from "./tags";
@@ -137,21 +136,10 @@ export const tagColorsCollection = createCollection(
   }),
 );
 
-type LunoraTagColorWrites = {
-  upsert: (tag: string, color: TagColor) => void;
-  remove: (tag: string) => void;
-};
-
-let lunoraWrites: LunoraTagColorWrites | null = null;
-
 /** Set (or change) a tag's color -- applies to every instance of the tag. */
 export function setTagColor(tag: string, color: TagColor) {
   const key = normalizeTag(tag);
   if (!key) return;
-  if (lunoraWrites) {
-    lunoraWrites.upsert(key, color);
-    return;
-  }
   const exists = tagColorsCollection.toArray.some((r) => r.tag === key);
   if (exists)
     tagColorsCollection.update(key, (draft) => void (draft.color = color));
@@ -162,10 +150,6 @@ export function setTagColor(tag: string, color: TagColor) {
 export function clearTagColor(tag: string) {
   const key = normalizeTag(tag);
   if (!key) return;
-  if (lunoraWrites) {
-    lunoraWrites.remove(key);
-    return;
-  }
   if (tagColorsCollection.toArray.some((r) => r.tag === key)) {
     tagColorsCollection.delete(key);
   }
@@ -197,7 +181,6 @@ const EMPTY: TagColorRow[] = [];
 let rows: TagColorRow[] = EMPTY;
 const listeners = new Set<() => void>();
 let started = false;
-let lunoraUnsub: (() => void) | null = null;
 
 function rebuildFrom(source: TagColorRow[]) {
   rows = source;
@@ -208,49 +191,8 @@ function rebuild() {
   rebuildFrom(tagColorsCollection.toArray);
 }
 
-/**
- * Called from `lunora-sync` when flag ON — subscribe to the Lunora shape and
- * skip `/api/kv` for this collection.
- */
-export function bindLunoraTagColors(
-  collection: {
-    toArray: TagColorRowDocLike[];
-    subscribeChanges: (
-      cb: () => void,
-      opts?: { includeInitialState?: boolean },
-    ) => { unsubscribe: () => void };
-  },
-  writes: LunoraTagColorWrites,
-): void {
-  lunoraUnsub?.();
-  lunoraWrites = writes;
-  const mapRows = (): TagColorRow[] =>
-    collection.toArray.map((r) => ({
-      tag: String(r.tag ?? r._id),
-      color: String(r.color ?? ""),
-    }));
-  const sub = collection.subscribeChanges(() => rebuildFrom(mapRows()), {
-    includeInitialState: true,
-  });
-  lunoraUnsub = () => sub.unsubscribe();
-  started = true;
-}
-
-/** Tear down Lunora feed (flag OFF / account switch). */
-export function unbindLunoraTagColors(): void {
-  lunoraUnsub?.();
-  lunoraUnsub = null;
-  lunoraWrites = null;
-  rows = EMPTY;
-  started = false;
-}
-
-type TagColorRowDocLike = { _id: string; tag?: unknown; color?: unknown };
-
 function ensureStarted() {
   if (started || !hasWindow()) return;
-  // Flag ON: wait for bindLunoraTagColors — never open the /api/kv collection.
-  if (isLunoraSyncEnabled()) return;
   started = true;
   tagColorsCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,

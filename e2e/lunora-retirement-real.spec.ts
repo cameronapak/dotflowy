@@ -179,6 +179,8 @@ test.beforeAll(async () => {
               value: "diagnostic-admin@dotflowy.local",
             },
             OWNER_USER_ID: { type: "text", value: "diagnostic-owner" },
+            // A stale production force must not reopen normal shard routing.
+            LUNORA_OUTLINE: { type: "text", value: "1" },
           },
           exports: {
             UserOutlineDO: { type: "durable-object", storage: "sqlite" },
@@ -191,6 +193,8 @@ test.beforeAll(async () => {
   const db = await mf.getD1Database("DB");
   for (const migration of [
     "0003_create_auth.sql",
+    "0004_create_oauth.sql",
+    "0006_create_stripe.sql",
     "0010_lunora_retirement.sql",
     "0011_lunora_retirement_operation_claim.sql",
     "0013_preserve_classic_retirement.sql",
@@ -733,80 +737,173 @@ for (const fault of ["verify", "rollback"] as const) {
   });
 }
 
-test("production shard shapes deliver outline snapshots and the live retirement signal", async () => {
-  const { userId, lunoraNodes } = await seed();
-  const response = await mf.dispatchFetch(
-    `http://fixture/_lunora/ws?shard=${userId}`,
+test("retired public Lunora namespace stays closed and cannot alter retained shard data", async () => {
+  const { userId } = await seed();
+  const before = await command<Inspection>("/inspect", userId);
+  const requests: Array<[string, RequestInit | undefined]> = [
+    ["/_lunora", undefined],
+    ["/_lunora/rpc", { method: "POST", body: "{}" }],
+    ["/_lunora/auth/session", undefined],
+    ["/_lunora/studio", undefined],
+    [`/_lunora/ws?shard=${userId}`, { headers: { Upgrade: "websocket" } }],
+  ];
+  for (const [path, init] of requests) {
+    const response = await mf.dispatchFetch(`http://fixture${path}`, init);
+    expect(response.status, path).toBe(404);
+    expect(response.webSocket, path).toBeNull();
+  }
+  const after = await command<Inspection>("/inspect", userId);
+  expect(after.classic.nodes).toEqual(before.classic.nodes);
+  expect(after.classic.kv).toEqual(before.classic.kv);
+  expect(after.lunora.retirement).toEqual(before.lunora.retirement);
+  expect(after.lunora.snapshot.nodes).toEqual(before.lunora.snapshot.nodes);
+  expect(after.lunora.snapshot.dailyIndex).toEqual(
+    before.lunora.snapshot.dailyIndex,
+  );
+  expect(after.lunora.snapshot.tagColors).toEqual(
+    before.lunora.snapshot.tagColors,
+  );
+  expect(after.lunora.snapshot.savedQueries).toEqual(
+    before.lunora.snapshot.savedQueries,
+  );
+  expect(after.lunora.snapshot.migrateState).toEqual(
+    before.lunora.snapshot.migrateState,
+  );
+});
+
+test("MCP uses Classic despite an enabled legacy preference and force-on env", async () => {
+  const db = await mf.getD1Database("DB");
+  const email = `mcp-retirement-${randomUUID()}@dotflowy.local`;
+  const headers = {
+    "content-type": "application/json",
+    origin: "http://fixture",
+  };
+  const password = "disposable-mcp-retirement-password";
+  const signup = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-up/email",
     {
-      headers: { Upgrade: "websocket" },
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email, name: "MCP retirement fixture", password }),
     },
   );
-  const ws = response.webSocket;
-  if (!ws) throw new Error("Lunora WebSocket upgrade failed");
-  ws.accept();
-  const messages: unknown[] = [];
-  let retirementStatus: string | undefined;
-  ws.addEventListener("message", (event) => {
-    const message = JSON.parse(String(event.data));
-    messages.push(message);
-    if (message["shapeId"] === "retirement") {
-      for (const op of message.rowsPatch ?? []) {
-        if (op.value) retirementStatus = op.value.status;
-      }
-    }
+  expect(signup.status).toBe(200);
+  const { user } = Schema.decodeUnknownSync(
+    Schema.Struct({ user: Schema.Struct({ id: Schema.String }) }),
+  )(await signup.json());
+  await db
+    .prepare('UPDATE "user" SET emailVerified=1 WHERE id=?')
+    .bind(user.id)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO subscription (id,plan,referenceId,status) VALUES (?, ?, ?, ?)",
+    )
+    .bind(randomUUID(), "unlimited", user.id, "active")
+    .run();
+  const signin = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email, password }),
+    },
+  );
+  expect(signin.status).toBe(200);
+  const cookie = signin.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const redirectUri = "http://127.0.0.1:8765/callback";
+  const registration = await mf.dispatchFetch(
+    "http://fixture/api/auth/mcp/register",
+    {
+      method: "POST",
+      headers: { ...headers, cookie },
+      body: JSON.stringify({
+        client_name: "retirement-regression",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+      }),
+    },
+  );
+  expect(registration.status).toBe(201);
+  const { client_id: clientId } = Schema.decodeUnknownSync(
+    Schema.Struct({ client_id: Schema.String }),
+  )(await registration.json());
+  const verifier = randomUUID() + randomUUID();
+  const challenge = Buffer.from(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+  ).toString("base64url");
+  const authorize = await mf.dispatchFetch(
+    "http://fixture/api/auth/mcp/authorize?" +
+      new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: "code",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        scope: "openid",
+      }),
+    { headers: { cookie, origin: "http://fixture" }, redirect: "manual" },
+  );
+  expect(authorize.status).toBe(302);
+  const code = new URL(
+    authorize.headers.get("location") ?? "http://fixture",
+  ).searchParams.get("code");
+  expect(code).toBeTruthy();
+  const token = await mf.dispatchFetch("http://fixture/api/auth/mcp/token", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      origin: "http://fixture",
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: code ?? "",
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      code_verifier: verifier,
+    }).toString(),
   });
-  try {
-    ws.send(
-      JSON.stringify({
-        type: "connect",
-        id: "connect",
-        clientId: "retirement-test",
+  expect(token.status).toBe(200);
+  const { access_token: bearer } = Schema.decodeUnknownSync(
+    Schema.Struct({ access_token: Schema.String }),
+  )(await token.json());
+  const classic = node("CLASSIC_ROUTING_SENTINEL");
+  const experimental = node("EXPERIMENTAL_ROUTING_SENTINEL");
+  await command("/seed", user.id, {
+    classicNodes: [classic],
+    lunoraNodes: [experimental],
+    preferenceEnabled: true,
+  });
+  for (const path of ["/mcp", "/api/mcp"]) {
+    const response = await mf.dispatchFetch(`http://fixture${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${bearer}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "get_outline", arguments: {} },
       }),
-    );
-    ws.send(
-      JSON.stringify({
-        type: "shape_subscribe",
-        id: "outline",
-        ["shape"]: { name: "wholeOutline" },
-      }),
-    );
-    ws.send(
-      JSON.stringify({
-        type: "shape_subscribe",
-        id: "retirement",
-        ["shape"]: { name: "userRetirementState" },
-      }),
-    );
-    await expect
-      .poll(() => messages)
-      .toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            type: "pokePart",
-            ["shapeId"]: "outline",
-            rowsPatch: expect.arrayContaining(
-              lunoraNodes.map((row) =>
-                expect.objectContaining({
-                  op: "insert",
-                  key: row.id,
-                  value: expect.objectContaining({ userId, text: row.text }),
-                }),
-              ),
-            ),
-          }),
-        ]),
-      );
-    expect(messages).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "error" })]),
-    );
-    expect(retirementStatus).toBeUndefined();
-    expect((await command<RetirementRecord>("/run", userId)).state).toBe(
-      "completed",
-    );
-    await expect.poll(() => retirementStatus).toBe("retired");
-  } finally {
-    ws.close();
+    });
+    expect(response.status).toBe(200);
+    const result = await response.text();
+    expect(result).toContain("CLASSIC_ROUTING_SENTINEL");
+    expect(result).not.toContain("EXPERIMENTAL_ROUTING_SENTINEL");
   }
+  const after = await command<Inspection>("/inspect", user.id);
+  expect(after.classic.nodes).toEqual([classic]);
+  expect(after.lunora.snapshot.nodes).toEqual([
+    { ...experimental, userId: user.id },
+  ]);
+  expect(after.lunora.retirement).toBeNull();
 });
 
 test("experimental-primary recovery atomically preserves sixteen live nodes and copies ten disjoint Classic nodes", async () => {

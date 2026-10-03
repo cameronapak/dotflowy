@@ -63,7 +63,6 @@
     "@icons-pack/react-simple-icons": "^13.15.1",
     "@lunora/db": "1.0.0-alpha.113",
     "@lunora/ratelimit": "1.0.0-alpha.63",
-    "@lunora/react": "1.0.0-alpha.115",
     "@react-aria/utils": "^3.34.1",
     "@rgrove/parse-xml": "^5.0.0",
     "@sentry/cloudflare": "^10.74.0",

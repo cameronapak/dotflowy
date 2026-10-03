@@ -1,12 +1,12 @@
 # Retire Lunora per user
 
-This is the release 1 operator runbook for [ADR 0061](../adr/0061-retire-lunora-through-per-user-cutover.md). It installs migration tooling only. Do not remove the Lunora binding, shard data, D1 records, or R2 snapshots during the observation period.
+This is the operator runbook for [ADR 0061](../adr/0061-retire-lunora-through-per-user-cutover.md). Release 2 uses Classic exclusively in the browser and MCP. Internal migration, diagnostic, and recovery tooling remains available. Do not remove the Lunora binding, shard data, D1 records, or R2 snapshots during the observation period.
 
 ## Local verification
 
-Run the isolated checks with `bun run test:e2e:retirement`. They exercise Workerd, SQLite Durable Objects, D1, and R2 without production bindings. They cover sequential cutover, recovery, overlapping request rejection, retained operation claims, CLI batch stopping, and live outline and retirement shape delivery. These checks do not exercise the browser's automatic reload.
+Run the isolated checks with `bun run test:e2e:retirement`. They exercise Workerd, SQLite Durable Objects, D1, and R2 without production bindings. They cover sequential cutover, recovery, overlapping request rejection, retained operation claims, CLI batch stopping, Classic-only MCP routing, and rejection of the retired public namespace without changing retained shard data.
 
-Also exercise a disposable local account with the app running: enable upgraded sync, confirm its nodes appear, keep that browser open while an admin migrates it, and confirm the browser switches to classic with the same nodes. The Lunora app must enable `.cdc()`; without it, the socket upgrades but refuses both outline and retirement shapes with `SHAPE_REQUIRES_CDC`.
+Run `bun run test:e2e e2e/lunora-retirement-browser.spec.ts` to confirm that stale enabled preferences, localStorage flags, and URL overrides cannot bypass Classic sync. Settings must not expose the upgraded-sync toggle, edits must survive reload, and the browser must make no `/_lunora` requests.
 
 ## Before running
 
@@ -182,4 +182,4 @@ The operation reads, decodes, and hashes the R2 object, restores it under the ma
 
 ## Observation period
 
-The 30-day observation period starts only after every user is either `completed` or confirmed `already-classic`, with no failed or manual-review classifications outstanding. Runtime removal, binding removal, shard deletion, and retirement snapshot deletion belong to later releases and require separate approval.
+The 30-day observation period starts only after every user is either `completed` or confirmed `already-classic`, with no failed or manual-review classifications outstanding. Release 2 removes the normal experimental runtime, not its stored data or internal operator tooling. Binding removal, shard deletion, and retirement snapshot deletion belong to later releases and require separate approval.

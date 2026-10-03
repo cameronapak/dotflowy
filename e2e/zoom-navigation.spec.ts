@@ -143,10 +143,7 @@ test("explicit expansion and keyboard collapse persist across navigation and rel
       const request = response.request();
       const path = new URL(response.url()).pathname;
       return (
-        response.ok() &&
-        ((path === "/api/nodes" && request.method() === "PATCH") ||
-          (path === "/_lunora/rpc" &&
-            request.postDataJSON()?.functionPath === "mutators:setCollapsed"))
+        response.ok() && path === "/api/nodes" && request.method() === "PATCH"
       );
     });
   const expanded = saved();

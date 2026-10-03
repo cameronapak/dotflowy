@@ -1,11 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
+import { Schema } from "effect";
 
-import {
-  seedOutline,
-  STANDARD_TREE,
-  isE2eLunora,
-  type SeedNode,
-} from "./fixtures";
+import { NodesPostBody } from "../worker/wire";
+import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
 
 // Regression suite for the atomic-structural-writes cure (PLAN.md):
 //  - P1: one structural edit = exactly ONE /api/nodes request carrying every op.
@@ -22,8 +19,8 @@ interface NodeOp {
 }
 interface NodesWrite {
   method: string;
-  ops?: NodeOp[];
-  nodes?: unknown[];
+  ops?: readonly NodeOp[];
+  nodes?: readonly unknown[];
 }
 
 /** Record every mutating /api/nodes request the client sends. */
@@ -34,10 +31,9 @@ function captureNodesWrites(page: Page): NodesWrite[] {
       req.url().includes("/api/nodes") &&
       ["POST", "PATCH", "DELETE"].includes(req.method())
     ) {
-      const body = (req.postDataJSON() ?? {}) as {
-        ops?: NodeOp[];
-        nodes?: unknown[];
-      };
+      const body = Schema.decodeUnknownSync(NodesPostBody)(
+        req.postDataJSON() ?? {},
+      );
       writes.push({ method: req.method(), ops: body.ops, nodes: body.nodes });
     }
   });
@@ -104,11 +100,6 @@ function applyWrites(seed: SeedNode[], writes: NodesWrite[]): SeedNode[] {
 }
 
 test.describe("atomic structural writes", () => {
-  test.skip(
-    isE2eLunora(),
-    "asserts classic /api/nodes batch wire; Lunora uses /_lunora/rpc",
-  );
-
   test("a structural edit is exactly one /api/nodes batch request (P1)", async ({
     page,
   }) => {
@@ -190,14 +181,12 @@ test.describe("atomic structural writes", () => {
     let inFlight = 0;
     let maxInFlight = 0;
     let batchCount = 0;
-    const isBatch = (req: {
-      url(): string;
-      method(): string;
-      postDataJSON(): unknown;
-    }) =>
+    const isBatch = (req: Request) =>
       req.url().includes("/api/nodes") &&
       req.method() === "POST" &&
-      Boolean((req.postDataJSON() as { ops?: unknown } | null)?.ops);
+      Boolean(
+        Schema.decodeUnknownSync(NodesPostBody)(req.postDataJSON() ?? {}).ops,
+      );
     page.on("request", (req) => {
       if (isBatch(req)) {
         batchCount += 1;

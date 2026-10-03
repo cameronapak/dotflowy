@@ -13,7 +13,6 @@
         "@icons-pack/react-simple-icons": "^13.15.1",
         "@lunora/db": "1.0.0-alpha.113",
         "@lunora/ratelimit": "1.0.0-alpha.63",
-        "@lunora/react": "1.0.0-alpha.115",
         "@react-aria/utils": "^3.34.1",
         "@rgrove/parse-xml": "^5.0.0",
         "@sentry/cloudflare": "^10.74.0",
@@ -421,8 +420,6 @@
     "@lunora/queue": ["@lunora/queue@1.0.0-alpha.59", "", { "dependencies": { "@lunora/errors": "1.0.0-alpha.39", "@lunora/platform": "1.0.0-alpha.32" } }, "sha512-P/ldQUBCN4n0V3Ibj13UjQrC94URCWI23uJ3b4iYMKiww3LV4FfMKEx2QR9jVeJIz1We4UTddj2ykovrcxIoWg=="],
 
     "@lunora/ratelimit": ["@lunora/ratelimit@1.0.0-alpha.63", "", { "dependencies": { "@lunora/errors": "1.0.0-alpha.39" }, "peerDependencies": { "@lunora/server": ">=1.0.0-alpha.24 <2.0.0-0", "@lunora/values": ">=1.0.0-alpha.7 <2.0.0-0" } }, "sha512-5Ty8jLCeMACMgv8QEA7ZAB74R7ZtFz8Lj5wBxVxIwNcLnWGIGzT1Y2g222KQVi0yhl/oJnpM839aWAFZLtf54g=="],
-
-    "@lunora/react": ["@lunora/react@1.0.0-alpha.115", "", { "dependencies": { "@lunora/client": "1.0.0-alpha.110", "@lunora/errors": "1.0.0-alpha.39", "@lunora/ratelimit": "1.0.0-alpha.63", "@visulima/storage-client": "1.0.3" }, "peerDependencies": { "@tanstack/react-query": "^5.101.0", "react": "^19.2.7", "react-dom": "^19.2.7" }, "optionalPeers": ["react-dom"] }, "sha512-16XjX/mQEqCsaLxQftm6OurwWJxcxWBLEycME7lO30sVsGn6C+eXc6AvmlbqWz3X9yPxJyNp8PVoeY+O+z/xHg=="],
 
     "@lunora/runtime": ["@lunora/runtime@1.0.0-alpha.125", "", { "dependencies": { "@lunora/bindings": "1.0.0-alpha.64", "@lunora/errors": "1.0.0-alpha.39", "@lunora/observability": "1.0.0-alpha.81", "@lunora/platform": "1.0.0-alpha.32" }, "peerDependencies": { "@lunora/shard-engine": ">=1.0.0-alpha.24 <2.0.0-0", "@lunora/workflow": ">=1.0.0-alpha.24 <2.0.0-0" } }, "sha512-XiUIvApaf8R2dotr9liH85WvKfojhUAh7tzYlH00WplY84zZ9u3GmtLPBDmBRp6rQQtUkMVhPLMh0FExNMazCA=="],
 

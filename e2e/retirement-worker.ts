@@ -3,7 +3,7 @@
 import type { ArgsOf } from "lunorash/client";
 
 // Test-only Workerd entry. Never included in wrangler.jsonc or deployed.
-import { createShardClient, createWorker } from "lunorash/runtime";
+import { createShardClient } from "lunorash/runtime";
 
 import type { Node } from "../src/data/wire-schema";
 import type {
@@ -11,14 +11,10 @@ import type {
   RetirementOperation,
 } from "../worker/lunora-retirement-service";
 
-import { api } from "../lunora/_generated/api";
-import { LUNORA_FUNCTIONS } from "../lunora/_generated/functions";
+import { api, internal } from "../lunora/_generated/api";
 import { resolveUserId } from "../worker/identity";
 import productionWorker from "../worker/index";
-import {
-  createLunoraOutlineStore,
-  createLunoraRetirementClient,
-} from "../worker/lunora-mcp-store";
+import { createLunoraRetirementClient } from "../worker/lunora-mcp-store";
 import {
   buildClassicTarget,
   retirementSnapshotKey,
@@ -62,23 +58,16 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) {
+    if (
+      url.pathname.startsWith("/api/") ||
+      url.pathname === "/mcp" ||
+      url.pathname === "/_lunora" ||
+      url.pathname.startsWith("/_lunora/")
+    ) {
       const fetch = productionWorker.fetch;
       if (!fetch)
         throw new Error("production Worker fetch missing from fixture");
       return fetch(request, env, ctx);
-    }
-    if (url.pathname === "/_lunora/ws") {
-      // Test-only identity bridge; the production Worker resolves a server session.
-      // The bound ShardDO below is the production class and configuration.
-      return createWorker({
-        shardDO: env.SHARD,
-        functions: LUNORA_FUNCTIONS,
-        resolveIdentity: async () => ({
-          userId: url.searchParams.get("shard") ?? "",
-        }),
-        authorizeShard: (caller) => caller.identity?.userId === caller.shardKey,
-      }).fetch(request, env, { waitUntil() {} });
     }
     if (url.pathname === "/sync") {
       const stub = env.USER_OUTLINE.get(
@@ -181,12 +170,13 @@ export default {
         await classic.deleteNodes(
           (input.classicNodes ?? []).map((node) => node.id),
         );
-        await createLunoraOutlineStore(env, userId).applyBatch(
-          (input.lunoraNodes ?? []).map((node) => ({
-            op: "delete",
+        await client.call(internal.mcp.applyChangeOps, {
+          userId,
+          ops: (input.lunoraNodes ?? []).map((node) => ({
+            op: "delete" as const,
             key: node.id,
           })),
-        );
+        });
         return Response.json({ deleted: true });
       }
       if (url.pathname === "/classic-write") {
@@ -232,9 +222,14 @@ export default {
         return Response.json(await retirementRepairPreview(env, userId));
       }
       if (url.pathname === "/write") {
-        await createLunoraOutlineStore(env, userId).applyBatch(
-          (input.lunoraNodes ?? []).map((value) => ({ op: "update", value })),
-        );
+        await client.call(internal.mcp.applyChangeOps, {
+          userId,
+          // SAFETY: runtime validators accept nullable wire fields that generated types collapse.
+          ops: (input.lunoraNodes ?? []).map((value) => ({
+            op: "update" as const,
+            value,
+          })) as ArgsOf<typeof internal.mcp.applyChangeOps>["ops"],
+        });
         return Response.json({ written: true });
       }
       if (url.pathname === "/browser-write") {

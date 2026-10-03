@@ -89,8 +89,8 @@
   // side-collections in colocated SQLite. The Worker routes each /api request to
   // the caller's DO. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
   //
-  // SHARD = Lunora outline plane (ADR 0055 Phase-2 compose). Lives beside
-  // USER_OUTLINE until the collection cutover deletes the custom DO sync.
+  // SHARD retains the experimental data and internal retirement/export RPCs
+  // through ADR 0061's observation period. Browser and MCP use USER_OUTLINE.
   "durable_objects": {
     "bindings": [
       { "name": "USER_OUTLINE", "class_name": "UserOutlineDO" },

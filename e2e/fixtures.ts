@@ -1,72 +1,22 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 
+import { Schema } from "effect";
+
 import {
-  applyPlan,
-  buildTreeIndex,
-  planAppendChild,
-  planImportNodes,
-  planIndent,
-  planIndentMany,
-  planInsertChildAtStart,
-  planInsertSibling,
-  planMaterializeDailyNodes,
-  planMirrorNode,
-  planMoveMany,
-  planMoveNode,
-  planFromChangeOps,
-  planOutdent,
-  planOutdentMany,
-  planRemoveMany,
-  planRemoveNode,
-  planRestoreNodes,
-  type ChangeOpLike,
-  planSetBookmarkedAt,
-  planSetCollapsed,
-  planSetCompleted,
-  planSetIsTask,
-  planSetKind,
-  planSetText,
-  planSplitNode,
-  type OutlineNode,
-  type OutlinePlan,
-} from "../src/data/outline-plans";
-import { resolveDailyClaim } from "../src/plugins/daily/claim-mapping";
+  KvClaimBody,
+  KvDeleteBody,
+  KvUpsertBody,
+  NodesDeleteBody,
+  NodesPatchBody,
+  NodesPostBody,
+} from "../worker/wire";
 
-/** True when this Playwright process targets the Lunora mock (`E2E_LUNORA=1`
- *  or `seedOutline(..., { lunora: true })`). Specs that override classic
- *  `/api/kv?op=claim` should skip under Lunora — shapes/mutators replace that
- *  transport. */
-export function isE2eLunora(opts?: { lunora?: boolean }): boolean {
-  if (opts?.lunora === true) return true;
-  if (opts?.lunora === false) return false;
-  const env = process.env.E2E_LUNORA;
-  return env === "1" || env === "true";
-}
-
-/** Opt classic specs onto the Lunora mock: `seedOutline(..., { lunora: true })`
- *  or `E2E_LUNORA=1 bunx playwright test …`. Default stays classic (`/api/sync`). */
-function wantsLunoraSeed(opts: { lunora?: boolean } | undefined): boolean {
-  return isE2eLunora(opts);
-}
-
-/** Lunora shape pokes can land after `goto`; wait for a seeded row. No-op classic. */
-export async function waitForSeededNode(
-  page: Page,
-  nodeId: string,
-): Promise<void> {
-  if (!isE2eLunora()) return;
-  await page
-    .locator(`li[data-node-id="${nodeId}"]`)
-    .waitFor({ state: "attached", timeout: 15_000 });
-}
-
-/** `page.goto` + Lunora hydration wait on a known seeded id. */
+/** Open a seeded Classic outline. */
 export async function openSeededOutline(
   page: Page,
   opts: { path?: string; anchorId?: string } = {},
 ): Promise<void> {
   await page.goto(opts.path ?? "/");
-  await waitForSeededNode(page, opts.anchorId ?? "alpha");
 }
 
 // A node as the test author cares about it -- structural fields only. Everything
@@ -157,14 +107,6 @@ function toNode(n: SeedNode): ApiNode {
  * page/context, so two tests never share state. Register before `page.goto(...)`
  * (every spec does) so the collection's first sync is mocked.
  *
- * Dual-path: pass `{ lunora: true }` or set `E2E_LUNORA=1` to route through
- * `seedOutlineLunora` (flag ON + `/_lunora/*` mock). The classic path sets
- * `dotflowy:flag:lunora-sync=off` so specs stay on `/api/sync` even though
- * the product default is ON. Classic-only opts (`echoDelayMs`, `echoChunks`,
- * `postDelayMs`, `failStructuralWrites`, `serverVersion`) are ignored on the
- * Lunora path — those specs stay classic-only. Lunora-only opts
- * (`suppressWholeOutlinePoke`, `failMutatorWrites`) live on
- * `seedOutlineLunora` directly.
  */
 export async function seedOutline(
   page: Page,
@@ -196,20 +138,8 @@ export async function seedOutline(
      *  (not a transport error), so the client's retry policy doesn't kick in —
      *  the failure lands immediately. */
     failStructuralWrites?: boolean;
-    /** When true, use the Lunora `/_lunora/*` mock + enable the client flag.
-     *  Also enabled by `E2E_LUNORA=1` / `true` when this is unset. */
-    lunora?: boolean;
   } = {},
 ): Promise<void> {
-  if (wantsLunoraSeed(opts)) {
-    return seedOutlineLunora(page, nodes, { kv: opts.kv });
-  }
-
-  // Product default is Lunora ON; classic e2e mocks `/api/sync` only.
-  await page.addInitScript(() => {
-    window.localStorage.setItem("dotflowy:flag:lunora-sync", "off");
-  });
-
   const echoDelayMs = opts.echoDelayMs ?? 0;
   // Delay only the structural-batch POST *response* (not its echo). Opens a
   // window to prove the client serializes batches: a second batch must not be
@@ -226,7 +156,7 @@ export async function seedOutline(
   // seq so the client can hold its optimistic overlay until the echo lands.
   let seq = 0;
   let socket: WebSocketRoute | null = null;
-  const broadcast = (ops: ApiChangeOp[], extraDelayMs = 0): number => {
+  const broadcast = (ops: readonly ApiChangeOp[], extraDelayMs = 0): number => {
     seq += 1;
     const at = seq;
     const frame = JSON.stringify({ type: "change", seq: at, ops });
@@ -238,7 +168,7 @@ export async function seedOutline(
   };
   const echoChunks = opts.echoChunks ?? 1;
 
-  const reply = (route: Route, data: unknown) =>
+  const reply = <T>(route: Route, data: T) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -279,10 +209,9 @@ export async function seedOutline(
         case "GET":
           return reply(route, [...store.values()]);
         case "POST": {
-          const body = req.postDataJSON() as {
-            ops?: ApiChangeOp[];
-            nodes?: ApiNode[];
-          };
+          const body = Schema.decodeUnknownSync(NodesPostBody)(
+            req.postDataJSON(),
+          );
           // Atomic structural batch: apply every op, commit ONE frame, reply with
           // its seq (mirrors the DO's applyBatch -> { seq }).
           if (body.ops) {
@@ -328,9 +257,9 @@ export async function seedOutline(
           return reply(route, { ok: true });
         }
         case "PATCH": {
-          const { updates } = req.postDataJSON() as {
-            updates: { id: string; changes: Partial<ApiNode> }[];
-          };
+          const { updates } = Schema.decodeUnknownSync(NodesPatchBody)(
+            req.postDataJSON(),
+          );
           const ops: ApiChangeOp[] = [];
           for (const u of updates ?? []) {
             const cur = store.get(u.id);
@@ -344,7 +273,9 @@ export async function seedOutline(
           return reply(route, { ok: true });
         }
         case "DELETE": {
-          const { ids } = req.postDataJSON() as { ids: string[] };
+          const { ids } = Schema.decodeUnknownSync(NodesDeleteBody)(
+            req.postDataJSON(),
+          );
           const ops: ApiChangeOp[] = [];
           for (const id of ids ?? []) {
             store.delete(id);
@@ -391,21 +322,22 @@ export async function seedOutline(
           // wins). The per-page Map IS the single source, so two claims for the
           // same key here resolve to one winner -- exactly as the real DO does.
           if (new URL(req.url()).searchParams.get("op") === "claim") {
-            const { key, value } = req.postDataJSON() as {
-              key: string;
-              value: unknown;
-            };
+            const { key, value } = Schema.decodeUnknownSync(KvClaimBody)(
+              req.postDataJSON(),
+            );
             if (!m.has(key)) m.set(key, value);
             return reply(route, { value: m.get(key) });
           }
-          const { rows } = req.postDataJSON() as {
-            rows: { key: string; value: unknown }[];
-          };
+          const { rows } = Schema.decodeUnknownSync(KvUpsertBody)(
+            req.postDataJSON(),
+          );
           for (const r of rows ?? []) m.set(r.key, r.value);
           return reply(route, { ok: true });
         }
         case "DELETE": {
-          const { keys } = req.postDataJSON() as { keys: string[] };
+          const { keys } = Schema.decodeUnknownSync(KvDeleteBody)(
+            req.postDataJSON(),
+          );
           for (const k of keys ?? []) m.delete(k);
           return reply(route, { ok: true });
         }
@@ -429,9 +361,7 @@ export async function seedOutline(
             type: "snapshot",
             seq,
             nodes: [...store.values()],
-            ...(opts.serverVersion === undefined
-              ? {}
-              : { serverVersion: opts.serverVersion }),
+            serverVersion: opts.serverVersion,
           }),
         ),
       );
@@ -463,742 +393,3 @@ export const STANDARD_TREE: SeedNode[] = [
     text: "Alpha two",
   },
 ];
-
-// --- Lunora flag-ON fixture (ADR 0058) --------------------------------------
-
-type LunoraRow = ApiNode & { userId: string; _id: string };
-
-function toLunoraRow(n: SeedNode, userId: string): LunoraRow {
-  const base = toNode(n);
-  return { ...base, _id: base.id, userId };
-}
-
-function rowToOutline(row: LunoraRow): OutlineNode {
-  const { _id: _, ...rest } = row;
-  return rest;
-}
-
-function outlineToRow(node: OutlineNode): LunoraRow {
-  return { ...node, _id: node.id };
-}
-
-function commitOutlinePlan(
-  store: Map<string, LunoraRow>,
-  plan: OutlinePlan | null | undefined,
-): void {
-  if (!plan) return;
-  const next = applyPlan([...store.values()].map(rowToOutline), plan);
-  store.clear();
-  for (const n of next) store.set(n.id, outlineToRow(n));
-}
-
-type DailyIndexRow = {
-  _id: string;
-  key: string;
-  nodeId: string;
-  touchedAt: number;
-  userId: string;
-};
-
-type TagColorRow = {
-  _id: string;
-  tag: string;
-  color: string;
-  userId: string;
-};
-
-type SavedQueryRow = {
-  _id: string;
-  name: string;
-  query: string;
-  createdAt: number;
-  userId: string;
-};
-
-/**
- * Seed an outline on the Lunora flag-ON path by mocking `/_lunora/ws` +
- * `/_lunora/rpc`. Structural mutators apply the same `outline-plans` pure
- * planners as production (insert/split/indent/delete/restore/move/multi/…).
- *
- * Also reachable via `seedOutline(..., { lunora: true })` or `E2E_LUNORA=1`
- * so classic specs can run against Lunora without rewriting call sites.
- * Auto-migrate is skipped by mocking GET `/api/nodes` → [].
- */
-export async function seedOutlineLunora(
-  page: Page,
-  nodes: SeedNode[],
-  opts: {
-    /** Pre-seed Lunora kv shapes from classic kv collection names
-     *  (`daily-index` / `tag-colors` / `saved-queries`). */
-    kv?: Record<string, { key: string; value: unknown }[]>;
-    /**
-     * Classic DO source for auto-migrate / KV heal. When set, GET `/api/nodes`
-     * and `/api/kv` serve this data (instead of empty). Pass Lunora `nodes` as
-     * `[]` for a full classic→Lunora import, or seed Lunora nodes + classic KV
-     * (and omit Lunora `kv`) to exercise the partial-migrate heal.
-     */
-    classicSource?: {
-      nodes?: SeedNode[];
-      kv?: Record<string, { key: string; value: unknown }[]>;
-    };
-    /**
-     * Skip post-mutation `wholeOutline` WS pokes (RPC still mutates the mock
-     * store). Reproduces a missed shape poke to pin Lunora's sticky optimistic
-     * hold across its fallback window.
-     */
-    suppressWholeOutlinePoke?: boolean;
-    /**
-     * Fail every `mutators:*` RPC with 500 before mutating the store —
-     * Lunora twin of classic `failStructuralWrites` (save-failure rollback).
-     */
-    failMutatorWrites?: boolean;
-  } = {},
-): Promise<void> {
-  // Drop prior mocks from earlier tests on this page — stacked handlers can
-  // keep an old in-memory store alive across reload (delete "persists" then
-  // resurrects from the stale mock). This MUST be `unrouteAll`: every route
-  // below is registered with a PREDICATE matcher, and `page.unroute("**/x")`
-  // only removes a handler registered with that same glob — so the per-pattern
-  // form silently removed nothing.
-  //
-  // NOTE: `routeWebSocket` and `addInitScript` have no unroute at all, so this
-  // is best-effort. One `seedOutlineLunora` per `page` is the supported use.
-  await page.unrouteAll({ behavior: "ignoreErrors" });
-
-  const userId = "test-user";
-  const store = new Map<string, LunoraRow>();
-  for (const n of nodes) store.set(n.id, toLunoraRow(n, userId));
-
-  const dailyIndex = new Map<string, DailyIndexRow>();
-  for (const r of opts.kv?.["daily-index"] ?? []) {
-    const v = r.value as { key?: string; nodeId?: string };
-    const key = v.key ?? r.key;
-    const nodeId = String(v.nodeId ?? "");
-    dailyIndex.set(key, {
-      _id: key,
-      key,
-      nodeId,
-      touchedAt: 0,
-      userId,
-    });
-  }
-
-  const tagColors = new Map<string, TagColorRow>();
-  for (const r of opts.kv?.["tag-colors"] ?? []) {
-    const v = r.value as { tag?: string; color?: string };
-    const tag = String(v.tag ?? r.key);
-    tagColors.set(tag, {
-      _id: tag,
-      tag,
-      color: String(v.color ?? ""),
-      userId,
-    });
-  }
-
-  const savedQueries = new Map<string, SavedQueryRow>();
-  for (const r of opts.kv?.["saved-queries"] ?? []) {
-    const v = r.value as {
-      id?: string;
-      name?: string;
-      query?: string;
-      createdAt?: number;
-    };
-    const id = String(v.id ?? r.key);
-    savedQueries.set(id, {
-      _id: id,
-      name: String(v.name ?? ""),
-      query: String(v.query ?? ""),
-      createdAt: Number(v.createdAt ?? 0),
-      userId,
-    });
-  }
-
-  /** Classic→Lunora migrate watermarks (ADR 0058 heal). */
-  let migrateState: { nodesAt: number | null; kvAt: number | null } | null =
-    null;
-
-  const classicNodes = (opts.classicSource?.nodes ?? []).map((n) => toNode(n));
-  const classicKv = opts.classicSource?.kv ?? {};
-
-  let clientSeq = 0;
-  let pokeN = 0;
-  /** Per-shape poke cursor — a shared counter desyncs shapes and Lunora
-   *  drops the poke (`baseDiverged`) without firing `onCheckpoint`, which
-   *  wedges `isPersisted` (claimDaily / materializeDaily / seedIfEmpty). */
-  const shapeCheckpoints = new Map<string, number>();
-  /** Last keys we put into each shape — poke is a diff; without deletes for
-   *  removed keys the client view keeps stale rows (Cmd+K delete "works" then
-   *  the poke resurrects the bullet). */
-  const shapeKeys = new Map<string, Set<string>>();
-  const sockets = new Set<WebSocketRoute>();
-  const shapeSubs = new Map<string, { name: string }>();
-
-  const reply = (route: Route, data: unknown) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(data),
-    });
-
-  const sendPoke = (
-    ws: WebSocketRoute,
-    shapeId: string,
-    rows: Array<Record<string, unknown> & { _id: string }>,
-    lastMutationId: number,
-  ) => {
-    pokeN += 1;
-    const pokeId = `p${pokeN}`;
-    const base = shapeCheckpoints.get(shapeId) ?? 0;
-    const next = base + 1;
-    shapeCheckpoints.set(shapeId, next);
-    const nextKeys = new Set(rows.map((r) => r._id));
-    const prevKeys = shapeKeys.get(shapeId) ?? new Set<string>();
-    const rowsPatch: Array<Record<string, unknown>> = [];
-    for (const key of prevKeys) {
-      if (!nextKeys.has(key)) rowsPatch.push({ op: "delete", key });
-    }
-    for (const r of rows) {
-      rowsPatch.push({ op: "put", key: r._id, value: r });
-    }
-    shapeKeys.set(shapeId, nextKeys);
-    ws.send(
-      JSON.stringify({
-        type: "pokeStart",
-        pokeId,
-        baseCheckpoint: base,
-        epoch: 1,
-      }),
-    );
-    ws.send(
-      JSON.stringify({
-        type: "pokePart",
-        pokeId,
-        shapeId,
-        lastMutationId,
-        rowsPatch,
-      }),
-    );
-    ws.send(
-      JSON.stringify({
-        type: "pokeEnd",
-        pokeId,
-        checkpoint: next,
-        epoch: 1,
-      }),
-    );
-  };
-
-  const shapeRows = (
-    name: string,
-  ): Array<Record<string, unknown> & { _id: string }> => {
-    if (name === "wholeOutline") return [...store.values()];
-    if (name === "userDailyIndex") return [...dailyIndex.values()];
-    if (name === "userTagColors") return [...tagColors.values()];
-    if (name === "userSavedQueries") return [...savedQueries.values()];
-    return [];
-  };
-
-  const seedShape = (ws: WebSocketRoute, shapeId: string, name: string) => {
-    sendPoke(ws, shapeId, shapeRows(name), 0);
-  };
-
-  const pokeSubscribed = (seq: number, shapes: ReadonlySet<string>) => {
-    for (const ws of sockets) {
-      for (const [shapeId, meta] of shapeSubs) {
-        if (!shapes.has(meta.name)) continue;
-        sendPoke(ws, shapeId, shapeRows(meta.name), seq);
-      }
-    }
-  };
-
-  const liveIndex = () => buildTreeIndex([...store.values()].map(rowToOutline));
-  const liveNodes = () => [...store.values()].map(rowToOutline);
-
-  await page.addInitScript(() => {
-    window.localStorage.setItem("dotflowy:flag:lunora-sync", "on");
-  });
-
-  await page.route(
-    (url) => url.pathname === "/api/auth/get-session",
-    (route) =>
-      reply(route, {
-        session: {
-          id: "test-session",
-          userId,
-          token: "test-token",
-          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-        },
-        user: {
-          id: userId,
-          email: "test@example.com",
-          name: "Test User",
-          emailVerified: true,
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-        },
-      }),
-  );
-
-  // Classic DO: empty by default (auto-migrate no-ops). `classicSource` serves
-  // real classic nodes/kv so migrate / KV-heal can run against the mock.
-  await page.route(
-    (url) => url.pathname === "/api/nodes",
-    (route) => {
-      if (route.request().method() === "GET") {
-        return reply(route, classicNodes);
-      }
-      return route.fulfill({ status: 404, body: "{}" });
-    },
-  );
-  await page.route(
-    (url) => url.pathname === "/api/kv",
-    (route) => {
-      if (route.request().method() !== "GET") {
-        return route.fulfill({ status: 404, body: "{}" });
-      }
-      const collection =
-        new URL(route.request().url()).searchParams.get("collection") ?? "";
-      const rows = classicKv[collection] ?? [];
-      // Classic Worker returns the stored values (key embedded in each object).
-      return reply(
-        route,
-        rows.map((r) => r.value),
-      );
-    },
-  );
-
-  await page.route(
-    (url) => url.pathname === "/_lunora/rpc",
-    async (route) => {
-      const body = route.request().postDataJSON() as {
-        functionPath?: string;
-        args?: Record<string, unknown>;
-      };
-      const path = body.functionPath ?? "";
-      const args = (body.args ?? {}) as Record<string, unknown>;
-      const seqHeader = route.request().headers()["x-lunora-client-seq"];
-      const seq = seqHeader ? Number(seqHeader) : ++clientSeq;
-      if (Number.isFinite(seq)) clientSeq = Math.max(clientSeq, seq);
-
-      if (opts.failMutatorWrites && path.startsWith("mutators:")) {
-        return route.fulfill({ status: 500, body: "mutator failed" });
-      }
-
-      let result: unknown = {};
-      let pokeShapes = new Set<string>(
-        opts.suppressWholeOutlinePoke ? [] : ["wholeOutline"],
-      );
-
-      const id = () => String(args.id ?? "");
-      const updatedAt = () => Number(args.updatedAt ?? Date.now());
-
-      if (path === "mutators:setText") {
-        commitOutlinePlan(
-          store,
-          planSetText(liveIndex(), id(), String(args.text ?? ""), updatedAt()),
-        );
-        result = { id: id() };
-      } else if (path === "mutators:setCompleted") {
-        commitOutlinePlan(
-          store,
-          planSetCompleted(
-            liveIndex(),
-            id(),
-            Boolean(args.completed),
-            updatedAt(),
-          ),
-        );
-      } else if (path === "mutators:setCollapsed") {
-        commitOutlinePlan(
-          store,
-          planSetCollapsed(
-            liveIndex(),
-            id(),
-            Boolean(args.collapsed),
-            updatedAt(),
-          ),
-        );
-      } else if (path === "mutators:setIsTask") {
-        commitOutlinePlan(
-          store,
-          planSetIsTask(liveIndex(), id(), Boolean(args.isTask), updatedAt()),
-        );
-      } else if (path === "mutators:setKind") {
-        commitOutlinePlan(
-          store,
-          planSetKind(
-            liveIndex(),
-            id(),
-            args.kind === "paragraph" ? "paragraph" : null,
-            updatedAt(),
-          ),
-        );
-      } else if (path === "mutators:setBookmarkedAt") {
-        commitOutlinePlan(
-          store,
-          planSetBookmarkedAt(
-            liveIndex(),
-            id(),
-            (args.bookmarkedAt as number | null) ?? null,
-            updatedAt(),
-          ),
-        );
-      } else if (path === "mutators:insertSibling") {
-        commitOutlinePlan(
-          store,
-          planInsertSibling(liveIndex(), {
-            id: id(),
-            userId,
-            parentId: (args.parentId as string | null) ?? null,
-            afterId: (args.afterId as string | null) ?? null,
-            text: String(args.text ?? ""),
-            isTask: Boolean(args.isTask),
-            kind: args.kind === "paragraph" ? "paragraph" : null,
-            createdAt: Number(args.createdAt ?? 0),
-            updatedAt: updatedAt(),
-          }),
-        );
-        result = { id: id() };
-      } else if (path === "mutators:insertChildAtStart") {
-        commitOutlinePlan(
-          store,
-          planInsertChildAtStart(liveIndex(), {
-            id: id(),
-            userId,
-            parentId: (args.parentId as string | null) ?? null,
-            text: String(args.text ?? ""),
-            isTask: Boolean(args.isTask),
-            kind: args.kind === "paragraph" ? "paragraph" : null,
-            createdAt: Number(args.createdAt ?? 0),
-            updatedAt: updatedAt(),
-          }),
-        );
-        result = { id: id() };
-      } else if (path === "mutators:appendChild") {
-        commitOutlinePlan(
-          store,
-          planAppendChild(liveIndex(), {
-            id: id(),
-            userId,
-            parentId: (args.parentId as string | null) ?? null,
-            text: String(args.text ?? ""),
-            isTask: Boolean(args.isTask),
-            kind: args.kind === "paragraph" ? "paragraph" : null,
-            createdAt: Number(args.createdAt ?? 0),
-            updatedAt: updatedAt(),
-          }),
-        );
-        result = { id: id() };
-      } else if (path === "mutators:splitNode") {
-        const newId = String(args.newId ?? "");
-        commitOutlinePlan(
-          store,
-          planSplitNode(liveIndex(), {
-            id: id(),
-            newId,
-            userId,
-            parentId: (args.parentId as string | null) ?? null,
-            afterId: String(args.afterId ?? id()),
-            leftText: String(args.leftText ?? ""),
-            rightText: String(args.rightText ?? ""),
-            isTask: Boolean(args.isTask),
-            kind: args.kind === "paragraph" ? "paragraph" : null,
-            createdAt: Number(args.createdAt ?? 0),
-            updatedAt: updatedAt(),
-          }),
-        );
-        result = { id: newId };
-      } else if (path === "mutators:indent") {
-        commitOutlinePlan(
-          store,
-          planIndent(
-            liveIndex(),
-            id(),
-            updatedAt(),
-            Boolean(args.resolveMirror),
-          ),
-        );
-      } else if (path === "mutators:outdent") {
-        commitOutlinePlan(store, planOutdent(liveIndex(), id(), updatedAt()));
-      } else if (path === "mutators:removeNode") {
-        commitOutlinePlan(
-          store,
-          planRemoveNode(liveIndex(), id(), updatedAt()),
-        );
-      } else if (path === "mutators:moveNode") {
-        commitOutlinePlan(
-          store,
-          planMoveNode(liveIndex(), {
-            id: id(),
-            newParentId: (args.newParentId as string | null) ?? null,
-            afterSiblingId: (args.afterSiblingId as string | null) ?? null,
-            updatedAt: updatedAt(),
-            expandIds: args.expandIds as string[] | undefined,
-          }),
-        );
-      } else if (path === "mutators:applyChangeOps") {
-        const ops = (args.ops as ChangeOpLike[] | undefined) ?? [];
-        const uid = String(args.userId ?? "e2e-user");
-        const plan = planFromChangeOps(uid, ops);
-        commitOutlinePlan(store, plan);
-        result = {
-          count: ops.length,
-          deletes: plan.deletes.length,
-          inserts: plan.inserts.length,
-          patches: plan.patches.length,
-        };
-      } else if (path === "mutators:restoreNodes") {
-        const target = (args.nodes as OutlineNode[] | undefined) ?? [];
-        commitOutlinePlan(store, planRestoreNodes(liveNodes(), target));
-        result = { ok: true };
-      } else if (path === "mutators:importNodes") {
-        const imported = (args.nodes as OutlineNode[] | undefined) ?? [];
-        commitOutlinePlan(store, planImportNodes(imported));
-        result = { count: imported.length };
-      } else if (path === "mutators:importKvRows") {
-        const rows =
-          (args.rows as
-            | Array<{
-                kind: string;
-                tag?: string;
-                color?: string;
-                id?: string;
-                name?: string;
-                query?: string;
-                createdAt?: number;
-                key?: string;
-                nodeId?: string;
-                touchedAt?: number;
-              }>
-            | undefined) ?? [];
-        const poke = new Set<string>();
-        for (const row of rows) {
-          if (row.kind === "tagColor") {
-            const tag = String(row.tag ?? "");
-            tagColors.set(tag, {
-              _id: tag,
-              tag,
-              color: String(row.color ?? ""),
-              userId,
-            });
-            poke.add("userTagColors");
-          } else if (row.kind === "savedQuery") {
-            const sid = String(row.id ?? "");
-            savedQueries.set(sid, {
-              _id: sid,
-              name: String(row.name ?? ""),
-              query: String(row.query ?? ""),
-              createdAt: Number(row.createdAt ?? 0),
-              userId,
-            });
-            poke.add("userSavedQueries");
-          } else if (row.kind === "dailyIndex") {
-            const key = String(row.key ?? "");
-            dailyIndex.set(key, {
-              _id: key,
-              key,
-              nodeId: String(row.nodeId ?? ""),
-              touchedAt: Number(row.touchedAt ?? Date.now()),
-              userId,
-            });
-            poke.add("userDailyIndex");
-          }
-        }
-        result = { count: rows.length };
-        pokeShapes = poke;
-      } else if (path === "mutators:getMigrateState") {
-        result = migrateState ?? { nodesAt: null, kvAt: null };
-        pokeShapes = new Set();
-      } else if (path === "mutators:setMigrateState") {
-        const prev = migrateState ?? { nodesAt: null, kvAt: null };
-        migrateState = {
-          nodesAt:
-            args.nodesAt !== undefined
-              ? (args.nodesAt as number | null)
-              : prev.nodesAt,
-          kvAt:
-            args.kvAt !== undefined ? (args.kvAt as number | null) : prev.kvAt,
-        };
-        result = migrateState;
-        pokeShapes = new Set();
-      } else if (path === "mutators:mirrorNode") {
-        commitOutlinePlan(
-          store,
-          planMirrorNode(liveIndex(), {
-            id: id(),
-            userId,
-            sourceId: String(args.sourceId ?? ""),
-            targetParentId: (args.targetParentId as string | null) ?? null,
-            createdAt: Number(args.createdAt ?? 0),
-            updatedAt: updatedAt(),
-          }),
-        );
-        result = { id: id() };
-      } else if (path === "mutators:removeMany") {
-        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
-        commitOutlinePlan(
-          store,
-          planRemoveMany(liveNodes(), nodeIds, updatedAt()),
-        );
-      } else if (path === "mutators:moveMany") {
-        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
-        commitOutlinePlan(
-          store,
-          planMoveMany(liveNodes(), {
-            targetId: (args.targetId as string | null) ?? null,
-            nodeIds,
-            updatedAt: updatedAt(),
-          }),
-        );
-      } else if (path === "mutators:indentMany") {
-        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
-        commitOutlinePlan(
-          store,
-          planIndentMany(
-            liveNodes(),
-            nodeIds,
-            updatedAt(),
-            Boolean(args.resolveMirror),
-          ),
-        );
-      } else if (path === "mutators:outdentMany") {
-        const nodeIds = (args.nodeIds as string[] | undefined) ?? [];
-        commitOutlinePlan(
-          store,
-          planOutdentMany(liveNodes(), nodeIds, updatedAt()),
-        );
-      } else if (path === "mutators:materializeDailyNodes") {
-        const inserts =
-          (args.inserts as
-            | {
-                id: string;
-                parentId: string | null;
-                afterId: string | null;
-                text: string;
-              }[]
-            | undefined) ?? [];
-        commitOutlinePlan(
-          store,
-          planMaterializeDailyNodes(liveNodes(), {
-            userId,
-            inserts,
-            createdAt: Number(args.createdAt ?? 0),
-            updatedAt: updatedAt(),
-          }),
-        );
-        result = { count: inserts.length };
-      } else if (path === "mutators:seedIfEmpty") {
-        result = { seeded: false };
-      } else if (path === "mutators:upsertTagColor") {
-        const tag = String(args.tag ?? "");
-        tagColors.set(tag, {
-          _id: tag,
-          tag,
-          color: String(args.color ?? ""),
-          userId,
-        });
-        pokeShapes = new Set(["userTagColors"]);
-      } else if (path === "mutators:deleteTagColor") {
-        tagColors.delete(String(args.tag ?? ""));
-        pokeShapes = new Set(["userTagColors"]);
-      } else if (path === "mutators:upsertSavedQuery") {
-        const sid = String(args.id ?? "");
-        savedQueries.set(sid, {
-          _id: sid,
-          name: String(args.name ?? ""),
-          query: String(args.query ?? ""),
-          createdAt: Number(args.createdAt ?? 0),
-          userId,
-        });
-        pokeShapes = new Set(["userSavedQueries"]);
-      } else if (path === "mutators:patchSavedQuery") {
-        const sid = String(args.id ?? "");
-        const cur = savedQueries.get(sid);
-        if (cur) {
-          savedQueries.set(sid, {
-            ...cur,
-            name: args.name !== undefined ? String(args.name) : cur.name,
-            query: args.query !== undefined ? String(args.query) : cur.query,
-          });
-        }
-        pokeShapes = new Set(["userSavedQueries"]);
-      } else if (path === "mutators:deleteSavedQuery") {
-        savedQueries.delete(String(args.id ?? ""));
-        pokeShapes = new Set(["userSavedQueries"]);
-      } else if (path === "mutators:claimDailyMapping") {
-        const key = String(args.key ?? "");
-        const candidate = String(args.nodeId ?? "");
-        const existing = dailyIndex.get(key);
-        const { winner, won } = resolveDailyClaim(existing?.nodeId, candidate);
-        dailyIndex.set(key, {
-          _id: key,
-          key,
-          nodeId: winner,
-          touchedAt: Number(args.touchedAt ?? Date.now()),
-          userId,
-        });
-        result = { nodeId: winner, won };
-        pokeShapes = new Set(["userDailyIndex"]);
-      } else if (path === "mutators:upsertDailyMapping") {
-        const key = String(args.key ?? "");
-        dailyIndex.set(key, {
-          _id: key,
-          key,
-          nodeId: String(args.nodeId ?? ""),
-          touchedAt: Number(args.touchedAt ?? Date.now()),
-          userId,
-        });
-        pokeShapes = new Set(["userDailyIndex"]);
-      } else if (path === "mutators:deleteDailyMapping") {
-        dailyIndex.delete(String(args.key ?? ""));
-        pokeShapes = new Set(["userDailyIndex"]);
-      }
-      // Unknown mutators: accept so watermark chain doesn't wedge.
-
-      // Watermark is per-client on the shard (wholeOutline checkpoints gate
-      // isPersisted). Kv-only mutators must still advance wholeOutline or
-      // claimDailyMapping / materializeDailyNodes hang awaiting the poke —
-      // unless a spec opts into `suppressWholeOutlinePoke` (missed-poke case).
-      if (!opts.suppressWholeOutlinePoke) {
-        pokeShapes.add("wholeOutline");
-      } else {
-        pokeShapes.delete("wholeOutline");
-      }
-
-      await reply(route, { result, lastMutationId: seq });
-      if (pokeShapes.size > 0) pokeSubscribed(seq, pokeShapes);
-    },
-  );
-
-  await page.routeWebSocket(
-    (url) => url.pathname === "/_lunora/ws",
-    (ws) => {
-      sockets.add(ws);
-      ws.onClose(() => sockets.delete(ws));
-      ws.onMessage((raw) => {
-        if (typeof raw !== "string") return;
-        if (raw === "lunora-ping") {
-          ws.send("lunora-pong");
-          return;
-        }
-        let msg: {
-          type?: string;
-          id?: string;
-          shape?: { name?: string; args?: unknown };
-        };
-        try {
-          msg = JSON.parse(raw) as typeof msg;
-        } catch {
-          return;
-        }
-        if (msg.type === "connect") {
-          return;
-        }
-        if (msg.type === "shape_subscribe" && msg.id && msg.shape?.name) {
-          shapeSubs.set(msg.id, { name: msg.shape.name });
-          seedShape(ws, msg.id, msg.shape.name);
-        }
-      });
-    },
-  );
-}

@@ -471,10 +471,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           // is the pre-move set, so it can't answer this), then toast so the move
           // isn't silent. Fresh index off the live store, the focusKeyFor /
           // paste-resolveSeam technique (getTreeIndex()'s notify can lag).
-          // getLiveNodes(), never nodesCollection: that collection is
-          // ready-and-empty while the Lunora flag is ON (ADR 0058), so a direct
-          // read yields an index with NO visible ids and every filtered drag
-          // toasts "hidden by the current filter" even when the row is on screen.
           if (getViewFilter()) {
             const fresh = buildTreeIndex(getLiveNodes());
             const recomputed = buildViewFilter(fresh, viewCtx, isHidden);

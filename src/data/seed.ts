@@ -1,12 +1,7 @@
 import { Effect } from "effect";
 
-import {
-  nodesCollection,
-  nodesLoadError,
-  whenNodesSyncReady,
-} from "./collection";
+import { nodesCollection, nodesLoadError } from "./collection";
 import { BootstrapError } from "./errors";
-import { isLunoraSyncEnabled } from "./flags";
 import { appendChild } from "./mutations";
 import { createId, createNode, now } from "./tree";
 
@@ -36,23 +31,6 @@ let bootstrapped = false;
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return;
   bootstrapped = true;
-
-  // ADR 0058: Lunora path seeds via `seedIfEmpty` mutator in lunora-sync.
-  // Just wait for wholeOutline ready so the editor doesn't race an empty feed.
-  if (isLunoraSyncEnabled()) {
-    return Effect.runPromise(
-      Effect.match(
-        Effect.tryPromise({
-          try: () => whenNodesSyncReady(),
-          catch: (cause) => new BootstrapError({ cause }),
-        }),
-        {
-          onFailure: (error) => error,
-          onSuccess: () => undefined,
-        },
-      ),
-    );
-  }
 
   // One Effect program. Wait for the first load (tryPromise covers the rare
   // synchronous sync-init throw); then the typed-failure gate — if the sync
