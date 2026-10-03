@@ -1,6 +1,7 @@
 import { Key01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Effect } from "effect";
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -21,6 +22,7 @@ import { toast } from "sonner";
 
 import { openAppleShortcut } from "../components/apple-shortcut-opener";
 import { CaptureKeysDialog } from "../components/capture-keys-dialog";
+import { CliSetupDialog } from "../components/cli-setup-dialog";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openOpmlImport } from "../components/opml-import-opener";
@@ -30,6 +32,12 @@ import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
+import {
+  retryEditorFeatures,
+  setEditorFeature,
+  useEditorFeatures,
+  type EditorFeature,
+} from "../data/editor-features";
 import {
   setExperimentalCaptureEnabled,
   useExperimentalCaptureEnabled,
@@ -134,7 +142,7 @@ function SettingRow({
   action: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 bg-card px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-4 bg-card px-4 py-3 sm:flex-nowrap">
       <div className="flex min-w-0 items-start gap-3">
         {icon && (
           <span className="mt-0.5 shrink-0 text-muted-foreground [&_svg]:size-4">
@@ -150,7 +158,7 @@ function SettingRow({
           )}
         </div>
       </div>
-      <div className="shrink-0">{action}</div>
+      <div className="ml-auto shrink-0">{action}</div>
     </div>
   );
 }
@@ -616,12 +624,13 @@ function AccountSection() {
  *  the free-tier nudge only shows once we KNOW the account is free. */
 function ConnectionsSection({ plan }: { plan: PlanName | null }) {
   const [connectOpen, setConnectOpen] = useState(false);
+  const [cliOpen, setCliOpen] = useState(false);
   const free = plan === "free";
 
   return (
     <Section
       title="Connections"
-      description="Connect AI apps to your outline over MCP."
+      description="Use your outline from other apps, your terminal, or scripts."
     >
       <RowGroup>
         <SettingRow
@@ -638,15 +647,30 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
             </Button>
           }
         />
+        <SettingRow
+          title="Command line (CLI)"
+          description="Use Dotflowy from your terminal or scripts."
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Set up command line (CLI)"
+              onClick={() => setCliOpen(true)}
+            >
+              Set up
+            </Button>
+          }
+        />
       </RowGroup>
       {free && (
         <p className="text-sm text-muted-foreground">
           Connecting AI apps requires{" "}
           <span className="font-medium text-foreground">Unlimited</span>. See
-          plan &amp; billing above to upgrade.
+          Other settings → Plan &amp; billing to upgrade.
         </p>
       )}
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <CliSetupDialog open={cliOpen} onOpenChange={setCliOpen} />
     </Section>
   );
 }
@@ -773,6 +797,164 @@ function DataSection() {
   );
 }
 
+function EditorFeaturesSection() {
+  const preferences = useEditorFeatures();
+  const [saving, setSaving] = useState<EditorFeature | null>(null);
+  const [details, setDetails] = useState<EditorFeature | null>(null);
+  const features = [
+    {
+      id: "bible",
+      name: "Bible references",
+      description: "Turn Scripture references into interactive passage chips.",
+    },
+    {
+      id: "daily",
+      name: "Daily notes",
+      description: "A place for each day, with Today and calendar navigation.",
+    },
+  ] as const;
+
+  return (
+    <Section
+      title="Editor features"
+      description="Choose the extras you want in your outline."
+    >
+      <RowGroup>
+        {features.map((feature) => (
+          <div key={feature.id}>
+            <SettingRow
+              title={feature.name}
+              description={
+                <>
+                  {feature.description}
+                  {!preferences[feature.id] && (
+                    <span className="mt-1 block text-xs">
+                      Off.{" "}
+                      {feature.id === "bible"
+                        ? "References stay as plain text."
+                        : "Your existing notes stay in your outline."}
+                    </span>
+                  )}
+                </>
+              }
+              action={
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`${feature.name} Details`}
+                    aria-expanded={details === feature.id}
+                    aria-controls={`${feature.id}-details`}
+                    onClick={() =>
+                      setDetails(details === feature.id ? null : feature.id)
+                    }
+                  >
+                    Details
+                  </Button>
+                  <div className="flex size-11 items-center justify-center">
+                    <Switch
+                      aria-label={feature.name}
+                      aria-describedby={`${feature.id}-details`}
+                      checked={preferences[feature.id]}
+                      disabled={!preferences.ready || saving !== null}
+                      onCheckedChange={(enabled) => {
+                        setSaving(feature.id);
+                        void Effect.runPromise(
+                          Effect.tryPromise(() =>
+                            setEditorFeature(feature.id, enabled),
+                          ).pipe(
+                            Effect.catch(() =>
+                              Effect.sync(() =>
+                                toast.error(
+                                  `Couldn't save ${feature.name.toLowerCase()}. Your previous setting was restored.`,
+                                ),
+                              ),
+                            ),
+                            Effect.ensuring(Effect.sync(() => setSaving(null))),
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+              }
+            />
+            <div
+              id={`${feature.id}-details`}
+              hidden={details !== feature.id}
+              className="border-t bg-muted/30 p-4 text-sm"
+            >
+              <p className="font-medium">
+                {feature.name} is {preferences[feature.id] ? "on" : "off"}.
+              </p>
+              <h3 className="mt-3 font-medium">When off</h3>
+              <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+                {feature.id === "bible" ? (
+                  <>
+                    <li>Scripture references remain as the text you wrote.</li>
+                    <li>
+                      Passage chips and Bible-specific controls stop appearing.
+                    </li>
+                  </>
+                ) : (
+                  <>
+                    <li>
+                      Today, calendar navigation, date chips, and daily commands
+                      stop appearing.
+                    </li>
+                    <li>Quick-add saves to the top level instead of Today.</li>
+                    <li>
+                      Existing notes remain accessible. Daily folders stay
+                      protected from deletion.
+                    </li>
+                    <li>Explicit CLI and MCP daily commands still work.</li>
+                  </>
+                )}
+              </ul>
+              <p className="mt-3 text-muted-foreground">
+                Turning this feature off never deletes your notes. Turn it back
+                on to use it with the same content.
+              </p>
+            </div>
+          </div>
+        ))}
+      </RowGroup>
+      <p className="text-xs text-muted-foreground">
+        Turning a feature off never deletes your notes. These settings follow
+        your account across devices.
+      </p>
+      {!preferences.ready && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {preferences.error ? (
+            <>
+              Couldn't load your feature settings.{" "}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void Effect.runPromise(
+                    Effect.tryPromise(() => retryEditorFeatures()).pipe(
+                      Effect.catch(() =>
+                        Effect.sync(() =>
+                          toast.error("Couldn't load your feature settings."),
+                        ),
+                      ),
+                    ),
+                  );
+                }}
+              >
+                Retry
+              </Button>
+            </>
+          ) : (
+            "Loading your feature settings…"
+          )}
+        </p>
+      )}
+    </Section>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
   const { textSize, setTextSize } = useTextSize();
@@ -844,18 +1026,25 @@ function SettingsPage() {
       </header>
 
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-4 py-8 sm:px-6">
-        <Section
-          title="Plan & billing"
-          description="Your plan, usage, and payment."
-        >
-          <PlanBilling {...subscriptions} />
-        </Section>
-
-        <AccountSection />
         <ConnectionsSection plan={plan} />
-        <DataSection />
+        <EditorFeaturesSection />
         <AppearanceSection />
         <ExperimentalSection />
+        <details className="border-t pt-4">
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            Other settings
+          </summary>
+          <div className="mt-6 flex flex-col gap-10">
+            <Section
+              title="Plan & billing"
+              description="Your plan, usage, and payment."
+            >
+              <PlanBilling {...subscriptions} />
+            </Section>
+            <AccountSection />
+            <DataSection />
+          </div>
+        </details>
       </div>
     </main>
   );

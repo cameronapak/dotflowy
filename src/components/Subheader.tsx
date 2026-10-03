@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 import type { PluginContext } from "../plugins/types";
 
-import { subheaderSlots } from "../plugins/registry";
+import { usePluginChrome } from "../plugins/registry";
 import { QueryFilterBar } from "./query-filter";
 import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 
@@ -26,6 +26,7 @@ import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
  * isn't clipped.
  */
 export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
+  const { subheaderSlots } = usePluginChrome();
   const reduceMotion = useReducedMotion();
   const contentRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // A flat top-level list -- the simplest shape to reason about sibling-scoped
 // selection (no subtree-implied descendants to track).
@@ -267,7 +267,9 @@ test.describe("Node multi-selection", () => {
   test("Backspace deletes the selected roots in one batch; undo restores", async ({
     page,
   }) => {
-    await load(page);
+    // Undo waits for the deletion's write acknowledgement before restoring.
+    await seedOutline(page, FLAT, { postDelayMs: 300 });
+    await openSeededOutline(page, { anchorId: "a" });
     await focus(page, "b");
     await page.keyboard.press("Shift+ArrowDown"); // enter -> [b]
     await page.keyboard.press("Shift+ArrowDown"); // extend -> [b, c]
@@ -278,7 +280,7 @@ test.describe("Node multi-selection", () => {
     await expect(focused(page)).toHaveText("alpha");
 
     await page.keyboard.press(`${MOD}+z`);
-    expect(await orderedTexts(page)).toEqual([
+    await expect(page.locator(".outline-row .node-text")).toHaveText([
       "alpha",
       "bravo",
       "charlie",

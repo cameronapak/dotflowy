@@ -212,6 +212,8 @@ test.describe("quick-add capture", () => {
     // Zoom into Today FIRST, so the capture lands in the view we're already on.
     await todayButton(page).click();
     await expect(page).toHaveURL(/\/[^/]+$/);
+    // Let navigation focus its new empty entry before the hotkey helper blurs it.
+    await expect(page.locator(".outline-row .node-text:focus")).toHaveText("");
 
     await openQuickAdd(page);
     await type(page, "silent-note");

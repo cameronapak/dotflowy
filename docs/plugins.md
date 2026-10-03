@@ -5,8 +5,8 @@ The editor is a clean core extended by **plugins**: modules compiled into the bu
 Read [ADR 0001](./adr/0001-plugin-architecture.md) before adding a seam, and [ADR 0031](./adr/0031-two-lane-plugin-trust.md) before giving a plugin new privileges. Widget-mode tokens: [ADR 0006](./adr/0006-react-token-widgets.md).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `NodeProtection`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
-- **`index.ts`** — the one explicit ordered array `plugins = [todos, provenance, code, links, nodeLinks, routeBible, tags, emphasis, highlight, spoiler, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order.
-- **`registry.ts`** — derives everything from that array once at load (token regex + dispatch, interaction dispatch, view-transform composition, menu/command/keymap lists with the load-time reserved-key guard, row/header/subheader slots, `isProtected`, the Seam-J providers, the input chain, `registerWidget`). The core consumes these and stays generic.
+- **`index.ts`** — the one explicit ordered array `plugins = [todos, provenance, code, links, nodeLinks, routeBible, tags, emphasis, highlight, spoiler, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order. `editorFeaturePlugins` maps the two reviewed optional plugins to their account preference keys.
+- **`registry.ts`** — derives the token regex, dispatch, transforms, menus, commands, keymaps, slots, protection, search providers, and input chain from that array. Optional Bible and Daily editor seams refresh when account preferences change; widget registration, protection, and preloads remain unconditional. React consumers read dynamic slots and commands through `usePluginChrome`. The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
 
@@ -35,6 +35,22 @@ Feature → seams: **code** A · **links** A+B+C+I+K · **node-links** A(widget)
 **Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans. **Shared token helpers live in `src/plugins/token-kit.ts`** (`isRevealed` fold/reveal predicate, verbatim-match-or-drop write-back, `spliceToken` re-export) — use them, don't re-copy the predicate; `spliceToken` itself lives in the dependency-free `token-splice.ts` so worker-reachable data modules can import it without dragging DOM types into the Workers tsconfig. **Plugin UI comes from `src/plugins/kit.ts`** — the curated shadcn surface a Lane-A plugin may use (ADR 0031); a plugin importing `@/components/ui/*` directly is an oxlint error (`no-restricted-imports` override on `src/plugins/**`). Add a component to the kit when a plugin needs it; there is no plugin `styles` seam (style via Tailwind utilities on your `El`/JSX).
 
 Add a new side-collection to `KV_COLLECTIONS` in `worker/index.ts`. The e2e kv mock accepts any name.
+
+## Optional editor features
+
+Settings → Editor features controls Bible references and Daily notes, both on
+by default. `src/data/editor-features.ts` stores `editor-feature:bible` and
+`editor-feature:daily` in the existing per-user `account-prefs` namespace. Local
+changes apply optimistically, failed saves roll back, and other tabs and devices
+refresh on focus. Optional controls wait for the initial preference read.
+
+Turning a feature off changes tokens, interactions, commands, chrome, search
+providers, and the default capture destination, not stored text or mappings.
+Daily scaffold protection and preloads stay active. The node-link picker also
+omits Daily date suggestions. All three editor render paths redecorate from DOM
+source text while preserving the caret; composing text waits until IME ends.
+CLI and MCP daily operations remain available. See
+[ADR 0064](./adr/0064-account-wide-editor-feature-preferences.md).
 
 ## Editor render paths
 

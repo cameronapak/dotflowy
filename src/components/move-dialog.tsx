@@ -22,13 +22,13 @@ import {
   type TreeIndex,
 } from "../data/tree";
 import { useTree } from "../data/useTree";
-import { searchAnnotation } from "../plugins/registry";
+import { searchAnnotation, usePluginChrome } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMoveDialogOpener, type MoveMode } from "./move-dialog-opener";
 import {
   buildTargetCandidates,
   subtreeIds,
-  TARGET_SEARCH_OPTIONS,
+  targetSearchOptions,
 } from "./node-target-search";
 import {
   Command,
@@ -58,12 +58,6 @@ import {
  * (with a "Go" action to jump there on demand) -- moving a node shouldn't yank
  * you away from where you were working.
  */
-
-// The shared destination-search ranking (node-target-search.ts), plus
-// `includeMatches` for the highlighter -- so `/move` and the quick-add retarget
-// chip can't rank the same query differently. Aliases (Seam J) ride along, so
-// `/move` -> "today" finds the daily note despite its full-date text.
-const FUSE_OPTIONS = { ...TARGET_SEARCH_OPTIONS, includeMatches: true };
 
 /** A destination row: a node, plus its Fuse match ranges when searched. */
 interface Hit {
@@ -140,6 +134,7 @@ function MoveDialogInner({
   setQuery: (q: string) => void;
 }) {
   const { index } = useTree();
+  const { aliasProviders } = usePluginChrome();
   const navigate = useNavigate();
   const open = nodeIds !== null && nodeIds.length > 0;
 
@@ -168,8 +163,14 @@ function MoveDialogInner({
   }, [index, nodeIds, mode]);
 
   const fuse = useMemo(
-    () => (open ? new Fuse(candidates, FUSE_OPTIONS) : null),
-    [open, candidates],
+    () =>
+      open
+        ? new Fuse(candidates, {
+            ...targetSearchOptions(aliasProviders),
+            includeMatches: true,
+          })
+        : null,
+    [open, candidates, aliasProviders],
   );
 
   const q = query.trim();

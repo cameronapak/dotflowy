@@ -6,7 +6,7 @@ import type { CommandSpec, PluginContext } from "../plugins/types";
 
 import { CORE_COMMANDS } from "../data/core-commands";
 import { useIsMobile } from "../hooks/use-mobile";
-import { commandSpecs } from "../plugins/registry";
+import { usePluginChrome } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { MenuDrawerContent } from "./menu-drawer";
@@ -18,15 +18,15 @@ import { useClampedMenuPosition } from "./use-menu-position";
  *  array order), then the core's (`data/core-commands.ts`) -- so the contextual
  *  type-change commands lead and the destination pickers trail, preserving the
  *  pre-plugin palette order. Detection/filtering/keyboard/rendering stay generic. */
-const COMMANDS: CommandSpec[] = [...commandSpecs, ...CORE_COMMANDS];
-
 function filterCommands(
   node: Node,
   query: string,
+  commands: CommandSpec[],
   commandFilter?: (spec: CommandSpec) => boolean,
 ): CommandSpec[] {
   const q = query.toLowerCase();
-  const base = commandFilter ? COMMANDS.filter(commandFilter) : COMMANDS;
+  const all = [...commands, ...CORE_COMMANDS];
+  const base = commandFilter ? all.filter(commandFilter) : all;
   const available = base.filter((c) => c.available(node));
   if (!q) return available;
   return available.filter(
@@ -71,10 +71,13 @@ export function useSlashMenu({
    *  the full outline palette. */
   commandFilter?: (spec: CommandSpec) => boolean;
 }) {
+  const { commandSpecs } = usePluginChrome();
   const [state, setState] = useState<SlashState | null>(null);
   const mobile = useIsMobile();
 
-  const items = state ? filterCommands(node, state.query, commandFilter) : [];
+  const items = state
+    ? filterCommands(node, state.query, commandSpecs, commandFilter)
+    : [];
 
   // Keep the menu on screen: clamp the caret coords to the viewport (shift left
   // near the right edge, flip above near the bottom). Re-measures on item count.
@@ -109,7 +112,7 @@ export function useSlashMenu({
   const select = (index: number) => {
     const el = getEl();
     if (!el || !state) return;
-    const list = filterCommands(node, state.query, commandFilter);
+    const list = filterCommands(node, state.query, commandSpecs, commandFilter);
     const item = list[index];
     if (!item) {
       setState(null);

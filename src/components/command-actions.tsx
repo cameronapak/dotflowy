@@ -26,6 +26,7 @@ import { useMemo } from "react";
 
 import type { CommandCenterAction } from "../data/command-center";
 
+import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
@@ -63,6 +64,7 @@ export function useGlobalActions(opts: {
   openConnect: () => void;
 }): CommandCenterAction[] {
   const { openConnect } = opts;
+  const { daily } = useEditorFeatures();
   const { theme, setTheme } = useTheme();
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
@@ -99,10 +101,20 @@ export function useGlobalActions(opts: {
       {
         id: "g:quick-add",
         label: "Quick add",
-        description: "Capture a thought to Today without leaving where you are",
+        description: daily
+          ? "Capture a thought to Today without leaving where you are"
+          : "Capture a thought to the top level without leaving where you are",
         icon: PlusIcon,
         scope: "global",
-        keywords: ["quick", "add", "capture", "new", "today", "inbox", "note"],
+        keywords: [
+          "quick",
+          "add",
+          "capture",
+          "new",
+          "inbox",
+          "note",
+          ...(daily ? ["today"] : []),
+        ],
         run: () => openQuickAdd(),
       },
       {
@@ -312,5 +324,6 @@ export function useGlobalActions(opts: {
     spotlight,
     rootNode,
     openConnect,
+    daily,
   ]);
 }

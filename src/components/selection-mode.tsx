@@ -21,7 +21,7 @@ import {
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
-import type { PluginContext } from "../plugins/types";
+import type { CommandSpec, PluginContext } from "../plugins/types";
 
 import { paragraphCommand } from "../data/core-commands";
 import { isMirrorsEnabled } from "../data/flags";
@@ -55,7 +55,7 @@ import {
   findVisibleNeighbor,
   lastVisibleDescendant,
 } from "../data/visible-order";
-import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { isProtected, usePluginChrome } from "../plugins/registry";
 import { placeCaretAtEnd } from "./caret-place";
 import {
   DELETE_CONFIRM_THRESHOLD,
@@ -460,6 +460,7 @@ export function SelectionActionsMenu({
   ops: SelectionOps;
   getCtx: () => PluginContext;
 }) {
+  const { selectionCommandSpecs } = usePluginChrome();
   const active = useIsSelectionActive();
   const rootIds = useSelectionRootIds();
   const [hover, setHover] = useState(0);
@@ -512,7 +513,9 @@ export function SelectionActionsMenu({
   }, [active, focusId, rootIds, refs, update]);
 
   const items =
-    active && rootIds.length ? buildItems(rootIds, ops, getCtx) : null;
+    active && rootIds.length
+      ? buildItems(rootIds, ops, getCtx, selectionCommandSpecs)
+      : null;
   if (!active || !focusId || !items) return null;
 
   const onSelect = (i: number) => {
@@ -541,6 +544,7 @@ function buildItems(
   rootIds: string[],
   ops: SelectionOps,
   getCtx: () => PluginContext,
+  selectionCommandSpecs: CommandSpec[],
 ): SelItem[] {
   const index = getTreeIndex();
   const core: SelItem[] = [

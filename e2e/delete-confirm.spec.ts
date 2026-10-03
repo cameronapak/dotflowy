@@ -10,7 +10,6 @@ import {
   openSeededOutline,
   seedOutline,
   STANDARD_TREE,
-  waitForSeededNode,
   type SeedNode,
 } from "./fixtures";
 
@@ -70,7 +69,7 @@ test.describe("big-delete confirmation", () => {
     // Nothing was deleted — and a reload agrees.
     await expect(text(page, "big")).toBeVisible();
     await page.reload();
-    await waitForSeededNode(page, "big");
+    await text(page, "big").waitFor({ state: "visible" });
     await expect(text(page, "big")).toBeVisible();
   });
 
@@ -90,14 +89,14 @@ test.describe("big-delete confirmation", () => {
     await expect(text(page, "charlie")).toBeVisible();
     // Persisted through the (mock) server store.
     await page.reload();
-    await waitForSeededNode(page, "alpha");
+    await text(page, "alpha").waitFor({ state: "visible" });
     await expect(text(page, "alpha")).toBeVisible();
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
 
     // (No reload-then-undo: the undo stack is session state. Re-run the flow
     // in-session to prove the single capture.)
     await seedOutline(page, bigSeed(40));
-    await page.goto("/");
+    await openSeededOutline(page, { anchorId: "big" });
     await text(page, "big").click();
     await page.keyboard.press("ControlOrMeta+Shift+Backspace");
     await page.getByTestId("delete-confirm").click();
@@ -131,7 +130,7 @@ test.describe("big-delete confirmation", () => {
     await expect(page.getByTestId("delete-confirm-dialog")).toHaveCount(0);
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
     await page.reload();
-    await waitForSeededNode(page, "alpha");
+    await text(page, "alpha").waitFor({ state: "visible" });
     await expect(text(page, "alpha")).toBeVisible();
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
   });

@@ -14,6 +14,7 @@ import { CalendarDaysIcon, Link2 } from "lucide-react";
 
 import type { Node } from "../../data/tree";
 
+import { getEditorFeatures } from "../../data/editor-features";
 import {
   linkTargetId,
   linkedNodeLabel,
@@ -116,7 +117,9 @@ export default definePlugin({
         // would shadow. Relatives + ISO + gated NL chrono live in
         // `pickerDateSuggestions` (client-only; date-links stays Worker-safe).
         // Inserts `[[YYYY-MM-DD]]` tokens — never uuid links, never navigate.
-        const dateHits = pickerDateSuggestions(raw);
+        const features = getEditorFeatures();
+        const dateHits =
+          features.ready && features.daily ? pickerDateSuggestions(raw) : [];
         const dates = dateHits.map((s) => ({
           key: `date:${s.key}`,
           render: () => (

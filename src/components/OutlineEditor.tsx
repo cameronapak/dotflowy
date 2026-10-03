@@ -113,7 +113,7 @@ import {
   dispatchPointerUp,
   keymapSpecs,
   pluginPreloads,
-  slotsAt,
+  usePluginChrome,
   useIsProtected,
   useViewFilter,
 } from "../plugins/registry";
@@ -139,6 +139,7 @@ import {
   readSource,
   revealLinkAtCaret,
   setCaretOffset,
+  useEditorFeatureDecoration,
   watchCaretReveal,
 } from "./inline-code";
 import { signalJoinRefusal } from "./join-refusal";
@@ -2168,6 +2169,8 @@ function ZoomedTitle({
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  useEditorFeatureDecoration(ref, composingRef);
+  const { slotsByPosition } = usePluginChrome();
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
   // node just as on a list bullet, so it wears the same lock when zoomed in.
   // Reactive: a plugin's protection can load async (mirrors OutlineRow). See
@@ -2186,7 +2189,7 @@ function ZoomedTitle({
   // docs/plugins.md "A node renders in three places"). Mirrors OutlineRow's order: slots,
   // then the lock, then the badge.
   const beforeTextSlots: SlotSpec[] = [
-    ...slotsAt("title:before-text"),
+    ...(slotsByPosition.get("title:before-text") ?? []),
     {
       // A zoomed paragraph keeps its signifier -- muted and non-interactive,
       // since the title has nothing to zoom into (ADR 0045).
