@@ -1,5 +1,5 @@
 import { ManagedRuntime } from "effect";
-import { Socket } from "effect/unstable/socket";
+import { Socket } from "effect/socket";
 
 /**
  * The app's single long-lived Effect runtime.

@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option } from "effect";
-import { Argument, Command, Flag } from "effect/unstable/cli";
+import { Argument, Command, Flag } from "effect/cli";
 
 import { fail, type JsonObject, VERSION } from "./core.js";
 
