@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   ALLOWED_ACTIONS,
@@ -43,6 +52,51 @@ test("the committed artifact is deterministic, valid, and credential-free", () =
   expect(artifact).not.toContain("dfc_");
   expect(artifact).toContain("PASTE_CAPTURE_KEY_DURING_IMPORT");
 });
+
+test.skipIf(process.platform !== "darwin")(
+  "signing rejects embedded credentials before invoking Apple's CLI",
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), "dotflowy-signing-test-"));
+    try {
+      for (const path of ["scripts", "public/shortcuts", "bin"]) {
+        mkdirSync(join(dir, path), { recursive: true });
+      }
+      const script = join(dir, "scripts/shortcut.ts");
+      copyFileSync(join(import.meta.dir, "shortcut.ts"), script);
+      writeFileSync(
+        join(dir, "public/shortcuts/add-to-dotflowy-today.shortcut"),
+        artifact.replaceAll(
+          "PASTE_CAPTURE_KEY_DURING_IMPORT",
+          "dfc_fake_signing_test_key",
+        ),
+      );
+      writeFileSync(
+        join(dir, "bin/shortcuts"),
+        `#!${process.execPath}\nconsole.error("signing was invoked"); process.exit(77);\n`,
+        { mode: 0o755 },
+      );
+      const result = Bun.spawnSync([process.execPath, script, "--sign"], {
+        env: { ...process.env, PATH: `${dir}/bin:${process.env.PATH}` },
+      });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr.toString()).toContain(
+        "possible embedded credential: dfc_",
+      );
+      expect(result.stderr.toString()).not.toContain("signing was invoked");
+
+      writeFileSync(
+        join(dir, "public/shortcuts/add-to-dotflowy-today.shortcut"),
+        artifact,
+      );
+      const clean = Bun.spawnSync([process.execPath, script, "--sign"], {
+        env: { ...process.env, PATH: `${dir}/bin:${process.env.PATH}` },
+      });
+      expect(clean.stderr.toString()).toContain("signing was invoked");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("every action is one Shortcuts recognizes", () => {
   const identifiers = actions.map(identifierOf);

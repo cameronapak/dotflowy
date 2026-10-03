@@ -567,9 +567,13 @@ function sign(): void {
   if (process.platform !== "darwin") {
     throw new Error("Apple's `shortcuts sign` is available only on macOS");
   }
+  const input = readFileSync(OUTPUT, "utf8");
+  const workflow = asDict(parsePlist(input));
+  if (!workflow) throw new Error("signing input is not an unsigned plist dict");
+  validateWorkflow(workflow);
   const unsigned = `${OUTPUT}.unsigned.shortcut`;
   const signed = `${OUTPUT}.signed.shortcut`;
-  writeFileSync(unsigned, readFileSync(OUTPUT));
+  writeFileSync(unsigned, input);
   rmSync(signed, { force: true });
   const result = Bun.spawnSync([
     "shortcuts",
