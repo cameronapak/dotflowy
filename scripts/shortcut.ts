@@ -1,302 +1,486 @@
+#!/usr/bin/env bun
+/**
+ * Builds the credential-free Apple Shortcut template (ADR 0065).
+ *
+ * The source of truth is `shortcuts/add-to-dotflowy-today.cherri`, compiled with
+ * Cherri (https://cherrilang.org). Cherri owns the action schemas, so the
+ * template can only contain actions Shortcuts actually knows — hand-written
+ * plist identifiers are how the first template shipped an unrecognized Match
+ * Text action and a "Generate UUID" action that does not exist as a built-in.
+ *
+ * Compilation repairs Cherri v2.3.0's import questions and control-flow IDs:
+ *
+ *   - `ActionIndex` is rebound to the action holding the question's parameter.
+ *     Cherri records a stale index, and a question bound to the wrong action
+ *     never reaches its target, leaving the capture key empty.
+ *   - The bound parameter is pre-filled with the question's default, so a
+ *     skipped setup question still runs and reports the server's clear
+ *     "invalid key" instead of failing on an empty parameter.
+ *   - Each conditional block gets a distinct deterministic grouping ID;
+ *     Cherri's derived UUID mode reuses one ID across every block.
+ *
+ * Usage:
+ *   bun scripts/shortcut.ts --build     compile the source into the artifact
+ *   bun scripts/shortcut.ts --validate  check the committed artifact
+ *   bun scripts/shortcut.ts --sign      macOS only: Apple `shortcuts sign`
+ */
 import {
+  existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-type Plist = boolean | number | string | Plist[] | { [key: string]: Plist };
+export type Plist =
+  | boolean
+  | number
+  | string
+  | Plist[]
+  | { [key: string]: Plist };
+
+/** A compiled workflow, keyed by its plist fields. */
+export type Workflow = { [key: string]: Plist };
+
+/**
+ * The one place that narrows the closed `Plist` union by runtime shape. The
+ * parser below is the boundary that builds those values, so every other function
+ * works with the narrowed types instead of re-asserting them.
+ */
+export function asDict(value: Plist | undefined): Workflow | undefined {
+  // This is the closed Plist union, not boundary parsing.
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+export function asArray(value: Plist | undefined): Plist[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+export function asString(value: Plist | undefined): string | undefined {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  return typeof value === "string" ? value : undefined;
+}
+
+export function asNumber(value: Plist | undefined): number | undefined {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  return typeof value === "number" ? value : undefined;
+}
 
 const ROOT = join(import.meta.dir, "..");
+const SOURCE = join(ROOT, "shortcuts/add-to-dotflowy-today.cherri");
 const OUTPUT = join(ROOT, "public/shortcuts/add-to-dotflowy-today.shortcut");
+/** Must match `#define name` in the source: Cherri names its output after it. */
+const SHORTCUT_NAME = "Add to Dotflowy Today";
 const DEFAULT_SERVER = "https://app.dotflowy.com";
-const BACKSLASH = String.fromCharCode(92);
-const IDS = {
-  inputIf: "4B1C8C85-CCB1-498E-BAE0-000000000001",
-  inputSet: "4B1C8C85-CCB1-498E-BAE0-000000000002",
-  ask: "4B1C8C85-CCB1-498E-BAE0-000000000003",
-  askSet: "4B1C8C85-CCB1-498E-BAE0-000000000004",
-  nonblank: "4B1C8C85-CCB1-498E-BAE0-000000000005",
-  uuid: "4B1C8C85-CCB1-498E-BAE0-000000000006",
-  date: "4B1C8C85-CCB1-498E-BAE0-000000000007",
-  server: "4B1C8C85-CCB1-498E-BAE0-000000000008",
-  key: "4B1C8C85-CCB1-498E-BAE0-000000000009",
-  request: "4B1C8C85-CCB1-498E-BAE0-000000000010",
-  saved: "4B1C8C85-CCB1-498E-BAE0-000000000011",
-  node: "4B1C8C85-CCB1-498E-BAE0-000000000012",
-  daily: "4B1C8C85-CCB1-498E-BAE0-000000000013",
-  receiptDate: "4B1C8C85-CCB1-498E-BAE0-000000000014",
-  receipt: "4B1C8C85-CCB1-498E-BAE0-000000000015",
-  receiptMatch: "4B1C8C85-CCB1-498E-BAE0-000000000016",
-  error: "4B1C8C85-CCB1-498E-BAE0-000000000017",
-  message: "4B1C8C85-CCB1-498E-BAE0-000000000018",
-} as const;
 
-const action = (
-  identifier: string,
-  parameters: Record<string, Plist> = {},
-) => ({
-  WFWorkflowActionIdentifier: `is.workflow.actions.${identifier}`,
-  WFWorkflowActionParameters: parameters,
-});
+/**
+ * Every action the template may contain. Cherri refuses to compile an action it
+ * does not define, and this list keeps the compiled output honest: an identifier
+ * outside it is one Shortcuts may not recognize.
+ */
+export const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
+  "is.workflow.actions.ask",
+  "is.workflow.actions.conditional",
+  "is.workflow.actions.downloadurl",
+  "is.workflow.actions.format.date",
+  "is.workflow.actions.gettext",
+  "is.workflow.actions.getvalueforkey",
+  "is.workflow.actions.nothing",
+  "is.workflow.actions.notification",
+  "is.workflow.actions.number",
+  "is.workflow.actions.number.random",
+  "is.workflow.actions.setvariable",
+  "is.workflow.actions.showresult",
+  "is.workflow.actions.text.match",
+]);
 
-const attachment = (uuid: string, outputName: string): Plist => ({
-  Value: { OutputName: outputName, OutputUUID: uuid, Type: "ActionOutput" },
-  WFSerializationType: "WFTextTokenAttachment",
-});
+const REQUIRED_ACTIONS = [
+  "is.workflow.actions.ask",
+  "is.workflow.actions.downloadurl",
+  "is.workflow.actions.format.date",
+  "is.workflow.actions.getvalueforkey",
+  "is.workflow.actions.notification",
+  "is.workflow.actions.number.random",
+  "is.workflow.actions.showresult",
+  "is.workflow.actions.text.match",
+];
 
-const variable = (name: string): Plist => ({
-  Value: { OutputName: name, Type: "Variable", VariableName: name },
-  WFSerializationType: "WFTextTokenAttachment",
-});
+const FORBIDDEN_MARKERS = [
+  "sk-",
+  "Bearer ey",
+  "Bearer dotflowy_",
+  "api_key=",
+  "dfc_",
+];
 
-const extensionInput: Plist = {
-  Value: { OutputName: "Shortcut Input", Type: "ExtensionInput" },
-  WFSerializationType: "WFTextTokenAttachment",
-};
+/* --- Cherri ---------------------------------------------------------------- */
 
-function tokenString(
-  text: string,
-  refs: Array<{ at: number; value: Record<string, Plist> }>,
-): Plist {
-  return {
-    Value: {
-      attachmentsByRange: Object.fromEntries(
-        refs.map(({ at, value }) => [`{${at}, 1}`, value]),
-      ),
-      string: text,
-    },
-    WFSerializationType: "WFTextTokenString",
-  };
+function cherriBinary(): string {
+  return process.env.CHERRI_BIN ?? "cherri";
 }
 
-const tokenRef = (uuid: string, outputName: string) => ({
-  OutputName: outputName,
-  OutputUUID: uuid,
-  Type: "ActionOutput",
-});
-
-function dictionaryItems(entries: Array<[string, Plist, number?]>): Plist {
-  return {
-    Value: {
-      WFDictionaryFieldValueItems: entries.map(([key, value, type = 0]) => ({
-        WFItemType: type,
-        WFKey: tokenString(key, []),
-        WFValue: value,
-      })),
-    },
-    WFSerializationType: "WFDictionaryFieldValue",
-  };
+/**
+ * Compiles the Cherri source and returns the workflow, normalized.
+ *
+ * Cherri writes its artifact next to the source file (its `--output` flag is
+ * ignored in v2.3.0), so the source is copied into a scratch directory first.
+ */
+export function compile(): Workflow {
+  const bin = cherriBinary();
+  const dir = mkdtempSync(join(tmpdir(), "dotflowy-shortcut-"));
+  try {
+    const source = join(dir, SOURCE.split("/").at(-1)!);
+    writeFileSync(source, readFileSync(SOURCE));
+    let result: Bun.SyncSubprocess<"ignore", "pipe">;
+    try {
+      result = Bun.spawnSync(
+        [bin, source, "--skip-sign", "--derive-uuids", "--no-ansi"],
+        { stderr: "pipe" },
+      );
+    } catch {
+      throw new Error(
+        `\`${bin}\` was not found. Install the Cherri compiler (https://cherrilang.org) or point CHERRI_BIN at it.`,
+      );
+    }
+    if (result.exitCode !== 0) {
+      const stderr = result.stderr.toString().trim();
+      throw new Error(
+        stderr || `\`${bin}\` failed with exit code ${result.exitCode}`,
+      );
+    }
+    const artifact = join(dir, `${SHORTCUT_NAME}_unsigned.shortcut`);
+    if (!existsSync(artifact)) {
+      throw new Error(`\`${bin}\` wrote no artifact at ${artifact}`);
+    }
+    const workflow = asDict(parsePlist(readFileSync(artifact, "utf8")));
+    if (!workflow) throw new Error("compiled output is not a plist dict");
+    normalizeConditionalGroups(workflow);
+    normalizeImportQuestions(workflow);
+    sortDictionaryItems(workflow);
+    return workflow;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
-export function createWorkflow() {
-  const inputGroup = "A963ED4A-02E5-4EA7-BDBF-000000000001";
-  const nonblankGroup = "A963ED4A-02E5-4EA7-BDBF-000000000002";
-  const receiptGroup = "A963ED4A-02E5-4EA7-BDBF-000000000003";
-  const actions = [
-    action("conditional", {
-      GroupingIdentifier: inputGroup,
-      UUID: IDS.inputIf,
-      WFCondition: 100,
-      WFControlFlowMode: 0,
-      WFInput: extensionInput,
-    }),
-    action("setvariable", {
-      UUID: IDS.inputSet,
-      WFInput: extensionInput,
-      WFVariableName: "Capture Text",
-    }),
-    action("conditional", {
-      GroupingIdentifier: inputGroup,
-      WFControlFlowMode: 1,
-    }),
-    action("ask", {
-      UUID: IDS.ask,
-      WFAskActionDefaultAnswer: "",
-      WFAskActionPrompt:
-        "What do you want to add to today? You can type or use keyboard dictation.",
-      WFInputType: "Text",
-    }),
-    action("setvariable", {
-      UUID: IDS.askSet,
-      WFInput: attachment(IDS.ask, "Provided Input"),
-      WFVariableName: "Capture Text",
-    }),
-    action("conditional", {
-      GroupingIdentifier: inputGroup,
-      WFControlFlowMode: 2,
-    }),
-    action("matchtext", {
-      UUID: IDS.nonblank,
-      WFInput: variable("Capture Text"),
-      WFMatchTextPattern: `${BACKSLASH}S`,
-    }),
-    action("conditional", {
-      GroupingIdentifier: nonblankGroup,
-      WFCondition: 100,
-      WFControlFlowMode: 0,
-      WFInput: attachment(IDS.nonblank, "Matches"),
-    }),
-    action("generateuuid", { UUID: IDS.uuid }),
-    action("format.date", {
-      UUID: IDS.date,
-      WFDate: {
-        Value: { Type: "CurrentDate" },
-        WFSerializationType: "WFTextTokenAttachment",
-      },
-      WFDateFormat: "Custom",
-      WFDateFormatStyle: "Custom",
-      WFDateFormatString: "yyyy-MM-dd",
-      WFISO8601IncludeTime: false,
-      WFTimeFormatStyle: "None",
-    }),
-    action("url", {
-      UUID: IDS.server,
-      WFURLActionURL: `${DEFAULT_SERVER}/api/capture`,
-    }),
-    action("gettext", {
-      UUID: IDS.key,
-      WFTextActionText: "PASTE_CAPTURE_KEY_DURING_IMPORT",
-    }),
-    action("downloadurl", {
-      UUID: IDS.request,
-      WFInput: attachment(IDS.server, "URL"),
-      ShowHeaders: true,
-      WFHTTPBodyType: "JSON",
-      WFHTTPHeaders: dictionaryItems([
-        [
-          "Authorization",
-          tokenString("Bearer ￼", [
-            { at: 7, value: tokenRef(IDS.key, "Text") },
-          ]),
-        ],
-        ["Content-Type", tokenString("application/json", [])],
-      ]),
-      WFHTTPMethod: "POST",
-      WFJSONValues: dictionaryItems([
-        ["attemptId", attachment(IDS.uuid, "UUID")],
-        ["date", attachment(IDS.date, "Formatted Date")],
-        ["text", variable("Capture Text")],
-      ]),
-    }),
-    action("getvalueforkey", {
-      UUID: IDS.saved,
-      WFDictionaryKey: "saved",
-      WFGetDictionaryValueType: "Value",
-      WFInput: attachment(IDS.request, "Contents of URL"),
-    }),
-    action("getvalueforkey", {
-      UUID: IDS.node,
-      WFDictionaryKey: "nodeId",
-      WFGetDictionaryValueType: "Value",
-      WFInput: attachment(IDS.request, "Contents of URL"),
-    }),
-    action("getvalueforkey", {
-      UUID: IDS.daily,
-      WFDictionaryKey: "dailyNoteId",
-      WFGetDictionaryValueType: "Value",
-      WFInput: attachment(IDS.request, "Contents of URL"),
-    }),
-    action("getvalueforkey", {
-      UUID: IDS.receiptDate,
-      WFDictionaryKey: "date",
-      WFGetDictionaryValueType: "Value",
-      WFInput: attachment(IDS.request, "Contents of URL"),
-    }),
-    action("gettext", {
-      UUID: IDS.receipt,
-      WFTextActionText: tokenString("￼\n￼\n￼\n￼", [
-        { at: 0, value: tokenRef(IDS.saved, "Dictionary Value") },
-        { at: 2, value: tokenRef(IDS.node, "Dictionary Value") },
-        { at: 4, value: tokenRef(IDS.daily, "Dictionary Value") },
-        { at: 6, value: tokenRef(IDS.receiptDate, "Dictionary Value") },
-      ]),
-    }),
-    action("matchtext", {
-      UUID: IDS.receiptMatch,
-      WFInput: attachment(IDS.receipt, "Text"),
-      WFMatchTextPattern: `(?s)^true${BACKSLASH}n.+${BACKSLASH}n.+${BACKSLASH}n${BACKSLASH}d{4}-${BACKSLASH}d{2}-${BACKSLASH}d{2}$`,
-    }),
-    action("conditional", {
-      GroupingIdentifier: receiptGroup,
-      UUID: "4B1C8C85-CCB1-498E-BAE0-000000000019",
-      WFCondition: 100,
-      WFControlFlowMode: 0,
-      WFInput: attachment(IDS.receiptMatch, "Matches"),
-    }),
-    action("notification", {
-      WFNotificationActionBody: "Added one bullet to today's note.",
-      WFNotificationActionTitle: "Saved to Dotflowy",
-    }),
-    action("conditional", {
-      GroupingIdentifier: receiptGroup,
-      WFControlFlowMode: 1,
-    }),
-    action("getvalueforkey", {
-      UUID: IDS.error,
-      WFDictionaryKey: "error",
-      WFGetDictionaryValueType: "Value",
-      WFInput: attachment(IDS.request, "Contents of URL"),
-    }),
-    action("getvalueforkey", {
-      UUID: IDS.message,
-      WFDictionaryKey: "message",
-      WFGetDictionaryValueType: "Value",
-      WFInput: attachment(IDS.request, "Contents of URL"),
-    }),
-    action("showresult", {
-      Text: tokenString("Capture failed (￼): ￼", [
-        { at: 16, value: tokenRef(IDS.error, "Dictionary Value") },
-        { at: 20, value: tokenRef(IDS.message, "Dictionary Value") },
-      ]),
-    }),
-    action("conditional", {
-      GroupingIdentifier: receiptGroup,
-      WFControlFlowMode: 2,
-    }),
-    action("conditional", {
-      GroupingIdentifier: nonblankGroup,
-      WFControlFlowMode: 2,
-    }),
-  ];
+/* --- Determinism ----------------------------------------------------------- */
 
-  return {
-    WFQuickActionSurfaces: [],
-    WFWorkflowActions: actions,
-    WFWorkflowClientVersion: "2700.0.4",
-    WFWorkflowHasOutputFallback: false,
-    WFWorkflowHasShortcutInputVariables: true,
-    WFWorkflowIcon: {
-      WFWorkflowIconGlyphNumber: 59412,
-      WFWorkflowIconStartColor: 4282601983,
-    },
-    WFWorkflowImportQuestions: [
-      {
-        ActionIndex: 11,
-        Category: "Parameter",
-        ParameterKey: "WFTextActionText",
-        Text: "Paste your Dotflowy capture key. It is stored only in your copy of this shortcut.",
-      },
-      {
-        ActionIndex: 10,
-        Category: "Parameter",
-        DefaultValue: `${DEFAULT_SERVER}/api/capture`,
-        ParameterKey: "WFURLActionURL",
-        Text: "Capture endpoint (change only when self-hosting Dotflowy).",
-      },
-    ],
-    WFWorkflowInputContentItemClasses: [
-      "WFStringContentItem",
-      "WFURLContentItem",
-    ],
-    WFWorkflowMinimumClientVersion: 900,
-    WFWorkflowMinimumClientVersionString: "900",
-    WFWorkflowName: "Add to Dotflowy Today",
-    WFWorkflowOutputContentItemClasses: [],
-    WFWorkflowTypes: ["ActionExtension"],
+/** Cherri's derived UUID mode reuses one ID for every conditional block. */
+function normalizeConditionalGroups(workflow: Workflow): void {
+  const actions = asArray(workflow.WFWorkflowActions) ?? [];
+  const stack: string[] = [];
+  actions.forEach((action, index) => {
+    const entry = asDict(action);
+    if (
+      entry?.WFWorkflowActionIdentifier !== "is.workflow.actions.conditional"
+    ) {
+      return;
+    }
+    const parameters = asDict(entry.WFWorkflowActionParameters);
+    if (!parameters) throw new Error("conditional has no parameters");
+    const mode = parameters.WFControlFlowMode;
+    if (mode === 0) {
+      stack.push(
+        `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+      );
+    }
+    const group = stack.at(-1);
+    if (!group) throw new Error("conditional boundary has no opening block");
+    parameters.GroupingIdentifier = group;
+    if (mode === 2) {
+      parameters.UUID = group;
+      stack.pop();
+    }
+  });
+  if (stack.length)
+    throw new Error("conditional block has no closing boundary");
+}
+
+/**
+ * Cherri emits dictionary field items in Go map order, so the same source can
+ * compile to different bytes. Item order is not semantic for HTTP headers or
+ * JSON bodies, so sort them by key and keep the artifact reproducible.
+ */
+export function sortDictionaryItems(value: Plist): Plist {
+  const array = asArray(value);
+  if (array) return array.map(sortDictionaryItems);
+  const dict = asDict(value);
+  if (!dict) return value;
+  for (const [key, item] of Object.entries(dict)) {
+    dict[key] = sortDictionaryItems(item);
+  }
+  if (dict.WFSerializationType === "WFDictionaryFieldValue") {
+    const items = asArray(asDict(dict.Value)?.WFDictionaryFieldValueItems);
+    if (items) {
+      items.sort((a, b) => dictionaryKey(a).localeCompare(dictionaryKey(b)));
+    }
+  }
+  return dict;
+}
+
+function dictionaryKey(item: Plist): string {
+  const key = asDict(asDict(item)?.WFKey);
+  const string = asString(asDict(key?.Value)?.string);
+  return string ?? JSON.stringify(item);
+}
+
+/* --- Import questions ------------------------------------------------------ */
+
+/**
+ * Binds each import question to the action that holds its parameter and
+ * pre-fills that parameter with the question's default. Questions are emitted in
+ * Cherri's map order, so sort them by their (now known) action index to keep the
+ * artifact deterministic and the setup dialog in flow order.
+ */
+export function normalizeImportQuestions(workflow: Workflow): void {
+  const actions = asArray(workflow.WFWorkflowActions);
+  const questions = asArray(workflow.WFWorkflowImportQuestions);
+  if (!actions || !questions) {
+    throw new Error("workflow is missing its actions or import questions");
+  }
+  const bound = new Set<number>();
+  for (const question of questions) {
+    const entry = asDict(question);
+    const key = asString(entry?.ParameterKey);
+    if (!entry || !key) {
+      throw new Error("import question has no parameter key");
+    }
+    const index = actions.findIndex((action, at) => {
+      if (bound.has(at)) return false;
+      const parameters = asDict(asDict(action)?.WFWorkflowActionParameters);
+      return parameters?.[key] === "";
+    });
+    if (index < 0) {
+      throw new Error(`import question ${key} has no empty target parameter`);
+    }
+    bound.add(index);
+    entry.ActionIndex = index;
+    const parameters = asDict(
+      asDict(actions[index])?.WFWorkflowActionParameters,
+    );
+    if (!parameters) {
+      throw new Error(
+        `import question ${key} targets an action with no parameters`,
+      );
+    }
+    parameters[key] = entry.DefaultValue ?? "";
+  }
+  questions.sort(
+    (a, b) =>
+      (asNumber(asDict(a)?.ActionIndex) ?? 0) -
+      (asNumber(asDict(b)?.ActionIndex) ?? 0),
+  );
+}
+
+/* --- Validation ------------------------------------------------------------ */
+
+export function validateWorkflow(workflow: Workflow): void {
+  const actions = asArray(workflow.WFWorkflowActions);
+  if (!actions || actions.length === 0) {
+    throw new Error("WFWorkflowActions must be a nonempty array");
+  }
+  const identifiers = actions.map(
+    (action) => asString(asDict(action)?.WFWorkflowActionIdentifier) ?? "",
+  );
+  for (const identifier of identifiers) {
+    if (!ALLOWED_ACTIONS.has(identifier)) {
+      throw new Error(`unknown action identifier: ${identifier}`);
+    }
+  }
+  for (const required of REQUIRED_ACTIONS) {
+    if (!identifiers.includes(required)) {
+      throw new Error(`missing action: ${required}`);
+    }
+  }
+
+  const questions = asArray(workflow.WFWorkflowImportQuestions);
+  if (!questions || questions.length !== 2) {
+    throw new Error("expected exactly two import questions");
+  }
+  const boundKeys: string[] = [];
+  for (const question of questions) {
+    const entry = asDict(question);
+    const index = asNumber(entry?.ActionIndex);
+    if (index === undefined || !Number.isInteger(index) || index < 0) {
+      throw new Error("import question has no ActionIndex");
+    }
+    const key = asString(entry?.ParameterKey);
+    if (!key) throw new Error("import question has no parameter key");
+    boundKeys.push(key);
+    const parameters = asDict(
+      asDict(actions[index])?.WFWorkflowActionParameters,
+    );
+    const value = asString(parameters?.[key]);
+    if (!value) {
+      throw new Error(
+        `import question ${key} does not target a filled parameter`,
+      );
+    }
+  }
+  if (!boundKeys.includes("WFTextActionText") || !boundKeys.includes("WFURL")) {
+    throw new Error(
+      "import questions must target the capture key and endpoint",
+    );
+  }
+
+  const serialized = JSON.stringify(workflow);
+  for (const marker of FORBIDDEN_MARKERS) {
+    if (serialized.toLowerCase().includes(marker.toLowerCase())) {
+      throw new Error(`possible embedded credential: ${marker}`);
+    }
+  }
+  if (!serialized.includes("PASTE_CAPTURE_KEY_DURING_IMPORT")) {
+    throw new Error("capture-key import placeholder missing");
+  }
+  if (!serialized.includes("yyyy-MM-dd")) {
+    throw new Error("local date format missing");
+  }
+  if (!serialized.includes("(?s)^.+")) {
+    throw new Error("success receipt validation missing");
+  }
+  for (const key of [
+    "attemptId",
+    "date",
+    "text",
+    "saved",
+    "nodeId",
+    "dailyNoteId",
+  ]) {
+    if (!serialized.includes(`"${key}"`)) {
+      throw new Error(`request or receipt field missing: ${key}`);
+    }
+  }
+  const inputs = asArray(workflow.WFWorkflowInputContentItemClasses);
+  if (
+    !inputs ||
+    !inputs.includes("WFStringContentItem") ||
+    !inputs.includes("WFURLContentItem")
+  ) {
+    throw new Error("shortcut must accept shared text and URLs");
+  }
+  const types = asArray(workflow.WFWorkflowTypes);
+  if (!types || !types.includes("ActionExtension")) {
+    throw new Error("shortcut must appear in the share sheet");
+  }
+}
+
+/* --- Plist ----------------------------------------------------------------- */
+
+/** Reads the XML property list subset Cherri emits. */
+export function parsePlist(xml: string): Plist {
+  let at = xml.indexOf("<plist");
+  if (at < 0) throw new Error("shortcut plist: no <plist> root");
+  at = xml.indexOf(">", at) + 1;
+
+  const fail = (message: string): never => {
+    throw new Error(`shortcut plist: ${message}`);
   };
+  const skipSpace = () => {
+    while (at < xml.length && /\s/.test(xml[at]!)) at += 1;
+  };
+  const take = (text: string) => {
+    skipSpace();
+    if (!xml.startsWith(text, at)) {
+      fail(`expected ${text} at ${at}, found ${xml.slice(at, at + 24)}`);
+    }
+    at += text.length;
+  };
+  const readUntil = (end: string) => {
+    const stop = xml.indexOf(end, at);
+    if (stop < 0) fail(`unterminated ${end}`);
+    const value = xml.slice(at, stop);
+    at = stop + end.length;
+    return value;
+  };
+  const decode = (text: string) =>
+    text
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">")
+      .replaceAll("&quot;", '"')
+      .replaceAll("&apos;", "'")
+      .replaceAll(/&#x([0-9a-f]+);/gi, (_, code: string) =>
+        String.fromCodePoint(Number.parseInt(code, 16)),
+      )
+      .replaceAll(/&#(\d+);/g, (_, code: string) =>
+        String.fromCodePoint(Number(code)),
+      )
+      .replaceAll("&amp;", "&");
+
+  const parseValue = (): Plist => {
+    skipSpace();
+    if (xml.startsWith("<dict/>", at)) {
+      at += "<dict/>".length;
+      return {};
+    }
+    if (xml.startsWith("<dict>", at)) {
+      at += "<dict>".length;
+      const dict: Workflow = {};
+      for (;;) {
+        skipSpace();
+        if (xml.startsWith("</dict>", at)) {
+          at += "</dict>".length;
+          return dict;
+        }
+        take("<key>");
+        const key = decode(readUntil("</key>"));
+        dict[key] = parseValue();
+      }
+    }
+    if (xml.startsWith("<array/>", at)) {
+      at += "<array/>".length;
+      return [];
+    }
+    if (xml.startsWith("<array>", at)) {
+      at += "<array>".length;
+      const array: Plist[] = [];
+      for (;;) {
+        skipSpace();
+        if (xml.startsWith("</array>", at)) {
+          at += "</array>".length;
+          return array;
+        }
+        array.push(parseValue());
+      }
+    }
+    if (xml.startsWith("<string/>", at)) {
+      at += "<string/>".length;
+      return "";
+    }
+    if (xml.startsWith("<string>", at)) {
+      at += "<string>".length;
+      return decode(readUntil("</string>"));
+    }
+    if (xml.startsWith("<integer>", at)) {
+      at += "<integer>".length;
+      return Number(readUntil("</integer>"));
+    }
+    if (xml.startsWith("<real>", at)) {
+      at += "<real>".length;
+      return Number(readUntil("</real>"));
+    }
+    if (xml.startsWith("<true/>", at)) {
+      at += "<true/>".length;
+      return true;
+    }
+    if (xml.startsWith("<false/>", at)) {
+      at += "<false/>".length;
+      return false;
+    }
+    return fail(`unsupported value at ${at}: ${xml.slice(at, at + 24)}`);
+  };
+
+  const value = parseValue();
+  skipSpace();
+  take("</plist>");
+  return value;
 }
 
 function escapeXml(value: string): string {
@@ -311,7 +495,11 @@ function serialize(value: Plist, indent = "  "): string {
   // oxlint-disable-next-line anti-slop/no-runtime-typeof
   if (typeof value === "string") return `<string>${escapeXml(value)}</string>`;
   // oxlint-disable-next-line anti-slop/no-runtime-typeof
-  if (typeof value === "number") return `<integer>${value}</integer>`;
+  if (typeof value === "number") {
+    return Number.isInteger(value)
+      ? `<integer>${value}</integer>`
+      : `<real>${value}</real>`;
+  }
   // oxlint-disable-next-line anti-slop/no-runtime-typeof
   if (typeof value === "boolean") return value ? "<true/>" : "<false/>";
   if (Array.isArray(value)) {
@@ -328,85 +516,64 @@ function serialize(value: Plist, indent = "  "): string {
     .join("\n")}\n${indent.slice(2)}</dict>`;
 }
 
-export function unsignedArtifact(): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n${serialize(createWorkflow())}\n</plist>\n`;
+export function unsignedArtifact(workflow: Workflow): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n${serialize(workflow)}\n</plist>\n`;
 }
 
-export function validateWorkflow(workflow = createWorkflow()): void {
-  const actions = workflow.WFWorkflowActions;
-  if (!Array.isArray(actions))
-    throw new Error("WFWorkflowActions must be an array");
-  const identifiers = actions.map((entry) => entry.WFWorkflowActionIdentifier);
-  for (const required of [
-    "is.workflow.actions.ask",
-    "is.workflow.actions.generateuuid",
-    "is.workflow.actions.format.date",
-    "is.workflow.actions.downloadurl",
-    "is.workflow.actions.matchtext",
-  ]) {
-    if (!identifiers.includes(required))
-      throw new Error(`missing action: ${required}`);
-  }
-  const serialized = unsignedArtifact();
-  for (const forbidden of [
-    "sk-",
-    "Bearer ey",
-    "Bearer dotflowy_",
-    "api_key=",
-  ]) {
-    if (serialized.toLowerCase().includes(forbidden.toLowerCase()))
-      throw new Error(`possible embedded credential: ${forbidden}`);
-  }
-  if (!serialized.includes("PASTE_CAPTURE_KEY_DURING_IMPORT"))
-    throw new Error("capture-key import placeholder missing");
-  if (!serialized.includes("yyyy-MM-dd"))
-    throw new Error("local date format missing");
-  if (!serialized.includes("(?s)^true"))
-    throw new Error("success receipt validation missing");
+/* --- Entry points ---------------------------------------------------------- */
+
+function build(): void {
+  const workflow = compile();
+  validateWorkflow(workflow);
+  mkdirSync(dirname(OUTPUT), { recursive: true });
+  writeFileSync(OUTPUT, unsignedArtifact(workflow));
+  console.log(`wrote shortcut template: ${OUTPUT}`);
 }
 
 function validateArtifact(): void {
   const bytes = readFileSync(OUTPUT);
   const text = bytes.toString("utf8");
   if (text.startsWith("<?xml")) {
-    if (text !== unsignedArtifact())
+    const workflow = asDict(parsePlist(text));
+    if (!workflow) throw new Error("artifact is not a plist dict");
+    validateWorkflow(workflow);
+    const reserialized = unsignedArtifact(workflow);
+    if (reserialized !== text) {
       throw new Error(`${OUTPUT} is stale; run --build`);
-    validateWorkflow();
+    }
     console.log(`valid unsigned template: ${OUTPUT}`);
     return;
   }
-  if (bytes.subarray(0, 4).toString("ascii") !== "AEA1")
+  if (bytes.subarray(0, 4).toString("ascii") !== "AEA1") {
     throw new Error(
       "artifact is neither the generated XML plist nor an Apple-signed AEA1 file",
     );
+  }
   for (const marker of [
     "PASTE_CAPTURE_KEY_DURING_IMPORT",
-    "Bearer dotflowy_",
-    "api_key=",
+    ...FORBIDDEN_MARKERS,
   ]) {
-    if (bytes.includes(Buffer.from(marker)))
+    if (marker === "PASTE_CAPTURE_KEY_DURING_IMPORT") continue;
+    if (bytes.includes(Buffer.from(marker))) {
       throw new Error(`signed artifact exposes forbidden marker: ${marker}`);
+    }
   }
   console.log(
     `valid Apple-signed envelope (payload was validated before signing): ${OUTPUT}`,
   );
 }
 
-function build(): void {
-  validateWorkflow();
-  mkdirSync(dirname(OUTPUT), { recursive: true });
-  writeFileSync(OUTPUT, unsignedArtifact());
-  console.log(`wrote unsigned template: ${OUTPUT}`);
-}
-
 function sign(): void {
-  if (process.platform !== "darwin")
+  if (process.platform !== "darwin") {
     throw new Error("Apple's `shortcuts sign` is available only on macOS");
-  validateWorkflow();
-  mkdirSync(dirname(OUTPUT), { recursive: true });
-  const unsigned = `${OUTPUT}.unsigned`;
-  const signed = `${OUTPUT}.signed`;
-  writeFileSync(unsigned, unsignedArtifact());
+  }
+  const input = readFileSync(OUTPUT, "utf8");
+  const workflow = asDict(parsePlist(input));
+  if (!workflow) throw new Error("signing input is not an unsigned plist dict");
+  validateWorkflow(workflow);
+  const unsigned = `${OUTPUT}.unsigned.shortcut`;
+  const signed = `${OUTPUT}.signed.shortcut`;
+  writeFileSync(unsigned, input);
   rmSync(signed, { force: true });
   const result = Bun.spawnSync([
     "shortcuts",
@@ -437,3 +604,6 @@ if (import.meta.main) {
       "usage: bun scripts/shortcut.ts [--build|--validate|--sign]",
     );
 }
+
+/** Exported for the template test. */
+export { DEFAULT_SERVER, OUTPUT, SOURCE };

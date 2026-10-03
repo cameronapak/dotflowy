@@ -30,7 +30,7 @@ import { Separator } from "./ui/separator";
 type Expiry = "never" | "30d" | "90d" | "1y";
 
 const APPLE_SHORTCUT_URL =
-  "https://www.icloud.com/shortcuts/73918f14013646a1a36252939c26db46";
+  "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139";
 
 interface CaptureKeyEntry {
   id: string;

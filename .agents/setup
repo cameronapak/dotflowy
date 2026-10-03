@@ -41,6 +41,29 @@ EOF
 fi
 
 step "Install root dependencies" bun install --frozen-lockfile
+
+# Cherri compiles the Apple Shortcut template (scripts/shortcut.ts --build).
+cherri_version="v2.3.0"
+case "$(uname -m)" in
+  x86_64 | amd64) cherri_asset="cherri_linux-x86_64.zip" ;;
+  aarch64 | arm64) cherri_asset="cherri_linux-arm64.zip" ;;
+  *) cherri_asset="" ;;
+esac
+if [[ -n "$cherri_asset" && ! -x "$HOME/.local/bin/cherri" ]]; then
+  step "Install Cherri $cherri_version" env \
+    CHERRI_ASSET="$cherri_asset" CHERRI_VERSION="$cherri_version" \
+    bash -c '
+      set -euo pipefail
+      scratch="$(mktemp -d)"
+      trap "rm -rf \"$scratch\"" EXIT
+      curl -fsSL -o "$scratch/cherri.zip" \
+        "https://github.com/electrikmilk/cherri/releases/download/$CHERRI_VERSION/$CHERRI_ASSET"
+      unzip -o "$scratch/cherri.zip" -d "$scratch/bin" >/dev/null
+      mkdir -p "$HOME/.local/bin"
+      install -m 0755 "$scratch/bin/cherri" "$HOME/.local/bin/cherri"
+    '
+fi
+
 step "Install landing dependencies" bash -c \
   'cd landing && bun install --frozen-lockfile'
 step "Prepare local Worker configuration and D1" env CI=1 bun run setup
