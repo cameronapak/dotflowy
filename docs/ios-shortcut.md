@@ -14,13 +14,16 @@ template now uses `is.workflow.actions.text.match` and two bounded random number
 for its attempt ID.
 
 The experimental installer currently points to
-[Cam's replacement sharing link](https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927).
-That share predates the latest runtime fixes, and its credential-free contents
-have not been verified. Replace it with a fresh clean master before release.
+[the clean master](https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139).
+Inspection of the downloaded shared workflow confirms the placeholder key,
+the corrected random-number ranges, and distinct conditional grouping IDs.
+Cam reports that a personal copy with a fresh key successfully adds exactly
+one node to today's note.
 The latest template passes macOS runtime checks against a local endpoint for
-text, URLs, blank input, and success/error receipts. Import-answer persistence
-and end-to-end iPhone capture still need verification. Keep External quick-add
-default-off until the replacement passes those checks.
+text, URLs, blank input, and success/error receipts. Safari and Home Screen PWA
+handoff, setup-answer persistence on a fresh import, and the full iPhone
+share-sheet and failure-case checks remain unverified. Keep External quick-add
+default-off until those checks pass.
 
 Import asks for:
 

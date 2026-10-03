@@ -209,7 +209,7 @@ test.describe("Apple Shortcut setup", () => {
       });
       await expect(install).toHaveAttribute(
         "href",
-        "https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927",
+        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
       );
       await expect(install).toHaveAttribute("rel", "noopener noreferrer");
       await expect(dialog.locator('a[href$=".shortcut"]')).toHaveCount(0);
@@ -245,7 +245,7 @@ test.describe("Apple Shortcut setup", () => {
         .click();
       const linkField = dialog.getByLabel("Installation link", { exact: true });
       await expect(linkField).toHaveValue(
-        "https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927",
+        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
       );
       await linkField.click();
       expect(
@@ -253,7 +253,7 @@ test.describe("Apple Shortcut setup", () => {
           element.value.slice(element.selectionStart!, element.selectionEnd!),
         ),
       ).toBe(
-        "https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927",
+        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
       );
       // Exercise handoff without relying on Apple's availability. Neither
       // the key nor captured content may be appended to the public URL.
@@ -266,7 +266,7 @@ test.describe("Apple Shortcut setup", () => {
       await install.click();
       const popup = await popupPromise;
       await expect(popup).toHaveURL(
-        "https://www.icloud.com/shortcuts/eb658337565943c8ab1ee13f2bdc1927",
+        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
       );
       await expect(dialog).toBeVisible();
       await expect(field).toHaveValue(secret);
