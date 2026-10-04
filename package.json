@@ -1,6 +1,6 @@
 {
   "name": "dotflowy",
-  "version": "1.19.2",
+  "version": "1.19.3",
   "private": true,
   "description": "A local-first outline editor built with TanStack Start and TanStack DB.",
   "license": "O'Saasy",

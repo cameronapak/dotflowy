@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.19.3
+
+### Patch Changes
+
+- b1e1c8a: Download the experimental Apple Shortcut as a signed Dotflowy file from app.dotflowy.com. New imports ask only for a capture key and enable Share Sheet and Spotlight input; existing installed copies do not update automatically.
+
 ## 1.19.2
 
 ### Patch Changes
