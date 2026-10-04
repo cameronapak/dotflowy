@@ -36,15 +36,16 @@ interface BulletKeymapArgs {
 }
 
 /**
- * Outline keyboard shortcuts, scoped to ONE bullet's contentEditable via
- * `target: textRef`. Scoping to the element is what lets single keys
- * (Enter/Tab/Backspace/Arrows) fire from a contentEditable -- the manager only
- * ignores input elements that aren't the registration's own target.
+ * Outline keyboard shortcuts for ONE bullet's contentEditable. Most bind
+ * through `target: textRef`; Backspace binds directly below for iPhone Safari.
+ * Element scoping lets single keys fire from a contentEditable -- the manager
+ * only ignores input elements that aren't the registration's own target.
  *
- * Extracted from the row body so the body stays readable; the wiring is
- * unchanged. Caret-conditional keys (Backspace/Arrows) opt out of the default
+ * Extracted from the row body so the body stays readable. Caret-conditional
+ * arrows opt out of the default
  * preventDefault/stopPropagation and call them manually only when they actually
- * act, so normal in-line editing and caret movement still work.
+ * act, so normal caret movement still works. Backspace uses the direct native
+ * listener below because iPhone Safari can beat the focus-gated registration.
  */
 /** Stable empty keymap for unfocused bullets, so an unfocused re-render never
  *  hands `useHotkeys` a fresh array (which would re-run its registration work). */
@@ -96,12 +97,13 @@ export function useBulletKeymap({
 
   // Software keyboards can send either Backspace or beforeinput deletion
   // intent. The iPhone trace has no beforeinput on an empty contentEditable.
-  // Bind checkbox demotion directly, without waiting for focus-gated hotkeys
-  // to register. Only demotion belongs here; node deletion/joining stays below.
+  // Bind the whole Backspace-at-start decision directly, without waiting for
+  // focus-gated hotkeys to register: task demotion, empty-node deletion, and
+  // non-empty joining must all survive that Safari event sequence.
   useLayoutEffect(() => {
     const el = textRef.current;
-    if (!el || !enabled || !node.isTask) return;
-    const demoteTask = (e: Event) => {
+    if (!el || !enabled) return;
+    const handleBackspace = (e: Event) => {
       if (
         e.defaultPrevented ||
         !e.cancelable ||
@@ -111,7 +113,15 @@ export function useBulletKeymap({
         return;
       e.preventDefault();
       e.stopPropagation();
-      commands.onSetTask(node.id, false);
+      if (node.isTask) {
+        commands.onSetTask(node.id, false);
+      } else if (readSource(el) === "") {
+        // Source, not textContent: a folded token can render as an empty atom.
+        // INSTANCE, not content: mirrors pass the source as `node` (ADR 0022).
+        commands.onDeleteNode(instanceId);
+      } else {
+        commands.onJoinPrevious(instanceId);
+      }
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (
@@ -122,13 +132,13 @@ export function useBulletKeymap({
         e.metaKey
       )
         return;
-      // Shift+Backspace is still native backward deletion, not a different
-      // editor command. Capture keeps the hotkey path from acting again.
-      demoteTask(e);
+      // Shift does not change Backspace behavior. Capture keeps another key
+      // handler from acting on the same deletion intent.
+      handleBackspace(e);
     };
     const onBeforeInput = (e: InputEvent) => {
       if (e.inputType === "deleteContentBackward" && !e.isComposing)
-        demoteTask(e);
+        handleBackspace(e);
     };
     el.addEventListener("keydown", onKeyDown, true);
     el.addEventListener("beforeinput", onBeforeInput);
@@ -136,7 +146,7 @@ export function useBulletKeymap({
       el.removeEventListener("keydown", onKeyDown, true);
       el.removeEventListener("beforeinput", onBeforeInput);
     };
-  }, [textRef, enabled, node.isTask, node.id, commands]);
+  }, [textRef, enabled, node.isTask, node.id, instanceId, commands]);
 
   useHotkeys(
     focused
@@ -252,43 +262,6 @@ export function useBulletKeymap({
             // the parent's next sibling. Mirror of Mod+Shift+ArrowUp.
             hotkey: "Mod+Shift+ArrowDown",
             callback: () => commands.onMoveDown(node.id),
-          },
-          {
-            // Backspace at the start of a bullet. On a task, the first backspace
-            // "deletes the checkbox" -- demoting it to a plain bullet while keeping
-            // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
-            // deletes the node and focuses the previous one. With text, it JOINS
-            // this bullet into the row visibly above -- the inverse of the Enter
-            // split. Away from the start it falls through to normal character
-            // deletion.
-            //
-            // Bullet-only on purpose: the zoomed title and the quick-add mini
-            // editor bind no Backspace at all (the three-path trap, ADR 0049).
-            // Joining a zoom root into a node outside the current view is
-            // incoherent, and a quick-add draft has no "bullet above".
-            hotkey: "Backspace",
-            callback: (e) => {
-              const el = textRef.current;
-              // Task demotion uses native events above, including keyboards
-              // that never emit beforeinput on an empty task.
-              if (node.isTask || !el || !isCaretAtStart(el)) return;
-              // SOURCE, not textContent (ADR 0005's landmine): a line whose whole
-              // text is a folded token renders shorter than it reads, and a widget
-              // atom with no plain-text child renders as "" -- which would send a
-              // non-empty bullet down the DELETE branch. This gate now chooses
-              // between deleting and merging, so it has to speak source space.
-              if (readSource(el) !== "") {
-                e.preventDefault();
-                e.stopPropagation();
-                commands.onJoinPrevious(instanceId);
-                return;
-              }
-              e.preventDefault();
-              e.stopPropagation();
-              // INSTANCE, not content: mirrors pass the source as `node` (ADR 0022).
-              commands.onDeleteNode(instanceId);
-            },
-            options: { preventDefault: false, stopPropagation: false },
           },
           {
             // Cmd/Ctrl+Shift+Delete: delete this bullet and its whole subtree,

@@ -284,3 +284,48 @@ test.describe("keyboard arrow navigation", () => {
     await expect(text(page, "above")).toHaveText("above!");
   });
 });
+
+test.describe("software-keyboard Backspace", () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+
+  test("deletes an empty plain node immediately on focus without beforeinput", async ({
+    page,
+  }) => {
+    await load(page, [
+      { id: "above", parentId: null, prevSiblingId: null, text: "above" },
+      { id: "empty", parentId: null, prevSiblingId: "above", text: "" },
+      { id: "below", parentId: null, prevSiblingId: "empty", text: "below" },
+    ]);
+
+    const prevented = await text(page, "empty").evaluate((el: HTMLElement) => {
+      // Keep focus and keydown in the same turn. On an empty contentEditable,
+      // iPhone Safari emits keydown/keyup but no beforeinput or input event.
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(true);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const event = new KeyboardEvent("keydown", {
+        key: "Backspace",
+        code: "Backspace",
+        keyCode: 8,
+        bubbles: true,
+        cancelable: true,
+      });
+      el.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+
+    expect(prevented).toBe(true);
+    await expect(text(page, "empty")).toHaveCount(0);
+    await expect(text(page, "above")).toBeFocused();
+    await expect(text(page, "above")).toHaveText("above");
+    await expect(text(page, "below")).toHaveText("below");
+  });
+});
