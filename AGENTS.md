@@ -85,6 +85,11 @@ scoped `rg` / `rg --files` for exact searches. Use Finder for behavior-level
 discovery when available. A `.codegraph/` directory alone does not provide an MCP tool.
 Use skills already listed in context before running Intent discovery.
 
+Apple Shortcut authoring: load the repo-local
+[Cherri skill](./.agents/skills/cherri/SKILL.md) and follow
+[`docs/ios-shortcut.md`](./docs/ios-shortcut.md) for the pinned compiler and
+Apple-only signing workflow.
+
 The three blocks below are written by their own tools. The `:start` and `:end`
 markers are how each tool finds its block to replace. Never hand-edit inside
 them, and never drop the markers: without them the next run appends a duplicate.
