@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.19.2
+
+### Patch Changes
+
+- 6072a91: Delete empty plain nodes reliably with Backspace on iPhone Safari.
+
 ## 1.19.1
 
 ### Patch Changes
