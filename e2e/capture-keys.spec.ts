@@ -13,6 +13,14 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("serves the signed Dotflowy file at its installation path", async ({
+  request,
+}) => {
+  const response = await request.get("/shortcuts/Dotflowy.shortcut");
+  expect(response.ok()).toBe(true);
+  expect((await response.body()).subarray(0, 4).toString()).toBe("AEA1");
+});
+
 async function mountDialog(page: Page) {
   await seedOutline(page, []);
   await page.route(
@@ -204,15 +212,23 @@ test.describe("Apple Shortcut setup", () => {
       await expect(
         dialog.getByText(/Experimental. Installation and capture/),
       ).toBeVisible();
+      await expect(
+        dialog.getByText(
+          "Open the signed Dotflowy.shortcut file in Shortcuts and paste your key during setup. Your installed shortcut contains the key, so treat it as a credential.",
+        ),
+      ).toBeVisible();
+      await expect(
+        dialog.getByText(/sharing a configured shortcut also shares/),
+      ).toHaveCount(0);
       const install = dialog.getByRole("link", {
         name: "Add to Apple Shortcuts",
       });
       await expect(install).toHaveAttribute(
         "href",
-        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
+        "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
       );
       await expect(install).toHaveAttribute("rel", "noopener noreferrer");
-      await expect(dialog.locator('a[href$=".shortcut"]')).toHaveCount(0);
+      await expect(dialog.locator('a[href$=".shortcut"]')).toHaveCount(1);
       expect(requests).toEqual([]);
 
       await dialog.getByLabel("Name", { exact: true }).fill("My phone");
@@ -245,28 +261,27 @@ test.describe("Apple Shortcut setup", () => {
         .click();
       const linkField = dialog.getByLabel("Installation link", { exact: true });
       await expect(linkField).toHaveValue(
-        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
+        "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
       );
       await linkField.click();
       expect(
         await linkField.evaluate((element: HTMLInputElement) =>
           element.value.slice(element.selectionStart!, element.selectionEnd!),
         ),
-      ).toBe(
-        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
-      );
-      // Exercise handoff without relying on Apple's availability. Neither
-      // the key nor captured content may be appended to the public URL.
+      ).toBe("https://app.dotflowy.com/shortcuts/Dotflowy.shortcut");
+      // Exercise link handoff, not native installation. Neither the key nor
+      // captured content may be appended to the public file URL.
       await page
         .context()
-        .route("https://www.icloud.com/shortcuts/**", (route) =>
-          route.fulfill({ body: "Shortcut preview" }),
+        .route(
+          "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
+          (route) => route.fulfill({ body: "Shortcut file handoff fixture" }),
         );
       const popupPromise = page.waitForEvent("popup");
       await install.click();
       const popup = await popupPromise;
       await expect(popup).toHaveURL(
-        "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139",
+        "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
       );
       await expect(dialog).toBeVisible();
       await expect(field).toHaveValue(secret);

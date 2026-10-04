@@ -19,8 +19,17 @@ and import. End-to-end real-device testing remains a general-release requirement
 - **Paste-once setup.** You sign in to Dotflowy, create a named key, and paste it
   into the official shortcut's setup prompt. The public template contains no
   personal credential. The secret is revealed once, stored only as a hash on the
-  server, and sent in an authorization header, never in a URL. Sharing your
-  configured shortcut can expose the key.
+  server, and sent in an authorization header, never in a URL. The installed
+  shortcut contains a readable credential, not a Keychain-isolated secret.
+  [Apple documents clearing fields bound to import questions when sharing](https://support.apple.com/guide/shortcuts/add-import-questions-to-shared-shortcuts-apdf330fd3a0/ios).
+  Keep the key solely in that bound Text field and use its output in the request.
+  Clearing on our published shortcut remains unverified; do not extend Apple's
+  documented behavior to external exports or signing tools.
+- **One setup question.** The official template asks only for the capture key
+  and uses `https://app.dotflowy.com/api/capture` without an endpoint question.
+  Self-hosters manually edit the URL in Get Contents of URL before using their
+  key. This keeps hosted setup to one credential entry without another app or
+  separate credential file.
 - **Separate keys from installation.** Capture keys are an account capability
   for shortcuts and scripts. Settings has a Capture keys row with Manage, and
   a separate Apple Shortcut row with Set up. During the experiment, both live
@@ -29,13 +38,16 @@ and import. End-to-end real-device testing remains a general-release requirement
   named key (default iPhone), offers automatic and manual copying, and then
   links to the official template. A small Settings link leads to key management;
   the installer does not list or revoke keys.
-- **Use an iCloud installation link.** Prefer a verified, public,
-  credential-free iCloud sharing link over a file download. A link click is not
-  proof of installation. Verify Safari and Home Screen PWA handoff on a real
-  iPhone, including a copy-link fallback for opening in Safari. Cam supplied
-  an iCloud link after signing/importing; use it only in the opt-in experiment
-  until its clean contents and real-device workflow are verified. Do not offer
-  the unsigned artifact as installable.
+- **Use a signed file on the app domain.** Cam chose direct distribution at
+  `https://app.dotflowy.com/shortcuts/Dotflowy.shortcut`, without a short URL or
+  an iCloud publication step. Rebuild, validate, sign with Apple's CLI for
+  Anyone, and publish the clean file at the same URL for each release. Keep the
+  unsigned build input outside public assets. The filename is `Dotflowy.shortcut`
+  so file imports use the intended name. New downloads receive the latest file;
+  installed copies do not update automatically. A download is not proof of
+  installation. Verify Safari and Home Screen PWA handoff on a real iPhone,
+  including copy-link and Files fallbacks. Keep discovery experimental until
+  the real-device workflow passes. Do not offer unsigned bytes as installable.
 - **Experimental rollout.** Settings → Experimental → External quick-add is a
   default-off, per-device flag. Opting in reveals both separate Settings rows
   and the header More installer. Keep the untested status visible. The flag is
@@ -71,9 +83,15 @@ and import. End-to-end real-device testing remains a general-release requirement
   and 1 year. Show expiration afterward. An expired key produces a clear
   instruction to create a replacement and update the shortcut.
 - **Official distribution.** Deliver an installable, credential-free template,
-  not only assembly instructions. Verify installation, sharing, direct launch,
-  and failure behavior on a real iPhone before release. Watch and hands-free
-  Siri guarantees are outside the initial scope.
+  not only assembly instructions. Verify file installation, name and icon,
+  direct launch, share-sheet capture, setup-answer persistence, and failure
+  behavior on a real iPhone before release. Before claiming that configured
+  personal copies are safe to share, customize a test copy with a dummy key,
+  share it through iCloud, and inspect a fresh recipient copy: the dummy key
+  must be absent and setup must ask for a replacement. Check file export
+  separately before claiming that path clears keys. Official publication uses
+  only the generated placeholder template, not an export of a personal copy.
+  Watch and hands-free Siri guarantees are outside the initial scope.
 
 ## Boundary and reuse
 
@@ -101,4 +119,7 @@ captured text.
 
 Shortcuts installation, HTTP failure handling, date formatting, and the full
 real-device workflow have not been demonstrated yet. These are feasibility and
-release checks, not claims about completed behavior.
+release checks, not claims about completed behavior. Import-question clearing
+through iCloud sharing and file export have not been demonstrated for our
+published shortcut. Do not claim it is safe to share until the relevant path
+passes the dummy-key recipient check.

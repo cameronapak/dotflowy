@@ -30,7 +30,7 @@ import { Separator } from "./ui/separator";
 type Expiry = "never" | "30d" | "90d" | "1y";
 
 const APPLE_SHORTCUT_URL =
-  "https://www.icloud.com/shortcuts/2f1344efd7ac4206a68e451cb5df7139";
+  "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut";
 
 interface CaptureKeyEntry {
   id: string;
@@ -405,9 +405,9 @@ function CaptureDialog({
                 3. Add the shortcut
               </h3>
               <p className="text-sm text-muted-foreground">
-                During import, paste your key into the shortcut's setup prompt.
-                Keep it private: sharing a configured shortcut also shares its
-                key.
+                Open the signed Dotflowy.shortcut file in Shortcuts and paste
+                your key during setup. Your installed shortcut contains the key,
+                so treat it as a credential.
               </p>
               <a
                 href={APPLE_SHORTCUT_URL}
@@ -423,8 +423,9 @@ function CaptureDialog({
                 Add to Apple Shortcuts
               </a>
               <p className="text-xs text-muted-foreground">
-                If the Home Screen app doesn't open Shortcuts, copy the
-                installation link and open it in Safari.
+                If the file downloads instead, open it from Files. If the Home
+                Screen app doesn't open the file, copy the installation link and
+                open it in Safari.
               </p>
               <Button variant="outline" onClick={() => void copyInstallLink()}>
                 <HugeiconsIcon icon={Copy01Icon} data-icon="inline-start" />

@@ -20,9 +20,9 @@
  *     Cherri's derived UUID mode reuses one ID across every block.
  *
  * Usage:
- *   bun scripts/shortcut.ts --build     compile the source into the artifact
- *   bun scripts/shortcut.ts --validate  check the committed artifact
- *   bun scripts/shortcut.ts --sign      macOS only: Apple `shortcuts sign`
+ *   bun scripts/shortcut.ts --build     compile the private unsigned input
+ *   bun scripts/shortcut.ts --validate  check the input and public signed envelope
+ *   bun scripts/shortcut.ts --sign      macOS only: Apple-sign the public download
  */
 import {
   existsSync,
@@ -76,9 +76,10 @@ export function asNumber(value: Plist | undefined): number | undefined {
 
 const ROOT = join(import.meta.dir, "..");
 const SOURCE = join(ROOT, "shortcuts/add-to-dotflowy-today.cherri");
-const OUTPUT = join(ROOT, "public/shortcuts/add-to-dotflowy-today.shortcut");
 /** Must match `#define name` in the source: Cherri names its output after it. */
-const SHORTCUT_NAME = "Add to Dotflowy Today";
+const SHORTCUT_NAME = "Dotflowy";
+const OUTPUT = join(ROOT, `shortcuts/${SHORTCUT_NAME}.unsigned.shortcut`);
+const SIGNED_OUTPUT = join(ROOT, `public/shortcuts/${SHORTCUT_NAME}.shortcut`);
 const DEFAULT_SERVER = "https://app.dotflowy.com";
 
 /**
@@ -177,6 +178,7 @@ export function compile(): Workflow {
 function normalizeConditionalGroups(workflow: Workflow): void {
   const actions = asArray(workflow.WFWorkflowActions) ?? [];
   const stack: string[] = [];
+  const outputs = new Map<string, string>();
   actions.forEach((action, index) => {
     const entry = asDict(action);
     if (
@@ -196,12 +198,31 @@ function normalizeConditionalGroups(workflow: Workflow): void {
     if (!group) throw new Error("conditional boundary has no opening block");
     parameters.GroupingIdentifier = group;
     if (mode === 2) {
+      const original = asString(parameters.UUID);
+      if (original) outputs.set(original, group);
       parameters.UUID = group;
       stack.pop();
     }
   });
   if (stack.length)
     throw new Error("conditional block has no closing boundary");
+
+  // Value-producing conditionals are magic variables. Keep their consumers
+  // bound to the closing action when its UUID changes with the group ID.
+  function remapOutputs(value: Plist): void {
+    const array = asArray(value);
+    if (array) {
+      array.forEach(remapOutputs);
+      return;
+    }
+    const dict = asDict(value);
+    if (!dict) return;
+    const original = asString(dict.OutputUUID);
+    const replacement = original && outputs.get(original);
+    if (replacement) dict.OutputUUID = replacement;
+    Object.values(dict).forEach(remapOutputs);
+  }
+  remapOutputs(workflow);
 }
 
 /**
@@ -302,10 +323,9 @@ export function validateWorkflow(workflow: Workflow): void {
   }
 
   const questions = asArray(workflow.WFWorkflowImportQuestions);
-  if (!questions || questions.length !== 2) {
-    throw new Error("expected exactly two import questions");
+  if (!questions || questions.length !== 1) {
+    throw new Error("expected exactly one capture-key import question");
   }
-  const boundKeys: string[] = [];
   for (const question of questions) {
     const entry = asDict(question);
     const index = asNumber(entry?.ActionIndex);
@@ -314,21 +334,23 @@ export function validateWorkflow(workflow: Workflow): void {
     }
     const key = asString(entry?.ParameterKey);
     if (!key) throw new Error("import question has no parameter key");
-    boundKeys.push(key);
-    const parameters = asDict(
-      asDict(actions[index])?.WFWorkflowActionParameters,
-    );
+    const action = asDict(actions[index]);
+    const parameters = asDict(action?.WFWorkflowActionParameters);
     const value = asString(parameters?.[key]);
     if (!value) {
       throw new Error(
         `import question ${key} does not target a filled parameter`,
       );
     }
-  }
-  if (!boundKeys.includes("WFTextActionText") || !boundKeys.includes("WFURL")) {
-    throw new Error(
-      "import questions must target the capture key and endpoint",
-    );
+    if (
+      key !== "WFTextActionText" ||
+      action?.WFWorkflowActionIdentifier !== "is.workflow.actions.gettext" ||
+      parameters?.CustomOutputName !== "captureKey"
+    ) {
+      throw new Error(
+        "import question must target the capture-key Text action",
+      );
+    }
   }
 
   const serialized = JSON.stringify(workflow);
@@ -531,23 +553,21 @@ function build(): void {
 }
 
 function validateArtifact(): void {
-  const bytes = readFileSync(OUTPUT);
-  const text = bytes.toString("utf8");
-  if (text.startsWith("<?xml")) {
-    const workflow = asDict(parsePlist(text));
-    if (!workflow) throw new Error("artifact is not a plist dict");
-    validateWorkflow(workflow);
-    const reserialized = unsignedArtifact(workflow);
-    if (reserialized !== text) {
-      throw new Error(`${OUTPUT} is stale; run --build`);
-    }
-    console.log(`valid unsigned template: ${OUTPUT}`);
-    return;
+  const text = readFileSync(OUTPUT, "utf8");
+  const workflow = asDict(parsePlist(text));
+  if (!workflow) throw new Error("artifact is not a plist dict");
+  validateWorkflow(workflow);
+  if (unsignedArtifact(workflow) !== text) {
+    throw new Error(`${OUTPUT} is stale; run --build`);
   }
+  console.log(`valid unsigned template: ${OUTPUT}`);
+  validateSignedArtifact();
+}
+
+function validateSignedArtifact(): void {
+  const bytes = readFileSync(SIGNED_OUTPUT);
   if (bytes.subarray(0, 4).toString("ascii") !== "AEA1") {
-    throw new Error(
-      "artifact is neither the generated XML plist nor an Apple-signed AEA1 file",
-    );
+    throw new Error("public shortcut must be an Apple-signed AEA1 file");
   }
   for (const marker of [
     "PASTE_CAPTURE_KEY_DURING_IMPORT",
@@ -559,7 +579,7 @@ function validateArtifact(): void {
     }
   }
   console.log(
-    `valid Apple-signed envelope (payload was validated before signing): ${OUTPUT}`,
+    `valid Apple-signed envelope (payload was validated before signing): ${SIGNED_OUTPUT}`,
   );
 }
 
@@ -571,9 +591,8 @@ function sign(): void {
   const workflow = asDict(parsePlist(input));
   if (!workflow) throw new Error("signing input is not an unsigned plist dict");
   validateWorkflow(workflow);
-  const unsigned = `${OUTPUT}.unsigned.shortcut`;
-  const signed = `${OUTPUT}.signed.shortcut`;
-  writeFileSync(unsigned, input);
+  mkdirSync(dirname(SIGNED_OUTPUT), { recursive: true });
+  const signed = `${SIGNED_OUTPUT}.signed.shortcut`;
   rmSync(signed, { force: true });
   const result = Bun.spawnSync([
     "shortcuts",
@@ -581,16 +600,15 @@ function sign(): void {
     "--mode",
     "anyone",
     "--input",
-    unsigned,
+    OUTPUT,
     "--output",
     signed,
   ]);
-  rmSync(unsigned, { force: true });
   if (result.exitCode !== 0) {
     rmSync(signed, { force: true });
     throw new Error(result.stderr.toString() || "shortcuts sign failed");
   }
-  renameSync(signed, OUTPUT);
+  renameSync(signed, SIGNED_OUTPUT);
   validateArtifact();
 }
 
@@ -606,4 +624,4 @@ if (import.meta.main) {
 }
 
 /** Exported for the template test. */
-export { DEFAULT_SERVER, OUTPUT, SOURCE };
+export { DEFAULT_SERVER, OUTPUT, SIGNED_OUTPUT, SOURCE };
