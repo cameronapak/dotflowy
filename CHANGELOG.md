@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.20.0
+
+### Minor Changes
+
+- 87f1973: YouTube video URLs now unfurl to their video titles when pasted.
+
 ## 1.19.3
 
 ### Patch Changes
