@@ -22,6 +22,41 @@ export function isHttpUrlString(s: string): boolean {
   return u.protocol === "http:" || u.protocol === "https:";
 }
 
+const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+
+/** Return the canonical metadata URL for a recognized YouTube video URL.
+ * The user's pasted URL stays untouched; this identity only deduplicates title
+ * lookups across watch/share/Shorts/Live/embed and timestamp variants. */
+export function canonicalYouTubeVideoUrl(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (u.port) return null;
+
+  const host = u.hostname.toLowerCase();
+  let videoId: string | null = null;
+
+  if (host === "youtu.be") {
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length === 1) videoId = parts[0] ?? null;
+  } else if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+    if (u.pathname === "/watch") {
+      videoId = u.searchParams.get("v");
+    } else {
+      videoId =
+        /^\/(?:v|shorts|embed|live)\/([^/]+)\/?$/.exec(u.pathname)?.[1] ?? null;
+    }
+  }
+
+  return videoId && YOUTUBE_VIDEO_ID.test(videoId)
+    ? `https://www.youtube.com/watch?v=${videoId}`
+    : null;
+}
+
 /** An IPv4 literal in a private / loopback / link-local / reserved range. Used
  *  to deny obvious internal targets even though Cloudflare already blocks raw-IP
  *  fetch -- belt and suspenders. Non-IPv4 hostnames return false here (handled

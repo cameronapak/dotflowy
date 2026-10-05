@@ -10,6 +10,7 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+  canonicalYouTubeVideoUrl,
   isAllowedUnfurlTarget,
   isHttpUrlString,
   sanitizeServerTitle,
@@ -27,6 +28,50 @@ describe("isHttpUrlString", () => {
     expect(isHttpUrlString("javascript:alert(1)")).toBe(false);
     expect(isHttpUrlString("not a url")).toBe(false);
     expect(isHttpUrlString("")).toBe(false);
+  });
+});
+
+describe("canonicalYouTubeVideoUrl", () => {
+  const canonical = "https://www.youtube.com/watch?v=BsJGo1wFTvQ";
+
+  it("recognizes YouTube's video URL forms and removes presentation params", () => {
+    const urls = [
+      "https://www.youtube.com/watch?v=BsJGo1wFTvQ&t=1s",
+      "https://youtube.com/watch?list=abc&v=BsJGo1wFTvQ",
+      "https://m.youtube.com/watch?v=BsJGo1wFTvQ",
+      "https://music.youtube.com/watch?v=BsJGo1wFTvQ",
+      "https://youtu.be/BsJGo1wFTvQ?t=1",
+      "https://www.youtube.com/v/BsJGo1wFTvQ",
+      "https://www.youtube.com/shorts/BsJGo1wFTvQ?feature=share",
+      "https://www.youtube.com/embed/BsJGo1wFTvQ",
+      "https://www.youtube.com/live/BsJGo1wFTvQ",
+    ];
+
+    for (const url of urls) {
+      expect(canonicalYouTubeVideoUrl(url)).toBe(canonical);
+    }
+  });
+
+  it("rejects lookalike hosts, unsupported pages, and malformed video ids", () => {
+    const urls = [
+      "https://youtube.com.evil.example/watch?v=BsJGo1wFTvQ",
+      "https://youtu.be.evil.example/BsJGo1wFTvQ",
+      "https://notyoutube.com/watch?v=BsJGo1wFTvQ",
+      "https://www.youtube-nocookie.com/embed/BsJGo1wFTvQ",
+      "https://www.youtube.com/playlist?list=PL123",
+      "https://www.youtube.com/channel/UC123",
+      "https://www.youtube.com/results?search_query=dotflowy",
+      "https://www.youtube.com/watch",
+      "https://www.youtube.com/watch?v=too-short",
+      "https://youtu.be/BsJGo1wFTvQ/extra",
+      "https://www.youtube.com:8443/watch?v=BsJGo1wFTvQ",
+      "ftp://www.youtube.com/watch?v=BsJGo1wFTvQ",
+      "not a url",
+    ];
+
+    for (const url of urls) {
+      expect(canonicalYouTubeVideoUrl(url)).toBeNull();
+    }
   });
 });
 
