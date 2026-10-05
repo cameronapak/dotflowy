@@ -16,9 +16,10 @@
  * still `string | null` — every "couldn't get a title" reason collapses to null
  * (ADR 0016); typed errors would buy the client nothing.
  *
- * The pure decisions (target guard, title sanitizer, the http(s) param check)
- * live in unfurl-core.ts so they import cleanly under `bun test`; this module is
- * the impure half (fetch + HTMLRewriter) and needs the CF runtime.
+ * The pure decisions (target guard, YouTube video identity, title sanitizer,
+ * the http(s) param check) live in unfurl-core.ts so they import cleanly under
+ * `bun test`; this module is the impure half (fetch + HTMLRewriter) and needs
+ * the CF runtime.
  *
  * The HTMLRewriter title extraction is adapted from tldraw/cloudflare-workers-unfurl
  * (MIT License, https://github.com/tldraw/cloudflare-workers-unfurl) -- its own
@@ -27,9 +28,13 @@
  * so its description/image/favicon handlers are intentionally dropped.
  */
 
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Schema } from "effect";
 
-import { isAllowedUnfurlTarget, sanitizeServerTitle } from "./unfurl-core";
+import {
+  canonicalYouTubeVideoUrl,
+  isAllowedUnfurlTarget,
+  sanitizeServerTitle,
+} from "./unfurl-core";
 
 export { isHttpUrlString } from "./unfurl-core";
 
@@ -37,9 +42,15 @@ const TIMEOUT_MS = 5_000;
 const MAX_BYTES = 64 * 1024;
 const MAX_REDIRECTS = 3;
 const USER_AGENT = "dotflowy-bot/1.0 (+https://app.dotflowy.com)";
+const HTML_ACCEPT = "text/html,application/xhtml+xml";
+const JSON_ACCEPT = "application/json";
+const decodeYouTubeOembed = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ title: Schema.String })),
+);
 
 /** Cross-user cache key (titles are public, not user-specific). A synthetic
- *  same-shape Request keyed on the normalized url. */
+ *  same-shape Request keyed on the original URL, or a provider identity when
+ *  the same public resource has multiple URL forms. */
 function cacheKey(url: string): Request {
   return new Request(
     `https://unfurl-cache.dotflowy.invalid/?u=${encodeURIComponent(url)}`,
@@ -49,7 +60,10 @@ function cacheKey(url: string): Request {
 /** GET the page with redirects handled manually so each hop is re-validated
  *  against the SSRF guard. Returns the final non-redirect Response, or null if a
  *  hop is disallowed / there are too many hops / a hop has no Location. */
-const fetchManualE = Effect.fnUntraced(function* (url: string) {
+const fetchManualE = Effect.fnUntraced(function* (
+  url: string,
+  accept = HTML_ACCEPT,
+) {
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (!isAllowedUnfurlTarget(current)) return null;
@@ -61,7 +75,7 @@ const fetchManualE = Effect.fnUntraced(function* (url: string) {
           signal,
           // Anonymous: none of the user's cookies/headers are forwarded.
           headers: {
-            accept: "text/html,application/xhtml+xml",
+            accept,
             "user-agent": USER_AGENT,
           },
         }),
@@ -78,9 +92,9 @@ const fetchManualE = Effect.fnUntraced(function* (url: string) {
   return null;
 });
 
-/** Read at most MAX_BYTES of the body as text, then cancel the stream. The
- *  title + og:title live in `<head>`, far inside 64KB on any real page, so this
- *  bounds memory/time without missing the title. */
+/** Read at most MAX_BYTES of the body as text, then cancel the stream. This
+ *  bounds memory/time; providers whose useful metadata sits deeper must expose
+ *  a bounded metadata endpoint, as YouTube does through oEmbed. */
 function readCappedTextE(res: Response): Effect.Effect<string, unknown> {
   const reader = res.body?.getReader();
   if (!reader) return Effect.succeed("");
@@ -141,9 +155,35 @@ function extractTitleE(html: string): Effect.Effect<string | null, unknown> {
   });
 }
 
-/** Outbound fetch + extract only (no cache). Failures stay in the error channel
- *  so the outer program can fold them to null. */
-const fetchAndExtractE = Effect.fnUntraced(function* (url: string) {
+/** Fetch YouTube's bounded, keyless oEmbed representation for a canonical video
+ *  URL. Only its title is trusted, and it passes through the same sanitizer as
+ *  HTML titles; malformed/error responses fall back to generic extraction. */
+const fetchYouTubeTitleE = Effect.fnUntraced(function* (
+  canonicalVideoUrl: string,
+) {
+  const endpoint = new URL("https://www.youtube.com/oembed");
+  endpoint.searchParams.set("url", canonicalVideoUrl);
+  endpoint.searchParams.set("format", "json");
+
+  const res = yield* fetchManualE(endpoint.href, JSON_ACCEPT);
+  if (!res || !res.ok) return null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!/^application\/json/i.test(contentType)) {
+    if (res.body) {
+      yield* Effect.promise(() => res.body!.cancel().catch(() => undefined));
+    }
+    return null;
+  }
+
+  const body = yield* readCappedTextE(res);
+  const data = yield* decodeYouTubeOembed(body).pipe(
+    Effect.orElseSucceed(() => null),
+  );
+  return data ? sanitizeServerTitle(data.title) : null;
+});
+
+/** Generic outbound HTML fetch + extract only (no cache). */
+const fetchHtmlTitleE = Effect.fnUntraced(function* (url: string) {
   const res = yield* fetchManualE(url);
   if (!res || !res.ok) return null;
   const contentType = res.headers.get("content-type") ?? "";
@@ -154,6 +194,21 @@ const fetchAndExtractE = Effect.fnUntraced(function* (url: string) {
     return null;
   }
   return sanitizeServerTitle(yield* extractTitleE(yield* readCappedTextE(res)));
+});
+
+/** Prefer bounded provider metadata for recognized YouTube videos, then retain
+ *  the generic HTML path as the agreed best-effort fallback. */
+const fetchAndExtractE = Effect.fnUntraced(function* (
+  url: string,
+  youtubeVideoUrl: string | null,
+) {
+  if (youtubeVideoUrl) {
+    const title = yield* fetchYouTubeTitleE(youtubeVideoUrl).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (title) return title;
+  }
+  return yield* fetchHtmlTitleE(url);
 });
 
 /**
@@ -167,9 +222,11 @@ const fetchAndExtractE = Effect.fnUntraced(function* (url: string) {
  */
 export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
   if (!isAllowedUnfurlTarget(url)) return null;
+  const youtubeVideoUrl = canonicalYouTubeVideoUrl(url);
+  const titleIdentity = youtubeVideoUrl ?? url;
 
   const cached = yield* Effect.tryPromise({
-    try: () => caches.default.match(cacheKey(url)),
+    try: () => caches.default.match(cacheKey(titleIdentity)),
     catch: (cause) => cause,
   }).pipe(Effect.orElseSucceed(() => undefined));
   if (cached) {
@@ -181,7 +238,7 @@ export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
     return data?.title ?? null;
   }
 
-  const title = yield* fetchAndExtractE(url).pipe(
+  const title = yield* fetchAndExtractE(url, youtubeVideoUrl).pipe(
     Effect.timeoutOrElse({
       duration: Duration.millis(TIMEOUT_MS),
       orElse: () => Effect.succeed<string | null>(null),
@@ -193,7 +250,7 @@ export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
     yield* Effect.tryPromise({
       try: () =>
         caches.default.put(
-          cacheKey(url),
+          cacheKey(titleIdentity),
           new Response(JSON.stringify({ title }), {
             headers: {
               "content-type": "application/json",
