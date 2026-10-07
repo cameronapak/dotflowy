@@ -199,7 +199,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                   );
                 }}
                 className={cn(
-                  "relative flex w-full flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-xs transition-colors",
+                  "group relative flex w-full scale-100 flex-col items-center gap-0.5 rounded-md border-2 border-transparent px-1 py-1.5 text-xs transition-[color,background-color,border-color,transform] after:pointer-events-none after:absolute after:-inset-1 after:rounded-md after:border-[3px] after:border-transparent after:content-[''] data-[external-drop-active]:scale-[1.03] data-[external-drop-active]:border-primary data-[external-drop-active]:bg-muted! data-[external-drop-active]:text-foreground! data-[external-drop-active]:after:border-primary/20",
                   selected
                     ? "text-primary-foreground"
                     : isToday
@@ -217,21 +217,21 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                   reduceMotion ? (
                     <span
                       aria-hidden="true"
-                      className="absolute inset-0 rounded-md bg-primary"
+                      className="absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden"
                     />
                   ) : (
                     <motion.span
                       aria-hidden="true"
                       layoutId="week-calendar-selected"
-                      className="absolute inset-0 rounded-md bg-primary"
+                      className="absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden"
                       transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
                     />
                   )
                 ) : null}
-                <span className="relative text-[0.6rem] leading-none opacity-70">
+                <span className="relative text-[0.6rem] leading-none opacity-70 group-data-[external-drop-active]:text-foreground!">
                   {WEEKDAY_INITIALS[i]}
                 </span>
-                <span className="relative leading-none tabular-nums">
+                <span className="relative leading-none tabular-nums group-data-[external-drop-active]:text-foreground!">
                   {dayOfMonth}
                 </span>
                 {/* Content dot: this day has a mapped node with children. Sits

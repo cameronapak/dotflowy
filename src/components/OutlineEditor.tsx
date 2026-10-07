@@ -111,6 +111,7 @@ import {
   dispatchPointerCancel,
   dispatchPointerDown,
   dispatchPointerUp,
+  externalDropTargets,
   keymapSpecs,
   pluginPreloads,
   usePluginChrome,
@@ -447,6 +448,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
       (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ?? null,
     getListEl: () => listRef.current,
+    getExternalDropTargets: () => externalDropTargets,
+    // Resolved only on pointer-up, after the drag hook's own cleanup. Like the
+    // delegated Seam-B handlers above, this reads the live event-time context.
+    getPluginContext: () => pluginCtx(),
     onMove: (grabbedKey, newParentInstanceId, afterSiblingId) =>
       runStructural(() => {
         const index = getTreeIndex();

@@ -6,8 +6,10 @@ import {
 } from "react";
 
 import type { QueryFilter } from "../data/filter-query";
+import type { ExternalDropTargetSpec, PluginContext } from "../plugins/types";
 
 import { isMirrorsEnabled } from "../data/flags";
+import { getSelectionDragSet } from "../data/selection-fill";
 import { type Node, type TreeIndex } from "../data/tree";
 import { virtualRowRect } from "../data/virtual-nav";
 import {
@@ -97,6 +99,10 @@ interface DragDeps {
   getRowEl: (key: string) => HTMLElement | null;
   /** The `ul.outline-list` element, for the indicator's right edge. */
   getListEl: () => HTMLElement | null;
+  /** Plugin-owned controls that can receive this structural drag (Seam M). */
+  getExternalDropTargets: () => readonly ExternalDropTargetSpec[];
+  /** Live plugin context, resolved only when an external drop commits. */
+  getPluginContext: () => PluginContext;
   /**
    * Commit the drop. `grabbedKey` is the dragged row's render address; the parent
    * + predecessor are INSTANCE ids from the render hierarchy. The editor resolves
@@ -115,6 +121,11 @@ interface DragState {
   /** The grabbed row's KEY (render address) -- buildRows/getRowEl/onMove all key
    *  off it. Equals the node id for every mirror-free drag. */
   id: string;
+  /** Structural roots carried by an external target. One instance id for an
+   *  ordinary drag, or the active selection's ordered root run. */
+  nodeIds: string[];
+  /** Render rows dimmed while the drag is active. */
+  sourceKeys: string[];
   startX: number;
   startY: number;
   dragging: boolean;
@@ -123,6 +134,10 @@ interface DragState {
   lastX: number;
   lastY: number;
   pending: { parentId: string | null; afterSiblingId: string | null } | null;
+  external: {
+    spec: ExternalDropTargetSpec;
+    element: HTMLElement;
+  } | null;
   indicator: HTMLElement | null;
   pill: HTMLElement | null;
   raf: number | null;
@@ -130,6 +145,7 @@ interface DragState {
   // the same references even if the component re-rendered mid-drag.
   moveHandler: (e: PointerEvent) => void;
   upHandler: () => void;
+  cancelHandler: () => void;
 }
 
 export function useDragReorder(deps: DragDeps) {
@@ -144,14 +160,16 @@ export function useDragReorder(deps: DragDeps) {
     const s = state.current;
     if (!s) return;
     if (s.raf != null) cancelAnimationFrame(s.raf);
+    s.external?.element.removeAttribute("data-external-drop-active");
     s.indicator?.remove();
     s.pill?.remove();
-    const sourceRow = depsRef.current.getRowEl(s.id);
-    sourceRow?.classList.remove("drag-source");
+    for (const key of s.sourceKeys) {
+      depsRef.current.getRowEl(key)?.classList.remove("drag-source");
+    }
     document.body.classList.remove("dragging-active");
     document.removeEventListener("pointermove", s.moveHandler);
     document.removeEventListener("pointerup", s.upHandler);
-    document.removeEventListener("pointercancel", s.upHandler);
+    document.removeEventListener("pointercancel", s.cancelHandler);
     state.current = null;
   }, []);
 
@@ -239,12 +257,14 @@ export function useDragReorder(deps: DragDeps) {
       s.indent = Math.abs((la - lb) / (a.depth - b.depth)) || INDENT_FALLBACK;
     }
 
-    const sourceRow = depsRef.current.getRowEl(s.id);
-    sourceRow?.classList.add("drag-source");
+    for (const key of s.sourceKeys) {
+      depsRef.current.getRowEl(key)?.classList.add("drag-source");
+    }
 
     const index = depsRef.current.getIndex();
-    const text =
+    let text =
       index.byId.get(instanceIdForKey(s.id))?.text?.trim() || "Untitled";
+    if (s.nodeIds.length > 1) text += ` +${s.nodeIds.length - 1}`;
 
     const pill = document.createElement("div");
     pill.className = "drag-pill";
@@ -265,6 +285,43 @@ export function useDragReorder(deps: DragDeps) {
   const project = useCallback((px: number, py: number) => {
     const s = state.current;
     if (!s) return;
+    if (s.pill) {
+      s.pill.style.left = `${px + 12}px`;
+      s.pill.style.top = `${py + 12}px`;
+    }
+
+    // External plugin target wins over ordinary outline-gap projection. The
+    // floating drag pill is pointer-events:none, so elementFromPoint sees the
+    // actual rendered control beneath the pointer/finger center (ADR 0054).
+    const hit = document.elementFromPoint(px, py);
+    let external: DragState["external"] = null;
+    if (hit instanceof Element) {
+      for (const spec of depsRef.current.getExternalDropTargets()) {
+        const match = hit.closest(spec.selector);
+        const element = match instanceof HTMLElement ? match : null;
+        if (element && (!spec.accepts || spec.accepts(element, s.nodeIds))) {
+          external = { spec, element };
+          break;
+        }
+      }
+    }
+    if (external) {
+      if (
+        s.external?.spec !== external.spec ||
+        s.external.element !== external.element
+      ) {
+        s.external?.element.removeAttribute("data-external-drop-active");
+        external.element.setAttribute("data-external-drop-active", "");
+        s.external = external;
+      }
+      s.pending = null;
+      if (s.indicator) s.indicator.style.display = "none";
+      return;
+    }
+    s.external?.element.removeAttribute("data-external-drop-active");
+    s.external = null;
+    if (s.indicator) s.indicator.style.display = "";
+
     // Geometry source: the virtualizer's measurements (via the nav bridge the
     // editor wires on mount), so an off-screen drop target still has a
     // position, estimated until it renders.
@@ -369,10 +426,6 @@ export function useDragReorder(deps: DragDeps) {
       s.indicator.style.left = `${left}px`;
       s.indicator.style.width = `${Math.max(40, right - left)}px`;
     }
-    if (s.pill) {
-      s.pill.style.left = `${px + 12}px`;
-      s.pill.style.top = `${py + 12}px`;
-    }
   }, []);
 
   // Auto-scroll loop: while the pointer sits in a top/bottom edge band, scroll
@@ -413,9 +466,17 @@ export function useDragReorder(deps: DragDeps) {
     if (s.dragging) {
       consumed.current = true;
       const pending = s.pending;
+      const external = s.external;
+      const nodeIds = s.nodeIds;
       const grabbedKey = s.id;
       cleanup();
-      if (pending) {
+      if (external) {
+        external.spec.onDrop(
+          external.element,
+          nodeIds,
+          depsRef.current.getPluginContext(),
+        );
+      } else if (pending) {
         depsRef.current.onMove(
           grabbedKey,
           pending.parentId,
@@ -427,14 +488,27 @@ export function useDragReorder(deps: DragDeps) {
     cleanup();
   }
 
+  function onCancel() {
+    const s = state.current;
+    if (!s) return;
+    if (s.dragging) consumed.current = true;
+    cleanup();
+  }
+
   const startDrag = useCallback(
     (grabbedKey: string, e: ReactPointerEvent) => {
       // A fresh press: clear any stale click-suppression.
       consumed.current = false;
       // Ignore secondary buttons.
       if (e.button !== 0 && e.pointerType === "mouse") return;
+      // Snapshot selection ownership at press time, before any compatibility
+      // mouse/focus events can run. Pointer cancel and failed async drops leave
+      // the actor itself untouched; this snapshot only drives the gesture.
+      const selected = getSelectionDragSet(grabbedKey);
       state.current = {
         id: grabbedKey,
+        nodeIds: selected?.rootIds ?? [instanceIdForKey(grabbedKey)],
+        sourceKeys: selected?.rowKeys ?? [grabbedKey],
         startX: e.clientX,
         startY: e.clientY,
         dragging: false,
@@ -443,15 +517,17 @@ export function useDragReorder(deps: DragDeps) {
         lastX: e.clientX,
         lastY: e.clientY,
         pending: null,
+        external: null,
         indicator: null,
         pill: null,
         raf: null,
         moveHandler: onMove,
         upHandler: onUp,
+        cancelHandler: onCancel,
       };
       document.addEventListener("pointermove", onMove, { passive: false });
       document.addEventListener("pointerup", onUp);
-      document.addEventListener("pointercancel", onUp);
+      document.addEventListener("pointercancel", onCancel);
     },
     // startDrag must stay referentially stable (it rides in the memoized
     // commands, ADR 0014). onMove/onUp are recreated each render but read only

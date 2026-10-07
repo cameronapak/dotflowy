@@ -37,6 +37,7 @@ import type { WidgetEl } from "../types";
 import {
   DATE_LINK_PATTERN,
   PROTECTED_SCAFFOLD_KINDS,
+  formatDateFull,
   monthLabel,
   parseDateLink,
   scaffoldKeyKind,
@@ -54,8 +55,9 @@ import {
 } from "../../data/mutations";
 import { isNodesLimitError } from "../../data/nodes-client-effect";
 import { parseGoToDateTargets } from "../../data/parse-go-to-date";
+import { clearSelection } from "../../data/selection-state";
 import { runStructural } from "../../data/structural";
-import { buildTreeIndex } from "../../data/tree";
+import { buildTreeIndex, childrenOf } from "../../data/tree";
 import {
   definePlugin,
   type NodeProtection,
@@ -120,6 +122,51 @@ function scaffoldProtection(
  */
 function captureLive(focusId: string): void {
   capture(buildTreeIndex(getLiveNodes()), focusId);
+}
+
+/** Move an external drag's ordered structural roots to the end of one Daily
+ * note. The day is resolved before capture, so undo restores only the move and
+ * deliberately leaves a newly-created empty day in place (ADR 0054). */
+async function moveNodesToDay(
+  key: string,
+  nodeIds: readonly string[],
+  ctx: PluginContext,
+): Promise<void> {
+  const dayId = await getOrCreateDay(key, {
+    failureToast: "Couldn't move to that daily note",
+  });
+  if (!dayId) return;
+
+  // A day cannot be moved under itself. This also makes dropping a selection
+  // containing the destination day behave like the existing Move workflow.
+  const targets = nodeIds.filter((id) => id !== dayId);
+  if (targets.length === 0) return;
+
+  // Avoid feeding moveManyNodes an already-final run whose last member is also
+  // its initial append predecessor. Product-wise this is the settled silent
+  // same-day no-op; structurally it keeps the sibling chain untouched.
+  const siblings = childrenOf(buildTreeIndex(getLiveNodes()), dayId);
+  const tail = siblings.slice(-targets.length);
+  if (
+    tail.length === targets.length &&
+    tail.every((node, index) => node.id === targets[index])
+  )
+    return;
+
+  const moved = runStructural(() => {
+    captureLive(targets[0]!);
+    return moveManyNodes(dayId, [...targets]);
+  });
+  if (!moved) {
+    drop();
+    return;
+  }
+
+  clearSelection();
+  const count = moved === 1 ? "" : `${moved} nodes `;
+  toast.success(`Moved ${count}to ${formatDateFull(key)}`, {
+    action: { label: "Go", onClick: () => ctx.nav.open(dayId) },
+  });
 }
 
 // --- Seam A + B: the `[[YYYY-MM-DD]]` date token (ADR 0038) ------------------
@@ -330,6 +377,21 @@ export default definePlugin({
     {
       id: "daily-week-calendar",
       render: (getCtx) => <WeekCalendar getCtx={getCtx} />,
+    },
+  ],
+
+  // Seam M: each of the seven currently-rendered day pills accepts the same
+  // structural roots an ordinary bullet drag carries. Core owns hit testing and
+  // active-target stamping; Daily owns day creation and the move semantics.
+  externalDropTargets: [
+    {
+      id: "daily-week-calendar-day",
+      selector: '[data-testid="week-calendar"] [data-day-key]',
+      onDrop: (element, nodeIds, ctx) => {
+        const key = element.dataset.dayKey;
+        if (!key) return;
+        ctx.run(Effect.promise(() => moveNodesToDay(key, nodeIds, ctx)));
+      },
     },
   ],
 

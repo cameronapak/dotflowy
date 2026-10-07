@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   dayKeyToWeekKey,
+  formatDateFull,
   monthKeyToYearKey,
   monthLabel,
   shiftWeekKey,
@@ -50,6 +51,26 @@ async function load(
 const strip = (page: Page) => page.getByTestId("week-calendar");
 const pill = (page: Page, key: string) =>
   page.locator(`[data-testid="week-calendar"] [data-day-key="${key}"]`);
+
+async function dragNodeToDay(page: Page, nodeId: string, key: string) {
+  const bullet = page.locator(`li[data-node-id="${nodeId}"] .bullet`);
+  const target = pill(page, key);
+  await expect(bullet).toBeVisible();
+  await expect(target).toBeVisible();
+  const bulletBox = await bullet.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!bulletBox || !targetBox)
+    throw new Error("drag endpoints are not visible");
+
+  const startX = bulletBox.x + bulletBox.width / 2;
+  const startY = bulletBox.y + bulletBox.height / 2;
+  const targetX = targetBox.x + targetBox.width / 2;
+  const targetY = targetBox.y + targetBox.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 10, startY + 10, { steps: 3 });
+  await page.mouse.move(targetX, targetY, { steps: 8 });
+}
 
 /** Sample the subheader band (the motion.div wrapping the strip) height on every
  *  animation frame for `ms`, skipping frames where the strip is absent. Returns
@@ -226,6 +247,188 @@ test.describe("week calendar strip (ADR 0054)", () => {
     // stray entry line, unlike the write-intent Today button -- ADR 0041/0054).
     await clientNavigate(page, "/");
     await expect(page.locator(`li[data-parent-id="${newId}"]`)).toHaveCount(0);
+  });
+
+  test("dragging a node onto a day pill moves its subtree, stays put, and undoes in one step", async ({
+    page,
+  }) => {
+    const OTHER = "2030-06-11";
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "the-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: "A day",
+        },
+        {
+          id: "other-day",
+          parentId: null,
+          prevSiblingId: "the-day",
+          text: "Another day",
+        },
+        {
+          id: "move-me",
+          parentId: "the-day",
+          prevSiblingId: null,
+          text: "Prepare launch notes",
+        },
+        {
+          id: "move-child",
+          parentId: "move-me",
+          prevSiblingId: null,
+          text: "Keep this child",
+        },
+      ],
+      {
+        kv: dailyIndexKv([
+          { key: DAY, nodeId: "the-day" },
+          { key: OTHER, nodeId: "other-day" },
+        ]),
+      },
+    );
+    await clientNavigate(page, "/the-day");
+
+    // The selected day is a valid target too. Its ordinary primary fill must
+    // disappear immediately so the muted target state remains readable, and
+    // the quiet outer border keeps the button's own corner radius. Releasing
+    // here is the settled silent no-op because this is already the final child.
+    await dragNodeToDay(page, "move-me", DAY);
+    await expect(pill(page, DAY)).toHaveAttribute(
+      "data-external-drop-active",
+      "",
+    );
+    await expect(pill(page, DAY).locator("span.bg-primary")).toHaveCSS(
+      "display",
+      "none",
+    );
+    const targetStyles = await pill(page, DAY).evaluate((element) => ({
+      color: getComputedStyle(element.querySelector(".tabular-nums")!).color,
+      titleColor: getComputedStyle(document.querySelector("h2")!).color,
+      radius: getComputedStyle(element).borderRadius,
+      outerRadius: getComputedStyle(element, "::after").borderRadius,
+    }));
+    expect(targetStyles.color).toBe(targetStyles.titleColor);
+    expect(targetStyles.outerRadius).toBe(targetStyles.radius);
+    await page.mouse.up();
+    await expect(page.getByText(/^Moved /)).toHaveCount(0);
+
+    await dragNodeToDay(page, "move-me", OTHER);
+    await expect(pill(page, OTHER)).toHaveAttribute(
+      "data-external-drop-active",
+      "",
+    );
+    await expect(page.locator(".drag-indicator")).not.toBeVisible();
+    await page.mouse.up();
+
+    await expect(page).toHaveURL(/\/the-day$/);
+    await expect(
+      page.getByText(`Moved to ${formatDateFull(OTHER)}`),
+    ).toBeVisible();
+    await expect(page.locator('li[data-node-id="move-me"]')).toHaveCount(0);
+
+    // One undo restores the entire subtree to the source day.
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+z" : "Control+z",
+    );
+    await expect(
+      page.locator('li[data-node-id="move-me"][data-parent-id="the-day"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="move-child"][data-parent-id="move-me"]'),
+    ).toBeVisible();
+  });
+
+  test("a selected run can be dragged by a descendant into a missing day in order", async ({
+    page,
+  }) => {
+    const NEW = "2030-06-14";
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "the-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: "A day",
+        },
+        {
+          id: "first",
+          parentId: "the-day",
+          prevSiblingId: null,
+          text: "Prepare launch notes",
+        },
+        {
+          id: "first-child",
+          parentId: "first",
+          prevSiblingId: null,
+          text: "Draft announcement",
+        },
+        {
+          id: "second",
+          parentId: "the-day",
+          prevSiblingId: "first",
+          text: "Review launch notes",
+        },
+      ],
+      {
+        postDelayMs: 200,
+        kv: dailyIndexKv([{ key: DAY, nodeId: "the-day" }]),
+      },
+    );
+    await clientNavigate(page, "/the-day");
+
+    const firstText = page.locator(
+      'li[data-node-id="first"] > .outline-row .node-text',
+    );
+    await firstText.click();
+    await page.keyboard.press("Shift+ArrowDown");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(page.locator('li[data-node-id="first"]')).toHaveAttribute(
+      "data-selected",
+      "top",
+    );
+    await expect(page.locator('li[data-node-id="second"]')).toHaveAttribute(
+      "data-selected",
+      "bottom",
+    );
+
+    // The grabbed child lies inside the selected slab, so the drag carries the
+    // two selected roots (not the child alone) and advertises the extra node.
+    await dragNodeToDay(page, "first-child", NEW);
+    await expect(page.locator(".drag-pill")).toContainText("+1");
+    await expect(pill(page, NEW)).toHaveAttribute(
+      "data-external-drop-active",
+      "",
+    );
+    await page.mouse.up();
+
+    await expect(page.locator('output[aria-live="polite"]')).toBeVisible();
+    await expect(
+      page.getByText(`Moved 2 nodes to ${formatDateFull(NEW)}`),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/the-day$/);
+    await page.getByRole("button", { name: "Go" }).click();
+
+    const newId = page.url().split("/").pop()!;
+    await expect(
+      page.locator(`li[data-node-id="first"][data-parent-id="${newId}"]`),
+    ).toBeVisible();
+    await expect(
+      page.locator(`li[data-node-id="second"][data-parent-id="${newId}"]`),
+    ).toBeVisible();
+    await expect(
+      page.locator('li[data-node-id="first-child"][data-parent-id="first"]'),
+    ).toBeVisible();
+    await expect(page.locator('li[data-node-id="first"]')).not.toHaveAttribute(
+      "data-selected",
+    );
+    await expect(page.locator('li[data-node-id="second"]')).not.toHaveAttribute(
+      "data-selected",
+    );
   });
 
   test("chevron paging changes the week, shows a snap-back, and resets navigation-free", async ({

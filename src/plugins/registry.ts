@@ -14,6 +14,7 @@ import type {
   CaptureDestination,
   CommandSpec,
   El,
+  ExternalDropTargetSpec,
   HeaderSlotSpec,
   SubheaderSlotSpec,
   InteractionEvent,
@@ -466,6 +467,12 @@ export let headerSlots: HeaderSlotSpec[] = [];
  *  results into one collapsible muted band below the header. */
 export let subheaderSlots: SubheaderSlotSpec[] = [];
 
+// --- Seam M: external structural drop targets ------------------------------
+
+/** Plugin-owned controls that can receive the core bullet drag, in plugin array
+ *  order. Optional editor features disappear from this list when switched off. */
+export let externalDropTargets: ExternalDropTargetSpec[] = [];
+
 // --- Protected nodes --------------------------------------------------------
 
 const protectPredicates = plugins
@@ -642,6 +649,7 @@ function refreshOptionalSeams(
   selectionCommandSpecs = commandSpecs.filter((c) => c.runMany);
   headerSlots = active.flatMap((p) => p.headerSlots ?? []);
   subheaderSlots = active.flatMap((p) => p.subheaderSlots ?? []);
+  externalDropTargets = active.flatMap((p) => p.externalDropTargets ?? []);
   slotsByPosition = new Map();
   for (const slot of active.flatMap((p) => p.slots ?? [])) {
     const slots = slotsByPosition.get(slot.position);

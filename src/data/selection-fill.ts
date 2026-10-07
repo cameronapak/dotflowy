@@ -114,6 +114,25 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
+/** Event-time snapshot for pointer drag. A grabbed row anywhere inside the
+ * selected slab carries the selected ROOT ids, while `rowKeys` names every
+ * rendered row that should dim during the gesture. Null means the grabbed row
+ * is outside the active selection and remains an ordinary single-node drag. */
+export function getSelectionDragSet(
+  grabbedKey: string,
+): { rootIds: string[]; rowKeys: string[] } | null {
+  ensureStarted();
+  if (!fillMap.has(grabbedKey)) return null;
+  const rootIds = getSelectionState()?.rootIds;
+  if (!rootIds || rootIds.length === 0) return null;
+  // SAFETY: SelectionData's schema-owned readonly array is copied before it
+  // crosses into mutable drag state.
+  return {
+    rootIds: [...rootIds],
+    rowKeys: [...fillMap.keys()],
+  };
+}
+
 /**
  * Per-row subscription to this row's fill: a row re-renders only when ITS OWN
  * value changes (ADR 0014, the `useIsProtected` shape), keyed by `row.key` (not
