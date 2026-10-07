@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.21.0
+
+### Minor Changes
+
+- 10a04f0: Nodes and selected groups can now be moved between Daily notes by dragging them onto a date in the week calendar.
+
 ## 1.20.0
 
 ### Minor Changes
