@@ -56,6 +56,9 @@ Include a Mermaid diagram (GitHub renders it natively) only when the change alte
 
 Post it:
 
+- Before either path, commit the branch and run `bun run check:changeset`. Stop
+  if it fails; the command reads committed history, so an uncommitted fragment
+  does not satisfy the PR gate.
 - New PR: push the branch if it isn't pushed, then `gh pr create`. If HEAD is the default branch, stop and ask the user before branching.
 - Existing PR: `gh pr edit --body-file`, adding `--title` if the current title breaks the title rule.
 

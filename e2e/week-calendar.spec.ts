@@ -9,7 +9,12 @@ import {
   weekKeyToMonthKey,
   weekLabel,
 } from "../src/data/date-links";
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  STANDARD_TREE,
+  type SeedNode,
+} from "./fixtures";
 
 // A fixed ISO week far from "now", so month/year/week-number assertions are
 // stable whatever day the suite runs on. 2030-06-12 is a Wednesday in 2030-W24
@@ -42,10 +47,7 @@ async function load(
   kv: Parameters<typeof seedOutline>[2],
 ) {
   await seedOutline(page, tree, kv);
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 const strip = (page: Page) => page.getByTestId("week-calendar");
