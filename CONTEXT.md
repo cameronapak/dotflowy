@@ -8,6 +8,10 @@ The ubiquitous language for dotflowy's outline domain. A glossary, not a spec â€
 A single item in the outline. Owns its text and, via child pointers, its subtree. Every node has exactly one Kind; "bullet" names one kind of node, not the node itself.
 _Avoid_: item, bullet (when precision matters), block
 
+**Locked**:
+An owner-controlled state that prevents changes to a node's content and its full descendant subtree until the owner unlocks it in the editor. A locked subtree may still move intact.
+_Avoid_: read-only, frozen, protected
+
 **Kind**:
 Which of the mutually exclusive presentations a node has: bullet, task, or paragraph. Exactly one â€” converting between kinds is allowed, combining is not. Independent of Completed.
 _Avoid_: type, mode, style

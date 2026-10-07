@@ -13,6 +13,7 @@ export const nodes = sqliteTable("nodes", {
     completed: integer("completed", { mode: "boolean" }).notNull(),
     collapsed: integer("collapsed", { mode: "boolean" }).notNull(),
     bookmarkedAt: real("bookmarkedAt").notNull(),
+    locked: integer("locked", { mode: "boolean" }).notNull(),
     mirrorOf: text("mirrorOf").notNull(),
     createdAt: real("createdAt").notNull(),
     updatedAt: real("updatedAt").notNull(),

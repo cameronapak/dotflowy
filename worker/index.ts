@@ -43,12 +43,12 @@ import {
 import { createAuth } from "./auth";
 import {
   OutlineSnapshotSchema,
-  SNAPSHOT_VERSION,
   backupKey,
   backupKeyForDate,
   backupPrefix,
   backupTargets,
   isBackupDateKey,
+  isSupportedSnapshotVersion,
 } from "./backup";
 import { handleCaptureKeys, handleCaptureRequest } from "./capture";
 import {
@@ -212,6 +212,8 @@ function rowToNode(r: NodeRow): Node {
     completed: !!r.completed,
     collapsed: !!r.collapsed,
     bookmarkedAt: r.bookmarkedAt,
+    // Legacy D1 rows predate owner-controlled locks.
+    locked: false,
     // Legacy D1 data predates mirrors (ADR 0022); the import source has no such
     // column, so every imported node is its own source.
     mirrorOf: null,
@@ -295,6 +297,9 @@ class NodeLimitExceeded extends Data.TaggedError("NodeLimitExceeded")<{}> {}
 
 /** A history replay was planned against an older authoritative sequence. */
 class StaleOutlineWrite extends Data.TaggedError("StaleOutlineWrite")<{}> {}
+
+/** An ordinary write would change owner-locked content. */
+class NodeLocked extends Data.TaggedError("NodeLocked")<{}> {}
 
 // --- ensureSeededE ----------------------------------------------------------
 
@@ -417,7 +422,10 @@ function handleNodes(
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
   billingUserId: string,
-): Effect.Effect<Response, BadRequest | NodeLimitExceeded | StaleOutlineWrite> {
+): Effect.Effect<
+  Response,
+  BadRequest | NodeLimitExceeded | StaleOutlineWrite | NodeLocked
+> {
   return Effect.gen(function* () {
     switch (request.method) {
       case "GET":
@@ -461,10 +469,12 @@ function handleNodes(
                 limit,
                 clientId,
                 expectedSeq,
-              ) as Promise<number | null | "stale">,
+                true,
+              ) as Promise<number | null | "stale" | "locked">,
           );
           if (seq === "stale")
             return yield* Effect.fail(new StaleOutlineWrite());
+          if (seq === "locked") return yield* Effect.fail(new NodeLocked());
           if (seq === null) return yield* Effect.fail(new NodeLimitExceeded());
           return json({ seq });
         }
@@ -475,9 +485,14 @@ function handleNodes(
           const limit = nodeLimitForPlan(
             yield* Effect.promise(() => getPlan(billingUserId, env)),
           );
-          const applied = yield* Effect.promise(() =>
-            stub.upsertNodesGated(nodes, limit, clientId),
+          const applied = yield* Effect.promise(
+            // SAFETY: the generated RPC stub type predates this method's new locked sentinel; the deployed method returns this declared union.
+            () =>
+              stub.upsertNodesGated(nodes, limit, clientId) as Promise<
+                boolean | "locked"
+              >,
           );
+          if (applied === "locked") return yield* Effect.fail(new NodeLocked());
           if (!applied) return yield* Effect.fail(new NodeLimitExceeded());
         }
         return json({ ok: true });
@@ -487,15 +502,24 @@ function handleNodes(
           request,
           NodesPatchBody,
         );
-        const seq = yield* Effect.promise(() =>
-          stub.patchNodes(updates, clientId),
+        const seq = yield* Effect.promise(
+          // SAFETY: the generated RPC stub type predates this method's new locked sentinel; the deployed method returns this declared union.
+          () =>
+            stub.patchNodes(updates, clientId, true) as Promise<
+              number | "locked"
+            >,
         );
+        if (seq === "locked") return yield* Effect.fail(new NodeLocked());
         return json({ ok: true, seq });
       }
       case "DELETE": {
         const { ids, clientId } = yield* decodeBody(request, NodesDeleteBody);
-        if (ids.length)
-          yield* Effect.promise(() => stub.deleteNodes(ids, clientId));
+        if (ids.length) {
+          const deleted = yield* Effect.promise(() =>
+            stub.deleteNodes(ids, clientId),
+          );
+          if (!deleted) return yield* Effect.fail(new NodeLocked());
+        }
         return json({ ok: true });
       }
       default:
@@ -746,6 +770,7 @@ function handleApiRequest(
   | RouteNotFound
   | BadRequest
   | NodeLimitExceeded
+  | NodeLocked
   | StaleOutlineWrite
   | RetirementOperationInProgress
   | RetirementOperationRejected
@@ -968,7 +993,7 @@ function handleApiRequest(
             new BadRequest({ reason: `snapshot rejected: ${issue.message}` }),
         ),
       );
-      if (snapshot.version !== SNAPSHOT_VERSION) {
+      if (!isSupportedSnapshotVersion(snapshot.version)) {
         return yield* Effect.fail(
           new BadRequest({
             reason: `unknown snapshot version ${snapshot.version}`,
@@ -1320,6 +1345,9 @@ const handler = {
           Effect.succeed(
             json({ error: "node_limit", limit: FREE_NODE_LIMIT }, 403),
           ),
+        ),
+        Effect.catchTag("NodeLocked", () =>
+          Effect.succeed(json({ error: "node_locked" }, 423)),
         ),
         Effect.catchTag("StaleOutlineWrite", () =>
           Effect.succeed(json({ error: "stale_outline" }, 409)),

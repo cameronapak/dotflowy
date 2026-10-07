@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, LockIcon } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -19,6 +19,7 @@ import { getHistoryState } from "../data/history";
 import { useSelectionFill } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import {
+  useIsLocked,
   useMirrorCount,
   useNode,
   useVisibleChildIds,
@@ -26,6 +27,7 @@ import {
 import { rowKeyFor } from "../data/visible-order";
 import {
   autoformat,
+  getProtection,
   usePluginChrome,
   useIsProtected,
 } from "../plugins/registry";
@@ -52,7 +54,7 @@ import {
 } from "./paste";
 import { applyPendingCaret } from "./pending-caret";
 import { healProtectedText } from "./protected-text";
-import { ProtectedLock } from "./protection";
+import { ProtectionIndicator } from "./protection";
 import { useSlashMenu } from "./slash-menu";
 import { useBulletKeymap } from "./use-bullet-keymap";
 
@@ -259,6 +261,8 @@ function RowChrome({
   });
 
   const protectedNode = useIsProtected(content.id);
+  const protection = protectedNode ? getProtection(content.id) : null;
+  const locked = useIsLocked(content.id);
   // Covers this row AND its visible descendants (2e-2) -- the flat list has no
   // DOM nesting for a root's tint to paint behind its children, so every
   // covered row reads its own value.
@@ -280,9 +284,20 @@ function RowChrome({
   const beforeTextSlots: SlotSpec[] = [
     ...(slotsByPosition.get("row:before-text") ?? []),
     {
-      id: "core:protected-lock",
+      id: "core:protection-indicator",
       position: "row:before-text",
-      render: () => (protectedNode ? <ProtectedLock size={12} /> : null),
+      render: () =>
+        protectedNode || locked ? (
+          <ProtectionIndicator
+            size={12}
+            label={
+              locked
+                ? "Locked subtree"
+                : (protection?.indicator?.label ?? "Protected node")
+            }
+            icon={locked ? LockIcon : protection?.indicator?.icon}
+          />
+        ) : null,
     },
     {
       id: "core:mirror-badge",
@@ -477,10 +492,12 @@ function RowChrome({
             }}
             className={`node-text${isPivot ? " vt-morph" : ""}`}
             style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
-            contentEditable
+            contentEditable={!locked}
+            tabIndex={locked ? 0 : undefined}
             suppressContentEditableWarning
             spellCheck={false}
             aria-label={content.text.trim() || "Empty bullet"}
+            aria-readonly={locked}
             aria-multiline="true"
             data-completed={content.completed}
             data-history-key={rowKey}
@@ -584,6 +601,11 @@ function RowChrome({
               }
             }}
             onKeyDown={(e) => {
+              if (locked && e.key === "/" && !slash.isOpen) {
+                e.preventDefault();
+                slash.openWithoutInput();
+                return;
+              }
               if (menus.handleKeyDown(e)) return;
               slash.handleKeyDown(e);
             }}

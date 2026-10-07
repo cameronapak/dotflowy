@@ -401,7 +401,7 @@ export interface CommandSpec {
   keywords: string[];
   /** Hide the command for nodes it doesn't apply to (e.g. "To-do" once the
    *  bullet already is a task). */
-  available(node: Node): boolean;
+  available(node: Node, ctx?: PluginContext): boolean;
   /**
    * Marks a command whose `run` needs a live caret/text-selection inside the
    * bullet (e.g. emphasis wrap). The `/` palette and Seam D still run it (a caret
@@ -501,6 +501,13 @@ export interface HeaderSlotSpec {
 // optional; the core never depends on the plugin filling them in.
 
 export interface NodeProtection {
+  /** Optional plugin-owned visual identity for the protected node. The core
+   *  renders it in the shared protection position on rows and zoomed titles.
+   *  Omit for the generic core protection indicator. */
+  indicator?: {
+    icon: ComponentType<{ size?: number; strokeWidth?: number }>;
+    label: string;
+  };
   /** General "why" toasted for any rejected action, overriding the core default.
    *  Also the message for a rejected delete specifically. Per-action fields below
    *  override it for their action. */

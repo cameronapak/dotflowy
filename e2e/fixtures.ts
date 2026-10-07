@@ -41,6 +41,8 @@ export interface SeedNode {
   isTask?: boolean;
   /** Epoch ms when bookmarked; omit/null for an un-bookmarked node. */
   bookmarkedAt?: number | null;
+  /** Direct owner lock; descendant lock state is derived by the app. */
+  locked?: boolean;
   /** Source node id this is a mirror of (ADR 0022); omit/null for a normal node. */
   mirrorOf?: string | null;
   /** Provenance: agent harness name if created via MCP; omit/null for human. */
@@ -60,6 +62,7 @@ export interface ApiNode {
   completed: boolean;
   collapsed: boolean;
   bookmarkedAt: number | null;
+  locked: boolean;
   mirrorOf: string | null;
   createdAt: number;
   updatedAt: number;
@@ -84,6 +87,7 @@ function toNode(n: SeedNode): ApiNode {
     completed: n.completed ?? false,
     collapsed: n.collapsed ?? false,
     bookmarkedAt: n.bookmarkedAt ?? null,
+    locked: n.locked ?? false,
     mirrorOf: n.mirrorOf ?? null,
     createdAt: 0,
     updatedAt: 0,

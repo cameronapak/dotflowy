@@ -8,6 +8,7 @@ import {
   childrenOf,
   createId,
   createNode,
+  isNodeLocked,
   now,
   trueSourceOf,
   wouldMirrorCycle,
@@ -339,6 +340,13 @@ export function indent(
   const newParentContentId = resolveMirror
     ? trueSourceOf(index, newParent.id)
     : newParent.id;
+  // A locked root may move intact, but nothing may enter or leave protected
+  // contents. The authoritative DO repeats this semantic check.
+  if (
+    (node.parentId && isNodeLocked(index, node.parentId)) ||
+    isNodeLocked(index, newParentContentId)
+  )
+    return false;
 
   // Cycle guard (ADR 0022 + ADR 0010): mirror resolution can point
   // `newParentContentId` at `nodeId` itself (a mirror of `nodeId` sitting as its
@@ -402,6 +410,7 @@ export function indent(
 export function outdent(index: TreeIndex, nodeId: string): boolean {
   const node = index.byId.get(nodeId);
   if (!node || node.parentId === null) return false;
+  if (isNodeLocked(index, node.parentId)) return false;
 
   const oldParent = index.byId.get(node.parentId);
   if (!oldParent) return false;
@@ -540,6 +549,7 @@ export function moveUp(
   const isVisible = opts.isVisible ?? (() => true);
   const node = index.byId.get(nodeId);
   if (!node) return false;
+  if (node.parentId && isNodeLocked(index, node.parentId)) return false;
 
   const siblings = childrenOf(index, node.parentId);
   const i = siblings.findIndex((n) => n.id === nodeId);
@@ -634,6 +644,11 @@ export function moveNode(
 ): boolean {
   const node = index.byId.get(nodeId);
   if (!node) return false;
+  if (
+    (node.parentId && isNodeLocked(index, node.parentId)) ||
+    (newParentId && isNodeLocked(index, newParentId))
+  )
+    return false;
   // Can't land after yourself, and can't become your own parent.
   if (afterSiblingId === nodeId || newParentId === nodeId) return false;
 
@@ -915,4 +930,10 @@ export function toggleCollapsed(nodeId: string, collapsed: boolean) {
  */
 export function toggleBookmark(nodeId: string, bookmarked: boolean) {
   update(nodeId, { bookmarkedAt: bookmarked ? now() : null });
+}
+
+/** Store direct owner lock intent. Effective descendant/mirror state is derived
+ * by the tree index; callers resolve mirrors to their true source first. */
+export function setLocked(nodeId: string, locked: boolean) {
+  update(nodeId, { locked });
 }

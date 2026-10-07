@@ -8,7 +8,7 @@ import {
   parseNodeLinks,
 } from "../src/data/node-links";
 import { NodeSchema } from "../src/data/wire-schema";
-import { type OutlineSnapshot, SNAPSHOT_VERSION } from "./backup";
+import { isSupportedSnapshotVersion, type OutlineSnapshot } from "./backup";
 import {
   type LunoraRetirementSnapshot,
   RETIREMENT_SNAPSHOT_VERSION,
@@ -109,6 +109,7 @@ const FIELD_ROLE = {
   mirrorOf: "content",
   collapsed: "metadata",
   bookmarkedAt: "metadata",
+  locked: "content",
   createdAt: "metadata",
   updatedAt: "metadata",
   origin: "metadata",
@@ -182,7 +183,7 @@ function validateRecoveryInputs(
   userId: string,
 ) {
   if (
-    classic.version !== SNAPSHOT_VERSION ||
+    !isSupportedSnapshotVersion(classic.version) ||
     experimental.version !== RETIREMENT_SNAPSHOT_VERSION ||
     experimental.userId !== userId ||
     [
@@ -315,6 +316,7 @@ function planRecoveryCopies(
       completed: false,
       collapsed: false,
       bookmarkedAt: null,
+      locked: false,
       mirrorOf: null,
       createdAt: args.timestamp,
       updatedAt: args.timestamp,

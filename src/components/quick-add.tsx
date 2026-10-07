@@ -173,6 +173,8 @@ const STRUCTURAL_COMMAND_IDS = new Set([
   "delete",
   "send-to-today",
   "mirror-to-today",
+  "lock",
+  "unlock",
 ]);
 function quickAddCommandFilter(spec: CommandSpec): boolean {
   return !STRUCTURAL_COMMAND_IDS.has(spec.id);
@@ -1096,6 +1098,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         runNodeIntent((id) => toggleCompleted(id, completed)),
       onSetTask: (_id, isTask) => runNodeIntent((id) => setIsTask(id, isTask)),
       onSetKind: (_id, kind) => runNodeIntent((id) => setKind(id, kind)),
+      onSetLocked: noop,
       onRequestMove: noop,
       onRequestMirror: noop,
       onToggleCollapsed: noop,

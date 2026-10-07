@@ -103,6 +103,10 @@ function scaffoldProtection(
   name: string,
 ): NodeProtection {
   return {
+    indicator: {
+      icon: CalendarDaysIcon,
+      label: "Protected Daily scaffold",
+    },
     reason: `This ${noun} groups your daily notes and can't be deleted.`,
     blankReason: `This daily ${noun} needs its name.`,
     taskReason: `A daily ${noun} can't be a to-do.`,
@@ -548,6 +552,10 @@ export default definePlugin({
     switch (kind) {
       case "container":
         return {
+          indicator: {
+            icon: CalendarDaysIcon,
+            label: "Protected Daily scaffold",
+          },
           reason:
             "The Daily list can't be deleted. It holds all your daily notes.",
           blankReason: "The Daily list needs a name.",

@@ -39,6 +39,7 @@ Node {
   text, isTask, completed, collapsed, // content + UI state
   kind,                               // null (a bullet, or a task per isTask) or "paragraph"
   bookmarkedAt,                       // null, or the ms it was pinned (also the bookmark sort key)
+  locked,                             // direct owner lock; effective state inherits through subtrees and mirrors
   mirrorOf,                           // null, or the id of the node this one windows
   origin,                             // null if you wrote it; the agent's name if MCP created it
   createdAt, updatedAt
@@ -57,17 +58,19 @@ renumbering. Reordering is relinking pointers.
 See `src/data/tree.ts` for the index builder and `src/data/mutations.ts` for
 the structural operations — insert, indent / outdent, the fused `moveNode`
 (drag reorder + reparent), move up / down, delete — plus the field setters
-(text, task, completed, collapsed, bookmark). Each preserves the linked-list
+(text, task, completed, collapsed, bookmark, lock). Each preserves the linked-list
 invariant.
 
 ### Adding a Node field
 
-A new field touches seven places: `src/data/wire-schema.ts`, `src/data/schema.ts`,
+A new field touches at least seven places: `src/data/wire-schema.ts`, `src/data/schema.ts`,
 `createNode()`, `withNodeDefaults` in `collection.ts`, a DO `ADD COLUMN` migration,
 `e2e/fixtures.ts`, and the R2 snapshot boundary in `worker/backup.ts`. Miss the
 fixtures and inbound-frame decode rejects every snapshot. Build nodes with
 `createNode()` — a schema default makes the field optional in the encoded type
-([ADR 0003](./adr/0003-no-schema-defaults.md)).
+([ADR 0003](./adr/0003-no-schema-defaults.md)). Also update any MCP/CLI output
+schema that exposes the field and Lunora's retained retirement schema, then run
+`bun run lunora:codegen`.
 
 ### Reading the tree
 

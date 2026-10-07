@@ -253,9 +253,9 @@ function ensureStarted() {
 
 /** Subscribe to any change in the daily index (rebuilt on every collection
  *  change, including the initial fetch resolving). Drives the reactive date
- *  badge AND the container's protection lock (Seam: `protectsChanged`) -- the
- *  lock must re-render when the `container -> nodeId` mapping arrives, not only
- *  after an unrelated re-render. Returns an unsubscribe. */
+ *  badge AND the container's protection indicator (`protectsChanged`) -- the
+ *  indicator must re-render when the `container -> nodeId` mapping arrives, not
+ *  only after an unrelated re-render. Returns an unsubscribe. */
 export function subscribeDailyIndex(cb: () => void): () => void {
   ensureStarted();
   listeners.add(cb);
@@ -266,9 +266,9 @@ export function subscribeDailyIndex(cb: () => void): () => void {
 
 /** Start the index's kv fetch eagerly (the plugin `preload` seam, called once
  *  at editor mount). Without this the fetch starts lazily at the FIRST badge/
- *  lock render -- i.e. only after the outline snapshot has already painted --
- *  so the day badges and the container lock popped in a beat later (a layout
- *  shift). Preloading lets the kv fetch race the nodes snapshot instead of
+ *  indicator render -- i.e. only after the outline snapshot has painted --
+ *  so day badges and the container indicator popped in later (a layout shift).
+ *  Preloading lets the kv fetch race the nodes snapshot instead of
  *  queuing behind it. */
 export function preloadDailyIndex(): void {
   ensureStarted();

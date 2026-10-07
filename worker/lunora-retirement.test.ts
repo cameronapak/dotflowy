@@ -28,6 +28,7 @@ const node = (
   completed: false,
   collapsed: false,
   bookmarkedAt: null,
+  locked: false,
   mirrorOf: null,
   createdAt: 1,
   updatedAt: 1,
@@ -102,7 +103,7 @@ describe("retirement snapshot validation", () => {
     ];
     const lunora = { ...base, dailyIndex };
     const classic: OutlineSnapshot = {
-      version: 1,
+      version: 2,
       exportedAt: 10,
       seq: 3,
       nodes: [node("old", null, null)],
@@ -156,7 +157,7 @@ describe("retirement snapshot validation", () => {
       updatedAt: 1,
     };
     const classic: OutlineSnapshot = {
-      version: 1,
+      version: 2,
       exportedAt: 1,
       seq: 1,
       nodes: [node("a", null, null)],
@@ -272,8 +273,8 @@ it("uses a migration-specific prefix outside backup lifecycle", () => {
 
 it("builds a classic target without merging stale shared rows", () => {
   const lunora = snapshot([node("a", null, null), node("b", "a", null)]);
-  const classic = {
-    version: 1,
+  const classic: OutlineSnapshot = {
+    version: 2,
     exportedAt: 1,
     seq: 2,
     nodes: [node("old", null, null)],
@@ -315,7 +316,7 @@ it("builds a classic target without merging stale shared rows", () => {
 describe("read-only retirement comparison", () => {
   it("reports asymmetric differences and missing references without content or mutations", () => {
     const classic: OutlineSnapshot = {
-      version: 1,
+      version: 2,
       exportedAt: 20,
       seq: 3,
       nodes: [
@@ -435,7 +436,7 @@ describe("read-only retirement comparison", () => {
 
   it("marks malformed or duplicate side collections uncomparable without echoing values", () => {
     const classic: OutlineSnapshot = {
-      version: 1,
+      version: 2,
       exportedAt: 1,
       seq: 1,
       nodes: [],
@@ -479,7 +480,7 @@ describe("read-only retirement comparison", () => {
     const base = node("a", null, null);
     for (const backend of ["classic", "experimental"]) {
       const classic: OutlineSnapshot = {
-        version: 1,
+        version: 2,
         exportedAt: 1,
         seq: 1,
         nodes:
@@ -510,7 +511,7 @@ describe("read-only retirement comparison", () => {
     const a = node("a", null, null);
     const b = node("b", null, "a");
     const classic: OutlineSnapshot = {
-      version: 1,
+      version: 2,
       exportedAt: 1,
       seq: 1,
       nodes: [a, b],
@@ -543,7 +544,7 @@ describe("read-only retirement comparison", () => {
       ["{", "invalid"],
     ] as const) {
       const classic: OutlineSnapshot = {
-        version: 1,
+        version: 2,
         exportedAt: 1,
         seq: 1,
         nodes: [],
@@ -572,7 +573,7 @@ describe("read-only retirement comparison", () => {
         node(`n${i}`, null, i === 0 ? null : `n${i - 1}`),
       );
       const classic: OutlineSnapshot = {
-        version: 1,
+        version: 2,
         exportedAt: 1,
         seq: 1,
         nodes,
@@ -606,7 +607,7 @@ describe("read-only retirement comparison", () => {
 
 describe("explicit Classic link repair", () => {
   const classic = (nodes: Node[]): OutlineSnapshot => ({
-    version: 1,
+    version: 2,
     exportedAt: 10,
     seq: 3,
     nodes,

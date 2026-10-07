@@ -33,6 +33,7 @@ const NODE: Node = {
   completed: false,
   collapsed: false,
   bookmarkedAt: null,
+  locked: false,
   mirrorOf: null,
   createdAt: 1,
   updatedAt: 1,
@@ -106,6 +107,21 @@ describe("backupTargets", () => {
 describe("OutlineSnapshotSchema", () => {
   it("accepts a well-formed snapshot", () => {
     expect(() => decode(SNAPSHOT)).not.toThrow();
+  });
+
+  it("restores version-1 nodes as unlocked", () => {
+    const { locked: _locked, ...legacyNode } = NODE;
+    const restored = decode({
+      ...SNAPSHOT,
+      version: 1,
+      nodes: [legacyNode],
+    });
+    expect(restored.nodes[0]?.locked).toBe(false);
+  });
+
+  it("keeps locked required in current snapshots", () => {
+    const { locked: _locked, ...partial } = NODE;
+    expect(() => decode({ ...SNAPSHOT, nodes: [partial] })).toThrow();
   });
 
   it("rejects a node missing a required wire field", () => {

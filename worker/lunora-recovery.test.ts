@@ -25,9 +25,10 @@ const node = (id: string, fields: Partial<Node> = {}): Node => ({
   origin: null,
   kind: null,
   ...fields,
+  locked: fields.locked ?? false,
 });
 const classic = (nodes: Node[]): OutlineSnapshot => ({
-  version: 1,
+  version: 2,
   exportedAt: 100,
   seq: 7,
   nodes,
@@ -136,6 +137,7 @@ describe("preserve-Classic detached recovery plan", () => {
       isTask: 1,
       completed: 1,
       kind: 1,
+      locked: 0,
       mirrorOf: 0,
       collapsed: 1,
       bookmarkedAt: 1,
@@ -385,9 +387,10 @@ describe("preserve-Classic detached recovery plan", () => {
   it("rejects wrong versions, duplicate nodes, ownership drift and invalid Classic", () => {
     const left = classic([node("current")]),
       right = experimental([node("extra")]);
-    expect(() => plan({ ...left, version: 2 }, right)).toThrow(
-      "version or ownership",
-    );
+    // SAFETY: this deliberately passes an impossible future version to exercise the runtime guard.
+    expect(() =>
+      plan({ ...left, version: 3 as OutlineSnapshot["version"] }, right),
+    ).toThrow("version or ownership");
     expect(() => plan(left, { ...right, version: 2 })).toThrow(
       "version or ownership",
     );

@@ -27,6 +27,7 @@ import { parseNodeLinks } from "../src/data/node-links";
 import { buildTreeIndex } from "../src/data/tree";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
+import { validateLockedPatches, validateLockedWrite } from "./lock-policy";
 import {
   classicSnapshotsEquivalent,
   validateNodeGraph,
@@ -52,6 +53,7 @@ interface NodeRow {
   completed: number;
   collapsed: number;
   bookmarkedAt: number | null;
+  locked: number;
   mirrorOf: string | null;
   createdAt: number;
   updatedAt: number;
@@ -91,7 +93,7 @@ type FieldChangeValue = PatchUpdate["changes"][string];
 /** Columns a client may write, and which of them are stored as 0/1 booleans.
  *  The dynamic PATCH builds its SQL only from this allowlist, so it can't be
  *  injected. */
-const BOOL_COLUMNS = new Set(["isTask", "completed", "collapsed"]);
+const BOOL_COLUMNS = new Set(["isTask", "completed", "collapsed", "locked"]);
 const WRITABLE_COLUMNS = new Set([
   "parentId",
   "prevSiblingId",
@@ -100,6 +102,7 @@ const WRITABLE_COLUMNS = new Set([
   "completed",
   "collapsed",
   "bookmarkedAt",
+  "locked",
   "mirrorOf",
   "createdAt",
   "updatedAt",
@@ -141,6 +144,7 @@ function rowToNode(r: NodeRow): Node {
     completed: !!r.completed,
     collapsed: !!r.collapsed,
     bookmarkedAt: r.bookmarkedAt,
+    locked: !!r.locked,
     mirrorOf: r.mirrorOf,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -302,6 +306,16 @@ export class UserOutlineDO extends DurableObject<Env> {
         )`);
       },
     },
+    {
+      // Owner-controlled subtree locking (ADR 0067). Existing nodes are
+      // unlocked; descendants derive effective state without row rewrites.
+      version: 6,
+      up: (sql) => {
+        sql.exec(
+          `ALTER TABLE nodes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0`,
+        );
+      },
+    },
   ];
 
   /** Run every migration newer than the recorded schema version, each atomically
@@ -351,7 +365,7 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   getNodes(): Node[] {
     return this.readRows<NodeRow>(
-      "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes",
+      "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, locked, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes",
     ).map(rowToNode);
   }
 
@@ -369,12 +383,12 @@ export class UserOutlineDO extends DurableObject<Env> {
     // re-puts the full node) can never flip a node's provenance. Existing rows
     // keep whatever they were born with; legacy rows stay NULL (human).
     this.sql.exec(
-      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, locked, mirrorOf, createdAt, updatedAt, origin, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
          isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
-         bookmarkedAt=excluded.bookmarkedAt, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt,
+         bookmarkedAt=excluded.bookmarkedAt, locked=excluded.locked, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt,
          kind=excluded.kind`,
       n.id,
       n.parentId,
@@ -384,6 +398,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       n.completed ? 1 : 0,
       n.collapsed ? 1 : 0,
       n.bookmarkedAt,
+      n.locked ? 1 : 0,
       n.mirrorOf,
       n.createdAt,
       n.updatedAt,
@@ -402,6 +417,9 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   upsertNodes(nodes: readonly Node[]): void {
     this.assertWritable();
+    const ops = nodes.map((value) => ({ op: "update" as const, value }));
+    const violation = validateLockedWrite(this.getNodes(), ops);
+    if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
         this.recordChange(nodes.map((n) => this.putNode(n))),
@@ -503,7 +521,8 @@ export class UserOutlineDO extends DurableObject<Env> {
     limit: number | null,
     clientId?: string,
     expectedSeq?: number,
-  ): number | null | "stale" {
+    allowLockChanges = false,
+  ): number | null | "stale" | "locked" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       // History replay is conditional on exactly the state it was planned
@@ -511,6 +530,8 @@ export class UserOutlineDO extends DurableObject<Env> {
       // cap probes and node writes, so rejection has no observable side effect.
       if (expectedSeq !== undefined && this.currentSeq() !== expectedSeq)
         return "stale" as const;
+      if (validateLockedWrite(this.getNodes(), ops, allowLockChanges))
+        return "locked" as const;
       if (limit !== null) {
         const { inserts, deletes } = countNetGrowth(ops, (id) =>
           this.nodeExists(id),
@@ -527,7 +548,8 @@ export class UserOutlineDO extends DurableObject<Env> {
         clientId,
       );
     });
-    if (frames === null || frames === "stale") return frames;
+    if (frames === null || frames === "stale" || frames === "locked")
+      return frames;
     return this.broadcastChange(frames);
   }
 
@@ -539,9 +561,11 @@ export class UserOutlineDO extends DurableObject<Env> {
     nodes: readonly Node[],
     limit: number | null,
     clientId?: string,
-  ): boolean {
+  ): boolean | "locked" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
+      const ops = nodes.map((value) => ({ op: "update" as const, value }));
+      if (validateLockedWrite(this.getNodes(), ops)) return "locked" as const;
       if (limit !== null) {
         const newIds = new Set<string>();
         for (const n of nodes) if (!this.nodeExists(n.id)) newIds.add(n.id);
@@ -554,6 +578,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       );
     });
     if (frames === null) return false;
+    if (frames === "locked") return frames;
     this.broadcastChange(frames);
     return true;
   }
@@ -580,6 +605,8 @@ export class UserOutlineDO extends DurableObject<Env> {
    */
   applyBatch(ops: readonly ChangeOp[]): number {
     this.assertWritable();
+    const violation = validateLockedWrite(this.getNodes(), ops);
+    if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
     return this.broadcastChange(
       this.ctx.storage.transactionSync(() => {
         const out: ChangeOp[] = [];
@@ -685,6 +712,8 @@ export class UserOutlineDO extends DurableObject<Env> {
         const result: CaptureResult = { error: "node_limit" };
         return { result, frames: [] };
       }
+      const violation = validateLockedWrite(this.getNodes(), plan.ops);
+      if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
       for (const row of pending) {
         this.sql.exec(
           "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
@@ -741,49 +770,73 @@ export class UserOutlineDO extends DurableObject<Env> {
         )
         .toArray()[0];
       if (!row) return [];
-      return this.recordChange([
-        this.putNode({ ...rowToNode(row), text, updatedAt: Date.now() }),
-      ]);
+      const value = { ...rowToNode(row), text, updatedAt: Date.now() };
+      if (validateLockedWrite(this.getNodes(), [{ op: "update", value }]))
+        return [];
+      return this.recordChange([this.putNode(value)]);
     });
     this.broadcastChange(frames);
     return frames.length > 0;
   }
 
-  patchNodes(updates: readonly PatchUpdate[], clientId?: string): number {
+  patchNodes(
+    updates: readonly PatchUpdate[],
+    clientId?: string,
+    allowLockChanges = false,
+  ): number | "locked" {
     this.assertWritable();
-    return this.broadcastChange(
-      this.ctx.storage.transactionSync(() => {
-        const ops: ChangeOp[] = [];
-        for (const u of updates) {
-          const sets: string[] = [];
-          const vals: SqlVal[] = [];
-          for (const [k, v] of Object.entries(u.changes)) {
-            if (!WRITABLE_COLUMNS.has(k)) continue;
-            sets.push(`${k} = ?`);
-            vals.push(toSqlValue(k, v));
-          }
-          if (!sets.length) continue;
-          vals.push(u.id);
-          this.sql.exec(
-            `UPDATE nodes SET ${sets.join(", ")} WHERE id = ?`,
-            ...vals,
-          );
-          // Broadcast the full post-patch row (canonical booleans, every field) so
-          // a remote client applies an unambiguous update regardless of rowUpdateMode.
-          // SAFETY: the SELECT lists exactly the NodeRow columns; index 0 is absent when the row vanished, hence the union.
-          const row = this.readRows<NodeRow>(
-            "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes WHERE id = ?",
-            u.id,
-          )[0] as NodeRow | undefined;
-          if (row) ops.push({ op: "update", value: rowToNode(row) });
+    const frames = this.ctx.storage.transactionSync(() => {
+      const current = this.getNodes();
+      const planned: Array<{ id: string; changes: Partial<Node> }> = [];
+      for (const u of updates) {
+        const changes = Object.fromEntries(
+          Object.entries(u.changes).filter(([key]) =>
+            WRITABLE_COLUMNS.has(key),
+          ),
+        );
+        if (Object.keys(changes).length === 0) continue;
+        planned.push({
+          id: u.id,
+          // SAFETY: changes contains only WRITABLE_COLUMNS and the wire schema has already validated each corresponding Node field value.
+          changes: changes as Partial<Node>,
+        });
+      }
+      if (validateLockedPatches(current, planned, allowLockChanges))
+        return "locked" as const;
+      const ops: ChangeOp[] = [];
+      for (const u of updates) {
+        const sets: string[] = [];
+        const vals: SqlVal[] = [];
+        for (const [k, v] of Object.entries(u.changes)) {
+          if (!WRITABLE_COLUMNS.has(k)) continue;
+          sets.push(`${k} = ?`);
+          vals.push(toSqlValue(k, v));
         }
-        return this.recordChange(ops, clientId);
-      }),
-    );
+        if (!sets.length) continue;
+        vals.push(u.id);
+        this.sql.exec(
+          `UPDATE nodes SET ${sets.join(", ")} WHERE id = ?`,
+          ...vals,
+        );
+        // Broadcast the full post-patch row (canonical booleans, every field) so
+        // a remote client applies an unambiguous update regardless of rowUpdateMode.
+        // SAFETY: the SELECT lists exactly the NodeRow columns; index 0 is absent when the row vanished, hence the union.
+        const row = this.readRows<NodeRow>(
+          "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, locked, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes WHERE id = ?",
+          u.id,
+        )[0] as NodeRow | undefined;
+        if (row) ops.push({ op: "update", value: rowToNode(row) });
+      }
+      return this.recordChange(ops, clientId);
+    });
+    if (frames === "locked") return frames;
+    return this.broadcastChange(frames);
   }
 
-  deleteNodes(ids: readonly string[], clientId?: string): void {
+  deleteNodes(ids: readonly string[], clientId?: string): boolean {
     this.assertWritable();
+    const ops = ids.map((key) => ({ op: "delete" as const, key }));
+    if (validateLockedWrite(this.getNodes(), ops)) return false;
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
         this.recordChange(
@@ -792,6 +845,7 @@ export class UserOutlineDO extends DurableObject<Env> {
         ),
       ),
     );
+    return true;
   }
 
   // --- realtime sync (WebSocket Hibernation) ---------------------------------

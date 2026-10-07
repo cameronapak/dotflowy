@@ -125,6 +125,11 @@ const LUNORA_TABLE_COLUMNS: Record<
             "nullable": true
         },
         {
+            "name": "locked",
+            "optional": false,
+            "type": "boolean"
+        },
+        {
             "name": "mirrorOf",
             "optional": false,
             "type": "string",
@@ -435,18 +440,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Bare Error thrown instead of a coded LunoraError"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:58:retirementState",
+        "cacheKey": "unbounded_collect:mcp:59:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:58 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:59 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 58,
+            "line": 59,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -455,18 +460,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:94:nodes",
+        "cacheKey": "unbounded_collect:mcp:95:nodes",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"nodes\" at mcp:94 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"nodes\" at mcp:95 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "listNodes",
             "file": "mcp",
-            "line": 94,
+            "line": 95,
             "shardKind": "shardBy",
             "table": "nodes"
         },
@@ -475,18 +480,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:107:dailyIndex",
+        "cacheKey": "unbounded_collect:mcp:108:dailyIndex",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"dailyIndex\" at mcp:107 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"dailyIndex\" at mcp:108 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "listDailyIndex",
             "file": "mcp",
-            "line": 107,
+            "line": 108,
             "shardKind": "shardBy",
             "table": "dailyIndex"
         },
@@ -495,32 +500,12 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:206:nodes",
+        "cacheKey": "unbounded_collect:mcp:207:nodes",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"nodes\" at mcp:206 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
-        "facing": "EXTERNAL",
-        "level": "INFO",
-        "metadata": {
-            "exportName": "<module>",
-            "file": "mcp",
-            "line": 206,
-            "shardKind": "shardBy",
-            "table": "nodes"
-        },
-        "name": "unbounded_collect",
-        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
-        "title": "Unbounded collect"
-    },
-    {
-        "cacheKey": "unbounded_collect:mcp:207:dailyIndex",
-        "categories": [
-            "PERFORMANCE"
-        ],
-        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"dailyIndex\" at mcp:207 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"nodes\" at mcp:207 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
@@ -528,6 +513,26 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
             "file": "mcp",
             "line": 207,
             "shardKind": "shardBy",
+            "table": "nodes"
+        },
+        "name": "unbounded_collect",
+        "remediation": "Narrow the read with `.withIndex(\"name\", (q) => q.eq(...))`, cap it with `.take(n)`, or page it with `.paginate(args.paginationOpts)` so neither the scan nor the subscription payload grows with the table.",
+        "title": "Unbounded collect"
+    },
+    {
+        "cacheKey": "unbounded_collect:mcp:208:dailyIndex",
+        "categories": [
+            "PERFORMANCE"
+        ],
+        "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
+        "detail": "Query on \"dailyIndex\" at mcp:208 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+            "exportName": "<module>",
+            "file": "mcp",
+            "line": 208,
+            "shardKind": "shardBy",
             "table": "dailyIndex"
         },
         "name": "unbounded_collect",
@@ -535,18 +540,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:208:tagColors",
+        "cacheKey": "unbounded_collect:mcp:209:tagColors",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"tagColors\" at mcp:208 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"tagColors\" at mcp:209 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 208,
+            "line": 209,
             "shardKind": "shardBy",
             "table": "tagColors"
         },
@@ -555,18 +560,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:209:savedQueries",
+        "cacheKey": "unbounded_collect:mcp:210:savedQueries",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"savedQueries\" at mcp:209 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"savedQueries\" at mcp:210 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 209,
+            "line": 210,
             "shardKind": "shardBy",
             "table": "savedQueries"
         },
@@ -575,18 +580,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:210:migrateState",
+        "cacheKey": "unbounded_collect:mcp:211:migrateState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"migrateState\" at mcp:210 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"migrateState\" at mcp:211 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 210,
+            "line": 211,
             "shardKind": "shardBy",
             "table": "migrateState"
         },
@@ -595,18 +600,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:259:nodes",
+        "cacheKey": "unbounded_collect:mcp:260:nodes",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"nodes\" at mcp:259 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"nodes\" at mcp:260 calls .collect() with no index and no filter — \"nodes\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 259,
+            "line": 260,
             "shardKind": "shardBy",
             "table": "nodes"
         },
@@ -615,18 +620,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:260:dailyIndex",
+        "cacheKey": "unbounded_collect:mcp:261:dailyIndex",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"dailyIndex\" at mcp:260 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"dailyIndex\" at mcp:261 calls .collect() with no index and no filter — \"dailyIndex\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 260,
+            "line": 261,
             "shardKind": "shardBy",
             "table": "dailyIndex"
         },
@@ -635,18 +640,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:261:tagColors",
+        "cacheKey": "unbounded_collect:mcp:262:tagColors",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"tagColors\" at mcp:261 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"tagColors\" at mcp:262 calls .collect() with no index and no filter — \"tagColors\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 261,
+            "line": 262,
             "shardKind": "shardBy",
             "table": "tagColors"
         },
@@ -655,18 +660,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:262:savedQueries",
+        "cacheKey": "unbounded_collect:mcp:263:savedQueries",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"savedQueries\" at mcp:262 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"savedQueries\" at mcp:263 calls .collect() with no index and no filter — \"savedQueries\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 262,
+            "line": 263,
             "shardKind": "shardBy",
             "table": "savedQueries"
         },
@@ -675,18 +680,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:263:migrateState",
+        "cacheKey": "unbounded_collect:mcp:264:migrateState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"migrateState\" at mcp:263 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"migrateState\" at mcp:264 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mcp",
-            "line": 263,
+            "line": 264,
             "shardKind": "shardBy",
             "table": "migrateState"
         },
@@ -695,18 +700,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:286:retirementState",
+        "cacheKey": "unbounded_collect:mcp:287:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:286 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:287 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "inspectRetirement",
             "file": "mcp",
-            "line": 286,
+            "line": 287,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -715,18 +720,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:303:retirementState",
+        "cacheKey": "unbounded_collect:mcp:304:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:303 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:304 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "freezeAndExportRetirement",
             "file": "mcp",
-            "line": 303,
+            "line": 304,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -735,18 +740,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:325:retirementState",
+        "cacheKey": "unbounded_collect:mcp:326:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:325 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:326 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "freezeAndExportArchiveRetirement",
             "file": "mcp",
-            "line": 325,
+            "line": 326,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -755,18 +760,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:348:retirementState",
+        "cacheKey": "unbounded_collect:mcp:349:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:348 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:349 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "releaseRetirementFreeze",
             "file": "mcp",
-            "line": 348,
+            "line": 349,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -775,18 +780,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mcp:364:retirementState",
+        "cacheKey": "unbounded_collect:mcp:365:retirementState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"retirementState\" at mcp:364 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"retirementState\" at mcp:365 calls .collect() with no index and no filter — \"retirementState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "markRetirementVerified",
             "file": "mcp",
-            "line": 364,
+            "line": 365,
             "shardKind": "shardBy",
             "table": "retirementState"
         },
@@ -835,18 +840,18 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "unbounded_collect:mutators:1070:migrateState",
+        "cacheKey": "unbounded_collect:mutators:1071:migrateState",
         "categories": [
             "PERFORMANCE"
         ],
         "description": "A query calls `.collect()` with no `.withIndex()` and no `.filter()`, so it materializes every row of the table. Any live subscription over it also re-sends that whole result to every subscribed client on every write to the table.",
-        "detail": "Query on \"migrateState\" at mutators:1070 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
+        "detail": "Query on \"migrateState\" at mutators:1071 calls .collect() with no index and no filter — \"migrateState\" is `.shardBy()`, so this collects one shard's rows rather than the whole table — bounded by a single tenant's row count. Cap it with `.take(n)` if that count can grow.",
         "facing": "EXTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "<module>",
             "file": "mutators",
-            "line": 1070,
+            "line": 1071,
             "shardKind": "shardBy",
             "table": "migrateState"
         },
@@ -855,19 +860,19 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Unbounded collect"
     },
     {
-        "cacheKey": "owner_field_from_args_not_auth:mcp:311:userId",
+        "cacheKey": "owner_field_from_args_not_auth:mcp:312:userId",
         "categories": [
             "SECURITY"
         ],
         "description": "A `ctx.db` write sets an ownership/identity column (`userId`, `ownerId`, `tenantId`, …) from the handler's `args`. The caller controls who the row belongs to, so any caller can write rows owned by another user or tenant — an act-as-any-user / cross-tenant IDOR.",
-        "detail": "`insert` in `freezeAndExportRetirement` (mcp:311) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
+        "detail": "`insert` in `freezeAndExportRetirement` (mcp:312) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
         "facing": "INTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "freezeAndExportRetirement",
             "field": "userId",
             "file": "mcp",
-            "line": 311,
+            "line": 312,
             "method": "insert",
             "visibility": "internal"
         },
@@ -876,19 +881,19 @@ const LUNORA_ADVISORIES: AdvisoryFinding[] = [
         "title": "Ownership field written from args, not server identity"
     },
     {
-        "cacheKey": "owner_field_from_args_not_auth:mcp:335:userId",
+        "cacheKey": "owner_field_from_args_not_auth:mcp:336:userId",
         "categories": [
             "SECURITY"
         ],
         "description": "A `ctx.db` write sets an ownership/identity column (`userId`, `ownerId`, `tenantId`, …) from the handler's `args`. The caller controls who the row belongs to, so any caller can write rows owned by another user or tenant — an act-as-any-user / cross-tenant IDOR.",
-        "detail": "`insert` in `freezeAndExportArchiveRetirement` (mcp:335) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
+        "detail": "`insert` in `freezeAndExportArchiveRetirement` (mcp:336) sets the ownership field `userId` from `args`. This is expected for an `internal` procedure — no caller can reach it directly, and the trusted caller passes the subject along. Audit the PUBLIC procedures that dispatch to it: if one forwards `args.userId` straight through, the IDOR is there.",
         "facing": "INTERNAL",
         "level": "INFO",
         "metadata": {
             "exportName": "freezeAndExportArchiveRetirement",
             "field": "userId",
             "file": "mcp",
-            "line": 335,
+            "line": 336,
             "method": "insert",
             "visibility": "internal"
         },
@@ -1205,7 +1210,7 @@ const LUNORA_STUDIO_FEATURES: StudioFeaturesResult = {
 };
 
 /** Structural schema snapshot + its content hash, recorded in the shard's `__lunora_schema_history` ledger on cold start so the studio can show a schema-version timeline and diff any two versions. */
-const LUNORA_SCHEMA_SNAPSHOT: { hash: string; json: string } = { hash: "0dbf0084ed858ca2", json: "{\n  \"migrationIds\": [],\n  \"tables\": {\n    \"dailyIndex\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"key\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"nodeId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"touchedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_key\": {\n          \"fields\": [\n            \"key\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"migrateState\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"kvAt\": {\n          \"kind\": \"number\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"nodesAt\": {\n          \"kind\": \"number\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {},\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"nodes\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"bookmarkedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"collapsed\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"completed\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"createdAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"isTask\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"kind\": {\n          \"kind\": \"literal\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false,\n          \"literal\": \"\\\"paragraph\\\"\"\n        },\n        \"mirrorOf\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"origin\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"parentId\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"prevSiblingId\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"text\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"updatedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_parent\": {\n          \"fields\": [\n            \"parentId\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"ratelimit_buckets\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"key\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"prev\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": true,\n          \"unique\": false\n        },\n        \"ts\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"value\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_key\": {\n          \"fields\": [\n            \"key\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"root\"\n    },\n    \"retirementState\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"migrationId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"status\": {\n          \"kind\": \"union\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false,\n          \"members\": [\n            {\n              \"kind\": \"literal\",\n              \"nullable\": false,\n              \"optional\": false,\n              \"unique\": false,\n              \"literal\": \"\\\"frozen\\\"\"\n            },\n            {\n              \"kind\": \"literal\",\n              \"nullable\": false,\n              \"optional\": false,\n              \"unique\": false,\n              \"literal\": \"\\\"retired\\\"\"\n            }\n          ]\n        },\n        \"updatedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {},\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"savedQueries\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"createdAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"name\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"query\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {},\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"tagColors\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"color\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"tag\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_tag\": {\n          \"fields\": [\n            \"tag\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    }\n  },\n  \"version\": 1\n}\n" };
+const LUNORA_SCHEMA_SNAPSHOT: { hash: string; json: string } = { hash: "315135edad88879f", json: "{\n  \"migrationIds\": [],\n  \"tables\": {\n    \"dailyIndex\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"key\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"nodeId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"touchedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_key\": {\n          \"fields\": [\n            \"key\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"migrateState\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"kvAt\": {\n          \"kind\": \"number\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"nodesAt\": {\n          \"kind\": \"number\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {},\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"nodes\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"bookmarkedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"collapsed\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"completed\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"createdAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"isTask\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"kind\": {\n          \"kind\": \"literal\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false,\n          \"literal\": \"\\\"paragraph\\\"\"\n        },\n        \"locked\": {\n          \"kind\": \"boolean\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"mirrorOf\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"origin\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"parentId\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"prevSiblingId\": {\n          \"kind\": \"string\",\n          \"nullable\": true,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"text\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"updatedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_parent\": {\n          \"fields\": [\n            \"parentId\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"ratelimit_buckets\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"key\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"prev\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": true,\n          \"unique\": false\n        },\n        \"ts\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"value\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_key\": {\n          \"fields\": [\n            \"key\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"root\"\n    },\n    \"retirementState\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"migrationId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"status\": {\n          \"kind\": \"union\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false,\n          \"members\": [\n            {\n              \"kind\": \"literal\",\n              \"nullable\": false,\n              \"optional\": false,\n              \"unique\": false,\n              \"literal\": \"\\\"frozen\\\"\"\n            },\n            {\n              \"kind\": \"literal\",\n              \"nullable\": false,\n              \"optional\": false,\n              \"unique\": false,\n              \"literal\": \"\\\"retired\\\"\"\n            }\n          ]\n        },\n        \"updatedAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {},\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"savedQueries\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"createdAt\": {\n          \"kind\": \"number\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"name\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"query\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {},\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    },\n    \"tagColors\": {\n      \"commitOrdered\": false,\n      \"fields\": {\n        \"color\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"tag\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        },\n        \"userId\": {\n          \"kind\": \"string\",\n          \"nullable\": false,\n          \"optional\": false,\n          \"unique\": false\n        }\n      },\n      \"indexes\": {\n        \"by_tag\": {\n          \"fields\": [\n            \"tag\"\n          ],\n          \"unique\": false\n        }\n      },\n      \"memory\": false,\n      \"relations\": {},\n      \"shardMode\": \"shardBy:userId\"\n    }\n  },\n  \"version\": 1\n}\n" };
 
 export interface ShardDOConfig {
     /** Opt into change-data-capture: records a post-image to `__cdc_log` on every write (backs streaming export + replay-PITR). */

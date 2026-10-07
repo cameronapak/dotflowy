@@ -13,6 +13,7 @@ export type NodeDocLike = {
   completed?: unknown;
   collapsed?: unknown;
   bookmarkedAt?: unknown;
+  locked?: unknown;
   mirrorOf?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -35,6 +36,7 @@ export function rowToNode(doc: NodeDocLike): OutlineNode {
     collapsed: Boolean(doc.collapsed),
     // SAFETY: Lunora rows store bookmarkedAt as a numeric timestamp or null; the fallback absorbs a legacy undefined.
     bookmarkedAt: (doc.bookmarkedAt as number | null) ?? null,
+    locked: Boolean(doc.locked),
     // SAFETY: Lunora rows store mirrorOf as string | null; the fallback absorbs a legacy undefined.
     mirrorOf: (doc.mirrorOf as string | null) ?? null,
     createdAt: Number(doc.createdAt ?? 0),
@@ -66,6 +68,7 @@ export function nodeToDocFields(
     completed: node.completed,
     collapsed: node.collapsed,
     bookmarkedAt: node.bookmarkedAt,
+    locked: node.locked,
     mirrorOf: node.mirrorOf,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,

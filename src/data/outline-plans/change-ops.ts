@@ -26,6 +26,7 @@ function toOutlineNode(
     completed: Boolean(value.completed),
     collapsed: Boolean(value.collapsed),
     bookmarkedAt: value.bookmarkedAt ?? null,
+    locked: Boolean(value.locked),
     mirrorOf: value.mirrorOf ?? null,
     createdAt: Number(value.createdAt ?? 0),
     updatedAt: Number(value.updatedAt ?? 0),

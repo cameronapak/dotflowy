@@ -1,3 +1,5 @@
+import type { ComponentType } from "react";
+
 /**
  * Protected nodes -- the core half of the seam.
  *
@@ -16,12 +18,17 @@
  * real, legible block rather than a silent no-op. The plugin overrides the copy
  * only when it cares; the core never depends on it doing so. See ADR 0015.
  */
-import { Lock } from "lucide-react";
+import { ShieldIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import type { NodeProtection } from "../plugins/types";
 
-import { orphanedMirrorsBy, type TreeIndex } from "../data/tree";
+import {
+  isNodeLocked,
+  orphanedMirrorsBy,
+  subtreeContainsLocked,
+  type TreeIndex,
+} from "../data/tree";
 import { getProtection } from "../plugins/registry";
 import { rejectRow } from "./flash-node";
 
@@ -87,6 +94,36 @@ export function guardProtected(
   return true;
 }
 
+/** Immediate editor guard for authored mutations. The Durable Object repeats
+ * the check authoritatively; this owns legible local feedback. */
+export function guardLocked(
+  index: TreeIndex,
+  id: string,
+  rowEl: Element | null,
+): boolean {
+  if (!isNodeLocked(index, id)) return false;
+  rejectRow(rowEl);
+  toast.error("This subtree is locked. Unlock it before editing.", {
+    id: "node-locked",
+  });
+  return true;
+}
+
+/** Deleting an unlocked ancestor is also blocked when its subtree contains
+ * locked content. */
+export function guardLockedDelete(
+  index: TreeIndex,
+  ids: readonly string[],
+  rowEl: Element | null,
+): boolean {
+  if (!subtreeContainsLocked(index, ids)) return false;
+  rejectRow(rowEl);
+  toast.error("Unlock the protected subtree before deleting it.", {
+    id: "node-locked-delete",
+  });
+  return true;
+}
+
 /**
  * Guard a delete of `ids` (and their subtrees): if any is a mirror SOURCE whose
  * instances would be orphaned, shake `rowEl`, toast why, and return `true` (the
@@ -112,17 +149,21 @@ export function guardMirrorSourceDelete(
   return true;
 }
 
-/** The always-on lock signifier on a protected node's row -- and on the zoomed
- *  title, at a larger `size`. Decorative (a quiet marker, not a control), so it
- *  carries a tooltip but no pointer affordance; styling is `.protected-lock`. */
-export function ProtectedLock({ size = 12 }: { size?: number }) {
+/** The always-on signifier on a protected or locked node's row -- and on the
+ *  zoomed title, at a larger `size`. Decorative (a quiet marker, not a control),
+ *  so it carries a tooltip but no pointer affordance. */
+export function ProtectionIndicator({
+  size = 12,
+  label = "Protected node",
+  icon: Icon = ShieldIcon,
+}: {
+  size?: number;
+  label?: string;
+  icon?: ComponentType<{ size?: number; strokeWidth?: number }>;
+}) {
   return (
-    <span
-      className="protected-lock"
-      title="Protected node"
-      aria-label="Protected node"
-    >
-      <Lock size={size} strokeWidth={2.5} />
+    <span className="protection-indicator" title={label} aria-label={label}>
+      <Icon size={size} strokeWidth={2.5} />
     </span>
   );
 }

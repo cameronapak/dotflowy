@@ -11,7 +11,13 @@ import {
 } from "@tanstack/react-router";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { Cause, Effect, Fiber } from "effect";
-import { ChevronRight, HomeIcon, MoreHorizontal, PlusIcon } from "lucide-react";
+import {
+  ChevronRight,
+  HomeIcon,
+  LockIcon,
+  MoreHorizontal,
+  PlusIcon,
+} from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -56,6 +62,7 @@ import {
   removeNode,
   setIsTask,
   setKind,
+  setLocked,
   setText,
   splitNode,
   toggleCollapsed,
@@ -72,11 +79,13 @@ import {
   buildTreeIndex,
   childrenOf,
   countSubtreeNodes,
+  trueSourceOf,
   type Node,
 } from "../data/tree";
 import {
   getTreeIndex,
   useHasNodes,
+  useIsLocked,
   useMirrorCount,
   useNode,
   useSyncReady,
@@ -112,6 +121,7 @@ import {
   dispatchPointerDown,
   dispatchPointerUp,
   externalDropTargets,
+  getProtection,
   keymapSpecs,
   pluginPreloads,
   usePluginChrome,
@@ -165,9 +175,11 @@ import {
 } from "./pending-caret";
 import { healProtectedText } from "./protected-text";
 import {
+  guardLocked,
+  guardLockedDelete,
   guardMirrorSourceDelete,
   guardProtected,
-  ProtectedLock,
+  ProtectionIndicator,
 } from "./protection";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
@@ -1618,12 +1630,17 @@ function useNodeCommands({
         refs.get(id)?.closest(".outline-row") ?? null;
       return {
         onTextChange: (id, text) => {
-          if (getTreeIndex().byId.get(id)?.text === text) return;
+          const idx = getTreeIndex();
+          if (guardLocked(idx, id, rowOf(findFocusedId() ?? id))) return;
+          if (idx.byId.get(id)?.text === text) return;
           captureTextHistory(id);
           setText(id, text);
         },
 
         onEnter: (id, caretOffset) => {
+          const initialIndex = getTreeIndex();
+          if (guardLocked(initialIndex, id, rowOf(findFocusedId() ?? id)))
+            return;
           // The new node's id + the row the user was editing, returned from the
           // batch so the focus key can be re-derived from the post-edit render walk
           // AFTER it commits (focusKeyFor reads the settled collection).
@@ -1880,6 +1897,7 @@ function useNodeCommands({
           // the user acted on (the active key). The node isn't removed, so its
           // row still exists.
           if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
+          if (guardLockedDelete(idx, [instanceId], rowOf(activeKey))) return;
           // Deleting a SOURCE would orphan its live mirrors (Stage 3 promotes;
           // v1 blocks). A mirror's own row is never a source, so this no-ops
           // there -- backspacing a mirror still works. Flag-gated: off-flag a
@@ -1972,6 +1990,8 @@ function useNodeCommands({
           // the roles: the TARGET is the one being deleted, and nothing is
           // rewritten, so there is no blank-rule subject at all.
           if (plan.kind === "remove-empty-target") {
+            if (guardLockedDelete(idx, [plan.targetId], rowOf(plan.targetKey)))
+              return;
             if (
               guardProtected(
                 plan.targetContentId,
@@ -2001,6 +2021,9 @@ function useNodeCommands({
             return;
           }
           // The source disappears, so it's a delete...
+          if (guardLockedDelete(idx, [instanceId], rowOf(activeKey))) return;
+          if (guardLocked(idx, plan.targetContentId, rowOf(plan.targetKey)))
+            return;
           if (guardProtected(contentId, "delete", rowOf(activeKey))) return;
           // ...and the target's text is rewritten, so it's a blank-rule subject.
           // Load-bearing, not defensive: without it a merge appends to a
@@ -2033,6 +2056,7 @@ function useNodeCommands({
         },
 
         onToggleCompleted: (id, completed) => {
+          if (guardLocked(getTreeIndex(), id, rowOf(id))) return;
           // A protected node can't be marked done (completing it would strike
           // through its whole subtree). This funnel catches every completion path
           // (Mod+Enter / Mod+D on a bullet OR the zoomed title, the todos
@@ -2044,6 +2068,7 @@ function useNodeCommands({
         },
 
         onSetTask: (id, isTask) => {
+          if (guardLocked(getTreeIndex(), id, rowOf(id))) return;
           // A protected node stays a plain text node -- it can't become a to-do.
           // This funnel catches every task-creation path (`/todo`, the `[]`
           // autoformat). Un-tasking (isTask=false) is always allowed. See ADR 0015.
@@ -2059,10 +2084,22 @@ function useNodeCommands({
         // gate -- a paragraph is still a plain text node, so none of the four
         // protected-node rules (delete/blank/to-do/complete) are in play.
         onSetKind: (id, kind) => {
+          if (guardLocked(getTreeIndex(), id, rowOf(id))) return;
           const node = getTreeIndex().byId.get(id);
           if (node?.kind === kind && !node.isTask) return;
           capture(getTreeIndex(), id, null, { label: "kind" });
           setKind(id, kind);
+        },
+
+        onSetLocked: (id, locked) => {
+          const idx = getTreeIndex();
+          const sourceId = trueSourceOf(idx, id);
+          const node = idx.byId.get(sourceId);
+          if (!node || node.locked === locked) return;
+          capture(idx, sourceId, null, {
+            label: "lock",
+          });
+          setLocked(sourceId, locked);
         },
 
         // Open the move picker; the dialog runs the mutation + navigation itself.
@@ -2177,10 +2214,12 @@ function ZoomedTitle({
   useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
-  // node just as on a list bullet, so it wears the same lock when zoomed in.
+  // node just as on a list bullet, so it wears the same indicator when zoomed.
   // Reactive: a plugin's protection can load async (mirrors OutlineRow). See
   // ADR 0015.
   const protectedNode = useIsProtected(node.id);
+  const protection = protectedNode ? getProtection(node.id) : null;
+  const locked = useIsLocked(node.id);
 
   // Mirror "appears in N places" badge on the zoomed title too (ADR 0022, slice
   // 1d), so a mirrored node shows the chrome whether it's a list bullet or the
@@ -2203,9 +2242,20 @@ function ZoomedTitle({
       render: () => <TitleParagraphGlyph kind={node.kind} />,
     },
     {
-      id: "core:protected-lock",
+      id: "core:protection-indicator",
       position: "title:before-text",
-      render: () => (protectedNode ? <ProtectedLock size={16} /> : null),
+      render: () =>
+        protectedNode || locked ? (
+          <ProtectionIndicator
+            size={16}
+            label={
+              locked
+                ? "Locked subtree"
+                : (protection?.indicator?.label ?? "Protected node")
+            }
+            icon={locked ? LockIcon : protection?.indicator?.icon}
+          />
+        ) : null,
     },
     {
       id: "core:mirror-badge",
@@ -2305,10 +2355,12 @@ function ZoomedTitle({
           }}
           className={`node-text zoomed-title-text${isPivot ? " vt-morph" : ""}`}
           style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
-          contentEditable
+          contentEditable={!locked}
+          tabIndex={locked ? 0 : undefined}
           suppressContentEditableWarning
           spellCheck={false}
           aria-label="Title"
+          aria-readonly={locked}
           aria-multiline="true"
           data-completed={node.completed}
           data-history-key={node.id}
@@ -2401,6 +2453,11 @@ function ZoomedTitle({
             }
           }}
           onKeyDown={(e) => {
+            if (locked && e.key === "/" && !slash.isOpen) {
+              e.preventDefault();
+              slash.openWithoutInput();
+              return;
+            }
             // While a menu is open its Enter/Arrow/Escape/Tab are handled here;
             // the title keymap above is suspended, so these are the sole
             // consumers. Both no-op when closed. A caret menu (#, [[) wins over

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import type { Node } from "../src/data/wire-schema";
 
@@ -6,7 +6,7 @@ import { chainDisagreements, orderSiblings } from "../src/data/sibling-chain";
 import { NodeSchema } from "../src/data/wire-schema";
 import {
   OutlineSnapshotSchema,
-  SNAPSHOT_VERSION,
+  isSupportedSnapshotVersion,
   type OutlineSnapshot,
 } from "./backup";
 
@@ -14,10 +14,18 @@ export const RETIREMENT_SNAPSHOT_VERSION = 1;
 export const RETIREMENT_PREFIX = "lunora-retirement";
 
 const OwnedRow = { userId: Schema.String };
-const { id: _nodeId, ...NodeSourceFields } = NodeSchema.fields;
+const RetainedNodeFields = {
+  ...NodeSchema.fields,
+  // Retained version-1 snapshots and immutable archives predate owner locks.
+  // Normalize only at this historical server boundary.
+  locked: NodeSchema.fields.locked.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+  ),
+};
+const { id: _nodeId, ...NodeSourceFields } = RetainedNodeFields;
 
 export const LunoraNodeSchema = Schema.Struct({
-  ...NodeSchema.fields,
+  ...RetainedNodeFields,
   ...OwnedRow,
 });
 export type LunoraNode = Schema.Schema.Type<typeof LunoraNodeSchema>;
@@ -473,6 +481,7 @@ export function validateLunoraRetirementArchive(
         row.completed === source.completed &&
         row.collapsed === source.collapsed &&
         row.bookmarkedAt === source.bookmarkedAt &&
+        row.locked === (source.locked ?? false) &&
         row.mirrorOf === source.mirrorOf &&
         row.createdAt === source.createdAt &&
         row.updatedAt === source.updatedAt &&
@@ -685,7 +694,7 @@ export const ClassicLinkRepairManifestSchema = Schema.Struct({
 /** Explicit repair only: preserve payloads and the editor's existing order. */
 export function planClassicLinkRepair(classic: OutlineSnapshot) {
   if (
-    classic.version !== SNAPSHOT_VERSION ||
+    !isSupportedSnapshotVersion(classic.version) ||
     validateClassicSnapshot(classic).ok
   )
     throw new Error("link repair requires an invalid Classic graph");

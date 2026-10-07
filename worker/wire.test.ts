@@ -34,6 +34,7 @@ const node = (id: string): Node => ({
   completed: false,
   collapsed: false,
   bookmarkedAt: null,
+  locked: false,
   mirrorOf: null,
   createdAt: 1,
   updatedAt: 1,

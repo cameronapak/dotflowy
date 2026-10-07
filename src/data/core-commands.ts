@@ -2,15 +2,19 @@ import {
   AlignLeftIcon,
   CopyPlusIcon,
   CornerUpRightIcon,
+  LockIcon,
   Trash2Icon,
+  UnlockIcon,
 } from "lucide-react";
 
 import type { CommandSpec } from "../plugins/types";
 
+import { waitForPendingWrites } from "./api";
 import { isMirrorsEnabled } from "./flags";
 import { capture } from "./history";
-import { setKind } from "./mutations";
+import { setKind, setLocked } from "./mutations";
 import { runStructural } from "./structural";
+import { isNodeInheritedLocked, isNodeLocked, trueSourceOf } from "./tree";
 
 /**
  * `/paragraph` is CORE, not a plugin (ADR 0045): the paragraph glyph is core's
@@ -56,6 +60,72 @@ export const paragraphCommand: CommandSpec = {
   },
 };
 
+export const lockCommand: CommandSpec = {
+  id: "lock",
+  label: "Lock",
+  description: "Prevent changes inside this subtree",
+  icon: LockIcon,
+  keywords: ["lock", "protect", "readonly", "freeze"],
+  available: (_node, ctx) => !!ctx && !isNodeLocked(ctx.tree, _node.id),
+  run: (id, ctx) => {
+    void waitForPendingWrites().then(() => ctx.mutations.onSetLocked(id, true));
+  },
+  runMany: (ids, ctx) => {
+    const sources = [
+      ...new Set(
+        ids
+          .filter((id) => !isNodeLocked(ctx.tree, id))
+          .map((id) => trueSourceOf(ctx.tree, id)),
+      ),
+    ];
+    if (sources.length === 0) return;
+    void waitForPendingWrites().then(() => {
+      runStructural(() => {
+        for (const id of sources) setLocked(id, true);
+      });
+    });
+  },
+};
+
+export const unlockCommand: CommandSpec = {
+  id: "unlock",
+  label: "Unlock",
+  description: "Allow changes inside this subtree",
+  icon: UnlockIcon,
+  keywords: ["unlock", "edit", "unprotect"],
+  available: (node, ctx) => {
+    if (!ctx) return node.locked;
+    return (
+      !!ctx.tree.byId.get(trueSourceOf(ctx.tree, node.id))?.locked &&
+      !isNodeInheritedLocked(ctx.tree, node.id)
+    );
+  },
+  run: (id, ctx) => {
+    void waitForPendingWrites().then(() =>
+      ctx.mutations.onSetLocked(id, false),
+    );
+  },
+  runMany: (ids, ctx) => {
+    const sources = [
+      ...new Set(
+        ids
+          .map((id) => trueSourceOf(ctx.tree, id))
+          .filter(
+            (id) =>
+              ctx.tree.byId.get(id)?.locked &&
+              !isNodeInheritedLocked(ctx.tree, id),
+          ),
+      ),
+    ];
+    if (sources.length === 0) return;
+    void waitForPendingWrites().then(() => {
+      runStructural(() => {
+        for (const id of sources) setLocked(id, false);
+      });
+    });
+  },
+};
+
 /**
  * The core's own slash commands. Move, Mirror, and Delete are structural (they
  * relink or prune the tree), not feature concepts, so they stay core; feature
@@ -66,6 +136,8 @@ export const paragraphCommand: CommandSpec = {
  */
 export const CORE_COMMANDS: CommandSpec[] = [
   paragraphCommand,
+  lockCommand,
+  unlockCommand,
   {
     id: "move",
     label: "Move",

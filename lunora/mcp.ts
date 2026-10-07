@@ -41,6 +41,7 @@ type McpNode = {
   completed: boolean;
   collapsed: boolean;
   bookmarkedAt: number | null;
+  locked: boolean;
   mirrorOf: string | null;
   createdAt: number;
   updatedAt: number;

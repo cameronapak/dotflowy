@@ -425,11 +425,17 @@ function withNodeDefaults(n: Node): Node {
   // cast: a row persisted before a field existed (or the e2e mock) may omit it
   // at runtime even though the type can't express that.
   // SAFETY: a row persisted before a field existed, or the e2e mock, may omit it at runtime even though the Node type cannot express that.
-  const loose = n as { mirrorOf?: unknown; origin?: unknown; kind?: unknown };
+  const loose = n as {
+    mirrorOf?: unknown;
+    origin?: unknown;
+    kind?: unknown;
+    locked?: unknown;
+  };
   if (
     loose.mirrorOf !== undefined &&
     loose.origin !== undefined &&
-    loose.kind !== undefined
+    loose.kind !== undefined &&
+    loose.locked !== undefined
   ) {
     return n;
   }
@@ -438,6 +444,7 @@ function withNodeDefaults(n: Node): Node {
     mirrorOf: loose.mirrorOf === undefined ? null : n.mirrorOf,
     origin: loose.origin === undefined ? null : n.origin,
     kind: loose.kind === undefined ? null : n.kind,
+    locked: loose.locked === undefined ? false : n.locked,
   };
 }
 
