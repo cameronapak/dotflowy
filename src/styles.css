@@ -210,28 +210,29 @@
 }
 
 /*
- * Protected-node lock. A muted glyph leading the text of a node a plugin
- * forbids deleting (the daily "Daily" container) -- a quiet, always-on
- * signifier, not a control. Sits in its own column between the bullet and the
- * text. It floats inside .row-body in both render paths, so a margin nudges it
- * onto the first text line (floats ignore align-self; the align rules below
- * only center the glyph within its own box).
- * Decorative, so it carries a title tooltip but no pointer affordance.
+ * Protection indicator. A muted glyph leading a plugin-protected or owner-
+ * locked node -- a quiet, always-on signifier, not a control. Sits in its own
+ * 20px square between the bullet and the text. The glyph centers inside it and
+ * the square sits 2px below the geometric line-box center, matching the visible
+ * center of Geist's letterforms rather than its font-metric box. It floats
+ * inside .row-body in both render paths. Decorative, so it carries a title
+ * tooltip but no pointer affordance.
  */
-.protected-lock {
+.protection-indicator {
   display: inline-flex;
   align-items: center;
-  align-self: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
   color: var(--muted-foreground);
   cursor: help;
   user-select: none;
 }
 
-/* 12px lock glyph; K=2.25px aligns it to the text optical center while scaling
-   with the reading size (ADR 0029). */
-.outline-row .protected-lock {
-  margin-top: calc(var(--reading-line-box) / 2 - 2.25px);
+/* Center the fixed box on the body text's visible letterforms. */
+.outline-row .protection-indicator {
+  margin-top: calc(var(--reading-line-box) / 2 - 8px);
 }
 
 /*
@@ -310,16 +311,11 @@
   background: var(--row-hover);
 }
 
-h2 span.protected-lock {
+h2 span.protection-indicator {
   gap: 0px;
-  --size-of-bullet: 20px;
-  --size-of-gap: 6px;
-  width: calc(var(--size-of-bullet) + var(--size-of-gap));
-  justify-content: center;
-  /* Floated in .row-body, so align-self can't center it -- nudge the 16px
-     glyph onto the 24px/1.3 title line instead (center ~18px, cf. the title
-     checkbox's mt-2 and mirror-badge's mt-2.5). */
-  margin-top: 10px;
+  /* The title line box is reading-size × 1.4 font scale × 1.3 line-height.
+     Apply the same 2px optical correction as body rows. */
+  margin-top: calc(var(--reading-font-size) * 0.91 - 8px);
 }
 
 /*

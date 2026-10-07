@@ -23,7 +23,11 @@ import { toast } from "sonner";
 
 import type { CommandSpec, PluginContext } from "../plugins/types";
 
-import { paragraphCommand } from "../data/core-commands";
+import {
+  lockCommand,
+  paragraphCommand,
+  unlockCommand,
+} from "../data/core-commands";
 import { isMirrorsEnabled } from "../data/flags";
 import { capture, drop } from "../data/history";
 import { outlineToMarkdown } from "../data/markdown";
@@ -44,7 +48,11 @@ import {
   useSelectionRootIds,
 } from "../data/selection-state";
 import { runStructural } from "../data/structural";
-import { countSubtreeNodes, orphanedMirrorsBy } from "../data/tree";
+import {
+  countSubtreeNodes,
+  orphanedMirrorsBy,
+  subtreeContainsLocked,
+} from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
   getViewFilter,
@@ -133,6 +141,13 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     const index = getTreeIndex();
+    if (subtreeContainsLocked(index, ids)) {
+      for (const id of ids) rejectRow(rowOf(id));
+      toast.error("Unlock the protected subtree before deleting it.", {
+        id: "node-locked-delete",
+      });
+      return;
+    }
     const protectedIds = ids.filter((id) => isProtected(id));
     const deletable = ids.filter((id) => !isProtected(id));
     if (protectedIds.length > 0) {
@@ -582,11 +597,16 @@ function buildItems(
   // Commands that opted in via `runMany` -- the plugins' (To-do, Send to Today)
   // plus core's `/paragraph` (ADR 0045) -- kept only when they apply to at least
   // one selected node (To-do hides when all are already tasks).
-  const pluginItems: SelItem[] = [...selectionCommandSpecs, paragraphCommand]
+  const pluginItems: SelItem[] = [
+    ...selectionCommandSpecs,
+    paragraphCommand,
+    lockCommand,
+    unlockCommand,
+  ]
     .filter((c) =>
       rootIds.some((id) => {
         const n = index.byId.get(id);
-        return !!n && c.available(n);
+        return !!n && c.available(n, getCtx());
       }),
     )
     .map((c) => ({

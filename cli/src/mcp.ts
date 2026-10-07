@@ -38,6 +38,7 @@ const SearchNode = Schema.Struct({
   kind: Schema.NullOr(Schema.Literal("paragraph")),
   isTask: Schema.Boolean,
   completed: Schema.Boolean,
+  locked: Schema.Boolean,
   mirrorOf: Schema.NullOr(Schema.String),
   path: Schema.Array(Schema.String),
 });

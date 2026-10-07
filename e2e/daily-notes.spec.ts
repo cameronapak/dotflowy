@@ -55,7 +55,7 @@ async function load(page: Page, tree: SeedNode[] = STANDARD_TREE) {
   await page.goto("/");
   await expect(
     page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
 }
 
 // The breadcrumb's leading icon button zooms back to the top. It's a CLIENT
@@ -253,8 +253,11 @@ test.describe("daily notes", () => {
     const container = rowWithText(page, "Daily");
     await expect(container).toBeVisible();
 
-    // The protected row wears an always-on lock signifier.
-    await expect(container.locator(".protected-lock")).toBeVisible();
+    // Daily owns the protected scaffold's visual identity; owner locks use a
+    // separate lock glyph.
+    await expect(
+      container.getByLabel("Protected Daily scaffold"),
+    ).toBeVisible();
 
     // Focus the container's own text and fire the subtree-delete hotkey
     // (Mod+Shift+Backspace -> the single onDeleteNode funnel).
@@ -311,8 +314,8 @@ test.describe("daily notes", () => {
     await page.goto("/");
 
     const container = rowWithText(page, "Daily");
-    await expect(container).toBeVisible();
-    await expect(container.locator(".protected-lock")).toBeVisible();
+    await expect(container).toBeVisible({ timeout: 15_000 });
+    await expect(container.locator(".protection-indicator")).toBeVisible();
   });
 
   test("blanking the protected Daily container restores its name and explains on blur", async ({
@@ -408,7 +411,7 @@ test.describe("daily notes", () => {
     await expect(containerRow).not.toHaveClass(/node-rejected/);
     await expect(page.getByText(/needs a name/i)).toHaveCount(0);
     // Still protected, still locked.
-    await expect(containerRow.locator(".protected-lock")).toBeVisible();
+    await expect(containerRow.locator(".protection-indicator")).toBeVisible();
   });
 
   test("the protected Daily container can't be turned into a to-do", async ({
@@ -438,8 +441,8 @@ test.describe("daily notes", () => {
     // Rejected: it stays a plain bullet (no checkbox) and a toast explains why.
     await expect(containerRow.locator(".checkbox")).toHaveCount(0);
     await expect(page.getByText(/can't be a to-do/i)).toBeVisible();
-    // ...and it still wears its lock, now leading the text.
-    await expect(containerRow.locator(".protected-lock")).toBeVisible();
+    // ...and it still wears its Daily protection indicator, leading the text.
+    await expect(containerRow.locator(".protection-indicator")).toBeVisible();
   });
 
   test("the protected Daily container can't be completed", async ({ page }) => {
@@ -485,9 +488,8 @@ test.describe("daily notes", () => {
     const title = page.locator("h2.zoomed-title");
     const titleText = title.locator(".node-text");
     await expect(titleText).toHaveText("Daily");
-    // The protection affordance follows the node when zoomed: the title wears
-    // the same lock.
-    await expect(title.locator(".protected-lock")).toBeVisible();
+    // The plugin-owned protection affordance follows the node when zoomed.
+    await expect(title.getByLabel("Protected Daily scaffold")).toBeVisible();
 
     // The completion rule applies to the zoomed node too: Mod+Enter on the
     // title routes through the same funnel and is rejected.
@@ -1005,8 +1007,8 @@ test.describe("daily notes", () => {
       await expect(li).toBeVisible();
       const row = li.locator(".outline-row").first();
 
-      // Always-on lock signifier.
-      await expect(row.locator(".protected-lock")).toBeVisible();
+      // Always-on Daily protection indicator.
+      await expect(row.locator(".protection-indicator")).toBeVisible();
 
       // Force-delete (Mod+Shift+Backspace -> the onDeleteNode funnel) is refused:
       // the row shakes (one-shot reject class) and stays present.

@@ -19,6 +19,7 @@ export default defineSchema({
     completed: v.boolean(),
     collapsed: v.boolean(),
     bookmarkedAt: v.number().nullable(),
+    locked: v.boolean(),
     mirrorOf: v.string().nullable(),
     createdAt: v.number(),
     updatedAt: v.number(),

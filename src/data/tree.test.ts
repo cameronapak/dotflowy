@@ -6,8 +6,11 @@ import {
   childrenOf,
   countSubtreeNodes,
   createNode,
+  isNodeInheritedLocked,
+  isNodeLocked,
   orphanedMirrorsBy,
   planRemoveSubtrees,
+  subtreeContainsLocked,
   trueSourceOf,
   wouldMirrorCycle,
 } from "./tree";
@@ -72,6 +75,35 @@ describe("buildTreeIndex mirrorsBySource (ADR 0022)", () => {
     const m = createNode({ id: "m", mirrorOf: "ghost" });
     const index = buildTreeIndex([m]);
     expect(index.mirrorsBySource.get("ghost")).toEqual(["m"]);
+  });
+});
+
+describe("effective locks (ADR 0067)", () => {
+  test("inherit recursively and preserve a nested direct lock", () => {
+    const index = buildTreeIndex([
+      createNode({ id: "root", locked: true }),
+      createNode({ id: "child", parentId: "root" }),
+      createNode({ id: "grandchild", parentId: "child", locked: true }),
+    ]);
+
+    expect(isNodeLocked(index, "child")).toBe(true);
+    expect(isNodeLocked(index, "grandchild")).toBe(true);
+    expect(isNodeInheritedLocked(index, "root")).toBe(false);
+    expect(isNodeInheritedLocked(index, "grandchild")).toBe(true);
+    expect(subtreeContainsLocked(index, ["root"])).toBe(true);
+  });
+
+  test("crosses from a locked ancestor through a mirror to source content", () => {
+    const index = buildTreeIndex([
+      createNode({ id: "locked", locked: true }),
+      createNode({ id: "mirror", parentId: "locked", mirrorOf: "source" }),
+      createNode({ id: "source" }),
+      createNode({ id: "source-child", parentId: "source" }),
+    ]);
+
+    expect(isNodeLocked(index, "mirror")).toBe(true);
+    expect(isNodeLocked(index, "source")).toBe(true);
+    expect(isNodeLocked(index, "source-child")).toBe(true);
   });
 });
 

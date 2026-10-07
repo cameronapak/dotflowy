@@ -4,7 +4,7 @@ import type { Node } from "../src/data/wire-schema";
 import type { OutlineSnapshot } from "./backup";
 import type { RetirementStatus, UserOutlineDO } from "./outline-do";
 
-import { OutlineSnapshotSchema, SNAPSHOT_VERSION } from "./backup";
+import { OutlineSnapshotSchema, isSupportedSnapshotVersion } from "./backup";
 import { resolveUserId } from "./identity";
 import { createLunoraRetirementClient } from "./lunora-mcp-store";
 import {
@@ -1334,7 +1334,7 @@ export async function retirementDiagnostic(
   }
   const snapshot = experimental.value;
   if (
-    classic.value.version !== SNAPSHOT_VERSION ||
+    !isSupportedSnapshotVersion(classic.value.version) ||
     snapshot.version !== RETIREMENT_SNAPSHOT_VERSION ||
     snapshot.userId !== userId ||
     [

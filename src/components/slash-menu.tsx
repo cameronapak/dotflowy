@@ -22,12 +22,13 @@ function filterCommands(
   node: Node,
   query: string,
   commands: CommandSpec[],
+  ctx: PluginContext,
   commandFilter?: (spec: CommandSpec) => boolean,
 ): CommandSpec[] {
   const q = query.toLowerCase();
   const all = [...commands, ...CORE_COMMANDS];
   const base = commandFilter ? all.filter(commandFilter) : all;
-  const available = base.filter((c) => c.available(node));
+  const available = base.filter((c) => c.available(node, ctx));
   if (!q) return available;
   return available.filter(
     (c) =>
@@ -39,7 +40,8 @@ function filterCommands(
 /** Open-menu state. `slashIndex` is the char offset of the triggering "/". */
 interface SlashState {
   query: string;
-  slashIndex: number;
+  /** Null when a read-only locked row opened the palette without inserting /. */
+  slashIndex: number | null;
   activeIndex: number;
   x: number;
   y: number;
@@ -76,7 +78,7 @@ export function useSlashMenu({
   const mobile = useIsMobile();
 
   const items = state
-    ? filterCommands(node, state.query, commandSpecs, commandFilter)
+    ? filterCommands(node, state.query, commandSpecs, ctx(), commandFilter)
     : [];
 
   // Keep the menu on screen: clamp the caret coords to the viewport (shift left
@@ -88,6 +90,19 @@ export function useSlashMenu({
   );
 
   const close = () => setState(null);
+
+  const openWithoutInput = () => {
+    const el = getEl();
+    if (!el) return;
+    const pos = caretPosition(el);
+    setState({
+      query: "",
+      slashIndex: null,
+      activeIndex: 0,
+      x: pos.x,
+      y: pos.y,
+    });
+  };
 
   // Re-evaluate the trigger after every input. Opens, updates, or closes.
   const handleInput = () => {
@@ -112,7 +127,13 @@ export function useSlashMenu({
   const select = (index: number) => {
     const el = getEl();
     if (!el || !state) return;
-    const list = filterCommands(node, state.query, commandSpecs, commandFilter);
+    const list = filterCommands(
+      node,
+      state.query,
+      commandSpecs,
+      ctx(),
+      commandFilter,
+    );
     const item = list[index];
     if (!item) {
       setState(null);
@@ -121,12 +142,14 @@ export function useSlashMenu({
     // Strip the "/query" the user typed, then run the command. Work in
     // SOURCE space (readSource, not textContent) so a folded link elsewhere
     // on the line keeps its url instead of flattening to its label.
-    const text = readSource(el);
-    const end = state.slashIndex + 1 + state.query.length;
-    const newText = text.slice(0, state.slashIndex) + text.slice(end);
-    onTextChange(newText);
-    decorate(el, newText, state.slashIndex, false);
-    setCaretOffset(el, state.slashIndex);
+    if (state.slashIndex !== null) {
+      const text = readSource(el);
+      const end = state.slashIndex + 1 + state.query.length;
+      const newText = text.slice(0, state.slashIndex) + text.slice(end);
+      onTextChange(newText);
+      decorate(el, newText, state.slashIndex, false);
+      setCaretOffset(el, state.slashIndex);
+    }
     setState(null);
     item.run(node.id, ctx());
   };
@@ -198,7 +221,14 @@ export function useSlashMenu({
     )
   ) : null;
 
-  return { handleInput, handleKeyDown, close, isOpen: !!state, menu };
+  return {
+    handleInput,
+    handleKeyDown,
+    openWithoutInput,
+    close,
+    isOpen: !!state,
+    menu,
+  };
 }
 
 /**

@@ -516,6 +516,7 @@ const nodeSnapshotArg = v.object({
   completed: v.boolean(),
   collapsed: v.boolean(),
   bookmarkedAt: v.number().nullable(),
+  locked: v.boolean(),
   mirrorOf: v.string().nullable(),
   createdAt: tsArg,
   updatedAt: tsArg,

@@ -32,6 +32,7 @@ export interface Doc_nodes {
     completed: boolean;
     collapsed: boolean;
     bookmarkedAt: number;
+    locked: boolean;
     mirrorOf: string;
     createdAt: number;
     updatedAt: number;
@@ -172,6 +173,7 @@ export interface Insert_nodes {
     completed: boolean;
     collapsed: boolean;
     bookmarkedAt: number;
+    locked: boolean;
     mirrorOf: string;
     createdAt: number;
     updatedAt: number;

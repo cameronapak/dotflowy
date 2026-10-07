@@ -18,6 +18,7 @@ function archive(text: string | null = "kept") {
     completed: false,
     collapsed: false,
     bookmarkedAt: null,
+    locked: false,
     mirrorOf: null,
     createdAt: 1,
     updatedAt: 2,
@@ -104,6 +105,24 @@ describe("raw Lunora retirement archive", () => {
       archive(),
     );
     expect(decoded.raw.nodes[0]?.futureField).toEqual({ preserved: true });
+    expect(validateLunoraRetirementArchive(decoded, "u1")).toEqual({
+      ok: true,
+    });
+  });
+
+  it("reads pre-lock immutable archives as unlocked without changing raw authority", () => {
+    const current = archive();
+    const { locked: _projectedLock, ...projectedNode } =
+      current.snapshot.nodes[0]!;
+    const { locked: _rawLock, ...rawNode } = current.raw.nodes[0]!;
+    const decoded = Schema.decodeUnknownSync(LunoraRetirementArchiveSchema)({
+      ...current,
+      snapshot: { ...current.snapshot, nodes: [projectedNode] },
+      raw: { ...current.raw, nodes: [rawNode] },
+    });
+
+    expect(decoded.snapshot.nodes[0]?.locked).toBe(false);
+    expect(decoded.raw.nodes[0]?.locked).toBeUndefined();
     expect(validateLunoraRetirementArchive(decoded, "u1")).toEqual({
       ok: true,
     });

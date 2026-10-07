@@ -170,6 +170,7 @@ describe("DQL agent matching", () => {
       kind: null,
       isTask: true,
       completed: false,
+      locked: false,
       mirrorOf: "task",
       path: ["Today"],
     });

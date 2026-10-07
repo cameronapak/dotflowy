@@ -830,6 +830,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             if (h.kind === "paragraph") meta.push("paragraph");
             if (h.mirrorOf) meta.push(`mirror of ${h.mirrorOf}`);
             if (h.completed) meta.push("completed");
+            if (h.locked) meta.push("locked");
             return `- ${h.isTask ? (h.completed ? "[x] " : "[ ] ") : ""}"${h.text}" (${meta.join(", ")})${path}`;
           })
           .join("\n");

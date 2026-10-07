@@ -29,6 +29,7 @@ function node(id: string): Node {
     completed: false,
     collapsed: false,
     bookmarkedAt: null,
+    locked: false,
     mirrorOf: null,
     createdAt: 1,
     updatedAt: 1,
@@ -39,7 +40,7 @@ function node(id: string): Node {
 
 function classicSnapshot(id = "classic"): OutlineSnapshot {
   return {
-    version: 1,
+    version: 2,
     exportedAt: 1,
     seq: 1,
     nodes: [node(id)],
@@ -560,8 +561,23 @@ describe("read-only retirement diagnostic", () => {
   });
 
   it("rejects unsupported versions and foreign ownership in every experimental collection", async () => {
+    const unsupportedClassic = fixture();
+    // SAFETY: this deliberately passes an impossible future version to exercise the decoder boundary.
+    unsupportedClassic.backend.replaceClassic({
+      ...classicSnapshot(),
+      version: 3 as OutlineSnapshot["version"],
+    });
+    await expect(
+      retirementDiagnostic(
+        unsupportedClassic.env,
+        USER_ID,
+        unsupportedClassic.backend.backends,
+      ),
+    ).rejects.toThrow("retirement diagnostic snapshot schema rejected");
+    expect(unsupportedClassic.db.record).toBeNull();
+    expect(unsupportedClassic.bucket.objects.size).toBe(0);
+
     const mutations: Array<(f: ReturnType<typeof fixture>) => void> = [
-      (f) => f.backend.replaceClassic({ ...classicSnapshot(), version: 2 }),
       (f) => f.backend.replaceLunora({ ...lunoraSnapshot(), version: 2 }),
       (f) =>
         f.backend.replaceLunora({ ...lunoraSnapshot(), userId: "foreign" }),

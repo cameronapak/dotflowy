@@ -484,7 +484,7 @@ const protectPredicates = plugins
  *  descriptor (the core's default copy then carries every message). The
  *  enforcement lives in `components/protection.tsx` (`guardProtected` on the
  *  delete / to-do / complete command paths, `signalRejection` on the blur heal)
- *  and the lock render reads {@link isProtected}; this just resolves the
+ *  and the indicator render reads {@link isProtected}; this just resolves the
  *  descriptor. The plugin authors only the overrides it cares about. ADR 0015. */
 export function getProtection(nodeId: string): NodeProtection | null {
   for (const p of protectPredicates) {

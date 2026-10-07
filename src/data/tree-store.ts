@@ -15,6 +15,8 @@ import {
   buildTreeIndex,
   buildTrail,
   childrenOf,
+  computeLockedContentIds,
+  isNodeLocked,
   orderChildIds,
   parentKeyOf,
   type Node,
@@ -55,6 +57,7 @@ let index: TreeIndex = {
   byId: new Map(),
   childrenByParent: new Map(),
   mirrorsBySource: new Map(),
+  lockedContentIds: new Set(),
   linksByTarget: new Map(),
   dateMentionsByKey: new Map(),
   tagCorpus: new Map(),
@@ -119,6 +122,9 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // batches today, but tracked independently so the reverse index stays correct
   // (and its Map identity is refreshed) even on a bare field edit that flips it.
   let mirrorsChanged = false;
+  // A direct lock flip changes effective state for its full rendered subtree.
+  // Recompute once after the batch, never once per mounted row.
+  let locksChanged = false;
   // Outbound-link transitions (ADR 0032): a text edit that completes or deletes
   // a `[[id]]` token. Tracked like mirrorsChanged so the backlink reverse index
   // refreshes on a bare field edit; parseNodeLinks bails on link-free text, so
@@ -224,6 +230,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       if (next.mirrorOf) addMirror(next.mirrorOf, next.id);
       mirrorsChanged = true;
     }
+    if ((prev?.locked ?? false) !== next.locked) locksChanged = true;
     if (!prev) {
       // Insert (also the safe fallback for an update to a row we haven't seen).
       const key = parentKeyOf(next);
@@ -266,6 +273,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // reactivity flows through `useNode` (node-object identity), not Map identity,
   // and whole-collection readers are inert while a bullet is being edited.
   const structural = dirty.size > 0;
+  const lockedContentIds =
+    structural || mirrorsChanged || locksChanged
+      ? computeLockedContentIds(index)
+      : index.lockedContentIds;
   index = {
     byId: structural ? new Map(index.byId) : index.byId,
     childrenByParent: structural
@@ -278,6 +289,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       structural || mirrorsChanged
         ? new Map(index.mirrorsBySource)
         : index.mirrorsBySource,
+    lockedContentIds,
     // Same discipline for the backlink reverse index (ADR 0032): fresh on a
     // structural change or when a text edit flipped an outbound link. A plain
     // (link-free) keystroke keeps the reference.
@@ -458,6 +470,12 @@ export function useTreeIndex(): TreeIndex {
 export function useNode(id: string): Node | undefined {
   const getSnapshot = useCallback(() => getTreeIndex().byId.get(id), [id]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined);
+}
+
+/** Subscribe to effective lock state for one content node. */
+export function useIsLocked(id: string): boolean {
+  const getSnapshot = useCallback(() => isNodeLocked(getTreeIndex(), id), [id]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => false);
 }
 
 /** A no-op store subscription, for hooks switched off by a session-fixed flag:

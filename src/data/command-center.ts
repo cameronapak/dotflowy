@@ -20,7 +20,7 @@ import type { NodeActionBridge } from "./command-bridge";
 import type { Node, TreeIndex } from "./tree";
 
 import { commandSpecs } from "../plugins/registry";
-import { paragraphCommand } from "./core-commands";
+import { lockCommand, paragraphCommand, unlockCommand } from "./core-commands";
 import { isMirrorsEnabled } from "./flags";
 import { childrenOf } from "./tree";
 import { getViewRootId } from "./view-state";
@@ -236,10 +236,15 @@ export function buildCommandSpecActions(
 ): CommandCenterAction[] {
   const { getCtx } = bridge;
   const out: CommandCenterAction[] = [];
-  const specs: readonly CommandSpec[] = [...commandSpecs, paragraphCommand];
+  const specs: readonly CommandSpec[] = [
+    ...commandSpecs,
+    paragraphCommand,
+    lockCommand,
+    unlockCommand,
+  ];
   for (const spec of specs) {
     if (spec.caretScoped) continue;
-    if (!spec.available(node)) continue;
+    if (!spec.available(node, getCtx())) continue;
     out.push({
       id: `cmd:${spec.id}`,
       label: spec.label,

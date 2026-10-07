@@ -33,6 +33,9 @@ export interface TreeIndex {
    * `mirrorOf` is null), so it costs nothing today.
    */
   mirrorsBySource: Map<string, string[]>;
+  /** Canonical content ids covered by a direct, ancestor, or mirror-crossing
+   * lock (ADR 0067). Rebuilt only when structure, mirrors, or direct locks move. */
+  lockedContentIds: Set<string>;
   /**
    * Reverse LINK index (ADR 0032): a target node's id -> ids of the nodes whose
    * TEXT links to it (`[[targetId]]` tokens, parsed by node-links.ts). Derived,
@@ -102,6 +105,13 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     else mirrorsBySource.set(node.mirrorOf, [node.id]);
   }
 
+  const partialIndex = {
+    childrenByParent,
+    byId,
+    mirrorsBySource,
+  };
+  const lockedContentIds = computeLockedContentIds(partialIndex);
+
   // Reverse link index (ADR 0032): bucket each referrer under every node its
   // text links to. parseNodeLinks bails on link-free text, so this pass costs
   // one `includes` per node when no links exist.
@@ -143,10 +153,78 @@ export function buildTreeIndex(nodes: Node[]): TreeIndex {
     childrenByParent,
     byId,
     mirrorsBySource,
+    lockedContentIds,
     linksByTarget,
     dateMentionsByKey,
     tagCorpus,
   };
+}
+
+/** Derive every canonical content id covered by direct locks. Traversing a
+ * mirror follows its source children, so a lock cannot be changed elsewhere
+ * through another instance. The visited set also caps corrupted mirror cycles. */
+export function computeLockedContentIds(
+  index: Pick<TreeIndex, "byId" | "childrenByParent" | "mirrorsBySource">,
+): Set<string> {
+  const locked = new Set<string>();
+  const stack = [...index.byId.values()]
+    .filter((node) => node.locked)
+    .map((node) => node.mirrorOf ?? node.id);
+  while (stack.length) {
+    const id = stack.pop()!;
+    const sourceId = index.byId.get(id)?.mirrorOf ?? id;
+    if (locked.has(sourceId)) continue;
+    locked.add(sourceId);
+    const childIds = index.childrenByParent.get(sourceId) ?? [];
+    for (const childId of childIds) {
+      const child = index.byId.get(childId);
+      if (child) stack.push(child.mirrorOf ?? child.id);
+    }
+  }
+  return locked;
+}
+
+/** Whether `id`'s shared content is directly or transitively locked. */
+export function isNodeLocked(index: TreeIndex, id: string): boolean {
+  return index.lockedContentIds.has(trueSourceOf(index, id));
+}
+
+/** Whether another direct lock still covers this node after its own direct lock
+ * is ignored. This disables nested lock controls until the outer lock is gone. */
+export function isNodeInheritedLocked(index: TreeIndex, id: string): boolean {
+  const sourceId = trueSourceOf(index, id);
+  const source = index.byId.get(sourceId);
+  if (!source?.locked) return isNodeLocked(index, sourceId);
+  const byId = new Map(index.byId);
+  byId.set(sourceId, { ...source, locked: false });
+  return computeLockedContentIds({
+    byId,
+    childrenByParent: index.childrenByParent,
+    mirrorsBySource: index.mirrorsBySource,
+  }).has(sourceId);
+}
+
+/** Whether deleting any physical subtree rooted at `ids` would remove content
+ * covered by an effective lock. */
+export function subtreeContainsLocked(
+  index: TreeIndex,
+  ids: readonly string[],
+): boolean {
+  const stack = [...ids];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = index.byId.get(id);
+    // A mirror instance outside the protected subtree may be removed without
+    // changing its locked source content. A real source, direct lock, or locked
+    // physical ancestor may not.
+    if (node?.locked || (!node?.mirrorOf && isNodeLocked(index, id)))
+      return true;
+    for (const child of childrenOf(index, id)) stack.push(child.id);
+  }
+  return false;
 }
 
 export function childrenOf(index: TreeIndex, parentId: string | null): Node[] {
@@ -365,6 +443,7 @@ export function createNode(partial: Partial<Node> & Pick<Node, "id">): Node {
     completed: false,
     collapsed: false,
     bookmarkedAt: null,
+    locked: false,
     mirrorOf: null,
     createdAt: now(),
     updatedAt: now(),

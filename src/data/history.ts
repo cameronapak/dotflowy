@@ -25,6 +25,7 @@ export type HistoryLabel =
   | "join"
   | "completion"
   | "kind"
+  | "lock"
   | "mirror"
   | "paste"
   | "import"

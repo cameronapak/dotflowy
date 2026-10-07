@@ -38,6 +38,7 @@ import {
   buildTreeIndex,
   childrenOf,
   createNode,
+  isNodeLocked,
   orphanedMirrorsBy,
   trueSourceOf,
   wouldMirrorCycle,
@@ -1168,6 +1169,7 @@ export interface OutlineLine {
   text: string;
   isTask: boolean;
   completed: boolean;
+  locked: boolean;
   /** `"paragraph"` when this node is prose rather than a list item (ADR 0045). */
   kind: NodeKind;
   /** Set when this row is a mirror instance (points at its true source). */
@@ -1222,6 +1224,7 @@ export function flattenSubtree(
       // as a `- [ ]` to-do the app never draws.
       isTask: content.kind === "paragraph" ? false : content.isTask,
       completed: content.completed,
+      locked: isNodeLocked(index, contentId),
       kind: content.kind,
       mirrorOf: node.mirrorOf,
       capped,
@@ -1268,6 +1271,7 @@ export function formatOutlineLines(lines: ReadonlyArray<OutlineLine>): string {
       if (l.mirrorOf) meta.push(`mirror of ${l.mirrorOf}`);
       if (l.capped) meta.push("cycle capped");
       if (!l.isTask && l.completed) meta.push("completed");
+      if (l.locked) meta.push("locked");
       return `${indent}- ${check}${l.text || "(empty)"} (${meta.join(", ")})`;
     })
     .join("\n");
@@ -1280,6 +1284,7 @@ export interface SearchHit {
   kind: NodeKind;
   isTask: boolean;
   completed: boolean;
+  locked: boolean;
   mirrorOf: string | null;
   /** First ancestor path within the searched view, excluding the hit. */
   path: string[];
@@ -1315,6 +1320,7 @@ export function searchNodes(
       kind: node.kind,
       isTask: node.kind !== "paragraph" && node.isTask,
       completed: node.completed,
+      locked: isNodeLocked(safeIndex, node.id),
       mirrorOf: node.mirrorOf,
       path: path.map((ancestor) => ancestor.text),
     });

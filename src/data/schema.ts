@@ -38,6 +38,9 @@ export const nodeSchema = Schema.Struct({
   // timestamp beats a boolean: it carries both "is it pinned?" and "in what
   // order?" in one field. See ADR 0011.
   bookmarkedAt: Schema.NullOr(Schema.Number),
+  // Direct owner intent (ADR 0067). Descendant and mirror locks are derived
+  // from this field; locking one node never rewrites its whole subtree.
+  locked: Schema.Boolean,
   // Mirror pointer (ADR 0022). `null` = this node is its own source (the normal
   // case); a node id = this node is a *mirror* that windows that source's content
   // and children. The content id is `mirrorOf ?? id`. Required + nullable, no

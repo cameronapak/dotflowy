@@ -466,7 +466,7 @@ test("Daily off preserves every scaffold deletion guard and existing note access
   await expect(plain).toContainText("[[2030-04-12]]", { timeout: 15000 });
   for (const id of ["container", "year", "month", "week"]) {
     const row = page.locator(`li[data-node-id="${id}"] .outline-row`);
-    await expect(row.locator(".protected-lock")).toBeVisible();
+    await expect(row.getByLabel("Protected Daily scaffold")).toBeVisible();
     await row.locator(".node-text").click();
     await page.keyboard.press(
       `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Backspace`,

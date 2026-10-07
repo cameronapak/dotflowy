@@ -295,6 +295,7 @@ test("search --all validates and buffers real pages while raw search stays singl
     kind: null,
     isTask: false,
     completed: false,
+    locked: false,
     mirrorOf: null,
     path: ["Root", `text ${id}`],
   });
