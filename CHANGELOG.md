@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.22.0
+
+### Minor Changes
+
+- 937697a: Nodes can now be locked so their content and descendants stay read-only in the editor, CLI, and MCP.
+
 ## 1.21.0
 
 ### Minor Changes
