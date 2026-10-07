@@ -176,12 +176,17 @@ bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run test            # bun test — pure-logic unit tests (src + worker/)
 bun run test:e2e        # playwright (chromium) — behavior/integration
 bunx changeset          # describe your change for the changelog (see below)
+bun run check:changeset # verify the committed branch carries that decision
 ```
 
 Then **run the app**: before calling an observable change done, drive it in
 `bun run cf:dev` — or exercise it through an e2e spec — and confirm the
 behavior. Green gates are necessary, not sufficient. Skip only for changes with
 no runtime surface (docs, types, tooling).
+
+For a visible change, derive a state matrix from every styling branch the diff
+adds or changes. Exercise and inspect each visually distinct state; the default
+state cannot verify selected, active, loading, error, or responsive variants.
 
 ### Package checks
 
@@ -209,8 +214,9 @@ Rules of thumb:
 - **Every PR carries a changeset.** `bunx changeset` writes a fragment saying what
   changed and how loudly — `major` when a reader has to _do_ something, `minor` for
   a new capability, `patch` for a fix. If the PR isn't news (a `chore:`, a refactor),
-  say so with `bunx changeset --empty`. CI checks that you decided; it does not ask
-  you to invent an entry. Releases are cut with `bun run release` — **never
+  say so with `bunx changeset --empty`. Commit the fragment, then run
+  `bun run check:changeset`; its comparison reads committed history. CI runs the
+  same command. Releases are cut with `bun run release` — **never
   `changeset version` directly**, which would delete the fragments before they're
   archived. See [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md).
 

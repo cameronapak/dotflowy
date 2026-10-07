@@ -58,4 +58,4 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
-          bunx changeset status --since="origin/$GITHUB_BASE_REF"
+          bun run check:changeset

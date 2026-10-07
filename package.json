@@ -45,6 +45,7 @@
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "check:docs": "bun scripts/check-doc-links.ts",
+    "check:changeset": "changeset status --since=origin/main",
     "test": "bun test -- ./src ./worker",
     "test:e2e": "playwright test",
     "test:e2e:serial": "playwright test --workers=1",
