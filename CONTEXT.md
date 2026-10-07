@@ -79,6 +79,10 @@ _Avoid_: result, hit
 A filter query kept for reuse, with a name. Saves the question, not the place — running it filters whatever view you're in. The pin's twin is the Bookmark: a bookmark pins a place, a saved query pins a question.
 _Avoid_: saved search (a filter stays put; see Filter), smart view
 
+**Daily note**:
+The node identified with one local calendar day. It owns that day's captured and organized nodes as its children; the Daily note is the dated parent, not each entry beneath it.
+_Avoid_: day page, journal entry (that names a child, not the dated parent)
+
 **Quick-add**:
 Capturing a thought as a real node in one uninterrupted gesture, without looking at where it lands. The node commits immediately to the account's default destination and is relocatable afterward; the whole point is to write the thing down before the destination's existing content distracts you out of remembering it. Distinct from navigation (Cmd+K takes you somewhere) and from an ordinary new node (which is authored in place, in view of its siblings).
 _Avoid_: quick capture (fine as a synonym, but the action is "quick-add"), inbox (capture is not a holding bucket), compose

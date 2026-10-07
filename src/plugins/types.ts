@@ -537,6 +537,31 @@ export interface SubheaderSlotSpec {
   render(getCtx: () => PluginContext): ReactNode;
 }
 
+// --- Seam M: external structural drop targets ------------------------------
+//
+// The core owns the bullet drag gesture and ordinary outline-gap projection. A
+// compiled-in plugin may expose one of its rendered controls as an alternate
+// destination without teaching core what that control means. Core stamps the
+// active element with `data-external-drop-active`; the plugin owns that state's
+// styling and the structural commit. First consumer: Daily's week-calendar day
+// pills (ADR 0054).
+
+export interface ExternalDropTargetSpec {
+  id: string;
+  /** `closest()` selector resolved from the element under the pointer. */
+  selector: string;
+  /** Optional event-time gate. Omit when every matching element accepts every
+   *  ordinary draggable root set. */
+  accepts?(element: HTMLElement, nodeIds: readonly string[]): boolean;
+  /** Commit the drop. Async work starts through `ctx.run`, so the editor owns
+   *  fiber lifetime and failures rather than leaving a floating promise. */
+  onDrop(
+    element: HTMLElement,
+    nodeIds: readonly string[],
+    ctx: PluginContext,
+  ): void;
+}
+
 // --- Protected nodes --------------------------------------------------------
 //
 // A plugin can declare a node protected. The core consults the composed
@@ -692,6 +717,8 @@ export interface PluginDef {
   headerSlots?: HeaderSlotSpec[];
   /** Seam F (subheader): contextual chrome below the header (the tag filter). */
   subheaderSlots?: SubheaderSlotSpec[];
+  /** Seam M: plugin-owned DOM controls that accept a structural bullet drop. */
+  externalDropTargets?: ExternalDropTargetSpec[];
   /** Protected nodes: mark `nodeId` protected (the daily container is the first
    *  consumer). Return `false` to allow, or `true` / a {@link NodeProtection} to
    *  protect. `true` is enough -- the core enforces every rule (no delete / blank

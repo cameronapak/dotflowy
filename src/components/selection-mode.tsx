@@ -417,6 +417,11 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
       // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="listbox"]')) return;
+      // Keep the selected slab alive while its bullet arms pointer drag. A
+      // successful external drop clears it; pointer cancel and failed drops do
+      // not. A plain dot click zooms and the new editor mount clears it.
+      if (target?.closest<HTMLElement>(".bullet")?.closest("li[data-selected]"))
+        return;
       clearSelection();
     };
     window.addEventListener("keydown", onKey, true);

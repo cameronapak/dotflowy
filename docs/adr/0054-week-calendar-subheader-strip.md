@@ -68,6 +68,39 @@ false})`): the clicked day isn't rendered in the outgoing view, so there's
    mapping AND the node has children. Existence alone would light up every
    shell minted by a seed-free peek, decaying the signal into noise.
 
+7. **The seven visible day pills are external structural drop targets.** A
+   node dragged from the open Daily note can be dropped on a date to move that
+   node and its whole subtree to the destination Daily note's end. A missing
+   destination is created seed-free before the move; Undo restores the moved
+   nodes but intentionally keeps that empty day, matching "Send to Today."
+   The view stays on the source day and confirms with the standard Move toast
+   ("Moved to Tuesday, October 6" + **Go**). Same-day drops have the same
+   append-or-no-op semantics as "Send to Today." Only the seven visible dates
+   participate — chevrons do not page on hover and the strip has no edge paging.
+
+   During drag-over, the outline insertion line is suppressed and the target
+   pill uses the chosen **Primary ring** treatment: a 2px monochrome primary
+   outline, muted fill, and quiet outer ring, with no chromatic accent. Hit
+   testing uses the pointer/finger center against the pill's existing ≥44px
+   target; adjacent invisible hit areas would make boundaries ambiguous. An
+   unminted day keeps the nodes in place while the existing Daily progress bar
+   reports creation. Failure leaves both tree and selection unchanged.
+
+   This is a narrow, generic **external drop-target plugin seam**, not a Daily
+   branch in core and not a private global-event bridge. Core owns the pointer
+   lifecycle, cancellation, dragged root set, and target arbitration; a
+   reviewed compiled-in plugin owns its rendered target, acceptance, active
+   styling, and commit. The seam is Lane A only (ADR 0031): it does not allow
+   runtime third-party code onto the outline surface.
+
+   If the grabbed row belongs to an active node selection, every selected root
+   moves in order as one structural batch and one undo step; all selected rows
+   dim, the drag pill keeps the grabbed text plus a count ("Prepare launch
+   notes +2"), and success clears selection because the roots left the current
+   day. A cancelled or failed drop keeps selection. The existing selection
+   actor supplies the root ids, but the established imperative drag lifecycle
+   remains imperative — this does not add another XState machine (ADR 0020).
+
 ## Consequences
 
 - The subheader band gains ~2 rows of sticky height on every day page. Accepted
@@ -75,6 +108,9 @@ false})`): the clicked day isn't rendered in the outgoing view, so there's
 - The seam-F subheader table in `AGENTS.md` gains its first plugin owner.
 - The strip lives in ONE render path (chrome), so the bullet/title/mini-editor
   duality trap does not apply.
+- External drop targets become a reviewed plugin capability. The first
+  consumer is Daily; ordinary outline gaps keep their existing projection and
+  indicator, while an active external target takes precedence.
 - `goToDate` gained a second in-plugin caller, and the strip↔`index.tsx`
   import cycle it forced was real — so the whole get-or-create engine
   (`getOrCreateDay`/`goToDate` + the scaffold cascade/migration) moved to
