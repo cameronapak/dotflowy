@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.23.0
+
+### Minor Changes
+
+- acf45d4: Let Daily notes use account-wide Sunday- or Monday-start Calendar weeks.
+
 ## 1.22.0
 
 ### Minor Changes
