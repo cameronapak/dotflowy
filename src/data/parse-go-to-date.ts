@@ -17,6 +17,8 @@ import {
   type DateSuggestion,
   type PeriodQualifier,
   type PeriodUnit,
+  type WeekStart,
+  DEFAULT_WEEK_START,
 } from "./date-links";
 
 const ISO_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -118,6 +120,7 @@ function parseOwnedWeekday(q: string, today: string): string | null {
 function parseExactPeriod(
   q: string,
   today: string,
+  weekStart: WeekStart,
 ): ReturnType<typeof resolvePeriod> {
   const m = /^(next|last)\s+(week|month|year)$/i.exec(q);
   if (!m) return null;
@@ -126,6 +129,7 @@ function parseExactPeriod(
     m[1]!.toLowerCase() as PeriodQualifier,
     m[2]!.toLowerCase() as PeriodUnit,
     today,
+    weekStart,
   );
 }
 
@@ -137,6 +141,7 @@ function parseExactPeriod(
 export function parseGoToDateTargets(
   query: string,
   now = new Date(),
+  weekStart: WeekStart = DEFAULT_WEEK_START,
 ): GoToDateHit[] {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -151,7 +156,7 @@ export function parseGoToDateTargets(
   }
 
   // Exact period before catalog so `next week` is one scaffold hit, not three.
-  const exact = parseExactPeriod(lower, today);
+  const exact = parseExactPeriod(lower, today, weekStart);
   if (exact) {
     const qualifier = lower.startsWith("next") ? "next" : "last";
     return [scaffoldHit(exact.scaffoldKey, exact.scaffoldKind, qualifier)];
@@ -161,7 +166,7 @@ export function parseGoToDateTargets(
   if (catalog) {
     const hits: GoToDateHit[] = [];
     for (const unit of catalog.units) {
-      const resolved = resolvePeriod(catalog.qualifier, unit, today);
+      const resolved = resolvePeriod(catalog.qualifier, unit, today, weekStart);
       if (!resolved) continue;
       hits.push({
         key: resolved.scaffoldKey,
@@ -195,8 +200,9 @@ export function parseGoToDateTargets(
 export function parseGoToDateQuery(
   query: string,
   now = new Date(),
+  weekStart: WeekStart = DEFAULT_WEEK_START,
 ): GoToDateHit | null {
-  return parseGoToDateTargets(query, now)[0] ?? null;
+  return parseGoToDateTargets(query, now, weekStart)[0] ?? null;
 }
 
 /**
@@ -209,8 +215,9 @@ export function parseGoToDateQuery(
 export function parseDatePickerQuery(
   query: string,
   now = new Date(),
+  weekStart: WeekStart = DEFAULT_WEEK_START,
 ): DateSuggestion | null {
-  const hits = parseDatePickerTargets(query, now);
+  const hits = parseDatePickerTargets(query, now, weekStart);
   return hits[0] ?? null;
 }
 
@@ -218,6 +225,7 @@ export function parseDatePickerQuery(
 export function parseDatePickerTargets(
   query: string,
   now = new Date(),
+  weekStart: WeekStart = DEFAULT_WEEK_START,
 ): DateSuggestion[] {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -232,7 +240,7 @@ export function parseDatePickerTargets(
     }
   }
 
-  const exact = parseExactPeriod(lower, today);
+  const exact = parseExactPeriod(lower, today, weekStart);
   if (exact) {
     return [
       {
@@ -246,7 +254,7 @@ export function parseDatePickerTargets(
   if (catalog) {
     const out: DateSuggestion[] = [];
     for (const unit of catalog.units) {
-      const resolved = resolvePeriod(catalog.qualifier, unit, today);
+      const resolved = resolvePeriod(catalog.qualifier, unit, today, weekStart);
       if (!resolved) continue;
       out.push({
         key: resolved.periodStartDay,
@@ -287,10 +295,11 @@ export function parseDatePickerTargets(
 export function pickerDateSuggestions(
   query: string,
   now = new Date(),
+  weekStart: WeekStart = DEFAULT_WEEK_START,
 ): DateSuggestion[] {
   const today = localDateKey(now);
   const base = dateSuggestions(query, today);
-  const nl = parseDatePickerTargets(query, now);
+  const nl = parseDatePickerTargets(query, now, weekStart);
   const seen = new Set(base.map((s) => s.key));
   const merged = [...base];
   for (const s of nl) {

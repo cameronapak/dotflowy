@@ -22,10 +22,12 @@ import type { NodeKind } from "../src/data/schema";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import {
+  DEFAULT_WEEK_START,
   dayKeyToScaffoldChain,
   localDateKey,
   scaffoldLabel,
   sortedInsertAfterId,
+  type WeekStart,
 } from "../src/data/date-links";
 import {
   nodeMatches,
@@ -744,10 +746,10 @@ export function planAddSubtree(
 // side-collection maps `container` -> the "Daily" container node and every
 // scaffold key -> its node. Since issue #271 a day no longer hangs directly off
 // the container: it lives in a calendar hierarchy `Daily > YYYY > Month > Week >
-// Day` (year "2026", month "July", week "Week 29" — ISO 8601, Monday start,
-// atomic weeks whose Thursday decides the owning month AND year). The scaffold
-// keys join the same kv beside `container`, bare + shape-disambiguated
-// (`2026`, `2026-07`, `2026-W29`, `2026-07-16`); all the calendar math lives in
+// Day` (year "2026", month "July", week "Jul 13–19"). Calendar weeks start on
+// the account's Sunday/Monday preference, and their fourth day decides the owning
+// month and year. The scaffold keys join the same kv beside `container`
+// (`2026`, `2026-07`, `week:2026-07-13`, `2026-07-16`); all calendar math lives in
 // the dependency-free `src/data/date-links.ts` (imported above), so this Worker
 // twin and the client can't drift.
 //
@@ -838,6 +840,7 @@ export interface DailyScaffold {
   weekId?: string;
   dayId: string;
   keyByNodeId: ReadonlyMap<string, string>;
+  weekStart?: WeekStart;
 }
 
 /**
@@ -962,7 +965,10 @@ export function planEnsureDaily(
   }
 
   // A new day: derive its calendar chain (the ONE Thursday-rule waterfall).
-  const chain = dayKeyToScaffoldChain(dateKey);
+  const chain = dayKeyToScaffoldChain(
+    dateKey,
+    args.weekStart ?? DEFAULT_WEEK_START,
+  );
 
   // Defensive fallback (unreachable for a validated dateKey with claimed ids): a
   // key that can't be placed on the calendar — or a caller that didn't claim the

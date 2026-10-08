@@ -75,6 +75,16 @@ export const KvDeleteBody = Schema.Struct({
   keys: Schema.Array(Schema.String),
 });
 
+/** POST /api/daily/week-start — atomically change calendar meaning and migrate
+ *  the derived Daily scaffold in the caller's per-user Durable Object. */
+export const WeekStartPostBody = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("canonicalize") }),
+  Schema.Struct({
+    operation: Schema.Literal("set"),
+    weekStart: Schema.Literals(["sunday", "monday"]),
+  }),
+]);
+
 /** POST /api/waitlist — public alpha-waitlist signup (invite-only signup gate,
  *  worker/auth.ts). Email plausibility is checked in the route handler; the
  *  schema only guards the shape. */

@@ -22,6 +22,7 @@ import {
   NodesPatchBody,
   NodesPostBody,
   WaitlistPostBody,
+  WeekStartPostBody,
   type Node,
 } from "./wire";
 
@@ -133,6 +134,23 @@ describe("NodesPatchBody (PATCH /api/nodes)", () => {
 
   it("rejects a missing updates array", () => {
     rejects(NodesPatchBody, {});
+  });
+});
+
+describe("WeekStartPostBody (POST /api/daily/week-start)", () => {
+  it("separates targetless canonicalization from an explicit preference change", () => {
+    accepts(WeekStartPostBody, { operation: "canonicalize" });
+    accepts(WeekStartPostBody, { operation: "set", weekStart: "sunday" });
+    expect(
+      Schema.decodeUnknownSync(WeekStartPostBody)({
+        // Effect Struct discards excess properties. The discriminant still
+        // guarantees this cannot become an explicit preference change.
+        operation: "canonicalize",
+        weekStart: "sunday",
+      }),
+    ).toEqual({ operation: "canonicalize" });
+    rejects(WeekStartPostBody, { operation: "set" });
+    rejects(WeekStartPostBody, { operation: "change", weekStart: "sunday" });
   });
 });
 

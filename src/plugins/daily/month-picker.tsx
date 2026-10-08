@@ -1,4 +1,4 @@
-// Compact Mon-start month calendar popover for the week strip (ADR 0055).
+// Compact account-week month calendar popover for the week strip (ADR 0055).
 // Purpose-built — no react-day-picker. Day pick → seed-free goToDate.
 
 import { Effect } from "effect";
@@ -21,20 +21,26 @@ import {
   monthKeyToYearKey,
   monthLabel,
   shiftMonthKey,
+  type WeekStart,
 } from "../../data/date-links";
 import { useDaysWithContent } from "./days-with-content";
 import { goToDate } from "./get-or-create";
 
-const WEEKDAY_INITIALS = ["M", "T", "W", "T", "F", "S", "S"];
+const WEEKDAY_INITIALS = {
+  monday: ["M", "T", "W", "T", "F", "S", "S"],
+  sunday: ["S", "M", "T", "W", "T", "F", "S"],
+} as const;
 
 export function MonthPickerButton({
   monthKey,
   selectedDayKey,
+  weekStart,
   getCtx,
   onPicked,
 }: {
   monthKey: string;
   selectedDayKey: string;
+  weekStart: WeekStart;
   getCtx: () => PluginContext;
   /** Called after a day is chosen (caller resets week-strip offset). */
   onPicked: () => void;
@@ -45,8 +51,8 @@ export function MonthPickerButton({
   const monthYear = `${monthLabel(monthKey)} ${monthKeyToYearKey(monthKey) ?? ""}`;
 
   const cells = useMemo(
-    () => monthKeyToCalendarGrid(viewMonth) ?? [],
-    [viewMonth],
+    () => monthKeyToCalendarGrid(viewMonth, weekStart) ?? [],
+    [viewMonth, weekStart],
   );
   const cellKeys = useMemo(() => cells.map((c) => c.key), [cells]);
   const withContent = useDaysWithContent(cellKeys);
@@ -107,7 +113,7 @@ export function MonthPickerButton({
           </button>
         </div>
         <div className="mb-1 grid grid-cols-7 gap-0.5">
-          {WEEKDAY_INITIALS.map((w, i) => (
+          {WEEKDAY_INITIALS[weekStart].map((w, i) => (
             <div
               key={`${w}-${i}`}
               className="text-center text-[0.6rem] text-muted-foreground"

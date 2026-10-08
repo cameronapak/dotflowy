@@ -29,7 +29,6 @@ import {
   weekKeyToDayRange,
   weekKeyToDays,
   weekKeyToMonthKey,
-  weekKeyWeekNumber,
   weekLabel,
   yearLabel,
 } from "./date-links";
@@ -236,55 +235,34 @@ describe("dateSuggestions", () => {
   });
 });
 
-// --- Daily calendar scaffold (issue #271) -----------------------------------
-// Ground truth is hand-verified by day-of-week arithmetic (Jan 1 2026 is a
-// Thursday; 2026 has 365 days; each result was cross-checked by calculation).
+// --- Account Calendar weeks (ADR 0068) --------------------------------------
 
-describe("dayKeyToWeekKey (ISO 8601, Thursday-decides)", () => {
-  test("Jan 1 2026 is a Thursday -> its own W01", () => {
-    expect(dayKeyToWeekKey("2026-01-01")).toBe("2026-W01");
+describe("dayKeyToWeekKey", () => {
+  test("Monday and Sunday starts differ at the seam", () => {
+    expect(dayKeyToWeekKey("2026-10-11", "monday")).toBe("week:2026-10-05");
+    expect(dayKeyToWeekKey("2026-10-11", "sunday")).toBe("week:2026-10-11");
+    expect(dayKeyToWeekKey("2026-10-12", "monday")).toBe("week:2026-10-12");
+    expect(dayKeyToWeekKey("2026-10-12", "sunday")).toBe("week:2026-10-11");
   });
 
-  test("a late-Dec Monday joins the NEXT year's W01 (crosses the year)", () => {
-    // 2025-12-29 is a Monday whose week's Thursday is 2026-01-01.
-    expect(dayKeyToWeekKey("2025-12-29")).toBe("2026-W01");
-  });
-
-  test("a late-Dec Sunday stays in the OLD year's last week (W52)", () => {
-    // 2025-12-28 is a Sunday whose week's Thursday is 2025-12-25.
-    expect(dayKeyToWeekKey("2025-12-28")).toBe("2025-W52");
-  });
-
-  test("2026 is a 53-week ISO year (Dec 31 2026 is a Thursday -> W53)", () => {
-    expect(dayKeyToWeekKey("2026-12-31")).toBe("2026-W53");
-  });
-
-  test("the issue's straddle week (Jun 29 - Jul 5 2026) is W27", () => {
-    expect(dayKeyToWeekKey("2026-06-29")).toBe("2026-W27"); // Monday
-    expect(dayKeyToWeekKey("2026-07-05")).toBe("2026-W27"); // Sunday, same week
-  });
-
-  test("null on a malformed / non-calendar day key", () => {
-    expect(dayKeyToWeekKey("2026-13-45")).toBeNull();
-    expect(dayKeyToWeekKey("garbage")).toBeNull();
+  test("null on a malformed day", () => {
+    expect(dayKeyToWeekKey("2026-13-45", "sunday")).toBeNull();
   });
 });
 
-describe("weekKeyToMonthKey (the Thursday rule owns the straddle)", () => {
-  test("the Jun-29..Jul-5 straddle week is owned WHOLE by July", () => {
-    // Thursday 2026-07-02 -> July, even though 3 of its days are in June.
+describe("week ownership", () => {
+  test("the fourth day owns the whole week in either mode", () => {
+    expect(weekKeyToMonthKey("week:2026-06-29")).toBe("2026-07");
+    expect(weekKeyToMonthKey("week:2026-06-28")).toBe("2026-07");
+  });
+
+  test("legacy ISO keys remain readable as migration input", () => {
     expect(weekKeyToMonthKey("2026-W27")).toBe("2026-07");
-  });
-
-  test("a year-crossing week is owned by the Thursday's month/year", () => {
-    expect(weekKeyToMonthKey("2026-W01")).toBe("2026-01"); // Thu 2026-01-01
-    expect(weekKeyToMonthKey("2025-W52")).toBe("2025-12"); // Thu 2025-12-25
-  });
-
-  test("null on a nonexistent week (W53 in a 52-week year rolls out)", () => {
-    expect(weekKeyToMonthKey("2025-W53")).toBeNull(); // 2025 has 52 ISO weeks
-    expect(weekKeyToMonthKey("2026-W00")).toBeNull();
-    expect(weekKeyToMonthKey("2026-07")).toBeNull(); // not a week key
+    expect(weekKeyToDayRange("2026-W27")).toEqual({
+      start: "2026-06-29",
+      end: "2026-07-05",
+    });
+    expect(weekKeyToMonthKey("2025-W53")).toBeNull();
   });
 });
 
@@ -319,13 +297,20 @@ describe("shiftMonthKey / monthKeyToCalendarGrid (ADR 0055)", () => {
     });
     expect(grid!.at(-1)).toEqual({ key: "2026-09-06", inMonth: false }); // Sun
   });
+
+  test("Sunday start changes both grid boundaries", () => {
+    const grid = monthKeyToCalendarGrid("2026-08", "sunday")!;
+    expect(grid[0]).toEqual({ key: "2026-07-26", inMonth: false });
+    expect(grid.at(-1)).toEqual({ key: "2026-09-05", inMonth: false });
+  });
 });
 
 describe("scaffoldKeyKind", () => {
   test("classifies each valid shape", () => {
     expect(scaffoldKeyKind("2026")).toBe("year");
     expect(scaffoldKeyKind("2026-07")).toBe("month");
-    expect(scaffoldKeyKind("2026-W29")).toBe("week");
+    expect(scaffoldKeyKind("week:2026-07-13")).toBe("week");
+    expect(scaffoldKeyKind("2026-W29")).toBe("week"); // migration input
     expect(scaffoldKeyKind("2026-07-16")).toBe("day");
     expect(scaffoldKeyKind("container")).toBe("container");
   });
@@ -341,9 +326,8 @@ describe("scaffoldKeyKind", () => {
 
 describe("parentScaffoldKey (the Daily > Y > M > W > D climb)", () => {
   test("walks a straddle day all the way to its year", () => {
-    // 2026-06-29 (June) -> W27 -> July (Thursday rule) -> 2026.
     const week = parentScaffoldKey("2026-06-29");
-    expect(week).toBe("2026-W27");
+    expect(week).toBe("week:2026-06-29");
     const month = parentScaffoldKey(week!);
     expect(month).toBe("2026-07");
     const year = parentScaffoldKey(month!);
@@ -359,30 +343,17 @@ describe("parentScaffoldKey (the Daily > Y > M > W > D climb)", () => {
 });
 
 describe("compareScaffoldKeys (chronological ascending)", () => {
-  test("weeks order across a year boundary (2025-W52 < 2026-W01)", () => {
-    expect(compareScaffoldKeys("2025-W52", "2026-W01")).toBeLessThan(0);
-    expect(compareScaffoldKeys("2026-W01", "2025-W52")).toBeGreaterThan(0);
-  });
-
-  test("weeks order within a year by number, not by string", () => {
-    expect(compareScaffoldKeys("2026-W02", "2026-W29")).toBeLessThan(0);
-    expect(compareScaffoldKeys("2026-W29", "2026-W29")).toBe(0);
+  test("weeks order by their start dates", () => {
+    expect(
+      compareScaffoldKeys("week:2025-12-29", "week:2026-01-05"),
+    ).toBeLessThan(0);
+    expect(compareScaffoldKeys("week:2026-07-13", "week:2026-07-13")).toBe(0);
   });
 
   test("years, months, and days order chronologically", () => {
     expect(compareScaffoldKeys("2025", "2026")).toBeLessThan(0);
     expect(compareScaffoldKeys("2026-01", "2026-12")).toBeLessThan(0);
     expect(compareScaffoldKeys("2026-07-08", "2026-07-16")).toBeLessThan(0);
-  });
-
-  test("a real sibling list sorts ascending", () => {
-    const weeks = ["2026-W29", "2025-W52", "2026-W01", "2026-W02"];
-    expect([...weeks].sort(compareScaffoldKeys)).toEqual([
-      "2025-W52",
-      "2026-W01",
-      "2026-W02",
-      "2026-W29",
-    ]);
   });
 });
 
@@ -397,99 +368,54 @@ describe("display helpers", () => {
     expect(monthLabel("2026-13")).toBe("2026-13"); // falls back to the key
   });
 
-  test("weekLabel is 'Week N' with no leading zero", () => {
-    expect(weekLabel("2026-W29")).toBe("Week 29");
-    expect(weekLabel("2026-W01")).toBe("Week 1");
-    expect(weekLabel("2026-W99")).toBe("2026-W99"); // nonexistent -> raw key
+  test("weekLabel is a date range, including years only across years", () => {
+    expect(weekLabel("week:2026-07-13")).toBe("Jul 13–19");
+    expect(weekLabel("week:2026-08-30")).toBe("Aug 30–Sep 5");
+    expect(weekLabel("week:2026-12-27")).toBe("Dec 27, 2026–Jan 2, 2027");
   });
 
-  test("weekKeyToDayRange gives the Monday and Sunday day-keys", () => {
-    // 2026-W29 has Thursday 2026-07-16 -> Mon 2026-07-13, Sun 2026-07-19.
-    expect(weekKeyToDayRange("2026-W29")).toEqual({
-      monday: "2026-07-13",
-      sunday: "2026-07-19",
+  test("weekKeyToDayRange gives start and end", () => {
+    expect(weekKeyToDayRange("week:2026-07-12")).toEqual({
+      start: "2026-07-12",
+      end: "2026-07-18",
     });
-    // A year-crossing week's range spans the boundary.
-    expect(weekKeyToDayRange("2026-W01")).toEqual({
-      monday: "2025-12-29",
-      sunday: "2026-01-04",
-    });
-    expect(weekKeyToDayRange("2025-W53")).toBeNull();
   });
 });
 
 describe("weekKeyToDays / shiftWeekKey (ADR 0054 week strip)", () => {
-  test("weekKeyToDays lists Monday..Sunday in order", () => {
-    expect(weekKeyToDays("2026-W29")).toEqual([
+  test("weekKeyToDays follows the key's start day", () => {
+    expect(weekKeyToDays("week:2026-07-12")).toEqual([
+      "2026-07-12",
       "2026-07-13",
       "2026-07-14",
       "2026-07-15",
       "2026-07-16",
       "2026-07-17",
       "2026-07-18",
-      "2026-07-19",
     ]);
-    // Every day round-trips to the SAME week (no straddle).
-    for (const day of weekKeyToDays("2026-W29")!) {
-      expect(dayKeyToWeekKey(day)).toBe("2026-W29");
+    for (const day of weekKeyToDays("week:2026-07-12")!) {
+      expect(dayKeyToWeekKey(day, "sunday")).toBe("week:2026-07-12");
     }
   });
 
-  test("weekKeyToDays spans a year boundary intact", () => {
-    expect(weekKeyToDays("2026-W01")).toEqual([
-      "2025-12-29",
-      "2025-12-30",
-      "2025-12-31",
-      "2026-01-01",
-      "2026-01-02",
-      "2026-01-03",
-      "2026-01-04",
-    ]);
-  });
-
-  test("weekKeyToDays is null on a nonexistent week", () => {
-    expect(weekKeyToDays("2025-W53")).toBeNull();
-  });
-
   test("shiftWeekKey pages forward and back by whole weeks", () => {
-    expect(shiftWeekKey("2026-W29", 1)).toBe("2026-W30");
-    expect(shiftWeekKey("2026-W29", -1)).toBe("2026-W28");
-    expect(shiftWeekKey("2026-W29", 0)).toBe("2026-W29");
-  });
-
-  test("shiftWeekKey crosses a year boundary correctly", () => {
-    // 2026-W01 back one week is the last week of 2025 (a 52-week ISO year, so W52).
-    expect(shiftWeekKey("2026-W01", -1)).toBe("2025-W52");
-    // Forward from the last full week of December 2026 into 2027's W01.
-    expect(shiftWeekKey("2026-W53", 1)).toBe("2027-W01");
-  });
-
-  test("shiftWeekKey is null on a malformed week", () => {
-    expect(shiftWeekKey("nope", 1)).toBeNull();
-  });
-
-  test("weekKeyWeekNumber pulls the two-digit week part", () => {
-    expect(weekKeyWeekNumber("2026-W29")).toBe("29");
-    expect(weekKeyWeekNumber("2026-W01")).toBe("01");
-    expect(weekKeyWeekNumber("2026-W53")).toBe("53");
-    expect(weekKeyWeekNumber("2026-07-16")).toBe("");
-    expect(weekKeyWeekNumber("nope")).toBe("");
+    expect(shiftWeekKey("week:2026-12-27", 1)).toBe("week:2027-01-03");
+    expect(shiftWeekKey("week:2026-12-27", -1)).toBe("week:2026-12-20");
   });
 });
 
-describe("dayKeyToScaffoldChain (the one Thursday-rule waterfall)", () => {
+describe("dayKeyToScaffoldChain", () => {
   test("walks day -> week -> month -> year", () => {
     expect(dayKeyToScaffoldChain("2026-07-16")).toEqual({
-      weekKey: "2026-W29",
+      weekKey: "week:2026-07-13",
       monthKey: "2026-07",
       yearKey: "2026",
     });
   });
 
-  test("a straddle day is owned WHOLE by its Thursday's month/year", () => {
-    // 2026-06-29 (June) -> W27 whose Thursday (Jul 2) is July 2026.
-    expect(dayKeyToScaffoldChain("2026-06-29")).toEqual({
-      weekKey: "2026-W27",
+  test("Sunday start changes identity but keeps fourth-day ownership", () => {
+    expect(dayKeyToScaffoldChain("2026-07-05", "sunday")).toEqual({
+      weekKey: "week:2026-07-05",
       monthKey: "2026-07",
       yearKey: "2026",
     });
@@ -505,7 +431,7 @@ describe("scaffoldLabel + PROTECTED_SCAFFOLD_KINDS", () => {
   test("scaffoldLabel dispatches on kind, raw key otherwise", () => {
     expect(scaffoldLabel("2026")).toBe("2026");
     expect(scaffoldLabel("2026-07")).toBe("July");
-    expect(scaffoldLabel("2026-W29")).toBe("Week 29");
+    expect(scaffoldLabel("week:2026-07-13")).toBe("Jul 13–19");
     // A day / container / unknown key falls through to itself (text owned else).
     expect(scaffoldLabel("2026-07-16")).toBe("2026-07-16");
     expect(scaffoldLabel("container")).toBe("container");

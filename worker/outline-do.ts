@@ -4,6 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 import { Schema } from "effect";
 
 import type {
+  CalendarSyncState,
   ChangeFrame,
   ChangeOp,
   Node,
@@ -22,9 +23,18 @@ import type {
 import type { RestorePoint } from "./restore";
 import type { NodesPatchBody } from "./wire";
 
-import { dayKeyToScaffoldChain } from "../src/data/date-links";
+import {
+  DEFAULT_WEEK_START,
+  dayKeyToScaffoldChain,
+  scaffoldKeyKind,
+  type WeekStart,
+} from "../src/data/date-links";
 import { parseNodeLinks } from "../src/data/node-links";
 import { buildTreeIndex } from "../src/data/tree";
+import {
+  planWeekStartMigration,
+  type DailyIndexRow,
+} from "../src/data/week-start-migration";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
 import { validateLockedPatches, validateLockedWrite } from "./lock-policy";
@@ -80,6 +90,10 @@ export interface RetirementStatus {
   frozenBy: string | null;
   appliedMigrationId: string | null;
 }
+
+export type WeekStartMigrationResult =
+  | { weekStart: WeekStart; seq: number }
+  | { error: "node_limit" | "locked" };
 
 type SqlVal = string | number | null;
 
@@ -603,29 +617,184 @@ export class UserOutlineDO extends DurableObject<Env> {
    * advisory. Apply order follows the array, but within one frame the ops are
    * absolute (keyed by id), so the final state is order-independent.
    */
-  applyBatch(ops: readonly ChangeOp[]): number {
+  applyBatch(ops: readonly ChangeOp[], expectedWeekStart?: WeekStart): number {
     this.assertWritable();
-    const violation = validateLockedWrite(this.getNodes(), ops);
-    if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
-    return this.broadcastChange(
-      this.ctx.storage.transactionSync(() => {
-        const out: ChangeOp[] = [];
-        for (const op of ops) {
-          out.push(
-            op.op === "delete"
-              ? this.deleteNodeRow(op.key)
-              : this.putNode(op.value),
-          );
+    const frames = this.ctx.storage.transactionSync(() => {
+      if (
+        expectedWeekStart !== undefined &&
+        this.currentWeekStart() !== expectedWeekStart
+      ) {
+        throw new Error(
+          "CALENDAR_CHANGED: retry against the current Week start",
+        );
+      }
+      const violation = validateLockedWrite(this.getNodes(), ops);
+      if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
+      const out: ChangeOp[] = [];
+      for (const op of ops) {
+        out.push(
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        );
+      }
+      return this.recordChange(out);
+    });
+    return this.broadcastChange(frames);
+  }
+
+  private currentWeekStart(): WeekStart {
+    const row = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'account-prefs' AND key = 'daily:week-start'",
+      )
+      .toArray()[0];
+    if (!row) return DEFAULT_WEEK_START;
+    try {
+      const decoded = Schema.decodeUnknownOption(
+        Schema.Struct({
+          key: Schema.Literal("daily:week-start"),
+          weekStart: Schema.Literals(["sunday", "monday"]),
+        }),
+      )(JSON.parse(row.value));
+      return decoded._tag === "Some"
+        ? decoded.value.weekStart
+        : DEFAULT_WEEK_START;
+    } catch {
+      return DEFAULT_WEEK_START;
+    }
+  }
+
+  /** Preference, mappings, and tree move together or not at all (ADR 0068). */
+  migrateWeekStart(
+    weekStart: WeekStart,
+    limit: number | null,
+  ): WeekStartMigrationResult {
+    return this.applyWeekStartMigration(weekStart, limit);
+  }
+
+  /** Canonicalize legacy keys against the preference read inside this DO turn.
+   * Automatic callers never echo a stale client-side preference back here. */
+  canonicalizeWeekStart(limit: number | null): WeekStartMigrationResult {
+    return this.applyWeekStartMigration(this.currentWeekStart(), limit);
+  }
+
+  private applyWeekStartMigration(
+    weekStart: WeekStart,
+    limit: number | null,
+  ): WeekStartMigrationResult {
+    this.assertWritable();
+    const committed = this.ctx.storage.transactionSync<
+      | {
+          result: WeekStartMigrationResult;
+          frames: ChangeFrame[];
+          calendar: CalendarSyncState;
         }
-        return this.recordChange(out);
-      }),
-    );
+      | { result: { error: "node_limit" | "locked" }; frames: [] }
+    >(() => {
+      const rows = this.getKv("daily-index").map((row) =>
+        Schema.decodeUnknownSync(
+          Schema.Struct({ key: Schema.String, nodeId: Schema.String }),
+        )(row),
+      ) satisfies DailyIndexRow[];
+      const previousWeekStart = this.currentWeekStart();
+      if (
+        previousWeekStart === weekStart &&
+        rows.every(
+          (row) =>
+            scaffoldKeyKind(row.key) !== "week" || row.key.startsWith("week:"),
+        )
+      ) {
+        return {
+          result: { weekStart, seq: this.currentSeq() },
+          frames: [],
+          calendar: { weekStart },
+        };
+      }
+      const plan = planWeekStartMigration(
+        this.getNodes(),
+        rows,
+        weekStart,
+        Date.now(),
+        () => crypto.randomUUID(),
+      );
+      const growth = countNetGrowth(plan.ops, (id) => this.nodeExists(id));
+      if (
+        batchExceedsNodeLimit(
+          this.nodeCount(),
+          growth.inserts,
+          growth.deletes,
+          limit,
+        )
+      ) {
+        return { result: { error: "node_limit" }, frames: [] };
+      }
+      if (validateLockedWrite(this.getNodes(), plan.ops)) {
+        return { result: { error: "locked" }, frames: [] };
+      }
+
+      const now = Date.now();
+      for (const key of plan.deletes) {
+        this.sql.exec(
+          "DELETE FROM kv WHERE collection = 'daily-index' AND key = ?",
+          key,
+        );
+      }
+      for (const row of plan.upserts) {
+        this.sql.exec(
+          `INSERT INTO kv (collection, key, value, updatedAt)
+           VALUES ('daily-index', ?, ?, ?)
+           ON CONFLICT(collection, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+          row.key,
+          JSON.stringify(row),
+          now,
+        );
+      }
+      this.sql.exec(
+        `INSERT INTO kv (collection, key, value, updatedAt)
+         VALUES ('account-prefs', 'daily:week-start', ?, ?)
+         ON CONFLICT(collection, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+        JSON.stringify({ key: "daily:week-start", weekStart }),
+        now,
+      );
+      const frames = this.recordChange(
+        plan.ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+        undefined,
+        previousWeekStart !== weekStart ||
+          plan.upserts.length > 0 ||
+          plan.deletes.length > 0,
+      );
+      const seq = frames.at(-1)?.seq ?? this.currentSeq();
+      return {
+        result: { weekStart, seq },
+        frames,
+        calendar: {
+          weekStart,
+          upserts: plan.upserts,
+          deletes: plan.deletes,
+        },
+      };
+    });
+    if ("calendar" in committed) {
+      this.broadcastChange(committed.frames, committed.calendar);
+    }
+    return committed.result;
   }
 
   /** Claims, current-tail planning, quota, nodes, receipt, and changelog share
    *  one synchronous transaction. No stale Worker snapshot or per-level RPCs. */
   captureDaily(input: CaptureInput, limit: number | null): CaptureResult {
     this.assertWritable();
+    const weekStart = this.currentWeekStart();
+    const migration = this.migrateWeekStart(weekStart, limit);
+    if ("error" in migration) {
+      if (migration.error === "node_limit") return { error: "node_limit" };
+      throw new Error("NODE_LOCKED: calendar migration blocked by a lock");
+    }
     const committed = this.ctx.storage.transactionSync<{
       result: CaptureResult;
       frames: ChangeFrame[];
@@ -679,7 +848,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       };
       const containerId = claim("container");
       const dayId = claim(input.date);
-      const chain = dayKeyToScaffoldChain(input.date);
+      const chain = dayKeyToScaffoldChain(input.date, weekStart);
       if (!chain) throw new Error("invalid capture date");
       const levels = index.byId.has(dayId)
         ? {}
@@ -690,6 +859,7 @@ export class UserOutlineDO extends DurableObject<Env> {
           };
       const plan = planAddToDaily(index, {
         dateKey: input.date,
+        weekStart,
         containerId,
         dayId,
         ...levels,
@@ -875,18 +1045,23 @@ export class UserOutlineDO extends DurableObject<Env> {
    * `planChangeFrames` (worker/changelog.ts) into consecutive-seq rows so no
    * single row nears SQLite's 2 MB cap; op order is preserved across chunk
    * boundaries, so every frame prefix stays chain-valid for a live remote
-   * client. A no-op for an empty batch (e.g. a patch that touched no writable
-   * columns), so the seq only advances on real changes. Returns the frames
-   * (committed seqs + ops) for `broadcastChange` to emit, in order, once the
-   * transaction has committed.
+   * client. An empty batch normally leaves seq unchanged; `forceFrame` records
+   * an empty frame when committed calendar semantics changed without node ops.
+   * Returns the frames (committed seqs + ops) for `broadcastChange` to emit, in
+   * order, once the transaction has committed.
    */
-  private recordChange(ops: ChangeOp[], clientId?: string): ChangeFrame[] {
-    const frames = planChangeFrames(
-      ops,
-      this.currentSeq(),
-      undefined,
-      clientId,
-    );
+  private recordChange(
+    ops: ChangeOp[],
+    clientId?: string,
+    forceFrame = false,
+  ): ChangeFrame[] {
+    let frames = planChangeFrames(ops, this.currentSeq(), undefined, clientId);
+    if (!frames.length && forceFrame) {
+      const seq = this.currentSeq() + 1;
+      const frame: ChangeFrame =
+        clientId === undefined ? { seq, ops: [] } : { seq, ops: [], clientId };
+      frames = [frame];
+    }
     if (!frames.length) return frames;
     for (const f of frames) {
       this.sql.exec(
@@ -917,19 +1092,25 @@ export class UserOutlineDO extends DurableObject<Env> {
    * Broadcasting is free (outgoing WS); the send runs inside the DO window the
    * triggering write already opened, so it adds negligible billed duration.
    */
-  private broadcastChange(frames: readonly ChangeFrame[]): number {
+  private broadcastChange(
+    frames: readonly ChangeFrame[],
+    calendar?: CalendarSyncState,
+  ): number {
     if (!frames.length) return this.currentSeq();
     const sockets = this.ctx.getWebSockets();
-    for (const frame of frames) {
-      const message: ServerMessage =
-        frame.clientId === undefined
-          ? { type: "change", seq: frame.seq, ops: frame.ops }
-          : {
-              type: "change",
-              seq: frame.seq,
-              ops: frame.ops,
-              clientId: frame.clientId,
-            };
+    for (const [index, frame] of frames.entries()) {
+      const frameCalendar = index === frames.length - 1 ? calendar : undefined;
+      let message: ServerMessage = {
+        type: "change",
+        seq: frame.seq,
+        ops: frame.ops,
+      };
+      if (frame.clientId !== undefined) {
+        message = { ...message, clientId: frame.clientId };
+      }
+      if (frameCalendar !== undefined) {
+        message = { ...message, calendar: frameCalendar };
+      }
       const data = JSON.stringify(message);
       for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
@@ -1049,6 +1230,7 @@ export class UserOutlineDO extends DurableObject<Env> {
               : { seq: r.seq, ops, clientId: r.clientId };
           }),
           serverVersion: APP_VERSION,
+          calendar: { weekStart: this.currentWeekStart() },
         };
       }
     }
@@ -1057,6 +1239,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       seq,
       nodes: this.getNodes(),
       serverVersion: APP_VERSION,
+      calendar: { weekStart: this.currentWeekStart() },
     };
   }
 

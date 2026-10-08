@@ -35,6 +35,7 @@ import { downloadTextFile } from "../data/download";
 import {
   retryEditorFeatures,
   setEditorFeature,
+  setWeekStart,
   useEditorFeatures,
   type EditorFeature,
 } from "../data/editor-features";
@@ -169,11 +170,13 @@ function Segmented<T extends string>({
   onChange,
   options,
   label,
+  disabled = false,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: ReactNode; title?: string }[];
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <div
@@ -189,6 +192,7 @@ function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            disabled={disabled}
             title={o.title}
             onClick={() => onChange(o.value)}
             className={cn(
@@ -196,6 +200,7 @@ function Segmented<T extends string>({
               active
                 ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
                 : "text-muted-foreground hover:text-foreground",
+              disabled && "cursor-not-allowed opacity-60",
             )}
           >
             {o.label}
@@ -801,6 +806,7 @@ function EditorFeaturesSection() {
   const preferences = useEditorFeatures();
   const [saving, setSaving] = useState<EditorFeature | null>(null);
   const [details, setDetails] = useState<EditorFeature | null>(null);
+  const [savingWeekStart, setSavingWeekStart] = useState(false);
   const features = [
     {
       id: "bible",
@@ -915,6 +921,48 @@ function EditorFeaturesSection() {
                 Turning this feature off never deletes your notes. Turn it back
                 on to use it with the same content.
               </p>
+              {feature.id === "daily" ? (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                  <div>
+                    <p className="font-medium">Week starts on</p>
+                    <p className="text-muted-foreground">
+                      Changes your Daily calendar and reorganizes its weeks.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2" aria-live="polite">
+                    {savingWeekStart ? (
+                      <Loader2Icon
+                        className="size-4 animate-spin text-muted-foreground"
+                        aria-label="Reorganizing Daily calendar"
+                      />
+                    ) : null}
+                    <Segmented
+                      label="Week starts on"
+                      value={preferences.weekStart}
+                      disabled={!preferences.ready || savingWeekStart}
+                      onChange={(weekStart) => {
+                        setSavingWeekStart(true);
+                        void setWeekStart(weekStart)
+                          .then(() =>
+                            toast.success(
+                              `Weeks now start on ${weekStart === "sunday" ? "Sunday" : "Monday"}`,
+                            ),
+                          )
+                          .catch(() =>
+                            toast.error(
+                              "Couldn't change when weeks start. Nothing was moved.",
+                            ),
+                          )
+                          .finally(() => setSavingWeekStart(false));
+                      }}
+                      options={[
+                        { value: "sunday", label: "Sunday" },
+                        { value: "monday", label: "Monday" },
+                      ]}
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         ))}
