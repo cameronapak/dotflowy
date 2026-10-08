@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.23.1
+
+### Patch Changes
+
+- aa1dc01: Keep the Daily note selection pill on its horizontal track when switching days from a scrolled page.
+
 ## 1.23.0
 
 ### Minor Changes
