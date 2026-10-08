@@ -97,6 +97,115 @@ function sampleBandHeights(page: Page, ms = 400): Promise<number[]> {
   );
 }
 
+type SelectionMidpoint = {
+  source: { left: number; top: number; width: number; height: number };
+  destinationLeft: number;
+  midpoint: { left: number; top: number; width: number; height: number };
+  sourceBandHeight: number;
+  midpointBandHeight: number;
+  midpointBandOpacity: number;
+};
+
+/** Catch the destination CSS animation, pause it at 50%, and measure the pill
+ *  relative to the stationary calendar. This proves an intermediate frame
+ *  exists; endpoint samples alone would let an instant jump pass. */
+function pauseSelectionAtMidpoint(
+  page: Page,
+  destinationDayKey: string,
+): Promise<SelectionMidpoint> {
+  return page.evaluate(
+    (destination) =>
+      new Promise<SelectionMidpoint>((resolve, reject) => {
+        const sourceCalendar = document.querySelector<HTMLElement>(
+          '[data-testid="week-calendar"]',
+        );
+        const sourceSelection = document.querySelector<HTMLElement>(
+          '[data-testid="week-calendar-selection"]',
+        );
+        const destinationButton = sourceCalendar?.querySelector<HTMLElement>(
+          `[data-day-key="${destination}"]`,
+        );
+        const sourceBand =
+          sourceCalendar?.closest<HTMLElement>(".overflow-hidden");
+        if (
+          !sourceCalendar ||
+          !sourceSelection ||
+          !destinationButton ||
+          !sourceBand
+        ) {
+          reject(new Error("selection animation source is missing"));
+          return;
+        }
+        const calendarRect = sourceCalendar.getBoundingClientRect();
+        const sourceRect = sourceSelection.getBoundingClientRect();
+        const destinationRect = destinationButton.getBoundingClientRect();
+        const source = {
+          left: sourceRect.left - calendarRect.left,
+          top: sourceRect.top - calendarRect.top,
+          width: sourceRect.width,
+          height: sourceRect.height,
+        };
+        const destinationLeft = destinationRect.left - calendarRect.left;
+        const sourceBandHeight = sourceBand.getBoundingClientRect().height;
+        const start = performance.now();
+        const tick = () => {
+          const calendar = document.querySelector<HTMLElement>(
+            '[data-testid="week-calendar"]',
+          );
+          const selection = document.querySelector<HTMLElement>(
+            '[data-testid="week-calendar-selection"]',
+          );
+          const selectedDestination = calendar
+            ?.querySelector(`[data-day-key="${destination}"]`)
+            ?.hasAttribute("data-selected");
+          const animation = selection
+            ?.getAnimations()
+            .find(
+              (candidate) =>
+                candidate instanceof CSSAnimation &&
+                candidate.animationName === "week-calendar-selection-slide",
+            );
+          if (calendar && selection && selectedDestination && animation) {
+            animation.pause();
+            animation.currentTime = 100;
+            requestAnimationFrame(() => {
+              const currentCalendarRect = calendar.getBoundingClientRect();
+              const selectionRect = selection.getBoundingClientRect();
+              const band = calendar.closest<HTMLElement>(".overflow-hidden");
+              if (!band) {
+                reject(new Error("selection animation band is missing"));
+                return;
+              }
+              resolve({
+                source,
+                destinationLeft,
+                midpoint: {
+                  left: selectionRect.left - currentCalendarRect.left,
+                  top: selectionRect.top - currentCalendarRect.top,
+                  width: selectionRect.width,
+                  height: selectionRect.height,
+                },
+                sourceBandHeight,
+                midpointBandHeight: band.getBoundingClientRect().height,
+                midpointBandOpacity: Number(getComputedStyle(band).opacity),
+              });
+            });
+            return;
+          }
+          if (performance.now() - start >= 10_000) {
+            reject(
+              new Error("destination selection animation was not observed"),
+            );
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    destinationDayKey,
+  );
+}
+
 test.describe("week calendar strip (ADR 0054)", () => {
   test("shows on a day node, and NOT on a non-daily node or a week scaffold node", async ({
     page,
@@ -256,6 +365,322 @@ test.describe("week calendar strip (ADR 0054)", () => {
     const max = Math.max(...samples);
     expect(max).toBeGreaterThan(0); // the band stayed open (never collapsed)
     expect(max - min).toBeLessThan(12); // and it snapped -- no 0->full ramp
+  });
+
+  test("the selection pill moves only on the x-axis from a scrolled day", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 720 });
+    const OTHER = "2030-06-16"; // Sunday in the same ISO week as DAY.
+    const entries: SeedNode[] = Array.from({ length: 48 }, (_, i) => ({
+      id: `entry-${i}`,
+      parentId: "the-day",
+      prevSiblingId: i === 0 ? null : `entry-${i - 1}`,
+      text: `Entry ${i}`,
+    }));
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "the-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: "A day",
+        },
+        ...entries,
+        {
+          id: "other-day",
+          parentId: null,
+          prevSiblingId: "the-day",
+          text: "Another day",
+        },
+      ],
+      {
+        kv: dailyIndexKv([
+          { key: DAY, nodeId: "the-day" },
+          { key: OTHER, nodeId: "other-day" },
+        ]),
+      },
+    );
+
+    await clientNavigate(page, "/the-day");
+    await expect(strip(page)).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+
+    const midpointPromise = pauseSelectionAtMidpoint(page, OTHER);
+    await pill(page, OTHER).click();
+    await expect(page).toHaveURL(/\/other-day$/);
+
+    const frame = await midpointPromise;
+    const leftEdge = Math.min(frame.source.left, frame.destinationLeft);
+    const rightEdge = Math.max(frame.source.left, frame.destinationLeft);
+    expect(frame.midpoint.left).toBeGreaterThan(leftEdge + 5);
+    expect(frame.midpoint.left).toBeLessThan(rightEdge - 5);
+    expect(Math.abs(frame.midpoint.top - frame.source.top)).toBeLessThan(2);
+    expect(Math.abs(frame.midpoint.width - frame.source.width)).toBeLessThan(2);
+    expect(Math.abs(frame.midpoint.height - frame.source.height)).toBeLessThan(
+      2,
+    );
+    expect(
+      Math.abs(frame.midpointBandHeight - frame.sourceBandHeight),
+    ).toBeLessThan(12);
+    expect(frame.midpointBandOpacity).toBe(1);
+
+    // A tree update changes the destination's content dot and rerenders the
+    // calendar. The latched handoff must remain paused at its midpoint.
+    await page.getByRole("button", { name: "Add node", exact: true }).click();
+    const selection = page.getByTestId("week-calendar-selection");
+    await expect(selection).toHaveClass(/week-calendar-selection-slide/);
+    expect(
+      await selection.evaluate((element) =>
+        element
+          .getAnimations()
+          .some(
+            (animation) =>
+              animation instanceof CSSAnimation &&
+              animation.animationName === "week-calendar-selection-slide" &&
+              animation.currentTime === 100,
+          ),
+      ),
+    ).toBe(true);
+
+    // Paging removes the selected span and cancels its animation. Returning to
+    // the current week must not replay the stale day-switch handoff.
+    await page.getByRole("button", { name: "Next week" }).click();
+    await page
+      .getByRole("button", { name: "Back to the current week" })
+      .click();
+    await expect(selection).not.toHaveClass(/week-calendar-selection-slide/);
+    expect(
+      await selection.evaluate((element) => element.getAnimations().length),
+    ).toBe(0);
+  });
+
+  test("enabling reduced motion cancels an active pill without replay", async ({
+    page,
+  }) => {
+    const OTHER = "2030-06-16";
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "the-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: "A day",
+        },
+        {
+          id: "other-day",
+          parentId: null,
+          prevSiblingId: "the-day",
+          text: "Another day",
+        },
+      ],
+      {
+        kv: dailyIndexKv([
+          { key: DAY, nodeId: "the-day" },
+          { key: OTHER, nodeId: "other-day" },
+        ]),
+      },
+    );
+
+    await clientNavigate(page, "/the-day");
+    await expect(strip(page)).toBeVisible();
+    const midpointPromise = pauseSelectionAtMidpoint(page, OTHER);
+    await pill(page, OTHER).click();
+    await expect(page).toHaveURL(/\/other-day$/);
+    await midpointPromise;
+
+    const selection = page.getByTestId("week-calendar-selection");
+    const heights = sampleBandHeights(page);
+    // Motion snapshots this preference at mount. The CSS media query cancels
+    // the already-running animation without remounting the destination.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(selection).not.toHaveClass(/week-calendar-selection-slide/);
+    expect(
+      await selection.evaluate((element) => element.getAnimations().length),
+    ).toBe(0);
+    // Returning to no preference must not replay the cancelled handoff.
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect(selection).not.toHaveClass(/week-calendar-selection-slide/);
+    expect(
+      await selection.evaluate((element) => element.getAnimations().length),
+    ).toBe(0);
+    const samples = await heights;
+    expect(Math.max(...samples) - Math.min(...samples)).toBeLessThan(12);
+  });
+
+  test("the latest day click wins while an earlier creation is pending", async ({
+    page,
+  }) => {
+    const EARLIER = "2030-06-10";
+    const LATEST = "2030-06-16";
+    let earlierId = "";
+    let latestId = "";
+    let releaseEarlierClaim = () => {};
+    let releaseLatestClaim = () => {};
+    let markEarlierClaimSeen = () => {};
+    let markLatestClaimSeen = () => {};
+    const earlierClaimSeen = new Promise<void>((resolve) => {
+      markEarlierClaimSeen = resolve;
+    });
+    const latestClaimSeen = new Promise<void>((resolve) => {
+      markLatestClaimSeen = resolve;
+    });
+    const earlierClaimReleased = new Promise<void>((resolve) => {
+      releaseEarlierClaim = resolve;
+    });
+    const latestClaimReleased = new Promise<void>((resolve) => {
+      releaseLatestClaim = resolve;
+    });
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "the-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: "A day",
+        },
+      ],
+      { kv: dailyIndexKv([{ key: DAY, nodeId: "the-day" }]) },
+    );
+    await page.route(
+      (url) => url.pathname === "/api/kv",
+      async (route) => {
+        const request = route.request();
+        // SAFETY: the fixture decodes every claim POST with KvClaimBody; optional
+        // fields keep unrelated /api/kv requests outside the held branches.
+        const body = request.postDataJSON() as {
+          key?: string;
+          value?: { nodeId?: string };
+        } | null;
+        const isClaim =
+          request.method() === "POST" &&
+          new URL(request.url()).searchParams.get("op") === "claim";
+        if (isClaim && body?.key === EARLIER) {
+          earlierId = body.value?.nodeId ?? "";
+          markEarlierClaimSeen();
+          await earlierClaimReleased;
+        } else if (isClaim && body?.key === LATEST) {
+          latestId = body.value?.nodeId ?? "";
+          markLatestClaimSeen();
+          await latestClaimReleased;
+        }
+        await route.fallback();
+      },
+    );
+
+    await clientNavigate(page, "/the-day");
+    await expect(strip(page)).toBeVisible();
+    await pill(page, EARLIER).click();
+    await earlierClaimSeen;
+    await pill(page, LATEST).click();
+    await latestClaimSeen;
+    expect(earlierId).not.toBe("");
+    expect(latestId).not.toBe("");
+
+    // Settle the earlier request while the latest remains blocked. The earlier
+    // node write proves get-or-create progressed past its held claim; the route
+    // must remain on the source because only the latest click may navigate.
+    const earlierWriteResponse = page.waitForResponse((response) => {
+      const request = response.request();
+      if (
+        new URL(request.url()).pathname !== "/api/nodes" ||
+        request.method() !== "POST"
+      ) {
+        return false;
+      }
+      // SAFETY: the fixture decodes every structural POST with NodesPostBody
+      // before replying, so an operations array has this tested id shape.
+      const body = request.postDataJSON() as {
+        ops?: Array<{ value?: { id?: string } }>;
+      } | null;
+      return Boolean(
+        body?.ops?.some((operation) => operation.value?.id === earlierId),
+      );
+    });
+    releaseEarlierClaim();
+    const response = await earlierWriteResponse;
+    await response.finished();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await expect(page).toHaveURL(/\/the-day$/);
+
+    releaseLatestClaim();
+    await expect(page).toHaveURL(new RegExp(`/${latestId}$`));
+  });
+
+  test("a delayed creation measures the current day button after week paging", async ({
+    page,
+  }) => {
+    const NEW = "2030-06-10";
+    let releaseClaim = () => {};
+    let markClaimSeen = () => {};
+    const claimSeen = new Promise<void>((resolve) => {
+      markClaimSeen = resolve;
+    });
+    const claimReleased = new Promise<void>((resolve) => {
+      releaseClaim = resolve;
+    });
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "the-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: "A day",
+        },
+      ],
+      { kv: dailyIndexKv([{ key: DAY, nodeId: "the-day" }]) },
+    );
+    await page.route(
+      (url) => url.pathname === "/api/kv",
+      async (route) => {
+        const request = route.request();
+        // SAFETY: the fixture decodes every claim POST with KvClaimBody; an
+        // optional key keeps unrelated /api/kv requests outside this hold.
+        const body = request.postDataJSON() as { key?: string } | null;
+        if (
+          request.method() === "POST" &&
+          new URL(request.url()).searchParams.get("op") === "claim" &&
+          body?.key === NEW
+        ) {
+          markClaimSeen();
+          await claimReleased;
+        }
+        await route.fallback();
+      },
+    );
+
+    await clientNavigate(page, "/the-day");
+    await expect(strip(page)).toBeVisible();
+    const midpointPromise = pauseSelectionAtMidpoint(page, NEW);
+    await pill(page, NEW).click();
+    await claimSeen;
+    await page.getByRole("button", { name: "Next week" }).click();
+    await page
+      .getByRole("button", { name: "Back to the current week" })
+      .click();
+    releaseClaim();
+
+    await expect(page).not.toHaveURL(/\/the-day$/);
+    const frame = await midpointPromise;
+    const leftEdge = Math.min(frame.source.left, frame.destinationLeft);
+    const rightEdge = Math.max(frame.source.left, frame.destinationLeft);
+    expect(frame.midpoint.left).toBeGreaterThan(leftEdge + 5);
+    expect(frame.midpoint.left).toBeLessThan(rightEdge - 5);
+    expect(Math.abs(frame.midpoint.top - frame.source.top)).toBeLessThan(2);
   });
 
   test("clicking an un-minted day creates it WITHOUT seeding a child (seed-free)", async ({

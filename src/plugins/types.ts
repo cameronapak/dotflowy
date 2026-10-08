@@ -164,7 +164,7 @@ export interface PluginContext {
      *  focus theft; the content below just swaps. Use when the destination
      *  isn't rendered in the outgoing view (so there's no element to morph
      *  FROM), or when a separate element already carries the motion (the week
-     *  strip's layoutId pill IS the transition -- ADR 0054). */
+     *  strip's horizontal pill handoff IS the transition -- ADR 0054). */
     open: (id: string) => void;
   };
   /** Show (or dismiss, with null) a self-managing overlay -- a portaled popover

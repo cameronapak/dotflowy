@@ -43,22 +43,34 @@ cut.
 
    **Motion grammar (revised after an animation review):** the strip's chrome
    is **stationary** across a day switch. The selection pill is the **sole
-   moving element** — a `layoutId` sliding from the old day to the new one, a
+   moving element** — it slides from the old day to the new one using only the
+   horizontal delta captured from the current painted pills immediately before
+   navigation commits, with a
    **tween** on the house curve (`cubic-bezier(0.32, 0.72, 0, 1)`, the zoom
    morph's curve in `styles.css`), not a spring (dotflowy doesn't use springs,
    and the underdamped spring overshot). The week row has **no entrance
-   animation** — paging swaps it instantly (the month label + `W29` badge carry
-   the change), and a same-week switch is silent chrome. **Navigation from the
-   strip is plain, not the zoom morph** (`ctx.nav.open` / `goToDate(…, {morph:
-false})`): the clicked day isn't rendered in the outgoing view, so there's
+   animation** — paging swaps it instantly (the month label + date-range badge
+   carry the change), and a same-week switch is silent chrome. **Navigation
+   from the strip is plain, not the zoom morph** (`ctx.nav.open`): the clicked
+   day isn't rendered in the outgoing view, so there's
    no element to morph FROM — the pill slide IS the transition, and a zoom
    morph would stack a redundant title pop-in over it. Reduced motion snaps the
    pill and the subheader height, as before. The subheader itself **snaps to
    full height on mount** (it only animates open/close changes made after first
    paint), so the per-day-switch editor remount can't make the band re-open.
+   After async creation, the click re-queries the current pills and records only
+   their x delta immediately before navigation commits. The destination latches
+   that handoff until `animationend`; later renders cannot cut the tween short.
+   The handoff is discarded if paging or reduced-motion cancellation removes
+   the animation, so returning to the selected week cannot replay stale motion.
+   The painted pill does not use shared-layout projection, which would also
+   project the window's scroll restoration into y and scale. A mount-snap marker
+   makes delayed Daily chrome open at full height without relying on Motion timing.
+   Competing async clicks are latest-wins; failed or detached requests publish
+   no handoff and cannot navigate later.
 
-5. **Orientation chrome:** a quiet month+year label ("July 2026", the visible
-   ISO week's majority month — Thursday's month) plus a `W29` ISO week badge.
+5. **Orientation chrome:** a quiet month+year label ("July 2026") plus the
+   Calendar week's unambiguous date range (ADR 0068).
    Paging is ephemeral local state (reset on route change); while the visible
    week ≠ the zoomed day's week, a snap-back affordance re-centers the strip —
    **navigation-free**, unlike the header Today button (which navigates and
@@ -111,11 +123,9 @@ false})`): the clicked day isn't rendered in the outgoing view, so there's
 - External drop targets become a reviewed plugin capability. The first
   consumer is Daily; ordinary outline gaps keep their existing projection and
   indicator, while an active external target takes precedence.
-- `goToDate` gained a second in-plugin caller, and the strip↔`index.tsx`
-  import cycle it forced was real — so the whole get-or-create engine
-  (`getOrCreateDay`/`goToDate` + the scaffold cascade/migration) moved to
-  `get-or-create.ts`, a behavior-identical extraction (verified against the old
-  bodies in review) save for the one deliberate addition: `goToDate` gained the
-  `morph` option the strip needs for its plain (non-morph) navigation.
-  `index.tsx` keeps only the `protects` seam and re-exports `getOrCreateDay` for
-  `routes/today.tsx`.
+- The whole get-or-create engine (`getOrCreateDay`/`goToDate` + the scaffold
+  cascade/migration) lives in `get-or-create.ts`. The strip calls
+  `getOrCreateDay` directly, then publishes its measured handoff immediately
+  before plain `ctx.nav.open`; the other date-entry surfaces keep using
+  `goToDate`. `index.tsx` keeps only the `protects` seam and re-exports
+  `getOrCreateDay` for `routes/today.tsx`.
