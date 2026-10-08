@@ -10,6 +10,7 @@ import type { Node } from "./schema";
 import { hasWindow } from "../env";
 import { createNodes, deleteNodes, updateNodes } from "./api";
 import { noteServerVersion } from "./app-version";
+import { publishCalendarSync } from "./calendar-sync";
 import { isMirrorsEnabled } from "./flags";
 import { clearHistory, sameAuthoring } from "./history";
 import { runPromise } from "./nodes-client-effect";
@@ -223,6 +224,26 @@ export function waitForSeqE(
       orElse: () => Effect.void,
     }),
   );
+}
+
+/** Like waitForSeqE, but a missing echo is a failure. Calendar activation uses
+ * this stricter barrier because publishing a preference before its migrated node
+ * frame arrives would expose two calendar meanings in one tab. */
+export function waitForSeqStrictE(
+  seq: number,
+  timeoutMs = 8000,
+): Effect.Effect<void, Cause.TimeoutError> {
+  return Effect.callback<void>((resume) => {
+    if (appliedSeq >= seq) {
+      resume(Effect.void);
+      return;
+    }
+    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) };
+    seqWaiters.add(waiter);
+    return Effect.sync(() => {
+      seqWaiters.delete(waiter);
+    });
+  }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
 }
 
 /**
@@ -521,6 +542,10 @@ export const nodesCollection = createCollection({
         // tab's bundle is stale and offers a reload (ADR 0046). Live `change`
         // frames don't carry it -- a reconnect is when the deploy gap appears.
         if (msg.type !== "change") noteServerVersion(msg.serverVersion);
+        // Calendar preference/index state is committed with the node frame.
+        // Publish it first so date semantics and mappings cross the boundary
+        // before migrated nodes become visible to render and event handlers.
+        if (msg.calendar) publishCalendarSync(msg.calendar);
         if (msg.type === "snapshot") {
           if (
             !ready ||

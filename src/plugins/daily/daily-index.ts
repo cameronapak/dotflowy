@@ -3,7 +3,12 @@ import { createCollection } from "@tanstack/react-db";
 import { Effect, Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { subscribeCalendarSync } from "../../data/calendar-sync";
 import { localDateKey } from "../../data/date-links";
+import {
+  getEditorFeatures,
+  subscribeEditorFeatures,
+} from "../../data/editor-features";
 import {
   kvDelete,
   kvFetch,
@@ -248,6 +253,30 @@ function ensureStarted() {
   started = true;
   dailyIndexCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,
+  });
+  let weekStart = getEditorFeatures().weekStart;
+  subscribeEditorFeatures(() => {
+    const next = getEditorFeatures().weekStart;
+    if (next === weekStart) return;
+    weekStart = next;
+    void dailyIndexCollection.utils
+      .refetch()
+      .catch((err) =>
+        console.warn("daily: week-start index refetch failed", err),
+      );
+  });
+  subscribeCalendarSync((calendar) => {
+    if (calendar.upserts || calendar.deletes) {
+      const next = new Map(rows.map((row) => [row.key, row]));
+      for (const key of calendar.deletes ?? []) next.delete(key);
+      for (const row of calendar.upserts ?? []) next.set(row.key, row);
+      rebuildFrom([...next.values()]);
+    }
+    void dailyIndexCollection.utils
+      .refetch()
+      .catch((err) =>
+        console.warn("daily: calendar index reconciliation failed", err),
+      );
   });
 }
 

@@ -17,15 +17,21 @@ import { toast } from "sonner";
 import type { PluginContext } from "../types";
 
 import { setRestoreProgress } from "../../components/history-restore-opener";
-import { resyncNodes } from "../../data/collection";
+import { getAppliedSeq, resyncNodes } from "../../data/collection";
 import {
   dayKeyToScaffoldChain,
+  dayKeyToWeekKey,
   monthKeyToYearKey,
   parentScaffoldKey,
   scaffoldKeyKind,
   scaffoldLabel,
   weekKeyToMonthKey,
+  weekKeyToStartDay,
 } from "../../data/date-links";
+import {
+  ensureWeekStartCanonical,
+  getEditorFeatures,
+} from "../../data/editor-features";
 import { RESTORE_SLICE_OPS, capture } from "../../data/history";
 import { getLiveNodes } from "../../data/live-nodes";
 import {
@@ -160,10 +166,11 @@ async function materializeNewDay(
   day: { id: string; won: boolean; present: boolean },
   key: string,
   seedEntryLine: boolean,
+  expectedSeq: number,
 ): Promise<GetOrCreateResult> {
   // The day is absent -> derive + claim its Y/M/W chain (concurrently). A
   // non-calendar key (defensive) lands the day directly under the container.
-  const chain = dayKeyToScaffoldChain(key);
+  const chain = dayKeyToScaffoldChain(key, getEditorFeatures().weekStart);
   const levels = chain
     ? await Promise.all([
         claimScaffoldNode(chain.yearKey),
@@ -219,7 +226,7 @@ async function materializeNewDay(
     // Seed the entry line in the SAME batch when a write-intent surface asked.
     if (seedEntryLine && !hasChildInLiveCollection(day.id))
       appendChild(day.id, null, "");
-  });
+  }, expectedSeq);
   // Phantom-success guard (#233): the optimistic overlay makes `hasNode(day.id)`
   // true the instant the batch applies, so returning the id off it would let a
   // caller `setMapping` + navigate to a day that VANISHES on a failed send. Gate
@@ -284,6 +291,7 @@ async function ensureDailyMigrated(containerId: string): Promise<void> {
     containerId,
     getDailyRows(),
     getKeyForNode,
+    getEditorFeatures().weekStart,
   );
   if (!plan.needed) return;
   dailyMigration = runDailyMigration(containerId, plan).catch((err) => {
@@ -421,10 +429,14 @@ async function runDailyMigration(
   const captureStep = () =>
     capture(buildTreeIndex(getLiveNodes()), containerId);
   if (estimatedWrites < RESTORE_SLICE_OPS) {
-    runStructural(() => {
+    const { persisted } = runStructuralTracked(() => {
       captureStep();
       for (const step of steps) step();
     });
+    // Creation captures a stale-write precondition after this migration. Wait
+    // for the committed frame so its sequence and migrated nodes are both
+    // authoritative before the next Daily batch is planned.
+    await persisted;
   } else {
     // Wire the modal progress (finding 8c): a big migration streams behind the
     // history-restore dialog instead of freezing a blank /today, exactly like
@@ -489,6 +501,8 @@ export async function getOrCreateDayResult(
     // days' MAPPINGS aren't broadcast -- either leaves sorted insertion / the
     // migration working against a stale reverse map.
     await refreshDailyIndex();
+    await ensureWeekStartCanonical();
+    await refreshDailyIndex();
     // Container + this day: independent per-key atomic claims, run concurrently
     // (finding 2/8a). The claim winner is authoritative; a loser reuses it.
     const [container, day] = await Promise.all([
@@ -498,6 +512,7 @@ export async function getOrCreateDayResult(
     // Nest any legacy flat days before placing this one (issue #271) -- its own
     // inline batch (deliberate: the new day must land in the migrated scaffold).
     await ensureDailyMigrated(container.id);
+    const expectedSeq = getAppliedSeq();
     // An EXISTING day (pre-migration flat OR already nested): reuse it, heal a
     // blank title + optional seed, and DO NOT mint Y/M/W scaffold beside it --
     // placement is the migration's job (finding 3).
@@ -517,6 +532,7 @@ export async function getOrCreateDayResult(
       day,
       key,
       opts?.seedEntryLine ?? false,
+      expectedSeq,
     );
     inFlightDays.set(key, creating);
     void creating.finally(() => {
@@ -598,32 +614,45 @@ export async function getOrCreateScaffold(
     const joined = inFlightScaffolds.get(key);
     if (joined) return joined;
     await refreshDailyIndex();
+    await ensureWeekStartCanonical();
+    await refreshDailyIndex();
 
-    const existing = getMappedId(key);
+    const container = await claimScaffoldNode(CONTAINER_KEY);
+    await ensureDailyMigrated(container.id);
+
+    // A preference switch can land after this action was constructed but before
+    // it writes. Re-anchor Week identity to the server-synced current calendar;
+    // year and month identities are preference-independent.
+    const startDay = kind === "week" ? weekKeyToStartDay(key) : null;
+    const effectiveKey =
+      kind === "week" && startDay
+        ? dayKeyToWeekKey(startDay, getEditorFeatures().weekStart)
+        : key;
+    if (!effectiveKey) return { id: null, cause: null };
+    const expectedSeq = getAppliedSeq();
+
+    const existing = getMappedId(effectiveKey);
     if (existing && hasNode(existing)) return { id: existing };
 
     // Derive parent keys (week → month → year).
     let monthKey: string | null = null;
     let yearKey: string | null = null;
     if (kind === "week") {
-      monthKey = weekKeyToMonthKey(key);
+      monthKey = weekKeyToMonthKey(effectiveKey);
       yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
     } else if (kind === "month") {
-      monthKey = key;
-      yearKey = monthKeyToYearKey(key);
+      monthKey = effectiveKey;
+      yearKey = monthKeyToYearKey(effectiveKey);
     } else {
-      yearKey = key;
+      yearKey = effectiveKey;
     }
     if (!yearKey) return { id: null, cause: null };
 
-    const [container, year, month, week] = await Promise.all([
-      claimScaffoldNode(CONTAINER_KEY),
+    const [year, month, week] = await Promise.all([
       claimScaffoldNode(yearKey),
       monthKey ? claimScaffoldNode(monthKey) : Promise.resolve(null),
-      kind === "week" ? claimScaffoldNode(key) : Promise.resolve(null),
+      kind === "week" ? claimScaffoldNode(effectiveKey) : Promise.resolve(null),
     ]);
-
-    await ensureDailyMigrated(container.id);
 
     const target = kind === "week" ? week : kind === "month" ? month : year;
     if (!target) return { id: null, cause: null };
@@ -659,8 +688,13 @@ export async function getOrCreateScaffold(
             month.id,
           );
         if (kind === "week" && week && monthKey && month && !hasNode(week.id))
-          insertScaffoldNode(month.id, key, scaffoldLabel(key), week.id);
-      });
+          insertScaffoldNode(
+            month.id,
+            effectiveKey,
+            scaffoldLabel(effectiveKey),
+            week.id,
+          );
+      }, expectedSeq);
       try {
         await persisted;
       } catch (err) {

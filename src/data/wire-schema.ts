@@ -80,6 +80,18 @@ export const ChangeFrameSchema = Schema.Struct({
 });
 export type ChangeFrame = Schema.Schema.Type<typeof ChangeFrameSchema>;
 
+const CalendarSyncStateSchema = Schema.Struct({
+  weekStart: Schema.Literals(["sunday", "monday"]),
+  upserts: Schema.optional(
+    Schema.Array(Schema.Struct({ key: Schema.String, nodeId: Schema.String })),
+  ),
+  deletes: Schema.optional(Schema.Array(Schema.String)),
+});
+export type CalendarSyncState = Schema.Schema.Type<
+  typeof CalendarSyncStateSchema
+>;
+const calendar = Schema.optional(CalendarSyncStateSchema);
+
 // --- DO → client frames -----------------------------------------------------
 // `snapshot` = full state (initial connect or resync past the changelog window);
 // `resume` = the gap since the client's cursor; `change` = a live mutation.
@@ -103,18 +115,21 @@ const SnapshotMessage = Schema.Struct({
   seq: Schema.Number,
   nodes: Schema.Array(NodeSchema),
   serverVersion,
+  calendar,
 });
 const ResumeMessage = Schema.Struct({
   type: Schema.Literal("resume"),
   seq: Schema.Number,
   changes: Schema.Array(ChangeFrameSchema),
   serverVersion,
+  calendar,
 });
 const ChangeMessage = Schema.Struct({
   type: Schema.Literal("change"),
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
   clientId: Schema.optional(Schema.String),
+  calendar,
 });
 
 /** The union of every DO→client frame. `realtime.ts` decodes inbound frames

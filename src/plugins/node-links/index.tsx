@@ -119,7 +119,9 @@ export default definePlugin({
         // Inserts `[[YYYY-MM-DD]]` tokens — never uuid links, never navigate.
         const features = getEditorFeatures();
         const dateHits =
-          features.ready && features.daily ? pickerDateSuggestions(raw) : [];
+          features.ready && features.daily
+            ? pickerDateSuggestions(raw, new Date(), features.weekStart)
+            : [];
         const dates = dateHits.map((s) => ({
           key: `date:${s.key}`,
           render: () => (

@@ -9,6 +9,7 @@ import {
   NodesDeleteBody,
   NodesPatchBody,
   NodesPostBody,
+  WeekStartPostBody,
 } from "../worker/wire";
 
 /** Open a seeded Classic outline. */
@@ -345,6 +346,34 @@ export async function seedOutline(
     if (!m) kv.set(collection, (m = new Map()));
     return m;
   };
+
+  // Legacy accounts canonicalize their effective Monday default through the
+  // same authoritative endpoint used to switch to Sunday. Most editor specs
+  // have no Calendar scaffold to migrate, so mirror the endpoint's preference
+  // write and sequence receipt while the pure migration tests cover its graph
+  // rewrite in detail.
+  await page.route(
+    (url) => url.pathname === "/api/daily/week-start",
+    (route) => {
+      const body = Schema.decodeUnknownSync(WeekStartPostBody)(
+        route.request().postDataJSON(),
+      );
+      // SAFETY: only this fixture's week-start route writes this account-prefs
+      // key, always with the optional weekStart shape below.
+      const current = ns("account-prefs").get("daily:week-start") as
+        | { weekStart?: "sunday" | "monday" }
+        | undefined;
+      const weekStart =
+        body.operation === "set"
+          ? body.weekStart
+          : (current?.weekStart ?? "monday");
+      ns("account-prefs").set("daily:week-start", {
+        key: "daily:week-start",
+        weekStart,
+      });
+      return reply(route, { weekStart, seq });
+    },
+  );
 
   await page.route(
     (url) => url.pathname === "/api/kv",

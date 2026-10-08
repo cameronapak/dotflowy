@@ -26,18 +26,22 @@ interface FakeStore {
   nodes: Map<string, Node>;
   kv: Map<string, { key: string; nodeId: string }>;
   batches: ChangeOp[][];
+  expectedWeekStarts: Array<"sunday" | "monday" | undefined>;
 }
 
 function makeStore(
   seed: Node[] = [],
   kvRows: Array<{ key: string; nodeId: string }> = [],
+  weekStart?: "sunday" | "monday",
 ): FakeStore {
   const nodes = new Map(seed.map((n) => [n.id, n]));
   const kv = new Map(kvRows.map((r) => [r.key, r]));
   const batches: ChangeOp[][] = [];
+  const expectedWeekStarts: Array<"sunday" | "monday" | undefined> = [];
   const store: OutlineStore = {
     getNodes: () => [...nodes.values()],
-    applyBatch: (ops) => {
+    applyBatch: (ops, expectedWeekStart) => {
+      expectedWeekStarts.push(expectedWeekStart);
       batches.push([...ops]);
       for (const op of ops) {
         if (op.op === "delete") nodes.delete(op.key);
@@ -45,8 +49,13 @@ function makeStore(
       }
       return batches.length;
     },
-    getKv: (collection) =>
-      collection === "daily-index" ? [...kv.values()] : [],
+    getKv: (collection) => {
+      if (collection === "daily-index") return [...kv.values()];
+      if (collection === "account-prefs" && weekStart) {
+        return [{ key: "daily:week-start", weekStart }];
+      }
+      return [];
+    },
     getOrCreateKv: (collection, key, value) => {
       if (collection !== "daily-index")
         throw new Error(`unexpected kv collection ${collection}`);
@@ -56,8 +65,12 @@ function makeStore(
       kv.set(key, value as { key: string; nodeId: string });
       return value;
     },
+    canonicalizeWeekStart: () => ({
+      weekStart: weekStart ?? "monday",
+      seq: batches.length,
+    }),
   };
-  return { store, nodes, kv, batches };
+  return { store, nodes, kv, batches, expectedWeekStarts };
 }
 
 // --- Request plumbing -----------------------------------------------------------
@@ -690,27 +703,59 @@ describe("MCP tools", () => {
     expect(fake.kv.get("container")).toBeDefined();
     expect(fake.kv.get("2026")).toBeDefined();
     expect(fake.kv.get("2026-07")).toBeDefined();
-    expect(fake.kv.get("2026-W27")).toBeDefined();
+    expect(fake.kv.get("week:2026-06-29")).toBeDefined();
     expect(fake.kv.get("2026-07-03")).toBeDefined();
     const containerId = fake.kv.get("container")!.nodeId;
     const yearId = fake.kv.get("2026")!.nodeId;
     const monthId = fake.kv.get("2026-07")!.nodeId;
-    const weekId = fake.kv.get("2026-W27")!.nodeId;
+    const weekId = fake.kv.get("week:2026-06-29")!.nodeId;
     const dayId = fake.kv.get("2026-07-03")!.nodeId;
-    // Daily > 2026 > July > Week 27 > day, each a child of the one above.
+    // Daily > 2026 > July > Calendar week > day.
     expect(fake.nodes.get(containerId)?.text).toBe("Daily");
     expect(fake.nodes.get(yearId)?.parentId).toBe(containerId);
     expect(fake.nodes.get(yearId)?.text).toBe("2026");
     expect(fake.nodes.get(monthId)?.parentId).toBe(yearId);
     expect(fake.nodes.get(monthId)?.text).toBe("July");
     expect(fake.nodes.get(weekId)?.parentId).toBe(monthId);
-    expect(fake.nodes.get(weekId)?.text).toBe("Week 27");
+    expect(fake.nodes.get(weekId)?.text).toBe("Jun 29–Jul 5");
     expect(fake.nodes.get(dayId)?.parentId).toBe(weekId);
     // The captured entry hangs under the day, not the scaffold.
     const entry = [...fake.nodes.values()].find((n) => n.text === "captured");
     expect(entry?.parentId).toBe(dayId);
     // The whole chain + entry lands as ONE batch (ADR 0009).
     expect(fake.batches).toHaveLength(1);
+  });
+
+  test("add_to_today honors the account's Sunday-start Calendar week", async () => {
+    const fake = makeStore(fixture(), [], "sunday");
+    const json = await callTool(fake.store, "add_to_today", {
+      text: "Sunday capture",
+      date: "2026-07-05",
+    });
+
+    expect(json.result?.isError).toBeUndefined();
+    expect(fake.kv.get("week:2026-07-05")).toBeDefined();
+    expect(fake.kv.get("week:2026-06-29")).toBeUndefined();
+    expect(fake.expectedWeekStarts).toEqual(["sunday"]);
+  });
+
+  test("add_to_today refuses a plan when Week start changes before commit", async () => {
+    const fake = makeStore(fixture(), [], "monday");
+    fake.store.applyBatch = (_ops, expectedWeekStart) => {
+      expect(expectedWeekStart).toBe("monday");
+      throw new Error("CALENDAR_CHANGED: retry against the current Week start");
+    };
+
+    const json = await callTool(fake.store, "add_to_today", {
+      text: "Stale capture",
+      date: "2026-07-05",
+    });
+
+    expect(json.result?.isError).toBe(true);
+    expect(toolText(json)).toContain("CALENDAR_CHANGED");
+    expect(
+      [...fake.nodes.values()].some((node) => node.text === "Stale capture"),
+    ).toBe(false);
   });
 
   test("add_to_today reuses an existing day (the kv claim is authoritative)", async () => {
@@ -959,7 +1004,7 @@ describe("MCP tools", () => {
       date: "2026-07-03",
     });
     // Every intermediate scaffold node: delete cascades, so all four rules apply.
-    for (const key of ["2026", "2026-07", "2026-W27"]) {
+    for (const key of ["2026", "2026-07", "week:2026-06-29"]) {
       const nodeId = fake.kv.get(key)!.nodeId;
 
       const del = await callTool(fake.store, "delete_node", { nodeId });

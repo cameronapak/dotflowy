@@ -12,7 +12,7 @@
 // the house curve, the week row has no entrance animation, and paging swaps
 // instantly. Styled with dotflowy theme tokens
 // (bg-muted / text-muted-foreground / primary / border), never the upstream
-// palette. ISO (Monday-start) week truth stays in date-links.ts -- this file adds
+// palette. Account Calendar-week truth stays in date-links.ts -- this file adds
 // no parallel week math.
 
 import { useParams } from "@tanstack/react-router";
@@ -35,26 +35,21 @@ import {
   shiftWeekKey,
   weekKeyToDays,
   weekKeyToMonthKey,
-  weekKeyWeekNumber,
+  weekLabel,
 } from "../../data/date-links";
+import { useEditorFeatures } from "../../data/editor-features";
 import { useScaffoldKey } from "./daily-index";
 import { useDaysWithContent } from "./days-with-content";
 import { goToDate } from "./get-or-create";
 import { MonthPickerButton } from "./month-picker";
 
-// Weekday initials, Monday-first (matches weekKeyToDays' Mon..Sun order).
-const WEEKDAY_INITIALS = ["M", "T", "W", "T", "F", "S", "S"];
-
-/** The ISO week-number badge for a week key: `2026-W29` -> `W29` (no leading
- *  zero). Display-only string formatting; the week number itself is ISO truth
- *  from date-links. Empty on a malformed key (never reached -- the caller
- *  guards). */
-function weekNumberBadge(weekKey: string): string {
-  const num = weekKeyWeekNumber(weekKey);
-  return num ? `W${Number(num)}` : "";
-}
+const WEEKDAY_INITIALS = {
+  monday: ["M", "T", "W", "T", "F", "S", "S"],
+  sunday: ["S", "M", "T", "W", "T", "F", "S"],
+} as const;
 
 export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
+  const { weekStart } = useEditorFeatures();
   const params = useParams({ strict: false });
   const rootId = params.nodeId ?? null;
   // Reactive: the zoom root's scaffold key (null unless it maps to a scaffold
@@ -74,7 +69,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
     setOffset(0);
   }, [dayKey]);
 
-  const baseWeek = dayKey ? dayKeyToWeekKey(dayKey) : null;
+  const baseWeek = dayKey ? dayKeyToWeekKey(dayKey, weekStart) : null;
   const visibleWeek = useMemo(() => {
     if (!baseWeek) return null;
     if (offset === 0) return baseWeek;
@@ -96,7 +91,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
   const monthYear = monthKey
     ? `${monthLabel(monthKey)} ${monthKeyToYearKey(monthKey)}`
     : "";
-  const weekNum = weekNumberBadge(visibleWeek);
+  const weekRange = weekLabel(visibleWeek);
   const paged = offset !== 0;
 
   const iconBtn =
@@ -110,7 +105,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
       className="flex w-full flex-col gap-1"
     >
       {/* Orientation row: paging chevrons flank a quiet month+year label and the
-          ISO week-number badge; a snap-back affordance appears while paged. */}
+          week range; a snap-back affordance appears while paged. */}
       <div className="flex items-center gap-1">
         <button
           type="button"
@@ -125,6 +120,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
             <MonthPickerButton
               monthKey={monthKey}
               selectedDayKey={dayKey}
+              weekStart={weekStart}
               getCtx={getCtx}
               onPicked={() => setOffset(0)}
             />
@@ -137,10 +133,10 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
             </span>
           )}
           <span
-            data-testid="week-calendar-weeknum"
+            data-testid="week-calendar-week-range"
             className="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] leading-none text-muted-foreground"
           >
-            {weekNum}
+            {weekRange}
           </span>
           {paged ? (
             <button
@@ -166,7 +162,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
       </div>
 
       {/* The seven day pills. No entrance animation (ADR 0054, decision 4):
-          paging swaps the row instantly -- the month label and W-number badge
+          paging swaps the row instantly -- the month label and week range
           carry the week change -- and a same-week day switch is silent chrome.
           The ONLY thing that moves is the layoutId selection pill, which tweens
           from the old day to the new one. */}
@@ -229,7 +225,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                   )
                 ) : null}
                 <span className="relative text-[0.6rem] leading-none opacity-70 group-data-[external-drop-active]:text-foreground!">
-                  {WEEKDAY_INITIALS[i]}
+                  {WEEKDAY_INITIALS[weekStart][i]}
                 </span>
                 <span className="relative leading-none tabular-nums group-data-[external-drop-active]:text-foreground!">
                   {dayOfMonth}

@@ -245,17 +245,20 @@ describe("pickerDateSuggestions", () => {
   });
 });
 
-describe("resolvePeriod (ISO dual-resolve math)", () => {
-  test("next/last week use ISO Monday, not mid-week", () => {
-    // Sat 2026-07-25 is ISO week 2026-W30 (Mon Jul 20 … Sun Jul 26)
+describe("resolvePeriod (Calendar-period dual-resolve math)", () => {
+  test("next/last week use the configured start, not mid-week", () => {
     const thisWeek = dayKeyToWeekKey(TODAY)!;
-    expect(thisWeek).toBe("2026-W30");
+    expect(thisWeek).toBe("week:2026-07-20");
     const next = resolvePeriod("next", "week", TODAY)!;
-    expect(next.scaffoldKey).toBe("2026-W31");
+    expect(next.scaffoldKey).toBe("week:2026-07-27");
     expect(next.periodStartDay).toBe("2026-07-27"); // Monday
     const last = resolvePeriod("last", "week", TODAY)!;
-    expect(last.scaffoldKey).toBe("2026-W29");
+    expect(last.scaffoldKey).toBe("week:2026-07-13");
     expect(last.periodStartDay).toBe("2026-07-13");
+
+    const nextSunday = resolvePeriod("next", "week", TODAY, "sunday")!;
+    expect(nextSunday.scaffoldKey).toBe("week:2026-07-26");
+    expect(nextSunday.periodStartDay).toBe("2026-07-26");
   });
 
   test("next/last month → 1st; year → Jan 1", () => {

@@ -56,6 +56,51 @@ test("feature switches default on and save independently across reloads", async 
   await expect(daily).not.toBeChecked();
 });
 
+test("Week start remains available while Daily is off and activates after migration", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  let weekStart: "sunday" | "monday" = "monday";
+  await page.route(
+    (url) =>
+      url.pathname === "/api/kv" &&
+      url.searchParams.get("collection") === "account-prefs",
+    (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({
+            json: [
+              { key: "editor-feature:daily", enabled: false },
+              { key: "daily:week-start", weekStart },
+            ],
+          })
+        : route.fallback(),
+  );
+  await page.route("**/api/daily/week-start", async (route) => {
+    // SAFETY: this test intercepts only the app's schema-validated week-start
+    // request and needs its discriminant to model the server response.
+    const body = route.request().postDataJSON() as {
+      operation: "canonicalize" | "set";
+      weekStart?: "sunday" | "monday";
+    };
+    if (body.operation === "set" && body.weekStart) weekStart = body.weekStart;
+    await route.fulfill({ json: { weekStart, seq: 0 } });
+  });
+
+  await page.goto("/settings");
+  const daily = page.getByRole("switch", { name: "Daily notes" });
+  await expect(daily).not.toBeChecked({ timeout: 15000 });
+  await page.getByRole("button", { name: "Daily notes Details" }).click();
+  const sunday = page.getByRole("radio", { name: "Sunday" });
+  const monday = page.getByRole("radio", { name: "Monday" });
+  await expect(monday).toBeChecked();
+  await expect(sunday).toBeEnabled();
+
+  await sunday.click();
+  await expect(sunday).toBeChecked();
+  await expect(page.getByText("Weeks now start on Sunday")).toBeVisible();
+  await expect(daily).not.toBeChecked();
+});
+
 test("disabled features leave source text intact in rows, titles, and quick-add", async ({
   page,
 }) => {

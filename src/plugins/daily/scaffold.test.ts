@@ -58,13 +58,12 @@ describe("sortedInsertAfterId (chronological ascending, same-kind only)", () => 
     expect(sortedInsertAfterId(siblings, "2026-07-20")).toBe("d2");
   });
 
-  test("weeks order by ISO year then week number", () => {
+  test("weeks order by their start date", () => {
     const siblings: ScaffoldSibling[] = [
-      { id: "wA", key: "2025-W52" },
-      { id: "wB", key: "2026-W02" },
+      { id: "wA", key: "week:2025-12-22" },
+      { id: "wB", key: "week:2026-01-05" },
     ];
-    // 2026-W01 sits between 2025-W52 and 2026-W02.
-    expect(sortedInsertAfterId(siblings, "2026-W01")).toBe("wA");
+    expect(sortedInsertAfterId(siblings, "week:2025-12-29")).toBe("wA");
   });
 
   test("only same-kind siblings count (a week among months appends)", () => {
@@ -72,17 +71,17 @@ describe("sortedInsertAfterId (chronological ascending, same-kind only)", () => 
       { id: "m1", key: "2026-01" },
       { id: "m2", key: "2026-07" },
     ];
-    expect(sortedInsertAfterId(siblings, "2026-W29")).toBe("m2");
+    expect(sortedInsertAfterId(siblings, "week:2026-07-13")).toBe("m2");
   });
 });
 
 describe("formatWeekRange", () => {
-  test("within one month -> 'Jul 13 – 19'", () => {
-    expect(formatWeekRange("2026-W29")).toBe("Jul 13 – 19");
+  test("within one month", () => {
+    expect(formatWeekRange("week:2026-07-13")).toBe("Jul 13–19");
   });
 
-  test("across a month boundary -> 'Dec 29 – Jan 4'", () => {
-    expect(formatWeekRange("2026-W01")).toBe("Dec 29 – Jan 4");
+  test("across a year boundary", () => {
+    expect(formatWeekRange("week:2025-12-29")).toBe("Dec 29, 2025–Jan 4, 2026");
   });
 
   test("nonexistent week -> the raw label", () => {
@@ -91,13 +90,16 @@ describe("formatWeekRange", () => {
 });
 
 describe("formatWeekRelative", () => {
-  const today = "2026-07-16"; // ISO 2026-W29
+  const today = "2026-07-16";
 
   test("this week / last week, null beyond", () => {
-    expect(formatWeekRelative("2026-W29", today)).toBe("This week");
-    expect(formatWeekRelative("2026-W28", today)).toBe("Last week");
-    expect(formatWeekRelative("2026-W27", today)).toBeNull();
-    expect(formatWeekRelative("2026-W30", today)).toBeNull();
+    expect(formatWeekRelative("week:2026-07-13", today)).toBe("This week");
+    expect(formatWeekRelative("week:2026-07-06", today)).toBe("Last week");
+    expect(formatWeekRelative("week:2026-06-29", today)).toBeNull();
+    expect(formatWeekRelative("week:2026-07-20", today)).toBeNull();
+    expect(formatWeekRelative("week:2026-07-12", today, "sunday")).toBe(
+      "This week",
+    );
   });
 });
 
@@ -115,7 +117,7 @@ describe("planDailyMigration", () => {
       createNode({ id: "c", text: "Daily" }),
       createNode({ id: "d1", parentId: "c" }), // 2026-07-16
       createNode({ id: "d2", parentId: "c" }), // 2026-07-08
-      createNode({ id: "d3", parentId: "c" }), // 2025-12-30 (ISO week-year 2026)
+      createNode({ id: "d3", parentId: "c" }), // 2025-12-30; fourth day is in 2026
     ];
     const map = {
       c: "container",
@@ -149,8 +151,7 @@ describe("planDailyMigration", () => {
     for (let i = 1; i < ranks.length; i++) {
       expect(ranks[i]!).toBeGreaterThanOrEqual(ranks[i - 1]!);
     }
-    // The distinct expected keys (2025-12-30's Thursday is 2026-01-01, so it
-    // rolls into ISO year 2026).
+    // The distinct expected keys (2025-12-30's fourth day is 2026-01-01).
     const years = plan.scaffoldKeys.filter(
       (k) => scaffoldKeyKind(k) === "year",
     );
@@ -168,7 +169,12 @@ describe("planDailyMigration", () => {
       createNode({ id: "w", parentId: "y" }),
       createNode({ id: "d1", parentId: "w" }),
     ];
-    const map = { c: "container", y: "2026", w: "2026-W29", d1: "2026-07-16" };
+    const map = {
+      c: "container",
+      y: "2026",
+      w: "week:2026-07-13",
+      d1: "2026-07-16",
+    };
     const plan = planDailyMigration(
       buildTreeIndex(nodes),
       "c",
@@ -232,7 +238,7 @@ describe("planDailyMigration", () => {
       c: "container",
       y: "2026",
       m: "2026-07",
-      w: "2026-W29",
+      w: "week:2026-07-13",
       nested: "2026-07-16",
       flat: "2026-07-08",
     };
@@ -267,8 +273,8 @@ describe("planDailyMigration", () => {
     const plan = planDailyMigration(index, "c", dayRows(map), keyOf(map));
     expect(plan.needed).toBe(true);
     expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["d1", "d2"]);
-    expect(plan.scaffoldKeys).toContain("2026-W28");
-    expect(plan.scaffoldKeys).toContain("2026-W29");
+    expect(plan.scaffoldKeys).toContain("week:2026-07-06");
+    expect(plan.scaffoldKeys).toContain("week:2026-07-13");
   });
 
   test("day under the wrong week is needed (reattach), correct week is not", () => {
@@ -278,17 +284,17 @@ describe("planDailyMigration", () => {
       createNode({ id: "m", parentId: "y" }),
       createNode({ id: "w29", parentId: "m" }),
       createNode({ id: "w28", parentId: "m" }),
-      createNode({ id: "wrong", parentId: "w29" }), // belongs in W28
-      createNode({ id: "right", parentId: "w29" }), // belongs in W29
+      createNode({ id: "wrong", parentId: "w29" }),
+      createNode({ id: "right", parentId: "w29" }),
     ];
     const map = {
       c: "container",
       y: "2026",
       m: "2026-07",
-      w29: "2026-W29",
-      w28: "2026-W28",
-      wrong: "2026-07-08", // W28
-      right: "2026-07-16", // W29
+      w29: "week:2026-07-13",
+      w28: "week:2026-07-06",
+      wrong: "2026-07-08",
+      right: "2026-07-16",
     };
     const plan = planDailyMigration(
       buildTreeIndex(nodes),
@@ -318,7 +324,7 @@ describe("planDailyMigration", () => {
     const map = {
       c: "container",
       y: "2026",
-      w: "2026-W29",
+      w: "week:2026-07-13",
       moved: "2026-07-16",
       flat: "2026-07-08",
     };

@@ -16,16 +16,15 @@ import {
   type SeedNode,
 } from "./fixtures";
 
-// A fixed ISO week far from "now", so month/year/week-number assertions are
-// stable whatever day the suite runs on. 2030-06-12 is a Wednesday in 2030-W24
-// (Mon 2030-06-10 .. Sun 2030-06-16), month June 2030.
+// A fixed Calendar week far from "now", so month/year/range assertions are
+// stable whatever day the suite runs on.
 const DAY = "2030-06-12";
-const WEEK = dayKeyToWeekKey(DAY)!; // 2030-W24
+const WEEK = dayKeyToWeekKey(DAY)!;
 const MONTH_YEAR = `${monthLabel(weekKeyToMonthKey(WEEK)!)} ${monthKeyToYearKey(
   weekKeyToMonthKey(WEEK)!,
 )}`; // "June 2030"
-const WEEKNUM = `W${Number(WEEK.slice(6))}`; // W24
-const NEXT_WEEKNUM = `W${Number(shiftWeekKey(WEEK, 1)!.slice(6))}`; // W25
+const WEEK_RANGE = weekLabel(WEEK);
+const NEXT_WEEK_RANGE = weekLabel(shiftWeekKey(WEEK, 1)!);
 
 const dailyIndexKv = (rows: { key: string; nodeId: string }[]) => ({
   "daily-index": rows.map((r) => ({ key: r.key, value: r })),
@@ -134,7 +133,9 @@ test.describe("week calendar strip (ADR 0054)", () => {
     await expect(page.getByTestId("week-calendar-month")).toHaveText(
       MONTH_YEAR,
     );
-    await expect(page.getByTestId("week-calendar-weeknum")).toHaveText(WEEKNUM);
+    await expect(page.getByTestId("week-calendar-week-range")).toHaveText(
+      WEEK_RANGE,
+    );
     await expect(pill(page, DAY)).toHaveAttribute("data-selected", "");
     await expect(pill(page, DAY)).toHaveAttribute("aria-pressed", "true");
 
@@ -151,12 +152,58 @@ test.describe("week calendar strip (ADR 0054)", () => {
     await expect(strip(page)).toHaveCount(0);
   });
 
+  test("Sunday preference starts the strip and month picker on Sunday", async ({
+    page,
+  }) => {
+    const sunday = "2030-06-16";
+    const sundayWeek = dayKeyToWeekKey(sunday, "sunday")!;
+    await load(
+      page,
+      [
+        ...STANDARD_TREE,
+        {
+          id: "sunday-day",
+          parentId: null,
+          prevSiblingId: "charlie",
+          text: formatDateFull(sunday),
+        },
+      ],
+      {
+        kv: {
+          ...dailyIndexKv([{ key: sunday, nodeId: "sunday-day" }]),
+          "account-prefs": [
+            {
+              key: "daily:week-start",
+              value: { key: "daily:week-start", weekStart: "sunday" },
+            },
+          ],
+        },
+      },
+    );
+
+    await clientNavigate(page, "/sunday-day");
+    await expect(strip(page)).toHaveAttribute("data-week-key", sundayWeek);
+    await expect(strip(page).locator("[data-day-key]").first()).toHaveAttribute(
+      "data-day-key",
+      sunday,
+    );
+    await page.getByTestId("week-calendar-month").click();
+    await expect(
+      page
+        .getByTestId("week-calendar-month-picker")
+        .locator(".grid-cols-7")
+        .first()
+        .locator("div")
+        .first(),
+    ).toHaveText("S");
+  });
+
   test("clicking another day navigates to that day's node", async ({
     page,
   }) => {
     // Seed a NEIGHBOUR day too, so the click lands on an existing node and we can
     // assert the navigation deterministically.
-    const OTHER = "2030-06-11"; // same ISO week as DAY
+    const OTHER = "2030-06-11"; // same Calendar week as DAY
     await load(
       page,
       [
@@ -214,7 +261,7 @@ test.describe("week calendar strip (ADR 0054)", () => {
   test("clicking an un-minted day creates it WITHOUT seeding a child (seed-free)", async ({
     page,
   }) => {
-    const NEW = "2030-06-14"; // same ISO week, no node/mapping yet
+    const NEW = "2030-06-14"; // same Calendar week, no node/mapping yet
     await load(
       page,
       [
@@ -452,22 +499,26 @@ test.describe("week calendar strip (ADR 0054)", () => {
 
     await clientNavigate(page, "/the-day");
     await expect(strip(page)).toBeVisible();
-    await expect(page.getByTestId("week-calendar-weeknum")).toHaveText(WEEKNUM);
+    await expect(page.getByTestId("week-calendar-week-range")).toHaveText(
+      WEEK_RANGE,
+    );
     // No snap-back while centred on the zoomed day's week.
     await expect(page.getByTestId("week-calendar-snapback")).toHaveCount(0);
 
-    // Page forward one week: the week-number badge advances and the snap-back
+    // Page forward one week: the date range advances and the snap-back
     // affordance appears -- and the URL does NOT change (paging is view-only).
     await page.getByRole("button", { name: "Next week" }).click();
-    await expect(page.getByTestId("week-calendar-weeknum")).toHaveText(
-      NEXT_WEEKNUM,
+    await expect(page.getByTestId("week-calendar-week-range")).toHaveText(
+      NEXT_WEEK_RANGE,
     );
     await expect(page.getByTestId("week-calendar-snapback")).toBeVisible();
     await expect(page).toHaveURL(/\/the-day$/);
 
     // Snap back: the strip re-centres, the affordance disappears, still no nav.
     await page.getByTestId("week-calendar-snapback").click();
-    await expect(page.getByTestId("week-calendar-weeknum")).toHaveText(WEEKNUM);
+    await expect(page.getByTestId("week-calendar-week-range")).toHaveText(
+      WEEK_RANGE,
+    );
     await expect(page.getByTestId("week-calendar-snapback")).toHaveCount(0);
     await expect(page).toHaveURL(/\/the-day$/);
   });
@@ -521,7 +572,7 @@ test.describe("week calendar strip (ADR 0054)", () => {
   test("month label opens a picker that jumps to a far day (ADR 0055)", async ({
     page,
   }) => {
-    // FAR is in the next month (July 2030); not in DAY's ISO week.
+    // FAR is in the next month (July 2030); not in DAY's Calendar week.
     const FAR = "2030-07-15";
     await load(
       page,

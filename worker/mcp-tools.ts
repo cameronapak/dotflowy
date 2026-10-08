@@ -20,10 +20,12 @@ import type { ChangeOp, Node } from "../src/data/wire-schema";
 import type { KvClaim } from "./outline-do";
 
 import {
+  DEFAULT_WEEK_START,
   PROTECTED_SCAFFOLD_KINDS,
   dayKeyToScaffoldChain,
   scaffoldKeyKind,
   scaffoldLabel,
+  type WeekStart,
 } from "../src/data/date-links";
 import { exportOpml } from "../src/data/opml-export";
 import {
@@ -72,13 +74,35 @@ export type { ChangeOp, Node };
  */
 export interface OutlineStore {
   getNodes(): Node[] | Promise<Node[]>;
-  applyBatch(ops: readonly ChangeOp[]): number | Promise<number>;
+  applyBatch(
+    ops: readonly ChangeOp[],
+    expectedWeekStart?: WeekStart,
+  ): number | Promise<number>;
   getKv(collection: string): unknown[] | Promise<unknown[]>;
   getOrCreateKv(
     collection: string,
     key: string,
     value: KvClaim,
   ): KvClaim | Promise<KvClaim>;
+  migrateWeekStart?(
+    weekStart: WeekStart,
+    limit: number | null,
+  ):
+    | { weekStart: WeekStart; seq: number }
+    | { error: "node_limit" | "locked" }
+    | Promise<
+        | { weekStart: WeekStart; seq: number }
+        | { error: "node_limit" | "locked" }
+      >;
+  canonicalizeWeekStart?(
+    limit: number | null,
+  ):
+    | { weekStart: WeekStart; seq: number }
+    | { error: "node_limit" | "locked" }
+    | Promise<
+        | { weekStart: WeekStart; seq: number }
+        | { error: "node_limit" | "locked" }
+      >;
 }
 
 /** A tool execution failure — surfaces as an `isError` tool result (the MCP
@@ -142,10 +166,11 @@ const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex, ToolError> =>
 const commit = (
   store: OutlineStore,
   ops: ReadonlyArray<ChangeOp>,
+  expectedWeekStart?: WeekStart,
 ): Effect.Effect<void, ToolError> =>
   Effect.tryPromise({
     try: async () => {
-      if (ops.length) await store.applyBatch(ops);
+      if (ops.length) await store.applyBatch(ops, expectedWeekStart);
     },
     // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
     catch: (error) =>
@@ -238,6 +263,28 @@ const loadDailyReverseMap = (
     return map;
   });
 
+const loadWeekStart = (
+  store: OutlineStore,
+): Effect.Effect<WeekStart, ToolError> =>
+  Effect.gen(function* () {
+    const rows = yield* Effect.tryPromise({
+      try: () => Promise.resolve(store.getKv("account-prefs")),
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
+    });
+    const schema = Schema.Struct({
+      key: Schema.Literal("daily:week-start"),
+      weekStart: Schema.Literals(["sunday", "monday"]),
+    });
+    for (const raw of rows) {
+      const decoded = Schema.decodeUnknownOption(schema)(raw);
+      if (decoded._tag === "Some") return decoded.value.weekStart;
+    }
+    return DEFAULT_WEEK_START;
+  });
+
 /** The claimed ids of the whole `Daily > YYYY > Month > Week > Day` chain plus
  *  the reverse map — the DO-side twin of the client's ensure cascade (issue
  *  #271). Each level is claimed atomically PER LEVEL through `getOrCreateKv`, so
@@ -248,7 +295,27 @@ const claimDailyScaffold = (
   dateKey: string,
 ): Effect.Effect<DailyScaffold & { index: TreeIndex }, ToolError> =>
   Effect.gen(function* () {
-    const chain = dayKeyToScaffoldChain(dateKey);
+    if (store.canonicalizeWeekStart) {
+      const migrated = yield* Effect.tryPromise({
+        try: () => Promise.resolve(store.canonicalizeWeekStart!(null)),
+        catch: (error) =>
+          error instanceof Error
+            ? toolErrorFrom(error)
+            : new ToolError({ reason: String(error) }),
+      });
+      if ("error" in migrated) {
+        return yield* Effect.fail(
+          new ToolError({
+            reason:
+              migrated.error === "locked"
+                ? "calendar migration is blocked by a locked node"
+                : "calendar migration exceeds the node limit",
+          }),
+        );
+      }
+    }
+    const weekStart = yield* loadWeekStart(store);
+    const chain = dayKeyToScaffoldChain(dateKey, weekStart);
     if (!chain) {
       return yield* Effect.fail(
         new ToolError({
@@ -278,7 +345,7 @@ const claimDailyScaffold = (
     // identical tree.
     const index = yield* loadIndex(store);
     if (index.byId.has(dayId))
-      return { containerId, dayId, keyByNodeId, index };
+      return { containerId, dayId, keyByNodeId, weekStart, index };
 
     const [yearId, monthId, weekId] = yield* Effect.all(
       [
@@ -288,7 +355,16 @@ const claimDailyScaffold = (
       ],
       { concurrency: "unbounded" },
     );
-    return { containerId, yearId, monthId, weekId, dayId, keyByNodeId, index };
+    return {
+      containerId,
+      yearId,
+      monthId,
+      weekId,
+      dayId,
+      keyByNodeId,
+      weekStart,
+      index,
+    };
   });
 
 /** The calendar day a given instant falls on in a given IANA timezone — the
@@ -927,7 +1003,7 @@ export const tools: ReadonlyArray<ToolDef> = [
               maxNodes: MAX_BATCH_NODES,
             }),
           );
-          yield* commit(store, plan.ops);
+          yield* commit(store, plan.ops, scaffold.weekStart);
           return mcpReceipt(
             `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
           );
@@ -1074,7 +1150,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           origin,
           timestamp,
         });
-        yield* commit(store, plan.ops);
+        yield* commit(store, plan.ops, scaffold.weekStart);
         return mcpReceipt(
           `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`,
         );
@@ -1133,7 +1209,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             timestamp,
           }),
         );
-        yield* commit(store, plan.ops);
+        yield* commit(store, plan.ops, scaffold.weekStart);
         return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`;
       }),
   },
@@ -1232,7 +1308,11 @@ export const tools: ReadonlyArray<ToolDef> = [
               maxNodes: OPML_MCP_MAX_NODES,
             }),
           );
-          yield* commit(store, [...ensure.ops, ...plan.ops]);
+          yield* commit(
+            store,
+            [...ensure.ops, ...plan.ops],
+            scaffold.weekStart,
+          );
           return mcpReceipt(
             renderImportReceipt({
               report,

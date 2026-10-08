@@ -45,6 +45,10 @@ import {
   weekdaySearchStems,
   yearLabel,
 } from "../../data/date-links";
+import {
+  getEditorFeatures,
+  useEditorFeatures,
+} from "../../data/editor-features";
 import { isMirrorsEnabled } from "../../data/flags";
 import { capture, drop } from "../../data/history";
 import { getLiveNodes } from "../../data/live-nodes";
@@ -300,7 +304,8 @@ function WeekBadge({
   weekKey: string;
   placement: "row" | "title";
 }) {
-  const relative = formatWeekRelative(weekKey);
+  const { weekStart } = useEditorFeatures();
+  const relative = formatWeekRelative(weekKey, localDateKey(), weekStart);
   const thisWeek = relative === "This week";
   const label = relative
     ? `${relative} · ${formatWeekRange(weekKey)}`
@@ -589,7 +594,7 @@ export default definePlugin({
   // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
   // switcher and the /move picker, even though the node's text is the full date
   // ("Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping) -- and
-  // WEEK nodes by "This week"/"Last week" (+ their "Week 29" label), so Cmd+K
+  // WEEK nodes by "This week"/"Last week" (+ their date-range label), so Cmd+K
   // jumps to the current week (issue #271, decision 7). Matched (a second Fuse
   // key) but never highlighted -- the row still shows the node text.
   searchAliases: (node) => {
@@ -603,7 +608,11 @@ export default definePlugin({
         // when the mapped day exists (ADR 0057).
         return [formatDayBadge(key), key, ...weekdaySearchStems(key)];
       case "week": {
-        const relative = formatWeekRelative(key);
+        const relative = formatWeekRelative(
+          key,
+          localDateKey(),
+          getEditorFeatures().weekStart,
+        );
         return relative ? [relative, weekLabel(key)] : [weekLabel(key)];
       }
       default:
@@ -612,7 +621,7 @@ export default definePlugin({
   },
 
   // Seam J: a parenthetical suffix on the picker row so a day note reads
-  // "Tuesday, June 23, 2026 (Today)" and a week node "Week 29 (This week)" --
+  // "Tuesday, June 23, 2026 (Today)" and a week node "Jun 22–28 (This week)" --
   // relative labels only (a date/range would just echo the text/badge).
   // Display-only; the aliases above are what actually match.
   searchAnnotation: (node) => {
@@ -622,7 +631,11 @@ export default definePlugin({
       case "day":
         return formatDayRelative(key);
       case "week":
-        return formatWeekRelative(key);
+        return formatWeekRelative(
+          key,
+          localDateKey(),
+          getEditorFeatures().weekStart,
+        );
       default:
         return null;
     }
@@ -658,7 +671,11 @@ export default definePlugin({
   // today stays write-intent seed (ADR 0041). Period phrases navigate the ISO
   // scaffold (scaffold-only mint — no forced day child).
   searchActions: (query, ctx) => {
-    const hits = parseGoToDateTargets(query);
+    const hits = parseGoToDateTargets(
+      query,
+      new Date(),
+      getEditorFeatures().weekStart,
+    );
     if (hits.length === 0) return [];
     return hits.flatMap((hit) => {
       const existing = getMappedId(hit.key);

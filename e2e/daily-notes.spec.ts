@@ -906,7 +906,7 @@ test.describe("daily notes", () => {
     await expect(monthLi).toHaveAttribute("data-parent-id", yearId!);
     const monthId = await nodeIdOf(monthLi);
 
-    // Week "Week 29" nests under the month AND carries its own Seam-F badge
+    // The Calendar week nests under the month AND carries its own Seam-F badge
     // (a date range with a "This week" prefix), present only on week rows.
     const weekLi = rowLi(page, weekLabel(weekKey));
     await expect(weekLi).toBeVisible();
@@ -927,7 +927,7 @@ test.describe("daily notes", () => {
   test("days sort chronologically ascending under their week (sorted insertion, not append)", async ({
     page,
   }) => {
-    // Two days in the SAME ISO week (2030-W10): created LATER-first via date
+    // Two days in the same Monday-start week: created LATER-first via date
     // chips, so a passing order proves sorted INSERTION, not head/tail append.
     const EARLY = "2030-03-05";
     const LATE = "2030-03-07";
@@ -965,7 +965,7 @@ test.describe("daily notes", () => {
     await expect(earlyLi).toBeVisible();
     await expect(lateLi).toBeVisible();
 
-    // Both are day-children of the same Week 10 node.
+    // Both are day-children of the same Calendar-week node.
     const earlyParent = await earlyLi.getAttribute("data-parent-id");
     const lateParent = await lateLi.getAttribute("data-parent-id");
     expect(earlyParent).not.toBeNull();

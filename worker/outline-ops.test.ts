@@ -925,15 +925,15 @@ describe("daily planning", () => {
     expect(byId.get("mo")!.parentId).toBe("yr");
     expect(byId.get("mo")!.text).toBe("July");
     expect(byId.get("wk")!.parentId).toBe("mo");
-    expect(byId.get("wk")!.text).toBe("Week 27");
+    expect(byId.get("wk")!.text).toBe("Jun 29–Jul 5");
     expect(byId.get("day")!.parentId).toBe("wk");
     expect(byId.get("day")!.prevSiblingId).toBeNull();
     expect(byId.get("day")!.text).toBe("Friday, July 3, 2026");
   });
 
   test("a second day in the same week reuses year/month/week, only minting the day", () => {
-    // 2026-07-13 and 2026-07-16 are both ISO Week 29.
-    const { nodes, rev } = seededWeek("2026-W29", [
+    // 2026-07-13 and 2026-07-16 are in the same Monday-start week.
+    const { nodes, rev } = seededWeek("week:2026-07-13", [
       createNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
     ]);
     rev.set("d13", "2026-07-13");
@@ -955,7 +955,7 @@ describe("daily planning", () => {
     // The week holds a day plus a stray bullet (outdented under it, decision 9,
     // no daily-index mapping). A newer day chains after the last DAY, NOT past
     // the trailing bullet at the absolute tail — the shared placement decision.
-    const { nodes, rev } = seededWeek("2026-W29", [
+    const { nodes, rev } = seededWeek("week:2026-07-13", [
       createNode({ id: "d13", text: "Monday, July 13, 2026", parentId: "wk" }),
       createNode({
         id: "note",
@@ -979,9 +979,9 @@ describe("daily planning", () => {
   });
 
   test("an out-of-order EARLIER day inserts BEFORE its later sibling (ascending)", () => {
-    // Week 29 already holds 07-16; ensuring 07-13 must land before it — retiring
+    // The week already holds 07-16; ensuring 07-13 must land before it — retiring
     // the old "past day lands on top" caveat (decision 4).
-    const { nodes, rev } = seededWeek("2026-W29", [
+    const { nodes, rev } = seededWeek("week:2026-07-13", [
       createNode({
         id: "d16",
         text: "Thursday, July 16, 2026",
@@ -1023,9 +1023,7 @@ describe("daily planning", () => {
     expect(updated(plan.ops)).toHaveLength(0); // appended, nothing repointed
   });
 
-  test("the Thursday rule places a late-December day in the NEXT ISO year", () => {
-    // 2025-12-29 (a Monday) is ISO 2026-W01: its Thursday is Jan 1, 2026, so the
-    // whole straddle week lives under YEAR 2026 > January > Week 1.
+  test("the fourth-day rule places a late-December week in the next year", () => {
     const plan = planEnsureDaily(index(fixture()), {
       dateKey: "2025-12-29",
       ...scaffold(),
@@ -1034,7 +1032,7 @@ describe("daily planning", () => {
     const byId = new Map(inserted(plan.ops).map((n) => [n.id, n]));
     expect(byId.get("yr")!.text).toBe("2026");
     expect(byId.get("mo")!.text).toBe("January");
-    expect(byId.get("wk")!.text).toBe("Week 1");
+    expect(byId.get("wk")!.text).toBe("Dec 29, 2025–Jan 4, 2026");
     expect(byId.get("day")!.parentId).toBe("wk");
     expect(byId.get("day")!.text).toBe("Monday, December 29, 2025");
   });
@@ -1068,7 +1066,7 @@ describe("daily planning", () => {
   });
 
   test("heals a blank existing day's text without re-scaffolding", () => {
-    const { nodes, rev } = seededWeek("2026-W27", [
+    const { nodes, rev } = seededWeek("week:2026-06-29", [
       createNode({ id: "day", text: "  ", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");
@@ -1089,7 +1087,7 @@ describe("daily planning", () => {
       ["cont", "container"],
       ["yr", "2026"],
       ["mo", "2026-07"],
-      ["wk", "2026-W27"],
+      ["wk", "week:2026-06-29"],
       ["day", "2026-07-03"],
     ]);
     const plan = planEnsureDaily(index(fixture()), {
@@ -1107,7 +1105,7 @@ describe("daily planning", () => {
   });
 
   test("planAddToDaily appends day content under the day, after its last child", () => {
-    const { nodes, rev } = seededWeek("2026-W27", [
+    const { nodes, rev } = seededWeek("week:2026-06-29", [
       createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
       createNode({ id: "entry1", text: "existing", parentId: "day" }),
     ]);
@@ -1127,7 +1125,7 @@ describe("daily planning", () => {
   });
 
   test("planMirrorToDaily refuses mirroring the container onto its own day", () => {
-    const { nodes, rev } = seededWeek("2026-W27", [
+    const { nodes, rev } = seededWeek("week:2026-06-29", [
       createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");
@@ -1164,7 +1162,7 @@ describe("daily planning", () => {
   });
 
   test("planMirrorToDaily mirrors an outside node onto the day", () => {
-    const { nodes, rev } = seededWeek("2026-W27", [
+    const { nodes, rev } = seededWeek("week:2026-06-29", [
       createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");

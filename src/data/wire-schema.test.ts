@@ -105,6 +105,30 @@ describe("ServerMessageSchema (DO → client frames)", () => {
     ).toBe(true);
   });
 
+  it("accepts an atomic calendar state and index delta on sync frames", () => {
+    const calendar = {
+      weekStart: "sunday",
+      upserts: [{ key: "week:2030-06-09", nodeId: "week" }],
+      deletes: ["week:2030-06-10"],
+    };
+    expect(
+      decodes(ServerMessageSchema, {
+        type: "change",
+        seq: 7,
+        ops: [],
+        calendar,
+      }),
+    ).toBe(true);
+    expect(
+      decodes(ServerMessageSchema, {
+        type: "snapshot",
+        seq: 7,
+        nodes: [],
+        calendar: { weekStart: "sunday" },
+      }),
+    ).toBe(true);
+  });
+
   it("accepts correlation on live and resumed change frames", () => {
     const change = Schema.decodeUnknownSync(ServerMessageSchema)({
       type: "change",

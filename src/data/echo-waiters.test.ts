@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
-import { waitForNodeE, waitForSeqE } from "./collection";
+import { waitForNodeE, waitForSeqE, waitForSeqStrictE } from "./collection";
 
 // Pins the ONE thing easy to get wrong about the echo waiters: they have
 // OPPOSITE timeout semantics (issue 03 watch-out). `waitForSeqE` RESOLVES on
@@ -23,6 +23,12 @@ describe("echo waiters: opposite timeout semantics", () => {
   test("waitForNodeE FAILS on timeout", async () => {
     await expect(
       Effect.runPromise(waitForNodeE("node-that-never-syncs", 20)),
+    ).rejects.toThrow();
+  });
+
+  test("waitForSeqStrictE FAILS when calendar activation misses its echo", async () => {
+    await expect(
+      Effect.runPromise(waitForSeqStrictE(Number.MAX_SAFE_INTEGER, 20)),
     ).rejects.toThrow();
   });
 });

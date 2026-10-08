@@ -32,7 +32,7 @@ import {
 } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
-import type { KvClaim } from "./outline-do";
+import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
 import type { Node } from "./wire";
 
 import {
@@ -93,6 +93,7 @@ import {
   NodesPatchBody,
   NodesPostBody,
   WaitlistPostBody,
+  WeekStartPostBody,
 } from "./wire";
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
@@ -564,6 +565,38 @@ function handleKv(
       default:
         return json({ error: "method not allowed" }, 405);
     }
+  });
+}
+
+function handleWeekStart(
+  request: Request,
+  stub: DurableObjectStub<UserOutlineDO>,
+  env: Env,
+  billingUserId: string,
+): Effect.Effect<Response, BadRequest | NodeLimitExceeded | NodeLocked> {
+  return Effect.gen(function* () {
+    if (request.method !== "POST")
+      return json({ error: "method not allowed" }, 405);
+    const body = yield* decodeBody(request, WeekStartPostBody);
+    const limit = nodeLimitForPlan(
+      yield* Effect.promise(() => getPlan(billingUserId, env)),
+    );
+    // SAFETY: the generated DurableObjectStub surface does not preserve this
+    // class method's concrete RPC return type, but the called method does.
+    const result = yield* Effect.promise(
+      () =>
+        (body.operation === "set"
+          ? stub.migrateWeekStart(body.weekStart, limit)
+          : stub.canonicalizeWeekStart(
+              limit,
+            )) as Promise<WeekStartMigrationResult>,
+    );
+    if ("error" in result) {
+      if (result.error === "node_limit")
+        return yield* Effect.fail(new NodeLimitExceeded());
+      return yield* Effect.fail(new NodeLocked());
+    }
+    return json(result);
   });
 }
 
@@ -1211,6 +1244,11 @@ function handleApiRequest(
       // `stub` routes on the resolved `userId` (owner → 'default'); the plan
       // lookup takes the raw billing id (`session.user.id`) — see handleNodes.
       return yield* handleNodes(request, stub, env, session.user.id);
+    }
+
+    if (url.pathname === "/api/daily/week-start") {
+      yield* maybeSeed;
+      return yield* handleWeekStart(request, stub, env, session.user.id);
     }
 
     if (url.pathname === "/api/kv") {
