@@ -15,6 +15,9 @@ const VITE = fileURLToPath(
 
 export default defineConfig({
   testDir: "./e2e",
+  // These specs run against a real Worker under their own configs
+  // (e2e/capture.config.ts, e2e/retirement.config.ts), not this Vite server.
+  testIgnore: ["capture-real.spec.ts", "lunora-retirement-real.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

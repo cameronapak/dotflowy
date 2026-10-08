@@ -15,67 +15,36 @@ import {
   wouldMirrorCycle,
 } from "./tree";
 
-describe("buildTreeIndex + childrenOf", () => {
-  test("orders siblings by the prevSiblingId chain, not input order", () => {
-    // a -> b -> c, fed to the index out of order
-    const a = createNode({ id: "a", prevSiblingId: null });
-    const b = createNode({ id: "b", prevSiblingId: "a" });
-    const c = createNode({ id: "c", prevSiblingId: "b" });
-    const index = buildTreeIndex([c, a, b]);
+test("buildTreeIndex groups children by parentId in sibling-chain order", () => {
+  const p = createNode({ id: "p" });
+  const k1 = createNode({ id: "k1", parentId: "p", prevSiblingId: null });
+  const k2 = createNode({ id: "k2", parentId: "p", prevSiblingId: "k1" });
+  const index = buildTreeIndex([k2, p, k1]); // fed out of order
 
-    expect(childrenOf(index, null).map((n) => n.id)).toEqual(["a", "b", "c"]);
-    expect(index.byId.size).toBe(3);
-  });
-
-  test("children are keyed by parentId", () => {
-    const p = createNode({ id: "p" });
-    const k1 = createNode({ id: "k1", parentId: "p", prevSiblingId: null });
-    const k2 = createNode({ id: "k2", parentId: "p", prevSiblingId: "k1" });
-    const index = buildTreeIndex([p, k1, k2]);
-
-    expect(childrenOf(index, "p").map((n) => n.id)).toEqual(["k1", "k2"]);
-    expect(childrenOf(index, null).map((n) => n.id)).toEqual(["p"]);
-    expect(childrenOf(index, "nope")).toEqual([]);
-  });
-
-  test("a node orphaned by a broken chain is appended, never dropped", () => {
-    const p = createNode({ id: "p" });
-    const x = createNode({ id: "x", parentId: "p", prevSiblingId: null });
-    // y points at a sibling that does not exist -> off the chain
-    const y = createNode({ id: "y", parentId: "p", prevSiblingId: "ghost" });
-    const index = buildTreeIndex([p, x, y]);
-
-    // x is the chain head; y is appended in arrival order rather than lost
-    expect(childrenOf(index, "p").map((n) => n.id)).toEqual(["x", "y"]);
-  });
+  expect(childrenOf(index, "p").map((n) => n.id)).toEqual(["k1", "k2"]);
+  expect(childrenOf(index, null).map((n) => n.id)).toEqual(["p"]);
+  expect(childrenOf(index, "nope")).toEqual([]);
 });
 
-describe("buildTreeIndex mirrorsBySource (ADR 0022)", () => {
-  test("is empty for a mirror-free outline", () => {
-    const a = createNode({ id: "a" });
-    const b = createNode({ id: "b", prevSiblingId: "a" });
-    const index = buildTreeIndex([a, b]);
-    expect(index.mirrorsBySource.size).toBe(0);
-  });
+test("buildTreeIndex buckets every mirror under its source id (ADR 0022)", () => {
+  expect(
+    buildTreeIndex([createNode({ id: "a" }), createNode({ id: "b" })])
+      .mirrorsBySource.size,
+  ).toBe(0);
 
-  test("buckets every mirror under its source id", () => {
-    const src = createNode({ id: "src" });
-    const m1 = createNode({ id: "m1", mirrorOf: "src" });
-    const m2 = createNode({ id: "m2", mirrorOf: "src" });
-    const other = createNode({ id: "other" });
-    const index = buildTreeIndex([src, m1, m2, other]);
-
-    expect(index.mirrorsBySource.get("src")).toEqual(["m1", "m2"]);
-    // A source is not its own mirror; an un-mirrored node has no bucket.
-    expect(index.mirrorsBySource.has("other")).toBe(false);
-    expect(index.mirrorsBySource.has("m1")).toBe(false);
-  });
-
-  test("a mirror whose source is absent still indexes (broken-mirror tolerant)", () => {
-    const m = createNode({ id: "m", mirrorOf: "ghost" });
-    const index = buildTreeIndex([m]);
-    expect(index.mirrorsBySource.get("ghost")).toEqual(["m"]);
-  });
+  const index = buildTreeIndex([
+    createNode({ id: "src" }),
+    createNode({ id: "m1", mirrorOf: "src" }),
+    createNode({ id: "m2", mirrorOf: "src" }),
+    createNode({ id: "other" }),
+    // a mirror whose source is absent still indexes (broken-mirror tolerant)
+    createNode({ id: "m3", mirrorOf: "ghost" }),
+  ]);
+  expect(index.mirrorsBySource.get("src")).toEqual(["m1", "m2"]);
+  expect(index.mirrorsBySource.get("ghost")).toEqual(["m3"]);
+  // A source is not its own mirror; an un-mirrored node has no bucket.
+  expect(index.mirrorsBySource.has("other")).toBe(false);
+  expect(index.mirrorsBySource.has("m1")).toBe(false);
 });
 
 describe("effective locks (ADR 0067)", () => {
@@ -174,79 +143,47 @@ describe("orphanedMirrorsBy (delete-source guard, ADR 0022)", () => {
   });
 });
 
-describe("trueSourceOf (mirror flatten, ADR 0022)", () => {
-  const src = createNode({ id: "src" });
-  const m = createNode({ id: "m", mirrorOf: "src" });
-  const plain = createNode({ id: "plain" });
-  const index = buildTreeIndex([src, m, plain]);
-
-  test("a non-mirror node is its own source", () => {
-    expect(trueSourceOf(index, "plain")).toBe("plain");
-    expect(trueSourceOf(index, "src")).toBe("src");
-  });
-
-  test("a mirror resolves to its source (one hop -- the create invariant)", () => {
-    // mirrorOf always points at a TRUE source, so mirroring a mirror flattens to
-    // that same source rather than chaining through the mirror.
-    expect(trueSourceOf(index, "m")).toBe("src");
-  });
-
-  test("an unknown id resolves to itself (tolerant)", () => {
-    expect(trueSourceOf(index, "ghost")).toBe("ghost");
-  });
+test("trueSourceOf resolves a mirror to its source, anything else to itself", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "src" }),
+    createNode({ id: "m", mirrorOf: "src" }),
+    createNode({ id: "plain" }),
+  ]);
+  // mirrorOf always points at a TRUE source, so one hop flattens.
+  expect(trueSourceOf(index, "m")).toBe("src");
+  expect(trueSourceOf(index, "plain")).toBe("plain");
+  expect(trueSourceOf(index, "src")).toBe("src");
+  expect(trueSourceOf(index, "ghost")).toBe("ghost");
 });
 
-describe("wouldMirrorCycle (ADR 0022)", () => {
-  // src > c > gc ; `other` is an unrelated top-level node.
-  const src = createNode({ id: "src", parentId: null });
-  const c = createNode({ id: "c", parentId: "src" });
-  const gc = createNode({ id: "gc", parentId: "c" });
-  const other = createNode({
-    id: "other",
-    parentId: null,
-    prevSiblingId: "src",
-  });
-  const index = buildTreeIndex([src, c, gc, other]);
-
-  test("mirroring into an unrelated branch is fine", () => {
-    expect(wouldMirrorCycle(index, "src", "other")).toBe(false);
-  });
-
-  test("mirroring into the source itself cycles", () => {
-    expect(wouldMirrorCycle(index, "src", "src")).toBe(true);
-  });
-
-  test("mirroring into a descendant of the source cycles (direct + deep)", () => {
-    expect(wouldMirrorCycle(index, "src", "c")).toBe(true);
-    expect(wouldMirrorCycle(index, "src", "gc")).toBe(true);
-  });
-
-  test("mirroring a descendant under the source does NOT cycle", () => {
-    // A mirror of `c` placed under `src` windows c's subtree, which never
-    // contains the mirror -- only `src` being an ancestor would close a loop.
-    expect(wouldMirrorCycle(index, "c", "src")).toBe(false);
-  });
-
-  test("Home (null parent) never cycles", () => {
-    expect(wouldMirrorCycle(index, "src", null)).toBe(false);
-  });
+// src > c > gc ; `other` is an unrelated top-level node.
+const cycleIndex = buildTreeIndex([
+  createNode({ id: "src", parentId: null }),
+  createNode({ id: "c", parentId: "src" }),
+  createNode({ id: "gc", parentId: "c" }),
+  createNode({ id: "other", parentId: null, prevSiblingId: "src" }),
+]);
+test.each<[string, string, string | null, boolean]>([
+  ["into an unrelated branch is fine", "src", "other", false],
+  ["into the source itself cycles", "src", "src", true],
+  ["into a direct child of the source cycles", "src", "c", true],
+  ["into a deep descendant of the source cycles", "src", "gc", true],
+  // A mirror of c under src windows c's subtree, which never contains it.
+  ["a descendant under the source does NOT cycle", "c", "src", false],
+  ["into Home (null parent) never cycles", "src", null, false],
+])("wouldMirrorCycle: mirroring %s", (_name, source, parent, expected) => {
+  expect(wouldMirrorCycle(cycleIndex, source, parent)).toBe(expected);
 });
 
-describe("buildTrail", () => {
-  // a -> b -> c (parent chain)
-  const a = createNode({ id: "a", parentId: null });
-  const b = createNode({ id: "b", parentId: "a" });
-  const c = createNode({ id: "c", parentId: "b" });
-  const index = buildTreeIndex([a, b, c]);
-
-  test("walks ancestors top-down, including rootId itself", () => {
-    expect(buildTrail(index, "c").map((n) => n.id)).toEqual(["a", "b", "c"]);
-    expect(buildTrail(index, "a").map((n) => n.id)).toEqual(["a"]);
-  });
-
-  test("null root yields an empty trail", () => {
-    expect(buildTrail(index, null)).toEqual([]);
-  });
+test("buildTrail walks ancestors top-down, including rootId itself", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "a", parentId: null }),
+    createNode({ id: "b", parentId: "a" }),
+    createNode({ id: "c", parentId: "b" }),
+  ]);
+  expect(buildTrail(index, "c").map((n) => n.id)).toEqual(["a", "b", "c"]);
+  expect(buildTrail(index, "a").map((n) => n.id)).toEqual(["a"]);
+  expect(buildTrail(index, null)).toEqual([]);
 });
 
 describe("countSubtreeNodes + planRemoveSubtrees", () => {

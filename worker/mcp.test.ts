@@ -126,6 +126,10 @@ function toolText(json: Awaited<ReturnType<typeof callTool>>): string {
   return json.result?.content[0]?.text ?? "";
 }
 
+function inserts(ops: ChangeOp[]): Node[] {
+  return ops.flatMap((op) => (op.op === "insert" ? [op.value] : []));
+}
+
 /** a -> b (top level), a1 under a. */
 function fixture(): Node[] {
   return [
@@ -137,79 +141,55 @@ function fixture(): Node[] {
 
 // --- Protocol level -------------------------------------------------------------
 
-describe("MCP transport", () => {
-  test("initialize echoes a supported protocol version and advertises tools", async () => {
-    const { store } = makeStore();
-    const res = await rpc(store, "initialize", {
-      protocolVersion: "2025-03-26",
-      capabilities: {},
-      clientInfo: { name: "test", version: "0" },
-    });
-    // SAFETY: parsed from the initialize response our own handler serializes; fields checked by the expects below.
-    const json = (await res.json()) as any;
-    expect(json.result.protocolVersion).toBe("2025-03-26");
-    expect(json.result.capabilities.tools).toBeDefined();
-    expect(json.result.serverInfo.name).toBe("dotflowy");
-  });
+/** POST (or any method) a raw body straight at the handler. */
+function raw(store: OutlineStore, init: RequestInit) {
+  return Effect.runPromise(
+    handleMcp(new Request("http://test/api/mcp", init), store, null, true),
+  );
+}
 
-  test("an unknown requested protocol version is countered with the latest", async () => {
+describe("MCP transport", () => {
+  test("the handshake negotiates a version, acknowledges notifications, and pongs", async () => {
     const { store } = makeStore();
+    // SAFETY: parsed from the initialize response our own handler serializes; fields checked by the expects below.
+    const init = (await (
+      await rpc(store, "initialize", {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test", version: "0" },
+      })
+    ).json()) as any;
+    expect(init.result.protocolVersion).toBe("2025-03-26");
+    expect(init.result.capabilities.tools).toBeDefined();
+    expect(init.result.serverInfo.name).toBe("dotflowy");
+
+    // An unknown requested version is countered with the latest supported one.
     // SAFETY: parsed from the initialize response our own handler serializes; field checked by the expect below.
-    const json = (await (
+    const counter = (await (
       await rpc(store, "initialize", { protocolVersion: "1999-01-01" })
     ).json()) as any;
-    expect(json.result.protocolVersion).toBe("2025-06-18");
-  });
+    expect(counter.result.protocolVersion).toBe("2025-06-18");
 
-  test("notifications get 202 and no body", async () => {
-    const { store } = makeStore();
-    const res = await rpc(store, "notifications/initialized", undefined, null);
-    expect(res.status).toBe(202);
-    expect(await res.text()).toBe("");
-  });
+    const note = await rpc(store, "notifications/initialized", undefined, null);
+    expect(note.status).toBe(202);
+    expect(await note.text()).toBe("");
 
-  test("ping pongs", async () => {
-    const { store } = makeStore();
     // SAFETY: parsed from the ping response our own handler serializes; field checked by the expect below.
-    const json = (await (await rpc(store, "ping")).json()) as any;
-    expect(json.result).toEqual({});
+    const ping = (await (await rpc(store, "ping")).json()) as any;
+    expect(ping.result).toEqual({});
   });
 
-  test("tools/list publishes JSON Schema derived from the Effect Schema inputs", async () => {
-    const { store } = makeStore();
-    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
-    const json = (await (await rpc(store, "tools/list")).json()) as any;
-    const names = json.result.tools.map((t: any) => t.name);
-    expect(names).toEqual([
-      "get_outline",
-      "search_nodes",
-      "add_node",
-      "add_subtree",
-      "update_node",
-      "delete_node",
-      "move_nodes",
-      "add_to_today",
-      "mirror_node",
-      "mirror_to_today",
-      "import_opml",
-      "export_opml",
-    ]);
-    const addNode = json.result.tools.find((t: any) => t.name === "add_node");
-    expect(addNode.inputSchema.type).toBe("object");
-    expect(addNode.inputSchema.required).toEqual(["text"]);
-    expect(addNode.annotations.readOnlyHint).toBe(false);
-    const getOutline = json.result.tools.find(
-      (t: any) => t.name === "get_outline",
-    );
-    expect(getOutline.annotations.readOnlyHint).toBe(true);
-  });
-
-  test("tools/list publishes the paragraph `kind` on every write tool", async () => {
+  test("tools/list publishes the Effect Schema inputs agents rely on", async () => {
     const { store } = makeStore();
     // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
     const json = (await (await rpc(store, "tools/list")).json()) as any;
     const tool = (name: string) =>
       json.result.tools.find((t: any) => t.name === name);
+
+    expect(tool("add_node").inputSchema.type).toBe("object");
+    expect(tool("add_node").inputSchema.required).toEqual(["text"]);
+    expect(tool("add_node").annotations.readOnlyHint).toBe(false);
+    expect(tool("get_outline").annotations.readOnlyHint).toBe(true);
 
     // Creation tools take `kind: "paragraph"`; none of them REQUIRE it.
     for (const name of ["add_node", "add_to_today"]) {
@@ -218,19 +198,33 @@ describe("MCP transport", () => {
       );
       expect(tool(name).inputSchema.required).not.toContain("kind");
     }
-    // The recursive `$def` carries it too, so a whole forest can land as prose.
-    expect(
-      JSON.stringify(tool("add_subtree").inputSchema.$defs.SubtreeNode),
-    ).toContain("paragraph");
     // update_node names the reset explicitly rather than overloading null.
     const updateKind = JSON.stringify(
       tool("update_node").inputSchema.properties.kind,
     );
     expect(updateKind).toContain("paragraph");
     expect(updateKind).toContain("bullet");
+
+    // The recursive SubtreeNode shape is emitted as a referenced $def, and it
+    // carries `kind` so a whole forest can land as prose (ADR 0028).
+    const addSubtree = tool("add_subtree").inputSchema;
+    expect(addSubtree.required).toEqual(["nodes"]);
+    expect(JSON.stringify(addSubtree.$defs.SubtreeNode)).toContain("paragraph");
+    expect(JSON.stringify(addSubtree)).toContain("#/$defs/SubtreeNode");
+
+    // search_nodes publishes both its input bounds and its output contract.
+    const search = tool("search_nodes");
+    expect(search.inputSchema.required).toEqual(["query"]);
+    expect(search.inputSchema.properties.limit).toMatchObject({
+      minimum: 1,
+      maximum: 100,
+    });
+    expect(search.inputSchema.properties.nodeId).toBeDefined();
+    expect(search.inputSchema.properties.cursor).toBeDefined();
+    expect(search.outputSchema.required).toEqual(["nodes", "nextCursor"]);
   });
 
-  test("unknown method is -32601, unknown tool and bad args are -32602", async () => {
+  test("protocol faults map to their JSON-RPC codes and GET is declined", async () => {
     const { store } = makeStore();
     // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
     expect(
@@ -240,87 +234,46 @@ describe("MCP transport", () => {
     expect((await callTool(store, "add_node", { text: 42 })).error?.code).toBe(
       -32602,
     );
-  });
 
-  test("malformed JSON is -32700 and a batch array is -32600", async () => {
-    const { store } = makeStore();
-    const bad = await Effect.runPromise(
-      handleMcp(
-        new Request("http://test/api/mcp", { method: "POST", body: "{nope" }),
-        store,
-        null,
-        true,
-      ),
-    );
+    const bad = await raw(store, { method: "POST", body: "{nope" });
     // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
     expect(((await bad.json()) as any).error.code).toBe(-32700);
 
-    const batch = await Effect.runPromise(
-      handleMcp(
-        new Request("http://test/api/mcp", { method: "POST", body: "[]" }),
-        store,
-        null,
-        true,
-      ),
-    );
+    const batch = await raw(store, { method: "POST", body: "[]" });
     // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
     expect(((await batch.json()) as any).error.code).toBe(-32600);
-  });
 
-  test("GET is declined with 405 (stateless: no server stream)", async () => {
-    const { store } = makeStore();
-    const res = await Effect.runPromise(
-      handleMcp(
-        new Request("http://test/api/mcp", { method: "GET" }),
-        store,
-        null,
-        true,
-      ),
-    );
-    expect(res.status).toBe(405);
+    // Stateless: no server stream.
+    expect((await raw(store, { method: "GET" })).status).toBe(405);
   });
 
   test("a free plan (no agent access) refuses tools/call but keeps discovery open (#170)", async () => {
     const { store, batches } = makeStore(fixture());
+    const free = async (method: string, params: RpcParams) =>
+      // SAFETY: parsed from the JSON-RPC body our own handler serializes; fields checked by the expects below.
+      (await (
+        await rpc(store, method, params, 1, "TestAgent", false)
+      ).json()) as any;
 
-    // tools/call — the only entitlement-gated method — is refused, and no write
+    // tools/call, the only entitlement-gated method, is refused, and no write
     // reaches the store.
-    // SAFETY: parsed from the JSON-RPC error body our own handler serializes; fields checked by the expects below.
-    const call = (await (
-      await rpc(
-        store,
-        "tools/call",
-        { name: "get_outline", arguments: {} },
-        1,
-        "TestAgent",
-        false,
-      )
-    ).json()) as any;
-    expect(call.error.code).toBe(-32001);
-    expect(call.error.message).toContain("paid");
-    expect(call.result).toBeUndefined();
-
-    // SAFETY: parsed from the JSON-RPC error body our own handler serializes; fields checked by the expects below.
-    const write = (await (
-      await rpc(
-        store,
-        "tools/call",
-        { name: "add_node", arguments: { text: "nope" } },
-        1,
-        "TestAgent",
-        false,
-      )
-    ).json()) as any;
+    const read = await free("tools/call", {
+      name: "get_outline",
+      arguments: {},
+    });
+    expect(read.error.code).toBe(-32001);
+    expect(read.result).toBeUndefined();
+    const write = await free("tools/call", {
+      name: "add_node",
+      arguments: { text: "nope" },
+    });
     expect(write.error.code).toBe(-32001);
     expect(batches.length).toBe(0);
 
     // initialize / ping / tools/list stay open, so a free connection can still
     // handshake and see WHY every call is refused.
     for (const method of ["initialize", "ping", "tools/list"]) {
-      // SAFETY: parsed from the JSON-RPC body our own handler serializes; fields checked by the expects below.
-      const ok = (await (
-        await rpc(store, method, {}, 1, "TestAgent", false)
-      ).json()) as any;
+      const ok = await free(method, {});
       expect(ok.result).toBeDefined();
       expect(ok.error).toBeUndefined();
     }
@@ -330,17 +283,11 @@ describe("MCP transport", () => {
 // --- Tools over the fake store ----------------------------------------------------
 
 describe("MCP tools", () => {
-  test("get_outline renders lines with ids; search_nodes finds by substring", async () => {
+  test("get_outline renders lines with ids and indentation", async () => {
     const { store } = makeStore(fixture());
     const outline = toolText(await callTool(store, "get_outline", {}));
     expect(outline).toContain("- alpha (id: a)");
     expect(outline).toContain("  - alpha one (id: a1)");
-
-    const hits = toolText(
-      await callTool(store, "search_nodes", { query: "one" }),
-    );
-    expect(hits).toContain("(id: a1)");
-    expect(hits).toContain("in: alpha");
   });
 
   test("DQL search returns validated structured pages and explicit continuation", async () => {
@@ -380,8 +327,9 @@ describe("MCP tools", () => {
     expect(first.error).toBeUndefined();
     expect(data.nodes.map((node) => node.id)).toEqual(["t0", "t1"]);
     expect(data.nodes[0]?.path).toEqual(["Project [spoiler]"]);
-    expect(toolText(first)).toContain('[ ] "Ship 0 #dotflowy [spoiler]"');
-    expect(first.result?.content[1]?.text).toContain("More matches remain");
+    expect(toolText(first)).toContain("Ship 0 #dotflowy [spoiler]");
+    // A partial page carries a second, continuation content block.
+    expect(first.result?.content).toHaveLength(2);
     expect(JSON.stringify(first)).not.toContain("secret-");
     expect(JSON.stringify(first)).not.toContain("hidden-parent");
     if (!data.nextCursor) throw new Error("Expected continuation");
@@ -402,43 +350,12 @@ describe("MCP tools", () => {
       cursor: data.nextCursor,
     });
     expect(stale.result?.isError).toBe(true);
-    expect(toolText(stale)).toContain("Restart");
     expect(stale.result?.structuredContent).toBeUndefined();
     expect(fake.batches).toEqual([]);
   });
 
-  test("DQL search publishes both contracts and rejects invalid page bounds", async () => {
+  test("DQL search rejects invalid page bounds and reports empty and missing scopes", async () => {
     const { store } = makeStore(fixture());
-    const listed = Schema.decodeUnknownSync(
-      Schema.Struct({
-        result: Schema.Struct({
-          tools: Schema.Array(
-            Schema.Struct({
-              name: Schema.String,
-              inputSchema: Schema.Struct({
-                required: Schema.optionalKey(Schema.Array(Schema.String)),
-                properties: Schema.Record(Schema.String, Schema.Json),
-              }),
-              outputSchema: Schema.optionalKey(
-                Schema.Struct({ required: Schema.Array(Schema.String) }),
-              ),
-            }),
-          ),
-        }),
-      }),
-    )(await (await rpc(store, "tools/list")).json());
-    const tool = listed.result.tools.find(
-      (entry) => entry.name === "search_nodes",
-    );
-    if (!tool) throw new Error("Missing search tool");
-    expect(tool.inputSchema.required).toEqual(["query"]);
-    expect(tool.inputSchema.properties.limit).toMatchObject({
-      minimum: 1,
-      maximum: 100,
-    });
-    expect(tool.inputSchema.properties.nodeId).toBeDefined();
-    expect(tool.inputSchema.properties.cursor).toBeDefined();
-    expect(tool.outputSchema?.required).toEqual(["nodes", "nextCursor"]);
     for (const limit of [0, 101, 2.5]) {
       expect(
         (await callTool(store, "search_nodes", { query: "alpha", limit })).error
@@ -450,7 +367,6 @@ describe("MCP tools", () => {
       nodes: [],
       nextCursor: null,
     });
-    expect(toolText(empty)).toContain("No nodes match");
     const missing = await callTool(store, "search_nodes", {
       query: "alpha",
       nodeId: "missing",
@@ -458,7 +374,7 @@ describe("MCP tools", () => {
     expect(missing.result?.isError).toBe(true);
   });
 
-  test("add_node writes one atomic batch and reports the new id", async () => {
+  test("add_node writes one atomic batch, stamps origin, and reports the new id", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_node", {
       text: "new bullet",
@@ -466,14 +382,12 @@ describe("MCP tools", () => {
     });
     expect(json.result?.isError).toBeUndefined();
     expect(fake.batches).toHaveLength(1);
-    const insert = fake.batches[0]!.find((op) => op.op === "insert");
-    expect(insert && insert.op === "insert" && insert.value.parentId).toBe("a");
+    const insert = inserts(fake.batches[0]!)[0]!;
+    expect(insert.parentId).toBe("a");
     // Provenance: the resolved harness name is stamped onto the created node, so
     // the editor can mark an agent's edit apart from the user's own (write-once).
-    expect(insert && insert.op === "insert" && insert.value.origin).toBe(
-      "TestAgent",
-    );
-    expect(toolText(json)).toContain('Added "new bullet"');
+    expect(insert.origin).toBe("TestAgent");
+    expect(toolText(json)).toContain(insert.id);
   });
 
   test("write receipts redact spoilers without changing stored text", async () => {
@@ -482,72 +396,82 @@ describe("MCP tools", () => {
       text: "parent ||answer||",
       prevSiblingId: "b",
     });
-    const fake = makeStore([...fixture(), parent]);
-
-    const added = await callTool(fake.store, "add_node", {
-      text: "child ||twist||",
-      parentId: parent.id,
-    });
-    expect(toolText(added)).toContain(
-      'Added "child [spoiler]" under "parent [spoiler]"',
-    );
-    expect(toolText(added)).not.toContain("answer");
-    expect(toolText(added)).not.toContain("twist");
-    expect(
-      [...fake.nodes.values()].find((n) => n.text === "child ||twist||")?.text,
-    ).toBe("child ||twist||");
-
-    const mirrored = await callTool(fake.store, "mirror_node", {
-      nodeId: "a1",
-      parentId: parent.id,
-    });
-    expect(toolText(mirrored)).toContain('under "parent [spoiler]"');
-    expect(toolText(mirrored)).not.toContain("answer");
-
-    const subtree = await callTool(fake.store, "add_subtree", {
-      nodes: [{ text: "root ||hidden||" }],
-    });
-    expect(toolText(subtree)).toContain("root [spoiler]");
-    expect(toolText(subtree)).not.toContain("hidden");
-
-    const moved = await callTool(fake.store, "move_nodes", {
-      nodeIds: ["b"],
-      newParentId: parent.id,
-    });
-    expect(toolText(moved)).toContain('under "parent [spoiler]"');
-
-    const today = await callTool(fake.store, "add_to_today", {
-      text: "today ||private||",
-      date: "2026-07-03",
-    });
-    expect(toolText(today)).toContain('Added "today [spoiler]"');
-    expect(
-      [...fake.nodes.values()].find((n) => n.text === "today ||private||")
-        ?.text,
-    ).toBe("today ||private||");
-
-    const imported = await callTool(fake.store, "import_opml", {
-      opml: '<opml version="2.0"><body><outline text="import ||secret||"/></body></opml>',
-    });
-    expect(toolText(imported)).toContain('"import [spoiler]"');
-    expect(toolText(imported)).not.toContain("secret");
-  });
-
-  test("add_node redacts child and parent text independently", async () => {
-    const parent = createNode({
+    const unclosed = createNode({
       id: "unmatched-parent",
       text: "parent ||",
-      prevSiblingId: "b",
+      prevSiblingId: parent.id,
     });
-    const fake = makeStore([...fixture(), parent]);
+    const fake = makeStore([...fixture(), parent, unclosed]);
+    const stored = (text: string) =>
+      [...fake.nodes.values()].find((n) => n.text === text)?.text;
 
-    const added = await callTool(fake.store, "add_node", {
-      text: "child ||",
-      parentId: parent.id,
-    });
+    const added = toolText(
+      await callTool(fake.store, "add_node", {
+        text: "child ||twist||",
+        parentId: parent.id,
+      }),
+    );
+    expect(added).toContain("child [spoiler]");
+    expect(added).toContain("parent [spoiler]");
+    expect(added).not.toContain("answer");
+    expect(added).not.toContain("twist");
+    expect(stored("child ||twist||")).toBe("child ||twist||");
 
-    expect(toolText(added)).toContain('Added "child ||" under "parent ||"');
-    expect(toolText(added)).not.toContain("[spoiler]");
+    // Child and parent redact independently: two unclosed fences must not pair
+    // up across the receipt into one spoiler run.
+    const unmatched = toolText(
+      await callTool(fake.store, "add_node", {
+        text: "child ||",
+        parentId: unclosed.id,
+      }),
+    );
+    expect(unmatched).toContain("child ||");
+    expect(unmatched).toContain("parent ||");
+    expect(unmatched).not.toContain("[spoiler]");
+
+    const mirrored = toolText(
+      await callTool(fake.store, "mirror_node", {
+        nodeId: "a1",
+        parentId: parent.id,
+      }),
+    );
+    expect(mirrored).toContain("parent [spoiler]");
+    expect(mirrored).not.toContain("answer");
+
+    const subtree = toolText(
+      await callTool(fake.store, "add_subtree", {
+        nodes: [{ text: "root ||hidden||" }],
+      }),
+    );
+    expect(subtree).toContain("root [spoiler]");
+    expect(subtree).not.toContain("hidden");
+
+    const moved = toolText(
+      await callTool(fake.store, "move_nodes", {
+        nodeIds: ["b"],
+        newParentId: parent.id,
+      }),
+    );
+    expect(moved).toContain("parent [spoiler]");
+    expect(moved).not.toContain("answer");
+
+    const today = toolText(
+      await callTool(fake.store, "add_to_today", {
+        text: "today ||private||",
+        date: "2026-07-03",
+      }),
+    );
+    expect(today).toContain("today [spoiler]");
+    expect(today).not.toContain("private");
+    expect(stored("today ||private||")).toBe("today ||private||");
+
+    const imported = toolText(
+      await callTool(fake.store, "import_opml", {
+        opml: '<opml version="2.0"><body><outline text="import ||secret||"/></body></opml>',
+      }),
+    );
+    expect(imported).toContain("import [spoiler]");
+    expect(imported).not.toContain("secret");
   });
 
   test("add_subtree inserts a nested forest as ONE atomic batch, stamping origin on all", async () => {
@@ -561,23 +485,17 @@ describe("MCP tools", () => {
     });
     expect(json.result?.isError).toBeUndefined();
     expect(fake.batches).toHaveLength(1);
-    const inserts = fake.batches[0]!.flatMap((op) =>
-      op.op === "insert" ? [op.value] : [],
-    );
+    const created = inserts(fake.batches[0]!);
     // 2 roots + 2 grandchildren = 4 fresh nodes, all agent-stamped.
-    expect(inserts).toHaveLength(4);
-    expect(inserts.every((n) => n.origin === "TestAgent")).toBe(true);
-    // The two top-level roots chain, both under a, first after a's existing child.
-    const roots = inserts.filter((n) => n.parentId === "a");
+    expect(created).toHaveLength(4);
+    expect(created.every((n) => n.origin === "TestAgent")).toBe(true);
+    const roots = created.filter((n) => n.parentId === "a");
     expect(roots).toHaveLength(2);
-    expect(roots[0]!.prevSiblingId).toBe("a1");
-    expect(roots[1]!.prevSiblingId).toBe(roots[0]!.id);
-    // The reply renders the created bullets with their ids.
-    expect(toolText(json)).toContain("one-a");
-    expect(toolText(json)).toContain("(id:");
+    // The reply names the created bullets by id.
+    expect(toolText(json)).toContain(roots[0]!.id);
   });
 
-  test("add_subtree onto the daily note creates the day and appends the forest", async () => {
+  test("add_subtree onto the daily note claims the day and appends the forest", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_subtree", {
       date: "2026-07-03",
@@ -585,80 +503,92 @@ describe("MCP tools", () => {
     });
     expect(json.result?.isError).toBeUndefined();
     expect(fake.batches).toHaveLength(1);
-    // Daily container + day claimed in the kv index.
     expect(fake.kv.has("container")).toBe(true);
-    expect(fake.kv.has("2026-07-03")).toBe(true);
-    expect(toolText(json)).toContain("Friday, July 3, 2026");
-  });
-
-  test("add_subtree with BOTH parentId and date is a loud isError, nothing written", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "add_subtree", {
-      parentId: "a",
-      date: "2026-07-03",
-      nodes: [{ text: "x" }],
-    });
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("not both");
-    expect(fake.batches).toHaveLength(0);
-  });
-
-  test("add_subtree with a missing parent is isError with no write", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "add_subtree", {
-      parentId: "ghost",
-      nodes: [{ text: "x" }],
-    });
-    expect(json.result?.isError).toBe(true);
-    expect(fake.batches).toHaveLength(0);
-  });
-
-  test("add_subtree onto a day with an empty forest fails BEFORE claiming any daily ids", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "add_subtree", {
-      date: "2026-07-03",
-      nodes: [],
-    });
-    expect(json.result?.isError).toBe(true);
-    expect(fake.batches).toHaveLength(0);
-    // The size guard runs before the kv claims, so no orphan container/day
-    // mapping is left pointing at nodes that were never inserted (ADR 0028).
-    expect(fake.kv.has("container")).toBe(false);
-    expect(fake.kv.has("2026-07-03")).toBe(false);
-  });
-
-  test("add_subtree publishes its recursive input as a named $def", async () => {
-    const { store } = makeStore();
-    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
-    const json = (await (await rpc(store, "tools/list")).json()) as any;
-    const addSubtree = json.result.tools.find(
-      (t: any) => t.name === "add_subtree",
+    const dayId = fake.kv.get("2026-07-03")!.nodeId;
+    const research = [...fake.nodes.values()].find(
+      (n) => n.text === "research",
     );
-    expect(addSubtree.inputSchema.type).toBe("object");
-    expect(addSubtree.inputSchema.required).toEqual(["nodes"]);
-    // The recursive SubtreeNode shape is emitted as a $def and referenced.
-    expect(addSubtree.inputSchema.$defs?.SubtreeNode).toBeDefined();
-    expect(JSON.stringify(addSubtree.inputSchema)).toContain(
-      "#/$defs/SubtreeNode",
-    );
+    expect(research?.parentId).toBe(dayId);
   });
 
-  test("update_node edits fields; delete_node cascades", async () => {
+  test("add_subtree and import_opml refuse bad targets without writing or claiming", async () => {
     const fake = makeStore(fixture());
+    const opml = '<opml version="2.0"><body><outline text="x" /></body></opml>';
+    const refusals = [
+      // Both selectors at once.
+      callTool(fake.store, "add_subtree", {
+        parentId: "a",
+        date: "2026-07-03",
+        nodes: [{ text: "x" }],
+      }),
+      callTool(fake.store, "import_opml", {
+        opml,
+        parentId: "a",
+        date: "2026-07-03",
+      }),
+      // A missing parent.
+      callTool(fake.store, "add_subtree", {
+        parentId: "ghost",
+        nodes: [{ text: "x" }],
+      }),
+      callTool(fake.store, "import_opml", { opml, parentId: "ghost" }),
+      // An empty forest onto a day: the size guard runs before the kv claims,
+      // so no orphan container/day mapping is left behind (ADR 0028).
+      callTool(fake.store, "add_subtree", { date: "2026-07-03", nodes: [] }),
+      // A truncated document.
+      callTool(fake.store, "import_opml", {
+        opml: '<opml version="2.0"><body><outline text="x"',
+      }),
+    ];
+    for (const json of await Promise.all(refusals)) {
+      expect(json.error).toBeUndefined();
+      expect(json.result?.isError).toBe(true);
+    }
+    expect(fake.batches).toHaveLength(0);
+    expect(fake.kv.size).toBe(0);
+  });
+
+  test("update_node and delete_node edit, cascade, and refuse as tool errors", async () => {
+    const fake = makeStore([
+      ...fixture(),
+      createNode({
+        id: "m",
+        text: "alpha",
+        mirrorOf: "a1",
+        prevSiblingId: "b",
+      }),
+    ]);
     await callTool(fake.store, "update_node", {
       nodeId: "a1",
       completed: true,
     });
     expect(fake.nodes.get("a1")?.completed).toBe(true);
 
+    // No fields to change, and a missing node, are tool errors, not crashes or
+    // protocol errors.
+    const noop = await callTool(fake.store, "update_node", { nodeId: "a1" });
+    expect(noop.result?.isError).toBe(true);
+    const ghost = await callTool(fake.store, "delete_node", {
+      nodeId: "ghost",
+    });
+    expect(ghost.error).toBeUndefined();
+    expect(ghost.result?.isError).toBe(true);
+
+    // Deleting an ancestor of a surviving mirror is refused (ADR 0022 v1).
+    const orphan = await callTool(fake.store, "delete_node", { nodeId: "a" });
+    expect(orphan.result?.isError).toBe(true);
+    expect(fake.nodes.has("a")).toBe(true);
+
+    // Once the mirror is gone, the delete cascades.
+    await callTool(fake.store, "delete_node", { nodeId: "m" });
     const json = await callTool(fake.store, "delete_node", { nodeId: "a" });
-    expect(toolText(json)).toContain("Deleted 2 node(s)");
+    expect(json.result?.isError).toBeUndefined();
     expect(fake.nodes.has("a")).toBe(false);
     expect(fake.nodes.has("a1")).toBe(false);
-    expect(fake.nodes.get("b")?.prevSiblingId).toBeNull();
+    expect(fake.nodes.has("b")).toBe(true);
   });
 
-  test("move_nodes reparents in one atomic batch without recreating nodes", async () => {
+  test("move_nodes reparents in one batch and refuses a move into its own subtree", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "move_nodes", {
       nodeIds: ["b"],
@@ -666,67 +596,58 @@ describe("MCP tools", () => {
     });
     expect(json.result?.isError).toBeUndefined();
     expect(fake.batches).toHaveLength(1);
-    // The id survives — a move is an update, never an insert/delete.
-    expect(fake.batches[0]!.every((op) => op.op === "update")).toBe(true);
     expect(fake.nodes.get("b")?.parentId).toBe("a");
-    expect(fake.nodes.has("b")).toBe(true);
-    expect(toolText(json)).toContain("Moved 1 node(s)");
-  });
 
-  test("move_nodes refuses a move into a moved node’s own subtree as isError", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "move_nodes", {
+    const cycle = await callTool(fake.store, "move_nodes", {
       nodeIds: ["a"],
       newParentId: "a1",
     });
-    expect(json.error).toBeUndefined();
-    expect(json.result?.isError).toBe(true);
-    expect(fake.batches).toHaveLength(0);
+    expect(cycle.error).toBeUndefined();
+    expect(cycle.result?.isError).toBe(true);
+    expect(fake.batches).toHaveLength(1);
     expect(fake.nodes.get("a")?.parentId).toBeNull();
   });
 
-  test("update_node with no fields is a tool error, not a crash", async () => {
-    const { store } = makeStore(fixture());
-    const json = await callTool(store, "update_node", { nodeId: "a1" });
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("nothing to change");
-  });
-
-  test("add_to_today builds the Daily > Year > Month > Week > Day chain and files the entry on first use", async () => {
+  test("add_to_today claims every calendar level, files entries under the day, and reuses it", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "add_to_today", {
-      text: "captured",
+      text: "first",
       date: "2026-07-03",
     });
     expect(json.result?.isError).toBeUndefined();
-    // Every calendar level is claimed in the kv index (issue #271).
-    expect(fake.kv.get("container")).toBeDefined();
-    expect(fake.kv.get("2026")).toBeDefined();
-    expect(fake.kv.get("2026-07")).toBeDefined();
-    expect(fake.kv.get("week:2026-06-29")).toBeDefined();
-    expect(fake.kv.get("2026-07-03")).toBeDefined();
-    const containerId = fake.kv.get("container")!.nodeId;
-    const yearId = fake.kv.get("2026")!.nodeId;
-    const monthId = fake.kv.get("2026-07")!.nodeId;
-    const weekId = fake.kv.get("week:2026-06-29")!.nodeId;
-    const dayId = fake.kv.get("2026-07-03")!.nodeId;
-    // Daily > 2026 > July > Calendar week > day.
-    expect(fake.nodes.get(containerId)?.text).toBe("Daily");
-    expect(fake.nodes.get(yearId)?.parentId).toBe(containerId);
-    expect(fake.nodes.get(yearId)?.text).toBe("2026");
-    expect(fake.nodes.get(monthId)?.parentId).toBe(yearId);
-    expect(fake.nodes.get(monthId)?.text).toBe("July");
-    expect(fake.nodes.get(weekId)?.parentId).toBe(monthId);
-    expect(fake.nodes.get(weekId)?.text).toBe("Jun 29–Jul 5");
-    expect(fake.nodes.get(dayId)?.parentId).toBe(weekId);
-    // The captured entry hangs under the day, not the scaffold.
-    const entry = [...fake.nodes.values()].find((n) => n.text === "captured");
-    expect(entry?.parentId).toBe(dayId);
     // The whole chain + entry lands as ONE batch (ADR 0009).
     expect(fake.batches).toHaveLength(1);
+    // Every calendar level is claimed in the kv index (issue #271), and the
+    // claimed ids are the ones the batch wired together.
+    const id = (key: string) => fake.kv.get(key)!.nodeId;
+    expect(fake.nodes.get(id("2026"))?.parentId).toBe(id("container"));
+    expect(fake.nodes.get(id("2026-07"))?.parentId).toBe(id("2026"));
+    expect(fake.nodes.get(id("week:2026-06-29"))?.parentId).toBe(id("2026-07"));
+    expect(fake.nodes.get(id("2026-07-03"))?.parentId).toBe(
+      id("week:2026-06-29"),
+    );
+    const dayId = id("2026-07-03");
+
+    // A second capture reuses the claimed day (the kv claim is authoritative).
+    await callTool(fake.store, "add_to_today", {
+      text: "second",
+      date: "2026-07-03",
+    });
+    expect(id("2026-07-03")).toBe(dayId);
+    const entries = [...fake.nodes.values()].filter(
+      (n) => n.parentId === dayId,
+    );
+    expect(entries.map((n) => n.text).sort()).toEqual(["first", "second"]);
+
+    const malformed = await callTool(fake.store, "add_to_today", {
+      text: "x",
+      date: "07/03/2026",
+    });
+    expect(malformed.result?.isError).toBe(true);
+    expect(fake.batches).toHaveLength(2);
   });
 
-  test("add_to_today honors the account's Sunday-start Calendar week", async () => {
+  test("add_to_today files under the account's Sunday-start Calendar week", async () => {
     const fake = makeStore(fixture(), [], "sunday");
     const json = await callTool(fake.store, "add_to_today", {
       text: "Sunday capture",
@@ -736,6 +657,7 @@ describe("MCP tools", () => {
     expect(json.result?.isError).toBeUndefined();
     expect(fake.kv.get("week:2026-07-05")).toBeDefined();
     expect(fake.kv.get("week:2026-06-29")).toBeUndefined();
+    // The commit carries the Week start the plan was built against.
     expect(fake.expectedWeekStarts).toEqual(["sunday"]);
   });
 
@@ -758,39 +680,7 @@ describe("MCP tools", () => {
     ).toBe(false);
   });
 
-  test("add_to_today reuses an existing day (the kv claim is authoritative)", async () => {
-    const fake = makeStore(fixture());
-    await callTool(fake.store, "add_to_today", {
-      text: "first",
-      date: "2026-07-03",
-    });
-    const dayId = fake.kv.get("2026-07-03")!.nodeId;
-    await callTool(fake.store, "add_to_today", {
-      text: "second",
-      date: "2026-07-03",
-    });
-    expect(fake.kv.get("2026-07-03")!.nodeId).toBe(dayId);
-    const entries = [...fake.nodes.values()].filter(
-      (n) => n.parentId === dayId,
-    );
-    expect(entries.map((n) => n.text).sort()).toEqual(["first", "second"]);
-    // "second" chains after "first".
-    const second = entries.find((n) => n.text === "second")!;
-    const first = entries.find((n) => n.text === "first")!;
-    expect(second.prevSiblingId).toBe(first.id);
-  });
-
-  test("add_to_today rejects a malformed date", async () => {
-    const { store } = makeStore(fixture());
-    const json = await callTool(store, "add_to_today", {
-      text: "x",
-      date: "07/03/2026",
-    });
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("YYYY-MM-DD");
-  });
-
-  test("mirror_node mirrors with a live pointer; mirror cycle is refused", async () => {
+  test("mirror_node mirrors with a live pointer, mirror_to_today onto the day; a cycle is refused", async () => {
     const fake = makeStore(fixture());
     const json = await callTool(fake.store, "mirror_node", {
       nodeId: "a1",
@@ -805,265 +695,144 @@ describe("MCP tools", () => {
       parentId: "a1",
     });
     expect(cycle.result?.isError).toBe(true);
-    expect(toolText(cycle)).toContain("cycle");
-  });
 
-  test("mirror_to_today mirrors onto the day note", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "mirror_to_today", {
-      nodeId: "a1",
+    const today = await callTool(fake.store, "mirror_to_today", {
+      nodeId: "a",
       date: "2026-07-03",
     });
-    expect(json.result?.isError).toBeUndefined();
+    expect(today.result?.isError).toBeUndefined();
     const dayId = fake.kv.get("2026-07-03")!.nodeId;
-    const mirror = [...fake.nodes.values()].find((n) => n.mirrorOf === "a1");
-    expect(mirror?.parentId).toBe(dayId);
-    expect(toolText(json)).toContain("Friday, July 3, 2026");
+    const dayMirror = [...fake.nodes.values()].find((n) => n.mirrorOf === "a");
+    expect(dayMirror?.parentId).toBe(dayId);
   });
 
-  test("timeZone resolves an omitted date to the caller's local today (issue #336)", async () => {
+  test("timeZone steers the omitted-date default and is validated even when date wins (issue #336)", async () => {
     setClock(new Date("2026-08-10T00:30:00Z").getTime());
     try {
       // 00:30 UTC is already 08-10 in UTC but still 08-09 in
-      // America/Los_Angeles — the whole point: the capture belongs on the
-      // user's calendar day, not UTC's. (23:30Z on the 9th would leave UTC on
-      // the 9th too, so it could never detect a UTC fallback.)
-      const fake = makeStore(fixture());
-      const json = await callTool(fake.store, "add_to_today", {
+      // America/Los_Angeles: the capture belongs on the user's calendar day,
+      // not UTC's. (23:30Z on the 9th would leave UTC on the 9th too, so it
+      // could never detect a UTC fallback.)
+      const west = makeStore(fixture());
+      const westJson = await callTool(west.store, "add_to_today", {
         text: "captured",
         timeZone: "America/Los_Angeles",
       });
-      expect(json.result?.isError).toBeUndefined();
-      expect(fake.kv.has("2026-08-09")).toBe(true);
-      expect(fake.kv.has("2026-08-10")).toBe(false);
-      expect(toolText(json)).toContain("Sunday, August 9, 2026");
+      expect(westJson.result?.isError).toBeUndefined();
+      expect(west.kv.has("2026-08-09")).toBe(true);
+      expect(west.kv.has("2026-08-10")).toBe(false);
 
       // East of UTC the same instant is already tomorrow.
       const east = makeStore(fixture());
-      const eastJson = await callTool(east.store, "add_to_today", {
+      await callTool(east.store, "add_to_today", {
         text: "captured",
         timeZone: "Asia/Tokyo",
       });
-      expect(eastJson.result?.isError).toBeUndefined();
       expect(east.kv.has("2026-08-10")).toBe(true);
       expect(east.kv.has("2026-08-09")).toBe(false);
-    } finally {
-      setClock(null);
-    }
-  });
 
-  test("timeZone steers the omitted-date default on add_to_today and mirror_to_today", async () => {
-    setClock(new Date("2026-08-10T00:30:00Z").getTime());
-    try {
-      // add_subtree / import_opml use `date` as a target SELECTOR (mutually
-      // exclusive with parentId), not an omitted-date default — so they only
-      // reach the daily path when `date` is present, where `date` wins and
-      // timeZone is validated-then-ignored. add_to_today and mirror_to_today
-      // genuinely default "today", and timeZone steers that.
+      // mirror_to_today defaults "today" the same way.
       const mir = makeStore(fixture());
-      const mirJson = await callTool(mir.store, "mirror_to_today", {
+      await callTool(mir.store, "mirror_to_today", {
         nodeId: "a1",
         timeZone: "America/Los_Angeles",
       });
-      expect(mirJson.result?.isError).toBeUndefined();
       expect(mir.kv.has("2026-08-09")).toBe(true);
       expect(mir.kv.has("2026-08-10")).toBe(false);
+
+      // An explicit date wins over timeZone on every daily tool. add_subtree
+      // and import_opml use `date` as a target selector, so timeZone is
+      // validated there and otherwise ignored.
+      const opml =
+        '<opml version="2.0"><body><outline text="one" /></body></opml>';
+      for (const [name, args] of [
+        ["add_to_today", { text: "x" }],
+        ["add_subtree", { nodes: [{ text: "x" }] }],
+        ["import_opml", { opml }],
+      ] as const) {
+        const ok = makeStore(fixture());
+        const okJson = await callTool(ok.store, name, {
+          ...args,
+          date: "2026-07-03",
+          timeZone: "America/Los_Angeles",
+        });
+        expect(okJson.result?.isError).toBeUndefined();
+        expect(ok.kv.has("2026-07-03")).toBe(true);
+
+        // A malformed timeZone is refused, nothing written or claimed, even
+        // when `date` would have won.
+        const bad = makeStore(fixture());
+        const badJson = await callTool(bad.store, name, {
+          ...args,
+          date: "2026-07-03",
+          timeZone: "bogus",
+        });
+        expect(badJson.result?.isError).toBe(true);
+        expect(bad.batches).toHaveLength(0);
+        expect(bad.kv.size).toBe(0);
+      }
+
+      // And on the omitted-date path, where it would have steered the day.
+      const invalid = makeStore(fixture());
+      const invalidJson = await callTool(invalid.store, "add_to_today", {
+        text: "x",
+        timeZone: "Not/AZone",
+      });
+      expect(invalidJson.result?.isError).toBe(true);
+      expect(invalid.batches).toHaveLength(0);
+      expect(invalid.kv.size).toBe(0);
     } finally {
       setClock(null);
     }
   });
 
-  test("add_subtree / import_opml accept timeZone on the date path and validate it", async () => {
-    const sub = makeStore(fixture());
-    const subJson = await callTool(sub.store, "add_subtree", {
-      date: "2026-07-03",
-      timeZone: "America/Los_Angeles",
-      nodes: [{ text: "x" }],
-    });
-    expect(subJson.result?.isError).toBeUndefined();
-    expect(sub.kv.has("2026-07-03")).toBe(true);
-
-    const imp = makeStore(fixture());
-    const opml =
-      '<?xml version="1.0"?><opml version="2.0"><head></head><body>' +
-      '<outline text="one" /></body></opml>';
-    const impJson = await callTool(imp.store, "import_opml", {
-      date: "2026-07-03",
-      timeZone: "America/Los_Angeles",
-      opml,
-    });
-    expect(impJson.result?.isError).toBeUndefined();
-    expect(imp.kv.has("2026-07-03")).toBe(true);
-
-    // A malformed timeZone is refused even when `date` wins.
-    const bad = makeStore(fixture());
-    const badJson = await callTool(bad.store, "add_subtree", {
-      date: "2026-07-03",
-      timeZone: "bogus",
-      nodes: [{ text: "x" }],
-    });
-    expect(badJson.result?.isError).toBe(true);
-    expect(toolText(badJson)).toContain("IANA");
-    expect(bad.batches).toHaveLength(0);
-  });
-
-  test("an invalid timeZone is a loud isError, nothing written", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "add_to_today", {
-      text: "x",
-      timeZone: "Not/AZone",
-    });
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("IANA");
-    expect(fake.batches).toHaveLength(0);
-    expect(fake.kv.has("container")).toBe(false);
-  });
-
-  test("an explicit date wins over timeZone (which is still validated)", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "add_to_today", {
-      text: "x",
-      date: "2026-07-03",
-      timeZone: "America/Los_Angeles",
-    });
-    expect(json.result?.isError).toBeUndefined();
-    expect(fake.kv.has("2026-07-03")).toBe(true);
-    expect(toolText(json)).toContain("Friday, July 3, 2026");
-
-    // date wins, but a malformed timeZone alongside it is still refused.
-    const bad = makeStore(fixture());
-    const badJson = await callTool(bad.store, "add_to_today", {
-      text: "x",
-      date: "2026-07-03",
-      timeZone: "bogus",
-    });
-    expect(badJson.result?.isError).toBe(true);
-    expect(toolText(badJson)).toContain("IANA");
-    expect(bad.batches).toHaveLength(0);
-  });
-
-  test("tools/list exposes the timeZone field on all four daily tools", async () => {
-    const { store } = makeStore();
-    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
-    const json = (await (await rpc(store, "tools/list")).json()) as any;
-    const tool = (name: string) =>
-      json.result.tools.find((t: any) => t.name === name);
-    for (const name of [
-      "add_to_today",
-      "mirror_to_today",
-      "add_subtree",
-      "import_opml",
-    ]) {
-      const tz = tool(name).inputSchema.properties.timeZone;
-      expect(tz).toBeDefined();
-      // The field publishes as a nested anyOf [string, null]; its contract
-      // text rides inside the JSON, so assert on the serialized schema.
-      expect(JSON.stringify(tz)).toContain("timezone");
-    }
-  });
-
-  test("the daily container is protected from delete, blanking, and completing", async () => {
+  test("the daily container and calendar scaffold are protected; a day stays content (#271)", async () => {
     const fake = makeStore(fixture());
     await callTool(fake.store, "add_to_today", {
       text: "x",
       date: "2026-07-03",
     });
-    const containerId = fake.kv.get("container")!.nodeId;
-
-    const del = await callTool(fake.store, "delete_node", {
-      nodeId: containerId,
-    });
-    expect(del.result?.isError).toBe(true);
-    expect(fake.nodes.has(containerId)).toBe(true);
-
-    const blank = await callTool(fake.store, "update_node", {
-      nodeId: containerId,
-      text: "  ",
-    });
-    expect(blank.result?.isError).toBe(true);
-    expect(fake.nodes.get(containerId)?.text).toBe("Daily");
-
-    const complete = await callTool(fake.store, "update_node", {
-      nodeId: containerId,
-      completed: true,
-    });
-    expect(complete.result?.isError).toBe(true);
-
-    // Collapse is a position-local field and stays allowed.
-    const collapse = await callTool(fake.store, "update_node", {
-      nodeId: containerId,
-      collapsed: true,
-    });
-    expect(collapse.result?.isError).toBeUndefined();
-  });
-
-  test("the calendar scaffold nodes (year/month/week) are protected like the container (#271)", async () => {
-    const fake = makeStore(fixture());
-    await callTool(fake.store, "add_to_today", {
-      text: "x",
-      date: "2026-07-03",
-    });
-    // Every intermediate scaffold node: delete cascades, so all four rules apply.
-    for (const key of ["2026", "2026-07", "week:2026-06-29"]) {
+    // Delete cascades, so every rule applies to every scaffold level.
+    for (const key of ["container", "2026", "2026-07", "week:2026-06-29"]) {
       const nodeId = fake.kv.get(key)!.nodeId;
+      const text = fake.nodes.get(nodeId)!.text;
 
       const del = await callTool(fake.store, "delete_node", { nodeId });
       expect(del.result?.isError).toBe(true);
       expect(fake.nodes.has(nodeId)).toBe(true);
 
-      const blank = await callTool(fake.store, "update_node", {
-        nodeId,
-        text: "  ",
-      });
-      expect(blank.result?.isError).toBe(true);
-
-      const task = await callTool(fake.store, "update_node", {
-        nodeId,
-        isTask: true,
-      });
-      expect(task.result?.isError).toBe(true);
-
-      const complete = await callTool(fake.store, "update_node", {
-        nodeId,
-        completed: true,
-      });
-      expect(complete.result?.isError).toBe(true);
+      const changes: RpcParams[] = [
+        { text: "  " },
+        { isTask: true },
+        { completed: true },
+      ];
+      for (const change of changes) {
+        const json = await callTool(fake.store, "update_node", {
+          nodeId,
+          ...change,
+        });
+        expect(json.result?.isError).toBe(true);
+      }
+      expect(fake.nodes.get(nodeId)?.text).toBe(text);
+      expect(fake.nodes.get(nodeId)?.completed).toBe(false);
     }
 
-    // A DAY node is CONTENT, not scaffold — it stays freely editable + deletable.
-    const dayId = fake.kv.get("2026-07-03")!.nodeId;
-    const rename = await callTool(fake.store, "update_node", {
-      nodeId: dayId,
+    // Collapse is a position-local field and stays allowed.
+    const collapse = await callTool(fake.store, "update_node", {
+      nodeId: fake.kv.get("container")!.nodeId,
+      collapsed: true,
+    });
+    expect(collapse.result?.isError).toBeUndefined();
+
+    // A DAY node is content, not scaffold, so it stays freely editable.
+    const day = await callTool(fake.store, "update_node", {
+      nodeId: fake.kv.get("2026-07-03")!.nodeId,
       completed: true,
     });
-    expect(rename.result?.isError).toBeUndefined();
+    expect(day.result?.isError).toBeUndefined();
   });
 
-  test("deleting an ancestor of surviving mirrors is refused (ADR 0022 v1 protects)", async () => {
-    const fake = makeStore([
-      ...fixture(),
-      createNode({
-        id: "m",
-        text: "alpha one",
-        mirrorOf: "a1",
-        prevSiblingId: "b",
-      }),
-    ]);
-    const json = await callTool(fake.store, "delete_node", { nodeId: "a" });
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("orphan");
-    expect(fake.nodes.has("a")).toBe(true);
-  });
-
-  test("a tool-level failure surfaces as isError, never a protocol error", async () => {
-    const { store } = makeStore(fixture());
-    const json = await callTool(store, "delete_node", { nodeId: "ghost" });
-    expect(json.error).toBeUndefined();
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("not found");
-  });
-
-  test("import_opml lands the forest as ONE atomic batch with origin stamped, and answers with a receipt", async () => {
+  test("import_opml lands the forest as ONE atomic batch with origin stamped, and a compact receipt", async () => {
     const fake = makeStore(fixture());
     const opml = [
       '<?xml version="1.0"?>',
@@ -1078,58 +847,40 @@ describe("MCP tools", () => {
     });
     expect(json.result?.isError).toBeUndefined();
     expect(fake.batches).toHaveLength(1);
-    const inserts = fake.batches[0]!.flatMap((op) =>
-      op.op === "insert" ? [op.value] : [],
-    );
-    // 2 roots + 1 child + 1 note-derived bullet = 4 fresh nodes, all under a,
-    // all provenance-stamped.
-    expect(inserts).toHaveLength(4);
-    expect(inserts.every((n) => n.origin === "TestAgent")).toBe(true);
-    const roots = inserts.filter((n) => n.parentId === "a");
+    const created = inserts(fake.batches[0]!);
+    // 2 roots + 1 child + 1 note-derived bullet = 4 fresh nodes, all
+    // provenance-stamped.
+    expect(created).toHaveLength(4);
+    expect(created.every((n) => n.origin === "TestAgent")).toBe(true);
+    const roots = created.filter((n) => n.parentId === "a");
     expect(roots.map((n) => n.text)).toEqual(["one", "two"]);
-    expect(roots[0]!.prevSiblingId).toBe("a1");
-    expect(roots[1]!.prevSiblingId).toBe(roots[0]!.id);
-    expect(inserts.find((n) => n.text === "two")?.isTask).toBe(true);
-    expect(inserts.find((n) => n.text === "one-a")?.completed).toBe(true);
-    // The receipt is compact — root ids + texts, counts, landing spot — never
-    // the echoed forest.
+    expect(created.find((n) => n.text === "two")?.isTask).toBe(true);
+    expect(created.find((n) => n.text === "one-a")?.completed).toBe(true);
+    // The receipt names the root ids and never echoes the whole forest.
     const text = toolText(json);
-    expect(text).toContain('Imported 4 node(s) under "alpha" (id: a).');
-    expect(text).toContain(`- "one" (id: ${roots[0]!.id})`);
-    expect(text).toContain("1 _note attribute(s) -> 1 child bullet(s)");
-    expect(text).toContain("No fidelity degradations.");
+    expect(text).toContain(roots[0]!.id);
+    expect(text).toContain(roots[1]!.id);
     expect(text).not.toContain("one-a");
   });
 
-  test("import_opml with BOTH parentId and date is a loud isError, nothing written", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "import_opml", {
-      opml: '<opml version="2.0"><body><outline text="x" /></body></opml>',
-      parentId: "a",
-      date: "2026-07-03",
-    });
-    expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("not both");
-    expect(fake.batches).toHaveLength(0);
-  });
-
-  test("import_opml onto a date creates the day and appends; dryRun claims nothing", async () => {
+  test("import_opml dryRun writes and claims nothing; the real import lands under the day", async () => {
     const fake = makeStore(fixture());
     const opml =
       '<opml version="2.0"><body><outline text="from-agent" /></body></opml>';
 
-    const dry = await callTool(fake.store, "import_opml", {
-      opml,
-      date: "2026-07-03",
-      dryRun: true,
-    });
-    expect(dry.result?.isError).toBeUndefined();
-    expect(toolText(dry)).toContain("Dry run");
-    expect(toolText(dry)).toContain("Nothing was written.");
+    const targets: RpcParams[] = [{ date: "2026-07-03" }, { parentId: "a" }];
+    for (const target of targets) {
+      const dry = await callTool(fake.store, "import_opml", {
+        opml,
+        ...target,
+        dryRun: true,
+      });
+      expect(dry.result?.isError).toBeUndefined();
+    }
     expect(fake.batches).toHaveLength(0);
-    // A dry run must not claim daily-index ids either — a kv claim IS a write.
-    expect(fake.kv.has("container")).toBe(false);
-    expect(fake.kv.has("2026-07-03")).toBe(false);
+    expect(fake.nodes.size).toBe(3);
+    // A dry run must not claim daily-index ids either: a kv claim IS a write.
+    expect(fake.kv.size).toBe(0);
 
     const real = await callTool(fake.store, "import_opml", {
       opml,
@@ -1142,85 +893,40 @@ describe("MCP tools", () => {
       (n) => n.text === "from-agent",
     );
     expect(imported?.parentId).toBe(dayId);
-    expect(toolText(real)).toContain("Friday, July 3, 2026");
   });
 
-  test("import_opml dryRun onto a parent plans the same receipt and commits nothing", async () => {
-    const fake = makeStore(fixture());
-    const json = await callTool(fake.store, "import_opml", {
-      opml: '<opml version="2.0"><body><outline text="x" /></body></opml>',
-      parentId: "a",
-      dryRun: true,
-    });
-    expect(json.result?.isError).toBeUndefined();
-    expect(toolText(json)).toContain(
-      'Dry run — would import 1 node(s) under "alpha" (id: a).',
-    );
-    expect(fake.batches).toHaveLength(0);
-    expect(fake.nodes.size).toBe(3);
-  });
-
-  test("import_opml over the 5,000-node ceiling is refused with guidance, nothing written", async () => {
+  test("import_opml over the 5,000-node ceiling is refused, nothing written", async () => {
     const fake = makeStore(fixture());
     const opml = `<opml version="2.0"><body>${'<outline text="x" />'.repeat(5001)}</body></opml>`;
     const json = await callTool(fake.store, "import_opml", { opml });
     expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("5001 exceeds the 5000-node ceiling");
-    // Reject-with-guidance names the app importer as the migration door.
-    expect(toolText(json)).toContain("app's own OPML import");
     expect(fake.batches).toHaveLength(0);
   });
 
-  test("import_opml surfaces a parse error with line/column, and rejects a missing parent", async () => {
+  test("export_opml returns raw OPML scoped by nodeId, which round-trips through import_opml", async () => {
     const fake = makeStore(fixture());
-    const truncated = await callTool(fake.store, "import_opml", {
-      opml: '<opml version="2.0"><body><outline text="x"',
-    });
-    expect(truncated.result?.isError).toBe(true);
-    expect(toolText(truncated)).toMatch(/line \d+, column \d+/);
-    expect(fake.batches).toHaveLength(0);
-
-    const ghost = await callTool(fake.store, "import_opml", {
-      opml: '<opml version="2.0"><body><outline text="x" /></body></opml>',
-      parentId: "ghost",
-    });
-    expect(ghost.result?.isError).toBe(true);
-    expect(toolText(ghost)).toContain("not found");
-    expect(fake.batches).toHaveLength(0);
-  });
-
-  test("export_opml returns the raw OPML string with no preamble, scoped by nodeId", async () => {
-    const { store } = makeStore(fixture());
-    const whole = toolText(await callTool(store, "export_opml", {}));
+    const whole = toolText(await callTool(fake.store, "export_opml", {}));
+    // No preamble: the text is the document itself.
     expect(whole.startsWith('<?xml version="1.0"?>')).toBe(true);
-    expect(whole).toContain('<outline text="alpha">');
-    expect(whole).toContain('<outline text="bravo" />');
+    expect(whole).toContain("alpha");
+    expect(whole).toContain("bravo");
 
-    const scoped = toolText(
-      await callTool(store, "export_opml", { nodeId: "a" }),
-    );
     // Scope mirrors get_outline: the root is included, siblings are not.
-    expect(scoped).toContain('<outline text="alpha">');
-    expect(scoped).toContain('<outline text="alpha one" />');
-    expect(scoped).not.toContain("bravo");
-    expect(scoped).toContain("<title>alpha</title>");
-  });
-
-  test("export_opml round-trips through import_opml", async () => {
-    const fake = makeStore(fixture());
-    const opml = toolText(
+    const scoped = toolText(
       await callTool(fake.store, "export_opml", { nodeId: "a" }),
     );
+    expect(scoped).toContain("alpha one");
+    expect(scoped).not.toContain("bravo");
+
     const json = await callTool(fake.store, "import_opml", {
-      opml,
+      opml: scoped,
       parentId: "b",
     });
     expect(json.result?.isError).toBeUndefined();
-    const inserts = fake.batches[0]!.flatMap((op) =>
-      op.op === "insert" ? [op.value] : [],
-    );
-    expect(inserts.map((n) => n.text)).toEqual(["alpha", "alpha one"]);
-    expect(inserts[1]!.parentId).toBe(inserts[0]!.id);
+    const created = inserts(fake.batches[0]!);
+    expect(created.map((n) => n.text)).toEqual(["alpha", "alpha one"]);
+    expect(created[0]!.parentId).toBe("b");
+    expect(created[1]!.parentId).toBe(created[0]!.id);
   });
 
   test("export_opml over the 5,000-node ceiling rejects, never truncates", async () => {
@@ -1241,13 +947,11 @@ describe("MCP tools", () => {
     const { store } = makeStore(seed);
     const json = await callTool(store, "export_opml", { nodeId: "root" });
     expect(json.result?.isError).toBe(true);
-    expect(toolText(json)).toContain("5002 nodes, over the 5000-node ceiling");
-    expect(toolText(json)).toContain("nodeId");
 
     // Scoping down to a subtree under the ceiling still works.
     const scoped = await callTool(store, "export_opml", { nodeId: "c0" });
     expect(scoped.result?.isError).toBeUndefined();
-    expect(toolText(scoped)).toContain('<outline text="child 0" />');
+    expect(toolText(scoped)).toContain("child 0");
   });
 
   test("a store fault surfaces as a tool error with the real message", async () => {

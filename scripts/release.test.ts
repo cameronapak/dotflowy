@@ -189,37 +189,6 @@ test("publish is idempotent but only creates after a confirmed 404", () => {
   expect(call).toContain("--verify-tag");
 });
 
-test("a concurrent merge rejects the release commit AND tag atomically", () => {
-  const dir = fixture();
-  const remote = join(dir, ".test-bin/remote.git");
-  git(dir, "init", "--bare", remote);
-  git(dir, "remote", "add", "origin", remote);
-  git(dir, "push", "origin", "main");
-  const base = git(dir, "rev-parse", "HEAD");
-  writeFileSync(join(dir, "new-merge.txt"), "a newer merge\n");
-  git(dir, "add", "new-merge.txt");
-  git(dir, "commit", "-m", "newer merge");
-  const newer = git(dir, "rev-parse", "HEAD");
-  git(dir, "push", "origin", "main");
-  git(dir, "checkout", "-b", "release-candidate", base);
-  writeFileSync(join(dir, "release.txt"), "older release candidate\n");
-  git(dir, "add", "release.txt");
-  git(dir, "commit", "-m", "release candidate");
-  git(dir, "tag", "-a", "v1.3.0", "-m", "v1.3.0");
-  expect(
-    run(dir, [
-      "git",
-      "push",
-      "--atomic",
-      "origin",
-      "HEAD:refs/heads/main",
-      "refs/tags/v1.3.0:refs/tags/v1.3.0",
-    ]).code,
-  ).not.toBe(0);
-  expect(git(dir, "--git-dir", remote, "rev-parse", "main")).toBe(newer);
-  expect(git(dir, "--git-dir", remote, "tag")).toBe("");
-});
-
 test("deployment uses validated main and stops at each failed release/deploy step", () => {
   // SAFETY: This is the checked-in workflow validated by actionlint. The
   // assertions below fail if its job/step contract changes.

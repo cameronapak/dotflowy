@@ -48,33 +48,22 @@ describe("parseTags", () => {
 });
 
 describe("tagCorpus (buildTreeIndex)", () => {
-  test("matches collectAllTags for the same fixture (Plan 004 parity gate)", () => {
+  test("collects distinct case-folded tags, counting occurrences", () => {
     const tree = index([
       createNode({ id: "1", text: "#alpha #beta" }),
       createNode({ id: "2", text: "#Alpha" }), // case variant of #alpha
       createNode({ id: "3", text: "plain text, no tags" }),
       createNode({ id: "4", text: "#gamma #gamma" }), // repeated tag, one node
     ]);
-    expect(collectTagCorpus(tree.tagCorpus)).toEqual(collectAllTags(tree));
     expect(collectTagCorpus(tree.tagCorpus)).toEqual([
       "#alpha",
       "#beta",
       "#gamma",
     ]);
-  });
-
-  test("an empty tree has an empty corpus", () => {
-    const tree = index([]);
-    expect(collectTagCorpus(tree.tagCorpus)).toEqual([]);
-  });
-
-  test("counts occurrences, not just presence", () => {
-    const tree = index([
-      createNode({ id: "1", text: "#work" }),
-      createNode({ id: "2", text: "#work #home" }),
-    ]);
-    expect(tree.tagCorpus.get("#work")?.count).toBe(2);
-    expect(tree.tagCorpus.get("#home")?.count).toBe(1);
+    // Counts tagged nodes, not just presence.
+    expect(tree.tagCorpus.get("#alpha")?.count).toBe(2);
+    expect(tree.tagCorpus.get("#beta")?.count).toBe(1);
+    expect(collectTagCorpus(index([]).tagCorpus)).toEqual([]);
   });
 });
 

@@ -9,7 +9,7 @@
  * is rejected, and the raw-size guard fires before parsing.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import { Effect } from "effect";
 
 import type { ChangeOp, Node } from "./wire-schema";
@@ -36,221 +36,167 @@ const runFail = (src: string, options?: { maxLength?: number }) =>
 const doc = (body: string): string =>
   `<?xml version="1.0"?>\n<opml version="2.0"><head></head><body>${body}</body></opml>`;
 
-describe("crafted Workflowy sample (the fidelity-probe pin)", () => {
+test("the crafted Workflowy sample imports with the fidelity probe's exact counts", () => {
   const { forest, report } = run(sampleOpml);
   const root = forest[0]!;
   const texts = root.children.map((c) => c.text);
 
-  it("reproduces the probe scale numbers: 21 pre -> 23 post-split", () => {
-    expect(report.nodesPre).toBe(21);
-    expect(report.nodesPost).toBe(23);
-    expect(report.emptyText).toBe(0);
-    expect(report.textNewlineSplits).toBe(0);
+  // Scale: 21 outlines -> 23 bullets after the note split.
+  expect(report.nodesPre).toBe(21);
+  expect(report.nodesPost).toBe(23);
+  expect(report.emptyText).toBe(0);
+  expect(report.textNewlineSplits).toBe(0);
+  // Degradation keys are byte-compatible with the probe report (ADR 0037).
+  expect(report.degraded).toEqual({
+    "nested <mark> dropped (outermost wins)": 2,
+    "<mention> -> @mention(id) (name unrecoverable)": 1,
   });
+  expect(report.degradedTotal).toBe(3);
+  // 1 note -> 2 bullets, 1 blank dropped.
+  expect(report.notes).toBe(1);
+  expect(report.noteLines).toBe(2);
+  expect(report.noteBlanksDropped).toBe(1);
+  expect(report.anomalies).toEqual({});
+  expect(report.unknownAttributes).toEqual({});
+  expect(report.mirrorsLinked).toBe(0);
+  expect(report.mirrorsDetached).toBe(0);
 
-  it("reproduces the probe degradation counts EXACTLY", () => {
-    expect(report.degraded).toEqual({
-      "nested <mark> dropped (outermost wins)": 2,
-      "<mention> -> @mention(id) (name unrecoverable)": 1,
-    });
-    expect(report.degradedTotal).toBe(3);
-  });
-
-  it("reproduces the probe note split: 1 note -> 2 bullets, 1 blank dropped", () => {
-    expect(report.notes).toBe(1);
-    expect(report.noteLines).toBe(2);
-    expect(report.noteBlanksDropped).toBe(1);
-  });
-
-  it("finds no anomalies, no unknown attributes, no mirrors in the sample", () => {
-    expect(report.anomalies).toEqual({});
-    expect(report.unknownAttributes).toEqual({});
-    expect(report.mirrorsLinked).toBe(0);
-    expect(report.mirrorsDetached).toBe(0);
-  });
-
-  it("two-layer decodes: &amp;lt; survives as a literal <", () => {
-    expect(texts[0]).toBe(
-      "plain text with special chars < > & \" ' and emoji 🙂🚀",
-    );
-  });
-
-  it("maps the emphasis/code tags to the shipped tokens", () => {
-    expect(texts[1]).toBe("**bold text**");
-    expect(texts[2]).toBe("*italic text*");
-    expect(texts[3]).toBe("~underline text~");
-    expect(texts[4]).toBe("~~strikethrough and colored text~~"); // nested marks dropped
-    expect(texts[5]).toBe("`inline code text`");
-  });
-
-  it("maps <a> to [label](url) with the XML layer decoded", () => {
-    expect(texts[6]).toBe("[a labeled link](https://example.com/path?q=1&r=2)");
-    expect(texts[7]).toBe(
-      "bare url [https://workflowy.com](https://workflowy.com) in text",
-    );
-  });
-
-  it("adopts <time> as the ADR 0038 date token, keyed on canonical attrs", () => {
-    expect(texts[8]).toBe("due [[2026-07-08]] ");
-  });
-
-  it("splits the _note into prepended child bullets, blanks dropped", () => {
-    const noteNode = root.children[9]!;
-    expect(noteNode.text).toBe("bullet with a multi-line note");
-    expect(noteNode.children.map((c) => c.text)).toEqual([
-      "note line one with a link [https://example.com/notes?x=1&y=2](https://example.com/notes?x=1&y=2)",
-      "note line two after a hard newline",
-    ]);
-  });
-
-  it("degrades <mention> to the @mention(id) placeholder", () => {
-    expect(texts[10]).toBe(
-      "tagged #dotflowy #import-test and a mention @mention(2544228)  and a tag-style time @work",
-    );
-  });
-
-  it("honors _complete and keeps deep nesting intact", () => {
-    expect(root.children[11]!.completed).toBe(true);
-    let cursor = root.children[14]!;
-    const chain = [cursor.text];
-    while (cursor.children.length) {
-      cursor = cursor.children[0]!;
-      chain.push(cursor.text);
-    }
-    expect(chain).toEqual([
-      "level 1 of deep nesting",
-      "level 2",
-      "level 3",
-      "level 4",
-      "level 5",
-      "level 6 deepest",
-    ]);
-  });
+  // Two-layer decode: &amp;lt; survives as a literal <.
+  expect(texts[0]).toBe(
+    "plain text with special chars < > & \" ' and emoji 🙂🚀",
+  );
+  expect(texts[1]).toBe("**bold text**");
+  expect(texts[2]).toBe("*italic text*");
+  expect(texts[3]).toBe("~underline text~");
+  expect(texts[4]).toBe("~~strikethrough and colored text~~"); // nested marks dropped
+  expect(texts[5]).toBe("`inline code text`");
+  expect(texts[6]).toBe("[a labeled link](https://example.com/path?q=1&r=2)");
+  expect(texts[7]).toBe(
+    "bare url [https://workflowy.com](https://workflowy.com) in text",
+  );
+  // <time> adopts the ADR 0038 date token, keyed on canonical attrs.
+  expect(texts[8]).toBe("due [[2026-07-08]] ");
+  // The _note splits into prepended child bullets.
+  expect(texts[9]).toBe("bullet with a multi-line note");
+  expect(root.children[9]!.children.map((c) => c.text)).toEqual([
+    "note line one with a link [https://example.com/notes?x=1&y=2](https://example.com/notes?x=1&y=2)",
+    "note line two after a hard newline",
+  ]);
+  expect(texts[10]).toBe(
+    "tagged #dotflowy #import-test and a mention @mention(2544228)  and a tag-style time @work",
+  );
+  expect(root.children[11]!.completed).toBe(true);
+  let cursor = root.children[14]!;
+  const chain = [cursor.text];
+  while (cursor.children.length) {
+    cursor = cursor.children[0]!;
+    chain.push(cursor.text);
+  }
+  expect(chain).toEqual([
+    "level 1 of deep nesting",
+    "level 2",
+    "level 3",
+    "level 4",
+    "level 5",
+    "level 6 deepest",
+  ]);
 });
 
-describe("tolerant inline-HTML scanner", () => {
-  it("tolerates cross-bullet <b> spans: text kept, anomalies counted", () => {
-    const { forest, report } = run(
-      doc(
-        '<outline text="see &lt;b&gt;bold start" />' +
-          '<outline text="end&lt;/b&gt; here" />',
-      ),
-    );
-    // The unclosed <b> auto-closes at end of value (still a bold run); the
-    // stray </b> is ignored. Nothing is rejected, nothing lost.
-    expect(forest[0]!.text).toBe("see **bold start**");
-    expect(forest[1]!.text).toBe("end here");
-    expect(report.anomalies).toEqual({ "unclosed <b>": 1, "stray </b>": 1 });
-  });
-
-  it("drops formatting on a marker-char clash, keeping the text", () => {
-    const { forest, report } = run(
-      doc('<outline text="&lt;b&gt;a*b&lt;/b&gt;" />'),
-    );
-    expect(forest[0]!.text).toBe("a*b");
-    expect(report.degraded["<b> dropped: marker char in interior"]).toBe(1);
-  });
-
-  it("link wins over formatting: styling dropped, link intact", () => {
-    const { forest, report } = run(
-      doc(
-        '<outline text="&lt;b&gt;&lt;a href=&quot;https://e.com&quot;&gt;go&lt;/a&gt;&lt;/b&gt;" />',
-      ),
-    );
-    expect(forest[0]!.text).toBe("[go](https://e.com)");
-    expect(report.degraded["<b> dropped: contains a link (link wins)"]).toBe(1);
-  });
-
-  it("strips unknown tags to their inner text, counted", () => {
-    const { forest, report } = run(
-      doc('<outline text="&lt;span&gt;kept&lt;/span&gt;" />'),
-    );
-    expect(forest[0]!.text).toBe("kept");
-    expect(report.degraded["unknown <span> stripped, text kept"]).toBe(1);
-  });
-
-  it("maps gray marks to the bare default run (no white in the palette)", () => {
-    const { forest, report } = run(
-      doc(
-        '<outline text="&lt;mark class=&quot;colored bc-gray&quot;&gt;g&lt;/mark&gt;" />',
-      ),
-    );
-    expect(forest[0]!.text).toBe("==g==");
-    expect(
-      report.degraded["<mark gray> -> bare == (no white in the palette)"],
-    ).toBe(1);
-  });
-
-  it("canonicalizes bc-sky to the BARE default-blue run", () => {
-    const { forest } = run(
-      doc(
-        '<outline text="&lt;mark class=&quot;colored bc-sky&quot;&gt;s&lt;/mark&gt;" />',
-      ),
-    );
-    expect(forest[0]!.text).toBe("==s==");
-  });
-
-  it("maps bc-red to the red-emoji run", () => {
-    const { forest } = run(
-      doc(
-        '<outline text="&lt;mark class=&quot;colored bc-red&quot;&gt;hot&lt;/mark&gt;" />',
-      ),
-    );
-    expect(forest[0]!.text).toBe("==🔴hot==");
-  });
+test("tolerates cross-bullet <b> spans: text kept, anomalies counted", () => {
+  const { forest, report } = run(
+    doc(
+      '<outline text="see &lt;b&gt;bold start" />' +
+        '<outline text="end&lt;/b&gt; here" />',
+    ),
+  );
+  // The unclosed <b> auto-closes at end of value (still a bold run); the
+  // stray </b> is ignored. Nothing is rejected, nothing lost.
+  expect(forest[0]!.text).toBe("see **bold start**");
+  expect(forest[1]!.text).toBe("end here");
+  expect(report.anomalies).toEqual({ "unclosed <b>": 1, "stray </b>": 1 });
 });
 
-describe("<time> mapping (ADR 0038)", () => {
-  it("carries startHour into the token time", () => {
-    const { forest } = run(
-      doc(
-        '<outline text="&lt;time startYear=&quot;2024&quot; startMonth=&quot;2&quot; startDay=&quot;3&quot; startHour=&quot;13&quot;&gt;Sat, Feb 3, 2024 at 1:00pm&lt;/time&gt;" />',
-      ),
-    );
-    expect(forest[0]!.text).toBe("[[2024-02-03 13:00]]");
-  });
+// One escaped `text` attribute in, one bullet out. `degraded` is how many
+// counted degradations the "degraded, never silent" bar must disclose.
+const mark = (cls: string, body: string) =>
+  `&lt;mark class=&quot;colored ${cls}&quot;&gt;${body}&lt;/mark&gt;`;
+const time = (attrs: string, display: string) =>
+  `&lt;time ${attrs}&gt;${display}&lt;/time&gt;`;
 
-  it("keeps the display text when the attrs are not a real calendar day", () => {
-    const { forest, report } = run(
-      doc(
-        '<outline text="&lt;time startYear=&quot;2026&quot; startMonth=&quot;13&quot; startDay=&quot;45&quot;&gt;bogus date&lt;/time&gt;" />',
-      ),
-    );
-    expect(forest[0]!.text).toBe("bogus date");
-    expect(
-      report.degraded[
-        "<time> missing canonical start attrs -> display text kept"
-      ],
-    ).toBe(1);
-  });
-
-  it("keeps the display text when the canonical attrs are missing", () => {
-    const { forest, report } = run(
-      doc('<outline text="&lt;time&gt;someday&lt;/time&gt;" />'),
-    );
-    expect(forest[0]!.text).toBe("someday");
-    expect(
-      report.degraded[
-        "<time> missing canonical start attrs -> display text kept"
-      ],
-    ).toBe(1);
-  });
+test.each<[string, string, string, number]>([
+  [
+    "a marker-char clash drops formatting, keeps text",
+    "&lt;b&gt;a*b&lt;/b&gt;",
+    "a*b",
+    1,
+  ],
+  [
+    "a link wins over formatting",
+    "&lt;b&gt;&lt;a href=&quot;https://e.com&quot;&gt;go&lt;/a&gt;&lt;/b&gt;",
+    "[go](https://e.com)",
+    1,
+  ],
+  [
+    "an unknown tag strips to its inner text",
+    "&lt;span&gt;kept&lt;/span&gt;",
+    "kept",
+    1,
+  ],
+  [
+    "a gray mark maps to the bare run (no white in the palette)",
+    mark("bc-gray", "g"),
+    "==g==",
+    1,
+  ],
+  [
+    "bc-sky canonicalizes to the bare default-blue run",
+    mark("bc-sky", "s"),
+    "==s==",
+    0,
+  ],
+  ["bc-red maps to the red-emoji run", mark("bc-red", "hot"), "==🔴hot==", 0],
+  [
+    "<time> carries startHour into the token time",
+    time(
+      "startYear=&quot;2024&quot; startMonth=&quot;2&quot; startDay=&quot;3&quot; startHour=&quot;13&quot;",
+      "Sat, Feb 3, 2024 at 1:00pm",
+    ),
+    "[[2024-02-03 13:00]]",
+    0,
+  ],
+  [
+    "<time> keeps the display text when attrs are not a real day",
+    time(
+      "startYear=&quot;2026&quot; startMonth=&quot;13&quot; startDay=&quot;45&quot;",
+      "bogus date",
+    ),
+    "bogus date",
+    1,
+  ],
+  [
+    "<time> keeps the display text when canonical attrs are missing",
+    "&lt;time&gt;someday&lt;/time&gt;",
+    "someday",
+    1,
+  ],
+])("inline HTML: %s", (_name, textAttr, expected, degraded) => {
+  const { forest, report } = run(doc(`<outline text="${textAttr}" />`));
+  expect(forest[0]!.text).toBe(expected);
+  expect(report.degradedTotal).toBe(degraded);
 });
 
-describe("text newlines and notes", () => {
-  it("splits &#10; in text into continuation bullets BEFORE note lines", () => {
-    const { forest, report } = run(
-      doc('<outline text="first&#10;second" _note="note line" />'),
-    );
-    expect(forest[0]!.text).toBe("first");
-    expect(forest[0]!.children.map((c) => c.text)).toEqual([
-      "second",
-      "note line",
-    ]);
-    expect(report.textNewlineSplits).toBe(1);
-    expect(report.notes).toBe(1);
-    expect(report.noteLines).toBe(1);
-  });
+test("splits &#10; in text into continuation bullets BEFORE note lines", () => {
+  const { forest, report } = run(
+    doc('<outline text="first&#10;second" _note="note line" />'),
+  );
+  expect(forest[0]!.text).toBe("first");
+  expect(forest[0]!.children.map((c) => c.text)).toEqual([
+    "second",
+    "note line",
+  ]);
+  expect(report.textNewlineSplits).toBe(1);
+  expect(report.notes).toBe(1);
+  expect(report.noteLines).toBe(1);
 });
 
 describe("mirror re-link (the dotflowy dialect)", () => {

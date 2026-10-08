@@ -1,100 +1,66 @@
-import { describe, expect, it } from "bun:test";
+import { expect, test } from "bun:test";
 
-import { applyPlan, buildTreeIndex, childrenOf } from "./index";
-import {
-  DEMO_SEED_IDS,
-  DEMO_SEED_TEXTS,
-  planSeedIfEmpty,
-  seedEmptyOutline,
-  shouldSeedOutline,
-} from "./seed";
+import { applyPlan } from "./index";
+import { planSeedIfEmpty, seedEmptyOutline, shouldSeedOutline } from "./seed";
 
-describe("planSeedIfEmpty", () => {
-  it("shouldSeedOutline only when ready and empty", () => {
-    expect(shouldSeedOutline({ isReady: false, nodeCount: 0 })).toBe(false);
-    expect(shouldSeedOutline({ isReady: true, nodeCount: 1 })).toBe(false);
-    expect(shouldSeedOutline({ isReady: true, nodeCount: 0 })).toBe(true);
-  });
-
-  it("returns null when any nodes exist (idempotent no-op)", () => {
-    const plan = planSeedIfEmpty(
-      [
-        {
-          id: "x",
-          parentId: null,
-          prevSiblingId: null,
-          text: "existing",
-          isTask: false,
-          completed: false,
-          collapsed: false,
-          bookmarkedAt: null,
-          locked: false,
-          mirrorOf: null,
-          createdAt: 1,
-          updatedAt: 1,
-          origin: null,
-          kind: null,
-          userId: "u1",
-        },
-      ],
-      { userId: "u1", createdAt: 1000 },
-    );
-    expect(plan).toBeNull();
-  });
-
-  it("inserts demo chain with deterministic ids + timestamps", () => {
-    const plan = planSeedIfEmpty([], {
-      userId: "u1",
-      createdAt: 1000,
-      texts: ["one", "two"],
-      ids: ["id-1", "id-2"],
-    });
-    expect(plan).not.toBeNull();
-    expect(plan!.inserts).toEqual([
-      expect.objectContaining({
-        id: "id-1",
-        userId: "u1",
-        parentId: null,
-        prevSiblingId: null,
-        text: "one",
-        createdAt: 1000,
-        updatedAt: 1000,
-      }),
-      expect.objectContaining({
-        id: "id-2",
-        userId: "u1",
-        parentId: null,
-        prevSiblingId: "id-1",
-        text: "two",
-        createdAt: 1001,
-        updatedAt: 1001,
-      }),
-    ]);
-    expect(plan!.patches).toEqual([]);
-    expect(plan!.deletes).toEqual([]);
-
-    const index = buildTreeIndex(applyPlan([], plan!));
-    expect(childrenOf(index, null).map((n) => n.id)).toEqual(["id-1", "id-2"]);
-  });
-
-  it("default texts/ids cover the demo bullets", () => {
-    const plan = planSeedIfEmpty([], { userId: "u1", createdAt: 1 });
-    expect(plan).not.toBeNull();
-    expect(plan!.inserts.map((n) => n.text)).toEqual([...DEMO_SEED_TEXTS]);
-    expect(plan!.inserts.map((n) => n.id)).toEqual([...DEMO_SEED_IDS]);
-  });
+test("shouldSeedOutline only when ready and empty", () => {
+  expect(shouldSeedOutline({ isReady: false, nodeCount: 0 })).toBe(false);
+  expect(shouldSeedOutline({ isReady: true, nodeCount: 1 })).toBe(false);
+  expect(shouldSeedOutline({ isReady: true, nodeCount: 0 })).toBe(true);
 });
 
-describe("seedEmptyOutline", () => {
-  it("calls seedIfEmpty once with userId + createdAt", async () => {
-    const calls: Array<{ userId: string; createdAt: number }> = [];
-    await seedEmptyOutline({
-      userId: "u1",
-      now: () => 42,
-      seedIfEmpty: async (args) => {
-        calls.push(args);
-      },
-    });
-    expect(calls).toEqual([{ userId: "u1", createdAt: 42 }]);
+test("an empty outline gets a chained seed, and seeding again is a no-op", () => {
+  const plan = planSeedIfEmpty([], {
+    userId: "u1",
+    createdAt: 1000,
+    texts: ["one", "two"],
+    ids: ["id-1", "id-2"],
   });
+  expect(plan!.inserts).toEqual([
+    expect.objectContaining({
+      id: "id-1",
+      userId: "u1",
+      parentId: null,
+      prevSiblingId: null,
+      text: "one",
+      createdAt: 1000,
+      updatedAt: 1000,
+    }),
+    expect.objectContaining({
+      id: "id-2",
+      userId: "u1",
+      parentId: null,
+      prevSiblingId: "id-1",
+      text: "two",
+      createdAt: 1001,
+      updatedAt: 1001,
+    }),
+  ]);
+  expect(plan!.patches).toEqual([]);
+  expect(plan!.deletes).toEqual([]);
+
+  const seeded = applyPlan([], plan!);
+  expect(planSeedIfEmpty(seeded, { userId: "u1", createdAt: 2000 })).toBeNull();
+});
+
+test("the default seed uses fixed ids so every tab converges on the same rows", () => {
+  const plan = planSeedIfEmpty([], { userId: "u1", createdAt: 1 });
+  expect(plan!.inserts.map((n) => n.id)).toEqual([
+    "d0ef1001-5eed-4000-8000-000000000001",
+    "d0ef1002-5eed-4000-8000-000000000002",
+    "d0ef1003-5eed-4000-8000-000000000003",
+    "d0ef1004-5eed-4000-8000-000000000004",
+  ]);
+});
+
+test("seedEmptyOutline calls seedIfEmpty once with userId + createdAt", async () => {
+  const calls: Array<{ userId: string; createdAt: number }> = [];
+  await seedEmptyOutline({
+    userId: "u1",
+    now: () => 42,
+    seedIfEmpty: async (args) => {
+      calls.push(args);
+    },
+  });
+  expect(calls).toEqual([{ userId: "u1", createdAt: 42 }]);
 });

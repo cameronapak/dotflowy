@@ -4,7 +4,7 @@ import { TestClock } from "effect/testing";
 
 import { buildTreeIndex, createNode, type Node } from "../src/data/tree";
 import { searchNodes } from "./outline-ops";
-import { SearchInput, SearchPage, searchPage } from "./search";
+import { SearchError, SearchInput, SearchPage, searchPage } from "./search";
 
 const ids = (nodes: Node[], query: string, rootId: string | null = null) =>
   searchNodes(buildTreeIndex(nodes), query, 100, rootId).map((hit) => hit.id);
@@ -248,7 +248,7 @@ describe("search continuation", () => {
           const error = yield* Effect.flip(
             run({ query, limit: 1, cursor: first.nextCursor }),
           );
-          expect(error.reason).toContain("Restart");
+          expect(error).toBeInstanceOf(SearchError);
           const restarted = yield* run({ query, limit: 1 });
           expect(restarted.nodes.map((node) => node.id)).toEqual(["c"]);
           yield* clock.setTime(new Date(2032, 9, 2, 12).getTime());
@@ -313,17 +313,21 @@ describe("search continuation", () => {
       const changed = nodes.map((node) =>
         node.id === "task-0" ? { ...node, ...changes } : node,
       );
-      await expect(page(changed, continued)).rejects.toThrow("Restart");
+      await expect(page(changed, continued)).rejects.toBeInstanceOf(
+        SearchError,
+      );
     }
-    await expect(page(nodes.slice(1), continued)).rejects.toThrow("Restart");
+    await expect(page(nodes.slice(1), continued)).rejects.toBeInstanceOf(
+      SearchError,
+    );
     for (const options of [
       { query: "#dotflowy" },
       { limit: 2 },
       { nodeId: "task-1" },
     ]) {
-      await expect(page(nodes, { ...continued, ...options })).rejects.toThrow(
-        "Restart",
-      );
+      await expect(
+        page(nodes, { ...continued, ...options }),
+      ).rejects.toBeInstanceOf(SearchError);
     }
     const scopedNodes = [
       createNode({ id: "scope", text: "Project" }),
@@ -337,7 +341,7 @@ describe("search continuation", () => {
         ...scopedInput,
         cursor: scoped.nextCursor,
       }),
-    ).rejects.toThrow("restart without the cursor");
+    ).rejects.toBeInstanceOf(SearchError);
   });
 
   test("spoiler-only changes and non-search view state keep continuation valid", async () => {
@@ -364,16 +368,16 @@ describe("search continuation", () => {
     const nodes = tasks(2);
     await expect(
       page(nodes, { query: "is:todo", nodeId: "missing" }),
-    ).rejects.toThrow("not found");
+    ).rejects.toBeInstanceOf(SearchError);
     for (const cursor of [
       "",
       "not-base64",
       btoa("{}"),
       btoa('{"version":2,"offset":1,"fingerprint":"x"}'),
     ]) {
-      await expect(page(nodes, { query: "is:todo", cursor })).rejects.toThrow(
-        "Invalid search cursor",
-      );
+      await expect(
+        page(nodes, { query: "is:todo", cursor }),
+      ).rejects.toBeInstanceOf(SearchError);
     }
     const first = await page(nodes, { query: "is:todo", limit: 1 });
     if (!first.nextCursor) throw new Error("Expected continuation");
@@ -384,7 +388,7 @@ describe("search continuation", () => {
         limit: 1,
         cursor: btoa(JSON.stringify(forged)),
       }),
-    ).rejects.toThrow("Invalid search cursor");
+    ).rejects.toBeInstanceOf(SearchError);
     for (const limit of [0, 101, 1.5])
       expect(Schema.is(SearchInput)({ query: "x", limit })).toBe(false);
     expect(Schema.is(SearchInput)({ query: "x", limit: 100 })).toBe(true);

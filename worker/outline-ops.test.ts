@@ -16,7 +16,6 @@ import { exportOpml } from "../src/data/opml-export";
 import { createNode } from "../src/data/tree";
 import {
   BatchTooLarge,
-  DAILY_CONTAINER_TEXT,
   EmptyForest,
   MirrorCycle,
   NodeNotFound,
@@ -38,7 +37,6 @@ import {
   planReparent,
   planUpdateNode,
   redactSpoilerIndex,
-  searchNodes,
 } from "./outline-ops";
 
 const T = 1_700_000_000_000;
@@ -101,116 +99,74 @@ function deletedKeys(ops: ChangeOp[]): string[] {
 }
 
 describe("planAddNode", () => {
-  test("appends as the last child without repointing anyone", () => {
-    const plan = planAddNode(index(fixture()), {
+  /** Plan one add into the shared fixture with defaults callers override. */
+  const add = (
+    overrides: Partial<Parameters<typeof planAddNode>[1]>,
+    nodes: Node[] = fixture(),
+  ) =>
+    planAddNode(index(nodes), {
       id: "new",
       text: "x",
       parentId: "a",
       position: "last",
       isTask: false,
       timestamp: T,
+      ...overrides,
     });
-    if (plan instanceof Error) throw plan;
-    expect(plan.ops).toHaveLength(1);
-    const node = inserted(plan.ops)[0]!;
-    expect(node.parentId).toBe("a");
-    expect(node.prevSiblingId).toBe("a2");
-  });
 
-  test("inserting first repoints the old head", () => {
-    const plan = planAddNode(index(fixture()), {
-      id: "new",
-      text: "x",
-      parentId: "a",
-      position: "first",
-      isTask: true,
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const node = inserted(plan.ops)[0]!;
-    expect(node.prevSiblingId).toBeNull();
-    expect(node.isTask).toBe(true);
-    const repointed = updated(plan.ops)[0]!;
-    expect(repointed.id).toBe("a1");
-    expect(repointed.prevSiblingId).toBe("new");
-  });
+  test("places, redirects, stamps, and normalizes the created node", () => {
+    // Appending as the last child repoints nobody.
+    const last = add({});
+    if (last instanceof Error) throw last;
+    expect(last.ops).toHaveLength(1);
+    const appended = inserted(last.ops)[0]!;
+    expect(appended.parentId).toBe("a");
+    expect(appended.prevSiblingId).toBe("a2");
+    // Omitting origin (a non-MCP caller) defaults to null: human-authored.
+    expect(appended.origin).toBeNull();
+    // Omitting kind defaults to a plain bullet.
+    expect(appended.kind).toBeNull();
 
-  test("null parent adds at the top level after the last root", () => {
-    const plan = planAddNode(index(fixture()), {
-      id: "new",
-      text: "x",
-      parentId: null,
-      position: "last",
-      isTask: false,
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const node = inserted(plan.ops)[0]!;
-    expect(node.parentId).toBeNull();
-    expect(node.prevSiblingId).toBe("b");
-  });
+    // Inserting first repoints the old head.
+    const first = add({ position: "first", isTask: true });
+    if (first instanceof Error) throw first;
+    expect(inserted(first.ops)[0]!.prevSiblingId).toBeNull();
+    expect(inserted(first.ops)[0]!.isTask).toBe(true);
+    expect(updated(first.ops)[0]!.id).toBe("a1");
+    expect(updated(first.ops)[0]!.prevSiblingId).toBe("new");
 
-  test("a mirror parent redirects to its true source", () => {
-    const nodes = [
+    // A null parent adds at the top level after the last root.
+    const top = add({ parentId: null });
+    if (top instanceof Error) throw top;
+    expect(inserted(top.ops)[0]!.parentId).toBeNull();
+    expect(inserted(top.ops)[0]!.prevSiblingId).toBe("b");
+
+    // A mirror parent redirects to its true source.
+    const viaMirror = add({ parentId: "m" }, [
       ...fixture(),
       createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
-    ];
-    const plan = planAddNode(index(nodes), {
-      id: "new",
-      text: "x",
-      parentId: "m",
-      position: "last",
-      isTask: false,
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(inserted(plan.ops)[0]!.parentId).toBe("a");
-  });
+    ]);
+    if (viaMirror instanceof Error) throw viaMirror;
+    expect(inserted(viaMirror.ops)[0]!.parentId).toBe("a");
 
-  test("missing parent is NodeNotFound", () => {
-    const plan = planAddNode(index(fixture()), {
-      id: "new",
-      text: "x",
-      parentId: "ghost",
-      position: "last",
-      isTask: false,
-      timestamp: T,
-    });
-    expect(plan).toBeInstanceOf(NodeNotFound);
-  });
-
-  test("stamps the provenance origin onto the created node (default null)", () => {
     // The MCP write path passes the caller's harness name; the created node
-    // carries it verbatim (write-once). Every content planner threads it the
-    // same way — planAddNode stands in for all of them here.
-    const agent = planAddNode(index(fixture()), {
-      id: "ai",
-      text: "x",
-      parentId: "a",
-      position: "last",
-      isTask: false,
-      origin: "Claude",
-      timestamp: T,
-    });
+    // carries it verbatim (write-once).
+    const agent = add({ origin: "Claude" });
     if (agent instanceof Error) throw agent;
     expect(inserted(agent.ops)[0]!.origin).toBe("Claude");
 
-    // Omitting origin (a non-MCP caller) defaults to null — human-authored.
-    const human = planAddNode(index(fixture()), {
-      id: "me",
-      text: "x",
-      parentId: "a",
-      position: "last",
-      isTask: false,
-      timestamp: T,
-    });
-    if (human instanceof Error) throw human;
-    expect(inserted(human.ops)[0]!.origin).toBeNull();
+    // A paragraph is never a task (ADR 0045).
+    const prose = add({ isTask: true, kind: "paragraph" });
+    if (prose instanceof Error) throw prose;
+    expect(inserted(prose.ops)[0]!.kind).toBe("paragraph");
+    expect(inserted(prose.ops)[0]!.isTask).toBe(false);
+
+    expect(add({ parentId: "ghost" })).toBeInstanceOf(NodeNotFound);
   });
 });
 
 describe("planUpdateNode", () => {
-  test("merges field changes into one update op", () => {
+  test("merges field changes into one update, routing mirror content to the source", () => {
     const plan = planUpdateNode(index(fixture()), {
       nodeId: "a1",
       changes: { text: "renamed", completed: true },
@@ -222,175 +178,81 @@ describe("planUpdateNode", () => {
     expect(node.text).toBe("renamed");
     expect(node.completed).toBe(true);
     expect(node.updatedAt).toBe(T);
-  });
 
-  test("content fields on a mirror land on the source; collapsed stays local", () => {
+    // Content fields on a mirror land on the source; collapsed stays local.
     const nodes = [
       ...fixture(),
       createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
     ];
-    const plan = planUpdateNode(index(nodes), {
+    const mirrored = planUpdateNode(index(nodes), {
       nodeId: "m",
       changes: { text: "shared edit", collapsed: true },
       timestamp: T,
     });
-    if (plan instanceof Error) throw plan;
-    const byId = new Map(updated(plan.ops).map((n) => [n.id, n]));
+    if (mirrored instanceof Error) throw mirrored;
+    const byId = new Map(updated(mirrored.ops).map((n) => [n.id, n]));
     expect(byId.get("a")?.text).toBe("shared edit");
     expect(byId.get("m")?.collapsed).toBe(true);
     // The mirror's own text is untouched (display snapshot; reads resolve live).
     expect(byId.get("m")?.text).toBe("alpha");
-  });
 
-  test("missing node is NodeNotFound", () => {
-    const plan = planUpdateNode(index(fixture()), {
-      nodeId: "ghost",
-      changes: { text: "x" },
-      timestamp: T,
-    });
-    expect(plan).toBeInstanceOf(NodeNotFound);
+    expect(
+      planUpdateNode(index(fixture()), {
+        nodeId: "ghost",
+        changes: { text: "x" },
+        timestamp: T,
+      }),
+    ).toBeInstanceOf(NodeNotFound);
   });
 
   // Kind exclusivity at the trust boundary (ADR 0045): the server normalizes the
   // pair exactly as the client funnels do, so no agent can persist an illegal one.
-  test("setting kind=paragraph clears isTask", () => {
-    const nodes = [createNode({ id: "t", text: "job", isTask: true })];
-    const plan = planUpdateNode(index(nodes), {
-      nodeId: "t",
-      changes: { kind: "paragraph" },
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const node = updated(plan.ops)[0]!;
-    expect(node.kind).toBe("paragraph");
-    expect(node.isTask).toBe(false);
-  });
-
-  test("setting isTask clears kind", () => {
-    const nodes = [createNode({ id: "p", text: "prose", kind: "paragraph" })];
-    const plan = planUpdateNode(index(nodes), {
-      nodeId: "p",
-      changes: { isTask: true },
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const node = updated(plan.ops)[0]!;
-    expect(node.isTask).toBe(true);
-    expect(node.kind).toBeNull();
-  });
-
-  test("kind wins when an agent passes both in one call", () => {
-    const nodes = [createNode({ id: "n", text: "x" })];
+  test.each([
+    [
+      "kind=paragraph clears isTask",
+      { isTask: true },
+      { kind: "paragraph" },
+      "paragraph",
+      false,
+    ],
+    ["isTask clears kind", { kind: "paragraph" }, { isTask: true }, null, true],
+    [
+      "kind wins when both are passed",
+      {},
+      { isTask: true, kind: "paragraph" },
+      "paragraph",
+      false,
+    ],
+    [
+      "kind=null turns a paragraph back into a bullet",
+      { kind: "paragraph" },
+      { kind: null },
+      null,
+      false,
+    ],
+  ] as const)("%s", (_name, start, changes, kind, isTask) => {
+    const nodes = [createNode({ id: "n", text: "x", ...start })];
     const plan = planUpdateNode(index(nodes), {
       nodeId: "n",
-      changes: { isTask: true, kind: "paragraph" },
+      changes,
       timestamp: T,
     });
     if (plan instanceof Error) throw plan;
     const node = updated(plan.ops)[0]!;
-    expect(node.kind).toBe("paragraph");
-    expect(node.isTask).toBe(false);
-  });
-
-  test("kind=null turns a paragraph back into a plain bullet", () => {
-    const nodes = [createNode({ id: "p", text: "prose", kind: "paragraph" })];
-    const plan = planUpdateNode(index(nodes), {
-      nodeId: "p",
-      changes: { kind: null },
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(updated(plan.ops)[0]!.kind).toBeNull();
-  });
-});
-
-describe("kind at the write planners", () => {
-  /** A deterministic id factory: n0, n1, n2, ... in emission order. */
-  const idFactory = () => {
-    let i = 0;
-    return () => `n${i++}`;
-  };
-
-  test("planAddNode creates a paragraph, and a paragraph is never a task", () => {
-    const plan = planAddNode(index(fixture()), {
-      id: "new",
-      text: "prose",
-      parentId: null,
-      position: "last",
-      isTask: true,
-      kind: "paragraph",
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const node = inserted(plan.ops)[0]!;
-    expect(node.kind).toBe("paragraph");
-    expect(node.isTask).toBe(false);
-  });
-
-  test("planAddNode defaults to a bullet", () => {
-    const plan = planAddNode(index(fixture()), {
-      id: "new",
-      text: "x",
-      parentId: null,
-      position: "last",
-      isTask: false,
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(inserted(plan.ops)[0]!.kind).toBeNull();
-  });
-
-  test("planAddSubtree carries kind per node, root and descendant", () => {
-    const plan = planAddSubtree(index(fixture()), {
-      nodes: [
-        {
-          text: "heading",
-          children: [
-            { text: "prose", kind: "paragraph" },
-            { text: "task", isTask: true },
-          ],
-        },
-      ],
-      parentId: null,
-      position: "last",
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 10,
-    });
-    if (plan instanceof Error) throw plan;
-    const byText = new Map(inserted(plan.ops).map((n) => [n.text, n]));
-    expect(byText.get("heading")!.kind).toBeNull();
-    expect(byText.get("prose")!.kind).toBe("paragraph");
-    expect(byText.get("task")!.kind).toBeNull();
-    expect(byText.get("task")!.isTask).toBe(true);
-  });
-
-  test("planAddToDaily carries kind onto the captured node", () => {
-    const plan = planAddToDaily(index([]), {
-      dateKey: "2026-07-10",
-      ...scaffold(),
-      newNodeId: "n",
-      text: "prose",
-      isTask: false,
-      kind: "paragraph",
-      timestamp: T,
-    });
-    const node = inserted(plan.ops).find((n) => n.id === "n")!;
-    expect(node.kind).toBe("paragraph");
+    expect(node.kind).toBe(kind);
+    expect(node.isTask).toBe(isTask);
   });
 });
 
 describe("planDeleteNode", () => {
-  test("cascades the subtree and repoints the follower sibling", () => {
+  test("cascades the subtree, repoints the follower, and guards mirrors", () => {
     const plan = planDeleteNode(index(fixture()), "a", T);
     if (plan instanceof Error) throw plan;
     expect(new Set(deletedKeys(plan.ops))).toEqual(new Set(["a", "a1", "a2"]));
     const repointed = updated(plan.ops)[0]!;
     expect(repointed.id).toBe("b");
     expect(repointed.prevSiblingId).toBeNull();
-  });
 
-  test("refuses when the subtree has surviving mirrors elsewhere", () => {
     const nodes = [
       ...fixture(),
       createNode({
@@ -400,23 +262,19 @@ describe("planDeleteNode", () => {
         prevSiblingId: "b",
       }),
     ];
-    const plan = planDeleteNode(index(nodes), "a", T);
-    expect(plan).toBeInstanceOf(WouldOrphanMirrors);
-  });
-
-  test("deleting a mirror itself is safe and touches only the mirror", () => {
-    const nodes = [
-      ...fixture(),
-      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
-    ];
-    const plan = planDeleteNode(index(nodes), "m", T);
-    if (plan instanceof Error) throw plan;
-    expect(deletedKeys(plan.ops)).toEqual(["m"]);
+    // The subtree has a surviving mirror elsewhere: refuse.
+    expect(planDeleteNode(index(nodes), "a", T)).toBeInstanceOf(
+      WouldOrphanMirrors,
+    );
+    // Deleting the mirror itself is safe and touches only the mirror.
+    const mirror = planDeleteNode(index(nodes), "m", T);
+    if (mirror instanceof Error) throw mirror;
+    expect(deletedKeys(mirror.ops)).toEqual(["m"]);
   });
 });
 
 describe("planMirrorNode", () => {
-  test("mirrors as the last child, flattening mirror-of-mirror to the true source", () => {
+  test("mirrors as the last child, flattening mirror-of-mirror, and refuses a cycle", () => {
     const nodes = [
       ...fixture(),
       createNode({
@@ -437,16 +295,16 @@ describe("planMirrorNode", () => {
     expect(node.mirrorOf).toBe("a1");
     expect(node.parentId).toBe("b");
     expect(plan.sourceId).toBe("a1");
-  });
 
-  test("refuses to mirror a node into its own subtree", () => {
-    const plan = planMirrorNode(index(fixture()), {
-      sourceId: "a",
-      targetParentId: "a1",
-      id: "mm",
-      timestamp: T,
-    });
-    expect(plan).toBeInstanceOf(MirrorCycle);
+    // Mirroring a node into its own subtree is refused.
+    expect(
+      planMirrorNode(index(fixture()), {
+        sourceId: "a",
+        targetParentId: "a1",
+        id: "mm",
+        timestamp: T,
+      }),
+    ).toBeInstanceOf(MirrorCycle);
   });
 });
 
@@ -458,96 +316,110 @@ describe("planReparent", () => {
   const movedById = (ops: ChangeOp[]) =>
     new Map(updated(ops).map((n) => [n.id, n]));
 
-  test("moves a single node to the last child of a parent", () => {
-    const plan = move(fixture(), {
+  test("moves one node last, first, to the top level, and through a mirror parent", () => {
+    const last = move(fixture(), {
       nodeIds: ["b"],
       newParentId: "a",
       position: "last",
       timestamp: T,
     });
-    if (plan instanceof Error) throw plan;
-    const b = movedById(plan.ops).get("b")!;
+    if (last instanceof Error) throw last;
+    const b = movedById(last.ops).get("b")!;
     expect(b.parentId).toBe("a");
     expect(b.prevSiblingId).toBe("a2");
     expect(b.updatedAt).toBe(T);
-    expect(plan.parentId).toBe("a");
-    expect(plan.movedIds).toEqual(["b"]);
-  });
+    expect(last.parentId).toBe("a");
+    expect(last.movedIds).toEqual(["b"]);
 
-  test('position "first" pushes the old head down', () => {
-    const plan = move(fixture(), {
+    // "first" pushes the old head down.
+    const first = move(fixture(), {
       nodeIds: ["b"],
       newParentId: "a",
       position: "first",
       timestamp: T,
     });
-    if (plan instanceof Error) throw plan;
-    const byId = movedById(plan.ops);
-    expect(byId.get("b")!.prevSiblingId).toBeNull();
-    expect(byId.get("b")!.parentId).toBe("a");
-    // the former first child now follows the moved node
-    expect(byId.get("a1")!.prevSiblingId).toBe("b");
-  });
+    if (first instanceof Error) throw first;
+    expect(movedById(first.ops).get("b")!.prevSiblingId).toBeNull();
+    expect(movedById(first.ops).get("a1")!.prevSiblingId).toBe("b");
 
-  test("a batch keeps the passed order (last)", () => {
-    const nodes = [
-      createNode({ id: "p", text: "parent" }),
-      createNode({ id: "x", text: "x", prevSiblingId: "p" }),
-      createNode({ id: "y", text: "y", prevSiblingId: "x" }),
-    ];
-    const plan = move(nodes, {
-      nodeIds: ["x", "y"],
-      newParentId: "p",
+    // A null parent moves to the top level after the last root, and the
+    // follower under the old parent inherits the moved node's old predecessor.
+    const top = move(fixture(), {
+      nodeIds: ["a1"],
+      newParentId: null,
       position: "last",
       timestamp: T,
     });
-    if (plan instanceof Error) throw plan;
-    const byId = movedById(plan.ops);
-    expect(byId.get("x")!.parentId).toBe("p");
-    expect(byId.get("x")!.prevSiblingId).toBeNull();
-    expect(byId.get("y")!.parentId).toBe("p");
-    expect(byId.get("y")!.prevSiblingId).toBe("x");
+    if (top instanceof Error) throw top;
+    expect(movedById(top.ops).get("a1")!.parentId).toBeNull();
+    expect(movedById(top.ops).get("a1")!.prevSiblingId).toBe("b");
+    expect(movedById(top.ops).get("a2")!.prevSiblingId).toBeNull();
+
+    // A mirror parent redirects to its true source.
+    const viaMirror = move(
+      [
+        ...fixture(),
+        createNode({
+          id: "m",
+          text: "alpha",
+          mirrorOf: "a",
+          prevSiblingId: "b",
+        }),
+      ],
+      { nodeIds: ["b"], newParentId: "m", position: "last", timestamp: T },
+    );
+    if (viaMirror instanceof Error) throw viaMirror;
+    expect(viaMirror.parentId).toBe("a");
+    expect(movedById(viaMirror.ops).get("b")!.parentId).toBe("a");
+
+    // Repeated ids are deduplicated, preserving first-seen order.
+    const dup = move(fixture(), {
+      nodeIds: ["b", "b"],
+      newParentId: "a",
+      position: "last",
+      timestamp: T,
+    });
+    if (dup instanceof Error) throw dup;
+    expect(dup.movedIds).toEqual(["b"]);
   });
 
-  test("a batch keeps the passed order at the front (first)", () => {
+  test("a run of mutual siblings keeps its chain at the tail and at the head", () => {
+    // Both a1 and a2 are children of a; moving both under b must not self-ref or
+    // reorder: the bug the rebuild-between-moves guard exists to prevent.
+    const tail = move(fixture(), {
+      nodeIds: ["a1", "a2"],
+      newParentId: "b",
+      position: "last",
+      timestamp: T,
+    });
+    if (tail instanceof Error) throw tail;
+    const byId = movedById(tail.ops);
+    expect(byId.get("a1")!.parentId).toBe("b");
+    expect(byId.get("a1")!.prevSiblingId).toBeNull();
+    expect(byId.get("a2")!.parentId).toBe("b");
+    expect(byId.get("a2")!.prevSiblingId).toBe("a1");
+
     const nodes = [
       createNode({ id: "p", text: "parent" }),
       createNode({ id: "z", text: "z", parentId: "p" }),
       createNode({ id: "x", text: "x", prevSiblingId: "p" }),
       createNode({ id: "y", text: "y", prevSiblingId: "x" }),
     ];
-    const plan = move(nodes, {
+    const head = move(nodes, {
       nodeIds: ["x", "y"],
       newParentId: "p",
       position: "first",
       timestamp: T,
     });
-    if (plan instanceof Error) throw plan;
-    const byId = movedById(plan.ops);
-    expect(byId.get("x")!.prevSiblingId).toBeNull();
-    expect(byId.get("y")!.prevSiblingId).toBe("x");
-    // the pre-existing child is pushed below the moved run
-    expect(byId.get("z")!.prevSiblingId).toBe("y");
+    if (head instanceof Error) throw head;
+    const headById = movedById(head.ops);
+    expect(headById.get("x")!.prevSiblingId).toBeNull();
+    expect(headById.get("y")!.prevSiblingId).toBe("x");
+    // The pre-existing child is pushed below the moved run.
+    expect(headById.get("z")!.prevSiblingId).toBe("y");
   });
 
-  test("a run of mutual siblings keeps its chain (no tearing)", () => {
-    // Both a1 and a2 are children of a; moving both under b must not self-ref or
-    // reorder — the bug the rebuild-between-moves guard exists to prevent.
-    const plan = move(fixture(), {
-      nodeIds: ["a1", "a2"],
-      newParentId: "b",
-      position: "last",
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const byId = movedById(plan.ops);
-    expect(byId.get("a1")!.parentId).toBe("b");
-    expect(byId.get("a1")!.prevSiblingId).toBeNull();
-    expect(byId.get("a2")!.parentId).toBe("b");
-    expect(byId.get("a2")!.prevSiblingId).toBe("a1");
-  });
-
-  test("moves across different parents in one call", () => {
+  test("moves across different parents in one call, emitting only updates (ADR 0027)", () => {
     // a1 (under a) and b (top level) both land under a2.
     const plan = move(fixture(), {
       nodeIds: ["a1", "b"],
@@ -561,117 +433,30 @@ describe("planReparent", () => {
     expect(byId.get("a1")!.prevSiblingId).toBeNull();
     expect(byId.get("b")!.parentId).toBe("a2");
     expect(byId.get("b")!.prevSiblingId).toBe("a1");
-  });
-
-  test("null parent moves to the top level after the last root", () => {
-    const plan = move(fixture(), {
-      nodeIds: ["a1"],
-      newParentId: null,
-      position: "last",
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    const byId = movedById(plan.ops);
-    expect(byId.get("a1")!.parentId).toBeNull();
-    expect(byId.get("a1")!.prevSiblingId).toBe("b");
-    // the follower under the old parent inherits the moved node's old predecessor
-    expect(byId.get("a2")!.prevSiblingId).toBeNull();
-  });
-
-  test("a mirror parent redirects to its true source", () => {
-    const nodes = [
-      ...fixture(),
-      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
-    ];
-    const plan = move(nodes, {
-      nodeIds: ["b"],
-      newParentId: "m",
-      position: "last",
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(plan.parentId).toBe("a");
-    expect(movedById(plan.ops).get("b")!.parentId).toBe("a");
-  });
-
-  test("emits ONLY update ops — never recreates a node (ADR 0027)", () => {
-    const plan = move(fixture(), {
-      nodeIds: ["a1", "b"],
-      newParentId: "a2",
-      position: "last",
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(inserted(plan.ops)).toHaveLength(0);
-    expect(deletedKeys(plan.ops)).toHaveLength(0);
+    // A move never recreates a node.
     expect(plan.ops.every((op) => op.op === "update")).toBe(true);
   });
 
-  test("deduplicates repeated ids, preserving first-seen order", () => {
-    const plan = move(fixture(), {
-      nodeIds: ["b", "b"],
-      newParentId: "a",
-      position: "last",
-      timestamp: T,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(plan.movedIds).toEqual(["b"]);
-    expect(movedById(plan.ops).get("b")!.parentId).toBe("a");
-  });
-
-  test("a missing node is NodeNotFound", () => {
+  test.each([
+    ["a missing node", ["ghost"], "a", NodeNotFound],
+    ["a missing parent", ["a1"], "ghost", NodeNotFound],
+    ["a node under itself", ["a"], "a", WouldCycle],
+    ["a node under its own descendant", ["a"], "a1", WouldCycle],
+    [
+      "a node alongside its own moved ancestor",
+      ["a", "a1"],
+      "b",
+      RedundantDescendant,
+    ],
+  ] as const)("refuses %s", (_name, nodeIds, newParentId, error) => {
     expect(
       move(fixture(), {
-        nodeIds: ["ghost"],
-        newParentId: "a",
+        nodeIds: [...nodeIds],
+        newParentId,
         position: "last",
         timestamp: T,
       }),
-    ).toBeInstanceOf(NodeNotFound);
-  });
-
-  test("a missing parent is NodeNotFound", () => {
-    expect(
-      move(fixture(), {
-        nodeIds: ["a1"],
-        newParentId: "ghost",
-        position: "last",
-        timestamp: T,
-      }),
-    ).toBeInstanceOf(NodeNotFound);
-  });
-
-  test("moving a node under itself is WouldCycle", () => {
-    expect(
-      move(fixture(), {
-        nodeIds: ["a"],
-        newParentId: "a",
-        position: "last",
-        timestamp: T,
-      }),
-    ).toBeInstanceOf(WouldCycle);
-  });
-
-  test("moving a node under its own descendant is WouldCycle", () => {
-    expect(
-      move(fixture(), {
-        nodeIds: ["a"],
-        newParentId: "a1",
-        position: "last",
-        timestamp: T,
-      }),
-    ).toBeInstanceOf(WouldCycle);
-  });
-
-  test("listing a node alongside its own moved ancestor is RedundantDescendant", () => {
-    expect(
-      move(fixture(), {
-        nodeIds: ["a", "a1"],
-        newParentId: "b",
-        position: "last",
-        timestamp: T,
-      }),
-    ).toBeInstanceOf(RedundantDescendant);
+    ).toBeInstanceOf(error);
   });
 });
 
@@ -682,45 +467,56 @@ describe("planAddSubtree", () => {
     return () => `n${i++}`;
   };
 
-  test("wires a run of sibling roots into one unbroken chain (the trap)", () => {
-    // Three top-level roots under `a`: looping planAddNode over a stale index
-    // would give each the same prevSiblingId (a2) and tear the chain. By
-    // construction each root chains to the previous one.
-    const plan = planAddSubtree(index(fixture()), {
-      nodes: [{ text: "one" }, { text: "two" }, { text: "three" }],
+  /** Plan a forest with defaults callers override. */
+  const addForest = (
+    nodes: Node[],
+    overrides: Partial<Parameters<typeof planAddSubtree>[1]>,
+  ) =>
+    planAddSubtree(index(nodes), {
+      nodes: [{ text: "x" }],
       parentId: "a",
       position: "last",
       timestamp: T,
       newId: idFactory(),
       maxNodes: 500,
+      ...overrides,
+    });
+
+  test("wires a run of sibling roots into one unbroken chain (the trap)", () => {
+    // Three top-level roots under `a`: looping planAddNode over a stale index
+    // would give each the same prevSiblingId (a2) and tear the chain. By
+    // construction each root chains to the previous one.
+    const plan = addForest(fixture(), {
+      nodes: [{ text: "one" }, { text: "two" }, { text: "three" }],
     });
     if (plan instanceof Error) throw plan;
     const nodes = inserted(plan.ops);
     expect(nodes.map((n) => n.id)).toEqual(["n0", "n1", "n2"]);
     expect(nodes.map((n) => n.parentId)).toEqual(["a", "a", "a"]);
     // First root chains after the parent's existing last child (a2), the rest
-    // chain to their predecessor — no shared predecessor, no self-ref.
+    // chain to their predecessor: no shared predecessor, no self-ref.
     expect(nodes.map((n) => n.prevSiblingId)).toEqual(["a2", "n0", "n1"]);
     expect(plan.rootIds).toEqual(["n0", "n1", "n2"]);
     expect(plan.parentId).toBe("a");
   });
 
-  test("nests children depth-first, each level its own chain", () => {
-    const plan = planAddSubtree(index([]), {
+  test("nests children depth-first, carrying origin and kind on every node", () => {
+    const plan = addForest([], {
       nodes: [
         {
           text: "root",
           children: [
-            { text: "c1", children: [{ text: "g1" }, { text: "g2" }] },
+            {
+              text: "c1",
+              kind: "paragraph",
+              children: [{ text: "g1" }, { text: "g2", isTask: true }],
+            },
             { text: "c2" },
           ],
         },
       ],
       parentId: null,
-      position: "last",
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 500,
+      origin: "Claude",
     });
     if (plan instanceof Error) throw plan;
     const byId = new Map(inserted(plan.ops).map((n) => [n.id, n]));
@@ -737,16 +533,20 @@ describe("planAddSubtree", () => {
     expect(byId.get("n4")!.parentId).toBe("n0");
     expect(byId.get("n4")!.prevSiblingId).toBe("n1");
     expect(plan.rootIds).toEqual(["n0"]);
+
+    // Every authored node, root and descendant, carries the caller's origin.
+    expect([...byId.values()].every((n) => n.origin === "Claude")).toBe(true);
+    // Kind is per node: only c1 is a paragraph; g2 stays a task bullet.
+    expect(byId.get("n0")!.kind).toBeNull();
+    expect(byId.get("n1")!.kind).toBe("paragraph");
+    expect(byId.get("n3")!.kind).toBeNull();
+    expect(byId.get("n3")!.isTask).toBe(true);
   });
 
   test('position "first" puts the run at the head and repoints the old head to the run tail', () => {
-    const plan = planAddSubtree(index(fixture()), {
+    const plan = addForest(fixture(), {
       nodes: [{ text: "one" }, { text: "two" }],
-      parentId: "a",
       position: "first",
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 500,
     });
     if (plan instanceof Error) throw plan;
     const inserts = inserted(plan.ops);
@@ -760,105 +560,76 @@ describe("planAddSubtree", () => {
   });
 
   test("a mirror parent redirects to its true source", () => {
-    const nodes = [
-      ...fixture(),
-      createNode({ id: "m", text: "alpha", mirrorOf: "a", prevSiblingId: "b" }),
-    ];
-    const plan = planAddSubtree(index(nodes), {
-      nodes: [{ text: "x" }],
-      parentId: "m",
-      position: "last",
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 500,
-    });
+    const plan = addForest(
+      [
+        ...fixture(),
+        createNode({
+          id: "m",
+          text: "alpha",
+          mirrorOf: "a",
+          prevSiblingId: "b",
+        }),
+      ],
+      { parentId: "m" },
+    );
     if (plan instanceof Error) throw plan;
     expect(inserted(plan.ops)[0]!.parentId).toBe("a");
     expect(plan.parentId).toBe("a");
   });
 
-  test("stamps origin onto every authored node, root and descendant", () => {
-    const plan = planAddSubtree(index([]), {
-      nodes: [{ text: "root", children: [{ text: "kid" }] }],
-      parentId: null,
-      position: "last",
-      origin: "Claude",
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 500,
-    });
-    if (plan instanceof Error) throw plan;
-    expect(inserted(plan.ops).every((n) => n.origin === "Claude")).toBe(true);
+  const refusals: Array<
+    [
+      string,
+      Partial<Parameters<typeof planAddSubtree>[1]>,
+      new (...args: never[]) => Error,
+    ]
+  > = [
+    ["an empty forest", { nodes: [] }, EmptyForest],
+    // 1 root + 2 children = 3 nodes; descendants count against a cap of 2.
+    [
+      "a forest over the cap",
+      {
+        nodes: [{ text: "r", children: [{ text: "a" }, { text: "b" }] }],
+        maxNodes: 2,
+      },
+      BatchTooLarge,
+    ],
+    ["a missing parent", { parentId: "ghost" }, NodeNotFound],
+  ];
+  test.each(refusals)("refuses %s", (_name, overrides, error) => {
+    expect(addForest(fixture(), overrides)).toBeInstanceOf(error);
   });
 
-  test("empty forest is EmptyForest", () => {
-    expect(
-      planAddSubtree(index(fixture()), {
-        nodes: [],
-        parentId: "a",
-        position: "last",
+  test("planAddSubtreeToDaily appends after the day's last child, materializing a missing day", () => {
+    const existing = planAddSubtreeToDaily(
+      index([
+        ...fixture(),
+        createNode({ id: "cont", text: "Daily", prevSiblingId: "b" }),
+        createNode({
+          id: "day",
+          text: "Friday, July 3, 2026",
+          parentId: "cont",
+        }),
+        createNode({ id: "existing", text: "already here", parentId: "day" }),
+      ]),
+      {
+        nodes: [{ text: "one" }, { text: "two" }],
+        dateKey: "2026-07-03",
+        ...scaffold(),
         timestamp: T,
         newId: idFactory(),
         maxNodes: 500,
-      }),
-    ).toBeInstanceOf(EmptyForest);
-  });
-
-  test("a forest over the cap is BatchTooLarge (descendants counted)", () => {
-    // 1 root + 2 children = 3 nodes; cap of 2 must reject.
-    const plan = planAddSubtree(index([]), {
-      nodes: [{ text: "root", children: [{ text: "a" }, { text: "b" }] }],
-      parentId: null,
-      position: "last",
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 2,
-    });
-    expect(plan).toBeInstanceOf(BatchTooLarge);
-  });
-
-  test("a missing parent is NodeNotFound", () => {
-    expect(
-      planAddSubtree(index(fixture()), {
-        nodes: [{ text: "x" }],
-        parentId: "ghost",
-        position: "last",
-        timestamp: T,
-        newId: idFactory(),
-        maxNodes: 500,
-      }),
-    ).toBeInstanceOf(NodeNotFound);
-  });
-
-  test("planAddSubtreeToDaily materializes the day and appends the forest after its last child", () => {
-    const nodes = [
-      ...fixture(),
-      createNode({
-        id: "cont",
-        text: DAILY_CONTAINER_TEXT,
-        prevSiblingId: "b",
-      }),
-      createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "cont" }),
-      createNode({ id: "existing", text: "already here", parentId: "day" }),
-    ];
-    const plan = planAddSubtreeToDaily(index(nodes), {
-      nodes: [{ text: "one" }, { text: "two" }],
-      dateKey: "2026-07-03",
-      ...scaffold(),
-      timestamp: T,
-      newId: idFactory(),
-      maxNodes: 500,
-    });
-    if (plan instanceof Error) throw plan;
-    const inserts = inserted(plan.ops);
+      },
+    );
+    if (existing instanceof Error) throw existing;
+    const inserts = inserted(existing.ops);
     expect(inserts.map((n) => n.parentId)).toEqual(["day", "day"]);
     expect(inserts[0]!.prevSiblingId).toBe("existing");
     expect(inserts[1]!.prevSiblingId).toBe(inserts[0]!.id);
-    expect(plan.rootIds).toHaveLength(2);
-  });
+    expect(existing.rootIds).toHaveLength(2);
 
-  test("planAddSubtreeToDaily creates the container + day when absent, then appends", () => {
-    const plan = planAddSubtreeToDaily(index(fixture()), {
+    // With no Daily subtree yet, the whole calendar chain is minted first.
+    const fresh = planAddSubtreeToDaily(index(fixture()), {
       nodes: [{ text: "one" }],
       dateKey: "2026-07-03",
       ...scaffold(),
@@ -866,17 +637,12 @@ describe("planAddSubtree", () => {
       newId: idFactory(),
       maxNodes: 500,
     });
-    if (plan instanceof Error) throw plan;
-    const ids = inserted(plan.ops).map((n) => n.id);
-    // container + year + month + week + day (materialized) + the forest node
-    expect(ids).toContain("cont");
-    expect(ids).toContain("yr");
-    expect(ids).toContain("mo");
-    expect(ids).toContain("wk");
-    expect(ids).toContain("day");
-    const entry = inserted(plan.ops).find(
-      (n) => n.parentId === "day" && n.id.startsWith("n"),
-    )!;
+    if (fresh instanceof Error) throw fresh;
+    const ids = inserted(fresh.ops).map((n) => n.id);
+    for (const id of ["cont", "yr", "mo", "wk", "day"])
+      expect(ids).toContain(id);
+    const entry = inserted(fresh.ops).find((n) => n.id === fresh.rootIds[0])!;
+    expect(entry.parentId).toBe("day");
     expect(entry.prevSiblingId).toBeNull();
   });
 });
@@ -890,7 +656,7 @@ describe("daily planning", () => {
       ...fixture(),
       createNode({
         id: "cont",
-        text: DAILY_CONTAINER_TEXT,
+        text: "Daily",
         prevSiblingId: "b",
       }),
       createNode({ id: "yr", text: "2026", parentId: "cont" }),
@@ -919,7 +685,7 @@ describe("daily planning", () => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
     expect(byId.get("cont")!.parentId).toBeNull();
     expect(byId.get("cont")!.prevSiblingId).toBe("b");
-    expect(byId.get("cont")!.text).toBe(DAILY_CONTAINER_TEXT);
+    expect(byId.get("cont")!.text).toBe("Daily");
     expect(byId.get("yr")!.parentId).toBe("cont");
     expect(byId.get("yr")!.text).toBe("2026");
     expect(byId.get("mo")!.parentId).toBe("yr");
@@ -1005,7 +771,7 @@ describe("daily planning", () => {
 
   test("years sort ascending under the container; a later year appends after an earlier one", () => {
     const nodes = [
-      createNode({ id: "cont", text: DAILY_CONTAINER_TEXT }),
+      createNode({ id: "cont", text: "Daily" }),
       createNode({ id: "yr25", text: "2025", parentId: "cont" }),
     ];
     const rev = new Map<string, string>([
@@ -1024,6 +790,8 @@ describe("daily planning", () => {
   });
 
   test("the fourth-day rule places a late-December week in the next year", () => {
+    // The week of Monday 2025-12-29 has its fourth day on Jan 1, 2026, so the
+    // whole straddle week lives under YEAR 2026 > January.
     const plan = planEnsureDaily(index(fixture()), {
       dateKey: "2025-12-29",
       ...scaffold(),
@@ -1044,7 +812,7 @@ describe("daily planning", () => {
       ...fixture(),
       createNode({
         id: "cont",
-        text: DAILY_CONTAINER_TEXT,
+        text: "Daily",
         prevSiblingId: "b",
       }),
       createNode({
@@ -1122,112 +890,121 @@ describe("daily planning", () => {
     expect(node.parentId).toBe("day");
     expect(node.prevSiblingId).toBe("entry1");
     expect(node.isTask).toBe(true);
+
+    // Kind rides onto the captured node.
+    const prose = planAddToDaily(index([]), {
+      dateKey: "2026-07-10",
+      ...scaffold(),
+      newNodeId: "n",
+      text: "prose",
+      isTask: false,
+      kind: "paragraph",
+      timestamp: T,
+    });
+    expect(inserted(prose.ops).find((n) => n.id === "n")!.kind).toBe(
+      "paragraph",
+    );
   });
 
-  test("planMirrorToDaily refuses mirroring the container onto its own day", () => {
+  test("planMirrorToDaily mirrors an outside node and refuses container cycles, existing day or not", () => {
     const { nodes, rev } = seededWeek("week:2026-06-29", [
       createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
     ]);
     rev.set("day", "2026-07-03");
-    const plan = planMirrorToDaily(index(nodes), {
-      dateKey: "2026-07-03",
-      ...scaffold(rev),
-      sourceId: "cont",
-      mirrorId: "mm",
-      timestamp: T,
-    });
-    expect(plan).toBeInstanceOf(MirrorCycle);
-  });
+    const mirror = (snapshot: Node[], sourceId: string, map = rev) =>
+      planMirrorToDaily(index(snapshot), {
+        dateKey: "2026-07-03",
+        ...scaffold(map),
+        sourceId,
+        mirrorId: "mm",
+        timestamp: T,
+      });
 
-  test("planMirrorToDaily refuses mirroring an ancestor onto a not-yet-created day", () => {
-    // A fresh day/week/month/year aren't in the snapshot, so the cycle guard must
-    // fall back to the deepest EXISTING prospective parent (here the container),
-    // or it builds a self-cycle (mirror -> container landing under the container).
-    const nodes = [
-      ...fixture(),
-      createNode({
-        id: "cont",
-        text: DAILY_CONTAINER_TEXT,
-        prevSiblingId: "b",
-      }),
-    ];
-    const plan = planMirrorToDaily(index(nodes), {
-      dateKey: "2026-07-03",
-      ...scaffold(), // yr/mo/wk/day all absent from the snapshot
-      sourceId: "cont",
-      mirrorId: "mm",
-      timestamp: T,
-    });
-    expect(plan).toBeInstanceOf(MirrorCycle);
-  });
-
-  test("planMirrorToDaily mirrors an outside node onto the day", () => {
-    const { nodes, rev } = seededWeek("week:2026-06-29", [
-      createNode({ id: "day", text: "Friday, July 3, 2026", parentId: "wk" }),
-    ]);
-    rev.set("day", "2026-07-03");
-    const plan = planMirrorToDaily(index(nodes), {
-      dateKey: "2026-07-03",
-      ...scaffold(rev),
-      sourceId: "a1",
-      mirrorId: "mm",
-      timestamp: T,
-    });
+    const plan = mirror(nodes, "a1");
     if (plan instanceof Error) throw plan;
     const node = inserted(plan.ops)[0]!;
     expect(node.mirrorOf).toBe("a1");
     expect(node.parentId).toBe("day");
+
+    expect(mirror(nodes, "cont")).toBeInstanceOf(MirrorCycle);
+
+    // A fresh day/week/month/year aren't in the snapshot, so the cycle guard must
+    // fall back to the deepest EXISTING prospective parent (here the container),
+    // or it builds a self-cycle (mirror -> container landing under the container).
+    const containerOnly = [
+      ...fixture(),
+      createNode({ id: "cont", text: "Daily", prevSiblingId: "b" }),
+    ];
+    expect(mirror(containerOnly, "cont", new Map())).toBeInstanceOf(
+      MirrorCycle,
+    );
   });
 
-  test("formatDayText renders the seeded full date", () => {
-    expect(formatDayText("2026-07-03")).toBe("Friday, July 3, 2026");
-    expect(formatDayText("not-a-date")).toBe("not-a-date");
-  });
-
-  test("formatDayText returns the raw key for a shaped-but-impossible date", () => {
+  test.each([
+    ["2026-07-03", "Friday, July 3, 2026"],
+    ["not-a-date", "not-a-date"],
     // Date.UTC rolls these over ("2026-13-45" -> 2027-02-14); the round-trip
-    // guard must reject them instead of seeding a date months off the key.
-    expect(formatDayText("2026-13-45")).toBe("2026-13-45");
-    expect(formatDayText("2026-02-31")).toBe("2026-02-31");
+    // guard must return the raw key instead of seeding a date months off.
+    ["2026-13-45", "2026-13-45"],
+    ["2026-02-31", "2026-02-31"],
+  ])("formatDayText(%s) is %s", (key, text) => {
+    expect(formatDayText(key)).toBe(text);
   });
 });
 
 describe("reads", () => {
-  test("kind reaches the agent through flattenSubtree, formatOutlineLines, and search", () => {
-    const nodes = [
+  /** Flatten the whole outline with generous bounds. */
+  const flatAll = (nodes: Node[]) => {
+    const result = flattenSubtree(index(nodes), null, {
+      maxDepth: 99,
+      maxNodes: 100,
+    });
+    if (result instanceof Error) throw result;
+    return result;
+  };
+
+  test("formatOutlineLines renders indentation, checkboxes, ids, and kind", () => {
+    const result = flatAll([
       createNode({ id: "a", text: "alpha" }),
+      createNode({
+        id: "a1",
+        text: "todo",
+        parentId: "a",
+        isTask: true,
+        completed: true,
+      }),
       createNode({
         id: "p",
         text: "alpha prose",
         parentId: "a",
+        prevSiblingId: "a1",
         kind: "paragraph",
       }),
-    ];
-    const result = flattenSubtree(index(nodes), null, {
-      maxDepth: 99,
-      maxNodes: 100,
-    });
-    if (result instanceof Error) throw result;
-    expect(result.lines.map((l) => l.kind)).toEqual([null, "paragraph"]);
+      // The illegal pair a raw PATCH or a stale client can still write. The app
+      // draws a paragraph glyph and no checkbox; the agent must not be told `- [ ]`.
+      createNode({
+        id: "q",
+        text: "prose",
+        prevSiblingId: "a",
+        isTask: true,
+        kind: "paragraph",
+      }),
+    ]);
+    expect(result.lines.map((l) => l.kind)).toEqual([
+      null,
+      null,
+      "paragraph",
+      "paragraph",
+    ]);
+    expect(result.lines.find((l) => l.id === "q")!.isTask).toBe(false);
     expect(formatOutlineLines(result.lines)).toBe(
-      ["- alpha (id: a)", "  - alpha prose (id: p, paragraph)"].join("\n"),
+      [
+        "- alpha (id: a)",
+        "  - [x] todo (id: a1)",
+        "  - alpha prose (id: p, paragraph)",
+        "- prose (id: q, paragraph)",
+      ].join("\n"),
     );
-    expect(searchNodes(index(nodes), "prose", 10)[0]!.kind).toBe("paragraph");
-  });
-
-  test("kind outranks isTask on the agent read path, as it does in the renderer", () => {
-    // The illegal pair a raw PATCH or a stale client can still write. The app
-    // draws a paragraph glyph and no checkbox; the agent must not be told `- [ ]`.
-    const nodes = [
-      createNode({ id: "p", text: "prose", isTask: true, kind: "paragraph" }),
-    ];
-    const result = flattenSubtree(index(nodes), null, {
-      maxDepth: 99,
-      maxNodes: 100,
-    });
-    if (result instanceof Error) throw result;
-    expect(result.lines[0]!.isTask).toBe(false);
-    expect(formatOutlineLines(result.lines)).toBe("- prose (id: p, paragraph)");
   });
 
   test("flattenSubtree windows a mirror's source children and caps cycles", () => {
@@ -1266,44 +1043,13 @@ describe("reads", () => {
     expect(result.lines).toHaveLength(2);
     expect(result.truncated).toBe(true);
   });
-
-  test("formatOutlineLines renders indentation, checkboxes, and ids", () => {
-    const nodes = [
-      createNode({ id: "a", text: "alpha" }),
-      createNode({
-        id: "a1",
-        text: "todo",
-        parentId: "a",
-        isTask: true,
-        completed: true,
-      }),
-    ];
-    const result = flattenSubtree(index(nodes), null, {
-      maxDepth: 99,
-      maxNodes: 100,
-    });
-    if (result instanceof Error) throw result;
-    expect(formatOutlineLines(result.lines)).toBe(
-      "- alpha (id: a)\n  - [x] todo (id: a1)",
-    );
-  });
-
-  test("searchNodes matches case-insensitively with a breadcrumb path", () => {
-    const hits = searchNodes(index(fixture()), "ALPHA ONE", 10);
-    expect(hits).toHaveLength(1);
-    expect(hits[0]!.id).toBe("a1");
-    expect(hits[0]!.path).toEqual(["alpha"]);
-  });
-
-  test("searchNodes caps at the limit", () => {
-    expect(searchNodes(index(fixture()), "alpha", 2)).toHaveLength(2);
-  });
 });
 
 // The MCP egress redaction (ADR 0043). Client-side stripping is covered by
-// src/data/spoiler.test.ts; e2e can't reach the Worker serialization (seedOutline
-// mocks it), so these unit tests are the redaction's only guard — the same
-// carve-out as worker/wire.test.ts / worker/mcp.test.ts.
+// src/data/spoiler.test.ts and search redaction by worker/search.test.ts; e2e
+// can't reach the Worker serialization (seedOutline mocks it), so these unit
+// tests guard the read and export paths: the same carve-out as
+// worker/wire.test.ts / worker/mcp.test.ts.
 describe("spoiler redaction at the MCP boundary", () => {
   test("flattenSubtree redacts a spoiler run to the [spoiler] sentinel", () => {
     const nodes = [createNode({ id: "a", text: "the killer is ||Bob||" })];
@@ -1314,28 +1060,6 @@ describe("spoiler redaction at the MCP boundary", () => {
     if (result instanceof Error) throw result;
     expect(result.lines[0]!.text).toBe("the killer is [spoiler]");
     expect(result.lines[0]!.text.includes("Bob")).toBe(false);
-  });
-
-  test("searchNodes cannot match a term that lives only inside a spoiler", () => {
-    const nodes = [createNode({ id: "a", text: "the killer is ||Bob||" })];
-    // "Bob" exists in the source but only inside the spoiler -> zero hits, not a
-    // masked hit (an agent must not be able to confirm the term is in there).
-    expect(searchNodes(index(nodes), "Bob", 10)).toHaveLength(0);
-    // A term OUTSIDE the spoiler still matches, and the returned text is redacted.
-    const hits = searchNodes(index(nodes), "killer", 10);
-    expect(hits).toHaveLength(1);
-    expect(hits[0]!.text).toBe("the killer is [spoiler]");
-  });
-
-  test("searchNodes redacts spoilers in the ancestor breadcrumb path", () => {
-    // An ancestor bullet can hold a spoiler; its crumb must be redacted too.
-    const nodes = [
-      createNode({ id: "p", text: "chapter ||twist||" }),
-      createNode({ id: "c", text: "a clue", parentId: "p" }),
-    ];
-    const hits = searchNodes(index(nodes), "clue", 10);
-    expect(hits).toHaveLength(1);
-    expect(hits[0]!.path).toEqual(["chapter [spoiler]"]);
   });
 
   test("redactSpoilerIndex rebuilds an index over redacted text (export_opml path)", () => {

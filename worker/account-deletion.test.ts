@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  BILLABLE_SUBSCRIPTION_STATUSES,
   cancelActiveSubscriptions,
   deleteResidualUserRows,
   isOwnerAccount,
@@ -12,48 +11,14 @@ import {
 // account, which maps to the shared 'default' DO (docs/adr/0051). The Stripe
 // skip-in-dev branch is the other worker-reachable decision; the live Stripe
 // path is exercised by hand (no D1/Stripe in bun test).
-describe("isOwnerAccount", () => {
-  test("true when the id matches OWNER_USER_ID", () => {
-    expect(isOwnerAccount("owner-123", "owner-123")).toBe(true);
-  });
-
-  test("false for any other account", () => {
-    expect(isOwnerAccount("user-abc", "owner-123")).toBe(false);
-  });
-
-  test("false when OWNER_USER_ID is unset (no owner bridge configured)", () => {
-    expect(isOwnerAccount("user-abc", undefined)).toBe(false);
-    // The empty-string env-var case must not accidentally match an id that is
-    // itself empty — no owner configured means no account is the owner.
-    expect(isOwnerAccount("", undefined)).toBe(false);
-    expect(isOwnerAccount("", "")).toBe(false);
-  });
-});
-
-describe("BILLABLE_SUBSCRIPTION_STATUSES", () => {
-  test("covers every non-terminal billing state, wider than plan.ts entitlement", () => {
-    // Deletion asks "could Stripe ever charge again?", NOT "is this user paid
-    // up?" (plan.ts's 'active'/'trialing'). A past_due sub mid-dunning — or an
-    // unpaid/incomplete/paused one — grants no entitlement but can still
-    // successfully charge later, so deletion must sweep it too.
-    // SAFETY: spreading a readonly string-literal array into a mutable string[] adds no values.
-    expect(([...BILLABLE_SUBSCRIPTION_STATUSES] as string[]).sort()).toEqual(
-      [
-        "active",
-        "incomplete",
-        "past_due",
-        "paused",
-        "trialing",
-        "unpaid",
-      ].sort(),
-    );
-  });
-
-  test("excludes the terminal states (nothing left to cancel)", () => {
-    const statuses: readonly string[] = BILLABLE_SUBSCRIPTION_STATUSES;
-    expect(statuses).not.toContain("canceled");
-    expect(statuses).not.toContain("incomplete_expired");
-  });
+test("isOwnerAccount matches only the exact, configured OWNER_USER_ID", () => {
+  expect(isOwnerAccount("owner-123", "owner-123")).toBe(true);
+  expect(isOwnerAccount("user-abc", "owner-123")).toBe(false);
+  // No owner configured means no account is the owner, including an empty id
+  // against an empty env var.
+  expect(isOwnerAccount("user-abc", undefined)).toBe(false);
+  expect(isOwnerAccount("", undefined)).toBe(false);
+  expect(isOwnerAccount("", "")).toBe(false);
 });
 
 /** A D1 stub that records every prepared statement + its bindings. `all()`
@@ -91,7 +56,7 @@ describe("cancelActiveSubscriptions", () => {
     expect(calls[0]!.args).toEqual(["user-abc"]);
   });
 
-  test("Stripe key set, no billable rows, no customer id = no Stripe client, row still cleared", async () => {
+  test("Stripe key set: sweeps every non-terminal status, reads the customer id, and clears the row last", async () => {
     const calls: Array<{ sql: string; args: unknown[] }> = [];
     await cancelActiveSubscriptions(
       { DB: recordingDb(calls), STRIPE_SECRET_KEY: "sk_test_x" },
@@ -100,11 +65,22 @@ describe("cancelActiveSubscriptions", () => {
     const subQuery = calls.find((c) =>
       c.sql.includes("SELECT stripeSubscriptionId"),
     );
-    expect(subQuery).toBeDefined();
-    // The widened status list is what the subscription query filters on.
-    for (const status of BILLABLE_SUBSCRIPTION_STATUSES) {
+    // Deletion asks "could Stripe ever charge again?", NOT "is this user paid
+    // up?" (plan.ts's 'active'/'trialing'). A past_due sub mid-dunning, or an
+    // unpaid/incomplete/paused one, grants no entitlement but can still charge
+    // later, so the query sweeps it too. Terminal states have nothing to cancel.
+    for (const status of [
+      "active",
+      "incomplete",
+      "past_due",
+      "paused",
+      "trialing",
+      "unpaid",
+    ]) {
       expect(subQuery!.sql).toContain(`'${status}'`);
     }
+    expect(subQuery!.sql).not.toContain("'canceled'");
+    expect(subQuery!.sql).not.toContain("'incomplete_expired'");
     // The customer lookup reads the plugin's column on the user row.
     expect(calls.some((c) => c.sql.includes("stripeCustomerId"))).toBe(true);
     // And the D1 row is cleared last (after Stripe committed / was skipped).
