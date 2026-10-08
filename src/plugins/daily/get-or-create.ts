@@ -574,9 +574,8 @@ export async function getOrCreateDay(
 /** get-or-create the day, then navigate to it -- a date-chip click (a reference,
  *  seed-free; the Today button navigates the route with focus=last instead).
  *  `morph` (default true) picks the nav: a date chip is an element in the
- *  outgoing view, so it MORPHS into the new title (`ctx.nav.zoom`); the week
- *  strip's pill isn't -- its layoutId pill already IS the transition -- so it
- *  passes `morph: false` for a PLAIN swap (ADR 0054). */
+ *  outgoing view, so it MORPHS into the new title (`ctx.nav.zoom`). Pass false
+ *  for a PLAIN swap when another element already carries the transition. */
 export async function goToDate(
   key: string,
   ctx: PluginContext,

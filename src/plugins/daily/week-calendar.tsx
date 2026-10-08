@@ -18,8 +18,14 @@
 import { useParams } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useReducedMotion } from "motion/react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -40,13 +46,25 @@ import {
 import { useEditorFeatures } from "../../data/editor-features";
 import { useScaffoldKey } from "./daily-index";
 import { useDaysWithContent } from "./days-with-content";
-import { goToDate } from "./get-or-create";
+import { getOrCreateDay } from "./get-or-create";
 import { MonthPickerButton } from "./month-picker";
 
 const WEEKDAY_INITIALS = {
   monday: ["M", "T", "W", "T", "F", "S", "S"],
   sunday: ["S", "M", "T", "W", "T", "F", "S"],
 } as const;
+
+// The editor is keyed by route, so switching days remounts this component. Keep
+// only the click's horizontal delta across that boundary; shared-layout Motion
+// also projected the window's scroll restoration into y/scale, making the pill
+// dive out of the sticky calendar when the source day was scrolled.
+type SelectionHandoff = {
+  dayKey: string;
+  x: number;
+};
+
+let pendingSelectionHandoff: SelectionHandoff | null = null;
+let latestSelectionRequest = 0;
 
 export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
   const { weekStart } = useEditorFeatures();
@@ -81,6 +99,36 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
     [visibleWeek],
   );
   const withContent = useDaysWithContent(days);
+  const [selectionHandoff, setSelectionHandoff] =
+    useState<SelectionHandoff | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingSelectionHandoff;
+    if (reduceMotion) {
+      if (pending?.dayKey === dayKey && pendingSelectionHandoff === pending)
+        pendingSelectionHandoff = null;
+      setSelectionHandoff(null);
+      return;
+    }
+    if (dayKey === null || pending?.dayKey !== dayKey) return;
+    if (pendingSelectionHandoff === pending) pendingSelectionHandoff = null;
+    setSelectionHandoff(pending);
+  }, [dayKey, reduceMotion]);
+  const selectionInitialX = selectionHandoff?.x ?? 0;
+  const selectionRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const selection = selectionRef.current;
+    if (!selection || selectionInitialX === 0) return;
+    const clearCancelledHandoff = () => setSelectionHandoff(null);
+    selection.addEventListener("animationcancel", clearCancelledHandoff);
+    return () =>
+      selection.removeEventListener("animationcancel", clearCancelledHandoff);
+  }, [selectionInitialX]);
+  const selectionStyle:
+    | (CSSProperties & { "--week-calendar-selection-x": string })
+    | undefined =
+    selectionInitialX === 0
+      ? undefined
+      : { "--week-calendar-selection-x": `${selectionInitialX}px` };
 
   // Guard AFTER every hook (rules of hooks): render nothing on a non-day page, so
   // the subheader band collapses.
@@ -100,6 +148,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
   return (
     <nav
       aria-label="Week calendar"
+      data-subheader-snap-open=""
       data-testid="week-calendar"
       data-week-key={visibleWeek}
       className="flex w-full flex-col gap-1"
@@ -111,7 +160,10 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
           type="button"
           aria-label="Previous week"
           className={iconBtn}
-          onClick={() => setOffset((o) => o - 1)}
+          onClick={() => {
+            setSelectionHandoff(null);
+            setOffset((o) => o - 1);
+          }}
         >
           <ChevronLeft className="size-4" />
         </button>
@@ -144,7 +196,10 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
               aria-label="Back to the current week"
               data-testid="week-calendar-snapback"
               className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              onClick={() => setOffset(0)}
+              onClick={() => {
+                setSelectionHandoff(null);
+                setOffset(0);
+              }}
             >
               <RotateCcw className="size-3" />
               This week
@@ -155,7 +210,10 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
           type="button"
           aria-label="Next week"
           className={iconBtn}
-          onClick={() => setOffset((o) => o + 1)}
+          onClick={() => {
+            setSelectionHandoff(null);
+            setOffset((o) => o + 1);
+          }}
         >
           <ChevronRight className="size-4" />
         </button>
@@ -164,7 +222,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
       {/* The seven day pills. No entrance animation (ADR 0054, decision 4):
           paging swaps the row instantly -- the month label and week range
           carry the week change -- and a same-week day switch is silent chrome.
-          The ONLY thing that moves is the layoutId selection pill, which tweens
+          The ONLY thing that moves is the selection pill, which tweens
           from the old day to the new one. */}
       <ul className="grid grid-cols-7 gap-1">
         {days.map((key, i) => {
@@ -181,17 +239,52 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                 data-day-key={key}
                 data-selected={selected ? "" : undefined}
                 data-today={isToday ? "" : undefined}
-                onClick={() => {
+                onClick={(event) => {
                   // Clicking the already-selected day is a no-op (ADR 0054).
                   if (key === dayKey) return;
+                  const request = ++latestSelectionRequest;
+                  const calendar = event.currentTarget.closest("nav");
                   const ctx = getCtx();
                   // Seed-free get-or-create (the date-chip semantics, ADR
                   // 0038/0041: no seeded entry line, no ?focus=last), but a
-                  // PLAIN navigation (`morph: false`) -- the layoutId pill IS
+                  // PLAIN navigation (`morph: false`) -- the selection pill IS
                   // the transition, so a zoom morph would stack a redundant
                   // title pop-in over it (ADR 0054).
                   ctx.run(
-                    Effect.promise(() => goToDate(key, ctx, { morph: false })),
+                    Effect.promise(async () => {
+                      const dayId = await getOrCreateDay(key, {
+                        failureToast: "Couldn't open that daily note",
+                      });
+                      // Latest click wins. Also drop a late continuation when
+                      // another navigation already detached this calendar.
+                      if (
+                        !dayId ||
+                        request !== latestSelectionRequest ||
+                        !calendar?.isConnected
+                      ) {
+                        return;
+                      }
+                      const paintedSelection =
+                        calendar.querySelector<HTMLElement>(
+                          '[data-testid="week-calendar-selection"]',
+                        );
+                      const destinationButton =
+                        calendar.querySelector<HTMLElement>(
+                          `[data-day-key="${key}"]`,
+                        );
+                      pendingSelectionHandoff =
+                        !reduceMotion && paintedSelection && destinationButton
+                          ? {
+                              dayKey: key,
+                              // Measure at commit time, after any resize or
+                              // in-flight prior tween, not at click time.
+                              x:
+                                paintedSelection.getBoundingClientRect().left -
+                                destinationButton.getBoundingClientRect().left,
+                            }
+                          : null;
+                      ctx.nav.open(dayId);
+                    }),
                   );
                 }}
                 className={cn(
@@ -203,26 +296,26 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
-                {/* The selection highlight (motion layoutId): it slides from the
-                    old day to the new one on a day switch, and snaps under
+                {/* The selection highlight: it slides by the captured x delta
+                    from the old day to the new one, and snaps under
                     reduced motion. A tween on the house curve (the same
                     cubic-bezier the zoom morph uses in styles.css), not a spring
                     -- dotflowy doesn't use springs, and the underdamped spring
                     overshot. This pill is the sole moving element in the strip. */}
                 {selected ? (
-                  reduceMotion ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden"
-                    />
-                  ) : (
-                    <motion.span
-                      aria-hidden="true"
-                      layoutId="week-calendar-selected"
-                      className="absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden"
-                      transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
-                    />
-                  )
+                  <span
+                    ref={selectionRef}
+                    aria-hidden="true"
+                    data-testid="week-calendar-selection"
+                    style={selectionStyle}
+                    className={cn(
+                      "absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden",
+                      !reduceMotion &&
+                        selectionInitialX !== 0 &&
+                        "week-calendar-selection-slide",
+                    )}
+                    onAnimationEnd={() => setSelectionHandoff(null)}
+                  />
                 ) : null}
                 <span className="relative text-[0.6rem] leading-none opacity-70 group-data-[external-drop-active]:text-foreground!">
                   {WEEKDAY_INITIALS[weekStart][i]}

@@ -2,7 +2,6 @@ import { motion, useReducedMotion } from "motion/react";
 import {
   Fragment,
   useCallback,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -30,41 +29,18 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
   const reduceMotion = useReducedMotion();
   const contentRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const [height, setHeight] = useState(0);
-  // The band mounts with `open=false, height=0`, then the layout effects below
-  // measure and flip it to full height in the SAME pre-paint commit. Without
-  // this guard that flip animates 0->full every time the editor remounts (a day
-  // switch remounts the whole editor, subheader included) — the band visibly
-  // "reopens" and shoves the outline down. So: SNAP on the initial mount (paint
-  // the measured height with no animation), and only animate open/close changes
-  // that happen AFTER first paint — e.g. the `?q=` filter bar appearing while
-  // the user stays on a page. A ref (not state) is right because the value is
-  // only read at the NEXT render, which a real open/close change already triggers.
-  //
-  // Why NOT a bare mount `useEffect(() => { ref = true }, [])`: it flips too
-  // early. `measure()` runs in a `useLayoutEffect` and calls `setOpen`/
-  // `setHeight`, which schedules a SYNCHRONOUS re-render — and React flushes any
-  // PENDING PASSIVE EFFECTS before that re-render begins. So the mount's passive
-  // effect body runs BEFORE the height-setting render, the guard is already true
-  // when `animate` changes to the measured height, and the band eases 0->full on
-  // the SUBHEADER_EXPAND_MS curve — the exact bug we're killing. A double
-  // `requestAnimationFrame` genuinely defers the flip past the first painted
-  // frame (a single rAF can fire before paint completes in some engines), so the
-  // mount's measure-and-snap has landed opaque before the guard opens.
-  const hasPaintedRef = useRef(false);
-  useEffect(() => {
-    let inner = 0;
-    const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() => {
-        hasPaintedRef.current = true;
-      });
-    });
-    return () => {
-      cancelAnimationFrame(outer);
-      cancelAnimationFrame(inner);
-    };
-  }, []);
+  const [{ open, height, measured, snapOpen }, setBand] = useState({
+    open: false,
+    height: 0,
+    measured: false,
+    snapOpen: false,
+  });
+  const openRef = useRef(false);
+  // The band initially uses its natural document height until the layout effects
+  // below measure it. That prevents a forced 0px frame whenever the editor (and
+  // this subheader) remounts during a day switch. Once measured, later open/close
+  // changes animate normally. Mount-time plugin chrome can explicitly keep the
+  // first measured frame snapped with `data-subheader-snap-open`.
 
   // Kept as useCallback (not redundant despite React Compiler): it's a
   // dependency of the useLayoutEffects below, so oxlint's exhaustive-deps gate
@@ -75,10 +51,24 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
     const shell = shellRef.current;
     if (!content || !shell) return;
     const has = content.childElementCount > 0;
-    setOpen(has);
+    const shouldSnapOpen = Boolean(
+      has &&
+      !openRef.current &&
+      content.querySelector("[data-subheader-snap-open]"),
+    );
+    openRef.current = has;
     // offsetHeight on the bordered shell — scrollHeight on the inner row
     // clipped the bottom border under overflow-hidden.
-    setHeight(has ? shell.offsetHeight : 0);
+    const nextHeight = has ? shell.offsetHeight : 0;
+    setBand((current) => ({
+      open: has,
+      height: nextHeight,
+      measured: true,
+      // Keep the snap through repeated observer measurements until it has
+      // painted; publishing these fields atomically prevents Motion from
+      // observing an intermediate open=true/snap=false render.
+      snapOpen: shouldSnapOpen || (has && current.snapOpen),
+    }));
   }, []);
 
   useLayoutEffect(() => {
@@ -105,15 +95,20 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
     <motion.div
       initial={false}
       animate={
-        reduceMotion
-          ? { height: open ? "auto" : 0 }
-          : { height: open ? height : 0, opacity: open ? 1 : 0 }
+        !measured
+          ? undefined
+          : reduceMotion
+            ? { height: open ? "auto" : 0 }
+            : { height: open ? height : 0, opacity: open ? 1 : 0 }
       }
       transition={
-        hasPaintedRef.current
+        !snapOpen
           ? { duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }
           : { duration: 0 }
       }
+      onAnimationComplete={() => {
+        if (snapOpen) setBand((current) => ({ ...current, snapOpen: false }));
+      }}
       className="overflow-hidden bg-background"
       aria-hidden={!open}
     >

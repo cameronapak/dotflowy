@@ -365,6 +365,29 @@ h2 span.protection-indicator {
   }
 }
 
+/* Daily note day-to-day handoff (ADR 0054). The keyed editor remount means a
+   shared-layout animation also absorbs window scroll restoration into y/scale.
+   This destination pill animates only the captured horizontal delta. */
+@keyframes week-calendar-selection-slide {
+  from {
+    transform: translateX(var(--week-calendar-selection-x));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.week-calendar-selection-slide {
+  animation: week-calendar-selection-slide 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .week-calendar-selection-slide {
+    animation: none;
+    transform: none;
+  }
+}
+
 /*
  * Spotlight focus mode (ADR 0033). `spotlight-on` on <body> = mode enabled; the
  * dim itself is PURE CSS. While a bullet caret is focused (`:has(.node-text:
