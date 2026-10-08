@@ -44,6 +44,32 @@ test("scrubs note text, credentials, and query strings from a request event and 
   ]);
 });
 
+test("scrubs independently optional request and breadcrumb fields", () => {
+  const breadcrumbOnly = {
+    breadcrumbs: [{ data: { to: "/outline?q=private%20note" } }],
+  };
+  scrubSentryEvent(breadcrumbOnly);
+  expect(breadcrumbOnly.breadcrumbs).toEqual([{ data: { to: "/outline" } }]);
+
+  const requestWithoutUrl = {
+    request: {
+      data: { text: "private note" },
+      cookies: "session=abc",
+      query_string: "q=private",
+      headers: {
+        authorization: "Bearer x",
+        referer: "https://app.dotflowy.com/?q=private",
+        "user-agent": "test",
+      },
+    },
+  };
+  scrubSentryEvent(requestWithoutUrl);
+  // SAFETY: widened only so toEqual can compare against a plain literal.
+  expect(requestWithoutUrl.request as unknown).toEqual({
+    headers: { "user-agent": "test" },
+  });
+});
+
 test("leaves a query-free url alone and no-ops on an event with nothing to scrub", () => {
   const clean = { request: { url: "https://app.dotflowy.com/abc" } };
   scrubSentryEvent(clean);

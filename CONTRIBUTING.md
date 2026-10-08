@@ -215,11 +215,13 @@ browser.
   `Meta+`.
 - Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
   `waitForTimeout`.
-- **e2e does not run in CI.** It is a local pre-PR gate. `--workers=2` is the
-  clean-signal full run; `bun run test:e2e:serial` is the run for chasing a
-  flake. A parallel-contention flake isn't a real failure. e2e runs its own
-  Vite server on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set
-  the Selection range directly. `toHaveText` normalizes whitespace.
+- **e2e does not run in CI.** It is a local pre-PR gate.
+  `bun run test:e2e:app --workers=2` is the clean-signal app-only run;
+  `bun run test:e2e` also runs the isolated real-Worker suites. Use
+  `bun run test:e2e:serial` when chasing a flake. A
+  parallel-contention flake isn't a real failure. The app suite runs its own Vite
+  server on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set the
+  Selection range directly. `toHaveText` normalizes whitespace.
 
 ### Keep test seams out of production
 
@@ -235,8 +237,9 @@ A test that was valuable when written is not valuable forever. When asked to
 prune or tighten tests:
 
 1. Read each test in scope against every rule in this section.
-2. Delete a test that breaks a rule, or merge it into the workflow test that
-   already covers its behavior. Move an e2e case that only exercises logic down
+2. Rewrite or move a test that breaks a rule while preserving distinct reachable
+   setups. Delete it only when another test provides equivalent coverage or the
+   path is no longer reachable. Move an e2e case that only exercises logic down
    to `bun test`. Delete a test that only checked work in progress, such as one
    proving a removed feature is gone.
 3. Run `bun run test`, plus each e2e spec you changed.
@@ -244,8 +247,8 @@ prune or tighten tests:
 The pass is done when every remaining test satisfies every rule, the PR
 description lists what you deleted, consolidated, and kept (each deletion names
 the rule it broke; each kept test that looks borderline says why it stays), and
-the gates are green. Expect the diff to remove more lines than it adds. Lunora retirement
-tests leave with their modules
+the gates are green. Line reduction is not a completion criterion. Lunora
+retirement tests leave with their modules
 ([ADR 0061](./docs/adr/0061-retire-lunora-through-per-user-cutover.md)), not in
 a pruning pass.
 
@@ -261,7 +264,7 @@ bun run typecheck       # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run test            # bun test — pure-logic unit tests (src + worker/)
-bun run test:e2e        # playwright (chromium) — behavior/integration
+bun run test:e2e        # playwright (chromium) — app plus isolated real-Worker suites
 bunx changeset          # describe your change for the changelog (see below)
 bun run check:changeset # verify the committed branch carries that decision
 ```
@@ -283,7 +286,7 @@ lint through `bun run lint`; `lint:cli` is the focused local command.
 
 | Surface | Additional checks                                                                                                       | Runtime or fixtures                                                                                                                                                                                                 |
 | ------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Editor  | `bun run test:e2e e2e/<name>.spec.ts --workers=1`                                                                       | Playwright starts its own Vite development server on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                          |
+| Editor  | `bun run test:e2e:app e2e/<name>.spec.ts --workers=1`                                                                   | Playwright starts its own Vite development server on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                          |
 | CLI     | `bun run lint:cli`, `bun run build:cli`, `bun run typecheck:cli`, `bun run test:cli`, `bun run --cwd cli check:package` | Install `cli/` dependencies first with `bun install --cwd cli --frozen-lockfile`. Tests run the Node executable against loopback fixtures. The [live test](./cli/README.md#development-and-verification) is opt-in. |
 | Landing | `bun run --cwd landing typecheck`, `bun run --cwd landing build`                                                        | Install `landing/` dependencies first. Inspect the rendered change at desktop and mobile widths.                                                                                                                    |
 
