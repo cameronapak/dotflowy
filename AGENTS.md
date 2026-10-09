@@ -51,7 +51,7 @@ Plugin, seam, token, or kit UI: read [`docs/plugins.md`](./docs/plugins.md).
 
 ## Testing
 
-Testing or coverage: read [`CONTRIBUTING.md`](./CONTRIBUTING.md). **A perf guard asserts a countable invariant.**
+Writing, reviewing, or pruning a test: read [`CONTRIBUTING.md#testing`](./CONTRIBUTING.md#testing). **A perf guard asserts a countable invariant.**
 
 ## Effect
 

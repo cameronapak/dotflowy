@@ -123,24 +123,6 @@ describe("planJoinPrevious — refusals", () => {
     });
   });
 
-  test("no-target: the zoom ROOT itself has no row above it", () => {
-    // The root is prepended to the walk sequence, so it is index 0 -- there is
-    // nothing above the title. (Its first child, by contrast, joins INTO it.)
-    const leafRoot = buildTreeIndex([
-      createNode({ id: "R", prevSiblingId: null, text: "root" }),
-      createNode({ id: "r1", parentId: "R", prevSiblingId: null, text: "kid" }),
-    ]);
-    expect(
-      planJoinPrevious(leafRoot, "r1", "R", show, null, false),
-    ).toMatchObject({ kind: "join", targetKey: "R" });
-    // The root row would refuse on has-children first; a childless root can't be
-    // a zoom root, so no-target above the title is unreachable by construction.
-    expect(planJoinPrevious(leafRoot, "R", "R", show, null, false)).toEqual({
-      kind: "refuse",
-      reason: "has-children",
-    });
-  });
-
   test("no-target: an unknown row key", () => {
     expect(planJoinPrevious(index, "ghost", null, show, null, false)).toEqual({
       kind: "refuse",

@@ -162,6 +162,96 @@ row. An operator-comped user is a hand-inserted active row with no Stripe ids.
 Keep the founding seat cap in `getCheckoutSessionParams` at checkout-creation
 time. Webhooks and `subscription.list()` resolve plans from that same list.
 
+## Testing
+
+A test earns its place by catching a regression nothing cheaper would catch.
+More green checks are not more confidence: every test costs run time and edit
+time. Write fewer, longer tests. While you build, write whatever tests check
+your work; a later pruning pass decides which ones stay. These rules adapt Kent C. Dodds'
+[testing principles](https://github.com/kentcdodds/kody/blob/main/docs/contributing/testing-principles.md).
+
+### Pick the lightest flavor that can falsify the behavior
+
+| Flavor                              | Use it for                                                                                                                 | Command            |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Unit, `*.test.ts` beside its module | Pure logic: `tree.ts`, parsers, tokens, the Worker planners and schemas.                                                   | `bun run test`     |
+| CLI, `cli/test/`                    | The built executable against loopback fixtures.                                                                            | `bun run test:cli` |
+| Playwright, `e2e/*.spec.ts`         | A few user-critical journeys, and behavior only a real browser shows: caret, contentEditable, layout, the collection path. | `bun run test:e2e` |
+
+Unit tests reach pure functions; the DOM path belongs to Playwright, because a
+mocked DOM proves only the mock. When an e2e case is really exercising a parser
+or planner, test that function in `bun test` and keep only the journey in the
+browser.
+
+### Write each test as one workflow
+
+- **One test is one workflow**: setup, actions, then every assertion that
+  proves it. Read it like a manual tester's script.
+- Write flat top-level `test(...)` calls with the setup inline, so each test
+  reads top to bottom on its own. For many input-output pairs of one function,
+  use one table test (`test.each`).
+- **Every assertion needs an independent oracle**: a literal, or a value you
+  derive by hand. An expected value from the code under test, an exported
+  constant, or a copy of the production helper agrees with the bug. Write
+  `NOW - 30 * DAY_MS`, not `NOW - RESTORE_WINDOW_MS`.
+- **One behavior, one home.** Test it beside the module that owns it. A
+  re-export inherits its source's tests.
+- Assert on what callers and users rely on. Copy, error message wording,
+  styling, animation timing, and facts the type checker enforces stay unpinned.
+- Test paths a caller can reach. An edge case or fallback that no input can
+  trigger stays untested.
+- An absence assertion runs on a path that can still show the thing: empty
+  versus populated, admin versus user.
+- **A perf guard asserts a countable invariant**, such as a render or
+  registration count, never a wall clock.
+
+### Hold Playwright to a high bar
+
+- Grow an existing journey before you add a spec. Add a spec only when the flow
+  is user-critical and no faster test can cover it.
+- A bug fix gets its regression test at the lowest layer that reproduces it.
+- Locate by role or label (`getByRole`, `getByLabel`); reach for a CSS locator
+  only when no accessible one exists. Press `ControlOrMeta+…`, never a bare
+  `Meta+`.
+- Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
+  `waitForTimeout`.
+- **e2e does not run in CI.** It is a local pre-PR gate.
+  `bun run test:e2e:app --workers=2` is the clean-signal app-only run;
+  `bun run test:e2e` also runs the isolated real-Worker suites. Use
+  `bun run test:e2e:serial` when chasing a flake. A
+  parallel-contention flake isn't a real failure. The app suite runs its own Vite
+  server on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set the
+  Selection range directly. `toHaveText` normalizes whitespace.
+
+### Keep test seams out of production
+
+Ask: would production keep this code if every test were deleted? If not, it
+belongs in the test file or `e2e/fixtures.ts`. Reach behavior through public
+interfaces, the Effect `TestClock`, and fixture route mocks. Known debt: the
+quick-add resolve gate (`src/components/quick-add.tsx`) and `setClock` in
+`worker/mcp-tools.ts`.
+
+### Prune
+
+A test that was valuable when written is not valuable forever. When asked to
+prune or tighten tests:
+
+1. Read each test in scope against every rule in this section.
+2. Rewrite or move a test that breaks a rule while preserving distinct reachable
+   setups. Delete it only when another test provides equivalent coverage or the
+   path is no longer reachable. Move an e2e case that only exercises logic down
+   to `bun test`. Delete a test that only checked work in progress, such as one
+   proving a removed feature is gone.
+3. Run `bun run test`, plus each e2e spec you changed.
+
+The pass is done when every remaining test satisfies every rule, the PR
+description lists what you deleted, consolidated, and kept (each deletion names
+the rule it broke; each kept test that looks borderline says why it stays), and
+the gates are green. Line reduction is not a completion criterion. Lunora
+retirement tests leave with their modules
+([ADR 0061](./docs/adr/0061-retire-lunora-through-per-user-cutover.md)), not in
+a pruning pass.
+
 ## Before you open a PR
 
 Run the full gate. These mirror CI — except `bun run test:e2e`, which is
@@ -174,7 +264,7 @@ bun run typecheck       # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run test            # bun test — pure-logic unit tests (src + worker/)
-bun run test:e2e        # playwright (chromium) — behavior/integration
+bun run test:e2e        # playwright (chromium) — app plus isolated real-Worker suites
 bunx changeset          # describe your change for the changelog (see below)
 bun run check:changeset # verify the committed branch carries that decision
 ```
@@ -196,7 +286,7 @@ lint through `bun run lint`; `lint:cli` is the focused local command.
 
 | Surface | Additional checks                                                                                                       | Runtime or fixtures                                                                                                                                                                                                 |
 | ------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Editor  | `bun run test:e2e e2e/<name>.spec.ts --workers=1`                                                                       | Playwright starts its own Vite development server on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                          |
+| Editor  | `bun run test:e2e:app e2e/<name>.spec.ts --workers=1`                                                                   | Playwright starts its own Vite development server on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                          |
 | CLI     | `bun run lint:cli`, `bun run build:cli`, `bun run typecheck:cli`, `bun run test:cli`, `bun run --cwd cli check:package` | Install `cli/` dependencies first with `bun install --cwd cli --frozen-lockfile`. Tests run the Node executable against loopback fixtures. The [live test](./cli/README.md#development-and-verification) is opt-in. |
 | Landing | `bun run --cwd landing typecheck`, `bun run --cwd landing build`                                                        | Install `landing/` dependencies first. Inspect the rendered change at desktop and mobile widths.                                                                                                                    |
 
@@ -230,18 +320,6 @@ Rules of thumb:
   maintains the release PR; merging that PR approves publication. See
   [ADR 0062](./docs/adr/0062-automated-cli-releases.md).
 
-- **Unit tests (`bun test`) cover pure logic only** — `tree.ts`, `tags.ts`,
-  `links.ts`, the Worker planners/schemas. Editor behavior (caret, contentEditable,
-  the collection/DO path) stays in **Playwright** (`e2e/`). Don't unit-test the
-  DOM path; you'd just be mocking the world.
-- **Chasing a flake? `bun run test:e2e:serial`** (`--workers=1`) is the
-  maximum-determinism local run; `--workers=2` is the clean-signal full run
-  before a PR. **e2e does not run in CI** — Playwright is a local pre-PR gate,
-  so running it here is what stands in for a CI check. A parallel-contention
-  flake isn't a real failure. e2e runs on its own Vite server on port 3210;
-  kill a zombie or set `E2E_PORT`. For a caret, set the Selection range
-  directly. `toHaveText` normalizes whitespace. **A perf guard asserts a
-  countable invariant**, never a wall clock.
 - **react-doctor is an occasional manual audit, not a gate** — its accepted
   editor false-positives (the deliberately kept manual memos) are known noise
   on every run, so it stays out of the recurring validation set.

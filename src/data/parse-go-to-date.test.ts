@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  dayKeyToWeekKey,
-  formatDateFull,
-  resolvePeriod,
-  shiftMonthKey,
-} from "./date-links";
+import type { PeriodQualifier, PeriodUnit } from "./date-links";
+
 import {
   goToDateLabel,
   parseDatePickerQuery,
@@ -17,173 +13,143 @@ import {
   pickerDateSuggestions,
 } from "./parse-go-to-date";
 
-/** Fixed noon local Saturday 2026-07-25 — weekdays/relatives stay stable. */
+/** Fixed noon local Saturday 2026-07-25 (Monday-start week Jul 20 to Jul 26,
+ *  Sunday-start week Jul 19 to Jul 25), so weekdays and relatives stay stable. */
 const NOW = new Date(2026, 6, 25, 12);
-const TODAY = "2026-07-25";
 
 describe("parseGoToDateQuery", () => {
   test("ISO fast-path", () => {
-    const hit = parseGoToDateQuery("2026-08-12", NOW);
-    expect(hit?.key).toBe("2026-08-12");
-    expect(hit?.kind).toBe("day");
-    expect(hit?.label).toMatch(/^Go to /);
-    expect(hit?.label).toContain("2026");
-    expect(hit?.label).toContain("12");
+    expect(parseGoToDateQuery("2026-08-12", NOW)).toEqual({
+      key: "2026-08-12",
+      kind: "day",
+      label: "Go to Wednesday, August 12, 2026",
+    });
   });
 
-  test("rejects invalid ISO calendar days", () => {
-    expect(parseGoToDateQuery("2026-13-45", NOW)).toBeNull();
+  test.each([
+    // Prose absolute dates.
+    ["August 12th", "2026-08-12"],
+    ["Aug 12", "2026-08-12"],
+    ["August 12 2026", "2026-08-12"],
+    // Relatives, with prefixes.
+    ["today", "2026-07-25"],
+    ["to", "2026-07-25"],
+    ["tomorrow", "2026-07-26"],
+    ["tom", "2026-07-26"],
+    ["yesterday", "2026-07-24"],
+    ["next Monday", "2026-07-27"],
+    ["in 2 weeks", "2026-08-08"],
+    ["last Friday", "2026-07-24"],
+    // Owned weekday stems fill chrono gaps (upcoming Thursday is Jul 30).
+    ["thurs", "2026-07-30"],
+    ["thursd", "2026-07-30"],
+    ["thursda", "2026-07-30"],
+    ["mond", "2026-07-27"],
+    ["next thurs", "2026-07-30"],
+    ["last fri", "2026-07-24"],
+    // A bare weekday prefers the upcoming day (forwardDate).
+    ["Friday", "2026-07-31"],
+  ])("%p -> %s", (query, key) => {
+    expect(parseGoToDateQuery(query, NOW)?.key).toBe(key);
   });
 
-  test("prose absolute dates", () => {
-    expect(parseGoToDateQuery("August 12th", NOW)?.key).toBe("2026-08-12");
-    expect(parseGoToDateQuery("Aug 12", NOW)?.key).toBe("2026-08-12");
-    expect(parseGoToDateQuery("August 12 2026", NOW)?.key).toBe("2026-08-12");
-  });
-
-  test("relatives and weekdays", () => {
-    expect(parseGoToDateQuery("today", NOW)?.key).toBe("2026-07-25");
-    expect(parseGoToDateQuery("to", NOW)?.key).toBe("2026-07-25"); // prefix
-    expect(parseGoToDateQuery("tomorrow", NOW)?.key).toBe("2026-07-26");
-    expect(parseGoToDateQuery("tom", NOW)?.key).toBe("2026-07-26");
-    expect(parseGoToDateQuery("yesterday", NOW)?.key).toBe("2026-07-24");
-    expect(parseGoToDateQuery("next Monday", NOW)?.key).toBe("2026-07-27");
-    expect(parseGoToDateQuery("in 2 weeks", NOW)?.key).toBe("2026-08-08");
-    expect(parseGoToDateQuery("last Friday", NOW)?.key).toBe("2026-07-24");
-  });
-
-  test("owned weekday stems fill chrono gaps", () => {
-    // Sat Jul 25 → upcoming Thursday = Jul 30
-    expect(parseGoToDateQuery("thurs", NOW)?.key).toBe("2026-07-30");
-    expect(parseGoToDateQuery("thursd", NOW)?.key).toBe("2026-07-30");
-    expect(parseGoToDateQuery("thursda", NOW)?.key).toBe("2026-07-30");
-    expect(parseGoToDateQuery("mond", NOW)?.key).toBe("2026-07-27");
-    expect(parseGoToDateQuery("next thurs", NOW)?.key).toBe("2026-07-30");
-    expect(parseGoToDateQuery("last fri", NOW)?.key).toBe("2026-07-24");
-  });
-
-  test("bare weekday prefers the upcoming day (forwardDate)", () => {
-    // Sat Jul 25 → next Friday is Jul 31
-    expect(parseGoToDateQuery("Friday", NOW)?.key).toBe("2026-07-31");
-  });
-
-  test("period phrases navigate ISO scaffold (not chrono mid-week day)", () => {
-    const nextWeek = resolvePeriod("next", "week", TODAY)!;
-    const hit = parseGoToDateQuery("next week", NOW);
-    expect(hit?.kind).toBe("week");
-    expect(hit?.key).toBe(nextWeek.scaffoldKey);
-    expect(hit?.label).toBe("Go to Next week");
-
-    const lastMonth = resolvePeriod("last", "month", TODAY)!;
+  test("period phrases navigate the Calendar scaffold, not chrono's mid-week day", () => {
+    expect(parseGoToDateQuery("next week", NOW)).toEqual({
+      key: "week:2026-07-27",
+      kind: "week",
+      label: "Go to Next week",
+    });
+    expect(parseGoToDateQuery("last week", NOW)?.key).toBe("week:2026-07-13");
+    // The configured week start decides which week is next.
+    expect(parseGoToDateQuery("next week", NOW, "sunday")?.key).toBe(
+      "week:2026-07-26",
+    );
     expect(parseGoToDateQuery("last month", NOW)).toEqual({
-      key: lastMonth.scaffoldKey,
+      key: "2026-06",
       kind: "month",
       label: "Go to Last month",
     });
-
-    const nextYear = resolvePeriod("next", "year", TODAY)!;
-    expect(parseGoToDateQuery("next year", NOW)?.key).toBe(
-      nextYear.scaffoldKey,
-    );
+    expect(parseGoToDateQuery("next year", NOW)?.key).toBe("2027");
   });
 
-  test("rejects non-date prose and short junk", () => {
-    expect(parseGoToDateQuery("project alpha", NOW)).toBeNull();
-    expect(parseGoToDateQuery("a", NOW)).toBeNull();
-    expect(parseGoToDateQuery("", NOW)).toBeNull();
-  });
-
-  test("rejects a date buried in longer prose", () => {
-    expect(parseGoToDateQuery("meet on August 12th please", NOW)).toBeNull();
+  test.each([
+    "2026-13-45", // invalid ISO calendar day
+    "project alpha",
+    "a",
+    "",
+    "meet on August 12th please", // a date buried in longer prose
+  ])("rejects %p", (query) => {
+    expect(parseGoToDateQuery(query, NOW)).toBeNull();
   });
 });
 
-describe("periodCatalogUnits / catalog trio", () => {
-  test("requires full word next/last — bare ne is quiet", () => {
-    expect(periodCatalogUnits("ne")).toBeNull();
-    expect(periodCatalogUnits("la")).toBeNull();
-    expect(periodCatalogUnits("nex")).toBeNull();
-  });
-
-  test("next / next  / last open the full trio", () => {
-    expect(periodCatalogUnits("next")?.units).toEqual([
-      "week",
-      "month",
-      "year",
-    ]);
-    expect(periodCatalogUnits("next ")?.units).toEqual([
-      "week",
-      "month",
-      "year",
-    ]);
-    expect(periodCatalogUnits("last")?.qualifier).toBe("last");
-  });
-
-  test("typed suffix filters the trio", () => {
-    expect(periodCatalogUnits("next w")?.units).toEqual(["week"]);
-    expect(periodCatalogUnits("next we")?.units).toEqual(["week"]);
-    expect(periodCatalogUnits("last m")?.units).toEqual(["month"]);
-    expect(periodCatalogUnits("next y")?.units).toEqual(["year"]);
-    expect(periodCatalogUnits("next friday")).toBeNull();
-  });
-
-  test("Cmd+K catalog returns up to three scaffold hits", () => {
-    const hits = parseGoToDateTargets("next", NOW);
-    expect(hits).toHaveLength(3);
-    expect(hits.map((h) => h.kind)).toEqual(["week", "month", "year"]);
-    expect(hits.every((h) => h.label.startsWith("Go to Next "))).toBe(true);
-  });
-
-  test("[[ catalog returns period-start day keys with labels", () => {
-    const hits = parseDatePickerTargets("next", NOW);
-    expect(hits).toHaveLength(3);
-    const week = resolvePeriod("next", "week", TODAY)!;
-    const month = resolvePeriod("next", "month", TODAY)!;
-    const year = resolvePeriod("next", "year", TODAY)!;
-    expect(hits[0]).toEqual({
-      key: week.periodStartDay,
-      label: "Next week",
-    });
-    expect(hits[1]?.key).toBe(month.periodStartDay);
-    expect(hits[2]?.key).toBe(year.periodStartDay);
-    // Period-start is Monday / 1st / Jan 1 — not chrono's mid-week day.
-    expect(hits[0]?.key).toBe(
-      // next week's Monday
-      week.periodStartDay,
-    );
-    expect(dayKeyToWeekKey(hits[0]!.key)).toBe(week.scaffoldKey);
-    expect(hits[1]?.key.endsWith("-01")).toBe(true);
-    expect(hits[2]?.key).toBe(`${year.scaffoldKey}-01-01`);
-  });
+test.each<[string, { qualifier: PeriodQualifier; units: PeriodUnit[] } | null]>(
+  [
+    // Requires the full word next/last: a bare "ne" stays quiet.
+    ["ne", null],
+    ["la", null],
+    ["nex", null],
+    ["next", { qualifier: "next", units: ["week", "month", "year"] }],
+    ["next ", { qualifier: "next", units: ["week", "month", "year"] }],
+    ["last", { qualifier: "last", units: ["week", "month", "year"] }],
+    // A typed suffix filters the trio.
+    ["next w", { qualifier: "next", units: ["week"] }],
+    ["next we", { qualifier: "next", units: ["week"] }],
+    ["last m", { qualifier: "last", units: ["month"] }],
+    ["next y", { qualifier: "next", units: ["year"] }],
+    ["next friday", null],
+  ],
+)("periodCatalogUnits(%p) -> %p", (query, expected) => {
+  const got = periodCatalogUnits(query);
+  expect(got && { qualifier: got.qualifier, units: got.units }).toEqual(
+    expected,
+  );
 });
 
-describe("pickerDateLabel", () => {
-  test("short for near relatives, formatDateFull otherwise", () => {
-    expect(pickerDateLabel("2026-07-25", "2026-07-25")).toBe("Today");
-    expect(pickerDateLabel("2026-07-26", "2026-07-25")).toBe("Tomorrow");
-    expect(pickerDateLabel("2026-07-24", "2026-07-25")).toBe("Yesterday");
-    expect(pickerDateLabel("2026-01-29", "2026-07-25")).toBe(
-      formatDateFull("2026-01-29"),
-    );
-  });
+test("Cmd+K catalog returns the three scaffold hits", () => {
+  expect(parseGoToDateTargets("next", NOW)).toEqual([
+    { key: "week:2026-07-27", kind: "week", label: "Go to Next week" },
+    { key: "2026-08", kind: "month", label: "Go to Next month" },
+    { key: "2027", kind: "year", label: "Go to Next year" },
+  ]);
 });
 
-describe("goToDateLabel", () => {
-  test("short for near relatives, full otherwise", () => {
-    expect(goToDateLabel("2026-07-25", "2026-07-25")).toBe("Go to Today");
-    expect(goToDateLabel("2026-07-26", "2026-07-25")).toBe("Go to Tomorrow");
-    expect(goToDateLabel("2026-07-24", "2026-07-25")).toBe("Go to Yesterday");
-    expect(goToDateLabel("2026-08-12", "2026-07-25")).toBe(
-      `Go to ${formatDateFull("2026-08-12")}`,
-    );
-  });
+test("[[ catalog returns period-start day keys (week start, the 1st, Jan 1)", () => {
+  expect(parseDatePickerTargets("next", NOW)).toEqual([
+    { key: "2026-07-27", label: "Next week" },
+    { key: "2026-08-01", label: "Next month" },
+    { key: "2027-01-01", label: "Next year" },
+  ]);
+  expect(parseDatePickerTargets("last w", NOW)).toEqual([
+    { key: "2026-07-13", label: "Last week" },
+  ]);
+  expect(parseDatePickerTargets("next w", NOW, "sunday")).toEqual([
+    { key: "2026-07-26", label: "Next week" },
+  ]);
+});
+
+test("pickerDateLabel and goToDateLabel are short near today, full otherwise", () => {
+  const today = "2026-07-25";
+  expect(pickerDateLabel("2026-07-25", today)).toBe("Today");
+  expect(pickerDateLabel("2026-07-26", today)).toBe("Tomorrow");
+  expect(pickerDateLabel("2026-07-24", today)).toBe("Yesterday");
+  expect(pickerDateLabel("2026-01-29", today)).toBe(
+    "Thursday, January 29, 2026",
+  );
+  expect(goToDateLabel("2026-07-25", today)).toBe("Go to Today");
+  expect(goToDateLabel("2026-07-26", today)).toBe("Go to Tomorrow");
+  expect(goToDateLabel("2026-07-24", today)).toBe("Go to Yesterday");
+  expect(goToDateLabel("2026-08-12", today)).toBe(
+    "Go to Wednesday, August 12, 2026",
+  );
 });
 
 describe("parseDatePickerQuery (stricter [[ picker gate)", () => {
   test("ISO and relatives still work", () => {
-    const iso = parseDatePickerQuery("2026-08-12", NOW);
-    expect(iso?.key).toBe("2026-08-12");
-    expect(iso?.label).toBe(formatDateFull("2026-08-12"));
+    expect(parseDatePickerQuery("2026-08-12", NOW)).toEqual({
+      key: "2026-08-12",
+      label: "Wednesday, August 12, 2026",
+    });
     expect(parseDatePickerQuery("tomorrow", NOW)).toEqual({
       key: "2026-07-26",
       label: "Tomorrow",
@@ -191,82 +157,45 @@ describe("parseDatePickerQuery (stricter [[ picker gate)", () => {
     expect(parseDatePickerQuery("tomo", NOW)?.key).toBe("2026-07-26");
   });
 
-  test("calendar-complete chrono (day-of-month or year) is accepted", () => {
-    const april = parseDatePickerQuery("April 22 2026", NOW);
-    expect(april?.key).toBe("2026-04-22");
-    expect(april?.label).toBe(formatDateFull("2026-04-22"));
-    expect(parseDatePickerQuery("Aug 12", NOW)?.key).toBe("2026-08-12");
-    expect(parseDatePickerQuery("April 2026", NOW)?.key).toBe("2026-04-01");
-  });
-
-  test("weekday phrases allowed; bare month still blocked", () => {
-    expect(parseDatePickerQuery("April", NOW)).toBeNull();
-    expect(parseDatePickerQuery("Monday", NOW)?.key).toBe("2026-07-27");
-    expect(parseDatePickerQuery("Friday", NOW)?.key).toBe("2026-07-31");
-    expect(parseDatePickerQuery("next Monday", NOW)?.key).toBe("2026-07-27");
-    expect(parseDatePickerQuery("Thursday", NOW)?.key).toBe("2026-07-30");
-    expect(parseDatePickerQuery("thursd", NOW)?.key).toBe("2026-07-30");
-  });
-
-  test("period → period-start day (not scaffold)", () => {
-    const nextWeek = resolvePeriod("next", "week", TODAY)!;
-    expect(parseDatePickerQuery("next week", NOW)?.key).toBe(
-      nextWeek.periodStartDay,
-    );
-    const nextMonth = resolvePeriod("next", "month", TODAY)!;
-    expect(parseDatePickerQuery("next month", NOW)?.key).toBe(
-      nextMonth.periodStartDay,
-    );
+  test.each([
+    // Calendar-complete chrono (day-of-month or year) is accepted.
+    ["April 22 2026", "2026-04-22"],
+    ["Aug 12", "2026-08-12"],
+    ["April 2026", "2026-04-01"],
+    // Weekday phrases are allowed.
+    ["Monday", "2026-07-27"],
+    ["Friday", "2026-07-31"],
+    ["next Monday", "2026-07-27"],
+    ["Thursday", "2026-07-30"],
+    ["thursd", "2026-07-30"],
+    // A period resolves to its period-start day, not the scaffold key.
+    ["next week", "2026-07-27"],
+    ["next month", "2026-08-01"],
+    // A bare month is still blocked.
+    ["April", undefined],
+  ])("%p -> %p", (query, key) => {
+    expect(parseDatePickerQuery(query, NOW)?.key).toBe(key);
   });
 });
 
-describe("pickerDateSuggestions", () => {
-  test("merges relatives with gated NL and dedupes by key", () => {
-    const tomo = pickerDateSuggestions("tomo", NOW);
-    expect(tomo).toEqual([{ key: "2026-07-26", label: "Tomorrow" }]);
-    const april = pickerDateSuggestions("April 22 2026", NOW);
-    expect(april).toEqual([
-      { key: "2026-04-22", label: formatDateFull("2026-04-22") },
-    ]);
-    const iso = pickerDateSuggestions("2026-01-29", NOW);
-    expect(iso).toEqual([
-      { key: "2026-01-29", label: formatDateFull("2026-01-29") },
-    ]);
-    expect(pickerDateSuggestions("April", NOW)).toEqual([]);
-  });
-
-  test("catalog trio surfaces Next week/month/year", () => {
-    const rows = pickerDateSuggestions("next", NOW);
-    expect(rows.map((r) => r.label)).toEqual([
-      "Next week",
-      "Next month",
-      "Next year",
-    ]);
-  });
-});
-
-describe("resolvePeriod (Calendar-period dual-resolve math)", () => {
-  test("next/last week use the configured start, not mid-week", () => {
-    const thisWeek = dayKeyToWeekKey(TODAY)!;
-    expect(thisWeek).toBe("week:2026-07-20");
-    const next = resolvePeriod("next", "week", TODAY)!;
-    expect(next.scaffoldKey).toBe("week:2026-07-27");
-    expect(next.periodStartDay).toBe("2026-07-27"); // Monday
-    const last = resolvePeriod("last", "week", TODAY)!;
-    expect(last.scaffoldKey).toBe("week:2026-07-13");
-    expect(last.periodStartDay).toBe("2026-07-13");
-
-    const nextSunday = resolvePeriod("next", "week", TODAY, "sunday")!;
-    expect(nextSunday.scaffoldKey).toBe("week:2026-07-26");
-    expect(nextSunday.periodStartDay).toBe("2026-07-26");
-  });
-
-  test("next/last month → 1st; year → Jan 1", () => {
-    const nextM = resolvePeriod("next", "month", TODAY)!;
-    expect(nextM.scaffoldKey).toBe(shiftMonthKey("2026-07", 1)!);
-    expect(nextM.periodStartDay).toBe("2026-08-01");
-    const nextY = resolvePeriod("next", "year", TODAY)!;
-    expect(nextY.scaffoldKey).toBe("2027");
-    expect(nextY.periodStartDay).toBe("2027-01-01");
-  });
+test.each([
+  // Merges relatives with gated NL and dedupes by key.
+  ["tomo", [{ key: "2026-07-26", label: "Tomorrow" }]],
+  [
+    "April 22 2026",
+    [{ key: "2026-04-22", label: "Wednesday, April 22, 2026" }],
+  ],
+  ["2026-01-29", [{ key: "2026-01-29", label: "Thursday, January 29, 2026" }]],
+  ["April", []],
+  // The catalog trio surfaces Next week/month/year.
+  [
+    "next",
+    [
+      { key: "2026-07-27", label: "Next week" },
+      { key: "2026-08-01", label: "Next month" },
+      { key: "2027-01-01", label: "Next year" },
+    ],
+  ],
+])("pickerDateSuggestions(%p)", (query, expected) => {
+  expect(pickerDateSuggestions(query, NOW)).toEqual(expected);
 });

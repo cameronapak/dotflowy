@@ -219,8 +219,8 @@ test("free-account HTTP capture honors explicit date and has decisive idempotenc
     "2024",
     "2024-02",
     "2024-02-29",
-    "2024-W09",
     "container",
+    "week:2024-02-26",
   ]);
 });
 

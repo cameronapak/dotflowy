@@ -6,7 +6,7 @@ This is the operator runbook for [ADR 0061](../adr/0061-retire-lunora-through-pe
 
 Run the isolated checks with `bun run test:e2e:retirement`. They exercise Workerd, SQLite Durable Objects, D1, and R2 without production bindings. They cover sequential cutover, recovery, overlapping request rejection, retained operation claims, CLI batch stopping, Classic-only MCP routing, and rejection of the retired public namespace without changing retained shard data.
 
-Run `bun run test:e2e e2e/lunora-retirement-browser.spec.ts` to confirm that stale enabled preferences, localStorage flags, and URL overrides cannot bypass Classic sync. Settings must not expose the upgraded-sync toggle, edits must survive reload, and the browser must make no `/_lunora` requests.
+Run `bun run test:e2e:app e2e/lunora-retirement-browser.spec.ts` to confirm that stale enabled preferences, localStorage flags, and URL overrides cannot bypass Classic sync. Settings must not expose the upgraded-sync toggle, edits must survive reload, and the browser must make no `/_lunora` requests.
 
 ## Before running
 

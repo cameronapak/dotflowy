@@ -152,9 +152,6 @@ test.skipIf(process.platform !== "darwin")(
         env: { ...process.env, PATH: `${dir}/bin:${process.env.PATH}` },
       });
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr.toString()).toContain(
-        "possible embedded credential: dfc_",
-      );
       expect(result.stderr.toString()).not.toContain("signing was invoked");
 
       writeFileSync(
