@@ -51,6 +51,25 @@ test("scrubs independently optional request and breadcrumb fields", () => {
   scrubSentryEvent(breadcrumbOnly);
   expect(breadcrumbOnly.breadcrumbs).toEqual([{ data: { to: "/outline" } }]);
 
+  const dirtyUrlWithoutHeaders = {
+    request: { url: "https://app.dotflowy.com/outline?q=private%20note" },
+  };
+  scrubSentryEvent(dirtyUrlWithoutHeaders);
+  expect(dirtyUrlWithoutHeaders.request.url).toBe(
+    "https://app.dotflowy.com/outline",
+  );
+
+  const sensitiveFieldsWithoutHeaders = {
+    request: {
+      data: { text: "private note" },
+      cookies: "session=abc",
+      query_string: "q=private",
+    },
+  };
+  scrubSentryEvent(sensitiveFieldsWithoutHeaders);
+  // SAFETY: widened only so toEqual can compare after the scrubber deletes fields.
+  expect(sensitiveFieldsWithoutHeaders.request as unknown).toEqual({});
+
   const requestWithoutUrl = {
     request: {
       data: { text: "private note" },

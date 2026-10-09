@@ -255,6 +255,7 @@ describe("planDeleteNode", () => {
 
     const nodes = [
       ...fixture(),
+      createNode({ id: "a11", text: "alpha child", parentId: "a1" }),
       createNode({
         id: "m",
         text: "alpha one",

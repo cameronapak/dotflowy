@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 const TREE: SeedNode[] = [
   {
@@ -37,7 +37,10 @@ test("stale experimental preferences cannot bypass Classic sync", async ({
     }
   });
 
-  await page.goto("/?lunora-sync=on");
+  await openSeededOutline(page, {
+    path: "/?lunora-sync=on",
+    anchorId: "classic",
+  });
   const text = page.locator(
     'li[data-node-id="classic"] > .outline-row .node-text',
   );
@@ -49,7 +52,10 @@ test("stale experimental preferences cannot bypass Classic sync", async ({
     page.getByRole("switch", { name: "Upgraded outline sync beta" }),
   ).toHaveCount(0);
 
-  await page.goto("/?lunora-sync=on");
+  await openSeededOutline(page, {
+    path: "/?lunora-sync=on",
+    anchorId: "classic",
+  });
   await text.click();
   await text.press("End");
   await page.keyboard.type(" edited");
