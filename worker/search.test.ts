@@ -79,6 +79,9 @@ describe("DQL agent matching", () => {
       "case",
     ]);
     expect(ids(nodes, "is:paragraph")).toEqual(["paragraph"]);
+    expect(
+      searchNodes(buildTreeIndex(nodes), "is:paragraph", 100)[0],
+    ).toMatchObject({ id: "paragraph", kind: "paragraph", isTask: false });
   });
 
   test("AND differs from a phrase; adjacent-term OR, unknown operators, and markup retain app semantics", () => {
