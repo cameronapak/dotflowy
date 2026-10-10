@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { placeCaret, seedOutline, STANDARD_TREE, text } from "./fixtures";
 
 // The mobile actions bar (ADR 0030) is a coarse-pointer, focus-gated toolbar. As
 // in mobile-touch-rows.spec.ts, drive it in a Chromium mobile-emulation context
@@ -11,10 +11,7 @@ import { seedOutline, STANDARD_TREE } from "./fixtures";
 
 const bar = (page: Page) => page.locator("[data-mobile-bar]");
 const btn = (page: Page, label: string) =>
-  page.locator(`[data-mobile-bar] button[aria-label="${label}"]`);
-const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-
+  bar(page).getByRole("button", { name: label, exact: true });
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
   await page.goto("/");
@@ -26,31 +23,7 @@ async function load(page: Page) {
 // enter-split.spec.ts: Home/Arrow keys are unreliable in macOS Chromium
 // contentEditable, and a plain click lands past the text).
 async function caretAt(page: Page, id: string, col: number) {
-  await text(page, id).click();
-  await text(page, id).evaluate((el, target) => {
-    const sel = window.getSelection();
-    if (!sel) return;
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let remaining = target;
-    let node = walker.nextNode();
-    const range = document.createRange();
-    while (node) {
-      const len = node.textContent?.length ?? 0;
-      if (remaining <= len) {
-        range.setStart(node, remaining);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return;
-      }
-      remaining -= len;
-      node = walker.nextNode();
-    }
-    range.selectNodeContents(el);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }, col);
+  await placeCaret(text(page, id), col);
 }
 
 test.describe("mobile actions bar (coarse pointer)", () => {
@@ -253,14 +226,10 @@ test.describe("mobile actions bar (coarse pointer)", () => {
   });
 });
 
-test.describe("mobile actions bar (fine pointer)", () => {
-  test("never mounts on a fine pointer even while editing", async ({
-    page,
-  }) => {
-    await load(page);
-    await text(page, "alpha").click();
-    await expect(text(page, "alpha")).toBeFocused();
-    // Desktop pointer -> the bar is gated out entirely.
-    await expect(bar(page)).toHaveCount(0);
-  });
+test("never mounts on a fine pointer even while editing", async ({ page }) => {
+  await load(page);
+  await text(page, "alpha").click();
+  await expect(text(page, "alpha")).toBeFocused();
+  // Desktop pointer -> the bar is gated out entirely.
+  await expect(bar(page)).toHaveCount(0);
 });

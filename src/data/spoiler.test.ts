@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
 
 import {
-  buildSpoiler,
-  hasSpoiler,
   redactSpoilers,
   SPOILER_PATTERN,
   spoilerInterior,
@@ -23,14 +21,7 @@ test.each([
   expect(runs).toEqual(expected);
 });
 
-test("hasSpoiler is true only with a complete run", () => {
-  expect(hasSpoiler("x ||y|| z")).toBe(true);
-  expect(hasSpoiler("no spoiler here")).toBe(false);
-  expect(hasSpoiler("||unclosed")).toBe(false);
-});
-
-test("buildSpoiler wraps in fences and spoilerInterior strips them", () => {
-  expect(buildSpoiler("secret")).toBe("||secret||");
+test("spoilerInterior strips fences", () => {
   expect(spoilerInterior("||secret||")).toBe("secret");
 });
 

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Registry-driven autocomplete for the summoned `?q=` filter input (ADR 0047
 // §7): empty focus shows the operator cheat sheet, `key:` shows that key's
@@ -22,15 +22,15 @@ const TREE: SeedNode[] = [
 
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"]`);
-const input = (page: Page) => page.locator('[aria-label="Filter query"]');
+const input = (page: Page) =>
+  page.getByRole("combobox", { name: "Filter query" });
 const listbox = (page: Page) => page.locator("[data-filter-suggestions]");
 const option = (page: Page, name: string | RegExp) =>
   listbox(page).getByRole("option", { name });
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(row(page, "milk").first()).toBeVisible();
+  await openSeededOutline(page, { anchorId: "milk" });
 }
 
 async function summon(page: Page) {
@@ -38,130 +38,122 @@ async function summon(page: Page) {
   await expect(input(page)).toBeFocused();
 }
 
-test.describe("filter autocomplete (ADR 0047 §7)", () => {
-  test("empty focus shows the operator cheat sheet", async ({ page }) => {
-    await load(page);
-    await summon(page);
+test("empty focus shows the operator cheat sheet", async ({ page }) => {
+  await load(page);
+  await summon(page);
 
-    await expect(listbox(page)).toBeVisible();
-    // One row per distinct operator key (registry-driven) plus the #tag row.
-    await expect(listbox(page).getByText("is:", { exact: true })).toBeVisible();
-    await expect(
-      listbox(page).getByText("has:", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      listbox(page).getByText("highlight:", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      listbox(page).getByText("#tag", { exact: true }),
-    ).toBeVisible();
-  });
+  await expect(listbox(page)).toBeVisible();
+  // One row per distinct operator key (registry-driven) plus the #tag row.
+  await expect(listbox(page).getByText("is:", { exact: true })).toBeVisible();
+  await expect(listbox(page).getByText("has:", { exact: true })).toBeVisible();
+  await expect(
+    listbox(page).getByText("highlight:", { exact: true }),
+  ).toBeVisible();
+  await expect(listbox(page).getByText("#tag", { exact: true })).toBeVisible();
+});
 
-  test("typing `is:` lists its values incl. todo; click inserts + filters", async ({
-    page,
-  }) => {
-    await load(page);
-    await summon(page);
+test("typing `is:` lists its values incl. todo; click inserts + filters", async ({
+  page,
+}) => {
+  await load(page);
+  await summon(page);
 
-    await input(page).fill("is:");
-    // Values folded from every plugin sharing the `is` key (core + todos + …).
-    await expect(option(page, "is:todo")).toBeVisible();
-    await expect(option(page, "is:complete")).toBeVisible();
+  await input(page).fill("is:");
+  // Values folded from every plugin sharing the `is` key (core + todos + …).
+  await expect(option(page, "is:todo")).toBeVisible();
+  await expect(option(page, "is:complete")).toBeVisible();
 
-    await option(page, "is:todo").click();
+  await option(page, "is:todo").click();
 
-    // Insertion writes the completed term (trailing space) into the input; the
-    // debounced `?q=` write applies the filter.
-    await expect(input(page)).toHaveValue("is:todo ");
-    await expect(page).toHaveURL(/[?&]q=is/);
-    await expect(row(page, "milk").first()).toBeVisible();
-    await expect(row(page, "mom")).toHaveCount(0);
-    await expect(row(page, "ship")).toHaveCount(0);
-  });
+  // Insertion writes the completed term (trailing space) into the input; the
+  // debounced `?q=` write applies the filter.
+  await expect(input(page)).toHaveValue("is:todo ");
+  await expect(page).toHaveURL(/[?&]q=is/);
+  await expect(row(page, "milk").first()).toBeVisible();
+  await expect(row(page, "mom")).toHaveCount(0);
+  await expect(row(page, "ship")).toHaveCount(0);
+});
 
-  test("keyboard: ArrowDown highlights a row, Enter inserts it", async ({
-    page,
-  }) => {
-    await load(page);
-    await page.clock.install();
-    await page.clock.pauseAt(new Date());
-    await page.keyboard.press("ControlOrMeta+f");
-    await page.clock.runFor(32);
-    await expect(input(page)).toBeFocused();
+test("keyboard: ArrowDown highlights a row, Enter inserts it", async ({
+  page,
+}) => {
+  await load(page);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.keyboard.press("ControlOrMeta+f");
+  await page.clock.runFor(32);
+  await expect(input(page)).toBeFocused();
 
-    await input(page).fill("is:");
-    await input(page).press("ArrowDown"); // -> first row (is:todo)
-    await expect(option(page, "is:todo")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+  await input(page).fill("is:");
+  await input(page).press("ArrowDown"); // -> first row (is:todo)
+  await expect(option(page, "is:todo")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 
-    // Settling the initial subheader animation must not clear a choice made
-    // while it was opening. Advance past its deferred popover reveal.
-    await page.clock.runFor(250);
-    await expect(option(page, "is:todo")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+  // Settling the initial subheader animation must not clear a choice made
+  // while it was opening. Advance past its deferred popover reveal.
+  await page.clock.runFor(250);
+  await expect(option(page, "is:todo")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 
-    await input(page).press("Enter"); // an active row -> insert (stays open)
-    await expect(input(page)).toHaveValue("is:todo ");
-    await expect(input(page)).toBeVisible();
-  });
+  await input(page).press("Enter"); // an active row -> insert (stays open)
+  await expect(input(page)).toHaveValue("is:todo ");
+  await expect(input(page)).toBeVisible();
+});
 
-  test("`#` shows seeded tags; picking one filters", async ({ page }) => {
-    await load(page);
-    await summon(page);
+test("`#` shows seeded tags; picking one filters", async ({ page }) => {
+  await load(page);
+  await summon(page);
 
-    await input(page).fill("#");
-    await expect(option(page, "#home")).toBeVisible();
-    await expect(option(page, "#work")).toBeVisible();
+  await input(page).fill("#");
+  await expect(option(page, "#home")).toBeVisible();
+  await expect(option(page, "#work")).toBeVisible();
 
-    await option(page, "#work").click();
+  await option(page, "#work").click();
 
-    await expect(input(page)).toHaveValue("#work ");
-    await expect(page).toHaveURL(/q=%23work/);
-    await expect(row(page, "milk").first()).toBeVisible();
-    await expect(row(page, "ship").first()).toBeVisible();
-    await expect(row(page, "mom")).toHaveCount(0);
-    await expect(row(page, "home")).toHaveCount(0);
-  });
+  await expect(input(page)).toHaveValue("#work ");
+  await expect(page).toHaveURL(/q=%23work/);
+  await expect(row(page, "milk").first()).toBeVisible();
+  await expect(row(page, "ship").first()).toBeVisible();
+  await expect(row(page, "mom")).toHaveCount(0);
+  await expect(row(page, "home")).toHaveCount(0);
+});
 
-  test("`highlight:` offers the bare form + color swatches", async ({
-    page,
-  }) => {
-    await load(page);
-    await summon(page);
+test("`highlight:` offers the bare form + color swatches", async ({ page }) => {
+  await load(page);
+  await summon(page);
 
-    await input(page).fill("highlight:");
-    // The bare (any) form leads, then one swatch-painted value per color.
-    await expect(option(page, "highlight:red")).toBeVisible();
-    await expect(listbox(page).locator('[style*="--tag-red"]')).toBeVisible();
-  });
+  await input(page).fill("highlight:");
+  // The bare (any) form leads, then one swatch-painted value per color.
+  await expect(option(page, "highlight:red")).toBeVisible();
+  await expect(listbox(page).locator('[style*="--tag-red"]')).toBeVisible();
+});
 
-  test("Escape ladder: popover -> clear text -> collapse (ADR 0047 §6)", async ({
-    page,
-  }) => {
-    await load(page);
-    await summon(page);
+test("Escape ladder: popover -> clear text -> collapse (ADR 0047 §6)", async ({
+  page,
+}) => {
+  await load(page);
+  await summon(page);
 
-    await input(page).fill("#work");
-    await expect(listbox(page)).toBeVisible();
+  await input(page).fill("#work");
+  await expect(listbox(page)).toBeVisible();
 
-    // Stage 1: the popover only; the input + query stay.
-    await input(page).press("Escape");
-    await expect(listbox(page)).toHaveCount(0);
-    await expect(input(page)).toBeFocused();
-    await expect(page).toHaveURL(/q=%23work/);
+  // Stage 1: the popover only; the input + query stay.
+  await input(page).press("Escape");
+  await expect(listbox(page)).toHaveCount(0);
+  await expect(input(page)).toBeFocused();
+  await expect(page).toHaveURL(/q=%23work/);
 
-    // Stage 2: clear the text AND the query, keeping focus.
-    await input(page).press("Escape");
-    await expect(input(page)).toHaveValue("");
-    await expect(input(page)).toBeFocused();
-    await expect(page).not.toHaveURL(/q=/);
+  // Stage 2: clear the text AND the query, keeping focus.
+  await input(page).press("Escape");
+  await expect(input(page)).toHaveValue("");
+  await expect(input(page)).toBeFocused();
+  await expect(page).not.toHaveURL(/q=/);
 
-    // Stage 3: collapse the row.
-    await input(page).press("Escape");
-    await expect(input(page)).toHaveCount(0);
-  });
+  // Stage 3: collapse the row.
+  await input(page).press("Escape");
+  await expect(input(page)).toHaveCount(0);
 });

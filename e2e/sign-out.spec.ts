@@ -39,47 +39,45 @@ const hasMarker = (page: Page) =>
     // reload under test, not a failure; report "unknown" and let poll retry.
     .catch(() => null);
 
-test.describe("Sign out (header More menu)", () => {
-  test("a successful sign-out hard-navigates to / (new document, marker gone)", async ({
-    page,
-  }) => {
-    await page.route(
-      (url) => url.pathname === "/api/auth/sign-out",
-      (route) =>
-        route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true }),
-        }),
-    );
-    await load(page);
+test("a successful sign-out hard-navigates to / (new document, marker gone)", async ({
+  page,
+}) => {
+  await page.route(
+    (url) => url.pathname === "/api/auth/sign-out",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      }),
+  );
+  await load(page);
 
-    await clickSignOut(page);
+  await clickSignOut(page);
 
-    // The reload lands back on "/" and the fresh document has no marker — an
-    // SPA-only gate swap would have kept it.
-    await expect.poll(() => hasMarker(page)).toBe(false);
-    await expect(page).toHaveURL("/");
-    // The mocked get-session still answers, so the outline remounts fresh.
-    await expect(text(page, "alpha")).toBeVisible();
-  });
+  // The reload lands back on "/" and the fresh document has no marker — an
+  // SPA-only gate swap would have kept it.
+  await expect.poll(() => hasMarker(page)).toBe(false);
+  await expect(page).toHaveURL("/");
+  // The mocked get-session still answers, so the outline remounts fresh.
+  await expect(text(page, "alpha")).toBeVisible();
+});
 
-  test("a failed sign-out stays put and says so (no silent no-op)", async ({
-    page,
-  }) => {
-    await page.route(
-      (url) => url.pathname === "/api/auth/sign-out",
-      (route) => route.fulfill({ status: 500, body: "nope" }),
-    );
-    await load(page);
+test("a failed sign-out stays put and says so (no silent no-op)", async ({
+  page,
+}) => {
+  await page.route(
+    (url) => url.pathname === "/api/auth/sign-out",
+    (route) => route.fulfill({ status: 500, body: "nope" }),
+  );
+  await load(page);
 
-    await clickSignOut(page);
+  await clickSignOut(page);
 
-    // No navigation: the session cookie is still valid and no teardown ran,
-    // so the editor stays (same document — marker intact) and the failure is
-    // surfaced instead of swallowed.
-    await expect(page.getByText(/sign out failed/i)).toBeVisible();
-    expect(await hasMarker(page)).toBe(true);
-    await expect(text(page, "alpha")).toBeVisible();
-  });
+  // No navigation: the session cookie is still valid and no teardown ran,
+  // so the editor stays (same document — marker intact) and the failure is
+  // surfaced instead of swallowed.
+  await expect(page.getByText(/sign out failed/i)).toBeVisible();
+  expect(await hasMarker(page)).toBe(true);
+  await expect(text(page, "alpha")).toBeVisible();
 });

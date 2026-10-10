@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
@@ -67,12 +66,6 @@ async function settleDrawer(page: Page) {
     );
 }
 
-async function capture(page: Page, name: string) {
-  await mkdir(".amp/in/artifacts", { recursive: true });
-  await settleDrawer(page);
-  await page.screenshot({ path: `.amp/in/artifacts/${name}.png` });
-}
-
 async function swipeDrawer(page: Page) {
   await settleDrawer(page);
   const handle = await drawer(page)
@@ -123,7 +116,6 @@ test.describe("narrow-screen drawers", () => {
     await expect(page.getByRole("option", { name: /Paragraph/ })).toHaveCount(
       0,
     );
-    await capture(page, "mobile-slash-drawer");
     await page.getByRole("option", { name: /To-do/ }).tap();
     await expect(drawer(page)).toHaveCount(0);
     await expect(editor(page)).toBeFocused();
@@ -182,17 +174,6 @@ test.describe("narrow-screen drawers", () => {
         return text.y >= 31 && text.y + text.height < sheet.y;
       })
       .toBe(true);
-    await mkdir(".amp/in/artifacts", { recursive: true });
-    // Capture only the simulated visible band, not the area behind the keyboard.
-    await page.screenshot({
-      path: ".amp/in/artifacts/mobile-keyboard-drawer.png",
-      clip: {
-        x: 0,
-        y: 31,
-        width: 390,
-        height: 260,
-      },
-    });
     const first = page.getByRole("option").first();
     await expect
       .poll(() =>
@@ -242,14 +223,12 @@ test.describe("narrow-screen drawers", () => {
     await page.keyboard.type("#urg");
     await expect(drawer(page)).toBeVisible();
     await expect(editor(page)).toBeFocused();
-    await capture(page, "mobile-tag-drawer");
     await page.locator('[role="option"] .tag-option[data-tag="urgent"]').tap();
     await expect(editor(page).locator('.tag[data-tag="urgent"]')).toBeVisible();
     await expect(drawer(page)).toHaveCount(0);
     await page.keyboard.type(" [[Phoe");
     await expect(drawer(page)).toBeVisible();
     await expect(editor(page)).toBeFocused();
-    await capture(page, "mobile-link-drawer");
     await page.getByRole("option", { name: /Project Phoenix/ }).tap();
     await expect(
       editor(page).locator(`[data-node-link="${TARGET}"]`),
@@ -261,11 +240,13 @@ test.describe("narrow-screen drawers", () => {
   test("daily chrome does not cover the caret in a short keyboard viewport", async ({
     page,
   }) => {
+    const edit = TREE.find((node) => node.id === "edit");
+    if (!edit) throw new Error("Drawer fixture must contain the edit node");
     await seedOutline(
       page,
       [
         ...TREE.slice(0, 2),
-        { ...TREE[2], parentId: "tagged", prevSiblingId: null },
+        { ...edit, parentId: "tagged", prevSiblingId: null },
       ],
       {
         kv: {
@@ -301,10 +282,6 @@ test.describe("narrow-screen drawers", () => {
         return caret.top >= 31 && caret.bottom < bottom && el.contains(hit);
       });
     await expect.poll(caretVisible).toBe(true);
-    await page.screenshot({
-      path: ".amp/in/artifacts/mobile-daily-keyboard-drawer.png",
-      clip: { x: 0, y: 31, width: 390, height: 260 },
-    });
     await expect(editor(page)).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(page.locator("div.sticky").first()).toHaveCSS(
@@ -343,10 +320,6 @@ test.describe("narrow-screen drawers", () => {
         );
       });
     await expect.poll(caretVisible).toBe(true);
-    await page.screenshot({
-      path: ".amp/in/artifacts/mobile-wrapped-quick-add-drawer.png",
-      clip: { x: 0, y: 31, width: 390, height: 260 },
-    });
     await expect(draft).toBeFocused();
     await page.keyboard.press("Backspace");
     await page.keyboard.type("o");
@@ -411,7 +384,6 @@ test.describe("narrow-screen drawers", () => {
       previous === "true" ? "false" : "true",
     );
     await expect(drawer(page)).toBeVisible();
-    await capture(page, "mobile-header-drawer");
     await page.getByRole("menuitem", { name: "Collapse all" }).tap();
     await expect(drawer(page)).toBeHidden();
     await page.setViewportSize({ width: 768, height: 844 });
@@ -433,7 +405,7 @@ test.describe("narrow-screen drawers", () => {
     await page.keyboard.type("Capture /todo");
     await expect(drawer(page)).toBeVisible();
     await expect(draft).toBeFocused();
-    await capture(page, "mobile-quick-add-suggestions");
+    await settleDrawer(page);
     const draftBox = (await draft.boundingBox())!;
     const drawerBox = (await drawer(page).boundingBox())!;
     expect(draftBox.y + draftBox.height).toBeLessThan(drawerBox.y);
@@ -447,15 +419,6 @@ test.describe("narrow-screen drawers", () => {
       })
       .toBe(true);
     await expect(draft).toBeFocused();
-    await page.screenshot({
-      path: ".amp/in/artifacts/mobile-quick-add-keyboard-drawer.png",
-      clip: {
-        x: 0,
-        y: 31,
-        width: 390,
-        height: 260,
-      },
-    });
     await setVisualViewport(page, 844, 0);
     await settleDrawer(page);
     await drawer(page)
@@ -502,7 +465,6 @@ test.describe("narrow-screen drawers", () => {
     await expect(
       drawer(page).getByRole("option", { name: "Project Phoenix" }),
     ).toBeInViewport();
-    await capture(page, "mobile-destination-drawer");
     await drawer(page).getByRole("option", { name: "Project Phoenix" }).tap();
     await expect(drawer(page)).toBeHidden();
     await expect(quickAdd(page)).toBeVisible();
@@ -521,7 +483,6 @@ test.describe("narrow-screen drawers", () => {
     await editor(page).tap();
     await page.keyboard.type("[[2030-06-12");
     await expect(drawer(page)).toBeVisible();
-    await capture(page, "mobile-date-drawer");
     await page.getByRole("option").first().tap();
     await expect(
       editor(page).locator('[data-date-link="2030-06-12"]'),
@@ -615,7 +576,7 @@ test.describe("narrow-screen drawers", () => {
     await expect(drawer(page)).toBeVisible();
     await page.getByTestId("month-picker-next").tap();
     await expect(drawer(page)).toContainText("July 2030");
-    await capture(page, "mobile-calendar-drawer");
+    await settleDrawer(page);
     const day = drawer(page).locator('[data-day-key="2030-07-15"]');
     expect((await day.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await day.tap();

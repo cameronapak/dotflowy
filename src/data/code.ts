@@ -50,11 +50,3 @@ export function stripCodeShielded(
     () => interiors[i++] ?? "",
   );
 }
-
-/** The interior of every inline-code run, in place -- backticks dropped, the
- *  rest kept verbatim; text outside runs untouched. The `stripEmphasis`
- *  projection for code spans, and `stripCodeShielded` with an identity `stripRest`
- *  pass. */
-export function stripCode(text: string): string {
-  return stripCodeShielded(text, (masked) => masked);
-}

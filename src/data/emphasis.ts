@@ -42,14 +42,10 @@ export const STRIKETHROUGH_PATTERN = "~~[^~\\n]+~~";
 export const UNDERLINE_PATTERN = "~[^~\\n]+~";
 
 /** The four patterns as one alternation, in precedence order. Used by
- *  `stripEmphasis` and `hasEmphasis` -- the registry composes its own combined
+ *  `stripEmphasis` -- the registry composes its own combined
  *  regex from the plugin's tokens (with per-token named groups for dispatch),
  *  so this is only for the pure-logic consumers that don't need to know which
- *  kind of run matched.
- *
- *  Built per-call (not a module singleton): a `g`-flagged RegExp carries
- *  `lastIndex` across `.test()` calls, so a shared instance would miss
- *  back-to-back matches. Mirrors `tags.ts`'s pattern. */
+ *  kind of run matched. */
 function anyEmphasisRegex(): RegExp {
   return new RegExp(
     [
@@ -61,11 +57,6 @@ function anyEmphasisRegex(): RegExp {
     ].join("|"),
     "gu",
   );
-}
-
-/** True iff the text contains at least one complete emphasis run. */
-export function hasEmphasis(text: string): boolean {
-  return anyEmphasisRegex().test(text);
 }
 
 /** The interior text of every emphasis run, concatenated in place -- the

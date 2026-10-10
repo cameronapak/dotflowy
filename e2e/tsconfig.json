@@ -1,0 +1,13 @@
+{
+  // Typechecks the Playwright specs and fixtures. e2e does not run in CI, so
+  // this is the CI signal that a spec still compiles against the app it drives.
+  // The real-Worker retirement spec and its entry need workers-types rather
+  // than DOM types. Retained browser retirement and recovery specs are included.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": [".", "../playwright.config.ts", "../src/vite-env.d.ts"],
+  "exclude": ["lunora-retirement-real.spec.ts", "retirement-worker.ts"]
+}

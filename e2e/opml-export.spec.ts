@@ -120,79 +120,75 @@ async function runMenuExport(page: Page) {
   await page.getByRole("option", { name: /Export OPML/ }).click();
 }
 
-test.describe("OPML export (Cmd+K + Settings)", () => {
-  test("zoomed export: subtree only, root as top-level outline, dialect attrs, no ownerEmail", async ({
-    page,
-  }) => {
-    await interceptDownloads(page);
-    await seedOutline(page, TREE);
-    await page.goto("/root");
-    await expect(nodeText(page, "done")).toBeVisible();
+test("zoomed export: subtree only, root as top-level outline, dialect attrs, no ownerEmail", async ({
+  page,
+}) => {
+  await interceptDownloads(page);
+  await seedOutline(page, TREE);
+  await page.goto("/root");
+  await expect(nodeText(page, "done")).toBeVisible();
 
-    await runMenuExport(page);
-    const { filename, text } = await capturedDownload(page);
+  await runMenuExport(page);
+  const { filename, text } = await capturedDownload(page);
 
-    // Filename: dotflowy-<slug>-<local date>.opml.
-    expect(filename).toMatch(
-      /^dotflowy-project-alpha-\d{4}-\d{2}-\d{2}\.opml$/,
-    );
+  // Filename: dotflowy-<slug>-<local date>.opml.
+  expect(filename).toMatch(/^dotflowy-project-alpha-\d{4}-\d{2}-\d{2}\.opml$/);
 
-    // OPML shell, title-only head -- never ownerEmail (privacy, ADR 0037).
-    expect(text).toContain('<opml version="2.0">');
-    expect(text).toContain("<title>Project alpha</title>");
-    expect(text).not.toContain("ownerEmail");
+  // OPML shell, title-only head -- never ownerEmail (privacy, ADR 0037).
+  expect(text).toContain('<opml version="2.0">');
+  expect(text).toContain("<title>Project alpha</title>");
+  expect(text).not.toContain("ownerEmail");
 
-    // Scope: the zoom root is the single top-level <outline>; the sibling
-    // top-level node is outside the subtree and absent.
-    expect(text).toContain('text="Project alpha"');
-    expect(text).not.toContain("Other top level");
+  // Scope: the zoom root is the single top-level <outline>; the sibling
+  // top-level node is outside the subtree and absent.
+  expect(text).toContain('text="Project alpha"');
+  expect(text).not.toContain("Other top level");
 
-    // completed -> _complete="true"; to-do -> _task="true" (present-iff-true).
-    expect(text).toContain('_complete="true" text="Done item"');
-    expect(text).toContain('_task="true" text="Task item"');
-    expect(text.match(/_complete=/g)).toHaveLength(1);
-    expect(text.match(/_task=/g)).toHaveLength(1);
+  // completed -> _complete="true"; to-do -> _task="true" (present-iff-true).
+  expect(text).toContain('_complete="true" text="Done item"');
+  expect(text).toContain('_task="true" text="Task item"');
+  expect(text.match(/_complete=/g)).toHaveLength(1);
+  expect(text.match(/_task=/g)).toHaveLength(1);
 
-    // Mirror dialect: the in-scope source carries id=..., the mirror root
-    // carries _mirror=<sourceId> and emits the fully resolved duplicate
-    // (source text AND its child, repeated inside the mirror's expansion).
-    expect(text).toContain('id="source"');
-    expect(text).toContain('_mirror="source" text="Source item"');
-    expect(text.match(/text="Source item"/g)).toHaveLength(2);
-    expect(text.match(/text="Source child"/g)).toHaveLength(2);
-  });
+  // Mirror dialect: the in-scope source carries id=..., the mirror root
+  // carries _mirror=<sourceId> and emits the fully resolved duplicate
+  // (source text AND its child, repeated inside the mirror's expansion).
+  expect(text).toContain('id="source"');
+  expect(text).toContain('_mirror="source" text="Source item"');
+  expect(text.match(/text="Source item"/g)).toHaveLength(2);
+  expect(text.match(/text="Source child"/g)).toHaveLength(2);
+});
 
-  test("home export includes every top-level node under the default filename", async ({
-    page,
-  }) => {
-    await interceptDownloads(page);
-    await seedOutline(page, TREE);
-    await page.goto("/");
-    await expect(nodeText(page, "root")).toBeVisible();
+test("home export includes every top-level node under the default filename", async ({
+  page,
+}) => {
+  await interceptDownloads(page);
+  await seedOutline(page, TREE);
+  await page.goto("/");
+  await expect(nodeText(page, "root")).toBeVisible();
 
-    await runMenuExport(page);
-    const { filename, text } = await capturedDownload(page);
+  await runMenuExport(page);
+  const { filename, text } = await capturedDownload(page);
 
-    expect(filename).toMatch(/^dotflowy-export-\d{4}-\d{2}-\d{2}\.opml$/);
-    expect(text).toContain('text="Project alpha"');
-    expect(text).toContain('text="Other top level"');
-  });
+  expect(filename).toMatch(/^dotflowy-export-\d{4}-\d{2}-\d{2}\.opml$/);
+  expect(text).toContain('text="Project alpha"');
+  expect(text).toContain('text="Other top level"');
+});
 
-  test("Cmd+K runs Export OPML through the global-actions bridge", async ({
-    page,
-  }) => {
-    await interceptDownloads(page);
-    await seedOutline(page, TREE);
-    await page.goto("/");
-    await expect(nodeText(page, "root")).toBeVisible();
+test("Cmd+K runs Export OPML through the global-actions bridge", async ({
+  page,
+}) => {
+  await interceptDownloads(page);
+  await seedOutline(page, TREE);
+  await page.goto("/");
+  await expect(nodeText(page, "root")).toBeVisible();
 
-    await page.keyboard.press("ControlOrMeta+k");
-    const input = page.getByPlaceholder(/Search nodes and actions/);
-    await expect(input).toBeVisible();
-    await input.fill("export opml");
-    await page.getByRole("option", { name: /Export OPML/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  const input = page.getByPlaceholder(/Search nodes and actions/);
+  await expect(input).toBeVisible();
+  await input.fill("export opml");
+  await page.getByRole("option", { name: /Export OPML/ }).click();
 
-    const { filename } = await capturedDownload(page);
-    expect(filename).toMatch(/^dotflowy-export-\d{4}-\d{2}-\d{2}\.opml$/);
-  });
+  const { filename } = await capturedDownload(page);
+  expect(filename).toMatch(/^dotflowy-export-\d{4}-\d{2}-\d{2}\.opml$/);
 });

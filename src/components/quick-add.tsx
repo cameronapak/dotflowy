@@ -653,40 +653,6 @@ function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
   };
 }
 
-// --- Deferred-resolve test seam (ADR 0049) ---------------------------------
-//
-// `seedOutline`'s Map mock resolves the daily claim in a microtask, so the
-// in-flight-born window (clear/retarget/slash while borning) never actually
-// happens under e2e -- the exact blind spot that hid a cluster of async-lifecycle
-// bugs. This DEV-only gate lets a spec HOLD the destination resolve open, drive
-// the interfering actions, then release -- exercising the real races. No-op (and
-// tree-shaken) in production.
-let resolveGate: Promise<void> | null = null;
-let releaseResolveGate: (() => void) | null = null;
-
-function awaitResolveGate(): Promise<void> {
-  return resolveGate ?? Promise.resolve();
-}
-
-if (import.meta.env.DEV && hasWindow()) {
-  // SAFETY: DEV-only test hooks this module is the sole writer of
-  const w = window as Window & {
-    __quickAddHoldResolve?: () => void;
-    __quickAddReleaseResolve?: () => void;
-  };
-  w.__quickAddHoldResolve = () => {
-    if (resolveGate) return;
-    resolveGate = new Promise<void>((r) => {
-      releaseResolveGate = r;
-    });
-  };
-  w.__quickAddReleaseResolve = () => {
-    releaseResolveGate?.();
-    resolveGate = null;
-    releaseResolveGate = null;
-  };
-}
-
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const { daily } = useEditorFeatures();
   const editorRef = useRef<MiniEditorHandle | null>(null);
@@ -791,7 +757,6 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     const prev = createChainRef.current;
     const p = (async (): Promise<string | null> => {
       await prev; // preserve create order across drafts (bug 6)
-      await awaitResolveGate(); // deferred-resolve test seam
       if (d.id) return d.id;
       // The destination provider (Seam L) REJECTS when it named a target it
       // couldn't mint (F2) -- a failure, NOT the legit `null` = "top level". Abort

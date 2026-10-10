@@ -7,6 +7,11 @@ import { flattenInline } from "./inline-text";
 // Flatten must agree and NOT eat the asterisks.
 test.each([
   ["plain reading text", "plain reading text"],
+  ["run `bun test` first", "run bun test first"],
+  ["`a` `b` `c`", "a b c"], // back-to-back runs
+  ["a `stray tick", "a `stray tick"],
+  ["``", "``"], // an empty run is not a run
+  ["`a\nb`", "`a\nb`"], // a run cannot span a line break
   ["**bold** ==🔴hot== ||secret||", "bold hot secret"],
   ["see [the docs](https://x.com)", "see the docs"],
   ["`**x**`", "**x**"], // a code span shields its emphasis interior

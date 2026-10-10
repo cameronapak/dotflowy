@@ -9,14 +9,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
+import { TestClock } from "effect/testing";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 import type { OutlineStore } from "./mcp-tools";
 
 import { createNode } from "../src/data/tree";
 import { handleMcp } from "./mcp";
-import { setClock } from "./mcp-tools";
 import { SearchPage } from "./search";
 
 // --- In-memory store fake -----------------------------------------------------
@@ -96,6 +96,8 @@ async function rpc(
   // fixed harness name here so the stamping assertions have something to check.
   origin: string | null = "TestAgent",
   agentAccess = true,
+  // Pins "now" through Effect's TestClock; omit for the real clock.
+  now?: number,
 ) {
   const body: RpcRequestBody = { jsonrpc: "2.0", method };
   if (id !== null) body.id = id;
@@ -105,11 +107,32 @@ async function rpc(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  return Effect.runPromise(handleMcp(request, store, origin, agentAccess));
+  const program = handleMcp(request, store, origin, agentAccess);
+  if (now === undefined) return Effect.runPromise(program);
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = yield* TestClock.make();
+      yield* clock.setTime(now);
+      return yield* program.pipe(Effect.provideService(Clock.Clock, clock));
+    }).pipe(Effect.scoped),
+  );
 }
 
-async function callTool(store: OutlineStore, name: string, args: RpcParams) {
-  const res = await rpc(store, "tools/call", { name, arguments: args });
+async function callTool(
+  store: OutlineStore,
+  name: string,
+  args: RpcParams,
+  now?: number,
+) {
+  const res = await rpc(
+    store,
+    "tools/call",
+    { name, arguments: args },
+    1,
+    "TestAgent",
+    true,
+    now,
+  );
   // SAFETY: parsed from the JSON-RPC body our own handleMcp serializes; fields verified by the expects below.
   const json = (await res.json()) as {
     result?: {
@@ -707,83 +730,109 @@ describe("MCP tools", () => {
   });
 
   test("timeZone steers the omitted-date default and is validated even when date wins (issue #336)", async () => {
-    setClock(new Date("2026-08-10T00:30:00Z").getTime());
-    try {
-      // 00:30 UTC is already 08-10 in UTC but still 08-09 in
-      // America/Los_Angeles: the capture belongs on the user's calendar day,
-      // not UTC's. (23:30Z on the 9th would leave UTC on the 9th too, so it
-      // could never detect a UTC fallback.)
-      const west = makeStore(fixture());
-      const westJson = await callTool(west.store, "add_to_today", {
+    const now = Date.parse("2026-08-10T00:30:00Z");
+    // 00:30 UTC is already 08-10 in UTC but still 08-09 in
+    // America/Los_Angeles: the capture belongs on the user's calendar day,
+    // not UTC's. (23:30Z on the 9th would leave UTC on the 9th too, so it
+    // could never detect a UTC fallback.)
+    const west = makeStore(fixture());
+    const westJson = await callTool(
+      west.store,
+      "add_to_today",
+      {
         text: "captured",
         timeZone: "America/Los_Angeles",
-      });
-      expect(westJson.result?.isError).toBeUndefined();
-      expect(west.kv.has("2026-08-09")).toBe(true);
-      expect(west.kv.has("2026-08-10")).toBe(false);
+      },
+      now,
+    );
+    expect(westJson.result?.isError).toBeUndefined();
+    expect(west.kv.has("2026-08-09")).toBe(true);
+    expect(west.kv.has("2026-08-10")).toBe(false);
 
-      // East of UTC the same instant is already tomorrow.
-      const east = makeStore(fixture());
-      await callTool(east.store, "add_to_today", {
+    // East of UTC the same instant is already tomorrow.
+    const east = makeStore(fixture());
+    await callTool(
+      east.store,
+      "add_to_today",
+      {
         text: "captured",
         timeZone: "Asia/Tokyo",
-      });
-      expect(east.kv.has("2026-08-10")).toBe(true);
-      expect(east.kv.has("2026-08-09")).toBe(false);
+      },
+      now,
+    );
+    expect(east.kv.has("2026-08-10")).toBe(true);
+    expect(east.kv.has("2026-08-09")).toBe(false);
 
-      // mirror_to_today defaults "today" the same way.
-      const mir = makeStore(fixture());
-      await callTool(mir.store, "mirror_to_today", {
+    // mirror_to_today defaults "today" the same way.
+    const mir = makeStore(fixture());
+    await callTool(
+      mir.store,
+      "mirror_to_today",
+      {
         nodeId: "a1",
         timeZone: "America/Los_Angeles",
-      });
-      expect(mir.kv.has("2026-08-09")).toBe(true);
-      expect(mir.kv.has("2026-08-10")).toBe(false);
+      },
+      now,
+    );
+    expect(mir.kv.has("2026-08-09")).toBe(true);
+    expect(mir.kv.has("2026-08-10")).toBe(false);
 
-      // An explicit date wins over timeZone on every daily tool. add_subtree
-      // and import_opml use `date` as a target selector, so timeZone is
-      // validated there and otherwise ignored.
-      const opml =
-        '<opml version="2.0"><body><outline text="one" /></body></opml>';
-      for (const [name, args] of [
-        ["add_to_today", { text: "x" }],
-        ["add_subtree", { nodes: [{ text: "x" }] }],
-        ["import_opml", { opml }],
-      ] as const) {
-        const ok = makeStore(fixture());
-        const okJson = await callTool(ok.store, name, {
+    // An explicit date wins over timeZone on every daily tool. add_subtree
+    // and import_opml use `date` as a target selector, so timeZone is
+    // validated there and otherwise ignored.
+    const opml =
+      '<opml version="2.0"><body><outline text="one" /></body></opml>';
+    for (const [name, args] of [
+      ["add_to_today", { text: "x" }],
+      ["add_subtree", { nodes: [{ text: "x" }] }],
+      ["import_opml", { opml }],
+    ] as const) {
+      const ok = makeStore(fixture());
+      const okJson = await callTool(
+        ok.store,
+        name,
+        {
           ...args,
           date: "2026-07-03",
           timeZone: "America/Los_Angeles",
-        });
-        expect(okJson.result?.isError).toBeUndefined();
-        expect(ok.kv.has("2026-07-03")).toBe(true);
+        },
+        now,
+      );
+      expect(okJson.result?.isError).toBeUndefined();
+      expect(ok.kv.has("2026-07-03")).toBe(true);
 
-        // A malformed timeZone is refused, nothing written or claimed, even
-        // when `date` would have won.
-        const bad = makeStore(fixture());
-        const badJson = await callTool(bad.store, name, {
+      // A malformed timeZone is refused, nothing written or claimed, even
+      // when `date` would have won.
+      const bad = makeStore(fixture());
+      const badJson = await callTool(
+        bad.store,
+        name,
+        {
           ...args,
           date: "2026-07-03",
           timeZone: "bogus",
-        });
-        expect(badJson.result?.isError).toBe(true);
-        expect(bad.batches).toHaveLength(0);
-        expect(bad.kv.size).toBe(0);
-      }
+        },
+        now,
+      );
+      expect(badJson.result?.isError).toBe(true);
+      expect(bad.batches).toHaveLength(0);
+      expect(bad.kv.size).toBe(0);
+    }
 
-      // And on the omitted-date path, where it would have steered the day.
-      const invalid = makeStore(fixture());
-      const invalidJson = await callTool(invalid.store, "add_to_today", {
+    // And on the omitted-date path, where it would have steered the day.
+    const invalid = makeStore(fixture());
+    const invalidJson = await callTool(
+      invalid.store,
+      "add_to_today",
+      {
         text: "x",
         timeZone: "Not/AZone",
-      });
-      expect(invalidJson.result?.isError).toBe(true);
-      expect(invalid.batches).toHaveLength(0);
-      expect(invalid.kv.size).toBe(0);
-    } finally {
-      setClock(null);
-    }
+      },
+      now,
+    );
+    expect(invalidJson.result?.isError).toBe(true);
+    expect(invalid.batches).toHaveLength(0);
+    expect(invalid.kv.size).toBe(0);
   });
 
   test("the daily container and calendar scaffold are protected; a day stays content (#271)", async () => {

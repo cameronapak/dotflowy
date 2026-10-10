@@ -289,7 +289,6 @@ export function OpmlImportDialog() {
         type="file"
         accept=".opml,.xml,text/xml,text/x-opml,application/xml"
         className="hidden"
-        data-testid="opml-file-input"
         onChange={onFile}
       />
       <Dialog
@@ -300,11 +299,7 @@ export function OpmlImportDialog() {
           if (!next && !importing) setStage({ kind: "closed" });
         }}
       >
-        <DialogContent
-          className="sm:max-w-md"
-          showCloseButton={!importing}
-          data-testid="opml-import-dialog"
-        >
+        <DialogContent className="sm:max-w-md" showCloseButton={!importing}>
           {stage.kind === "summary" && (
             <SummaryStage
               data={stage.data}

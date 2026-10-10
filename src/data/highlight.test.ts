@@ -5,7 +5,6 @@ import type { HighlightParts } from "./highlight";
 import {
   buildHighlightRun,
   HIGHLIGHT_PATTERN,
-  hasHighlight,
   parseHighlight,
   stripHighlights,
 } from "./highlight";
@@ -62,10 +61,6 @@ test("stripHighlights drops fences and the color emoji, keeps everything else", 
   expect(stripHighlights("plain = text == still plain")).toBe(
     "plain = text == still plain",
   );
-});
-
-test("hasHighlight is true for a run, false for stray fences", () => {
-  expect(hasHighlight("==hi==")).toBe(true);
-  expect(hasHighlight("a == b")).toBe(false);
-  expect(hasHighlight("plain")).toBe(false);
+  expect(stripHighlights("a == b")).toBe("a == b");
+  expect(stripHighlights("plain")).toBe("plain");
 });

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { build } from "esbuild";
 import { Miniflare } from "miniflare";
 import { randomUUID } from "node:crypto";
@@ -7,16 +7,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Node } from "../src/data/wire-schema";
-import type { OutlineSnapshot } from "../worker/backup";
+import type { OutlineSnapshot } from "./backup";
 import type {
   CaptureBody,
   CaptureReceipt,
   CaptureResult,
-} from "../worker/capture-input";
-import type { CaptureKeyEntry } from "../worker/capture-keys";
-import type { FixtureInput } from "./capture-worker";
+} from "./capture-input";
+import type { CaptureKeyEntry } from "./capture-keys";
+import type { FixtureInput } from "./capture-real-fixture";
 
-test.describe.configure({ mode: "serial" });
 let mf: Miniflare;
 let directory: string;
 
@@ -26,13 +25,16 @@ type Inspection = {
   keys: Array<CaptureKeyEntry & { hash: string }>;
 };
 
-async function fixture<A>(path: string, input: FixtureInput): Promise<A> {
+async function fixture<A = unknown>(
+  path: string,
+  input: FixtureInput,
+): Promise<A> {
   const { response, body } = await fixtureResponse<A>(path, input);
   expect(response.status, JSON.stringify(body)).toBe(200);
   return body;
 }
 
-async function fixtureResponse<A>(path: string, input: FixtureInput) {
+async function fixtureResponse<A = unknown>(path: string, input: FixtureInput) {
   const response = await mf.dispatchFetch(`http://fixture/fixture/${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -47,7 +49,7 @@ async function api(path: string, key: string, body?: typeof CaptureBody.Type) {
   if (body !== undefined) headers.set("content-type", "application/json");
   const response = await mf.dispatchFetch(`http://fixture${path}`, {
     method: body === undefined ? "GET" : "POST",
-    headers,
+    headers: Object.fromEntries(headers),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   // SAFETY: Capture returns receipt fields on success, error/message on failure;
@@ -68,7 +70,7 @@ async function account() {
   return { userId, ...created };
 }
 
-function assertSiblingChains(nodes: Node[]) {
+function assertSiblingChains(nodes: readonly Node[]) {
   const byParent = new Map<string | null, Node[]>();
   for (const node of nodes)
     byParent.set(node.parentId, [...(byParent.get(node.parentId) ?? []), node]);
@@ -95,11 +97,11 @@ function assertSiblingChains(nodes: Node[]) {
   }
 }
 
-test.beforeAll(async () => {
+beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "dotflowy-capture-"));
   const scriptPath = join(directory, "worker.mjs");
   await build({
-    entryPoints: ["e2e/capture-worker.ts"],
+    entryPoints: ["worker/capture-real-worker.ts"],
     outfile: scriptPath,
     bundle: true,
     format: "esm",
@@ -175,9 +177,9 @@ test.beforeAll(async () => {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/^--.*$/gm, "").replaceAll("\n", " "));
   }
-});
+}, 60_000);
 
-test.afterAll(async () => {
+afterAll(async () => {
   await mf?.dispose();
   if (directory) await rm(directory, { recursive: true, force: true });
 });
@@ -354,7 +356,7 @@ test("title upgrade only changes the untouched captured node", async () => {
   });
   await fixture("delete", { userId, nodeId: c.receipt.nodeId });
   expect(
-    await fixture("upgrade", {
+    await fixture<{ upgraded: boolean }>("upgrade", {
       userId,
       attemptId: untouched,
       expected: "raw",
@@ -362,7 +364,7 @@ test("title upgrade only changes the untouched captured node", async () => {
     }),
   ).toEqual({ upgraded: true });
   expect(
-    await fixture("upgrade", {
+    await fixture<{ upgraded: boolean }>("upgrade", {
       userId,
       attemptId: edited,
       expected: "raw edit",
@@ -370,7 +372,7 @@ test("title upgrade only changes the untouched captured node", async () => {
     }),
   ).toEqual({ upgraded: false });
   expect(
-    await fixture("upgrade", {
+    await fixture<{ upgraded: boolean }>("upgrade", {
       userId,
       attemptId: deleted,
       expected: "raw delete",
@@ -395,14 +397,14 @@ test("key storage, expiry boundary, revocation, tenant isolation, and password v
     expiresAt: exact,
   });
   expect(
-    await fixture("auth", {
+    await fixture<{ authenticated: boolean }>("auth", {
       userId: first.userId,
       authorization: `Bearer ${expiring.key}`,
       now: exact - 1,
     }),
   ).toEqual({ authenticated: true });
   expect(
-    await fixture("auth", {
+    await fixture<{ authenticated: boolean }>("auth", {
       userId: first.userId,
       authorization: `Bearer ${expiring.key}`,
       now: exact,
@@ -495,7 +497,7 @@ test("real password change and reset revoke keys; sign-out does not", async () =
     if (cookie) headers.set("cookie", cookie);
     return mf.dispatchFetch(`http://fixture/api/auth/${path}`, {
       method: "POST",
-      headers,
+      headers: Object.fromEntries(headers),
       body: JSON.stringify(body),
     });
   };
@@ -545,14 +547,20 @@ test("real password change and reset revoke keys; sign-out does not", async () =
     0,
   );
   expect(
-    await fixture("auth", { userId, authorization: `Bearer ${first.key}` }),
+    await fixture<{ authenticated: boolean }>("auth", {
+      userId,
+      authorization: `Bearer ${first.key}`,
+    }),
   ).toEqual({ authenticated: false });
 
   const second = await fixture<Key>("key", { userId });
   const signedOut = await auth("sign-out", {}, cookie);
   expect(signedOut.status).toBe(200);
   expect(
-    await fixture("auth", { userId, authorization: `Bearer ${second.key}` }),
+    await fixture<{ authenticated: boolean }>("auth", {
+      userId,
+      authorization: `Bearer ${second.key}`,
+    }),
   ).toEqual({ authenticated: true });
   const requested = await auth("request-password-reset", {
     email,
@@ -575,7 +583,10 @@ test("real password change and reset revoke keys; sign-out does not", async () =
     0,
   );
   expect(
-    await fixture("auth", { userId, authorization: `Bearer ${second.key}` }),
+    await fixture<{ authenticated: boolean }>("auth", {
+      userId,
+      authorization: `Bearer ${second.key}`,
+    }),
   ).toEqual({ authenticated: false });
 });
 

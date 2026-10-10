@@ -1,8 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE, type ApiNode } from "./fixtures";
-
-test.use({ deviceScaleFactor: 2 });
+import {
+  holdDailyClaims,
+  placeCaret,
+  seedOutline,
+  STANDARD_TREE,
+  type ApiNode,
+} from "./fixtures";
 
 test("the first node after emptying the outline can be undone and redone", async ({
   page,
@@ -20,11 +24,7 @@ test("the first node after emptying the outline can be undone and redone", async
     await page.keyboard.press("ControlOrMeta+Shift+Backspace");
   }
   await expect(page.locator("li[data-node-id]")).toHaveCount(0);
-  await page
-    .getByRole("region", { name: "Outline", exact: true })
-    .locator("button")
-    .last()
-    .click();
+  await page.getByRole("button", { name: "Add node", exact: true }).click();
   await expect(page.locator("li[data-node-id]")).toHaveCount(1);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.locator("li[data-node-id]")).toHaveCount(0);
@@ -47,8 +47,7 @@ test("hidden undo preserves the filter and offers View node", async ({
     'li[data-node-id="bravo"] > .outline-row .node-text',
   );
   await expect(bravo).toBeVisible({ timeout: 60_000 });
-  await bravo.click();
-  await page.keyboard.press("End");
+  await placeCaret(bravo, "end");
   await page.keyboard.type(" hidden");
   await page.keyboard.press("ControlOrMeta+f");
   const filter = page.getByRole("combobox", { name: "Filter query" });
@@ -59,11 +58,6 @@ test("hidden undo preserves the filter and offers View node", async ({
   const view = page.getByRole("button", { name: "View node", exact: true });
   await expect(page.getByText("Undid typing", { exact: true })).toBeVisible();
   await expect(view).toBeInViewport();
-  if (process.env.HISTORY_CAPTURE)
-    await page.screenshot({
-      path: ".amp/in/artifacts/undo-hidden-toast.png",
-      animations: "disabled",
-    });
   await view.click();
   await expect(page).toHaveURL(/\/bravo\?q=Alpha$/);
   await expect(page.locator('[data-history-key="bravo"].node-text')).toHaveText(
@@ -82,8 +76,7 @@ test("snapshots preserve unchanged authoring history but clear it for external e
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" kept");
   const readNodes = () =>
     page.evaluate(async (): Promise<ApiNode[]> =>
@@ -151,8 +144,7 @@ test("external collapse during a pending text write preserves history", async ({
     }
     await route.fallback();
   });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" local");
   await expect.poll(() => pending).toBe(true);
   try {
@@ -187,8 +179,7 @@ test("external browsing changes preserve authoring history and remain live after
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" kept");
   const readNodes = () =>
     page.evaluate(async (): Promise<ApiNode[]> =>
@@ -229,8 +220,7 @@ test("More exposes disabled history, then typing can be undone and redone", asyn
   await expect(page.getByRole("menuitem", { name: /^Undo$/ })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: /^Redo$/ })).toBeDisabled();
   await page.keyboard.press("Escape");
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" updated");
   await page.getByRole("button", { name: /^More actions/ }).click();
   await page.getByRole("menuitem", { name: /^Undo typing/ }).click();
@@ -238,10 +228,6 @@ test("More exposes disabled history, then typing can be undone and redone", asyn
   await page.getByRole("button", { name: /^More actions/ }).click();
   await page.getByRole("menuitem", { name: /^Redo typing/ }).click();
   await expect(alpha).toHaveText("Alpha updated");
-  if (process.env.HISTORY_CAPTURE) {
-    await page.getByRole("button", { name: /^More actions/ }).click();
-    await page.screenshot({ path: ".amp/in/artifacts/undo-more-menu.png" });
-  }
 });
 
 test("title undo returns to the editing root and Cmd+K can redo it", async ({
@@ -252,10 +238,12 @@ test("title undo returns to the editing root and Cmd+K can redo it", async ({
   await page.goto("/alpha");
   const title = page.locator('[data-history-key="alpha"].node-text');
   await expect(title).toBeVisible({ timeout: 60_000 });
-  await title.click();
-  await page.keyboard.press("End");
+  await placeCaret(title, "end");
   await page.keyboard.type(" title");
-  await page.locator("nav.breadcrumb button").first().click();
+  await page
+    .getByRole("navigation", { name: "Breadcrumb", exact: true })
+    .getByRole("button", { name: "", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/$/);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page).toHaveURL(/\/alpha$/);
@@ -304,8 +292,7 @@ test("failed undo rolls back and keeps the action available to retry", async ({
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" revised");
   server.failNextWrite();
   await page.keyboard.press("ControlOrMeta+z");
@@ -323,14 +310,14 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   page,
 }) => {
   test.setTimeout(90_000);
+  await page.clock.setFixedTime(new Date(2030, 5, 10, 12));
   await seedOutline(page, STANDARD_TREE);
   await page.goto("/?q=Alpha");
   const alpha = page.locator(
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" kept");
   await alpha.evaluate((el: HTMLElement) => el.blur());
   await page.keyboard.press("q");
@@ -353,22 +340,14 @@ test("quick-add undo stays in the current thought and closing makes capture one 
       .getByText("first thought", { exact: true }),
   ).toBeVisible();
   await expect(alpha).toHaveText("Alpha kept");
-  await page.evaluate(() => {
-    // SAFETY: quick-add exposes this destination-resolution gate only in development.
-    (
-      window as Window & { __quickAddHoldResolve: () => void }
-    ).__quickAddHoldResolve();
-  });
+  await page.clock.setFixedTime(new Date(2030, 5, 11, 12));
+  const gate = await holdDailyClaims(page);
   await page.keyboard.type("second thought");
+  await gate.seen;
   await page.keyboard.press("Enter");
   await expect(draft).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+z");
-  await page.evaluate(() => {
-    // SAFETY: paired with the development-only gate above.
-    (
-      window as Window & { __quickAddReleaseResolve: () => void }
-    ).__quickAddReleaseResolve();
-  });
+  gate.release();
   await expect(page.getByText("Undid capture", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^More actions/ }).click();
   await expect(
@@ -389,8 +368,7 @@ test("structural keyboard edits wait until a restore finishes", async ({
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" revision");
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -424,8 +402,7 @@ test("selection replacement is separate from typing and undo restores the source
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" suffix");
   await alpha.evaluate((el) => {
     const range = document.createRange();
@@ -454,8 +431,7 @@ test("one IME composition is one undo step", async ({ page }) => {
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   const ime = await page.context().newCDPSession(page);
   await ime.send("Input.imeSetComposition", {
     text: "文",
@@ -524,7 +500,7 @@ test("one quick-add typing run includes the first character and can be redone", 
   await expect(draft).toHaveText("a capture");
 });
 
-test("undo in a filter input does not undo outline authoring", async ({
+test("undo and redo in a filter input stay separate from outline authoring", async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -534,13 +510,22 @@ test("undo in a filter input does not undo outline authoring", async ({
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await alpha.click();
-  await page.keyboard.press("End");
+  await placeCaret(alpha, "end");
   await page.keyboard.type(" kept");
   await page.keyboard.press("ControlOrMeta+f");
-  await page.getByRole("combobox", { name: "Filter query" }).fill("Alpha");
+  const filter = page.getByRole("combobox", { name: "Filter query" });
+  await expect(filter).toBeFocused();
+  await page.keyboard.type("Alpha");
   await page.keyboard.press("ControlOrMeta+z");
+  await expect(filter).toHaveValue("");
   await expect(alpha).toHaveText("Alpha kept");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(filter).toHaveValue("Alpha");
+  await expect(alpha).toHaveText("Alpha kept");
+
+  await placeCaret(alpha, "end");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(alpha).toHaveText("Alpha");
 });
 
 test.describe("mobile history actions", () => {
@@ -560,14 +545,17 @@ test.describe("mobile history actions", () => {
     );
     await expect(alpha).toBeVisible({ timeout: 60_000 });
     await alpha.click();
-    const bar = page.locator("[data-mobile-bar]");
+    const bar = page.getByRole("toolbar", {
+      name: "Editing actions",
+      exact: true,
+    });
     await expect(
       bar.getByRole("button", { name: "Undo", exact: true }),
     ).toBeDisabled();
     await expect(
       bar.getByRole("button", { name: "Redo", exact: true }),
     ).toBeDisabled();
-    await page.keyboard.press("End");
+    await placeCaret(alpha, "end");
     await page.keyboard.type(" mobile");
     await bar.getByRole("button", { name: "Undo typing", exact: true }).click();
     await expect(alpha).toHaveText("Alpha");
@@ -575,9 +563,5 @@ test.describe("mobile history actions", () => {
     await expect(
       bar.getByRole("button", { name: "Redo typing", exact: true }),
     ).toBeEnabled();
-    if (process.env.HISTORY_CAPTURE)
-      await page.screenshot({
-        path: ".amp/in/artifacts/undo-mobile-capsule.png",
-      });
   });
 });
