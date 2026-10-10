@@ -1,10 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
 
-test.use({ deviceScaleFactor: 2 });
-
-const MOD = process.platform === "darwin" ? "Meta" : "Control";
 const TREE: SeedNode[] = [
   { id: "before", parentId: null, prevSiblingId: null, text: "Plan the week" },
   {
@@ -53,14 +50,14 @@ async function load(
 
 test("keyboard completion shows the checked subtree, fades, closes the measured gap, and hands off focus", async ({
   page,
-}, info) => {
+}) => {
   await load(page);
   const taskTop = (await row(page, "task").boundingBox())!.y;
   const afterTop = (await row(page, "after").boundingBox())!.y;
   const add = page.getByRole("button", { name: "Add node", exact: true });
   const addTop = (await add.boundingBox())!.y;
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await expect(row(page, "task")).toHaveAttribute(
     "data-completion-exit",
     "true",
@@ -100,7 +97,6 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
   expect(opacity).toBeLessThan(1);
   expect((await row(page, "after").boundingBox())!.y).toBeCloseTo(afterTop, 2);
   expect((await add.boundingBox())!.y).toBeCloseTo(addTop, 2);
-  await page.screenshot({ path: info.outputPath("completion-fade.png") });
   await page.evaluate(() => {
     for (const li of document.querySelectorAll(
       "li[data-node-id], [data-outline-add]",
@@ -118,7 +114,6 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
   const movingTop = (await row(page, "after").boundingBox())!.y;
   expect(movingTop).toBeGreaterThan(taskTop);
   expect(movingTop).toBeLessThan(afterTop);
-  await page.screenshot({ path: info.outputPath("completion-midpoint.png") });
   await page.evaluate(() => {
     for (const li of document.querySelectorAll(
       "li[data-node-id], [data-outline-add]",
@@ -138,7 +133,6 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
     addTop - (afterTop - taskTop),
     0,
   );
-  await page.screenshot({ path: info.outputPath("completion-after.png") });
   await page.reload();
   await expect(row(page, "task")).toHaveCount(0);
 });
@@ -221,7 +215,7 @@ test("checkbox completion uses the same exit and undo during the fade restores i
   );
   await page.clock.runFor(100);
   await expect(text(page, "after")).toBeFocused();
-  await page.keyboard.press(`${MOD}+z`);
+  await page.keyboard.press("ControlOrMeta+z");
   // History replay now yields before draining writes; the paused clock must
   // advance its scheduler as well as the completion presentation timeout.
   await page.clock.runFor(32);
@@ -236,7 +230,7 @@ test("checkbox completion uses the same exit and undo during the fade restores i
   await expect(text(page, "task")).toBeVisible();
   await expect(text(page, "child")).toBeVisible();
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+d`);
+  await page.keyboard.press("ControlOrMeta+d");
   await page.clock.runFor(240);
   await expect(row(page, "task")).toHaveCount(0);
 });
@@ -246,10 +240,10 @@ test("inserting a surviving row during an exit keeps its pending focus", async (
 }) => {
   await load(page);
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(100);
   await expect(text(page, "after")).toBeFocused();
-  await page.keyboard.press("End");
+  await placeCaret(text(page, "after"), "end");
   await page.keyboard.press("Enter");
   await page.clock.runFor(32);
   const inserted = page.locator(".node-text:focus");
@@ -295,7 +289,7 @@ test("re-enabling show completed interrupts an exit without leaving inert rows",
 }) => {
   await load(page);
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(100);
   await page.evaluate(() => {
     localStorage.setItem("dotflowy:show-completed", "true");
@@ -322,7 +316,7 @@ test("reduced motion removes immediately and focuses the previous surviving row"
     TREE.filter((n) => n.id !== "after"),
   );
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await expect(row(page, "task")).toHaveCount(0);
   await expect(row(page, "child")).toHaveCount(0);
   await expect(text(page, "before")).toBeFocused();
@@ -334,7 +328,7 @@ test("reduced motion removes immediately and focuses the previous surviving row"
 test("completing the last Home node lands on Add node", async ({ page }) => {
   await load(page, [{ ...TREE[1]!, prevSiblingId: null }]);
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(240);
   await expect(
     page.getByRole("button", { name: "Add node", exact: true }),
@@ -351,7 +345,7 @@ test("completing the last child lands on the zoomed title", async ({
     "/before",
   );
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(240);
   await expect(page.locator(".zoomed-title .node-text")).toBeFocused();
 });
@@ -420,7 +414,7 @@ test("a large disappearing subtree stays windowed and hands focus to an initiall
   const targetTop = (await row(page, "task").boundingBox())!.y;
   await expect(row(page, "after")).toHaveCount(0);
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await expect(row(page, "task")).toHaveAttribute(
     "data-completion-exit",
     "true",
@@ -447,7 +441,7 @@ test("changing the query does not animate removed matches", async ({
   page,
 }) => {
   await load(page);
-  await page.keyboard.press(`${MOD}+f`);
+  await page.keyboard.press("ControlOrMeta+f");
   await page.clock.runFor(32);
   await page.getByRole("combobox", { name: "Filter query" }).fill("Plan");
   await page.clock.runFor(500);
@@ -464,7 +458,7 @@ test("typing in a surviving filtered task does not restart an exit", async ({
 }) => {
   await load(page, TREE, false, "/?q=is%3Atodo");
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(100);
   await row(page, "task").evaluate((el) => {
     const animation = el.getAnimations()[0]!;
@@ -505,7 +499,7 @@ test("overlapping completions keep independent deadlines without snapping a movi
   ]);
   const taskTop = (await row(page, "task").boundingBox())!.y;
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(100);
   await row(page, "after").evaluate((el) => {
     const animation = el.getAnimations()[0]!;
@@ -514,7 +508,7 @@ test("overlapping completions keep independent deadlines without snapping a movi
   });
   const movingTop = (await row(page, "after").boundingBox())!.y;
   expect(movingTop).toBeGreaterThan(taskTop);
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(80);
   expect((await row(page, "after").boundingBox())!.y).toBeCloseTo(movingTop, 2);
   expect(
@@ -531,7 +525,7 @@ test("overlapping completions keep independent deadlines without snapping a movi
 
 test("late-mounted exiting rows join the fade and cannot take focus", async ({
   page,
-}, info) => {
+}) => {
   const children: SeedNode[] = Array.from({ length: 250 }, (_, i) => ({
     id: `child-${i}`,
     parentId: "task",
@@ -589,7 +583,6 @@ test("late-mounted exiting rows join the fade and cannot take focus", async ({
   expect(
     await late.evaluate((el) => Number(getComputedStyle(el).opacity)),
   ).toBeLessThan(0.5);
-  await page.screenshot({ path: info.outputPath("late-mounted-exit.png") });
   await late.locator(".node-text").evaluate((el) => {
     if (el instanceof HTMLElement) el.focus();
   });
@@ -625,7 +618,7 @@ test("collapse during a child's completion exit removes its presentation immedia
     },
   ]);
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(100);
   await row(page, "before")
     .getByRole("button", { name: "Collapse", exact: true })
@@ -649,7 +642,7 @@ test("deleting an exiting mirror removes its render path without restarting the 
     },
   ]);
   await text(page, "task").focus();
-  await page.keyboard.press(`${MOD}+Enter`);
+  await page.keyboard.press("ControlOrMeta+Enter");
   await page.clock.runFor(100);
   await page.evaluate(async () => {
     const response = await fetch("/api/nodes", {

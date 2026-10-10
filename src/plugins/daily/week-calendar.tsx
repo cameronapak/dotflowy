@@ -149,7 +149,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
     <nav
       aria-label="Week calendar"
       data-subheader-snap-open=""
-      data-testid="week-calendar"
+      data-week-calendar=""
       data-week-key={visibleWeek}
       className="flex w-full flex-col gap-1"
     >
@@ -266,7 +266,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                       }
                       const paintedSelection =
                         calendar.querySelector<HTMLElement>(
-                          '[data-testid="week-calendar-selection"]',
+                          "[data-week-calendar-selection]",
                         );
                       const destinationButton =
                         calendar.querySelector<HTMLElement>(
@@ -306,7 +306,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                   <span
                     ref={selectionRef}
                     aria-hidden="true"
-                    data-testid="week-calendar-selection"
+                    data-week-calendar-selection=""
                     style={selectionStyle}
                     className={cn(
                       "absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden",

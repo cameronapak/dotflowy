@@ -6,7 +6,6 @@ import {
   goToDateLabel,
   parseDatePickerQuery,
   parseDatePickerTargets,
-  parseGoToDateQuery,
   parseGoToDateTargets,
   periodCatalogUnits,
   pickerDateLabel,
@@ -17,59 +16,71 @@ import {
  *  Sunday-start week Jul 19 to Jul 25), so weekdays and relatives stay stable. */
 const NOW = new Date(2026, 6, 25, 12);
 
-describe("parseGoToDateQuery", () => {
+describe("parseGoToDateTargets", () => {
   test("ISO fast-path", () => {
-    expect(parseGoToDateQuery("2026-08-12", NOW)).toEqual({
-      key: "2026-08-12",
-      kind: "day",
-      label: "Go to Wednesday, August 12, 2026",
-    });
+    expect(parseGoToDateTargets("2026-08-12", NOW)).toEqual([
+      {
+        key: "2026-08-12",
+        kind: "day",
+        label: "Go to Wednesday, August 12, 2026",
+      },
+    ]);
   });
 
-  test.each([
+  test.each<[string, string[]]>([
     // Prose absolute dates.
-    ["August 12th", "2026-08-12"],
-    ["Aug 12", "2026-08-12"],
-    ["August 12 2026", "2026-08-12"],
+    ["August 12th", ["2026-08-12"]],
+    ["Aug 12", ["2026-08-12"]],
+    ["August 12 2026", ["2026-08-12"]],
     // Relatives, with prefixes.
-    ["today", "2026-07-25"],
-    ["to", "2026-07-25"],
-    ["tomorrow", "2026-07-26"],
-    ["tom", "2026-07-26"],
-    ["yesterday", "2026-07-24"],
-    ["next Monday", "2026-07-27"],
-    ["in 2 weeks", "2026-08-08"],
-    ["last Friday", "2026-07-24"],
+    ["today", ["2026-07-25"]],
+    ["to", ["2026-07-25"]],
+    ["tomorrow", ["2026-07-26"]],
+    ["tom", ["2026-07-26"]],
+    ["yesterday", ["2026-07-24"]],
+    ["next Monday", ["2026-07-27"]],
+    ["in 2 weeks", ["2026-08-08"]],
+    ["last Friday", ["2026-07-24"]],
     // Owned weekday stems fill chrono gaps (upcoming Thursday is Jul 30).
-    ["thurs", "2026-07-30"],
-    ["thursd", "2026-07-30"],
-    ["thursda", "2026-07-30"],
-    ["mond", "2026-07-27"],
-    ["next thurs", "2026-07-30"],
-    ["last fri", "2026-07-24"],
+    ["thurs", ["2026-07-30"]],
+    ["thursd", ["2026-07-30"]],
+    ["thursda", ["2026-07-30"]],
+    ["mond", ["2026-07-27"]],
+    ["next thurs", ["2026-07-30"]],
+    ["last fri", ["2026-07-24"]],
     // A bare weekday prefers the upcoming day (forwardDate).
-    ["Friday", "2026-07-31"],
-  ])("%p -> %s", (query, key) => {
-    expect(parseGoToDateQuery(query, NOW)?.key).toBe(key);
+    ["Friday", ["2026-07-31"]],
+  ])("%p -> %p", (query, expected) => {
+    expect(
+      parseGoToDateTargets(query, NOW).map((target) => target.key),
+    ).toEqual(expected);
   });
 
   test("period phrases navigate the Calendar scaffold, not chrono's mid-week day", () => {
-    expect(parseGoToDateQuery("next week", NOW)).toEqual({
-      key: "week:2026-07-27",
-      kind: "week",
-      label: "Go to Next week",
-    });
-    expect(parseGoToDateQuery("last week", NOW)?.key).toBe("week:2026-07-13");
+    expect(parseGoToDateTargets("next week", NOW)).toEqual([
+      {
+        key: "week:2026-07-27",
+        kind: "week",
+        label: "Go to Next week",
+      },
+    ]);
+    expect(parseGoToDateTargets("last week", NOW)).toEqual([
+      { key: "week:2026-07-13", kind: "week", label: "Go to Last week" },
+    ]);
     // The configured week start decides which week is next.
-    expect(parseGoToDateQuery("next week", NOW, "sunday")?.key).toBe(
-      "week:2026-07-26",
-    );
-    expect(parseGoToDateQuery("last month", NOW)).toEqual({
-      key: "2026-06",
-      kind: "month",
-      label: "Go to Last month",
-    });
-    expect(parseGoToDateQuery("next year", NOW)?.key).toBe("2027");
+    expect(parseGoToDateTargets("next week", NOW, "sunday")).toEqual([
+      { key: "week:2026-07-26", kind: "week", label: "Go to Next week" },
+    ]);
+    expect(parseGoToDateTargets("last month", NOW)).toEqual([
+      {
+        key: "2026-06",
+        kind: "month",
+        label: "Go to Last month",
+      },
+    ]);
+    expect(parseGoToDateTargets("next year", NOW)).toEqual([
+      { key: "2027", kind: "year", label: "Go to Next year" },
+    ]);
   });
 
   test.each([
@@ -79,7 +90,7 @@ describe("parseGoToDateQuery", () => {
     "",
     "meet on August 12th please", // a date buried in longer prose
   ])("rejects %p", (query) => {
-    expect(parseGoToDateQuery(query, NOW)).toBeNull();
+    expect(parseGoToDateTargets(query, NOW)).toEqual([]);
   });
 });
 

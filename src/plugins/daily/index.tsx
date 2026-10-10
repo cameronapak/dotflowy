@@ -395,7 +395,7 @@ export default definePlugin({
   externalDropTargets: [
     {
       id: "daily-week-calendar-day",
-      selector: '[data-testid="week-calendar"] [data-day-key]',
+      selector: "[data-week-calendar] [data-day-key]",
       onDrop: (element, nodeIds, ctx) => {
         const key = element.dataset.dayKey;
         if (!key) return;

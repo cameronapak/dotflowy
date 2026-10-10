@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { localDateKey } from "../src/data/date-links";
-import { seedOutline, type SeedNode } from "./fixtures";
+import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
 
 const TREE: SeedNode[] = [
   {
@@ -12,15 +12,12 @@ const TREE: SeedNode[] = [
   },
 ];
 
-test.beforeEach(async ({ page }) => {
-  await page.route("**/api/auth/subscription/list", (route) =>
-    route.fulfill({ json: [] }),
-  );
-});
-
 test("feature switches default on and save independently across reloads", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE, {
     kv: {
       "account-prefs": [
@@ -59,6 +56,9 @@ test("feature switches default on and save independently across reloads", async 
 test("Week start remains available while Daily is off and activates after migration", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   let weekStart: "sunday" | "monday" = "monday";
   await page.route(
@@ -104,6 +104,9 @@ test("Week start remains available while Daily is off and activates after migrat
 test("disabled features leave source text intact in rows, titles, and quick-add", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE, {
     kv: {
       "account-prefs": [
@@ -170,13 +173,25 @@ test("disabled features leave source text intact in rows, titles, and quick-add"
 test("today waits for account preferences and creates nothing when Daily is off", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
+  let release!: () => void;
+  let intercepted!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    intercepted = resolve;
+  });
   await page.route(
     (url) =>
       url.pathname === "/api/kv" &&
       url.searchParams.get("collection") === "account-prefs",
     async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      intercepted();
+      await gate;
       await route.fulfill({
         json: [{ key: "editor-feature:daily", enabled: false }],
       });
@@ -194,6 +209,10 @@ test("today waits for account preferences and creates nothing when Daily is off"
       writes.push(request.url());
   });
   await page.goto("/today");
+  await held;
+  await expect(page).toHaveURL(/\/today$/);
+  expect(writes).toEqual([]);
+  release();
   await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
   await expect(
     page.getByText("Daily notes is off", { exact: true }),
@@ -207,6 +226,9 @@ test("today waits for account preferences and creates nothing when Daily is off"
 test("focus refresh changes decoration in place and preserves local text and caret", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   await page.goto("/reflection");
   const title = page.locator(".zoomed-title-text");
@@ -214,16 +236,7 @@ test("focus refresh changes decoration in place and preserves local text and car
     timeout: 15000,
   });
   await expect(title.locator("[data-date-link]")).toHaveCount(1);
-  await title.evaluate((el) => {
-    // SAFETY: .zoomed-title-text is the editor's HTML span.
-    (el as HTMLElement).focus();
-    const range = document.createRange();
-    range.setStart(el.firstChild!, 0);
-    range.collapse(true);
-    const selection = window.getSelection()!;
-    selection.removeAllRanges();
-    selection.addRange(range);
-  });
+  await placeCaret(title, "start");
   await page.keyboard.type("X");
   const setRemote = async (enabled: boolean) => {
     await page.evaluate(async (on) => {
@@ -246,18 +259,20 @@ test("focus refresh changes decoration in place and preserves local text and car
     0,
   );
   await expect(page).toHaveURL(/\/reflection$/);
-  expect(
-    await title.evaluate((el) => {
-      const selection = window.getSelection()!;
-      const prefix = document.createRange();
-      prefix.selectNodeContents(el);
-      prefix.setEnd(selection.anchorNode!, selection.anchorOffset);
-      return {
-        focused: document.activeElement === el,
-        prefix: prefix.toString(),
-      };
-    }),
-  ).toEqual({ focused: true, prefix: "X" });
+  await expect
+    .poll(() =>
+      title.evaluate((el) => {
+        const selection = window.getSelection()!;
+        const prefix = document.createRange();
+        prefix.selectNodeContents(el);
+        prefix.setEnd(selection.anchorNode!, selection.anchorOffset);
+        return {
+          focused: document.activeElement === el,
+          prefix: prefix.toString(),
+        };
+      }),
+    )
+    .toEqual({ focused: true, prefix: "X" });
   await expect(
     page.getByRole("button", { name: "Today's daily note" }),
   ).toHaveCount(0);
@@ -276,6 +291,9 @@ test("focus refresh changes decoration in place and preserves local text and car
 test("remote Bible disable dismisses an open passage editor without changing the note", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   await page.goto("/");
   const row = page.locator('li[data-node-id="reflection"] .node-text');
@@ -312,6 +330,9 @@ test("remote Bible disable dismisses an open passage editor without changing the
 test("Daily off removes daily slash commands, date suggestions, and command-center navigation", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE, {
     kv: {
       "account-prefs": [
@@ -339,9 +360,7 @@ test("Daily off removes daily slash commands, date suggestions, and command-cent
   await expect(page.getByRole("listbox")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await row.focus();
-  await page.keyboard.press(
-    `${process.platform === "darwin" ? "Meta" : "Control"}+k`,
-  );
+  await page.keyboard.press("ControlOrMeta+k");
   await page.getByRole("combobox").fill("today");
   await expect(page.getByRole("option", { name: /Go to Today/ })).toHaveCount(
     0,
@@ -361,6 +380,9 @@ test("Daily off removes daily slash commands, date suggestions, and command-cent
 test("a failed save restores the previous switch and does not change the other feature", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   await page.route(
     (url) =>
@@ -392,6 +414,9 @@ test("a failed save restores the previous switch and does not change the other f
 test("malformed preferences keep switches unavailable until a successful retry", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   let invalid = true;
   await page.route(
@@ -428,6 +453,9 @@ test("malformed preferences keep switches unavailable until a successful retry",
 test("quick-add waits for preferences before choosing a default destination", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -476,6 +504,9 @@ test("quick-add waits for preferences before choosing a default destination", as
 test("Daily off preserves every scaffold deletion guard and existing note access", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   const scaffold = [
     { id: "container", parentId: null, prevSiblingId: null, text: "Daily" },
     { id: "year", parentId: "container", prevSiblingId: null, text: "2026" },
@@ -513,16 +544,12 @@ test("Daily off preserves every scaffold deletion guard and existing note access
     const row = page.locator(`li[data-node-id="${id}"] .outline-row`);
     await expect(row.getByLabel("Protected Daily scaffold")).toBeVisible();
     await row.locator(".node-text").click();
-    await page.keyboard.press(
-      `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Backspace`,
-    );
+    await page.keyboard.press("ControlOrMeta+Shift+Backspace");
     await expect(row).toHaveClass(/node-rejected/);
     await expect(page.locator('li[data-node-id="day"]')).toBeVisible();
   }
   await plain.click();
-  await page.keyboard.press(
-    `${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Backspace`,
-  );
+  await page.keyboard.press("ControlOrMeta+Shift+Backspace");
   await expect(page.locator('li[data-node-id="reflection"]')).toHaveCount(0);
   await page.goto("/day");
   await expect(page.locator(".zoomed-title-text")).toHaveText(
@@ -539,6 +566,9 @@ test("Daily off preserves every scaffold deletion guard and existing note access
 test("a focus change updates an untouched quick-add destination without creating notes", async ({
   page,
 }) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
   await seedOutline(page, TREE);
   await page.goto("/");
   await expect(
@@ -593,6 +623,9 @@ for (const surface of ["Move", "Quick add"] as const) {
   test(`${surface} refreshes Daily aliases without losing access to ordinary note titles`, async ({
     page,
   }) => {
+    await page.route("**/api/auth/subscription/list", (route) =>
+      route.fulfill({ json: [] }),
+    );
     const key = localDateKey();
     await seedOutline(
       page,

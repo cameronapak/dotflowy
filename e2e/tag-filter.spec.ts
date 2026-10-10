@@ -22,55 +22,55 @@ async function load(page: Page) {
   await expect(row(page, "a").first()).toBeVisible();
 }
 
-test.describe("tag filtering (plugin Seam B)", () => {
-  test("clicking a #tag chip filters the outline to matching nodes", async ({
-    page,
-  }) => {
-    await load(page);
+test("clicking a #tag chip filters the outline to matching nodes", async ({
+  page,
+}) => {
+  await load(page);
 
-    // The chip is decorated by the tags plugin's token render.
-    await page.locator('.tag[data-tag="work"]').first().click();
+  // The chip is decorated by the tags plugin's token render.
+  await page.locator('.tag[data-tag="work"]').first().click();
 
-    // The click AND-s the tag into the URL-driven filter (tags plugin).
-    await expect(page).toHaveURL(/q=%23work/);
-    // The filter bar is generalized core chrome now (ADR 0047 §6): aria-label
-    // "Filter", not "Tag filter".
-    await expect(page.locator('[aria-label="Filter"]')).toBeVisible();
+  // The click AND-s the tag into the URL-driven filter (tags plugin).
+  await expect(page).toHaveURL(/q=%23work/);
+  // The filter bar is generalized core chrome now (ADR 0047 §6): aria-label
+  // "Filter", not "Tag filter".
+  await expect(page.getByRole("search", { name: "Filter" })).toBeVisible();
 
-    // Matching nodes stay; the untagged one is pruned out of the render.
-    await expect(row(page, "a").first()).toBeVisible();
-    await expect(row(page, "c").first()).toBeVisible();
-    await expect(row(page, "b")).toHaveCount(0);
+  // Matching nodes stay; the untagged one is pruned out of the render.
+  await expect(row(page, "a").first()).toBeVisible();
+  await expect(row(page, "c").first()).toBeVisible();
+  await expect(row(page, "b")).toHaveCount(0);
+});
+
+test("right-clicking a #tag chip opens the color picker overlay", async ({
+  page,
+}) => {
+  await load(page);
+
+  await page.locator('.tag[data-tag="work"]').first().click({
+    button: "right",
   });
 
-  test("right-clicking a #tag chip opens the color picker overlay", async ({
-    page,
-  }) => {
-    await load(page);
+  // The tags plugin routes the context menu through ctx.openOverlay, which
+  // the core mounts as a self-managing portal.
+  await expect(
+    page.getByRole("menu", { name: "Color for #work" }),
+  ).toBeVisible();
+});
 
-    await page.locator('.tag[data-tag="work"]').first().click({
-      button: "right",
-    });
+test("clicking Clear collapses the filter subheader", async ({ page }) => {
+  await load(page);
 
-    // The tags plugin routes the context menu through ctx.openOverlay, which
-    // the core mounts as a self-managing portal.
-    await expect(
-      page.locator('[role="menu"][aria-label="Color for #work"]'),
-    ).toBeVisible();
-  });
+  await page.locator('.tag[data-tag="work"]').first().click();
+  await expect(page.getByRole("search", { name: "Filter" })).toBeVisible();
 
-  test("clicking Clear collapses the filter subheader", async ({ page }) => {
-    await load(page);
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page).not.toHaveURL(/q=/);
+  await expect(
+    page.getByRole("search", { name: "Filter", includeHidden: true }),
+  ).toHaveCount(0);
 
-    await page.locator('.tag[data-tag="work"]').first().click();
-    await expect(page.locator('[aria-label="Filter"]')).toBeVisible();
-
-    await page.getByRole("button", { name: "Clear" }).click();
-    await expect(page).not.toHaveURL(/q=/);
-    await expect(page.locator('[aria-label="Filter"]')).toHaveCount(0);
-
-    const subheader = page.locator('[aria-label="Active filters"]');
-    await expect(subheader).toHaveCSS("padding-top", "0px");
-    await expect(subheader).toHaveCSS("padding-bottom", "0px");
-  });
+  const subheader = page.locator('[aria-label="Active filters"]');
+  await expect(subheader).toHaveCSS("padding-top", "0px");
+  await expect(subheader).toHaveCSS("padding-bottom", "0px");
 });

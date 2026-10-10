@@ -45,26 +45,13 @@ const MARKER_LEN = 2;
  *  gap. See ADR 0043. */
 export const SPOILER_SENTINEL = "[spoiler]";
 
-/** Built per call: a `g`-flagged RegExp carries `lastIndex` across `.test()`
- *  calls, so a shared instance would miss back-to-back matches (mirrors
- *  highlight.ts / emphasis.ts). */
 function spoilerRegex(): RegExp {
   return new RegExp(SPOILER_PATTERN, "gu");
-}
-
-/** True iff the text contains at least one complete spoiler run. */
-export function hasSpoiler(text: string): boolean {
-  return spoilerRegex().test(text);
 }
 
 /** The visible text between the fences of a single matched run. */
 export function spoilerInterior(run: string): string {
   return run.slice(MARKER_LEN, run.length - MARKER_LEN);
-}
-
-/** The source run for `interior`. */
-export function buildSpoiler(interior: string): string {
-  return `||${interior}||`;
 }
 
 /** In-app projection: every spoiler run replaced by its interior (fences off,

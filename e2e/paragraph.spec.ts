@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { seedOutline, text, type SeedNode } from "./fixtures";
 
 // Paragraph nodes (ADR 0045): a third kind alongside bullet and task, signified
 // by a paragraph glyph standing exactly where the bullet dot would -- same button, same
@@ -13,8 +13,6 @@ import { seedOutline, type SeedNode } from "./fixtures";
 // Every command here runs from an EMPTY bullet, so the `/` palette opens at
 // offset 0 and no caret helper is needed (Home/End and `.click()` on text are
 // unreliable in macOS Chromium contentEditable -- see CONTRIBUTING.md).
-
-const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 const TREE: SeedNode[] = [
   { id: "a", parentId: null, prevSiblingId: null, text: "alpha" },
@@ -32,8 +30,6 @@ const TREE: SeedNode[] = [
 
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"]`);
-const text = (page: Page, id: string) =>
-  row(page, id).locator("> .outline-row .node-text");
 const dot = (page: Page, id: string) =>
   row(page, id).locator("> .outline-row .bullet-dot");
 const paragraphGlyph = (page: Page, id: string) =>
@@ -52,31 +48,31 @@ async function load(page: Page, path = "/", ready?: ReturnType<typeof text>) {
 /** Run a `/` command against the focused, empty bullet. */
 async function runSlash(page: Page, command: string) {
   await page.keyboard.type(`/${command}`);
-  await expect(page.locator('[role="listbox"]')).toBeVisible();
+  await expect(page.getByRole("listbox")).toBeVisible();
   await page.keyboard.press("Enter");
 }
 
-test.describe("paragraph nodes", () => {
-  test("the paragraph glyph replaces the dot, and only for a paragraph", async ({
-    page,
-  }) => {
-    await load(page);
-    await expect(paragraphGlyph(page, "p")).toBeVisible();
-    await expect(dot(page, "p")).toHaveCount(0);
-    await expect(dot(page, "a")).toBeVisible();
-    await expect(paragraphGlyph(page, "a")).toHaveCount(0);
-    // A paragraph is never a task, so it never wears a checkbox.
-    await expect(checkbox(page, "p")).toHaveCount(0);
-  });
+test("the paragraph glyph replaces the dot, and only for a paragraph", async ({
+  page,
+}) => {
+  await load(page);
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await expect(dot(page, "p")).toHaveCount(0);
+  await expect(dot(page, "a")).toBeVisible();
+  await expect(paragraphGlyph(page, "a")).toHaveCount(0);
+  // A paragraph is never a task, so it never wears a checkbox.
+  await expect(checkbox(page, "p")).toHaveCount(0);
+});
 
-  test("the paragraph glyph sits on the dot's optical center, in the dot's column", async ({
-    page,
-  }) => {
-    // ADR 0029's K-constants live on `.outline-row .bullet` (the 16px button),
-    // and the paragraph glyph is centered inside that same button -- so it must land on
-    // exactly the same baseline as a sibling row's dot. Numeric, not eyeballed:
-    // a glyph swap that shifted the box would show up here.
-    await load(page);
+test("the paragraph glyph sits on the dot's optical center, in the dot's column", async ({
+  page,
+}) => {
+  // ADR 0029's K-constants live on `.outline-row .bullet` (the 16px button),
+  // and the paragraph glyph is centered inside that same button -- so it must land on
+  // exactly the same baseline as a sibling row's dot. Numeric, not eyeballed:
+  // a glyph swap that shifted the box would show up here.
+  await load(page);
+  await expect(async () => {
     const m = await page.evaluate(() => {
       const li = (id: string) =>
         document.querySelector(`li[data-node-id="${id}"]`)!;
@@ -109,133 +105,135 @@ test.describe("paragraph nodes", () => {
     expect(Math.abs(m.paragraphOffset - m.dotOffset)).toBeLessThan(1);
     // ...and the same column: the glyph swap must not move the button.
     expect(Math.abs(m.paragraphX - m.dotX)).toBeLessThan(0.5);
-  });
+  }).toPass({ timeout: 5000 });
+});
 
-  test("the paragraph glyph still zooms on click, exactly like the dot", async ({
-    page,
-  }) => {
-    await load(page);
-    await paragraphGlyph(page, "p").click();
-    await expect(page).toHaveURL(/\/p$/);
-    await expect(page.locator("h2.zoomed-title .node-text")).toHaveText(
-      "prose",
-    );
-  });
+test("the paragraph glyph still zooms on click, exactly like the dot", async ({
+  page,
+}) => {
+  await load(page);
+  await paragraphGlyph(page, "p").click();
+  await expect(page).toHaveURL(/\/p$/);
+  await expect(page.locator("h2.zoomed-title .node-text")).toHaveText("prose");
+});
 
-  test("a zoomed paragraph shows a muted, inert paragraph glyph in the title", async ({
-    page,
-  }) => {
-    await load(page, "/p", page.locator("h2.zoomed-title .node-text"));
-    const mark = page.locator("h2.zoomed-title .title-paragraph");
-    await expect(mark).toBeVisible();
-    await expect(mark).toHaveCSS("pointer-events", "none");
+test("a zoomed paragraph shows a muted, inert paragraph glyph in the title", async ({
+  page,
+}) => {
+  await load(page, "/p", page.locator("h2.zoomed-title .node-text"));
+  const mark = page.locator("h2.zoomed-title .title-paragraph");
+  await expect(mark).toBeVisible();
+  await expect(mark).toHaveCSS("pointer-events", "none");
 
-    // It sits LEFT of the text rather than floating into it: a paragraph is
-    // prose, so every wrapped line shares the first line's left edge. A float
-    // would shorten only line one and let the rest slide under.
-    const titleText = page.locator("h2.zoomed-title .node-text");
-    const box = (await mark.boundingBox())!;
-    expect(box.x + box.width).toBeLessThanOrEqual(
-      (await titleText.boundingBox())!.x,
-    );
+  // It sits LEFT of the text rather than floating into it: a paragraph is
+  // prose, so every wrapped line shares the first line's left edge. A float
+  // would shorten only line one and let the rest slide under.
+  const titleText = page.locator("h2.zoomed-title .node-text");
+  await expect
+    .poll(async () => {
+      const box = (await mark.boundingBox())!;
+      return box.x + box.width - (await titleText.boundingBox())!.x;
+    })
+    .toBeLessThanOrEqual(0);
 
-    // Wide: the mark OUTDENTS into the margin, so the title's text keeps the
-    // bullet column -- a zoomed bullet and a zoomed paragraph start their text
-    // at the same x, and changing kind never shifts the title sideways.
-    await page.setViewportSize({ width: 900, height: 700 });
-    const proseX = (await titleText.boundingBox())!.x;
+  // Wide: the mark OUTDENTS into the margin, so the title's text keeps the
+  // bullet column -- a zoomed bullet and a zoomed paragraph start their text
+  // at the same x, and changing kind never shifts the title sideways.
+  await page.setViewportSize({ width: 900, height: 700 });
+  const proseX = (await titleText.boundingBox())!.x;
 
-    // Narrow: the content padding (16px) is thinner than the 20px mark, so it
-    // falls back INTO a gutter instead of clipping off the viewport's edge.
-    await page.setViewportSize({ width: 375, height: 700 });
-    expect((await mark.boundingBox())!.x).toBeGreaterThan(0);
+  // Narrow: the content padding (16px) is thinner than the 20px mark, so it
+  // falls back INTO a gutter instead of clipping off the viewport's edge.
+  await page.setViewportSize({ width: 375, height: 700 });
+  await expect
+    .poll(async () => (await mark.boundingBox())!.x)
+    .toBeGreaterThan(0);
 
-    // A zoomed BULLET shows nothing -- without the mark, the two would be
-    // indistinguishable and `/paragraph` would have no visible state -- and its
-    // title text starts exactly where the paragraph's did.
-    await page.setViewportSize({ width: 900, height: 700 });
-    await page.goto("/a");
-    await expect(titleText).toHaveText("alpha");
-    await expect(page.locator("h2.zoomed-title .title-paragraph")).toHaveCount(
-      0,
-    );
-    expect((await titleText.boundingBox())!.x).toBe(proseX);
-  });
+  // A zoomed BULLET shows nothing -- without the mark, the two would be
+  // indistinguishable and `/paragraph` would have no visible state -- and its
+  // title text starts exactly where the paragraph's did.
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.goto("/a");
+  await expect(titleText).toHaveText("alpha");
+  await expect(page.locator("h2.zoomed-title .title-paragraph")).toHaveCount(0);
+  await expect
+    .poll(async () => (await titleText.boundingBox())!.x)
+    .toBe(proseX);
+});
 
-  test("`/paragraph` converts a bullet; `/bullet` converts it back", async ({
-    page,
-  }) => {
-    await load(page);
-    await text(page, "e").click();
-    await runSlash(page, "paragraph");
-    await expect(paragraphGlyph(page, "e")).toBeVisible();
+test("`/paragraph` converts a bullet; `/bullet` converts it back", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "e").click();
+  await runSlash(page, "paragraph");
+  await expect(paragraphGlyph(page, "e")).toBeVisible();
 
-    await runSlash(page, "bullet");
-    await expect(paragraphGlyph(page, "e")).toHaveCount(0);
-    await expect(dot(page, "e")).toBeVisible();
-  });
+  await runSlash(page, "bullet");
+  await expect(paragraphGlyph(page, "e")).toHaveCount(0);
+  await expect(dot(page, "e")).toBeVisible();
+});
 
-  test("`/paragraph` on a task clears the checkbox (kinds are exclusive)", async ({
-    page,
-  }) => {
-    await load(page);
-    await expect(checkbox(page, "et")).toBeVisible();
-    await text(page, "et").click();
-    await runSlash(page, "paragraph");
-    await expect(paragraphGlyph(page, "et")).toBeVisible();
-    await expect(checkbox(page, "et")).toHaveCount(0);
-  });
+test("`/paragraph` on a task clears the checkbox (kinds are exclusive)", async ({
+  page,
+}) => {
+  await load(page);
+  await expect(checkbox(page, "et")).toBeVisible();
+  await text(page, "et").click();
+  await runSlash(page, "paragraph");
+  await expect(paragraphGlyph(page, "et")).toBeVisible();
+  await expect(checkbox(page, "et")).toHaveCount(0);
+});
 
-  test("`/todo` on a paragraph clears the paragraph glyph (the other direction)", async ({
-    page,
-  }) => {
-    await load(page);
-    await text(page, "e").click();
-    await runSlash(page, "paragraph");
-    await expect(paragraphGlyph(page, "e")).toBeVisible();
+test("`/todo` on a paragraph clears the paragraph glyph (the other direction)", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "e").click();
+  await runSlash(page, "paragraph");
+  await expect(paragraphGlyph(page, "e")).toBeVisible();
 
-    await runSlash(page, "todo");
-    await expect(checkbox(page, "e")).toBeVisible();
-    await expect(paragraphGlyph(page, "e")).toHaveCount(0);
-  });
+  await runSlash(page, "todo");
+  await expect(checkbox(page, "e")).toBeVisible();
+  await expect(paragraphGlyph(page, "e")).toHaveCount(0);
+});
 
-  test("the `[]` autoformat converts a paragraph into a task", async ({
-    page,
-  }) => {
-    await load(page);
-    await text(page, "e").click();
-    await runSlash(page, "paragraph");
-    await expect(paragraphGlyph(page, "e")).toBeVisible();
+test("the `[]` autoformat converts a paragraph into a task", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "e").click();
+  await runSlash(page, "paragraph");
+  await expect(paragraphGlyph(page, "e")).toBeVisible();
 
-    await page.keyboard.type("[]");
-    await expect(checkbox(page, "e")).toBeVisible();
-    await expect(paragraphGlyph(page, "e")).toHaveCount(0);
-  });
+  await page.keyboard.type("[]");
+  await expect(checkbox(page, "e")).toBeVisible();
+  await expect(paragraphGlyph(page, "e")).toHaveCount(0);
+});
 
-  test("Enter at the end of a paragraph makes another paragraph", async ({
-    page,
-  }) => {
-    await load(page);
-    await text(page, "e").click();
-    await runSlash(page, "paragraph");
-    // Two paragraphs now: the seeded "prose" and the converted "e".
-    await expect(page.locator(".outline-row .bullet-paragraph")).toHaveCount(2);
+test("Enter at the end of a paragraph makes another paragraph", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "e").click();
+  await runSlash(page, "paragraph");
+  // Two paragraphs now: the seeded "prose" and the converted "e".
+  await expect(page.locator(".outline-row .bullet-paragraph")).toHaveCount(2);
 
-    // "e" is empty and childless, so the caret is at its end: Enter adds a
-    // sibling, which inherits the kind exactly as `isTask` already does.
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".outline-row .bullet-paragraph")).toHaveCount(3);
-  });
+  // "e" is empty and childless, so the caret is at its end: Enter adds a
+  // sibling, which inherits the kind exactly as `isTask` already does.
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".outline-row .bullet-paragraph")).toHaveCount(3);
+});
 
-  test("a paragraph is completable — `completed` is orthogonal to kind", async ({
-    page,
-  }) => {
-    await load(page);
-    await text(page, "p").click();
-    await page.keyboard.press(`${MOD}+Enter`);
-    await expect(text(page, "p")).toHaveAttribute("data-completed", "true");
-    // Still a paragraph, still no checkbox.
-    await expect(paragraphGlyph(page, "p")).toBeVisible();
-    await expect(checkbox(page, "p")).toHaveCount(0);
-  });
+test("a paragraph is completable — `completed` is orthogonal to kind", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "p").click();
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(text(page, "p")).toHaveAttribute("data-completed", "true");
+  // Still a paragraph, still no checkbox.
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await expect(checkbox(page, "p")).toHaveCount(0);
 });

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import type {} from "../src/components/hotkey-devtools";
+
 import { seedOutline, type SeedNode } from "./fixtures";
 
 // Zoom performance guard.
@@ -69,12 +71,7 @@ async function settledRegistrationCount(page: Page): Promise<number> {
     .poll(
       async () => {
         const n = await page.evaluate(
-          () =>
-            (
-              window as unknown as {
-                __hotkeyManager?: { getRegistrationCount(): number };
-              }
-            ).__hotkeyManager?.getRegistrationCount() ?? -1,
+          () => window.__hotkeyManager?.getRegistrationCount() ?? -1,
         );
         const settled = n >= 0 && n === last;
         last = n;
@@ -94,48 +91,47 @@ async function load(page: Page) {
   ).toBeVisible();
 }
 
-test.describe("zoom performance (focus-gated bullet keymaps)", () => {
-  test("zooming into a node with hundreds of children keeps hotkey registrations bounded", async ({
-    page,
-  }) => {
-    await load(page);
+test("zooming into a node with hundreds of children keeps hotkey registrations bounded", async ({
+  page,
+}) => {
+  await load(page);
 
-    // Zoom into the big node the way a user does: click its bullet handle.
-    await page
-      .locator('li[data-node-id="many"] [aria-label="Zoom in"]')
-      .click();
-    await expect(page).toHaveURL(/\/many$/);
-    await expect(page.locator('li[data-node-id="many-c0"]')).toBeVisible();
+  // Zoom into the big node the way a user does: click its bullet handle.
+  await page
+    .locator('li[data-node-id="many"]')
+    .getByRole("button", { name: "Zoom in", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/many$/);
+  await expect(page.locator('li[data-node-id="many-c0"]')).toBeVisible();
 
-    const count = await settledRegistrationCount(page);
+  const count = await settledRegistrationCount(page);
 
-    // A viewport-ful of bullets is mounted (~dozens). Pre-fix each registered its
-    // own ~20 hotkeys, so this was visibleRows x 20 -- 500+. Post-fix only the
-    // focused bullet's keymap is live (plus a small app/zoom-title constant). A
-    // generous ceiling well under the pre-fix figure catches a regression with
-    // wide margin, mirroring virtualized-windowing.spec's "< 100 rows" bound.
-    expect(count).toBeLessThan(120);
-  });
+  // A viewport-ful of bullets is mounted (~dozens). Pre-fix each registered its
+  // own ~20 hotkeys, so this was visibleRows x 20 -- 500+. Post-fix only the
+  // focused bullet's keymap is live (plus a small app/zoom-title constant). A
+  // generous ceiling well under the pre-fix figure catches a regression with
+  // wide margin, mirroring virtualized-windowing.spec's "< 100 rows" bound.
+  expect(count).toBeLessThan(120);
+});
 
-  test("hotkey registration count does not scale with the number of visible bullets", async ({
-    page,
-  }) => {
-    await load(page);
+test("hotkey registration count does not scale with the number of visible bullets", async ({
+  page,
+}) => {
+  await load(page);
 
-    // Zoom into the small node: only a few bullets render.
-    await page.goto("/few");
-    await expect(page.locator('li[data-node-id="few-c0"]')).toBeVisible();
-    const countFew = await settledRegistrationCount(page);
+  // Zoom into the small node: only a few bullets render.
+  await page.goto("/few");
+  await expect(page.locator('li[data-node-id="few-c0"]')).toBeVisible();
+  const countFew = await settledRegistrationCount(page);
 
-    // Zoom into the huge node: a full window of bullets renders.
-    await page.goto("/many");
-    await expect(page.locator('li[data-node-id="many-c0"]')).toBeVisible();
-    const countMany = await settledRegistrationCount(page);
+  // Zoom into the huge node: a full window of bullets renders.
+  await page.goto("/many");
+  await expect(page.locator('li[data-node-id="many-c0"]')).toBeVisible();
+  const countMany = await settledRegistrationCount(page);
 
-    // The invariant: the manager holds ~one focused bullet's worth regardless of
-    // how many bullets are on screen. The app/zoom-title hotkeys are identical in
-    // both zoomed views, so they cancel; only the per-bullet term differs, and it
-    // must stay near zero. Pre-fix this gap was (window - few) x ~20 = hundreds.
-    expect(countMany - countFew).toBeLessThan(25);
-  });
+  // The invariant: the manager holds ~one focused bullet's worth regardless of
+  // how many bullets are on screen. The app/zoom-title hotkeys are identical in
+  // both zoomed views, so they cancel; only the per-bullet term differs, and it
+  // must stay near zero. Pre-fix this gap was (window - few) x ~20 = hundreds.
+  expect(countMany - countFew).toBeLessThan(25);
 });

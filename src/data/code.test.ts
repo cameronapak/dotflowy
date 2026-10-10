@@ -1,17 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { stripCode, stripCodeShielded } from "./code";
-
-test.each([
-  ["run `bun test` first", "run bun test first"],
-  ["nothing here", "nothing here"],
-  ["`a` `b` `c`", "a b c"], // back-to-back runs: the shared-regex lastIndex trap
-  ["a `stray tick", "a `stray tick"], // an unclosed backtick is left alone
-  ["``", "``"], // an empty run is not a run
-  ["`a\nb`", "`a\nb`"], // a run cannot span a line break
-])("stripCode(%p) -> %p", (text, expected) => {
-  expect(stripCode(text)).toBe(expected);
-});
+import { stripCodeShielded } from "./code";
 
 // Upper-cases only the text OUTSIDE code runs, proving the interior is masked
 // from `stripRest` and restored verbatim.

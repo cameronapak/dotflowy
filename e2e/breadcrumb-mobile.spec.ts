@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
@@ -44,8 +43,9 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await expect(crumbs.first()).toContainText("Level 6");
 
   // The compact form fits without horizontal overflow (no scroll needed).
-  const fits = await nav.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
-  expect(fits).toBe(true);
+  await expect
+    .poll(() => nav.evaluate((el) => el.scrollWidth <= el.clientWidth + 1))
+    .toBe(true);
 
   // The "…" holds every ancestor between Home and the parent (n0..n5 = 6).
   const trigger = page.getByRole("button", { name: "Show hidden breadcrumbs" });
@@ -66,14 +66,22 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await expect(items).toHaveCount(6);
 
   // The drawer spans the narrow viewport and labels ellipsis-truncate.
-  const box = await page.locator('[data-slot="drawer-popup"]').boundingBox();
-  expect(box!.width).toBeGreaterThan(300);
-  const overflow = await items
-    .first()
-    .locator("span")
-    .first()
-    .evaluate((el) => getComputedStyle(el).textOverflow);
-  expect(overflow).toBe("ellipsis");
+  await expect
+    .poll(
+      async () =>
+        (await page.locator('[data-slot="drawer-popup"]').boundingBox())
+          ?.width ?? 0,
+    )
+    .toBeGreaterThan(300);
+  await expect
+    .poll(() =>
+      items
+        .first()
+        .locator("span")
+        .first()
+        .evaluate((el) => getComputedStyle(el).textOverflow),
+    )
+    .toBe("ellipsis");
   await expect
     .poll(() =>
       page
@@ -81,10 +89,6 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
         .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
     )
     .toBe(700);
-  await mkdir(".amp/in/artifacts", { recursive: true });
-  await page.screenshot({
-    path: ".amp/in/artifacts/mobile-breadcrumb-drawer.png",
-  });
 
   // Picking an intermediate ancestor navigates to it.
   await items.nth(2).click(); // n2
@@ -137,9 +141,9 @@ test("a crumb flattens inline markup to its reading text", async ({ page }) => {
   // EXACT textContent, not `toHaveText` (which whitespace-normalizes): a
   // stripped run must not leave a doubled space where its markup used to be.
   await expect(crumb).toHaveText("Sprint goals code hot old docs");
-  expect(await crumb.evaluate((el) => el.textContent)).toBe(
-    "Sprint goals code hot old docs",
-  );
+  await expect
+    .poll(() => crumb.evaluate((el) => el.textContent))
+    .toBe("Sprint goals code hot old docs");
 
   // Display-only: the crumb still navigates by the real node id.
   await crumb.click();

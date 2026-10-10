@@ -11,11 +11,15 @@ import {
   yearLabel,
 } from "../src/data/date-links";
 import { KvClaimBody } from "../worker/wire";
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
+import {
+  placeCaret,
+  seedOutline,
+  STANDARD_TREE,
+  type SeedNode,
+} from "./fixtures";
 
-// Cmd on macOS, Control elsewhere.
 function modifier() {
-  return process.platform === "darwin" ? "Meta" : "Control";
+  return "ControlOrMeta";
 }
 
 const todayButton = (page: Page) =>
@@ -80,20 +84,7 @@ async function goHome(page: Page) {
 // range directly: Home/Arrow keys are unreliable in macOS Chromium
 // contentEditable and a plain click lands past the text (see enter-split.spec).
 async function caretAtStart(target: Locator) {
-  await target.click();
-  await target.evaluate((el) => {
-    const sel = window.getSelection();
-    if (!sel) return;
-    const first = document
-      .createTreeWalker(el, NodeFilter.SHOW_TEXT)
-      .nextNode();
-    const range = document.createRange();
-    if (first) range.setStart(first, 0);
-    else range.selectNodeContents(el);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  });
+  await placeCaret(target, "start");
 }
 
 async function clientNavigate(page: Page, path: string) {
@@ -118,1034 +109,1008 @@ async function openSwitcherAndType(page: Page, text: string) {
   await page.keyboard.type(text);
 }
 
-test.describe("daily notes", () => {
-  test("Today creates the Daily container + today's note and zooms in", async ({
+test("Today creates the Daily container + today's note and zooms in", async ({
+  page,
+}) => {
+  await load(page);
+
+  await expect(todayButton(page)).toBeVisible();
+  await todayButton(page).click();
+
+  // Zoomed into a node (URL left "/"); its title is today's full date.
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page).not.toHaveURL(/\/$/);
+  const year = String(new Date().getFullYear());
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+  // Home: the protected "Daily" container holds today's note, badged "Today".
+  await goHome(page);
+  await expect(rowWithText(page, "Daily")).toBeVisible();
+  const badge = page.locator("[data-daily-date]");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveText("Today");
+  // Today's badge wears the distinct (primary) treatment -- the data hook the
+  // variant swap sets only when the key is today.
+  await expect(badge).toHaveAttribute("data-daily-today", "");
+});
+
+test("/today seeds an entry line and lands the caret on it (write-intent, ADR 0041)", async ({
+  page,
+}) => {
+  await load(page);
+  // Client-nav to /today so the seedOutline mock survives (a full reload
+  // re-runs the init script). The route creates today's note, seeds ONE empty
+  // entry line, and redirects to /$nodeId?focus=last.
+  await clientNavigate(page, "/today");
+
+  // Redirected off /today, into today's note (title = the full date).
+  await expect(page).not.toHaveURL(/today/);
+  const year = String(new Date().getFullYear());
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+  // A single empty entry line was seeded under the day, and the caret landed
+  // ON it (focus=last) -- the day opens ready to append, not on the title.
+  // (The old tests only checked the redirect + badge, which is why the dead
+  // focus=last shipped green.)
+  const entry = page.locator("li[data-node-id] > .outline-row .node-text");
+  await expect(entry).toHaveCount(1);
+  await expect(entry).toBeFocused();
+  await expect(entry).toHaveText("");
+});
+
+test("only today's note gets the distinct badge; other days stay plain", async ({
+  page,
+}) => {
+  // A day note from the past renders the muted badge (its short date) with NO
+  // `data-daily-today` hook -- the primary highlight is reserved for today.
+  // Seeded like the lock test: a real node PLUS its daily-index mapping.
+  const d = new Date();
+  d.setDate(d.getDate() - 10);
+  const pastKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(d.getDate()).padStart(2, "0")}`;
+
+  await seedOutline(
     page,
-  }) => {
-    await load(page);
-
-    await expect(todayButton(page)).toBeVisible();
-    await todayButton(page).click();
-
-    // Zoomed into a node (URL left "/"); its title is today's full date.
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page).not.toHaveURL(/\/$/);
-    const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      year,
-    );
-
-    // Home: the protected "Daily" container holds today's note, badged "Today".
-    await goHome(page);
-    await expect(rowWithText(page, "Daily")).toBeVisible();
-    const badge = page.locator("[data-daily-date]");
-    await expect(badge).toBeVisible();
-    await expect(badge).toHaveText("Today");
-    // Today's badge wears the distinct (primary) treatment -- the data hook the
-    // variant swap sets only when the key is today.
-    await expect(badge).toHaveAttribute("data-daily-today", "");
-  });
-
-  test("/today seeds an entry line and lands the caret on it (write-intent, ADR 0041)", async ({
-    page,
-  }) => {
-    await load(page);
-    // Client-nav to /today so the seedOutline mock survives (a full reload
-    // re-runs the init script). The route creates today's note, seeds ONE empty
-    // entry line, and redirects to /$nodeId?focus=last.
-    await clientNavigate(page, "/today");
-
-    // Redirected off /today, into today's note (title = the full date).
-    await expect(page).not.toHaveURL(/today/);
-    const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      year,
-    );
-
-    // A single empty entry line was seeded under the day, and the caret landed
-    // ON it (focus=last) -- the day opens ready to append, not on the title.
-    // (The old tests only checked the redirect + badge, which is why the dead
-    // focus=last shipped green.)
-    const entry = page.locator("li[data-node-id] > .outline-row .node-text");
-    await expect(entry).toHaveCount(1);
-    await expect(entry).toBeFocused();
-    await expect(entry).toHaveText("");
-  });
-
-  test("only today's note gets the distinct badge; other days stay plain", async ({
-    page,
-  }) => {
-    // A day note from the past renders the muted badge (its short date) with NO
-    // `data-daily-today` hook -- the primary highlight is reserved for today.
-    // Seeded like the lock test: a real node PLUS its daily-index mapping.
-    const d = new Date();
-    d.setDate(d.getDate() - 10);
-    const pastKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}-${String(d.getDate()).padStart(2, "0")}`;
-
-    await seedOutline(
-      page,
-      [
-        {
-          id: "daily-container",
-          parentId: null,
-          prevSiblingId: null,
-          text: "Daily",
-        },
-        {
-          id: "past-day",
-          parentId: "daily-container",
-          prevSiblingId: null,
-          text: "A past day",
-        },
-      ],
+    [
       {
-        kv: {
-          "daily-index": [
-            {
-              key: "container",
-              value: { key: "container", nodeId: "daily-container" },
-            },
-            { key: pastKey, value: { key: pastKey, nodeId: "past-day" } },
-          ],
-        },
-      },
-    );
-    await page.goto("/");
-
-    const badge = page.locator("[data-daily-date]");
-    await expect(badge).toBeVisible();
-    // It's the past day's badge: not "Today", and without the today-only hook.
-    await expect(badge).not.toHaveText("Today");
-    await expect(badge).not.toHaveAttribute("data-daily-today");
-  });
-
-  test("the zoomed-in day note carries its date badge in the title", async ({
-    page,
-  }) => {
-    await load(page);
-
-    // Today zooms INTO today's note, so it's the page title (h2), not a list
-    // bullet. The badge is a title slot (Seam F, `title:before-text`), so it must
-    // render here too -- with the same primary "today" treatment.
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-
-    const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
-    await expect(titleBadge).toBeVisible();
-    await expect(titleBadge).toContainText("Today");
-    await expect(titleBadge).toHaveAttribute("data-daily-today", "");
-  });
-
-  test("deleting the protected Daily container shakes it instead of removing it", async ({
-    page,
-  }) => {
-    await load(page);
-
-    // Materialize the protected container (+ today's note), then go home so the
-    // "Daily" container row sits in the list.
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    const container = rowWithText(page, "Daily");
-    await expect(container).toBeVisible();
-
-    // Daily owns the protected scaffold's visual identity; owner locks use a
-    // separate lock glyph.
-    await expect(
-      container.getByLabel("Protected Daily scaffold"),
-    ).toBeVisible();
-
-    // Focus the container's own text and fire the subtree-delete hotkey
-    // (Mod+Shift+Backspace -> the single onDeleteNode funnel).
-    await container.locator(".node-text").click();
-    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
-
-    // It refuses: the row carries the one-shot reject class bound to the shake
-    // keyframe (confirms rejectRow wired through the isProtected branch), and
-    // the container is still present -- nothing was deleted.
-    await expect(container).toHaveClass(/node-rejected/);
-    await expect(
-      container.evaluate((el) => getComputedStyle(el).animationName),
-    ).resolves.toBe("node-rejected-shake");
-    await expect(container).toBeVisible();
-
-    // ...and a toast spells out *why* it can't go (the plugin's reason).
-    await expect(page.getByText(/can't be deleted/i)).toBeVisible();
-
-    // The class clears itself when the animation ends (so it can re-trigger).
-    await expect(container).not.toHaveClass(/node-rejected/, { timeout: 4000 });
-  });
-
-  test("an existing Daily container shows its lock on first load, before any zoom", async ({
-    page,
-  }) => {
-    // The container is already here from a prior session: a real outline node
-    // PLUS the daily-index `container -> nodeId` mapping that marks it protected.
-    // That mapping loads async (the kv GET), and this load never navigates -- so
-    // the lock must appear when the index resolves, NOT only after a re-render
-    // forced by zooming in and back out. (The bug this guards: a render-time
-    // `isProtected` read with no subscription to the index, so the lock showed
-    // late.) The other protection specs always navigate first, masking it.
-    await seedOutline(
-      page,
-      [
-        {
-          id: "daily-container",
-          parentId: null,
-          prevSiblingId: null,
-          text: "Daily",
-        },
-      ],
-      {
-        kv: {
-          "daily-index": [
-            {
-              key: "container",
-              value: { key: "container", nodeId: "daily-container" },
-            },
-          ],
-        },
-      },
-    );
-    await page.goto("/");
-
-    const container = rowWithText(page, "Daily");
-    await expect(container).toBeVisible({ timeout: 15_000 });
-    await expect(container.locator(".protection-indicator")).toBeVisible();
-  });
-
-  test("blanking the protected Daily container restores its name and explains on blur", async ({
-    page,
-  }) => {
-    await load(page);
-
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    // The container's id is a UUID; capture it so we can target the row even
-    // while its text is momentarily empty.
-    const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) =>
-        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
-    );
-    expect(containerId).not.toBe("");
-    const containerText = page.locator(
-      `li[data-node-id="${containerId}"] > .outline-row .node-text`,
-    );
-
-    // Select the whole word and delete it through the real input path (selecting
-    // the contents directly -- arrow/select-all keys are unreliable in macOS
-    // Chromium contentEditable; see enter-split.spec).
-    await containerText.click();
-    await containerText.evaluate((el) => {
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    });
-    await page.keyboard.press("Backspace");
-    // Editing is unfought: the field is allowed to sit empty mid-edit (no
-    // silent instant snap-back that would hide the reason).
-    await expect(containerText).toHaveText("");
-
-    // Blur by focusing another bullet -> the name heals AND a toast explains
-    // why, so the restore isn't a mystery.
-    await page
-      .locator('li[data-node-id="alpha"] > .outline-row .node-text')
-      .click();
-    await expect(containerText).toHaveText("Daily");
-    await expect(page.getByText(/needs a name/i)).toBeVisible();
-  });
-
-  test("Enter at the start of the protected Daily container never blanks it", async ({
-    page,
-  }) => {
-    // Enter at offset 0 used to take the mid-split arm: it wrote "" into the
-    // node and handed its text to a NEW node below -- so a protected node sat
-    // visibly blanked until its row blurred and the heal fired. The insert-above
-    // arm writes nothing to it at all, which is why this funnel deliberately
-    // carries no `guardProtected` call: there is nothing left to guard against.
-    await load(page);
-
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    // The container's id is a UUID; capture it so the row can be targeted by id
-    // rather than by the text this test is asserting about.
-    const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) =>
-        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
-    );
-    expect(containerId).not.toBe("");
-    const containerRow = page.locator(`li[data-node-id="${containerId}"]`);
-    const containerText = page.locator(
-      `li[data-node-id="${containerId}"] > .outline-row .node-text`,
-    );
-
-    await caretAtStart(containerText);
-    await page.keyboard.press("Enter");
-
-    // Wait for the insert to land: a blank row appears directly above.
-    const rowAbove = () =>
-      page.evaluate((id) => {
-        const lis = Array.from(document.querySelectorAll("li[data-node-id]"));
-        const i = lis.findIndex((li) => li.getAttribute("data-node-id") === id);
-        const prev = i > 0 ? lis[i - 1] : null;
-        return prev?.querySelector(".node-text")?.textContent ?? null;
-      }, containerId);
-    await expect.poll(rowAbove).toBe("");
-
-    // ...and the container was never blanked, not even momentarily. Read the
-    // text directly (no retrying matcher, which would happily pass on a value
-    // that had already healed).
-    expect(await containerText.textContent()).toBe("Daily");
-    // No rejection either: the arm is non-destructive, so there is nothing to
-    // refuse -- no shake, no "needs a name" toast.
-    await expect(containerRow).not.toHaveClass(/node-rejected/);
-    await expect(page.getByText(/needs a name/i)).toHaveCount(0);
-    // Still protected, still locked.
-    await expect(containerRow.locator(".protection-indicator")).toBeVisible();
-  });
-
-  test("the protected Daily container can't be turned into a to-do", async ({
-    page,
-  }) => {
-    await load(page);
-
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) =>
-        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
-    );
-    expect(containerId).not.toBe("");
-    const containerRow = page.locator(
-      `li[data-node-id="${containerId}"] > .outline-row`,
-    );
-
-    // Run /todo on the container (the conversion the daily plugin forbids).
-    await containerRow.locator(".node-text").click();
-    await page.keyboard.type(" /todo");
-    await expect(page.getByRole("listbox")).toBeVisible();
-    await page.getByRole("option", { name: /Turn into a To-do/i }).click();
-
-    // Rejected: it stays a plain bullet (no checkbox) and a toast explains why.
-    await expect(containerRow.locator(".checkbox")).toHaveCount(0);
-    await expect(page.getByText(/can't be a to-do/i)).toBeVisible();
-    // ...and it still wears its Daily protection indicator, leading the text.
-    await expect(containerRow.locator(".protection-indicator")).toBeVisible();
-  });
-
-  test("the protected Daily container can't be completed", async ({ page }) => {
-    await load(page);
-
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    const containerId = await rowWithText(page, "Daily").evaluate(
-      (el) =>
-        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
-    );
-    expect(containerId).not.toBe("");
-    const containerRow = page.locator(
-      `li[data-node-id="${containerId}"] > .outline-row`,
-    );
-    const containerText = containerRow.locator(".node-text");
-
-    // Mod+Enter (the completion hotkey, Seam D) on the container: completing it
-    // would strike through every day note under it, so the daily plugin forbids
-    // it. The single onToggleCompleted funnel rejects.
-    await containerText.click();
-    await page.keyboard.press(`${modifier()}+Enter`);
-
-    // Rejected: it stays un-done, the row shakes, and a toast explains why.
-    await expect(containerText).toHaveAttribute("data-completed", "false");
-    await expect(containerRow).toHaveClass(/node-rejected/);
-    await expect(page.getByText(/can't be completed/i)).toBeVisible();
-  });
-
-  test("the protected Daily container can't be completed when zoomed in as the title", async ({
-    page,
-  }) => {
-    await load(page);
-
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    // Zoom INTO the container so it becomes the page title (not a list bullet).
-    await rowWithText(page, "Daily").locator(".bullet").click();
-    const title = page.locator("h2.zoomed-title");
-    const titleText = title.locator(".node-text");
-    await expect(titleText).toHaveText("Daily");
-    // The plugin-owned protection affordance follows the node when zoomed.
-    await expect(title.getByLabel("Protected Daily scaffold")).toBeVisible();
-
-    // The completion rule applies to the zoomed node too: Mod+Enter on the
-    // title routes through the same funnel and is rejected.
-    await titleText.click();
-    await page.keyboard.press(`${modifier()}+Enter`);
-
-    await expect(titleText).toHaveAttribute("data-completed", "false");
-    await expect(page.getByText(/can't be completed/i)).toBeVisible();
-  });
-
-  test("clicking Today twice reuses the same note (no duplicates)", async ({
-    page,
-  }) => {
-    await load(page);
-
-    await todayButton(page).click();
-    // get-or-create is now async (an atomic claim round-trip on first create),
-    // so wait for the zoom nav to settle before capturing the URL.
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page).not.toHaveURL(/\/$/);
-    const firstUrl = page.url();
-
-    await goHome(page);
-    await todayButton(page).click();
-
-    // Same note -> same URL, and still exactly one daily badge in the tree.
-    await expect(page).toHaveURL(firstUrl);
-    await goHome(page);
-    await expect(page.locator("[data-daily-date]")).toHaveCount(1);
-  });
-
-  test("the `/` command moves a node under today's note", async ({ page }) => {
-    await load(page);
-
-    // Run the slash command from a top-level node. The leading space makes the
-    // "/" follow whitespace so detectSlash fires; "/today" uniquely matches
-    // "Move to Today" (see move-dialog.spec for the pattern).
-    const charlie = page.locator(
-      'li[data-node-id="charlie"] > .outline-row .node-text',
-    );
-    await charlie.click();
-    await expect(charlie).toBeFocused();
-    await page.keyboard.type(" /today");
-    await expect(page.getByRole("listbox")).toBeVisible();
-    await page.keyboard.press("Enter");
-
-    // Confirming toast, and the node -- a top-level sibling before -- now nests
-    // under the Daily container's today note (creating both on first use).
-    await expect(page.getByText("Moved to Today")).toBeVisible();
-    // charlie now nests under TODAY's note (itself a child of the Daily
-    // container). The flat render has no nested <li> (ADR 0019), so assert
-    // charlie's real parent is the today note -- located by its "today" badge.
-    const todayId = await page
-      .locator("li[data-node-id] [data-daily-today]")
-      .first()
-      .evaluate(
-        (el) =>
-          el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
-      );
-    expect(todayId).not.toBe("");
-    await expect(
-      page.locator(`li[data-node-id="charlie"][data-parent-id="${todayId}"]`),
-    ).toBeVisible();
-  });
-
-  test("Cmd+K 'today' offers a create-today action when the note is absent", async ({
-    page,
-  }) => {
-    await load(page);
-
-    await openSwitcherAndType(page, "today");
-
-    // The virtual (non-node) action -- today's note doesn't exist yet.
-    const go = page.getByRole("option", { name: /Go to Today/ });
-    await expect(go).toBeVisible();
-    await go.click();
-
-    // It created + navigated to today's note (URL left "/"; year in the title).
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page).not.toHaveURL(/\/$/);
-    const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      year,
-    );
-    await goHome(page);
-    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
-  });
-
-  test("Cmd+K 'today' surfaces the existing note by its label, with no dup action", async ({
-    page,
-  }) => {
-    await load(page);
-    await todayButton(page).click(); // create today's note
-    // Let the create+zoom settle before going home: the daily nav is async
-    // (fire-and-forget from the click), so without this wait it can race the
-    // home nav and land last, leaving us on the day. See the other Today tests.
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    await openSwitcherAndType(page, "today");
-
-    // The create-action is suppressed (the note exists)...
-    await expect(page.getByRole("option", { name: /Go to Today/ })).toHaveCount(
-      0,
-    );
-
-    // ...and the real day note is found via its "Today" alias even though its
-    // text is the full date (the row displays that date, hence the year). The
-    // row also carries a "(Today)" suffix (Seam J annotation) for clarity.
-    const year = String(new Date().getFullYear());
-    const hit = page.getByRole("option", { name: new RegExp(year) });
-    await expect(hit).toBeVisible();
-    await expect(page.getByRole("option", { name: /\(Today\)/ })).toBeVisible();
-    await hit.click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      year,
-    );
-  });
-
-  test("Cmd+K NL / ISO go-to-date creates a missing future day (ADR 0055)", async ({
-    page,
-  }) => {
-    await load(page);
-
-    // Far future ISO — no collision with "today" fixtures.
-    await openSwitcherAndType(page, "2031-08-12");
-    const go = page.getByRole("option", { name: /Go to .*2031/ });
-    await expect(go).toBeVisible();
-    await expect(go).toContainText("Creates this daily note");
-    await go.click();
-
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      "2031",
-    );
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      "August",
-    );
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      "12",
-    );
-
-    // Idempotent reopen: create action suppressed; real node via Fuse.
-    await goHome(page);
-    await openSwitcherAndType(page, "2031-08-12");
-    await expect(
-      page.getByRole("option", { name: /Creates this daily note/ }),
-    ).toHaveCount(0);
-    const existing = page.getByRole("option", { name: /2031/ });
-    await expect(existing).toBeVisible();
-    await existing.click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      "2031",
-    );
-  });
-
-  test("Cmd+K 'August 12th' prose creates that day's note (ADR 0055)", async ({
-    page,
-  }) => {
-    await load(page);
-    // Prose without year → chrono resolves against "now"; pin the year so the
-    // assertion stays stable (August 12 of the current year, or next if past).
-    const now = new Date();
-    const year =
-      now.getMonth() > 7 || (now.getMonth() === 7 && now.getDate() > 12)
-        ? now.getFullYear() + 1
-        : now.getFullYear();
-    await openSwitcherAndType(page, `August 12 ${year}`);
-    const go = page.getByRole("option", {
-      name: new RegExp(`Go to .*${year}`),
-    });
-    await expect(go).toBeVisible();
-    await go.click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      String(year),
-    );
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      "August",
-    );
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      "12",
-    );
-  });
-
-  test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
-    page,
-  }) => {
-    // Classic-only: fakes a stale `/api/kv` replica + `?op=claim` winner ack.
-    // Lunora delivers daily-index via shapes (no empty-GET + claim override).
-    // Simulate the race: this device's local daily-index replica is empty (it
-    // GETs an empty /api/kv below), so it thinks today is absent and CLAIMS --
-    // but another device already created the container + today's note, so the
-    // atomic claim returns THEIR winning ids. The device must adopt those, not
-    // mint duplicates. We pre-seed the winners as real nodes (so navigation +
-    // badge resolve) and force ?op=claim to return them.
-    const d = new Date();
-    const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}-${String(d.getDate()).padStart(2, "0")}`;
-    const winners = new Map([
-      ["container", "race-container"],
-      [todayKey, "race-today"],
-    ]);
-
-    await seedOutline(page, [
-      ...STANDARD_TREE,
-      {
-        id: "race-container",
+        id: "daily-container",
         parentId: null,
-        prevSiblingId: "charlie",
+        prevSiblingId: null,
         text: "Daily",
       },
       {
-        id: "race-today",
-        parentId: "race-container",
+        id: "past-day",
+        parentId: "daily-container",
         prevSiblingId: null,
-        text: `Note for ${d.getFullYear()}`,
+        text: "A past day",
       },
-    ]);
-
-    // Override only `?op=claim` to return the pre-existing winners; everything
-    // else (the empty daily-index GET, the setMapping POST) falls through to the
-    // seedOutline mock -- which is what keeps the local replica "stale".
-    await page.route(
-      (url) => url.pathname === "/api/kv",
-      async (route) => {
-        const req = route.request();
-        if (
-          req.method() === "POST" &&
-          new URL(req.url()).searchParams.get("op") === "claim"
-        ) {
-          const { key } = Schema.decodeUnknownSync(KvClaimBody)(
-            req.postDataJSON(),
-          );
-          const nodeId = winners.get(key);
-          if (nodeId) {
-            return route.fulfill({
-              status: 200,
-              contentType: "application/json",
-              body: JSON.stringify({ value: { key, nodeId } }),
-            });
-          }
-        }
-        return route.fallback();
-      },
-    );
-
-    await page.goto("/");
-    await expect(
-      page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-    ).toBeVisible();
-
-    await todayButton(page).click();
-
-    // Adopted the winner -> navigated to race-today, never a freshly minted id.
-    // The Today button is a write-intent surface (ADR 0041), so it lands with
-    // ?focus=last -- match race-today whether or not the query trails.
-    await expect(page).toHaveURL(/race-today(\?|$)/);
-
-    await goHome(page);
-    // Exactly one day badge and one "Daily" container: no duplicate was created
-    // despite this device having claimed.
-    await expect(page.locator("[data-daily-date]")).toHaveCount(1);
-    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
-    await expect(rowWithText(page, "Daily")).toHaveCount(1);
-    await expect(page.locator('li[data-node-id="race-today"]')).toHaveCount(1);
-  });
-
-  test("orphaned kv mapping materializes the node instead of zooming to a ghost", async ({
-    page,
-  }) => {
-    // daily-index points at ids with no matching outline rows (stale mapping).
-    // Today must create those nodes under the claimed ids, not show the
-    // "That bullet doesn't exist" empty state. Seed via `kv` so both classic
-    // `/api/kv` and Lunora `userDailyIndex` shapes see the orphans (a post-seed
-    // `/api/kv` route override is classic-only).
-    const d = new Date();
-    const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}-${String(d.getDate()).padStart(2, "0")}`;
-    const orphans = {
-      container: "ghost-container",
-      [todayKey]: "ghost-today",
-    };
-
-    await seedOutline(page, STANDARD_TREE, {
+    ],
+    {
       kv: {
         "daily-index": [
           {
             key: "container",
-            value: { key: "container", nodeId: orphans.container },
+            value: { key: "container", nodeId: "daily-container" },
           },
+          { key: pastKey, value: { key: pastKey, nodeId: "past-day" } },
+        ],
+      },
+    },
+  );
+  await page.goto("/");
+
+  const badge = page.locator("[data-daily-date]");
+  await expect(badge).toBeVisible();
+  // It's the past day's badge: not "Today", and without the today-only hook.
+  await expect(badge).not.toHaveText("Today");
+  await expect(badge).not.toHaveAttribute("data-daily-today");
+});
+
+test("the zoomed-in day note carries its date badge in the title", async ({
+  page,
+}) => {
+  await load(page);
+
+  // Today zooms INTO today's note, so it's the page title (h2), not a list
+  // bullet. The badge is a title slot (Seam F, `title:before-text`), so it must
+  // render here too -- with the same primary "today" treatment.
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+
+  const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
+  await expect(titleBadge).toBeVisible();
+  await expect(titleBadge).toContainText("Today");
+  await expect(titleBadge).toHaveAttribute("data-daily-today", "");
+});
+
+test("deleting the protected Daily container shakes it instead of removing it", async ({
+  page,
+}) => {
+  await load(page);
+
+  // Materialize the protected container (+ today's note), then go home so the
+  // "Daily" container row sits in the list.
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  const container = rowWithText(page, "Daily");
+  await expect(container).toBeVisible();
+
+  // Daily owns the protected scaffold's visual identity; owner locks use a
+  // separate lock glyph.
+  await expect(container.getByLabel("Protected Daily scaffold")).toBeVisible();
+
+  // Focus the container's own text and fire the subtree-delete hotkey
+  // (Mod+Shift+Backspace -> the single onDeleteNode funnel).
+  await container.locator(".node-text").click();
+  await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+
+  // It refuses: the row carries the one-shot reject class bound to the shake
+  // keyframe (confirms rejectRow wired through the isProtected branch), and
+  // the container is still present -- nothing was deleted.
+  await expect(container).toHaveClass(/node-rejected/);
+  await expect(
+    container.evaluate((el) => getComputedStyle(el).animationName),
+  ).resolves.toBe("node-rejected-shake");
+  await expect(container).toBeVisible();
+
+  // ...and a toast spells out *why* it can't go (the plugin's reason).
+  await expect(page.getByText(/can't be deleted/i)).toBeVisible();
+
+  // The class clears itself when the animation ends (so it can re-trigger).
+  await expect(container).not.toHaveClass(/node-rejected/, { timeout: 4000 });
+});
+
+test("an existing Daily container shows its lock on first load, before any zoom", async ({
+  page,
+}) => {
+  // The container is already here from a prior session: a real outline node
+  // PLUS the daily-index `container -> nodeId` mapping that marks it protected.
+  // That mapping loads async (the kv GET), and this load never navigates -- so
+  // the lock must appear when the index resolves, NOT only after a re-render
+  // forced by zooming in and back out. (The bug this guards: a render-time
+  // `isProtected` read with no subscription to the index, so the lock showed
+  // late.) The other protection specs always navigate first, masking it.
+  await seedOutline(
+    page,
+    [
+      {
+        id: "daily-container",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Daily",
+      },
+    ],
+    {
+      kv: {
+        "daily-index": [
           {
-            key: todayKey,
-            value: { key: todayKey, nodeId: orphans[todayKey] },
+            key: "container",
+            value: { key: "container", nodeId: "daily-container" },
           },
         ],
       },
-    });
+    },
+  );
+  await page.goto("/");
 
-    await page.goto("/");
-    await expect(
-      page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-    ).toBeVisible();
+  const container = rowWithText(page, "Daily");
+  await expect(container).toBeVisible({ timeout: 15_000 });
+  await expect(container.locator(".protection-indicator")).toBeVisible();
+});
 
-    await todayButton(page).click();
+test("blanking the protected Daily container restores its name and explains on blur", async ({
+  page,
+}) => {
+  await load(page);
 
-    // Write-intent nav (ADR 0041) lands with ?focus=last; match either way.
-    await expect(page).toHaveURL(/ghost-today(\?|$)/);
-    await expect(page.getByText("That bullet doesn't exist")).toHaveCount(0);
-    const year = String(d.getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      year,
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  // The container's id is a UUID; capture it so we can target the row even
+  // while its text is momentarily empty.
+  const containerId = await rowWithText(page, "Daily").evaluate(
+    (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+  );
+  expect(containerId).not.toBe("");
+  const containerText = page.locator(
+    `li[data-node-id="${containerId}"] > .outline-row .node-text`,
+  );
+
+  // Select the whole word and delete it through the real input path (selecting
+  // the contents directly -- arrow/select-all keys are unreliable in macOS
+  // Chromium contentEditable; see enter-split.spec).
+  await containerText.click();
+  await containerText.evaluate((el) => {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  });
+  await page.keyboard.press("Backspace");
+  // Editing is unfought: the field is allowed to sit empty mid-edit (no
+  // silent instant snap-back that would hide the reason).
+  await expect(containerText).toHaveText("");
+
+  // Blur by focusing another bullet -> the name heals AND a toast explains
+  // why, so the restore isn't a mystery.
+  await page
+    .locator('li[data-node-id="alpha"] > .outline-row .node-text')
+    .click();
+  await expect(containerText).toHaveText("Daily");
+  await expect(page.getByText(/needs a name/i)).toBeVisible();
+});
+
+test("Enter at the start of the protected Daily container never blanks it", async ({
+  page,
+}) => {
+  // Enter at offset 0 used to take the mid-split arm: it wrote "" into the
+  // node and handed its text to a NEW node below -- so a protected node sat
+  // visibly blanked until its row blurred and the heal fired. The insert-above
+  // arm writes nothing to it at all, which is why this funnel deliberately
+  // carries no `guardProtected` call: there is nothing left to guard against.
+  await load(page);
+
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  // The container's id is a UUID; capture it so the row can be targeted by id
+  // rather than by the text this test is asserting about.
+  const containerId = await rowWithText(page, "Daily").evaluate(
+    (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+  );
+  expect(containerId).not.toBe("");
+  const containerRow = page.locator(`li[data-node-id="${containerId}"]`);
+  const containerText = page.locator(
+    `li[data-node-id="${containerId}"] > .outline-row .node-text`,
+  );
+
+  await caretAtStart(containerText);
+  await page.keyboard.press("Enter");
+
+  // Wait for the insert to land: a blank row appears directly above.
+  const rowAbove = () =>
+    page.evaluate((id) => {
+      const lis = Array.from(document.querySelectorAll("li[data-node-id]"));
+      const i = lis.findIndex((li) => li.getAttribute("data-node-id") === id);
+      const prev = i > 0 ? lis[i - 1] : null;
+      return prev?.querySelector(".node-text")?.textContent ?? null;
+    }, containerId);
+  await expect.poll(rowAbove).toBe("");
+
+  // ...and the container was never blanked, not even momentarily. Read the
+  // text directly (no retrying matcher, which would happily pass on a value
+  // that had already healed).
+  expect(await containerText.textContent()).toBe("Daily");
+  // No rejection either: the arm is non-destructive, so there is nothing to
+  // refuse -- no shake, no "needs a name" toast.
+  await expect(containerRow).not.toHaveClass(/node-rejected/);
+  await expect(page.getByText(/needs a name/i)).toHaveCount(0);
+  // Still protected, still locked.
+  await expect(containerRow.locator(".protection-indicator")).toBeVisible();
+});
+
+test("the protected Daily container can't be turned into a to-do", async ({
+  page,
+}) => {
+  await load(page);
+
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  const containerId = await rowWithText(page, "Daily").evaluate(
+    (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+  );
+  expect(containerId).not.toBe("");
+  const containerRow = page.locator(
+    `li[data-node-id="${containerId}"] > .outline-row`,
+  );
+
+  // Run /todo on the container (the conversion the daily plugin forbids).
+  await containerRow.locator(".node-text").click();
+  await page.keyboard.type(" /todo");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.getByRole("option", { name: /Turn into a To-do/i }).click();
+
+  // Rejected: it stays a plain bullet (no checkbox) and a toast explains why.
+  await expect(containerRow.locator(".checkbox")).toHaveCount(0);
+  await expect(page.getByText(/can't be a to-do/i)).toBeVisible();
+  // ...and it still wears its Daily protection indicator, leading the text.
+  await expect(containerRow.locator(".protection-indicator")).toBeVisible();
+});
+
+test("the protected Daily container can't be completed", async ({ page }) => {
+  await load(page);
+
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  const containerId = await rowWithText(page, "Daily").evaluate(
+    (el) => el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
+  );
+  expect(containerId).not.toBe("");
+  const containerRow = page.locator(
+    `li[data-node-id="${containerId}"] > .outline-row`,
+  );
+  const containerText = containerRow.locator(".node-text");
+
+  // Mod+Enter (the completion hotkey, Seam D) on the container: completing it
+  // would strike through every day note under it, so the daily plugin forbids
+  // it. The single onToggleCompleted funnel rejects.
+  await containerText.click();
+  await page.keyboard.press(`${modifier()}+Enter`);
+
+  // Rejected: it stays un-done, the row shakes, and a toast explains why.
+  await expect(containerText).toHaveAttribute("data-completed", "false");
+  await expect(containerRow).toHaveClass(/node-rejected/);
+  await expect(page.getByText(/can't be completed/i)).toBeVisible();
+});
+
+test("the protected Daily container can't be completed when zoomed in as the title", async ({
+  page,
+}) => {
+  await load(page);
+
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  // Zoom INTO the container so it becomes the page title (not a list bullet).
+  await rowWithText(page, "Daily").locator(".bullet").click();
+  const title = page.locator("h2.zoomed-title");
+  const titleText = title.locator(".node-text");
+  await expect(titleText).toHaveText("Daily");
+  // The plugin-owned protection affordance follows the node when zoomed.
+  await expect(title.getByLabel("Protected Daily scaffold")).toBeVisible();
+
+  // The completion rule applies to the zoomed node too: Mod+Enter on the
+  // title routes through the same funnel and is rejected.
+  await titleText.click();
+  await page.keyboard.press(`${modifier()}+Enter`);
+
+  await expect(titleText).toHaveAttribute("data-completed", "false");
+  await expect(page.getByText(/can't be completed/i)).toBeVisible();
+});
+
+test("clicking Today twice reuses the same note (no duplicates)", async ({
+  page,
+}) => {
+  await load(page);
+
+  await todayButton(page).click();
+  // get-or-create is now async (an atomic claim round-trip on first create),
+  // so wait for the zoom nav to settle before capturing the URL.
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page).not.toHaveURL(/\/$/);
+  const firstUrl = page.url();
+
+  await goHome(page);
+  await todayButton(page).click();
+
+  // Same note -> same URL, and still exactly one daily badge in the tree.
+  await expect(page).toHaveURL(firstUrl);
+  await goHome(page);
+  await expect(page.locator("[data-daily-date]")).toHaveCount(1);
+});
+
+test("the `/` command moves a node under today's note", async ({ page }) => {
+  await load(page);
+
+  // Run the slash command from a top-level node. The leading space makes the
+  // "/" follow whitespace so detectSlash fires; "/today" uniquely matches
+  // "Move to Today" (see move-dialog.spec for the pattern).
+  const charlie = page.locator(
+    'li[data-node-id="charlie"] > .outline-row .node-text',
+  );
+  await charlie.click();
+  await expect(charlie).toBeFocused();
+  await page.keyboard.type(" /today");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Enter");
+
+  // Confirming toast, and the node -- a top-level sibling before -- now nests
+  // under the Daily container's today note (creating both on first use).
+  await expect(page.getByText("Moved to Today")).toBeVisible();
+  // charlie now nests under TODAY's note (itself a child of the Daily
+  // container). The flat render has no nested <li> (ADR 0019), so assert
+  // charlie's real parent is the today note -- located by its "today" badge.
+  const todayId = await page
+    .locator("li[data-node-id] [data-daily-today]")
+    .first()
+    .evaluate(
+      (el) =>
+        el.closest("li[data-node-id]")?.getAttribute("data-node-id") ?? "",
     );
+  expect(todayId).not.toBe("");
+  await expect(
+    page.locator(`li[data-node-id="charlie"][data-parent-id="${todayId}"]`),
+  ).toBeVisible();
+});
 
-    await goHome(page);
-    await expect(
-      page.locator('li[data-node-id="ghost-container"]'),
-    ).toHaveCount(1);
-    await expect(page.locator('li[data-node-id="ghost-today"]')).toHaveCount(1);
-    await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+test("Cmd+K 'today' offers a create-today action when the note is absent", async ({
+  page,
+}) => {
+  await load(page);
+
+  await openSwitcherAndType(page, "today");
+
+  // The virtual (non-node) action -- today's note doesn't exist yet.
+  const go = page.getByRole("option", { name: /Go to Today/ });
+  await expect(go).toBeVisible();
+  await go.click();
+
+  // It created + navigated to today's note (URL left "/"; year in the title).
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page).not.toHaveURL(/\/$/);
+  const year = String(new Date().getFullYear());
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+  await goHome(page);
+  await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+});
+
+test("Cmd+K 'today' surfaces the existing note by its label, with no dup action", async ({
+  page,
+}) => {
+  await load(page);
+  await todayButton(page).click(); // create today's note
+  // Let the create+zoom settle before going home: the daily nav is async
+  // (fire-and-forget from the click), so without this wait it can race the
+  // home nav and land last, leaving us on the day. See the other Today tests.
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  await openSwitcherAndType(page, "today");
+
+  // The create-action is suppressed (the note exists)...
+  await expect(page.getByRole("option", { name: /Go to Today/ })).toHaveCount(
+    0,
+  );
+
+  // ...and the real day note is found via its "Today" alias even though its
+  // text is the full date (the row displays that date, hence the year). The
+  // row also carries a "(Today)" suffix (Seam J annotation) for clarity.
+  const year = String(new Date().getFullYear());
+  const hit = page.getByRole("option", { name: new RegExp(year) });
+  await expect(hit).toBeVisible();
+  await expect(page.getByRole("option", { name: /\(Today\)/ })).toBeVisible();
+  await hit.click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+});
+
+test("Cmd+K NL / ISO go-to-date creates a missing future day (ADR 0055)", async ({
+  page,
+}) => {
+  await load(page);
+
+  // Far future ISO — no collision with "today" fixtures.
+  await openSwitcherAndType(page, "2031-08-12");
+  const go = page.getByRole("option", { name: /Go to .*2031/ });
+  await expect(go).toBeVisible();
+  await expect(go).toContainText("Creates this daily note");
+  await go.click();
+
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+    "2031",
+  );
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+    "August",
+  );
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText("12");
+
+  // Idempotent reopen: create action suppressed; real node via Fuse.
+  await goHome(page);
+  await openSwitcherAndType(page, "2031-08-12");
+  await expect(
+    page.getByRole("option", { name: /Creates this daily note/ }),
+  ).toHaveCount(0);
+  const existing = page.getByRole("option", { name: /2031/ });
+  await expect(existing).toBeVisible();
+  await existing.click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+    "2031",
+  );
+});
+
+test("Cmd+K 'August 12th' prose creates that day's note (ADR 0055)", async ({
+  page,
+}) => {
+  await load(page);
+  // Prose without year → chrono resolves against "now"; pin the year so the
+  // assertion stays stable (August 12 of the current year, or next if past).
+  const now = new Date();
+  const year =
+    now.getMonth() > 7 || (now.getMonth() === 7 && now.getDate() > 12)
+      ? now.getFullYear() + 1
+      : now.getFullYear();
+  await openSwitcherAndType(page, `August 12 ${year}`);
+  const go = page.getByRole("option", {
+    name: new RegExp(`Go to .*${year}`),
   });
+  await expect(go).toBeVisible();
+  await go.click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+    String(year),
+  );
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+    "August",
+  );
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText("12");
+});
 
-  test("the Daily container resists deletion; ordinary nodes still delete", async ({
-    page,
-  }) => {
-    await load(page);
-    await todayButton(page).click();
-    // Settle the async create+zoom before going home (see the other Today tests).
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
+test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
+  page,
+}) => {
+  // Classic-only: fakes a stale `/api/kv` replica + `?op=claim` winner ack.
+  // Lunora delivers daily-index via shapes (no empty-GET + claim override).
+  // Simulate the race: this device's local daily-index replica is empty (it
+  // GETs an empty /api/kv below), so it thinks today is absent and CLAIMS --
+  // but another device already created the container + today's note, so the
+  // atomic claim returns THEIR winning ids. The device must adopt those, not
+  // mint duplicates. We pre-seed the winners as real nodes (so navigation +
+  // badge resolve) and force ?op=claim to return them.
+  const d = new Date();
+  const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(d.getDate()).padStart(2, "0")}`;
+  const winners = new Map([
+    ["container", "race-container"],
+    [todayKey, "race-today"],
+  ]);
 
-    // Force-delete (Mod+Shift+Backspace) the protected container: a no-op.
-    await rowWithText(page, "Daily").locator(".node-text").click();
-    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
-    await expect(rowWithText(page, "Daily")).toBeVisible();
+  await seedOutline(page, [
+    ...STANDARD_TREE,
+    {
+      id: "race-container",
+      parentId: null,
+      prevSiblingId: "charlie",
+      text: "Daily",
+    },
+    {
+      id: "race-today",
+      parentId: "race-container",
+      prevSiblingId: null,
+      text: `Note for ${d.getFullYear()}`,
+    },
+  ]);
 
-    // The same gesture DOES delete an ordinary node -- the guard is specific.
-    await page
-      .locator('li[data-node-id="bravo"] > .outline-row .node-text')
-      .click();
-    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
-    await expect(page.locator('li[data-node-id="bravo"]')).toHaveCount(0);
-  });
-
-  test("/today redirects to today's daily note, creating it on first visit", async ({
-    page,
-  }) => {
-    await seedOutline(page, STANDARD_TREE);
-    await page.goto("/today");
-
-    // The redirect is async (wait for collection ready + get-or-create day),
-    // so wait for it to leave /today before asserting the zoom view.
-    await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
-    await expect(page).not.toHaveURL(/\/$/, { timeout: 10000 });
-    const year = String(new Date().getFullYear());
-    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-      year,
-    );
-
-    const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
-    await expect(titleBadge).toBeVisible();
-    await expect(titleBadge).toHaveAttribute("data-daily-today", "");
-  });
-
-  test("/today is idempotent: a second visit lands on the same note", async ({
-    page,
-  }) => {
-    await seedOutline(page, STANDARD_TREE);
-    await page.goto("/today");
-    await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
-    const firstUrl = page.url();
-
-    await goHome(page);
-    await clientNavigate(page, "/today");
-    await expect(page).toHaveURL(firstUrl);
-
-    await goHome(page);
-    await expect(page.locator("[data-daily-date]")).toHaveCount(1);
-  });
-
-  // --- calendar hierarchy: Daily > Year > Month > Week > Day (ADR 0052) -------
-
-  test("visiting today materializes the full Daily > Year > Month > Week > Day chain", async ({
-    page,
-  }) => {
-    await load(page);
-
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    const { weekKey, monthKey, yearKey } = todayChain();
-
-    // Container (top level -- no data-parent-id).
-    const containerLi = rowLi(page, "Daily");
-    await expect(containerLi).toBeVisible();
-    const containerId = await nodeIdOf(containerLi);
-
-    // Year "2026" nests under the container, with its canonical label as text.
-    const yearLi = rowLi(page, yearLabel(yearKey));
-    await expect(yearLi).toBeVisible();
-    await expect(yearLi).toHaveAttribute("data-parent-id", containerId!);
-    const yearId = await nodeIdOf(yearLi);
-
-    // Month "July" nests under the year.
-    const monthLi = rowLi(page, monthLabel(monthKey));
-    await expect(monthLi).toBeVisible();
-    await expect(monthLi).toHaveAttribute("data-parent-id", yearId!);
-    const monthId = await nodeIdOf(monthLi);
-
-    // The Calendar week nests under the month AND carries its own Seam-F badge
-    // (a date range with a "This week" prefix), present only on week rows.
-    const weekLi = rowLi(page, weekLabel(weekKey));
-    await expect(weekLi).toBeVisible();
-    await expect(weekLi).toHaveAttribute("data-parent-id", monthId!);
-    const weekBadge = weekLi.locator("[data-daily-week]");
-    await expect(weekBadge).toBeVisible();
-    await expect(weekBadge).toContainText("This week");
-    await expect(weekBadge).toHaveAttribute("data-daily-this-week", "");
-    const weekId = await nodeIdOf(weekLi);
-
-    // Today's day note is the leaf, nested under the week (not the container).
-    const dayLi = page.locator("li[data-node-id]").filter({
-      has: page.locator("[data-daily-today]"),
-    });
-    await expect(dayLi).toHaveAttribute("data-parent-id", weekId!);
-  });
-
-  test("days sort chronologically ascending under their week (sorted insertion, not append)", async ({
-    page,
-  }) => {
-    // Two days in the same Monday-start week: created LATER-first via date
-    // chips, so a passing order proves sorted INSERTION, not head/tail append.
-    const EARLY = "2030-03-05";
-    const LATE = "2030-03-07";
-    await seedOutline(page, [
-      {
-        id: "chips",
-        parentId: null,
-        prevSiblingId: null,
-        text: `[[${LATE}]] [[${EARLY}]]`,
-      },
-    ]);
-    await page.goto("/");
-    await expect(
-      page.locator('li[data-node-id="chips"] > .outline-row .node-text'),
-    ).toBeVisible();
-
-    const chip = (key: string) =>
-      page.locator(`li[data-node-id="chips"] [data-date-link="${key}"]`);
-
-    // Create the LATER day first...
-    await chip(LATE).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-    // ...then the EARLIER day.
-    await chip(EARLY).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    const earlyLi = page.locator(
-      `li[data-node-id]:has([data-daily-date="${EARLY}"])`,
-    );
-    const lateLi = page.locator(
-      `li[data-node-id]:has([data-daily-date="${LATE}"])`,
-    );
-    await expect(earlyLi).toBeVisible();
-    await expect(lateLi).toBeVisible();
-
-    // Both are day-children of the same Calendar-week node.
-    const earlyParent = await earlyLi.getAttribute("data-parent-id");
-    const lateParent = await lateLi.getAttribute("data-parent-id");
-    expect(earlyParent).not.toBeNull();
-    expect(earlyParent).toBe(lateParent);
-    await expect(
-      page.locator(`li[data-node-id="${earlyParent}"] [data-daily-week]`),
-    ).toBeVisible();
-
-    // Despite being created SECOND, the earlier date renders FIRST in document
-    // order (ascending), i.e. sorted insertion put it above the later one.
-    const rowIndex = (key: string) =>
-      page.evaluate((k) => {
-        const rows = Array.from(document.querySelectorAll("li[data-node-id]"));
-        return rows.findIndex((r) =>
-          r.querySelector(`[data-daily-date="${k}"]`),
+  // Override only `?op=claim` to return the pre-existing winners; everything
+  // else (the empty daily-index GET, the setMapping POST) falls through to the
+  // seedOutline mock -- which is what keeps the local replica "stale".
+  await page.route(
+    (url) => url.pathname === "/api/kv",
+    async (route) => {
+      const req = route.request();
+      if (
+        req.method() === "POST" &&
+        new URL(req.url()).searchParams.get("op") === "claim"
+      ) {
+        const { key } = Schema.decodeUnknownSync(KvClaimBody)(
+          req.postDataJSON(),
         );
-      }, key);
-    const earlyIdx = await rowIndex(EARLY);
-    const lateIdx = await rowIndex(LATE);
-    expect(earlyIdx).toBeGreaterThan(-1);
-    expect(lateIdx).toBeGreaterThan(earlyIdx);
-  });
+        const nodeId = winners.get(key);
+        if (nodeId) {
+          return route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ value: { key, nodeId } }),
+          });
+        }
+      }
+      return route.fallback();
+    },
+  );
 
-  test("scaffold year + week nodes are protected: deleting them is rejected with a shake", async ({
-    page,
-  }) => {
-    await load(page);
+  await page.goto("/");
+  await expect(
+    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
+  ).toBeVisible();
 
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
+  await todayButton(page).click();
 
-    const { weekKey, yearKey } = todayChain();
+  // Adopted the winner -> navigated to race-today, never a freshly minted id.
+  // The Today button is a write-intent surface (ADR 0041), so it lands with
+  // ?focus=last -- match race-today whether or not the query trails.
+  await expect(page).toHaveURL(/race-today(\?|$)/);
 
-    // Both the year and the week scaffold nodes carry the container's protection
-    // (removeNode cascades, so an unprotected delete would take the days with it).
-    for (const label of [yearLabel(yearKey), weekLabel(weekKey)]) {
-      const li = rowLi(page, label);
-      await expect(li).toBeVisible();
-      const row = li.locator(".outline-row").first();
+  await goHome(page);
+  // Exactly one day badge and one "Daily" container: no duplicate was created
+  // despite this device having claimed.
+  await expect(page.locator("[data-daily-date]")).toHaveCount(1);
+  await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+  await expect(rowWithText(page, "Daily")).toHaveCount(1);
+  await expect(page.locator('li[data-node-id="race-today"]')).toHaveCount(1);
+});
 
-      // Always-on Daily protection indicator.
-      await expect(row.locator(".protection-indicator")).toBeVisible();
+test("orphaned kv mapping materializes the node instead of zooming to a ghost", async ({
+  page,
+}) => {
+  // daily-index points at ids with no matching outline rows (stale mapping).
+  // Today must create those nodes under the claimed ids, not show the
+  // "That bullet doesn't exist" empty state. Seed via `kv` so both classic
+  // `/api/kv` and Lunora `userDailyIndex` shapes see the orphans (a post-seed
+  // `/api/kv` route override is classic-only).
+  const d = new Date();
+  const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(d.getDate()).padStart(2, "0")}`;
+  const orphans = {
+    container: "ghost-container",
+    [todayKey]: "ghost-today",
+  };
 
-      // Force-delete (Mod+Shift+Backspace -> the onDeleteNode funnel) is refused:
-      // the row shakes (one-shot reject class) and stays present.
-      await row.locator(".node-text").click();
-      await page.keyboard.press(`${modifier()}+Shift+Backspace`);
-      await expect(row).toHaveClass(/node-rejected/);
-      await expect(li).toBeVisible();
-      await expect(page.getByText(/can't be deleted/i)).toBeVisible();
-
-      // The class clears when the shake ends, so the next iteration can re-trigger.
-      await expect(row).not.toHaveClass(/node-rejected/, { timeout: 4000 });
-    }
-  });
-
-  test("the first daily touch migrates flat pre-hierarchy days under their weeks (one-time, ADR 0052)", async ({
-    page,
-  }) => {
-    // A legacy account: every day sits FLAT, directly under the container, with
-    // matching daily-index kv rows. Two days in different ISO weeks of one month.
-    const A = "2022-05-10"; // 2022-W19
-    const B = "2022-05-17"; // 2022-W20
-    // today, seeded FLAT but WITH a child so the first daily touch neither
-    // creates nor seeds it (present + childful). The migration is then the ONLY
-    // structural batch, so the single undo below cleanly reverts it (finding 8).
-    const TODAY = todayChain().dayKey;
-    await seedOutline(
-      page,
-      [
-        { id: "keep", parentId: null, prevSiblingId: null, text: "Keep" },
+  await seedOutline(page, STANDARD_TREE, {
+    kv: {
+      "daily-index": [
         {
-          id: "mig-container",
-          parentId: null,
-          prevSiblingId: "keep",
-          text: "Daily",
+          key: "container",
+          value: { key: "container", nodeId: orphans.container },
         },
         {
-          id: "mig-a",
-          parentId: "mig-container",
-          prevSiblingId: null,
-          text: "Day A",
-        },
-        {
-          id: "mig-b",
-          parentId: "mig-container",
-          prevSiblingId: "mig-a",
-          text: "Day B",
-        },
-        {
-          id: "mig-today",
-          parentId: "mig-container",
-          prevSiblingId: "mig-b",
-          text: "Today (flat)",
-        },
-        {
-          id: "mig-today-child",
-          parentId: "mig-today",
-          prevSiblingId: null,
-          text: "existing child",
+          key: todayKey,
+          value: { key: todayKey, nodeId: orphans[todayKey] },
         },
       ],
-      {
-        kv: {
-          "daily-index": [
-            {
-              key: "container",
-              value: { key: "container", nodeId: "mig-container" },
-            },
-            { key: A, value: { key: A, nodeId: "mig-a" } },
-            { key: B, value: { key: B, nodeId: "mig-b" } },
-            { key: TODAY, value: { key: TODAY, nodeId: "mig-today" } },
-          ],
-        },
-      },
-    );
-    await page.goto("/");
-    await expect(rowWithText(page, "Daily")).toBeVisible();
-
-    // Pre-migration: both days are DIRECT children of the container (flat).
-    await expect(page.locator('li[data-node-id="mig-a"]')).toHaveAttribute(
-      "data-parent-id",
-      "mig-container",
-    );
-    await expect(page.locator('li[data-node-id="mig-b"]')).toHaveAttribute(
-      "data-parent-id",
-      "mig-container",
-    );
-
-    // Touch a daily surface -> the automatic one-time migration runs and toasts.
-    await todayButton(page).click();
-    await expect(
-      page.getByText("Organized your daily notes by week"),
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-
-    // Each formerly-flat day now nests under its own week node (a row bearing the
-    // Seam-F week badge) -- no longer a direct child of the container.
-    for (const id of ["mig-a", "mig-b"]) {
-      const li = page.locator(`li[data-node-id="${id}"]`);
-      const parent = await li.getAttribute("data-parent-id");
-      expect(parent).not.toBeNull();
-      expect(parent).not.toBe("mig-container");
-      await expect(
-        page.locator(`li[data-node-id="${parent}"] [data-daily-week]`),
-      ).toBeVisible();
-    }
-
-    // One-time contract (finding 8): re-touching a daily surface must NOT
-    // re-migrate. Wait for the first toast to clear, re-enter, and assert no
-    // second "Organized..." toast fires (today is pre-seeded + childful, so the
-    // re-entry creates nothing -- a migration is the only thing that could toast).
-    await expect(
-      page.getByText("Organized your daily notes by week"),
-    ).toBeHidden({ timeout: 10_000 });
-    await todayButton(page).click();
-    await expect(page).toHaveURL(/\/[^/]+$/);
-    await goHome(page);
-    await expect(
-      page.getByText("Organized your daily notes by week"),
-    ).toBeHidden();
-
-    // The migration is ONE undo point (one capture(), one runStructural batch --
-    // ADR 0009/0052): a single Cmd+Z restores every flat day as a direct child of
-    // the container. today is pre-seeded, so the migration is the ONLY structural
-    // batch on the stack and the re-entry above added none.
-    const keepText = page.locator(
-      'li[data-node-id="keep"] > .outline-row .node-text',
-    );
-    await keepText.click();
-    await expect(keepText).toBeFocused();
-    await page.keyboard.press("ControlOrMeta+z");
-    for (const id of ["mig-a", "mig-b"]) {
-      await expect(page.locator(`li[data-node-id="${id}"]`)).toHaveAttribute(
-        "data-parent-id",
-        "mig-container",
-        { timeout: 10_000 },
-      );
-    }
+    },
   });
+
+  await page.goto("/");
+  await expect(
+    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
+  ).toBeVisible();
+
+  await todayButton(page).click();
+
+  // Write-intent nav (ADR 0041) lands with ?focus=last; match either way.
+  await expect(page).toHaveURL(/ghost-today(\?|$)/);
+  await expect(page.getByText("That bullet doesn't exist")).toHaveCount(0);
+  const year = String(d.getFullYear());
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+  await goHome(page);
+  await expect(page.locator('li[data-node-id="ghost-container"]')).toHaveCount(
+    1,
+  );
+  await expect(page.locator('li[data-node-id="ghost-today"]')).toHaveCount(1);
+  await expect(page.locator("[data-daily-date]")).toHaveText("Today");
+});
+
+test("the Daily container resists deletion; ordinary nodes still delete", async ({
+  page,
+}) => {
+  await load(page);
+  await todayButton(page).click();
+  // Settle the async create+zoom before going home (see the other Today tests).
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  // Force-delete (Mod+Shift+Backspace) the protected container: a no-op.
+  await rowWithText(page, "Daily").locator(".node-text").click();
+  await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+  await expect(rowWithText(page, "Daily")).toBeVisible();
+
+  // The same gesture DOES delete an ordinary node -- the guard is specific.
+  await page
+    .locator('li[data-node-id="bravo"] > .outline-row .node-text')
+    .click();
+  await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+  await expect(page.locator('li[data-node-id="bravo"]')).toHaveCount(0);
+});
+
+test("/today redirects to today's daily note, creating it on first visit", async ({
+  page,
+}) => {
+  await seedOutline(page, STANDARD_TREE);
+  await page.goto("/today");
+
+  // The redirect is async (wait for collection ready + get-or-create day),
+  // so wait for it to leave /today before asserting the zoom view.
+  await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
+  await expect(page).not.toHaveURL(/\/$/, { timeout: 10000 });
+  const year = String(new Date().getFullYear());
+  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+
+  const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
+  await expect(titleBadge).toBeVisible();
+  await expect(titleBadge).toHaveAttribute("data-daily-today", "");
+});
+
+test("/today is idempotent: a second visit lands on the same note", async ({
+  page,
+}) => {
+  await seedOutline(page, STANDARD_TREE);
+  await page.goto("/today");
+  await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
+  const firstUrl = page.url();
+
+  await goHome(page);
+  await clientNavigate(page, "/today");
+  await expect(page).toHaveURL(firstUrl);
+
+  await goHome(page);
+  await expect(page.locator("[data-daily-date]")).toHaveCount(1);
+});
+
+// --- calendar hierarchy: Daily > Year > Month > Week > Day (ADR 0052) -------
+
+test("visiting today materializes the full Daily > Year > Month > Week > Day chain", async ({
+  page,
+}) => {
+  await load(page);
+
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  const { weekKey, monthKey, yearKey } = todayChain();
+
+  // Container (top level -- no data-parent-id).
+  const containerLi = rowLi(page, "Daily");
+  await expect(containerLi).toBeVisible();
+  const containerId = await nodeIdOf(containerLi);
+
+  // Year "2026" nests under the container, with its canonical label as text.
+  const yearLi = rowLi(page, yearLabel(yearKey));
+  await expect(yearLi).toBeVisible();
+  await expect(yearLi).toHaveAttribute("data-parent-id", containerId!);
+  const yearId = await nodeIdOf(yearLi);
+
+  // Month "July" nests under the year.
+  const monthLi = rowLi(page, monthLabel(monthKey));
+  await expect(monthLi).toBeVisible();
+  await expect(monthLi).toHaveAttribute("data-parent-id", yearId!);
+  const monthId = await nodeIdOf(monthLi);
+
+  // The Calendar week nests under the month AND carries its own Seam-F badge
+  // (a date range with a "This week" prefix), present only on week rows.
+  const weekLi = rowLi(page, weekLabel(weekKey));
+  await expect(weekLi).toBeVisible();
+  await expect(weekLi).toHaveAttribute("data-parent-id", monthId!);
+  const weekBadge = weekLi.locator("[data-daily-week]");
+  await expect(weekBadge).toBeVisible();
+  await expect(weekBadge).toContainText("This week");
+  await expect(weekBadge).toHaveAttribute("data-daily-this-week", "");
+  const weekId = await nodeIdOf(weekLi);
+
+  // Today's day note is the leaf, nested under the week (not the container).
+  const dayLi = page.locator("li[data-node-id]").filter({
+    has: page.locator("[data-daily-today]"),
+  });
+  await expect(dayLi).toHaveAttribute("data-parent-id", weekId!);
+});
+
+test("days sort chronologically ascending under their week (sorted insertion, not append)", async ({
+  page,
+}) => {
+  // Two days in the same Monday-start week: created LATER-first via date
+  // chips, so a passing order proves sorted INSERTION, not head/tail append.
+  const EARLY = "2030-03-05";
+  const LATE = "2030-03-07";
+  await seedOutline(page, [
+    {
+      id: "chips",
+      parentId: null,
+      prevSiblingId: null,
+      text: `[[${LATE}]] [[${EARLY}]]`,
+    },
+  ]);
+  await page.goto("/");
+  await expect(
+    page.locator('li[data-node-id="chips"] > .outline-row .node-text'),
+  ).toBeVisible();
+
+  const chip = (key: string) =>
+    page.locator(`li[data-node-id="chips"] [data-date-link="${key}"]`);
+
+  // Create the LATER day first...
+  await chip(LATE).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+  // ...then the EARLIER day.
+  await chip(EARLY).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  const earlyLi = page.locator(
+    `li[data-node-id]:has([data-daily-date="${EARLY}"])`,
+  );
+  const lateLi = page.locator(
+    `li[data-node-id]:has([data-daily-date="${LATE}"])`,
+  );
+  await expect(earlyLi).toBeVisible();
+  await expect(lateLi).toBeVisible();
+
+  // Both are day-children of the same Calendar-week node.
+  const earlyParent = await earlyLi.getAttribute("data-parent-id");
+  const lateParent = await lateLi.getAttribute("data-parent-id");
+  expect(earlyParent).not.toBeNull();
+  expect(earlyParent).toBe(lateParent);
+  await expect(
+    page.locator(`li[data-node-id="${earlyParent}"] [data-daily-week]`),
+  ).toBeVisible();
+
+  // Despite being created SECOND, the earlier date renders FIRST in document
+  // order (ascending), i.e. sorted insertion put it above the later one.
+  const rowIndex = (key: string) =>
+    page.evaluate((k) => {
+      const rows = Array.from(document.querySelectorAll("li[data-node-id]"));
+      return rows.findIndex((r) => r.querySelector(`[data-daily-date="${k}"]`));
+    }, key);
+  const earlyIdx = await rowIndex(EARLY);
+  const lateIdx = await rowIndex(LATE);
+  expect(earlyIdx).toBeGreaterThan(-1);
+  expect(lateIdx).toBeGreaterThan(earlyIdx);
+});
+
+test("scaffold year + week nodes are protected: deleting them is rejected with a shake", async ({
+  page,
+}) => {
+  await load(page);
+
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  const { weekKey, yearKey } = todayChain();
+
+  // Both the year and the week scaffold nodes carry the container's protection
+  // (removeNode cascades, so an unprotected delete would take the days with it).
+  for (const label of [yearLabel(yearKey), weekLabel(weekKey)]) {
+    const li = rowLi(page, label);
+    await expect(li).toBeVisible();
+    const row = li.locator(".outline-row").first();
+
+    // Always-on Daily protection indicator.
+    await expect(row.locator(".protection-indicator")).toBeVisible();
+
+    // Force-delete (Mod+Shift+Backspace -> the onDeleteNode funnel) is refused:
+    // the row shakes (one-shot reject class) and stays present.
+    await row.locator(".node-text").click();
+    await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+    await expect(row).toHaveClass(/node-rejected/);
+    await expect(li).toBeVisible();
+    await expect(page.getByText(/can't be deleted/i)).toBeVisible();
+
+    // The class clears when the shake ends, so the next iteration can re-trigger.
+    await expect(row).not.toHaveClass(/node-rejected/, { timeout: 4000 });
+  }
+});
+
+test("the first daily touch migrates flat pre-hierarchy days under their weeks (one-time, ADR 0052)", async ({
+  page,
+}) => {
+  // A legacy account: every day sits FLAT, directly under the container, with
+  // matching daily-index kv rows. Two days in different ISO weeks of one month.
+  const A = "2022-05-10"; // 2022-W19
+  const B = "2022-05-17"; // 2022-W20
+  // today, seeded FLAT but WITH a child so the first daily touch neither
+  // creates nor seeds it (present + childful). The migration is then the ONLY
+  // structural batch, so the single undo below cleanly reverts it (finding 8).
+  const TODAY = todayChain().dayKey;
+  await seedOutline(
+    page,
+    [
+      { id: "keep", parentId: null, prevSiblingId: null, text: "Keep" },
+      {
+        id: "mig-container",
+        parentId: null,
+        prevSiblingId: "keep",
+        text: "Daily",
+      },
+      {
+        id: "mig-a",
+        parentId: "mig-container",
+        prevSiblingId: null,
+        text: "Day A",
+      },
+      {
+        id: "mig-b",
+        parentId: "mig-container",
+        prevSiblingId: "mig-a",
+        text: "Day B",
+      },
+      {
+        id: "mig-today",
+        parentId: "mig-container",
+        prevSiblingId: "mig-b",
+        text: "Today (flat)",
+      },
+      {
+        id: "mig-today-child",
+        parentId: "mig-today",
+        prevSiblingId: null,
+        text: "existing child",
+      },
+    ],
+    {
+      kv: {
+        "daily-index": [
+          {
+            key: "container",
+            value: { key: "container", nodeId: "mig-container" },
+          },
+          { key: A, value: { key: A, nodeId: "mig-a" } },
+          { key: B, value: { key: B, nodeId: "mig-b" } },
+          { key: TODAY, value: { key: TODAY, nodeId: "mig-today" } },
+        ],
+      },
+    },
+  );
+  await page.goto("/");
+  await expect(rowWithText(page, "Daily")).toBeVisible();
+
+  // Pre-migration: both days are DIRECT children of the container (flat).
+  await expect(page.locator('li[data-node-id="mig-a"]')).toHaveAttribute(
+    "data-parent-id",
+    "mig-container",
+  );
+  await expect(page.locator('li[data-node-id="mig-b"]')).toHaveAttribute(
+    "data-parent-id",
+    "mig-container",
+  );
+
+  // Touch a daily surface -> the automatic one-time migration runs and toasts.
+  await todayButton(page).click();
+  await expect(
+    page.getByText("Organized your daily notes by week"),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+
+  // Each formerly-flat day now nests under its own week node (a row bearing the
+  // Seam-F week badge) -- no longer a direct child of the container.
+  for (const id of ["mig-a", "mig-b"]) {
+    const li = page.locator(`li[data-node-id="${id}"]`);
+    const parent = await li.getAttribute("data-parent-id");
+    expect(parent).not.toBeNull();
+    expect(parent).not.toBe("mig-container");
+    await expect(
+      page.locator(`li[data-node-id="${parent}"] [data-daily-week]`),
+    ).toBeVisible();
+  }
+
+  // One-time contract (finding 8): re-touching a daily surface must NOT
+  // re-migrate. Wait for the first toast to clear, re-enter, and assert no
+  // second "Organized..." toast fires (today is pre-seeded + childful, so the
+  // re-entry creates nothing -- a migration is the only thing that could toast).
+  await expect(page.getByText("Organized your daily notes by week")).toBeHidden(
+    { timeout: 10_000 },
+  );
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await goHome(page);
+  await expect(
+    page.getByText("Organized your daily notes by week"),
+  ).toBeHidden();
+
+  // The migration is ONE undo point (one capture(), one runStructural batch --
+  // ADR 0009/0052): a single Cmd+Z restores every flat day as a direct child of
+  // the container. today is pre-seeded, so the migration is the ONLY structural
+  // batch on the stack and the re-entry above added none.
+  const keepText = page.locator(
+    'li[data-node-id="keep"] > .outline-row .node-text',
+  );
+  await keepText.click();
+  await expect(keepText).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+z");
+  for (const id of ["mig-a", "mig-b"]) {
+    await expect(page.locator(`li[data-node-id="${id}"]`)).toHaveAttribute(
+      "data-parent-id",
+      "mig-container",
+      { timeout: 10_000 },
+    );
+  }
 });

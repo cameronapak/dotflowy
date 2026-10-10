@@ -3,7 +3,6 @@ import { expect, test } from "bun:test";
 import {
   BOLD_PATTERN,
   emphasisMarkerLen,
-  hasEmphasis,
   ITALIC_PATTERN,
   ITALIC_UNDERSCORE_PATTERN,
   STRIKETHROUGH_PATTERN,
@@ -43,19 +42,6 @@ test.each([
 });
 
 test.each([
-  ["*italic*", true],
-  ["a **bold** b", true],
-  ["~~strike~~ and ~underline~", true],
-  ["an _underscore_ italic", true],
-  ["snake_case_name", false], // intraword underscores are not emphasis
-  ["plain text", false],
-  ["*unclosed", false],
-  ["**also unclosed", false],
-])("hasEmphasis(%p) -> %p", (text, expected) => {
-  expect(hasEmphasis(text)).toBe(expected);
-});
-
-test.each([
   ["*italic*", "italic"],
   ["**bold**", "bold"], // bold wins over italic on a ** run
   ["~~strike~~", "strike"], // strike wins over underline on a ~~ run
@@ -64,6 +50,9 @@ test.each([
   ["call foo_bar_baz()", "call foo_bar_baz()"], // search parity with render
   ["a *b* c **d** e", "a b c d e"],
   ["no emphasis here", "no emphasis here"],
+  ["snake_case_name", "snake_case_name"],
+  ["*unclosed", "*unclosed"],
+  ["**also unclosed", "**also unclosed"],
   // Flat v1: `**triple**` matches as bold and the leading `*` stays literal.
   ["***triple***", "*triple*"],
 ])("stripEmphasis(%p) -> %p", (text, expected) => {

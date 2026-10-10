@@ -32,34 +32,32 @@ async function load(page: Page) {
   await expect(text(page, "mine")).toBeVisible();
 }
 
-test.describe("provenance marker", () => {
-  test("marks an agent-created node and leaves the user's own unmarked", async ({
-    page,
-  }) => {
-    await load(page);
+test("marks an agent-created node and leaves the user's own unmarked", async ({
+  page,
+}) => {
+  await load(page);
 
-    // The user's node carries no mark.
-    await expect(mark(page, "mine")).toHaveCount(0);
+  // The user's node carries no mark.
+  await expect(mark(page, "mine")).toHaveCount(0);
 
-    // The agent's node does, tagged with the harness name plus an aria-label
-    // attribution (the visible copy lives in the hover tooltip).
-    const agentMark = mark(page, "ai");
-    await expect(agentMark).toBeVisible();
-    await expect(agentMark).toHaveAttribute("data-origin", "Claude");
-    await expect(agentMark).toHaveAttribute("aria-label", /Created by Claude/);
-  });
+  // The agent's node does, tagged with the harness name plus an aria-label
+  // attribution (the visible copy lives in the hover tooltip).
+  const agentMark = mark(page, "ai");
+  await expect(agentMark).toBeVisible();
+  await expect(agentMark).toHaveAttribute("data-origin", "Claude");
+  await expect(agentMark).toHaveAttribute("aria-label", /Created by Claude/);
+});
 
-  test("the mark rides the zoom into the page title (Seam F title slot)", async ({
-    page,
-  }) => {
-    await load(page);
+test("the mark rides the zoom into the page title (Seam F title slot)", async ({
+  page,
+}) => {
+  await load(page);
 
-    // Zoom the agent node in by clicking its bullet dot.
-    await page.locator(`li[data-node-id="ai"] .bullet`).first().click();
+  // Zoom the agent node in by clicking its bullet dot.
+  await page.locator(`li[data-node-id="ai"] .bullet`).first().click();
 
-    // The zoomed title (registered under the rootId) shows the same mark.
-    const titleMark = page.locator(`.zoomed-title [data-origin]`);
-    await expect(titleMark).toBeVisible();
-    await expect(titleMark).toHaveAttribute("data-origin", "Claude");
-  });
+  // The zoomed title (registered under the rootId) shows the same mark.
+  const titleMark = page.locator(`.zoomed-title [data-origin]`);
+  await expect(titleMark).toBeVisible();
+  await expect(titleMark).toHaveAttribute("data-origin", "Claude");
 });

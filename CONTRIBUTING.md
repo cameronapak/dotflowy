@@ -175,6 +175,7 @@ your work; a later pruning pass decides which ones stay. These rules adapt Kent 
 | Flavor                              | Use it for                                                                                                                 | Command            |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | Unit, `*.test.ts` beside its module | Pure logic: `tree.ts`, parsers, tokens, the Worker planners and schemas.                                                   | `bun run test`     |
+| Worker, `worker/*-real.test.ts`     | The bundled Worker and its Durable Objects under Miniflare, with no browser: HTTP, auth, and storage together.             | `bun run test`     |
 | CLI, `cli/test/`                    | The built executable against loopback fixtures.                                                                            | `bun run test:cli` |
 | Playwright, `e2e/*.spec.ts`         | A few user-critical journeys, and behavior only a real browser shows: caret, contentEditable, layout, the collection path. | `bun run test:e2e` |
 
@@ -217,7 +218,7 @@ browser.
   `waitForTimeout`.
 - **e2e does not run in CI.** It is a local pre-PR gate.
   `bun run test:e2e:app --workers=2` is the clean-signal app-only run;
-  `bun run test:e2e` also runs the isolated real-Worker suites. Use
+  `bun run test:e2e` also runs the isolated real-Worker suite. Use
   `bun run test:e2e:serial` when chasing a flake. A
   parallel-contention flake isn't a real failure. The app suite runs its own Vite
   server on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set the
@@ -227,9 +228,7 @@ browser.
 
 Ask: would production keep this code if every test were deleted? If not, it
 belongs in the test file or `e2e/fixtures.ts`. Reach behavior through public
-interfaces, the Effect `TestClock`, and fixture route mocks. Known debt: the
-quick-add resolve gate (`src/components/quick-add.tsx`) and `setClock` in
-`worker/mcp-tools.ts`.
+interfaces, the Effect `TestClock`, and fixture route mocks.
 
 ### Prune
 
@@ -263,8 +262,9 @@ bun run lint            # oxlint over src + worker + CLI source, tests, and scri
 bun run typecheck       # tsc over the app (DOM libs)
 bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
-bun run test            # bun test — pure-logic unit tests (src + worker/)
-bun run test:e2e        # playwright (chromium) — app plus isolated real-Worker suites
+bun run typecheck:e2e   # tsc over app Playwright specs and fixtures, no browser
+bun run test            # bun test — unit tests plus the Miniflare Worker suite (src + worker/)
+bun run test:e2e        # playwright (chromium) — app plus isolated real-Worker suite
 bunx changeset          # describe your change for the changelog (see below)
 bun run check:changeset # verify the committed branch carries that decision
 ```
@@ -290,10 +290,10 @@ lint through `bun run lint`; `lint:cli` is the focused local command.
 | CLI     | `bun run lint:cli`, `bun run build:cli`, `bun run typecheck:cli`, `bun run test:cli`, `bun run --cwd cli check:package` | Install `cli/` dependencies first with `bun install --cwd cli --frozen-lockfile`. Tests run the Node executable against loopback fixtures. The [live test](./cli/README.md#development-and-verification) is opt-in. |
 | Landing | `bun run --cwd landing typecheck`, `bun run --cwd landing build`                                                        | Install `landing/` dependencies first. Inspect the rendered change at desktop and mobile widths.                                                                                                                    |
 
-E2E tests need **development mode**, not `cf:dev` or `vite preview`.
-Quick-add's deferred-resolve tests use `__quickAddHoldResolve` and
-`__quickAddReleaseResolve`, which exist only when `import.meta.env.DEV` is true.
-The committed Playwright config invokes the installed Vite entry point directly
+E2E tests run against Vite development mode. Quick-add's deferred-resolve tests
+hold the real Daily claim request through `holdDailyClaims` in the fixture;
+they do not require development-only app hooks. The committed Playwright config
+invokes the installed Vite entry point directly
 to avoid nested Bun script PATH failures. It rejects a busy port instead of
 adopting another checkout's server; set `E2E_PORT` for concurrent runs.
 
