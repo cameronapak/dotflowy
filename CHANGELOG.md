@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.23.2
+
+### Patch Changes
+
+- d887f13: Undo and redo in the filter input now edit the query without changing your outline.
+
 ## 1.23.1
 
 ### Patch Changes
