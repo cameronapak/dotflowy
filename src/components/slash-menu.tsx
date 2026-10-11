@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -9,9 +10,8 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { usePluginChrome } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
-import { MenuDrawerContent } from "./menu-drawer";
 import { SlashMenuList } from "./slash-menu-list";
-import { Drawer } from "./ui/drawer";
+import { TypingSuggestions } from "./typing-suggestions";
 import { useClampedMenuPosition } from "./use-menu-position";
 
 /** The composed command list driving the `/` palette: plugin commands (Seam C,
@@ -186,38 +186,31 @@ export function useSlashMenu({
     }
   };
 
-  const menu = state ? (
-    mobile ? (
-      <Drawer
-        open
-        modal={false}
-        showSwipeHandle
-        onOpenChange={(next) => {
-          if (!next) close();
-        }}
-      >
-        <MenuDrawerContent title="Commands" typing>
+  const menu = mobile ? (
+    <AnimatePresence>
+      {state && (
+        <TypingSuggestions getEditor={getEl} onDismiss={close}>
           <SlashMenuList
             items={items}
             activeIndex={state.activeIndex}
-            inDrawer
+            inDock
             onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
             onSelect={select}
           />
-        </MenuDrawerContent>
-      </Drawer>
-    ) : (
-      createPortal(
-        <SlashMenuList
-          items={items}
-          activeIndex={state.activeIndex}
-          ref={menuPosition.ref}
-          style={menuPosition.style}
-          onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
-          onSelect={select}
-        />,
-        document.body,
-      )
+        </TypingSuggestions>
+      )}
+    </AnimatePresence>
+  ) : state ? (
+    createPortal(
+      <SlashMenuList
+        items={items}
+        activeIndex={state.activeIndex}
+        ref={menuPosition.ref}
+        style={menuPosition.style}
+        onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
+        onSelect={select}
+      />,
+      document.body,
     )
   ) : null;
 

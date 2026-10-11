@@ -188,6 +188,10 @@ For a visible change, derive a state matrix from every styling branch the diff
 adds or changes. Exercise and inspect each visually distinct state; the default
 state cannot verify selected, active, loading, error, or responsive variants.
 
+E2E tests use Chromium, plus a WebKit regression for touch selection in typing
+suggestions. Install both with `bunx playwright install chromium webkit`.
+Linux WebKit does not reproduce the iPhone keyboard or safe-area behavior.
+
 ### Package checks
 
 Run the root gate above, plus the checks for the package you changed. Commands

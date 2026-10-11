@@ -5,17 +5,18 @@ import {
   type ReactNode,
   type CSSProperties,
 } from "react";
+import { SheetTrigger } from "react-aria-components/Sheet";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 
-import { MenuDrawerContent } from "../menu-drawer";
-import { Drawer, DrawerTrigger } from "./drawer";
+import { MenuSheetButton, MenuSheetContent } from "../menu-sheet";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 
 const MobileTitle = createContext<string | null>(null);
 
 export function ResponsivePopover({
   title,
+  open,
   ...props
 }: {
   title: string;
@@ -26,14 +27,18 @@ export function ResponsivePopover({
   const mobile = useIsMobile();
   return (
     <MobileTitle value={mobile ? title : null}>
-      {mobile ? <Drawer showSwipeHandle {...props} /> : <Popover {...props} />}
+      {mobile ? (
+        <SheetTrigger isOpen={open} {...props} />
+      ) : (
+        <Popover open={open} {...props} />
+      )}
     </MobileTitle>
   );
 }
 
 export function ResponsivePopoverTrigger(props: ComponentProps<"button">) {
   return useContext(MobileTitle) ? (
-    <DrawerTrigger {...props} />
+    <MenuSheetButton {...props} />
   ) : (
     <PopoverTrigger {...props} />
   );
@@ -52,7 +57,9 @@ export function ResponsivePopoverContent({
 > & { className?: string; style?: CSSProperties }) {
   const title = useContext(MobileTitle);
   return title ? (
-    <MenuDrawerContent title={title} {...props} />
+    <MenuSheetContent title={title} compact>
+      {props.children}
+    </MenuSheetContent>
   ) : (
     <PopoverContent
       align={align}

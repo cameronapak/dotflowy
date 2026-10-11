@@ -1,17 +1,16 @@
 import {
   createContext,
   useContext,
-  useRef,
   useState,
   type ComponentProps,
   type ReactElement,
 } from "react";
+import { SheetTrigger } from "react-aria-components/Sheet";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
-import { MenuDrawerContent } from "../menu-drawer";
-import { Drawer, DrawerTrigger } from "./drawer";
+import { MenuSheetButton, MenuSheetContent } from "../menu-sheet";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -39,9 +38,9 @@ export function ResponsiveMenu({
   return (
     <MobileMenu value={mobile ? { title, close: () => setOpen(false) } : null}>
       {mobile ? (
-        <Drawer open={open} onOpenChange={setOpen} showSwipeHandle>
+        <SheetTrigger isOpen={open} onOpenChange={setOpen}>
           {children}
-        </Drawer>
+        </SheetTrigger>
       ) : (
         <DropdownMenu open={open} onOpenChange={setOpen}>
           {children}
@@ -52,10 +51,12 @@ export function ResponsiveMenu({
 }
 
 export function ResponsiveMenuTrigger(
-  props: ComponentProps<"button"> & { render?: ReactElement },
+  props: ComponentProps<"button"> & {
+    render?: ReactElement<ComponentProps<"button">>;
+  },
 ) {
   return useContext(MobileMenu) ? (
-    <DrawerTrigger {...props} />
+    <MenuSheetButton {...props} />
   ) : (
     <DropdownMenuTrigger {...props} />
   );
@@ -67,18 +68,9 @@ export function ResponsiveMenuContent({
   className,
 }: ComponentProps<typeof DropdownMenuContent>) {
   const mobile = useContext(MobileMenu);
-  const menuRef = useRef<HTMLDivElement>(null);
   return mobile ? (
-    <MenuDrawerContent
-      title={mobile.title}
-      initialFocus={() =>
-        menuRef.current?.querySelector<HTMLButtonElement>(
-          'button[role^="menuitem"]:not(:disabled)',
-        ) ?? false
-      }
-    >
+    <MenuSheetContent title={mobile.title}>
       <div
-        ref={menuRef}
         role="menu"
         aria-label={mobile.title}
         onKeyDown={(e) => {
@@ -104,7 +96,7 @@ export function ResponsiveMenuContent({
       >
         {children}
       </div>
-    </MenuDrawerContent>
+    </MenuSheetContent>
   ) : (
     <DropdownMenuContent align={align} className={className}>
       <DropdownMenuGroup>{children}</DropdownMenuGroup>

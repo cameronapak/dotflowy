@@ -165,6 +165,8 @@ export function MobileActionsBar({
       style={{
         top: offsetTop,
         height,
+        paddingLeft: "max(12px, env(safe-area-inset-left))",
+        paddingRight: "max(12px, env(safe-area-inset-right))",
         paddingBottom:
           height + offsetTop >= window.innerHeight
             ? "env(safe-area-inset-bottom)"

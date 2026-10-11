@@ -37,7 +37,22 @@ export function useMenuActiveItem({
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    activeItemRef.current?.scrollIntoView({ block: "nearest" });
+    const item = activeItemRef.current;
+    if (!item) return;
+    const body = item.closest<HTMLElement>(".typing-suggestions-scroll");
+    if (!body) {
+      item.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    // Safari can scroll the document/visual viewport when scrollIntoView walks
+    // out of a fixed accessory. Arrow navigation should move only the option list.
+    const option = item.getBoundingClientRect();
+    const viewport = body.getBoundingClientRect();
+    const padding = parseFloat(getComputedStyle(body).scrollPaddingTop);
+    if (option.top < viewport.top + padding)
+      body.scrollTop += option.top - viewport.top - padding;
+    else if (option.bottom > viewport.bottom - padding)
+      body.scrollTop += option.bottom - viewport.bottom + padding;
   }, [activeIndex, itemCount]);
 
   return {

@@ -93,6 +93,7 @@
     "lunorash": "1.0.0-alpha.259",
     "motion": "^13.3.0",
     "react": "^19.3.0",
+    "react-aria-components": "1.22.0",
     "react-dom": "^19.3.0",
     "shadcn": "^4.21.0",
     "sonner": "^2.0.8",
@@ -139,5 +140,8 @@
   "engines": {
     "bun": "1.4.2"
   },
-  "packageManager": "bun@1.4.2"
+  "packageManager": "bun@1.4.2",
+  "patchedDependencies": {
+    "react-aria-components@1.22.0": "patches/react-aria-components@1.22.0.patch"
+  }
 }

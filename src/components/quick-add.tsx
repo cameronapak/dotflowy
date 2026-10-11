@@ -125,7 +125,6 @@ import {
   useEditorFeatureDecoration,
   watchCaretReveal,
 } from "./inline-code";
-import { typingDrawerHeight } from "./menu-drawer";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
@@ -138,6 +137,7 @@ import {
 } from "./paste";
 import { setQuickAddOpener } from "./quick-add-opener";
 import { useSlashMenu } from "./slash-menu";
+import { typingSuggestionsHeight } from "./typing-suggestions";
 import {
   Command,
   CommandGroup,
@@ -1149,14 +1149,14 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const captureStyle: CSSProperties & {
     "--capture-viewport-top": string;
     "--capture-viewport-height": string;
-    "--capture-typing-drawer-height": string;
+    "--capture-suggestions-height": string;
   } = {
     "--capture-viewport-top": `${offsetTop}px`,
     "--capture-viewport-height": `${height}px`,
-    "--capture-typing-drawer-height": `${typingDrawerHeight(height)}px`,
+    "--capture-suggestions-height": `${typingSuggestionsHeight(height)}px`,
   };
   if (coarse) {
-    captureStyle.transform = `translateY(-${keyboardOffset}px)`;
+    captureStyle.bottom = `calc(1rem + ${keyboardOffset}px)`;
     captureStyle.marginBottom =
       keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined;
   }
@@ -1183,7 +1183,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
           // `sm:max-w-lg` (not a bare `max-w-*`): the DialogContent base carries
           // `sm:max-w-sm`, which outlives any unprefixed max-width at that
           // breakpoint -- the wider capture surface must override it in kind.
-          "quick-add-popup flex max-h-[85vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
+          "quick-add-popup inset-x-0! mx-auto flex max-h-[85vh] w-[calc(100%-2rem)] translate-none! transform-none! flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
           coarse ? "top-auto bottom-4 translate-y-0" : "top-1/3 translate-y-0",
         )}
         style={captureStyle}
@@ -1352,7 +1352,10 @@ function QuickAddFab({ onOpen }: { onOpen: () => void }) {
         "border border-border/60 bg-background/70 text-foreground shadow-lg backdrop-blur-xl",
         "ring-1 ring-black/5 transition-transform duration-100 ease-out active:scale-[0.94] dark:ring-white/10",
       )}
-      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+      style={{
+        marginBottom: "env(safe-area-inset-bottom)",
+        marginRight: "env(safe-area-inset-right)",
+      }}
     >
       <PlusIcon className="size-6" />
     </button>

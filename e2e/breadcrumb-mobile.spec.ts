@@ -66,7 +66,7 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await expect(items).toHaveCount(6);
 
   // The drawer spans the narrow viewport and labels ellipsis-truncate.
-  const box = await page.locator('[data-slot="drawer-popup"]').boundingBox();
+  const box = await page.locator(".sheet-surface").boundingBox();
   expect(box!.width).toBeGreaterThan(300);
   const overflow = await items
     .first()
@@ -77,13 +77,13 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await expect
     .poll(() =>
       page
-        .locator('[data-slot="drawer-popup"]')
+        .locator(".sheet-menu-content")
         .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
     )
     .toBe(700);
   await mkdir(".amp/in/artifacts", { recursive: true });
   await page.screenshot({
-    path: ".amp/in/artifacts/mobile-breadcrumb-drawer.png",
+    path: ".amp/in/artifacts/aria-sheet-breadcrumb.png",
   });
 
   // Picking an intermediate ancestor navigates to it.
