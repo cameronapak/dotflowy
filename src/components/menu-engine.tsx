@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -13,9 +14,8 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { menuSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
-import { MenuDrawerContent } from "./menu-drawer";
 import { MenuList } from "./menu-list";
-import { Drawer } from "./ui/drawer";
+import { TypingSuggestions } from "./typing-suggestions";
 import { useClampedMenuPosition } from "./use-menu-position";
 
 /**
@@ -181,45 +181,35 @@ export function useMenus({
     }
   };
 
-  const menu =
-    isOpen && open ? (
-      mobile ? (
-        <Drawer
-          open
-          modal={false}
-          showSwipeHandle
-          onOpenChange={(next) => {
-            if (!next) close();
-          }}
-        >
-          <MenuDrawerContent title="Suggestions" typing>
-            <MenuList
-              entries={entries}
-              activeIndex={open.activeIndex}
-              emptyLabel={spec?.emptyLabel}
-              inDrawer
-              onHover={(i) =>
-                setOpen((s) => (s ? { ...s, activeIndex: i } : s))
-              }
-              onSelect={pick}
-            />
-          </MenuDrawerContent>
-        </Drawer>
-      ) : (
-        createPortal(
+  const menu = mobile ? (
+    <AnimatePresence>
+      {isOpen && open && (
+        <TypingSuggestions getEditor={getEl} onDismiss={close}>
           <MenuList
             entries={entries}
             activeIndex={open.activeIndex}
             emptyLabel={spec?.emptyLabel}
-            ref={menuPosition.ref}
-            style={menuPosition.style}
+            inDock
             onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
             onSelect={pick}
-          />,
-          document.body,
-        )
-      )
-    ) : null;
+          />
+        </TypingSuggestions>
+      )}
+    </AnimatePresence>
+  ) : isOpen && open ? (
+    createPortal(
+      <MenuList
+        entries={entries}
+        activeIndex={open.activeIndex}
+        emptyLabel={spec?.emptyLabel}
+        ref={menuPosition.ref}
+        style={menuPosition.style}
+        onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
+        onSelect={pick}
+      />,
+      document.body,
+    )
+  ) : null;
 
   return { handleInput, handleKeyDown, close, isOpen, menu };
 }

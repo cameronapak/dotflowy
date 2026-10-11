@@ -14,7 +14,7 @@ export function MenuList({
   onSelect,
   style,
   ref,
-  inDrawer = false,
+  inDock = false,
 }: {
   entries: MenuEntry[];
   activeIndex: number;
@@ -25,7 +25,7 @@ export function MenuList({
    *  via `useClampedMenuPosition`). */
   style?: CSSProperties;
   ref?: Ref<HTMLDivElement>;
-  inDrawer?: boolean;
+  inDock?: boolean;
 }) {
   const { itemRef, onItemPointerMove } = useMenuActiveItem({
     activeIndex,
@@ -37,8 +37,9 @@ export function MenuList({
     <div
       ref={ref}
       role="listbox"
+      aria-label="Suggestions"
       className={cn(
-        inDrawer
+        inDock
           ? "w-full"
           : "z-50 w-64 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
       )}
@@ -48,10 +49,7 @@ export function MenuList({
           dissolves content into the card's bg-popover (matching the Cmd+K
           list), not into the darker editor background behind the card. */}
       <div
-        className={cn(
-          "p-1",
-          !inDrawer && "max-h-72 scroll-fade overflow-y-auto",
-        )}
+        className={cn("p-1", !inDock && "max-h-72 scroll-fade overflow-y-auto")}
       >
         {entries.length === 0 ? (
           <div className="px-2 py-1.5 text-sm text-muted-foreground">
@@ -68,15 +66,15 @@ export function MenuList({
               className={cn(
                 // scroll-my-10 clears the scroll-fade mask -- see SlashMenuList.
                 "flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-                inDrawer && "min-h-11 py-2",
+                inDock && "h-11 py-2",
                 i === activeIndex && "bg-accent text-accent-foreground",
               )}
               // mousedown (not click) so the contentEditable keeps focus.
               onMouseDown={(e) => {
                 e.preventDefault();
-                if (!inDrawer) onSelect(i);
+                if (!inDock) onSelect(i);
               }}
-              onClick={inDrawer ? () => onSelect(i) : undefined}
+              onClick={inDock ? () => onSelect(i) : undefined}
               onPointerMove={onItemPointerMove(i)}
             >
               {entry.render(i === activeIndex)}

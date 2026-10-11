@@ -30,7 +30,7 @@ export function SlashMenuList({
   onSelect,
   style,
   ref,
-  inDrawer = false,
+  inDock = false,
 }: {
   items: MenuListItem[];
   activeIndex: number;
@@ -40,7 +40,7 @@ export function SlashMenuList({
   style?: CSSProperties;
   /** Attach the floating element (e.g. floating-ui's `refs.setFloating`). */
   ref?: Ref<HTMLDivElement>;
-  inDrawer?: boolean;
+  inDock?: boolean;
 }) {
   const { itemRef, onItemPointerMove } = useMenuActiveItem({
     activeIndex,
@@ -52,8 +52,9 @@ export function SlashMenuList({
     <div
       ref={ref}
       role="listbox"
+      aria-label="Commands"
       className={cn(
-        inDrawer
+        inDock
           ? "w-full"
           : "fixed z-50 w-64 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
       )}
@@ -63,10 +64,7 @@ export function SlashMenuList({
           dissolves content into the card's bg-popover (matching the Cmd+K
           list), not into the darker editor background behind the card. */}
       <div
-        className={cn(
-          "p-1",
-          !inDrawer && "max-h-72 scroll-fade overflow-y-auto",
-        )}
+        className={cn("p-1", !inDock && "max-h-72 scroll-fade overflow-y-auto")}
       >
         {items.length === 0 ? (
           <div className="px-2 py-1.5 text-sm text-muted-foreground">
@@ -87,23 +85,25 @@ export function SlashMenuList({
                   // `block: "nearest"` would otherwise park the active item
                   // flush against the edge, where the fade dims the highlight.
                   "flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-                  inDrawer && "min-h-11 py-2",
+                  inDock && "h-11 py-2",
                   i === activeIndex && "bg-accent text-accent-foreground",
                 )}
                 // mousedown (not click) so the contentEditable keeps focus.
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  if (!inDrawer) onSelect(i);
+                  if (!inDock) onSelect(i);
                 }}
-                onClick={inDrawer ? () => onSelect(i) : undefined}
+                onClick={inDock ? () => onSelect(i) : undefined}
                 onPointerMove={onItemPointerMove(i)}
               >
                 <Icon className="size-4 shrink-0 opacity-70" />
-                <span className="flex flex-col">
-                  <span className="font-medium">{item.label}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {item.description}
-                  </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{item.label}</span>
+                  {!inDock && (
+                    <span className="text-xs text-muted-foreground">
+                      {item.description}
+                    </span>
+                  )}
                 </span>
               </button>
             );

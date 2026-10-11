@@ -69,8 +69,7 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await expect
     .poll(
       async () =>
-        (await page.locator('[data-slot="drawer-popup"]').boundingBox())
-          ?.width ?? 0,
+        (await page.locator(".sheet-surface").boundingBox())?.width ?? 0,
     )
     .toBeGreaterThan(300);
   await expect
@@ -85,7 +84,7 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await expect
     .poll(() =>
       page
-        .locator('[data-slot="drawer-popup"]')
+        .locator(".sheet-menu-content")
         .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
     )
     .toBe(700);

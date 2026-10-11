@@ -1,10 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
-// E2E config. Chromium-only and headless by default so the suite stays snappy
-// -- these are behavioral tests (caret/visual-line navigation needs a real
-// browser layout engine), not cross-browser checks. Add more projects only if
-// a bug turns out to be engine-specific.
+// Chromium and headless by default. These are behavioral tests (caret/visual-line
+// navigation needs a real layout engine). Engine-specific regressions can override
+// browserName: typing-suggestions-webkit covers touch suggestion selection.
 // `E2E_PORT` exists for the one case a fixed port can't serve: two agent
 // worktrees running the suite at once. Give the second one its own port.
 const PORT = Number(process.env.E2E_PORT ?? 3210);
