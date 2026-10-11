@@ -192,6 +192,9 @@ test.describe("Apple Shortcut setup", () => {
       await page.goto(entryPoint === "More" ? "/" : "/settings");
       if (entryPoint === "More") {
         await page.getByRole("button", { name: /More actions/ }).click();
+        await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
+          "data-expanded",
+        );
         await page
           .getByRole("menuitem", { name: "Add Apple Shortcut" })
           .click();
