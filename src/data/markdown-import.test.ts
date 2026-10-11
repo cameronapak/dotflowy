@@ -6,6 +6,7 @@ import {
   parseMarkdownForest,
   planMarkdownPaste,
   type MdNode,
+  type MdPastePlan,
 } from "./markdown-import";
 import { buildTreeIndex, createNode, type Node, type NodeKind } from "./tree";
 
@@ -213,114 +214,100 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
     }
   });
 
-  test("holds for a single empty bullet (`- ` is eaten by editors)", () => {
-    expect(roundTrip([outlineFixture("")])).toEqual([outlineFixture("")]);
+  test.each<[string, OutlineFixture[], OutlineFixture[]]>([
+    // `- ` alone is eaten by editors; the empty bullet must still come back.
+    ["a single empty bullet", [outlineFixture("")], [outlineFixture("")]],
+    [
+      "an open task with no text",
+      [outlineFixture("", [], true, false)],
+      [outlineFixture("", [], true, false)],
+    ],
+    [
+      "a done task with no text",
+      [outlineFixture("", [], true, true)],
+      [outlineFixture("", [], true, true)],
+    ],
+    // Exception 2: literal `[ ] x` text re-imports as a task.
+    [
+      "`[ ] x` as literal text",
+      [outlineFixture("[ ] buy milk")],
+      [outlineFixture("buy milk", [], true, false)],
+    ],
+    // The marker eats exactly one space. Consuming `\s+` would drop the
+    // indentation of every fence interior the fence rule promises to keep
+    // (ADR 0044).
+    ["two leading spaces", [outlineFixture("  x")], [outlineFixture("  x")]],
+    ["a leading tab", [outlineFixture("\tx")], [outlineFixture("\tx")]],
+    [
+      "an indented task",
+      [outlineFixture("    if x:", [], true, false)],
+      [outlineFixture("    if x:", [], true, false)],
+    ],
+    // A lookalike paragraph falls back to `- `: text intact, kind degraded.
+    ["paragraph `- foo`", [para("- foo")], [outlineFixture("- foo")]],
+    ["paragraph `# foo`", [para("# foo")], [outlineFixture("# foo")]],
+    ["paragraph `> quoted`", [para("> quoted")], [outlineFixture("> quoted")]],
+    ["paragraph ```", [para("```")], [outlineFixture("```")]],
+    ["paragraph `-`", [para("-")], [outlineFixture("-")]],
+    ["paragraph `1. x`", [para("1. x")], [outlineFixture("1. x")]],
+    // A blank line is a separator, so an empty paragraph degrades too.
+    ["an empty paragraph", [para("")], [outlineFixture("")]],
+    // trimStart would eat the indent of a bare line.
+    ["an indented paragraph", [para("  x")], [outlineFixture("  x")]],
+    [
+      "a tab-indented paragraph",
+      [para("\tif x:")],
+      [outlineFixture("\tif x:")],
+    ],
+    [
+      "a paragraph under a task parent stays a paragraph",
+      [outlineFixture("job", [para("why it matters")], true, false)],
+      [outlineFixture("job", [para("why it matters")], true, false)],
+    ],
+  ])("round-trips %s", (_name, forest, expected) => {
+    expect(roundTrip(forest)).toEqual(expected);
   });
 
-  test("holds for a task with no text", () => {
-    expect(roundTrip([outlineFixture("", [], true, false)])).toEqual([
-      outlineFixture("", [], true, false),
-    ]);
-    expect(roundTrip([outlineFixture("", [], true, true)])).toEqual([
-      outlineFixture("", [], true, true),
-    ]);
-  });
-
-  test("exception 3: a mirror flattens to an independent copy", () => {
-    // n0 "source" > n1 "kid"; n2 mirrors n0.
-    const { index } = buildIndex(
+  // Exception 3: a mirror flattens to an independent copy on export.
+  test.each<
+    [string, OutlineFixture[], Record<string, string>, string[], string[]]
+  >([
+    [
+      "a mirror expands to a copy of its source",
       [outlineFixture("source", [outlineFixture("kid")]), outlineFixture("")],
-      {
-        n2: "n0",
-      },
-    );
-    const md = outlineToMarkdown(index, ["n0", "n2"]);
-    expect(md).toBe(["- source", "  - kid", "- source", "  - kid"].join("\n"));
-    // ...and the copy round-trips as a plain subtree.
-    expect(forestFixture(parseMarkdownForest(md))).toEqual([
-      outlineFixture("source", [outlineFixture("kid")]),
-      outlineFixture("source", [outlineFixture("kid")]),
-    ]);
-  });
-
-  test("exception 3: a mirror inside its own source emits once and stops", () => {
-    // n0 "source" > n1 mirrors n0 -- expanding it forever is the cycle.
-    const { index } = buildIndex(
+      { n2: "n0" },
+      ["n0", "n2"],
+      ["- source", "  - kid", "- source", "  - kid"],
+    ],
+    [
+      "a mirror inside its own source emits once and stops",
       [outlineFixture("source", [outlineFixture("snapshot")])],
-      {
-        n1: "n0",
-      },
-    );
-    expect(outlineToMarkdown(index, ["n0"])).toBe(
-      ["- source", "  - source"].join("\n"),
-    );
-  });
-
-  test("exception 3: one source mirrored into two branches expands in both", () => {
-    const { index } = buildIndex(
+      { n1: "n0" },
+      ["n0"],
+      ["- source", "  - source"],
+    ],
+    [
+      "one source mirrored into two branches expands in both",
       [
         outlineFixture("src", [outlineFixture("kid")]),
         outlineFixture("a", [outlineFixture("")]),
         outlineFixture("b", [outlineFixture("")]),
       ],
       { n3: "n0", n5: "n0" },
-    );
-    expect(outlineToMarkdown(index, ["n2", "n4"])).toBe(
-      ["- a", "  - src", "    - kid", "- b", "  - src", "    - kid"].join("\n"),
-    );
-  });
-
-  test("exception 2: `[ ] x` as literal text re-imports as a task", () => {
-    expect(roundTrip([outlineFixture("[ ] buy milk")])).toEqual([
-      outlineFixture("buy milk", [], true, false),
-    ]);
-  });
-
-  test("leading whitespace survives -- the marker eats exactly one space", () => {
-    // `- ` + `  x` exports as `-   x`. Consuming `\s+` there would drop the two
-    // spaces, flattening the indentation of every fence interior the fence rule
-    // promises to keep (a pasted code block, copied back out, came back at
-    // column zero). See ADR 0044.
-    expect(roundTrip([outlineFixture("  x")])).toEqual([outlineFixture("  x")]);
-    expect(roundTrip([outlineFixture("\tx")])).toEqual([outlineFixture("\tx")]);
-    expect(roundTrip([outlineFixture("    if x:", [], true, false)])).toEqual([
-      outlineFixture("    if x:", [], true, false),
-    ]);
+      ["n2", "n4"],
+      ["- a", "  - src", "    - kid", "- b", "  - src", "    - kid"],
+    ],
+  ])("exception 3: %s", (_name, forest, mirrorOf, roots, lines) => {
+    const { index } = buildIndex(forest, mirrorOf);
+    expect(outlineToMarkdown(index, roots)).toBe(lines.join("\n"));
   });
 
   test("a paragraph exports as a bare line, at every depth", () => {
-    const { index } = buildIndex([
-      para("prose", [para("nested"), outlineFixture("kid")]),
-    ]);
+    const forest = [para("prose", [para("nested"), outlineFixture("kid")])];
+    const { index } = buildIndex(forest);
     expect(outlineToMarkdown(index, ["n0"])).toBe(
       ["prose", "  nested", "  - kid"].join("\n"),
     );
-    expect(
-      roundTrip([para("prose", [para("nested"), outlineFixture("kid")])]),
-    ).toEqual([para("prose", [para("nested"), outlineFixture("kid")])]);
-  });
-
-  test("a lookalike paragraph falls back to `- `, keeping every character", () => {
-    // Each of these, emitted bare, would come back as something else. The `- `
-    // prefix keeps the text intact and degrades the kind to bullet.
-    for (const text of ["- foo", "# foo", "> quoted", "```", "-", "1. x"]) {
-      expect(roundTrip([para(text)])).toEqual([outlineFixture(text)]);
-    }
-  });
-
-  test("an empty paragraph falls back to `- ` (a blank line is a separator)", () => {
-    expect(roundTrip([para("")])).toEqual([outlineFixture("")]);
-  });
-
-  test("an indented paragraph falls back to `- ` (trimStart would eat it)", () => {
-    expect(roundTrip([para("  x")])).toEqual([outlineFixture("  x")]);
-    expect(roundTrip([para("\tif x:")])).toEqual([outlineFixture("\tif x:")]);
-  });
-
-  test("a paragraph is never a task, even under a task parent", () => {
-    const forest = [
-      outlineFixture("job", [para("why it matters")], true, false),
-    ];
     expect(roundTrip(forest)).toEqual(forest);
   });
 
@@ -348,216 +335,167 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
 
 // --- the grammar --------------------------------------------------------------
 
-describe("parseMarkdownForest", () => {
-  const texts = (md: string) => parseMarkdownForest(md).map((n) => n.text);
+test.each<[string, string, string[]]>([
+  [
+    "one line, one bullet -- no paragraph continuation",
+    "alpha\nbravo\ncharlie",
+    ["alpha", "bravo", "charlie"],
+  ],
+  ["blank lines are separators", "a\n\n\nb", ["a", "b"]],
+  [
+    "a trailing newline is a terminator, not an empty bullet",
+    "a\nb\n",
+    ["a", "b"],
+  ],
+  ["strips exactly one list marker (`- - `)", "- - foo", ["- foo"]],
+  ["strips exactly one list marker (`- # `)", "- # foo", ["# foo"]],
+  [
+    "every list marker shape strips",
+    "1. one\n2) two\n* star\n+ plus",
+    ["one", "two", "star", "plus"],
+  ],
+  ["a dash marker", "- item", ["item"]],
+  ["a tab after the marker", "-\titem", ["item"]],
+  // The deliberate divergence from lenient readers: `outlineToMarkdown` emits
+  // one space, so foreign padding survives as leading whitespace.
+  ["padding after the marker is content", "-   item", ["  item"]],
+  ["padding after a task marker is content", "- [ ]   item", ["  item"]],
+  [
+    "a bare marker is an empty node, never a dropped line",
+    "- a\n-\n- \n*",
+    ["a", "", "", ""],
+  ],
+  [
+    "`*bold*` is not a bullet (a marker needs trailing space or EOL)",
+    "*bold* text",
+    ["*bold* text"],
+  ],
+  ["`#urgent` stays a tag (heading needs the space)", "#urgent", ["#urgent"]],
+  ["seven hashes is not a heading", "####### seven", ["####### seven"]],
+  ["`# urgent` is a heading", "# urgent", ["urgent"]],
+  ["`[]` with nothing inside is text, not a checkbox", "- [] x", ["[] x"]],
+  [
+    "blockquote markers strip; the text survives whole",
+    "> quoted\n>> deeper\n> - listed",
+    ["quoted", "deeper", "listed"],
+  ],
+  // What `outlineToMarkdown` emits for fence-delimiter bullets.
+  [
+    "a re-pasted fence delimiter never re-fires",
+    "- ```ts\n- const x = 1\n- ```",
+    ["```ts", "const x = 1", "```"],
+  ],
+])("parseMarkdownForest texts: %s", (_name, md, expected) => {
+  expect(parseMarkdownForest(md).map((n) => n.text)).toEqual(expected);
+});
 
-  test("one line, one bullet -- no paragraph continuation", () => {
-    expect(texts("alpha\nbravo\ncharlie")).toEqual([
-      "alpha",
-      "bravo",
-      "charlie",
-    ]);
-  });
+const nested = [
+  outlineFixture("a", [outlineFixture("b", [outlineFixture("c")])]),
+];
 
-  test("drops blank lines as separators", () => {
-    expect(texts("a\n\n\nb")).toEqual(["a", "b"]);
-  });
-
-  test("a single trailing newline is a terminator, not an empty bullet", () => {
-    expect(texts("a\nb\n")).toEqual(["a", "b"]);
-  });
-
-  test("strips exactly one list marker, never recursing", () => {
-    expect(texts("- - foo")).toEqual(["- foo"]);
-    expect(texts("- # foo")).toEqual(["# foo"]);
-    expect(texts("1. one\n2) two\n* star\n+ plus")).toEqual([
-      "one",
-      "two",
-      "star",
-      "plus",
-    ]);
-  });
-
-  test("consumes exactly one space after the marker, so padding is content", () => {
-    expect(texts("- item")).toEqual(["item"]);
-    expect(texts("-\titem")).toEqual(["item"]);
-    // The deliberate divergence from lenient markdown readers: `outlineToMarkdown`
-    // emits one space, so the rest is text. Foreign padding survives as leading
-    // whitespace rather than silently eating a fence interior's indent.
-    expect(texts("-   item")).toEqual(["  item"]);
-    expect(texts("- [ ]   item")).toEqual(["  item"]);
-  });
-
-  test("a bare marker is an empty node, never a dropped line", () => {
-    expect(texts("- a\n-\n- \n*")).toEqual(["a", "", "", ""]);
-  });
-
-  test("`*bold*` is not a bullet (a marker needs trailing space or EOL)", () => {
-    expect(texts("*bold* text")).toEqual(["*bold* text"]);
-  });
-
-  test("heading detection requires the space, so `#urgent` stays a tag", () => {
-    expect(texts("#urgent")).toEqual(["#urgent"]);
-    expect(texts("####### seven")).toEqual(["####### seven"]);
-    expect(texts("# urgent")).toEqual(["urgent"]);
-  });
-
-  test("headings drive nesting, and the shallowest normalizes to depth 0", () => {
-    const forest = parseMarkdownForest("### Section\nbody\n#### Sub\nmore");
-    expect(forestFixture(forest)).toEqual([
+test.each<[string, string, OutlineFixture[]]>([
+  [
+    "headings drive nesting; the shallowest normalizes to depth 0",
+    "### Section\nbody\n#### Sub\nmore",
+    [
       outlineFixture("Section", [
         para("body"),
         outlineFixture("Sub", [para("more")]),
       ]),
-    ]);
-  });
-
-  test("a skipped heading level clamps instead of jumping", () => {
-    const forest = parseMarkdownForest("# A\n##### E\ntext");
-    expect(forestFixture(forest)).toEqual([
-      outlineFixture("A", [outlineFixture("E", [para("text")])]),
-    ]);
-  });
-
-  test("a heading pops back out to its own level", () => {
-    const forest = parseMarkdownForest("# A\n## B\n# C");
-    expect(forestFixture(forest)).toEqual([
-      outlineFixture("A", [outlineFixture("B")]),
-      outlineFixture("C"),
-    ]);
-  });
-
-  test("list indentation nests inside the heading floor", () => {
-    const forest = parseMarkdownForest("# A\n- one\n  - two");
-    expect(forestFixture(forest)).toEqual([
-      outlineFixture("A", [outlineFixture("one", [outlineFixture("two")])]),
-    ]);
-  });
-
-  test("tabs, 2-space and 4-space indents all nest identically", () => {
-    const expected = [
-      outlineFixture("a", [outlineFixture("b", [outlineFixture("c")])]),
-    ];
-    expect(forestFixture(parseMarkdownForest("- a\n  - b\n    - c"))).toEqual(
-      expected,
-    );
-    expect(
-      forestFixture(parseMarkdownForest("- a\n    - b\n        - c")),
-    ).toEqual(expected);
-    expect(forestFixture(parseMarkdownForest("- a\n\t- b\n\t\t- c"))).toEqual(
-      expected,
-    );
-  });
-
-  test("a skipped indent level clamps to one level down", () => {
-    expect(forestFixture(parseMarkdownForest("- a\n        - b"))).toEqual([
-      outlineFixture("a", [outlineFixture("b")]),
-    ]);
-  });
-
-  test("task markers map to isTask/completed", () => {
-    expect(
-      forestFixture(parseMarkdownForest("- [ ] open\n- [x] done\n- [X] DONE")),
-    ).toEqual([
+    ],
+  ],
+  [
+    "a skipped heading level clamps instead of jumping",
+    "# A\n##### E\ntext",
+    [outlineFixture("A", [outlineFixture("E", [para("text")])])],
+  ],
+  [
+    "a heading pops back out to its own level",
+    "# A\n## B\n# C",
+    [outlineFixture("A", [outlineFixture("B")]), outlineFixture("C")],
+  ],
+  [
+    "list indentation nests inside the heading floor",
+    "# A\n- one\n  - two",
+    [outlineFixture("A", [outlineFixture("one", [outlineFixture("two")])])],
+  ],
+  ["2-space indents nest", "- a\n  - b\n    - c", nested],
+  ["4-space indents nest", "- a\n    - b\n        - c", nested],
+  ["tab indents nest", "- a\n\t- b\n\t\t- c", nested],
+  [
+    "a skipped indent level clamps to one level down",
+    "- a\n        - b",
+    [outlineFixture("a", [outlineFixture("b")])],
+  ],
+  [
+    "task markers map to isTask/completed",
+    "- [ ] open\n- [x] done\n- [X] DONE",
+    [
       outlineFixture("open", [], true, false),
       outlineFixture("done", [], true, true),
       outlineFixture("DONE", [], true, true),
-    ]);
-  });
-
-  test("a task marker needs its list marker (GFM), so bare `[ ] x` is text", () => {
-    expect(forestFixture(parseMarkdownForest("[ ] x\ny"))).toEqual([
-      para("[ ] x"),
-      para("y"),
-    ]);
-  });
-
-  test("`[]` with nothing inside is text, not a checkbox", () => {
-    expect(texts("- [] x")).toEqual(["[] x"]);
-  });
-
-  test("blockquote markers strip; the text survives whole", () => {
-    expect(texts("> quoted\n>> deeper\n> - listed")).toEqual([
-      "quoted",
-      "deeper",
-      "listed",
-    ]);
-  });
-
-  test("a quoted heading is not a heading (the grammar fires before any marker)", () => {
-    // ADR 0044 rule 2: the heading grammar only fires at the start of a line's
-    // content, before any marker, once. `>` is a marker, so `# A` survives as
-    // literal text -- and re-exporting it (`- # A`) is a fixed point.
-    // A stripped blockquote line is marker-less, so it lands as a paragraph
-    // (ADR 0045); `- # A` on the way back out is still the fixed point.
-    expect(forestFixture(parseMarkdownForest("> # A\n> body"))).toEqual([
-      para("# A"),
-      para("body"),
-    ]);
-  });
-
-  test("fences suppress the grammar and keep their delimiters", () => {
-    const forest = parseMarkdownForest(
-      "```ts\n- not a bullet\n  indented\n\n```\nafter",
-    );
-    expect(forestFixture(forest)).toEqual([
+    ],
+  ],
+  [
+    "a task marker needs its list marker (GFM), so bare `[ ] x` is text",
+    "[ ] x\ny",
+    [para("[ ] x"), para("y")],
+  ],
+  [
+    // ADR 0044 rule 2: the heading grammar fires only at content start, before
+    // any marker. `>` is a marker, so `# A` stays literal text (ADR 0045).
+    "a quoted heading is not a heading",
+    "> # A\n> body",
+    [para("# A"), para("body")],
+  ],
+  [
+    // Raw mode infers no kind, so only the line AFTER the fence is a paragraph.
+    "fences suppress the grammar and keep their delimiters and blank lines",
+    "```ts\n- not a bullet\n  indented\n\n```\nafter",
+    [
       outlineFixture("```ts"),
       outlineFixture("- not a bullet"),
       outlineFixture("  indented"),
-      outlineFixture(""), // a blank line inside a fence is content
+      outlineFixture(""),
       outlineFixture("```"),
-      // Raw mode infers no kind, so only the line AFTER the fence is a paragraph.
       para("after"),
-    ]);
-  });
-
-  test("a fence closes only on a bare delimiter of the same char", () => {
-    const forest = parseMarkdownForest("```\n~~~\n```js\n```\nout");
-    expect(forestFixture(forest)).toEqual([
+    ],
+  ],
+  [
+    "a fence closes only on a bare delimiter of the same char",
+    "```\n~~~\n```js\n```\nout",
+    [
       outlineFixture("```"),
       outlineFixture("~~~"),
       outlineFixture("```js"),
       outlineFixture("```"),
       para("out"),
-    ]);
-  });
+    ],
+  ],
+])("parseMarkdownForest structure: %s", (_name, md, expected) => {
+  expect(forestFixture(parseMarkdownForest(md))).toEqual(expected);
+});
 
-  test("a re-pasted fence delimiter never re-fires", () => {
-    // What `outlineToMarkdown` emits for the bullets above.
-    expect(texts("- ```ts\n- const x = 1\n- ```")).toEqual([
-      "```ts",
-      "const x = 1",
-      "```",
-    ]);
+test("literal mode: every line is one verbatim top-level bullet", () => {
+  const forest = parseMarkdownForest("- a\n  - b\n# C\n```\n+ d", {
+    literal: true,
   });
+  expect(forestFixture(forest)).toEqual([
+    outlineFixture("- a"),
+    outlineFixture("  - b"),
+    outlineFixture("# C"),
+    outlineFixture("```"),
+    outlineFixture("+ d"),
+  ]);
+});
 
-  test("literal mode: every line is one verbatim top-level bullet", () => {
-    const forest = parseMarkdownForest("- a\n  - b\n# C\n```\nd", {
-      literal: true,
-    });
-    expect(forestFixture(forest)).toEqual([
-      outlineFixture("- a"),
-      outlineFixture("  - b"),
-      outlineFixture("# C"),
-      outlineFixture("```"),
-      outlineFixture("d"),
-    ]);
-  });
-
-  test("literal mode keeps a diff pasteable", () => {
-    expect(
-      parseMarkdownForest("- old\n+ new", { literal: true }).map((n) => n.text),
-    ).toEqual(["- old", "+ new"]);
-  });
-
-  test("countForest counts the whole forest", () => {
-    expect(countForest(parseMarkdownForest("- a\n  - b\n    - c\n- d"))).toBe(
-      4,
-    );
-  });
+test("countForest counts the whole forest", () => {
+  expect(countForest(parseMarkdownForest("- a\n  - b\n    - c\n- d"))).toBe(4);
 });
 
 // --- the landing --------------------------------------------------------------
+
+type PlannedAnchor = MdPastePlan["anchor"];
 
 describe("planMarkdownPaste", () => {
   // anchor "A" with an existing child "kid" and a following sibling "next".
@@ -634,45 +572,40 @@ describe("planMarkdownPaste", () => {
     expect(p.focusOffset).toBe("HEAD one".length);
   });
 
-  test("a task marker on line 1 converts the anchor only when head is empty", () => {
-    expect(plan("- [x] done\nb")!.anchor).toEqual({
-      text: "done",
-      isTask: true,
-      completed: true,
-      kind: null,
-    });
-    expect(plan("- [x] done\nb", "mid-sentence ")!.anchor).toEqual({
-      text: "mid-sentence done",
-      isTask: null,
-      completed: null,
-      kind: null,
-    });
-  });
-
-  test("a plain first line never un-tasks the anchor", () => {
-    expect(plan("- plain\nb")!.anchor).toEqual({
-      text: "plain",
-      isTask: null,
-      completed: null,
-      kind: null,
-    });
-  });
-
-  test("a marker-less line 1 makes the anchor a paragraph, only when head is empty", () => {
-    // The accepted consequence of ADR 0044's amendment: multi-line prose pastes
-    // land as paragraphs. Mid-sentence, the anchor stays whatever it was.
-    expect(plan("plain\nb")!.anchor).toEqual({
-      text: "plain",
-      isTask: null,
-      completed: null,
-      kind: "paragraph",
-    });
-    expect(plan("plain\nb", "mid-sentence ")!.anchor).toEqual({
-      text: "mid-sentence plain",
-      isTask: null,
-      completed: null,
-      kind: null,
-    });
+  test.each<[string, string, string, PlannedAnchor]>([
+    [
+      "a task marker on line 1 converts the anchor when head is empty",
+      "- [x] done\nb",
+      "",
+      { text: "done", isTask: true, completed: true, kind: null },
+    ],
+    [
+      "a task marker mid-sentence leaves the anchor's kind alone",
+      "- [x] done\nb",
+      "mid-sentence ",
+      { text: "mid-sentence done", isTask: null, completed: null, kind: null },
+    ],
+    [
+      "a plain first line never un-tasks the anchor",
+      "- plain\nb",
+      "",
+      { text: "plain", isTask: null, completed: null, kind: null },
+    ],
+    // ADR 0044's amendment: multi-line prose pastes land as paragraphs.
+    [
+      "a marker-less line 1 makes the anchor a paragraph when head is empty",
+      "plain\nb",
+      "",
+      { text: "plain", isTask: null, completed: null, kind: "paragraph" },
+    ],
+    [
+      "a marker-less line 1 mid-sentence leaves the anchor's kind alone",
+      "plain\nb",
+      "mid-sentence ",
+      { text: "mid-sentence plain", isTask: null, completed: null, kind: null },
+    ],
+  ])("%s", (_name, md, head, expected) => {
+    expect(plan(md, head)!.anchor).toEqual(expected);
   });
 
   test("literal paste infers no kind at all", () => {

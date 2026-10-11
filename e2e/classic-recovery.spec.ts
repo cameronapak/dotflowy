@@ -19,6 +19,7 @@ const node = (id: string, text: string, fields: Partial<Node> = {}): Node => ({
   completed: false,
   collapsed: false,
   bookmarkedAt: null,
+  locked: false,
   mirrorOf: null,
   createdAt: 1,
   updatedAt: 2,

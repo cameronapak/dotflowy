@@ -7,7 +7,7 @@
  * runtime and aren't unit-tested (they import Workers globals). See docs/adr/0016.
  */
 
-import { describe, expect, it } from "bun:test";
+import { expect, test } from "bun:test";
 
 import {
   canonicalYouTubeVideoUrl,
@@ -16,149 +16,104 @@ import {
   sanitizeServerTitle,
 } from "./unfurl-core";
 
-describe("isHttpUrlString", () => {
-  it("accepts well-formed http(s)", () => {
-    expect(isHttpUrlString("http://example.com")).toBe(true);
-    expect(isHttpUrlString("https://example.com/a?b=1")).toBe(true);
-  });
+test.each([
+  ["http://example.com", true],
+  ["https://example.com/a?b=1", true],
+  ["ftp://example.com", false],
+  ["file:///etc/passwd", false],
+  ["javascript:alert(1)", false],
+  ["not a url", false],
+  ["", false],
+])(
+  "isHttpUrlString(%p) is %p (only http(s) passes the 400 check)",
+  (url, ok) => {
+    expect(isHttpUrlString(url)).toBe(ok);
+  },
+);
 
-  it("rejects other schemes and junk (the only 400 path)", () => {
-    expect(isHttpUrlString("ftp://example.com")).toBe(false);
-    expect(isHttpUrlString("file:///etc/passwd")).toBe(false);
-    expect(isHttpUrlString("javascript:alert(1)")).toBe(false);
-    expect(isHttpUrlString("not a url")).toBe(false);
-    expect(isHttpUrlString("")).toBe(false);
-  });
+test.each([
+  // Ordinary public http(s) URLs and public IPs pass.
+  ["https://anthropic.com", true],
+  ["http://example.com/path", true],
+  ["http://8.8.8.8/", true],
+  ["http://172.32.0.1/", true], // just outside 172.16/12
+  ["http://[::ffff:8.8.8.8]/", true], // IPv4-mapped IPv6 to a public address
+  // Non-http(s) schemes and unparseable input.
+  ["ftp://example.com", false],
+  ["file:///etc/passwd", false],
+  ["not a url", false],
+  ["", false],
+  // localhost and internal-suffix hostnames.
+  ["http://localhost/", false],
+  ["http://app.localhost/", false],
+  ["http://printer.local/", false],
+  ["http://db.internal/", false],
+  // Private, loopback, link-local, and CGNAT IPv4 literals.
+  ["http://127.0.0.1/", false],
+  ["http://10.0.0.5/", false],
+  ["http://192.168.1.1/", false],
+  ["http://172.16.0.1/", false],
+  ["http://172.31.255.255/", false],
+  ["http://169.254.169.254/", false], // cloud metadata
+  ["http://0.0.0.0/", false],
+  ["http://100.64.0.1/", false], // CGNAT
+  // IPv6 loopback, link-local, and ULA.
+  ["http://[::1]/", false],
+  ["http://[fe80::1]/", false],
+  ["http://[fd00::1]/", false],
+  // IPv4-mapped IPv6 smuggling a private target (#232), dotted and hex spellings.
+  ["http://[::ffff:127.0.0.1]/", false],
+  ["http://[::ffff:7f00:1]/", false],
+  ["http://[::ffff:10.0.0.1]/", false],
+  ["http://[::ffff:169.254.169.254]/", false],
+])("isAllowedUnfurlTarget(%p) is %p (SSRF guard)", (url, ok) => {
+  expect(isAllowedUnfurlTarget(url)).toBe(ok);
 });
 
-describe("canonicalYouTubeVideoUrl", () => {
-  const canonical = "https://www.youtube.com/watch?v=BsJGo1wFTvQ";
-
-  it("recognizes YouTube's video URL forms and removes presentation params", () => {
-    const urls = [
-      "https://www.youtube.com/watch?v=BsJGo1wFTvQ&t=1s",
-      "https://youtube.com/watch?list=abc&v=BsJGo1wFTvQ",
-      "https://m.youtube.com/watch?v=BsJGo1wFTvQ",
-      "https://music.youtube.com/watch?v=BsJGo1wFTvQ",
-      "https://youtu.be/BsJGo1wFTvQ?t=1",
-      "https://www.youtube.com/v/BsJGo1wFTvQ",
-      "https://www.youtube.com/shorts/BsJGo1wFTvQ?feature=share",
-      "https://www.youtube.com/embed/BsJGo1wFTvQ",
-      "https://www.youtube.com/live/BsJGo1wFTvQ",
-    ];
-
-    for (const url of urls) {
-      expect(canonicalYouTubeVideoUrl(url)).toBe(canonical);
-    }
-  });
-
-  it("rejects lookalike hosts, unsupported pages, and malformed video ids", () => {
-    const urls = [
-      "https://youtube.com.evil.example/watch?v=BsJGo1wFTvQ",
-      "https://youtu.be.evil.example/BsJGo1wFTvQ",
-      "https://notyoutube.com/watch?v=BsJGo1wFTvQ",
-      "https://www.youtube-nocookie.com/embed/BsJGo1wFTvQ",
-      "https://www.youtube.com/playlist?list=PL123",
-      "https://www.youtube.com/channel/UC123",
-      "https://www.youtube.com/results?search_query=dotflowy",
-      "https://www.youtube.com/watch",
-      "https://www.youtube.com/watch?v=too-short",
-      "https://youtu.be/BsJGo1wFTvQ/extra",
-      "https://www.youtube.com:8443/watch?v=BsJGo1wFTvQ",
-      "ftp://www.youtube.com/watch?v=BsJGo1wFTvQ",
-      "not a url",
-    ];
-
-    for (const url of urls) {
-      expect(canonicalYouTubeVideoUrl(url)).toBeNull();
-    }
-  });
+test("sanitizeServerTitle decodes known entities, collapses whitespace, caps length, and nulls empties", () => {
+  expect(sanitizeServerTitle("  Tom &amp; Jerry\n  Show ")).toBe(
+    "Tom & Jerry Show",
+  );
+  expect(sanitizeServerTitle("Caf&#233; &#x2014; Menu")).toBe("Café — Menu");
+  expect(sanitizeServerTitle("A &weird; B")).toBe("A &weird; B");
+  expect(sanitizeServerTitle("x".repeat(500))).toBe("x".repeat(300));
+  for (const empty of [null, undefined, "", "   \n\t "])
+    expect(sanitizeServerTitle(empty)).toBeNull();
 });
 
-describe("isAllowedUnfurlTarget (SSRF guard)", () => {
-  it("allows ordinary public http(s) URLs", () => {
-    expect(isAllowedUnfurlTarget("https://anthropic.com")).toBe(true);
-    expect(isAllowedUnfurlTarget("http://example.com/path")).toBe(true);
-  });
-
-  it("blocks non-http(s) schemes", () => {
-    expect(isAllowedUnfurlTarget("ftp://example.com")).toBe(false);
-    expect(isAllowedUnfurlTarget("file:///etc/passwd")).toBe(false);
-  });
-
-  it("blocks localhost and internal-suffix hostnames", () => {
-    expect(isAllowedUnfurlTarget("http://localhost/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://app.localhost/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://printer.local/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://db.internal/")).toBe(false);
-  });
-
-  it("blocks private / loopback / link-local IPv4 literals", () => {
-    expect(isAllowedUnfurlTarget("http://127.0.0.1/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://10.0.0.5/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://192.168.1.1/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://172.16.0.1/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://172.31.255.255/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://169.254.169.254/")).toBe(false); // cloud metadata
-    expect(isAllowedUnfurlTarget("http://0.0.0.0/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://100.64.0.1/")).toBe(false); // CGNAT
-  });
-
-  it("allows a public IPv4 that is not in a private range", () => {
-    expect(isAllowedUnfurlTarget("http://8.8.8.8/")).toBe(true);
-    expect(isAllowedUnfurlTarget("http://172.32.0.1/")).toBe(true); // just outside 172.16/12
-  });
-
-  it("blocks IPv6 loopback / link-local / ULA", () => {
-    expect(isAllowedUnfurlTarget("http://[::1]/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://[fe80::1]/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://[fd00::1]/")).toBe(false);
-  });
-
-  it("blocks IPv4-mapped IPv6 that smuggles a private target (#232)", () => {
-    // WHATWG canonicalizes the dotted form to hex, so both spellings resolve to
-    // the same host the guard sees — assert the raw inputs anyway.
-    expect(isAllowedUnfurlTarget("http://[::ffff:127.0.0.1]/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://[::ffff:7f00:1]/")).toBe(false); // canonical hex
-    expect(isAllowedUnfurlTarget("http://[::ffff:10.0.0.1]/")).toBe(false);
-    expect(isAllowedUnfurlTarget("http://[::ffff:169.254.169.254]/")).toBe(
-      false,
-    ); // mapped cloud metadata
-  });
-
-  it("still allows an IPv4-mapped IPv6 pointing at a public address", () => {
-    expect(isAllowedUnfurlTarget("http://[::ffff:8.8.8.8]/")).toBe(true);
-  });
-
-  it("rejects unparseable input", () => {
-    expect(isAllowedUnfurlTarget("not a url")).toBe(false);
-    expect(isAllowedUnfurlTarget("")).toBe(false);
-  });
+test.each([
+  "https://www.youtube.com/watch?v=BsJGo1wFTvQ&t=1s",
+  "https://youtube.com/watch?list=abc&v=BsJGo1wFTvQ",
+  "https://m.youtube.com/watch?v=BsJGo1wFTvQ",
+  "https://music.youtube.com/watch?v=BsJGo1wFTvQ",
+  "https://youtu.be/BsJGo1wFTvQ?t=1",
+  "https://www.youtube.com/v/BsJGo1wFTvQ",
+  "https://www.youtube.com/shorts/BsJGo1wFTvQ?feature=share",
+  "https://www.youtube.com/embed/BsJGo1wFTvQ",
+  "https://www.youtube.com/live/BsJGo1wFTvQ",
+])("canonicalYouTubeVideoUrl(%p) strips presentation params", (url) => {
+  expect(canonicalYouTubeVideoUrl(url)).toBe(
+    "https://www.youtube.com/watch?v=BsJGo1wFTvQ",
+  );
 });
 
-describe("sanitizeServerTitle", () => {
-  it("decodes entities, collapses whitespace, trims", () => {
-    expect(sanitizeServerTitle("  Tom &amp; Jerry\n  Show ")).toBe(
-      "Tom & Jerry Show",
-    );
-    expect(sanitizeServerTitle("Caf&#233; &#x2014; Menu")).toBe("Café — Menu");
-  });
-
-  it("returns null for empty / whitespace-only / nullish", () => {
-    expect(sanitizeServerTitle(null)).toBeNull();
-    expect(sanitizeServerTitle(undefined)).toBeNull();
-    expect(sanitizeServerTitle("")).toBeNull();
-    expect(sanitizeServerTitle("   \n\t ")).toBeNull();
-  });
-
-  it("caps very long titles", () => {
-    const long = "x".repeat(500);
-    const out = sanitizeServerTitle(long);
-    expect(out).not.toBeNull();
-    expect(out!.length).toBe(300);
-  });
-
-  it("leaves unknown entities intact", () => {
-    expect(sanitizeServerTitle("A &weird; B")).toBe("A &weird; B");
-  });
-});
+test.each([
+  "https://youtube.com.evil.example/watch?v=BsJGo1wFTvQ",
+  "https://youtu.be.evil.example/BsJGo1wFTvQ",
+  "https://notyoutube.com/watch?v=BsJGo1wFTvQ",
+  "https://www.youtube-nocookie.com/embed/BsJGo1wFTvQ",
+  "https://www.youtube.com/playlist?list=PL123",
+  "https://www.youtube.com/channel/UC123",
+  "https://www.youtube.com/results?search_query=dotflowy",
+  "https://www.youtube.com/watch",
+  "https://www.youtube.com/watch?v=too-short",
+  "https://youtu.be/BsJGo1wFTvQ/extra",
+  "https://www.youtube.com:8443/watch?v=BsJGo1wFTvQ",
+  "ftp://www.youtube.com/watch?v=BsJGo1wFTvQ",
+  "not a url",
+])(
+  "canonicalYouTubeVideoUrl(%p) rejects lookalikes and non-video pages",
+  (url) => {
+    expect(canonicalYouTubeVideoUrl(url)).toBeNull();
+  },
+);

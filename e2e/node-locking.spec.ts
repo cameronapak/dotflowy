@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
 
 const TREE: SeedNode[] = [
   { id: "root", parentId: null, prevSiblingId: null, text: "Lock root" },
@@ -10,7 +10,6 @@ const TREE: SeedNode[] = [
 
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row`);
-const text = (page: Page, id: string) => row(page, id).locator(".node-text");
 
 test("locking a node makes its subtree read-only while view state stays mutable", async ({
   page,
@@ -19,8 +18,7 @@ test("locking a node makes its subtree read-only while view state stays mutable"
   await page.goto("/");
   await expect(text(page, "root")).toBeVisible({ timeout: 15_000 });
 
-  await text(page, "root").click();
-  await page.keyboard.press("End");
+  await placeCaret(text(page, "root"), "end");
   await page.keyboard.type(" /lock");
   await expect(page.getByRole("listbox")).toBeVisible();
   await page.keyboard.press("Enter");

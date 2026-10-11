@@ -136,46 +136,33 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
     await expect(pA).resolves.toBeUndefined();
   });
 
-  test("coalesces a burst during the in-flight window into one PATCH", async () => {
+  test("coalesces a burst during the in-flight window into one field-wise PATCH", async () => {
     installControlledFetch();
     const pA = updateNodes([{ id: "a", changes: { text: "a1" } }]);
     await tick();
     expect(pending.length).toBe(1);
     expect(at(0).body).toContain("a1");
 
-    // Burst while gen 1 is in flight: same id twice + a different id.
+    // Burst while gen 1 is in flight: same id thrice (overlapping and new
+    // fields) + a different id.
     updateNodes([{ id: "a", changes: { text: "a2" } }]);
+    updateNodes([{ id: "a", changes: { completed: true } }]);
     updateNodes([{ id: "a", changes: { text: "a3" } }]);
     updateNodes([{ id: "b", changes: { text: "b1" } }]);
-
-    at(0).resolve(okField());
-    await tick();
-    // One PATCH for the whole burst; last-write-wins on `a`, `b` carried along.
-    expect(pending.length).toBe(2);
-    const body = at(1).body;
-    expect(JSON.parse(body).updates).toEqual([
-      { id: "a", changes: { text: "a3" } },
-      { id: "b", changes: { text: "b1" } },
-    ]);
-
-    at(1).resolve(okField());
-    await expect(pA).resolves.toBeUndefined();
-  });
-
-  test("a generation does not send before the prior responds", async () => {
-    installControlledFetch();
-    const pA = updateNodes([{ id: "a", changes: { text: "a" } }]);
-    await tick();
-    updateNodes([{ id: "b", changes: { text: "b" } }]); // gen 2, parked on permit
     await tick();
     expect(pending.length).toBe(1); // gen 2 stays off the wire
 
     at(0).resolve(okField());
     await tick();
+    // One PATCH for the whole burst; last-write-wins per field on `a`.
     expect(pending.length).toBe(2);
-    expect(at(1).body).toContain('"b"');
+    expect(JSON.parse(at(1).body).updates).toEqual([
+      { id: "a", changes: { text: "a3", completed: true } },
+      { id: "b", changes: { text: "b1" } },
+    ]);
+
     at(1).resolve(okField());
-    await pA;
+    await expect(pA).resolves.toBeUndefined();
   });
 
   test("a failed generation does not wedge the next", async () => {
@@ -191,32 +178,5 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
 
     at(1).resolve(okField());
     await expect(pB).resolves.toBeUndefined();
-  });
-
-  test("merges field-wise last-write-wins per id", async () => {
-    installControlledFetch();
-    const pA = updateNodes([{ id: "a", changes: { text: "x" } }]);
-    await tick();
-    // During flight: overlapping + new fields on the same id.
-    updateNodes([{ id: "a", changes: { completed: true } }]);
-    updateNodes([{ id: "a", changes: { text: "y" } }]);
-
-    at(0).resolve(okField());
-    await tick();
-    const body = at(1).body; // merged: { text: 'y', completed: true }
-    expect(body).toContain('"y"');
-    expect(body).toContain("completed");
-    expect(body).not.toContain('"x"'); // text superseded
-    at(1).resolve(okField());
-    await pA;
-  });
-
-  test("the first edit hits the wire on a tick, not after a debounce", async () => {
-    installControlledFetch();
-    const pA = updateNodes([{ id: "a", changes: { text: "a" } }]);
-    await tick(); // one scheduler tick, not a timer window
-    expect(pending.length).toBe(1);
-    at(0).resolve(okField());
-    await pA;
   });
 });

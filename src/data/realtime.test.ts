@@ -17,30 +17,17 @@ Object.assign(globalThis, {
 // hello-timeout / reset-after-stable timers are exercised by the fake-socket
 // harness + e2e; their delay math is this same function.)
 
-describe("backoffMillis", () => {
-  test("exponential floor doubles per attempt (no jitter, rand=0 lower bound)", () => {
-    // rand=0 -> factor 0.8, so the floor is scaled by exactly 0.8.
-    expect(backoffMillis(0, 0)).toBe(500 * 0.8);
-    expect(backoffMillis(1, 0)).toBe(1000 * 0.8);
-    expect(backoffMillis(2, 0)).toBe(2000 * 0.8);
-    expect(backoffMillis(3, 0)).toBe(4000 * 0.8);
-  });
-
-  test("caps at 30s no matter how high the attempt climbs", () => {
-    // 500·2^n passes 30s by n=6 (32s); every higher attempt stays capped.
-    for (const n of [6, 10, 50, 1000]) {
-      expect(backoffMillis(n, 0)).toBe(30_000 * 0.8);
-      expect(backoffMillis(n, 1)).toBeCloseTo(30_000 * 1.2, 5);
-    }
-  });
-
-  test("jitter stays within ±20% of the floor", () => {
-    for (const rand of [0, 0.25, 0.5, 0.75, 0.999]) {
-      const ms = backoffMillis(2, rand);
-      expect(ms).toBeGreaterThanOrEqual(2000 * 0.8);
-      expect(ms).toBeLessThanOrEqual(2000 * 1.2);
-    }
-  });
+test("backoff doubles from 500ms, caps at 30s, and jitters within ±20%", () => {
+  // rand=0 is the -20% bound, rand=1 the +20% bound.
+  expect([0, 1, 2, 3].map((n) => backoffMillis(n, 0))).toEqual([
+    400, 800, 1600, 3200,
+  ]);
+  expect(backoffMillis(2, 1)).toBeCloseTo(2400, 5);
+  // 500·2^n passes 30s by n=6 (32s); every higher attempt stays capped.
+  for (const n of [6, 1000]) {
+    expect(backoffMillis(n, 0)).toBe(24_000);
+    expect(backoffMillis(n, 1)).toBeCloseTo(36_000, 5);
+  }
 });
 
 // --- Fake WebSocket harness -------------------------------------------------
@@ -199,21 +186,6 @@ const helloOf = (ws: FakeWebSocket): { type: string; since: number | null } => {
 };
 
 describe("createSyncStream", () => {
-  test("sends hello with the current cursor on connect", () =>
-    withHarness(
-      () => 42,
-      ({ sockets }) =>
-        Effect.gen(function* () {
-          expect(sockets.length).toBe(1);
-          nth(sockets, 0).driveOpen();
-          yield* settle;
-          expect(helloOf(nth(sockets, 0))).toEqual({
-            type: "hello",
-            since: 42,
-          });
-        }),
-    ));
-
   test("emits decoded frames as Message events in order", () =>
     withHarness(
       () => null,
@@ -232,11 +204,12 @@ describe("createSyncStream", () => {
         }),
     ));
 
-  test("resync drops the connection and reconnects ignoring the cursor", () =>
+  test("connects with the cursor; resync reconnects ignoring it", () =>
     withHarness(
       () => 99, // a non-null cursor we expect resync to IGNORE
       ({ sockets }, resync) =>
         Effect.gen(function* () {
+          expect(sockets.length).toBe(1);
           nth(sockets, 0).driveOpen();
           nth(sockets, 0).driveMessage({ type: "snapshot", seq: 1, nodes: [] });
           yield* settle;

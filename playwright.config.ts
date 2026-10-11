@@ -14,6 +14,9 @@ const VITE = fileURLToPath(
 
 export default defineConfig({
   testDir: "./e2e",
+  // This spec runs against a real Worker under e2e/retirement.config.ts, not
+  // this Vite server.
+  testIgnore: ["lunora-retirement-real.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -32,7 +35,7 @@ export default defineConfig({
   // which is the loud version of the same fact.
   webServer: {
     // Use the installed entry point: Bun's nested script launch can lose .bin
-    // from PATH in an orb. Keep Vite in dev mode for the deferred-resolve hooks.
+    // from PATH in an orb.
     command: `"${process.execPath}" "${VITE}" dev --port ${PORT} --strictPort`,
     cwd: ROOT,
     url: `http://localhost:${PORT}`,

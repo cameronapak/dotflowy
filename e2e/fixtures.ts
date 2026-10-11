@@ -1,4 +1,4 @@
-import type { Page, Route, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 
 import { Schema } from "effect";
 
@@ -11,6 +11,98 @@ import {
   NodesPostBody,
   WeekStartPostBody,
 } from "../worker/wire";
+
+/** A node's editable text in the outline list (not the zoomed page title). */
+export const text = (page: Page, id: string): Locator =>
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
+
+/**
+ * Focus `target` and collapse the caret at a source offset, or at either edge.
+ * Set the Selection directly instead of pressing Home/End or clicking at a
+ * pixel: those depend on visual lines and hit-testing. An atom (an element with
+ * `data-src`, such as a date or link chip) counts as its source length, and an
+ * offset inside one snaps to its leading edge at 0 and its trailing edge
+ * otherwise. An offset past the end lands at the end.
+ */
+export async function placeCaret(
+  target: Locator,
+  at: number | "start" | "end",
+): Promise<void> {
+  await target.evaluate((el: HTMLElement, at) => {
+    el.focus();
+    const sel = window.getSelection()!;
+    const place = (range: Range) => {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+    const edge = (atEnd: boolean) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(!atEnd);
+      place(range);
+    };
+    if (at === "start" || at === "end") return edge(at === "end");
+    let remaining = at;
+    const visit = (node: Node): boolean => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const len = node.textContent?.length ?? 0;
+        if (remaining > len) {
+          remaining -= len;
+          return false;
+        }
+        const range = document.createRange();
+        range.setStart(node, remaining);
+        range.collapse(true);
+        place(range);
+        return true;
+      }
+      if (node instanceof Element && node.hasAttribute("data-src")) {
+        const len =
+          Number(node.getAttribute("data-src-len")) ||
+          (node.getAttribute("data-src") ?? "").length;
+        if (remaining >= len) {
+          remaining -= len;
+          return false;
+        }
+        const parent = node.parentNode!;
+        const index = Array.prototype.indexOf.call(parent.childNodes, node);
+        const range = document.createRange();
+        range.setStart(parent, remaining === 0 ? index : index + 1);
+        range.collapse(true);
+        place(range);
+        return true;
+      }
+      return Array.from(node.childNodes).some(visit);
+    };
+    if (!visit(el)) edge(true);
+  }, at);
+}
+
+/** Hold Daily's real claim boundary to exercise capture before its destination exists. */
+export async function holdDailyClaims(page: Page) {
+  let release!: () => void;
+  let markSeen!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seen = new Promise<void>((resolve) => {
+    markSeen = resolve;
+  });
+  await page.route(
+    (url) =>
+      url.pathname === "/api/kv" &&
+      url.searchParams.get("collection") === "daily-index" &&
+      url.searchParams.get("op") === "claim",
+    async (route) => {
+      if (route.request().method() === "POST") {
+        markSeen();
+        await held;
+      }
+      await route.fallback();
+    },
+  );
+  return { seen, release };
+}
 
 /** Open a seeded Classic outline. */
 export async function openSeededOutline(

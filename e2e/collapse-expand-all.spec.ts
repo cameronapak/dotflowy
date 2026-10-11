@@ -51,64 +51,62 @@ async function load(page: Page, path = "/", ready = text(page, "alpha")) {
   await expect(ready).toBeVisible();
 }
 
-test.describe("Collapse all / Expand all (header More menu)", () => {
-  test("Collapse all folds every nested bullet; Expand all restores them", async ({
-    page,
-  }) => {
-    await load(page);
-    // Everything starts expanded.
-    await expect(text(page, "alpha-1")).toBeVisible();
-    await expect(text(page, "alpha-1-a")).toBeVisible();
-    await expect(text(page, "bravo-1")).toBeVisible();
+test("Collapse all folds every nested bullet; Expand all restores them", async ({
+  page,
+}) => {
+  await load(page);
+  // Everything starts expanded.
+  await expect(text(page, "alpha-1")).toBeVisible();
+  await expect(text(page, "alpha-1-a")).toBeVisible();
+  await expect(text(page, "bravo-1")).toBeVisible();
 
-    await runMenuAction(page, /Collapse all/);
+  await runMenuAction(page, /Collapse all/);
 
-    // Top-level bullets stay; all descendants are gone (instant, windowed list).
-    await expect(text(page, "alpha")).toBeVisible();
-    await expect(text(page, "bravo")).toBeVisible();
-    await expect(text(page, "charlie")).toBeVisible();
-    await expect(text(page, "alpha-1")).toBeHidden();
-    await expect(text(page, "alpha-2")).toBeHidden();
-    await expect(text(page, "alpha-1-a")).toBeHidden();
-    await expect(text(page, "bravo-1")).toBeHidden();
-    // The parents themselves now read as collapsed.
-    await expect(chevron(page, "alpha")).toHaveAttribute(
-      "data-collapsed",
-      "true",
-    );
+  // Top-level bullets stay; all descendants are gone (instant, windowed list).
+  await expect(text(page, "alpha")).toBeVisible();
+  await expect(text(page, "bravo")).toBeVisible();
+  await expect(text(page, "charlie")).toBeVisible();
+  await expect(text(page, "alpha-1")).toBeHidden();
+  await expect(text(page, "alpha-2")).toBeHidden();
+  await expect(text(page, "alpha-1-a")).toBeHidden();
+  await expect(text(page, "bravo-1")).toBeHidden();
+  // The parents themselves now read as collapsed.
+  await expect(chevron(page, "alpha")).toHaveAttribute(
+    "data-collapsed",
+    "true",
+  );
 
-    await runMenuAction(page, /Expand all/);
+  await runMenuAction(page, /Expand all/);
 
-    // Every level is back, including the deepest.
-    await expect(text(page, "alpha-1")).toBeVisible();
-    await expect(text(page, "alpha-2")).toBeVisible();
-    await expect(text(page, "alpha-1-a")).toBeVisible();
-    await expect(text(page, "bravo-1")).toBeVisible();
-    await expect(chevron(page, "alpha")).toHaveAttribute(
-      "data-collapsed",
-      "false",
-    );
-  });
+  // Every level is back, including the deepest.
+  await expect(text(page, "alpha-1")).toBeVisible();
+  await expect(text(page, "alpha-2")).toBeVisible();
+  await expect(text(page, "alpha-1-a")).toBeVisible();
+  await expect(text(page, "bravo-1")).toBeVisible();
+  await expect(chevron(page, "alpha")).toHaveAttribute(
+    "data-collapsed",
+    "false",
+  );
+});
 
-  test("Collapse all is scoped to the zoom root and never collapses the root", async ({
-    page,
-  }) => {
-    // Zoom into Alpha: it renders as the page title, its children as rows.
-    await load(page, "/alpha", page.locator("h2.zoomed-title .node-text"));
-    await expect(text(page, "alpha-1")).toBeVisible();
-    await expect(text(page, "alpha-1-a")).toBeVisible();
+test("Collapse all is scoped to the zoom root and never collapses the root", async ({
+  page,
+}) => {
+  // Zoom into Alpha: it renders as the page title, its children as rows.
+  await load(page, "/alpha", page.locator("h2.zoomed-title .node-text"));
+  await expect(text(page, "alpha-1")).toBeVisible();
+  await expect(text(page, "alpha-1-a")).toBeVisible();
 
-    await runMenuAction(page, /Collapse all/);
+  await runMenuAction(page, /Collapse all/);
 
-    // The root's DIRECT children stay visible (root not collapsed -- that would
-    // hide the whole view); only their subtrees fold, so the deep node is gone.
-    await expect(text(page, "alpha-1")).toBeVisible();
-    await expect(text(page, "alpha-2")).toBeVisible();
-    await expect(text(page, "alpha-1-a")).toBeHidden();
-    // The now-childless-looking row is genuinely collapsed, not just off-screen.
-    await expect(chevron(page, "alpha-1")).toHaveAttribute(
-      "data-collapsed",
-      "true",
-    );
-  });
+  // The root's DIRECT children stay visible (root not collapsed -- that would
+  // hide the whole view); only their subtrees fold, so the deep node is gone.
+  await expect(text(page, "alpha-1")).toBeVisible();
+  await expect(text(page, "alpha-2")).toBeVisible();
+  await expect(text(page, "alpha-1-a")).toBeHidden();
+  // The now-childless-looking row is genuinely collapsed, not just off-screen.
+  await expect(chevron(page, "alpha-1")).toHaveAttribute(
+    "data-collapsed",
+    "true",
+  );
 });

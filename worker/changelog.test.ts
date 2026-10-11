@@ -18,16 +18,12 @@
  * transaction writes.
  */
 
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import type { ChangeOp } from "../src/data/wire-schema";
 
 import { createNode } from "../src/data/tree";
-import {
-  MAX_FRAME_OPS,
-  canResumeChangelog,
-  planChangeFrames,
-} from "./changelog";
+import { canResumeChangelog, planChangeFrames } from "./changelog";
 
 /** n delete ops with distinct, ordered keys — chunking is op-shape-agnostic,
  *  and delete ops keep the big fixtures cheap. */
@@ -39,78 +35,44 @@ function deletes(n: number): ChangeOp[] {
   );
 }
 
-describe("planChangeFrames", () => {
-  test("an empty batch plans no frames — the seq never advances", () => {
-    expect(planChangeFrames([], 7)).toEqual([]);
-  });
-
-  test("a <=MAX_FRAME_OPS batch plans exactly one frame at lastSeq + 1", () => {
-    const one = planChangeFrames(deletes(1), 3);
-    expect(one).toHaveLength(1);
-    expect(one[0]!.seq).toBe(4);
-    expect(one[0]!.ops).toHaveLength(1);
-
-    const full = planChangeFrames(deletes(MAX_FRAME_OPS), 0);
-    expect(full).toHaveLength(1);
-    expect(full[0]!.seq).toBe(1);
-    expect(full[0]!.ops).toHaveLength(MAX_FRAME_OPS);
-  });
-
-  test("a >MAX_FRAME_OPS batch plans ceil(n/500) frames with consecutive seqs", () => {
-    const justOver = planChangeFrames(deletes(MAX_FRAME_OPS + 1), 10);
-    expect(justOver).toHaveLength(2);
-    expect(justOver.map((f) => f.seq)).toEqual([11, 12]);
-    expect(justOver.map((f) => f.ops.length)).toEqual([MAX_FRAME_OPS, 1]);
-
-    const n = 1300; // ceil(1300/500) = 3
-    const frames = planChangeFrames(deletes(n), 42);
-    expect(frames).toHaveLength(Math.ceil(n / MAX_FRAME_OPS));
-    expect(frames.map((f) => f.seq)).toEqual([43, 44, 45]);
-    expect(frames.map((f) => f.ops.length)).toEqual([500, 500, 300]);
-  });
-
-  test("op order is preserved across chunk boundaries (every frame prefix stays chain-valid)", () => {
-    const ops = deletes(1201);
-    const frames = planChangeFrames(ops, 0);
-    // Concatenating the frames in seq order reproduces the batch byte-for-byte.
-    expect(frames.flatMap((f) => [...f.ops])).toEqual(ops);
-    // And no frame exceeds the cap.
-    for (const f of frames)
-      expect(f.ops.length).toBeLessThanOrEqual(MAX_FRAME_OPS);
-  });
-
-  test("heterogeneous ops chunk by count, order intact", () => {
-    const ops: ChangeOp[] = [
-      { op: "insert", value: createNode({ id: "a", text: "alpha" }) },
-      { op: "update", value: createNode({ id: "a", text: "alpha!" }) },
-      { op: "delete", key: "b" },
-    ];
-    const frames = planChangeFrames(ops, 5, 2);
-    expect(frames.map((f) => f.seq)).toEqual([6, 7]);
-    expect(frames[0]!.ops).toEqual([ops[0]!, ops[1]!]);
-    expect(frames[1]!.ops).toEqual([ops[2]!]);
-  });
-
-  test("preserves one client correlation id across every chunk", () => {
-    const frames = planChangeFrames(deletes(3), 5, 2, "page-1");
-    expect(frames.map((frame) => frame.clientId)).toEqual(["page-1", "page-1"]);
-  });
-
-  test("pure: the input batch is not mutated", () => {
-    const ops = deletes(750);
+test.each([
+  // [ops, lastSeq, expected seqs, expected frame sizes]
+  [0, 7, [], []],
+  [1, 3, [4], [1]],
+  [500, 0, [1], [500]],
+  [501, 10, [11, 12], [500, 1]],
+  [1300, 42, [43, 44, 45], [500, 500, 300]],
+])(
+  "planChangeFrames splits %i ops after seq %i into 500-op frames with consecutive seqs, order intact",
+  (n, lastSeq, seqs, sizes) => {
+    const ops = deletes(n);
     const snapshot = [...ops];
-    planChangeFrames(ops, 0);
+    const frames = planChangeFrames(ops, lastSeq);
+    expect(frames.map((f) => f.seq)).toEqual(seqs);
+    expect(frames.map((f) => f.ops.length)).toEqual(sizes);
+    // Concatenating the frames in seq order reproduces the batch exactly, and
+    // the input batch is not mutated.
+    expect(frames.flatMap((f) => [...f.ops])).toEqual(ops);
     expect(ops).toEqual(snapshot);
-  });
+  },
+);
+
+test("planChangeFrames chunks heterogeneous ops by count and carries one client id across chunks", () => {
+  const ops: ChangeOp[] = [
+    { op: "insert", value: createNode({ id: "a", text: "alpha" }) },
+    { op: "update", value: createNode({ id: "a", text: "alpha!" }) },
+    { op: "delete", key: "b" },
+  ];
+  const frames = planChangeFrames(ops, 5, 2, "page-1");
+  expect(frames).toEqual([
+    { seq: 6, ops: [ops[0]!, ops[1]!], clientId: "page-1" },
+    { seq: 7, ops: [ops[2]!], clientId: "page-1" },
+  ]);
 });
 
-describe("canResumeChangelog", () => {
-  test("a snapshot replacement blocks older cursors despite retained rows", () => {
-    expect(canResumeChangelog(10, 11, 3, 11)).toBe(false);
-  });
-
-  test("the replacement snapshot cursor can resume subsequent changes", () => {
-    expect(canResumeChangelog(11, 11, 3, 11)).toBe(true);
-    expect(canResumeChangelog(11, 12, 3, 11)).toBe(true);
-  });
+test("canResumeChangelog blocks cursors older than a snapshot replacement, then resumes from it", () => {
+  // seq 11, oldest retained row 3, resume floor 11 (a snapshot replaced the outline at 11).
+  expect(canResumeChangelog(10, 11, 3, 11)).toBe(false);
+  expect(canResumeChangelog(11, 11, 3, 11)).toBe(true);
+  expect(canResumeChangelog(11, 12, 3, 11)).toBe(true);
 });

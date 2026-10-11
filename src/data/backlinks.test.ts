@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import { collectBacklinkReferrerIds } from "./backlinks";
-import { parseDateLinkKeys } from "./date-links";
 import { buildTreeIndex, createNode } from "./tree";
 
 const DAY = "11111111-2222-3333-4444-555555555555";
@@ -12,21 +11,6 @@ const BOTH = "55555555-6666-7777-8888-999999999999";
 const TARGET = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const REF = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
 const OTHER = "cccccccc-dddd-eeee-ffff-000000000000";
-
-describe("parseDateLinkKeys", () => {
-  test("extracts unique calendar keys in order", () => {
-    expect(
-      parseDateLinkKeys(
-        "meet [[2026-04-22]] and [[2026-04-22 09:00]] then [[2026-05-01]]",
-      ),
-    ).toEqual(["2026-04-22", "2026-05-01"]);
-  });
-
-  test("bails on bracket-free text; rejects non-calendar shape", () => {
-    expect(parseDateLinkKeys("plain")).toEqual([]);
-    expect(parseDateLinkKeys("see [[2026-13-45]]")).toEqual([]);
-  });
-});
 
 describe("collectBacklinkReferrerIds", () => {
   test("unions node-links and date mentions; dedupes; excludes self + mirrors", () => {

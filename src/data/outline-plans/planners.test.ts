@@ -56,18 +56,7 @@ function seedFlat(ids: string[]): OutlineNode[] {
   );
 }
 
-describe("sibling-chain invariant (ADR 0009) via outline-plans", () => {
-  it("orderSiblings follows prevSiblingId chain", () => {
-    const nodes = seedFlat(["a", "b", "c"]);
-    const scrambled = [nodes[2]!, nodes[0]!, nodes[1]!];
-    expect(orderSiblings(scrambled).map((n) => n.id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("chainDisagreements empty for a valid chain", () => {
-    const nodes = seedFlat(["a", "b", "c"]);
-    expect(chainDisagreements(orderSiblings(nodes))).toEqual([]);
-  });
-
+describe("structural planners keep the sibling chain valid (ADR 0009)", () => {
   it("rapid structural sequences leave chain intact", () => {
     let nodes = seedFlat(["a", "b", "c"]);
     let t = 100;
@@ -294,35 +283,26 @@ describe("planInsertChildAtStart", () => {
 });
 
 describe("field planners (kind exclusivity)", () => {
-  it("planSetIsTask clears kind", () => {
+  it("planSetIsTask and planSetKind clear each other", () => {
     let nodes = [
       createOutlineNode({
         id: "a",
         userId: USER,
         kind: "paragraph",
-        isTask: false,
         text: "a",
       }),
     ];
-    const plan = planSetIsTask(buildTreeIndex(nodes), "a", true, 1);
-    expect(plan).not.toBeNull();
-    nodes = applyPlan(nodes, plan!);
+    nodes = applyPlan(
+      nodes,
+      planSetIsTask(buildTreeIndex(nodes), "a", true, 1)!,
+    );
     expect(nodes[0]!.isTask).toBe(true);
     expect(nodes[0]!.kind).toBeNull();
-  });
 
-  it("planSetKind clears isTask", () => {
-    let nodes = [
-      createOutlineNode({
-        id: "a",
-        userId: USER,
-        isTask: true,
-        text: "a",
-      }),
-    ];
-    const plan = planSetKind(buildTreeIndex(nodes), "a", "paragraph", 1);
-    expect(plan).not.toBeNull();
-    nodes = applyPlan(nodes, plan!);
+    nodes = applyPlan(
+      nodes,
+      planSetKind(buildTreeIndex(nodes), "a", "paragraph", 2)!,
+    );
     expect(nodes[0]!.kind).toBe("paragraph");
     expect(nodes[0]!.isTask).toBe(false);
   });
@@ -595,13 +575,8 @@ describe("planIndent resolveMirror", () => {
   });
 
   it("refuses a cycle when mirror prev sibling resolves into self", () => {
-    let nodes = seedFlat(["x", "m"]);
-    nodes = nodes.map((n) =>
-      n.id === "m" ? { ...n, mirrorOf: "x", text: "x" } : n,
-    );
-    // Indenting nothing after m that would cycle — indent m under x is fine.
     // Cycle: indent a node whose prev sibling mirrors THAT node.
-    nodes = seedFlat(["a", "m", "b"]);
+    let nodes = seedFlat(["a", "m", "b"]);
     nodes = nodes.map((n) =>
       n.id === "m" ? { ...n, mirrorOf: "b", text: "b" } : n,
     );

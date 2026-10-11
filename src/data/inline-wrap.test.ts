@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 
 import { detectMarkerWrap, planMarkerToggle } from "./inline-wrap";
 
@@ -8,43 +8,40 @@ const STRIKE = { pre: "~~", post: "~~" };
 const UNDER = { pre: "~", post: "~" };
 const MARK = { pre: "==", post: "==" };
 
-describe("detectMarkerWrap", () => {
-  it("detects a marker-inclusive selection (folded atom picked up whole)", () => {
-    expect(detectMarkerWrap("**bold**", 0, 8, BOLD)).toBe("inside");
-    expect(detectMarkerWrap("a *hi* b", 2, 6, ITALIC)).toBe("inside");
-  });
-
-  it("detects markers flanking an inner selection", () => {
-    // "**bold**" with just "bold" (offsets 2..6) selected.
-    expect(detectMarkerWrap("**bold**", 2, 6, BOLD)).toBe("outside");
-    expect(detectMarkerWrap("*hi*", 1, 3, ITALIC)).toBe("outside");
-  });
-
-  it("returns null when the selection is plain text", () => {
-    expect(detectMarkerWrap("bold", 0, 4, BOLD)).toBeNull();
-    expect(detectMarkerWrap("hello world", 0, 5, ITALIC)).toBeNull();
-  });
-
-  it("does NOT mistake a doubled marker for the single (** is not *)", () => {
-    // Selecting a whole bold run must not read as italic-active.
-    expect(detectMarkerWrap("**b**", 0, 5, ITALIC)).toBeNull();
-    // Inner selection of bold must not read as italic-active either.
-    expect(detectMarkerWrap("**b**", 2, 3, ITALIC)).toBeNull();
-    // ~~ vs ~ (strike vs underline).
-    expect(detectMarkerWrap("~~s~~", 0, 5, UNDER)).toBeNull();
-    expect(detectMarkerWrap("~~s~~", 2, 3, UNDER)).toBeNull();
-  });
-
-  it("still detects the genuine single-char run", () => {
-    expect(detectMarkerWrap("*i*", 0, 3, ITALIC)).toBe("inside");
-    expect(detectMarkerWrap("~u~", 0, 3, UNDER)).toBe("inside");
-  });
-
-  it("detects a highlight run including its color emoji", () => {
-    // 🔴 is a surrogate pair (2 UTF-16 units), so the run is 12 units long.
-    expect(detectMarkerWrap("==\u{1F534}urgent==", 0, 12, MARK)).toBe("inside");
-  });
-});
+test.each<
+  [
+    string,
+    number,
+    number,
+    Parameters<typeof detectMarkerWrap>[3],
+    ReturnType<typeof detectMarkerWrap>,
+  ]
+>([
+  // A marker-inclusive selection (the folded atom picked up whole).
+  ["**bold**", 0, 8, BOLD, "inside"],
+  ["a *hi* b", 2, 6, ITALIC, "inside"],
+  ["*i*", 0, 3, ITALIC, "inside"],
+  ["~u~", 0, 3, UNDER, "inside"],
+  // 🔴 is a surrogate pair (2 UTF-16 units), so the run is 12 units long.
+  ["==\u{1F534}urgent==", 0, 12, MARK, "inside"],
+  // Markers flanking an inner selection.
+  ["**bold**", 2, 6, BOLD, "outside"],
+  ["*hi*", 1, 3, ITALIC, "outside"],
+  // Plain text.
+  ["bold", 0, 4, BOLD, null],
+  ["hello world", 0, 5, ITALIC, null],
+  // A doubled marker is not the single one: bold is not italic-active, and
+  // strike is not underline-active, whole or inner.
+  ["**b**", 0, 5, ITALIC, null],
+  ["**b**", 2, 3, ITALIC, null],
+  ["~~s~~", 0, 5, UNDER, null],
+  ["~~s~~", 2, 3, UNDER, null],
+])(
+  "detectMarkerWrap(%p, %d, %d, %o) -> %p",
+  (text, start, end, marker, expected) => {
+    expect(detectMarkerWrap(text, start, end, marker)).toBe(expected);
+  },
+);
 
 describe("planMarkerToggle", () => {
   it("wraps a plain selection and re-selects the interior", () => {

@@ -1,24 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE, type SeedNode } from "./fixtures";
-
-// A node's OWN editable text span (not its descendants'): the .node-text that
-// is a direct child of this node's .outline-row. Child bullets live in a nested
-// <ul> further down the <li>, so the `>` chain can't reach them.
-const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-
-async function caretAtEdge(page: Page, id: string, edge: "start" | "end") {
-  await text(page, id).evaluate((el: HTMLElement, atEnd) => {
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(!atEnd);
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(range);
-  }, edge === "end");
-}
+import {
+  placeCaret,
+  seedOutline,
+  STANDARD_TREE,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 async function load(
   page: Page,
@@ -40,249 +28,247 @@ async function load(
   await expect(text(page, tree[0]!.id)).toBeVisible();
 }
 
-test.describe("keyboard arrow navigation", () => {
-  test("ArrowDown walks focus through every visible bullet, top to bottom", async ({
-    page,
-  }) => {
-    await load(page);
+test("ArrowDown walks focus through every visible bullet, top to bottom", async ({
+  page,
+}) => {
+  await load(page);
 
-    const order = ["alpha", "alpha-1", "alpha-2", "bravo", "charlie"];
-    await text(page, order[0]!).click();
-    await expect(text(page, order[0]!)).toBeFocused();
+  const order = ["alpha", "alpha-1", "alpha-2", "bravo", "charlie"];
+  await text(page, order[0]!).click();
+  await expect(text(page, order[0]!)).toBeFocused();
 
-    for (let i = 1; i < order.length; i++) {
-      await page.keyboard.press("ArrowDown");
-      await expect(text(page, order[i]!)).toBeFocused();
-    }
-
-    // Past the last bullet there's nowhere to go -- focus must hold, not jump.
+  for (let i = 1; i < order.length; i++) {
     await page.keyboard.press("ArrowDown");
-    await expect(text(page, "charlie")).toBeFocused();
-  });
+    await expect(text(page, order[i]!)).toBeFocused();
+  }
 
-  test("ArrowUp walks focus back up through every visible bullet", async ({
-    page,
-  }) => {
-    await load(page);
+  // Past the last bullet there's nowhere to go -- focus must hold, not jump.
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "charlie")).toBeFocused();
+});
 
-    const order = ["charlie", "bravo", "alpha-2", "alpha-1", "alpha"];
-    await text(page, order[0]!).click();
-    await expect(text(page, order[0]!)).toBeFocused();
+test("ArrowUp walks focus back up through every visible bullet", async ({
+  page,
+}) => {
+  await load(page);
 
-    for (let i = 1; i < order.length; i++) {
-      await page.keyboard.press("ArrowUp");
-      await expect(text(page, order[i]!)).toBeFocused();
-    }
+  const order = ["charlie", "bravo", "alpha-2", "alpha-1", "alpha"];
+  await text(page, order[0]!).click();
+  await expect(text(page, order[0]!)).toBeFocused();
 
-    // At the very top there's nowhere up to go -- focus holds on the first bullet.
+  for (let i = 1; i < order.length; i++) {
     await page.keyboard.press("ArrowUp");
-    await expect(text(page, "alpha")).toBeFocused();
-  });
+    await expect(text(page, order[i]!)).toBeFocused();
+  }
 
-  test("a completed bullet hidden by 'Show completed' off is skipped", async ({
-    page,
-  }) => {
-    // When 'Show completed' is off, completed nodes are filtered out of the
-    // DOM entirely (see useVisibleChildIds). Arrow nav must walk only the
-    // *mounted* bullets -- landing on a hidden id is a silent no-op that pins
-    // focus. Regression for the bug where findVisibleNeighbor returned an
-    // unmounted completed node as the neighbor.
-    //
-    //   A
-    //     A1
-    //       A1a
-    //       A1b
-    //     A2   <- completed, hidden
-    //   B
-    //   C
-    // Visible order: A, A1, A1a, A1b, B, C.
-    const tree: SeedNode[] = [
-      { id: "A", parentId: null, prevSiblingId: null, text: "A" },
-      { id: "B", parentId: null, prevSiblingId: "A", text: "B" },
-      { id: "C", parentId: null, prevSiblingId: "B", text: "C" },
-      { id: "A1", parentId: "A", prevSiblingId: null, text: "A1" },
-      {
-        id: "A2",
-        parentId: "A",
-        prevSiblingId: "A1",
-        text: "A2",
-        isTask: true,
-        completed: true,
-      },
-      { id: "A1a", parentId: "A1", prevSiblingId: null, text: "A1a" },
-      { id: "A1b", parentId: "A1", prevSiblingId: "A1a", text: "A1b" },
-    ];
-    await load(page, tree, { hideCompleted: true });
+  // At the very top there's nowhere up to go -- focus holds on the first bullet.
+  await page.keyboard.press("ArrowUp");
+  await expect(text(page, "alpha")).toBeFocused();
+});
 
-    // Sanity: A2 is filtered out of the DOM.
-    await expect(text(page, "A2")).toHaveCount(0);
+test("a completed bullet hidden by 'Show completed' off is skipped", async ({
+  page,
+}) => {
+  // When 'Show completed' is off, completed nodes are filtered out of the
+  // DOM entirely (see useVisibleChildIds). Arrow nav must walk only the
+  // *mounted* bullets -- landing on a hidden id is a silent no-op that pins
+  // focus. Regression for the bug where findVisibleNeighbor returned an
+  // unmounted completed node as the neighbor.
+  //
+  //   A
+  //     A1
+  //       A1a
+  //       A1b
+  //     A2   <- completed, hidden
+  //   B
+  //   C
+  // Visible order: A, A1, A1a, A1b, B, C.
+  const tree: SeedNode[] = [
+    { id: "A", parentId: null, prevSiblingId: null, text: "A" },
+    { id: "B", parentId: null, prevSiblingId: "A", text: "B" },
+    { id: "C", parentId: null, prevSiblingId: "B", text: "C" },
+    { id: "A1", parentId: "A", prevSiblingId: null, text: "A1" },
+    {
+      id: "A2",
+      parentId: "A",
+      prevSiblingId: "A1",
+      text: "A2",
+      isTask: true,
+      completed: true,
+    },
+    { id: "A1a", parentId: "A1", prevSiblingId: null, text: "A1a" },
+    { id: "A1b", parentId: "A1", prevSiblingId: "A1a", text: "A1b" },
+  ];
+  await load(page, tree, { hideCompleted: true });
 
-    // Down from A1b (sits right above the hidden A2) must skip A2 -> B.
-    await text(page, "A1b").click();
-    await expect(text(page, "A1b")).toBeFocused();
+  // Sanity: A2 is filtered out of the DOM.
+  await expect(text(page, "A2")).toHaveCount(0);
+
+  // Down from A1b (sits right above the hidden A2) must skip A2 -> B.
+  await text(page, "A1b").click();
+  await expect(text(page, "A1b")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "B")).toBeFocused();
+
+  // And up from B must skip back over A2 -> A1b.
+  await page.keyboard.press("ArrowUp");
+  await expect(text(page, "A1b")).toBeFocused();
+});
+
+test("single-line bullets cross in one press even with code/tag chips", async ({
+  page,
+}) => {
+  // Inline `code` and #tag both inject extra DOM (and a shorter caret) inside
+  // .node-text. This guards that a single visual line still crosses on the
+  // first press -- the threshold must not eat a press near a chip.
+  await load(page, [
+    { id: "p", parentId: null, prevSiblingId: null, text: "Plain parent" },
+    {
+      id: "code",
+      parentId: null,
+      prevSiblingId: "p",
+      text: "Has `inline` code",
+    },
+    {
+      id: "tag",
+      parentId: null,
+      prevSiblingId: "code",
+      text: "Has #urgent tag",
+    },
+  ]);
+
+  const order = ["p", "code", "tag"];
+  await text(page, order[0]!).click();
+  await placeCaret(text(page, order[0]!), "end");
+  for (let i = 1; i < order.length; i++) {
     await page.keyboard.press("ArrowDown");
-    await expect(text(page, "B")).toBeFocused();
-
-    // And up from B must skip back over A2 -> A1b.
+    await expect(text(page, order[i]!)).toBeFocused();
+  }
+  for (let i = order.length - 2; i >= 0; i--) {
     await page.keyboard.press("ArrowUp");
-    await expect(text(page, "A1b")).toBeFocused();
-  });
+    await expect(text(page, order[i]!)).toBeFocused();
+  }
+});
 
-  test("single-line bullets cross in one press even with code/tag chips", async ({
-    page,
-  }) => {
-    // Inline `code` and #tag both inject extra DOM (and a shorter caret) inside
-    // .node-text. This guards that a single visual line still crosses on the
-    // first press -- the threshold must not eat a press near a chip.
-    await load(page, [
-      { id: "p", parentId: null, prevSiblingId: null, text: "Plain parent" },
-      {
-        id: "code",
-        parentId: null,
-        prevSiblingId: "p",
-        text: "Has `inline` code",
-      },
-      {
-        id: "tag",
-        parentId: null,
-        prevSiblingId: "code",
-        text: "Has #urgent tag",
-      },
-    ]);
+test("a collapsed parent's hidden children are skipped", async ({ page }) => {
+  const collapsed = STANDARD_TREE.map((n) =>
+    n.id === "alpha" ? { ...n, collapsed: true } : n,
+  );
+  await load(page, collapsed);
 
-    const order = ["p", "code", "tag"];
-    await text(page, order[0]!).click();
-    await page.keyboard.press("End");
-    for (let i = 1; i < order.length; i++) {
-      await page.keyboard.press("ArrowDown");
-      await expect(text(page, order[i]!)).toBeFocused();
-    }
-    for (let i = order.length - 2; i >= 0; i--) {
-      await page.keyboard.press("ArrowUp");
-      await expect(text(page, order[i]!)).toBeFocused();
-    }
-  });
+  await text(page, "alpha").click();
+  await expect(text(page, "alpha")).toBeFocused();
 
-  test("a collapsed parent's hidden children are skipped", async ({ page }) => {
-    const collapsed = STANDARD_TREE.map((n) =>
-      n.id === "alpha" ? { ...n, collapsed: true } : n,
-    );
-    await load(page, collapsed);
+  // alpha-1 / alpha-2 are hidden under the collapsed alpha, so Down lands on
+  // the next *visible* bullet, bravo -- not into the hidden subtree.
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "bravo")).toBeFocused();
 
-    await text(page, "alpha").click();
-    await expect(text(page, "alpha")).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(text(page, "alpha")).toBeFocused();
+});
 
-    // alpha-1 / alpha-2 are hidden under the collapsed alpha, so Down lands on
-    // the next *visible* bullet, bravo -- not into the hidden subtree.
+test("arrows walk the FILTERED rows while a ?q= filter is active", async ({
+  page,
+}) => {
+  // Regression: findVisibleNeighbor walked the UNFILTERED tree, so with
+  // ?q=#go active the computed neighbor was often a row the filter pruned
+  // out of the DOM -- an unmounted target is a silent focus no-op ("can't
+  // move between nodes while filtering"). Nav must walk exactly what
+  // renders: matches, revealed descendants, AND dimmed ancestor context.
+  //
+  //   A #go
+  //   P            (dimmed context: untagged, has a tagged child)
+  //     K #go
+  //   B            (untagged, no tagged descendant -> filtered OUT)
+  //   C #go
+  //   P2 collapsed (dimmed context; filter force-descends to reveal D)
+  //     D #go
+  // Rendered order under #go: A, P, K, C, P2, D.
+  const tree: SeedNode[] = [
+    { id: "A", parentId: null, prevSiblingId: null, text: "alpha #go" },
+    { id: "P", parentId: null, prevSiblingId: "A", text: "parent" },
+    { id: "K", parentId: "P", prevSiblingId: null, text: "kid #go" },
+    { id: "B", parentId: null, prevSiblingId: "P", text: "bravo" },
+    { id: "C", parentId: null, prevSiblingId: "B", text: "charlie #go" },
+    {
+      id: "P2",
+      parentId: null,
+      prevSiblingId: "C",
+      text: "papa",
+      collapsed: true,
+    },
+    { id: "D", parentId: "P2", prevSiblingId: null, text: "deep #go" },
+  ];
+  await seedOutline(page, tree);
+  await page.goto("/?q=%23go");
+  await expect(text(page, "A")).toBeVisible();
+  // Sanity: B is pruned out of the DOM; D is revealed despite P2's collapse.
+  await expect(text(page, "B")).toHaveCount(0);
+  await expect(text(page, "D")).toBeVisible();
+
+  const order = ["A", "P", "K", "C", "P2", "D"];
+  await text(page, order[0]!).click();
+  await expect(text(page, order[0]!)).toBeFocused();
+  for (let i = 1; i < order.length; i++) {
     await page.keyboard.press("ArrowDown");
-    await expect(text(page, "bravo")).toBeFocused();
-
+    await expect(text(page, order[i]!)).toBeFocused();
+  }
+  // Bottom of the filtered view: focus holds.
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "D")).toBeFocused();
+  // And the walk reverses cleanly (D -> P2 crosses the force-descend seam).
+  for (let i = order.length - 2; i >= 0; i--) {
     await page.keyboard.press("ArrowUp");
-    await expect(text(page, "alpha")).toBeFocused();
-  });
+    await expect(text(page, order[i]!)).toBeFocused();
+  }
+});
 
-  test("arrows walk the FILTERED rows while a ?q= filter is active", async ({
-    page,
-  }) => {
-    // Regression: findVisibleNeighbor walked the UNFILTERED tree, so with
-    // ?q=#go active the computed neighbor was often a row the filter pruned
-    // out of the DOM -- an unmounted target is a silent focus no-op ("can't
-    // move between nodes while filtering"). Nav must walk exactly what
-    // renders: matches, revealed descendants, AND dimmed ancestor context.
-    //
-    //   A #go
-    //   P            (dimmed context: untagged, has a tagged child)
-    //     K #go
-    //   B            (untagged, no tagged descendant -> filtered OUT)
-    //   C #go
-    //   P2 collapsed (dimmed context; filter force-descends to reveal D)
-    //     D #go
-    // Rendered order under #go: A, P, K, C, P2, D.
-    const tree: SeedNode[] = [
-      { id: "A", parentId: null, prevSiblingId: null, text: "alpha #go" },
-      { id: "P", parentId: null, prevSiblingId: "A", text: "parent" },
-      { id: "K", parentId: "P", prevSiblingId: null, text: "kid #go" },
-      { id: "B", parentId: null, prevSiblingId: "P", text: "bravo" },
-      { id: "C", parentId: null, prevSiblingId: "B", text: "charlie #go" },
-      {
-        id: "P2",
-        parentId: null,
-        prevSiblingId: "C",
-        text: "papa",
-        collapsed: true,
-      },
-      { id: "D", parentId: "P2", prevSiblingId: null, text: "deep #go" },
-    ];
-    await seedOutline(page, tree);
-    await page.goto("/?q=%23go");
-    await expect(text(page, "A")).toBeVisible();
-    // Sanity: B is pruned out of the DOM; D is revealed despite P2's collapse.
-    await expect(text(page, "B")).toHaveCount(0);
-    await expect(text(page, "D")).toBeVisible();
+test("ArrowLeft/ArrowRight snake between adjacent visible bullets", async ({
+  page,
+}) => {
+  await load(page);
 
-    const order = ["A", "P", "K", "C", "P2", "D"];
-    await text(page, order[0]!).click();
-    await expect(text(page, order[0]!)).toBeFocused();
-    for (let i = 1; i < order.length; i++) {
-      await page.keyboard.press("ArrowDown");
-      await expect(text(page, order[i]!)).toBeFocused();
-    }
-    // Bottom of the filtered view: focus holds.
-    await page.keyboard.press("ArrowDown");
-    await expect(text(page, "D")).toBeFocused();
-    // And the walk reverses cleanly (D -> P2 crosses the force-descend seam).
-    for (let i = order.length - 2; i >= 0; i--) {
-      await page.keyboard.press("ArrowUp");
-      await expect(text(page, order[i]!)).toBeFocused();
-    }
-  });
+  await placeCaret(text(page, "alpha"), "end");
+  await page.keyboard.press("ArrowRight");
+  await expect(text(page, "alpha-1")).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(text(page, "alpha-1")).toHaveText("!Alpha one");
 
-  test("ArrowLeft/ArrowRight snake between adjacent visible bullets", async ({
-    page,
-  }) => {
-    await load(page);
+  await placeCaret(text(page, "bravo"), "start");
+  await page.keyboard.press("ArrowLeft");
+  await expect(text(page, "alpha-2")).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(text(page, "alpha-2")).toHaveText("Alpha two!");
+});
 
-    await caretAtEdge(page, "alpha", "end");
-    await page.keyboard.press("ArrowRight");
-    await expect(text(page, "alpha-1")).toBeFocused();
-    await page.keyboard.type("!");
-    await expect(text(page, "alpha-1")).toHaveText("!Alpha one");
+test("backspacing an empty bullet away focuses the row ABOVE, not below", async ({
+  page,
+}) => {
+  // Workflowy behavior: deleting a bullet by emptying it lands the caret on
+  // the previous row, never the next one. Regression for focus jumping down.
+  await load(page, [
+    { id: "above", parentId: null, prevSiblingId: null, text: "above" },
+    { id: "mid", parentId: null, prevSiblingId: "above", text: "" },
+    { id: "below", parentId: null, prevSiblingId: "mid", text: "below" },
+  ]);
 
-    await caretAtEdge(page, "bravo", "start");
-    await page.keyboard.press("ArrowLeft");
-    await expect(text(page, "alpha-2")).toBeFocused();
-    await page.keyboard.type("!");
-    await expect(text(page, "alpha-2")).toHaveText("Alpha two!");
-  });
+  await text(page, "mid").click();
+  await expect(text(page, "mid")).toBeFocused();
 
-  test("backspacing an empty bullet away focuses the row ABOVE, not below", async ({
-    page,
-  }) => {
-    // Workflowy behavior: deleting a bullet by emptying it lands the caret on
-    // the previous row, never the next one. Regression for focus jumping down.
-    await load(page, [
-      { id: "above", parentId: null, prevSiblingId: null, text: "above" },
-      { id: "mid", parentId: null, prevSiblingId: "above", text: "" },
-      { id: "below", parentId: null, prevSiblingId: "mid", text: "below" },
-    ]);
+  // Backspace at the start of the now-empty bullet deletes it.
+  await page.keyboard.press("Backspace");
 
-    await text(page, "mid").click();
-    await expect(text(page, "mid")).toBeFocused();
-
-    // Backspace at the start of the now-empty bullet deletes it.
-    await page.keyboard.press("Backspace");
-
-    // It's gone, and focus moved UP to "above" -- not down to "below".
-    await expect(page.locator('li[data-node-id="mid"]')).toHaveCount(0);
-    await expect(text(page, "above")).toBeFocused();
-    await expect(text(page, "below")).not.toBeFocused();
-    // ...and it DELETED rather than joined: the row above is untouched, and the
-    // caret sits at its end. Pins the emptiness gate now that it reads the
-    // reconstructed source instead of raw textContent (ADR 0005).
-    await expect(text(page, "above")).toHaveText("above");
-    await page.keyboard.type("!");
-    await expect(text(page, "above")).toHaveText("above!");
-  });
+  // It's gone, and focus moved UP to "above" -- not down to "below".
+  await expect(page.locator('li[data-node-id="mid"]')).toHaveCount(0);
+  await expect(text(page, "above")).toBeFocused();
+  await expect(text(page, "below")).not.toBeFocused();
+  // ...and it DELETED rather than joined: the row above is untouched, and the
+  // caret sits at its end. Pins the emptiness gate now that it reads the
+  // reconstructed source instead of raw textContent (ADR 0005).
+  await expect(text(page, "above")).toHaveText("above");
+  await page.keyboard.type("!");
+  await expect(text(page, "above")).toHaveText("above!");
 });
 
 test.describe("software-keyboard Backspace", () => {

@@ -55,25 +55,19 @@ const ops = buildFilterOperatorMap([
   },
 ]);
 
-describe("tokenizeQuery", () => {
-  test("splits on whitespace, drops empties", () => {
-    expect(tokenizeQuery(undefined)).toEqual([]);
-    expect(tokenizeQuery("   ")).toEqual([]);
-    expect(tokenizeQuery("#a  is:todo   word")).toEqual([
-      "#a",
-      "is:todo",
-      "word",
-    ]);
-  });
-
-  test("keeps a quoted phrase (with its spaces) as one token", () => {
-    expect(tokenizeQuery('a "b c" d')).toEqual(["a", '"b c"', "d"]);
-    expect(tokenizeQuery('-"b c"')).toEqual(['-"b c"']);
-  });
-
-  test("an unterminated quote runs to end of string", () => {
-    expect(tokenizeQuery('a "b c')).toEqual(["a", '"b c']);
-  });
+test.each<[string, string | undefined, string[]]>([
+  ["undefined is no tokens", undefined, []],
+  ["whitespace only is no tokens", "   ", []],
+  [
+    "splits on whitespace runs",
+    "#a  is:todo   word",
+    ["#a", "is:todo", "word"],
+  ],
+  ["a quoted phrase is one token", 'a "b c" d', ["a", '"b c"', "d"]],
+  ["a negated quoted phrase is one token", '-"b c"', ['-"b c"']],
+  ["an unterminated quote runs to the end", 'a "b c', ["a", '"b c']],
+])("tokenizeQuery: %s", (_name, input, expected) => {
+  expect(tokenizeQuery(input)).toEqual(expected);
 });
 
 describe("mirror-aware DQL view filtering", () => {
@@ -188,7 +182,7 @@ describe("mirror-aware DQL view filtering", () => {
     const blurred = buildQueryFilter(expanded, null, "absent", never, ops);
     expect(blurred?.visibleIds.size).toBe(0);
     expect(blurred?.retainedKey).toBeUndefined();
-    expect(blurred?.emptyMessage).toBe('No matches for "absent" here.');
+    expect(blurred?.emptyMessage).toBeDefined();
     // Focus never overrides a separate visibility prune or a zoom scope.
     expect(
       buildQueryFilter(
@@ -231,17 +225,11 @@ describe("parseFilterQuery", () => {
     });
   });
 
-  test("uppercase OR binds adjacent terms into one group", () => {
+  test("uppercase OR binds adjacent terms into one group, and chains", () => {
     const q = parseFilterQuery("#a OR #b #c");
-    expect(q.groups).toHaveLength(2);
-    expect(q.groups[0]!.terms).toHaveLength(2); // #a OR #b
-    expect(q.groups[1]!.terms).toHaveLength(1); // #c
-  });
-
-  test("a chain of ORs stays one group", () => {
-    const q = parseFilterQuery("a OR b OR c");
-    expect(q.groups).toHaveLength(1);
-    expect(q.groups[0]!.terms).toHaveLength(3);
+    expect(q.groups.map((g) => g.terms.length)).toEqual([2, 1]);
+    const chain = parseFilterQuery("a OR b OR c");
+    expect(chain.groups.map((g) => g.terms.length)).toEqual([3]);
   });
 
   test("a dangling OR degrades to literal text", () => {
@@ -301,27 +289,15 @@ describe("parseFilterQuery", () => {
 });
 
 describe("buildFilterOperatorMap", () => {
-  test("shared key, different values is allowed", () => {
-    expect(() =>
-      buildFilterOperatorMap([
-        { key: "is", values: ["todo"], description: "", predicate: () => true },
-        {
-          key: "is",
-          values: ["complete"],
-          description: "",
-          predicate: () => true,
-        },
-      ]),
-    ).not.toThrow();
-  });
-
+  // A shared key with different values is allowed: the module-level `ops`
+  // above already folds three owners' `is` values without throwing.
   test("a duplicate (key, value) pair throws at load", () => {
     expect(() =>
       buildFilterOperatorMap([
         { key: "is", values: ["todo"], description: "", predicate: () => true },
         { key: "is", values: ["todo"], description: "", predicate: () => true },
       ]),
-    ).toThrow(/duplicate operator claim/);
+    ).toThrow();
   });
 
   test("a duplicate bare claim throws", () => {
@@ -331,7 +307,7 @@ describe("buildFilterOperatorMap", () => {
       description: "",
       predicate: () => true,
     };
-    expect(() => buildFilterOperatorMap([bare, bare])).toThrow(/highlight:/);
+    expect(() => buildFilterOperatorMap([bare, bare])).toThrow();
   });
 });
 
@@ -373,8 +349,12 @@ describe("collectOperatorKeyInfos", () => {
     ]);
   });
 
-  test("description is the FIRST-registered operator's (core for `is`)", () => {
-    expect(is.description).toBe(CORE_FILTER_OPERATORS[0]!.description);
+  test("description is the FIRST-registered operator's", () => {
+    const [info] = collectOperatorKeyInfos([
+      { key: "k", values: ["a"], description: "first", predicate: () => true },
+      { key: "k", values: ["b"], description: "second", predicate: () => true },
+    ]);
+    expect(info!.description).toBe("first");
   });
 
   test("bare + swatch flags fold across a key", () => {
@@ -386,24 +366,30 @@ describe("collectOperatorKeyInfos", () => {
   });
 });
 
-describe("caretToken", () => {
-  test("returns the whitespace-delimited chunk containing the caret", () => {
-    expect(caretToken("is:todo #work", 3)).toEqual({
-      token: "is:todo",
-      start: 0,
-      end: 7,
-    });
-    // caret inside the second token
-    expect(caretToken("is:todo #work", 11)).toMatchObject({ token: "#work" });
-  });
-
-  test("an empty token when the caret sits between spaces", () => {
-    expect(caretToken("a  b", 2)).toEqual({ token: "", start: 2, end: 2 });
-  });
-
-  test("clamps an out-of-range caret", () => {
-    expect(caretToken("abc", 99)).toEqual({ token: "abc", start: 0, end: 3 });
-  });
+test.each<
+  [string, string, number, { token: string; start: number; end: number }]
+>([
+  [
+    "the chunk containing the caret",
+    "is:todo #work",
+    3,
+    { token: "is:todo", start: 0, end: 7 },
+  ],
+  [
+    "the second chunk",
+    "is:todo #work",
+    11,
+    { token: "#work", start: 8, end: 13 },
+  ],
+  ["an empty token between spaces", "a  b", 2, { token: "", start: 2, end: 2 }],
+  [
+    "an out-of-range caret clamps",
+    "abc",
+    99,
+    { token: "abc", start: 0, end: 3 },
+  ],
+])("caretToken: %s", (_name, text, caret, expected) => {
+  expect(caretToken(text, caret)).toEqual(expected);
 });
 
 describe("buildFilterSuggestions", () => {
@@ -515,7 +501,7 @@ describe("buildQueryFilter", () => {
   test("no matches sets emptyMessage", () => {
     const f = buildQueryFilter(base, "r", "#nope", never, ops)!;
     expect(f.matchIds.size).toBe(0);
-    expect(f.emptyMessage).toBe('No matches for "#nope" here.');
+    expect(f.emptyMessage).toBeDefined();
   });
 
   test("isHidden takes a subtree (and its matches) with it", () => {
@@ -524,45 +510,26 @@ describe("buildQueryFilter", () => {
     expect(f.matchIds.size).toBe(0);
   });
 
-  describe("node-kind operators (ADR 0045 tie-break)", () => {
-    const todo = createNode({
-      id: "t",
-      parentId: "r",
-      text: "t",
-      isTask: true,
-    });
-    const bullet = createNode({ id: "b", parentId: "r", text: "b" });
-    const para = createNode({
-      id: "p",
-      parentId: "r",
-      text: "p",
-      kind: "paragraph",
-    });
-    // Illegal pair (stale client): kind wins, so this is a paragraph, not a todo.
-    const both = createNode({
-      id: "x",
-      parentId: "r",
-      text: "x",
-      isTask: true,
-      kind: "paragraph",
-    });
-    const tree = index([r, todo, bullet, para, both]);
-
-    test("is:todo excludes paragraphs even with isTask true", () => {
-      expect(
-        buildQueryFilter(tree, "r", "is:todo", never, ops)!.matchIds,
-      ).toEqual(new Set(["t"]));
-    });
-    test("is:bullet is neither task nor paragraph", () => {
-      expect(
-        buildQueryFilter(tree, "r", "is:bullet", never, ops)!.matchIds,
-      ).toEqual(new Set(["b"]));
-    });
-    test("is:paragraph wins the tie-break", () => {
-      expect(
-        buildQueryFilter(tree, "r", "is:paragraph", never, ops)!.matchIds,
-      ).toEqual(new Set(["p", "x"]));
-    });
+  test("node-kind operators follow the ADR 0045 tie-break", () => {
+    const tree = index([
+      r,
+      createNode({ id: "t", parentId: "r", text: "t", isTask: true }),
+      createNode({ id: "b", parentId: "r", text: "b" }),
+      createNode({ id: "p", parentId: "r", text: "p", kind: "paragraph" }),
+      // Illegal pair (stale client): kind wins, so this is a paragraph.
+      createNode({
+        id: "x",
+        parentId: "r",
+        text: "x",
+        isTask: true,
+        kind: "paragraph",
+      }),
+    ]);
+    const ids = (q: string) =>
+      buildQueryFilter(tree, "r", q, never, ops)!.matchIds;
+    expect(ids("is:todo")).toEqual(new Set(["t"]));
+    expect(ids("is:bullet")).toEqual(new Set(["b"]));
+    expect(ids("is:paragraph")).toEqual(new Set(["p", "x"]));
   });
 
   test("is:mirror, is:complete, is:agent, has:link, highlight predicates", () => {

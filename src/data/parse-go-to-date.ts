@@ -194,19 +194,7 @@ export function parseGoToDateTargets(
 }
 
 /**
- * Parse a Cmd+K query into a local daily-index key, or null when it isn't a
- * date phrase. Convenience over {@link parseGoToDateTargets} (first hit).
- */
-export function parseGoToDateQuery(
-  query: string,
-  now = new Date(),
-  weekStart: WeekStart = DEFAULT_WEEK_START,
-): GoToDateHit | null {
-  return parseGoToDateTargets(query, now, weekStart)[0] ?? null;
-}
-
-/**
- * Stricter than {@link parseGoToDateQuery} for the `[[` picker (ADR 0038 /
+ * Stricter than {@link parseGoToDateTargets} for the `[[` picker (ADR 0038 /
  * 0057): ISO, relatives, owned weekdays (incl. next/last), period →
  * period-start **day**, or chrono that is calendar-complete (day-of-month,
  * explicit year, **or weekday**). Bare `April` → null. Always returns day keys

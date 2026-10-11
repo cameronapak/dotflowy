@@ -184,7 +184,7 @@ export function DeleteConfirmDialog() {
                 <TriangleAlertIcon className="size-4 text-destructive" />
                 Delete failed
               </DialogTitle>
-              <DialogDescription data-testid="delete-error">
+              <DialogDescription>
                 The change could not be saved. Nothing was deleted.
               </DialogDescription>
             </DialogHeader>

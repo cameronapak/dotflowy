@@ -41,12 +41,7 @@ describe("buildVisibleRows — mirror-free parity (the default path)", () => {
       expect(r.capped).toBe(false);
       expect(r.broken).toBe(false);
     }
-  });
-
-  test("depth + fade inheritance unchanged", () => {
-    const rows = buildVisibleRows(index, null, show);
-    expect(rows.find((r) => r.id === "a1")?.depth).toBe(1);
-    expect(rows.find((r) => r.id === "A")?.depth).toBe(0);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 1, 0]);
   });
 
   test("a node carrying mirrorOf is treated as normal while the flag is OFF", () => {
@@ -291,41 +286,20 @@ describe("row-key helpers (the Stage 2 identity keystone, ADR 0022)", () => {
       expect(contentIdForKey(index, r.key)).toBe(r.contentId);
     }
   });
-
-  test("INVARIANT: key === id for a mirror-free tree (flag-off parity budget)", () => {
-    const plain = buildTreeIndex([
-      createNode({ id: "A", prevSiblingId: null }),
-      createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-      createNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
-    ]);
-    const rows = buildVisibleRows(plain, null, show, null, true);
-    for (const r of rows) {
-      expect(r.key).toBe(r.id);
-      expect(instanceIdForKey(r.key)).toBe(r.id);
-      expect(contentIdForKey(plain, r.key)).toBe(r.id);
-    }
-  });
 });
 
-describe("parentKeyOf (Stage 2c focus composition)", () => {
-  test("a bare key has no parent (top level / pre-mirror)", () => {
-    expect(parentKeyOf("a1")).toBeNull();
-  });
-
-  test("drops the last segment of a compound key", () => {
-    expect(parentKeyOf(rowKeyFor("M", "a1"))).toBe("M");
-    expect(parentKeyOf(rowKeyFor(rowKeyFor("M", "a1"), "leaf"))).toBe(
-      rowKeyFor("M", "a1"),
-    );
-  });
-
-  test("inverse of rowKeyFor: recompose a sibling under the same parent", () => {
-    const child = rowKeyFor("M", "a1");
-    // A sibling of `child` shares its parent prefix.
-    expect(rowKeyFor(parentKeyOf(child), "a2")).toBe(rowKeyFor("M", "a2"));
-    // For a bare key the sibling stays bare (today's identity).
-    expect(rowKeyFor(parentKeyOf("a1"), "a2")).toBe("a2");
-  });
+test("parentKeyOf drops the last segment, so siblings recompose under the same parent", () => {
+  // A bare key has no parent (top level / pre-mirror).
+  expect(parentKeyOf("a1")).toBeNull();
+  expect(parentKeyOf(rowKeyFor("M", "a1"))).toBe("M");
+  expect(parentKeyOf(rowKeyFor(rowKeyFor("M", "a1"), "leaf"))).toBe(
+    rowKeyFor("M", "a1"),
+  );
+  // A sibling of a compound key shares its parent prefix; a bare key's stays bare.
+  expect(rowKeyFor(parentKeyOf(rowKeyFor("M", "a1")), "a2")).toBe(
+    rowKeyFor("M", "a2"),
+  );
+  expect(rowKeyFor(parentKeyOf("a1"), "a2")).toBe("a2");
 });
 
 describe("focusKeyAfterEdit (land focus in the editing instance, ADR 0022 2c)", () => {

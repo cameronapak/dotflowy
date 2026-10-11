@@ -177,10 +177,7 @@ export function ChangelogDialog() {
         </DialogHeader>
 
         {breaking && (
-          <div
-            className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
-            data-testid="changelog-breaking"
-          >
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
             <TriangleAlertIcon className="mt-px size-4 shrink-0" />
             <p>
               Something below is marked <strong>Changed</strong> — it asks

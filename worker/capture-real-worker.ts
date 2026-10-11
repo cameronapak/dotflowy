@@ -4,46 +4,19 @@ import { Effect } from "effect";
 
 // Test-only Workerd entry. Never included in wrangler.jsonc or deployed.
 import type { Node } from "../src/data/wire-schema";
+import type { FixtureInput } from "./capture-real-fixture";
 
-import { handleCaptureKeys } from "../worker/capture";
-import { captureDigest } from "../worker/capture-input";
-import {
-  authenticateCaptureKey,
-  createCaptureKey,
-} from "../worker/capture-keys";
-import { resolveUserId } from "../worker/identity";
-import productionWorker from "../worker/index";
+import { handleCaptureKeys } from "./capture";
+import { captureDigest } from "./capture-input";
+import { authenticateCaptureKey, createCaptureKey } from "./capture-keys";
+import { resolveUserId } from "./identity";
+import productionWorker from "./index";
 
-export { UserOutlineDO } from "../worker/outline-do";
-export { ShardDO } from "../worker/lunora-app";
+export { UserOutlineDO } from "./outline-do";
+export { ShardDO } from "./lunora-app";
 
 type Env = Parameters<NonNullable<typeof productionWorker.fetch>>[1] & {
-  USER_OUTLINE: DurableObjectNamespace<
-    import("../worker/outline-do").UserOutlineDO
-  >;
-};
-
-export type FixtureInput = {
-  userId: string;
-  password?: string;
-  name?: string;
-  expiry?: "never" | "30d" | "90d" | "1y";
-  expiresAt?: number | null;
-  attemptId?: string;
-  date?: string;
-  text?: string;
-  fingerprint?: string;
-  limit?: number | null;
-  nodeId?: string;
-  updatedText?: string;
-  expected?: string;
-  id?: string;
-  sessionCreatedAt?: number;
-  authorization?: string;
-  now?: number;
-  manageMethod?: "GET" | "POST" | "DELETE";
-  manageBody?: unknown;
-  origin?: string;
+  USER_OUTLINE: DurableObjectNamespace<import("./outline-do").UserOutlineDO>;
 };
 
 export default {

@@ -87,7 +87,6 @@ export function MonthPickerButton({
           <button
             type="button"
             aria-label="Previous month"
-            data-testid="month-picker-prev"
             className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:size-11"
             onClick={() => {
               const next = shiftMonthKey(viewMonth, -1);

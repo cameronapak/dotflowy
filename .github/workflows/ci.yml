@@ -38,6 +38,8 @@ jobs:
         run: bun run typecheck:worker
       - name: Typecheck tests
         run: bun run typecheck:test
+      - name: Typecheck app e2e
+        run: bun run typecheck:e2e
       - name: Unit tests
         run: bun run test
       - name: Release automation tests

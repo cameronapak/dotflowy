@@ -14,7 +14,7 @@
  * container can't be deleted, blanked, made a task, or completed (ADR 0015).
  */
 
-import { Data, Effect, Schema } from "effect";
+import { Clock, Data, Effect, Schema } from "effect";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 import type { KvClaim } from "./outline-do";
@@ -186,18 +186,6 @@ const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
     ? Effect.fail(new ToolError({ reason: result.message }))
     : // SAFETY: the instanceof Error branch above removed the Error side of A.
       Effect.succeed(result as Exclude<A, Error>);
-
-/** The write-timestamp source. Mutable so tests can pin "now" (the pre-agreed
- *  seam for deterministic timezone/day-boundary tests); production reads the
- *  real clock on every call, exactly as before. */
-let clock: Effect.Effect<number, never> = Effect.sync(() => Date.now());
-
-/** Test seam: pin the clock to a fixed instant (or restore with `null`). The
- *  daily tools resolve "today" from this, so timezone-boundary cases are
- *  deterministic. */
-export const setClock = (now: number | null): void => {
-  clock = now == null ? Effect.sync(() => Date.now()) : Effect.succeed(now);
-};
 
 // --- Daily-index claims -------------------------------------------------------
 
@@ -933,7 +921,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof AddNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planAddNode(index, {
             id: createId(),
@@ -969,7 +957,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             new ToolError({ reason: "pass either parentId or date, not both" }),
           );
         }
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
 
         // Daily path: claim the container + day ids atomically, then ensure-and-
         // append the forest under the day (position is ignored — always last).
@@ -1060,7 +1048,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         const index = yield* loadIndex(store);
         const scaffold = yield* loadDailyReverseMap(store);
         yield* guardScaffoldUpdate(index, scaffold, input.nodeId, changes);
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }),
         );
@@ -1078,7 +1066,7 @@ export const tools: ReadonlyArray<ToolDef> = [
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
         const scaffold = yield* loadDailyReverseMap(store);
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planDeleteNode(index, input.nodeId, timestamp),
         );
@@ -1096,7 +1084,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof MoveNodesInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
         const position = input.position ?? "last";
         const plan = yield* unwrap(
           planReparent(index, {
@@ -1133,7 +1121,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: false,
     handle: (input: typeof AddToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const now = yield* clock;
+        const now = yield* Clock.currentTimeMillis;
         const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
         // Reuse the index claimDailyScaffold already built -- only kv claims ran
@@ -1165,7 +1153,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof MirrorNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planMirrorNode(index, {
             sourceId: input.nodeId,
@@ -1192,7 +1180,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: false,
     handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const now = yield* clock;
+        const now = yield* Clock.currentTimeMillis;
         const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
         // Reuse the index claimDailyScaffold already built -- only kv claims ran
@@ -1250,7 +1238,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             }),
           );
         }
-        const timestamp = yield* clock;
+        const timestamp = yield* Clock.currentTimeMillis;
         const rootTexts = forest.map((n) => n.text);
 
         // Daily path (mirrors add_subtree's date targeting: always appends).

@@ -1,43 +1,20 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import { isRevealed, spliceToken } from "./token-kit";
 
-describe("isRevealed", () => {
-  test("null caret is never revealed", () => {
-    expect(isRevealed({ revealOffset: null, start: 2, end: 5 })).toBe(false);
-  });
-
-  test("offset before start is not revealed", () => {
-    expect(isRevealed({ revealOffset: 1, start: 2, end: 5 })).toBe(false);
-  });
-
-  test("offset at start is revealed (inclusive boundary)", () => {
-    expect(isRevealed({ revealOffset: 2, start: 2, end: 5 })).toBe(true);
-  });
-
-  test("offset inside the span is revealed", () => {
-    expect(isRevealed({ revealOffset: 3, start: 2, end: 5 })).toBe(true);
-  });
-
-  test("offset at end is revealed (inclusive boundary)", () => {
-    expect(isRevealed({ revealOffset: 5, start: 2, end: 5 })).toBe(true);
-  });
-
-  test("offset past end is not revealed", () => {
-    expect(isRevealed({ revealOffset: 6, start: 2, end: 5 })).toBe(false);
-  });
+test.each([
+  [null, false], // no caret is never revealed
+  [1, false], // before start
+  [2, true], // at start (inclusive)
+  [3, true], // inside
+  [5, true], // at end (inclusive)
+  [6, false], // past end
+])("isRevealed with caret %p on span 2..5 -> %p", (revealOffset, expected) => {
+  expect(isRevealed({ revealOffset, start: 2, end: 5 })).toBe(expected);
 });
 
-describe("spliceToken", () => {
-  test("replaces the first occurrence", () => {
-    expect(spliceToken("a [x](y) b", "[x](y)", "[z](y)")).toBe("a [z](y) b");
-  });
-
-  test("returns null when the token is missing", () => {
-    expect(spliceToken("edited away", "[x](y)", "[z](y)")).toBeNull();
-  });
-
-  test("only the first occurrence is replaced when the token appears twice", () => {
-    expect(spliceToken("aa bb aa", "aa", "cc")).toBe("cc bb aa");
-  });
+test("spliceToken replaces only the first occurrence, or returns null once the token is gone", () => {
+  expect(spliceToken("a [x](y) b", "[x](y)", "[z](y)")).toBe("a [z](y) b");
+  expect(spliceToken("aa bb aa", "aa", "cc")).toBe("cc bb aa");
+  expect(spliceToken("edited away", "[x](y)", "[z](y)")).toBeNull();
 });

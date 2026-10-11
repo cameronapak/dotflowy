@@ -739,6 +739,13 @@ export function QueryFilterBar() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Keep native input undo/redo out of the document's outline history handler.
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.stopPropagation();
+      // React delegates on document too; stop other listeners on that same target.
+      e.nativeEvent.stopImmediatePropagation();
+      return;
+    }
     if (e.key === "ArrowDown") {
       if (!showPopover) return;
       e.preventDefault();

@@ -56,6 +56,7 @@ function node(
     isTask: false,
     completed: false,
     collapsed: false,
+    locked: false,
     bookmarkedAt: null,
     mirrorOf: null,
     createdAt: 1,

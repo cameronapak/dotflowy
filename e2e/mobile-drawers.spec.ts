@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
@@ -90,18 +89,6 @@ async function settleDrawer(page: Page) {
   }
 }
 
-async function captureSheet(page: Page, name: string) {
-  await mkdir(".amp/in/artifacts", { recursive: true });
-  await settleSheet(page);
-  await page.screenshot({ path: `.amp/in/artifacts/${name}.png` });
-}
-
-async function capture(page: Page, name: string) {
-  await mkdir(".amp/in/artifacts", { recursive: true });
-  await settleDrawer(page);
-  await page.screenshot({ path: `.amp/in/artifacts/${name}.png` });
-}
-
 async function swipeSheet(page: Page) {
   await settleSheet(page);
   const handle = await sheet(page).locator(".sheet-handle").boundingBox();
@@ -164,7 +151,7 @@ test.describe("narrow-screen drawers", () => {
       suggestions(page).getByRole("button", { name: "Close" }),
     ).toHaveCount(0);
     await expect(suggestions(page).locator(".sheet-handle")).toHaveCount(0);
-    await capture(page, "typing-suggestions-slash");
+    await settleDrawer(page);
     await page.getByRole("option", { name: /To-do/ }).tap();
     await expect(drawer(page)).toHaveCount(0);
     await expect(editor(page)).toBeFocused();
@@ -203,7 +190,7 @@ test.describe("narrow-screen drawers", () => {
     await page.keyboard.type("/");
     await expect(drawer(page)).toBeVisible();
     await expect(page.locator("[data-mobile-bar]")).toBeHidden();
-    await capture(page, "typing-suggestions-toolbar-replacement");
+    await settleDrawer(page);
     const first = page.getByRole("option").first();
     await expect
       .poll(() =>
@@ -294,14 +281,14 @@ test.describe("narrow-screen drawers", () => {
     await page.keyboard.type("#urg");
     await expect(drawer(page)).toBeVisible();
     await expect(editor(page)).toBeFocused();
-    await capture(page, "typing-suggestions-tag");
+    await settleDrawer(page);
     await page.locator('[role="option"] .tag-option[data-tag="urgent"]').tap();
     await expect(editor(page).locator('.tag[data-tag="urgent"]')).toBeVisible();
     await expect(drawer(page)).toHaveCount(0);
     await page.keyboard.type(" [[Phoe");
     await expect(drawer(page)).toBeVisible();
     await expect(editor(page)).toBeFocused();
-    await capture(page, "typing-suggestions-link");
+    await settleDrawer(page);
     await page.getByRole("option", { name: /Project Phoenix/ }).tap();
     await expect(
       editor(page).locator(`[data-node-link="${TARGET}"]`),
@@ -313,6 +300,8 @@ test.describe("narrow-screen drawers", () => {
   test("a short tag sheet does not move an already visible caret or jump on dismissal", async ({
     page,
   }) => {
+    const edit = TREE.find((node) => node.id === "edit");
+    if (!edit) throw new Error("Drawer fixture must contain the edit node");
     const rows = Array.from({ length: 12 }, (_, i) => ({
       id: `preceding-${i}`,
       parentId: null,
@@ -322,7 +311,7 @@ test.describe("narrow-screen drawers", () => {
     await seedOutline(page, [
       ...TREE.slice(0, 2),
       ...rows,
-      { ...TREE[2], prevSiblingId: "preceding-11" },
+      { ...edit, prevSiblingId: "preceding-11" },
     ]);
     await page.goto("/");
     await expect(editor(page)).toBeVisible({ timeout: 15_000 });
@@ -355,11 +344,13 @@ test.describe("narrow-screen drawers", () => {
   test("daily chrome does not cover the caret in a short keyboard viewport", async ({
     page,
   }) => {
+    const edit = TREE.find((node) => node.id === "edit");
+    if (!edit) throw new Error("Drawer fixture must contain the edit node");
     await seedOutline(
       page,
       [
         ...TREE.slice(0, 2),
-        { ...TREE[2], parentId: "tagged", prevSiblingId: null },
+        { ...edit, parentId: "tagged", prevSiblingId: null },
       ],
       {
         kv: {
@@ -394,10 +385,6 @@ test.describe("narrow-screen drawers", () => {
         return caret.top >= 31 && caret.bottom < bottom && el.contains(hit);
       });
     await expect.poll(caretVisible).toBe(true);
-    await page.screenshot({
-      path: ".amp/in/artifacts/typing-suggestions-daily-caret.png",
-      clip: { x: 0, y: 31, width: 390, height: 260 },
-    });
     await expect(editor(page)).toBeFocused();
     const beforeClose = await page.evaluate(() => window.scrollY);
     await page.keyboard.press("Escape");
@@ -439,10 +426,6 @@ test.describe("narrow-screen drawers", () => {
         );
       });
     await expect.poll(caretVisible).toBe(true);
-    await page.screenshot({
-      path: ".amp/in/artifacts/typing-suggestions-wrapped-quick-add.png",
-      clip: { x: 0, y: 31, width: 390, height: 260 },
-    });
     await expect(draft).toBeFocused();
     await page.keyboard.press("Backspace");
     await page.keyboard.type("o");
@@ -509,7 +492,7 @@ test.describe("narrow-screen drawers", () => {
     await expect(sheet(page).locator(".sheet-handle")).toBeVisible();
     await expect(page.locator(".menu-sheet-overlay")).toBeVisible();
     await expect(page.locator(".menu-sheet-backdrop")).toBeVisible();
-    await captureSheet(page, "aria-sheet-more");
+    await settleSheet(page);
     await page.getByRole("menuitem", { name: "Collapse all" }).tap();
     await expect(drawer(page)).toBeHidden();
     await page.setViewportSize({ width: 768, height: 844 });
@@ -531,7 +514,7 @@ test.describe("narrow-screen drawers", () => {
     await page.keyboard.type("Capture /todo");
     await expect(drawer(page)).toBeVisible();
     await expect(draft).toBeFocused();
-    await capture(page, "typing-suggestions-quick-add");
+    await settleDrawer(page);
     const draftBox = (await draft.boundingBox())!;
     const suggestionsBox = (await suggestions(page).boundingBox())!;
     expect(draftBox.y + draftBox.height).toBeLessThan(suggestionsBox.y);
@@ -545,15 +528,6 @@ test.describe("narrow-screen drawers", () => {
       })
       .toBe(true);
     await expect(draft).toBeFocused();
-    await page.screenshot({
-      path: ".amp/in/artifacts/typing-suggestions-quick-add-keyboard.png",
-      clip: {
-        x: 0,
-        y: 31,
-        width: 390,
-        height: 260,
-      },
-    });
     await setVisualViewport(page, 844, 0);
     await page.keyboard.press("Escape");
     await expect(drawer(page)).toHaveCount(0);
@@ -597,7 +571,7 @@ test.describe("narrow-screen drawers", () => {
     await expect(
       drawer(page).getByRole("option", { name: "Project Phoenix" }),
     ).toBeInViewport();
-    await captureSheet(page, "aria-sheet-destination");
+    await settleSheet(page);
     await setVisualViewport(page, 420, 67);
     await settleSheet(page);
     await expect(
@@ -621,7 +595,7 @@ test.describe("narrow-screen drawers", () => {
     await editor(page).tap();
     await page.keyboard.type("[[2030-06-12");
     await expect(drawer(page)).toBeVisible();
-    await capture(page, "typing-suggestions-date");
+    await settleDrawer(page);
     await page.getByRole("option").first().tap();
     await expect(
       editor(page).locator('[data-date-link="2030-06-12"]'),
@@ -637,7 +611,7 @@ test.describe("narrow-screen drawers", () => {
     await page.keyboard.type("/not-a-command");
     await expect(drawer(page)).toBeVisible();
     await expect(page.getByRole("option")).toHaveCount(0);
-    await capture(page, "typing-suggestions-empty-results");
+    await settleDrawer(page);
     await page.keyboard.press("Escape");
     await expect(drawer(page)).toHaveCount(0);
     await expect(editor(page)).toHaveText("/not-a-command");
@@ -753,7 +727,7 @@ test.describe("narrow-screen drawers", () => {
     const box = (await body.boundingBox())!;
     await expect(body).not.toHaveCSS("mask-image", "none");
     const topMask = await body.evaluate((el) => getComputedStyle(el).maskImage);
-    await captureSheet(page, "sheet-scroll-fade-top");
+    await settleSheet(page);
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, 90);
     await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(90);
@@ -761,7 +735,7 @@ test.describe("narrow-screen drawers", () => {
     const middleMask = await body.evaluate(
       (el) => getComputedStyle(el).maskImage,
     );
-    await captureSheet(page, "sheet-scroll-fade-middle");
+    await settleSheet(page);
     await page.mouse.wheel(0, 240);
     await expect
       .poll(() => body.evaluate((el) => el.scrollTop))
@@ -775,7 +749,7 @@ test.describe("narrow-screen drawers", () => {
     await expect(
       body.getByRole("button", { name: "Close", exact: true }),
     ).toBeInViewport();
-    await captureSheet(page, "sheet-scroll-fade-bottom");
+    await settleSheet(page);
     await page.mouse.wheel(0, -240);
     await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(0);
 
@@ -841,7 +815,7 @@ test.describe("narrow-screen drawers", () => {
     await settleSheet(page);
     await page.getByRole("menuitemcheckbox", { name: "Show completed" }).tap();
     await expect(drawer(page)).toBeVisible();
-    await captureSheet(page, "aria-sheet-reduced-motion");
+    await settleSheet(page);
     await page.keyboard.press("Escape");
     await expect(drawer(page)).toBeHidden();
     await page.getByRole("button", { name: /More actions/ }).tap();
@@ -866,7 +840,7 @@ test.describe("narrow-screen drawers", () => {
     await settleSheet(page);
     await page.getByTestId("month-picker-next").tap();
     await expect(drawer(page)).toContainText("July 2030");
-    await captureSheet(page, "aria-sheet-calendar");
+    await settleSheet(page);
     const day = drawer(page).locator('[data-day-key="2030-07-15"]');
     expect((await day.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await day.tap();
