@@ -1664,9 +1664,9 @@ dotflowy-widget[data-bible-ref][data-atom-selected] > span {
 
 /* Adobe's Sheet owns scroll geometry. These are only the app's visual tokens. */
 html:has(.menu-sheet-overlay) {
-  /* RAC locks page scrolling and sizes its stage in dvw. A reserved desktop
-     gutter clips that stage, preventing full visibility and inner scrolling. */
-  scrollbar-gutter: auto;
+  /* Keep the sheet's edge insets relative to the full viewport. Override RAC's
+     inline stable gutter while the page scrollbar is locked. */
+  scrollbar-gutter: auto !important;
 }
 
 .menu-sheet-overlay {
@@ -1677,6 +1677,13 @@ html:has(.menu-sheet-overlay) {
   /* The default absolute overlay assumes a body portal. Inside Quick-add's
      focus boundary it must use the viewport, not the capture's padding box. */
   position: fixed !important;
+}
+
+.menu-sheet-overlay[data-nested][data-position="bottom"] > [data-sheet-scroll] {
+  /* The fixed wrapper is already viewport-anchored; RAC's inline document
+     scroll offsets would displace it again. Bottom sheets need no extra offset. */
+  top: 0 !important;
+  left: 0 !important;
 }
 
 .menu-sheet-backdrop[data-stack-index="0"] {

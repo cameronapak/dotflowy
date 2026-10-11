@@ -44,8 +44,9 @@ export function TypingSuggestions({
         else if (y < top) capture.scrollTop += y - top;
         return;
       }
-      // Use the actual resting height, not the maximum or an animated rect.
-      const bottom = offsetTop + height - body.offsetHeight - 8;
+      // Use the resting height and safe-area margin, not an animated rect.
+      const margin = parseFloat(getComputedStyle(body).marginBottom);
+      const bottom = offsetTop + height - body.offsetHeight - margin - 8;
       const delta = y - bottom;
       if (delta > 1)
         window.scrollBy({

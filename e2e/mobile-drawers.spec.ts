@@ -339,6 +339,37 @@ test.describe("narrow-screen drawers", () => {
     expect(await page.evaluate(() => window.scrollY)).toBe(before);
     await expect(editor(page)).toBeFocused();
     await expect(editor(page)).toHaveText("Note #urg");
+
+    // Simulate a reported bottom safe area. Linux Chromium reports zero for
+    // env(safe-area-inset-bottom), so supply the resulting margin explicitly.
+    await page.setViewportSize({ width: 390, height: 620 });
+    await setVisualViewport(page, 620, 0);
+    await page.addStyleTag({
+      content: ".typing-suggestions { margin-bottom: 34px !important; }",
+    });
+    await editor(page).evaluate(() => {
+      const range = window.getSelection()!.getRangeAt(0).cloneRange();
+      range.collapse(false);
+      window.scrollBy({
+        top: range.getBoundingClientRect().bottom - (innerHeight - 100),
+        behavior: "instant",
+      });
+    });
+    await page.keyboard.type(" /");
+    await expect(suggestions(page)).toBeVisible();
+    await expect
+      .poll(() =>
+        suggestions(page).evaluate((panel) => {
+          const range = window.getSelection()!.getRangeAt(0).cloneRange();
+          range.collapse(false);
+          return (
+            panel.getBoundingClientRect().top -
+            range.getBoundingClientRect().bottom
+          );
+        }),
+      )
+      .toBeGreaterThanOrEqual(7);
+    await expect(editor(page)).toBeFocused();
   });
 
   test("daily chrome does not cover the caret in a short keyboard viewport", async ({
@@ -386,6 +417,21 @@ test.describe("narrow-screen drawers", () => {
       });
     await expect.poll(caretVisible).toBe(true);
     await expect(editor(page)).toBeFocused();
+    // Visibility can precede the last frames of the smooth caret reveal.
+    // Measure dismissal only after that existing scroll has stopped.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            new Promise<boolean>((resolve) => {
+              const y = window.scrollY;
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve(window.scrollY === y)),
+              );
+            }),
+        ),
+      )
+      .toBe(true);
     const beforeClose = await page.evaluate(() => window.scrollY);
     await page.keyboard.press("Escape");
     await expect.poll(caretVisible).toBe(true);
@@ -506,7 +552,21 @@ test.describe("narrow-screen drawers", () => {
   test("quick-add child drawers dismiss independently and destination search picks a target", async ({
     page,
   }) => {
-    await load(page);
+    await seedOutline(page, [
+      ...TREE,
+      ...Array.from({ length: 30 }, (_, i) => ({
+        id: `later-${i}`,
+        parentId: null,
+        prevSiblingId: i ? `later-${i - 1}` : "edit",
+        text: `Later note ${i}`,
+      })),
+    ]);
+    await page.goto("/");
+    await expect(editor(page)).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() =>
+      window.scrollTo({ top: 400, behavior: "instant" }),
+    );
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(400);
     await page.keyboard.press("q");
     await expect(quickAdd(page)).toBeVisible();
     const draft = page.locator(".quick-add-editor [contenteditable]");
@@ -542,6 +602,8 @@ test.describe("narrow-screen drawers", () => {
     await expect(draft).toHaveText("Capture /todo");
     await page.locator("[data-quick-add-dest]").tap();
     await expect(drawer(page)).toBeVisible();
+    await settleSheet(page);
+    expect(await page.evaluate(() => window.scrollY)).toBe(400);
     await page.touchscreen.tap(10, 100);
     await expect(drawer(page)).toBeHidden();
     await expect(quickAdd(page)).toBeVisible();
@@ -586,6 +648,12 @@ test.describe("narrow-screen drawers", () => {
     );
     await expect(draft).toHaveText("Capture /todo");
     await expect(draft).toBeFocused();
+    const beforeClose = await page.evaluate(() => window.scrollY);
+    await page.keyboard.press("Escape");
+    await expect(quickAdd(page)).toBeHidden();
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBe(beforeClose);
   });
 
   test("date suggestions use the drawer and insert a date token", async ({
@@ -867,8 +935,28 @@ test("767px uses drawers even with a mouse; 768px uses caret menus", async ({
 test("keyboard opening More focuses its first item and supports immediate arrows", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await load(page);
+  await page.setViewportSize({ width: 390, height: 620 });
+  await seedOutline(
+    page,
+    Array.from({ length: 30 }, (_, i) => ({
+      id: `row-${i}`,
+      parentId: null,
+      prevSiblingId: i ? `row-${i - 1}` : null,
+      text: `Outline row ${i}`,
+    })),
+  );
+  await page.goto("/");
+  await expect(page.locator(".node-text").first()).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollHeight),
+  ).toBeGreaterThan(620);
+  expect(
+    await page.evaluate(
+      () => innerWidth - document.documentElement.clientWidth,
+    ),
+  ).toBeGreaterThan(0);
   const trigger = page.getByRole("button", { name: /More actions/ });
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -878,11 +966,23 @@ test("keyboard opening More focuses its first item and supports immediate arrows
   await expect(disabled.first()).toHaveCSS("opacity", "0.5");
   await expect(items.first()).toBeFocused();
   await settleSheet(page);
+  // The sheet keeps its 8px edge inset even with a classic page scrollbar.
+  await expect
+    .poll(() =>
+      sheetDialog(page).evaluate((el) =>
+        Math.round(el.getBoundingClientRect().right),
+      ),
+    )
+    .toBe(382);
   await expect(sheetDialog(page)).toHaveCSS("overflow-y", "auto");
   await page.keyboard.press("ArrowDown");
   await expect(items.nth(1)).toBeFocused();
   await page.keyboard.press("End");
   await expect(items.last()).toBeFocused();
+  await expect(items.last()).toBeInViewport();
+  expect(
+    await sheetDialog(page).evaluate((el) => el.scrollTop),
+  ).toBeGreaterThan(0);
   await page.keyboard.press("ArrowDown");
   await expect(items.first()).toBeFocused();
   await page.keyboard.press("ArrowUp");
