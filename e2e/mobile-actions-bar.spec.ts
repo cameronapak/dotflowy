@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, STANDARD_TREE, text } from "./fixtures";
+import {
+  placeCaret,
+  seedOutline,
+  STANDARD_TREE,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // The mobile actions bar (ADR 0030) is a coarse-pointer, focus-gated toolbar. As
 // in mobile-touch-rows.spec.ts, drive it in a Chromium mobile-emulation context
@@ -17,6 +23,28 @@ async function load(page: Page) {
   await page.goto("/");
   // The first dev-server visit includes Vite's lazy module transforms.
   await expect(text(page, "alpha")).toBeVisible({ timeout: 15_000 });
+}
+
+// Select the whole text of `id` by setting the DOM Selection directly, as a
+// long-press + handle drag would leave it.
+async function selectAll(page: Page, id: string) {
+  await text(page, id).click();
+  await text(page, id).evaluate((el) => {
+    const sel = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+}
+
+const ONE: SeedNode[] = [
+  { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
+];
+async function loadOne(page: Page) {
+  await seedOutline(page, ONE);
+  await page.goto("/");
+  await expect(text(page, "n")).toBeVisible({ timeout: 15_000 });
 }
 
 // Focus `id` and drop the caret at absolute offset `col` (copied from
@@ -211,6 +239,160 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(page.locator('[role="listbox"]')).toBeVisible();
   });
 
+  test("a text selection swaps in the format buttons; collapsing swaps back", async ({
+    page,
+  }) => {
+    // ADR 0069: one bar, two modes, never both.
+    await loadOne(page);
+    await text(page, "n").click();
+    await expect(btn(page, "Indent")).toBeVisible();
+    await expect(btn(page, "Bold")).toHaveCount(0);
+
+    await selectAll(page, "n");
+    await expect(bar(page)).toHaveAttribute("data-mode", "format");
+    for (const label of [
+      "Bold",
+      "Italic",
+      "Strikethrough",
+      "Underline",
+      "Highlight",
+      "Spoiler",
+      "Link",
+    ])
+      await expect(btn(page, label)).toBeVisible();
+    await expect(btn(page, "Indent")).toHaveCount(0);
+
+    await text(page, "n").evaluate(() =>
+      window.getSelection()!.collapseToEnd(),
+    );
+    await expect(bar(page)).toHaveAttribute("data-mode", "edit");
+    await expect(btn(page, "Indent")).toBeVisible();
+  });
+
+  test("bold toggles on and off with a lit state, keeping the selection", async ({
+    page,
+  }) => {
+    await loadOne(page);
+    await selectAll(page, "n");
+    await btn(page, "Bold").click();
+    await expect(text(page, "n").locator("strong")).toHaveText("alphabravo");
+    await expect(btn(page, "Bold")).toHaveAttribute("aria-pressed", "true");
+
+    // The re-press is the format's undo.
+    await btn(page, "Bold").click();
+    await expect(text(page, "n").locator("strong")).toHaveCount(0);
+    await expect(text(page, "n")).toHaveText("alphabravo");
+    await expect(btn(page, "Bold")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("a press that collapses the selection still formats what it landed on", async ({
+    page,
+  }) => {
+    // Touch WebKit may drop a range on a tap outside it. Simulate that after
+    // the bar's own pointerdown handler has run (a bubble-phase document
+    // listener fires after React's root listeners), then hold the press past
+    // a few frames so the live read flips before the finger lifts.
+    await loadOne(page);
+    await selectAll(page, "n");
+    await expect(bar(page)).toHaveAttribute("data-mode", "format");
+    await page.evaluate(() =>
+      document.addEventListener(
+        "pointerdown",
+        () => window.getSelection()?.collapseToEnd(),
+        { once: true },
+      ),
+    );
+    const box = (await btn(page, "Italic").boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection()?.isCollapsed))
+      .toBe(true);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    // Held: the button under the finger is still Italic, not an edit action.
+    await expect(bar(page)).toHaveAttribute("data-mode", "format");
+    await page.mouse.up();
+    await expect(text(page, "n").locator("em")).toHaveText("alphabravo");
+
+    // Lifting outside the bar releases format mode without applying a format.
+    const boldBox = (await btn(page, "Bold").boundingBox())!;
+    await page.mouse.move(
+      boldBox.x + boldBox.width / 2,
+      boldBox.y + boldBox.height / 2,
+    );
+    await page.mouse.down();
+    await text(page, "n").evaluate(() =>
+      window.getSelection()!.collapseToEnd(),
+    );
+    await page.mouse.move(5, 5);
+    await page.mouse.up();
+    await expect(bar(page)).toHaveAttribute("data-mode", "edit");
+    await expect(text(page, "n").locator("strong")).toHaveCount(0);
+  });
+
+  test("highlight toggles off and stays in format mode", async ({ page }) => {
+    await loadOne(page);
+    await selectAll(page, "n");
+    await btn(page, "Highlight").click();
+    await expect(text(page, "n").locator("mark[data-highlight]")).toHaveCount(
+      1,
+    );
+    await expect(btn(page, "Highlight")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await btn(page, "Highlight").click();
+    await expect(text(page, "n").locator("mark[data-highlight]")).toHaveCount(
+      0,
+    );
+    await expect(bar(page)).toHaveAttribute("data-mode", "format");
+    await expect(btn(page, "Highlight")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  test("link opens a sheet with the url focused, and creates the link", async ({
+    page,
+  }) => {
+    await loadOne(page);
+    await selectAll(page, "n");
+    await btn(page, "Link").click();
+    const sheet = page.locator(".sheet-surface");
+    await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
+      "data-expanded",
+    );
+    // Wait out the entry animation before tapping inside the sheet.
+    const done = sheet.getByRole("button", { name: "Done" });
+    await expect
+      .poll(() =>
+        done.evaluate(
+          (el) => el.getBoundingClientRect().bottom <= window.innerHeight,
+        ),
+      )
+      .toBe(true);
+    const url = sheet.getByLabel("Link URL");
+    await expect(url).toBeFocused();
+    await url.fill("https://example.com");
+    await expect(sheet.getByRole("heading")).toHaveText("Add link");
+    await done.click();
+    // Done animates the sheet out, then the overlay unmounts.
+    await expect(sheet).toHaveCount(0);
+    // The caret is back inside the new link, so it renders revealed: the label
+    // as text and the url as a chip.
+    await expect(text(page, "n").locator(".link-label")).toHaveText(
+      "alphabravo",
+    );
+    await expect(
+      text(page, "n").locator('.link-url-chip[data-src="https://example.com"]'),
+    ).toHaveCount(1);
+  });
+
   test("blur hides the bar (system Done / back dismisses the keyboard)", async ({
     page,
   }) => {
@@ -232,4 +414,37 @@ test("never mounts on a fine pointer even while editing", async ({ page }) => {
   await expect(text(page, "alpha")).toBeFocused();
   // Desktop pointer -> the bar is gated out entirely.
   await expect(bar(page)).toHaveCount(0);
+});
+
+// Native formatting input (ADR 0069): the iOS selection menu's Format items
+// arrive as `beforeinput`. They become marker toggles; every other `format*`
+// input is cancelled so the browser never injects HTML into the source.
+test("native format input toggles markers and never injects HTML", async ({
+  page,
+}) => {
+  await seedOutline(page, ONE);
+  await page.goto("/");
+  await expect(text(page, "n")).toBeVisible({ timeout: 15_000 });
+  await selectAll(page, "n");
+  const fire = (inputType: string) =>
+    text(page, "n").evaluate(
+      (el, type) =>
+        !el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      inputType,
+    );
+
+  expect(await fire("formatBold")).toBe(true);
+  await expect(text(page, "n").locator("strong")).toHaveText("alphabravo");
+
+  // Chromium's InputEvent constructor drops some types (formatFontColor),
+  // so probe the cancel path with one it keeps.
+  expect(await fire("formatSuperscript")).toBe(true);
+  await expect(text(page, "n").locator("sup")).toHaveCount(0);
+  await expect(text(page, "n").locator("strong")).toHaveText("alphabravo");
 });

@@ -93,6 +93,8 @@ improvement over the old blind double-wrap — it just doesn't keep the selectio
   reads as attached to the selection.
 - **All-pointer (desktop + touch).** Collides with the OS selection callout on
   iOS/Android; fine-pointer-only keeps the two bars cleanly split.
+  Touch formats from the mobile bar's format mode instead
+  ([ADR 0069](./0069-touch-selection-formatting.md)).
 - **Link with lit/toggle state.** Detecting an existing link in the selection is
   deferred; create-only ships the 90% and matches how links are made elsewhere.
 

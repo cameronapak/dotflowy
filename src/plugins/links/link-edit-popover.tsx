@@ -216,8 +216,8 @@ export function submitLinkCreate(
 }
 
 /** Open the create-link popover prefilled with the selected text as the label
- *  and an empty url, positioned at the selection. Reuses LinkEditPopover so
- *  create + edit share one UI. */
+ *  and an empty url, positioned at the selection, with the url focused. Reuses
+ *  LinkEditPopover so create + edit share one UI. */
 export function openLinkCreatePopover(
   args: {
     nodeId: string;
@@ -234,6 +234,7 @@ export function openLinkCreatePopover(
     <LinkEditPopover
       label={args.selText}
       url=""
+      focus="url"
       x={args.x}
       y={args.y}
       onSubmit={(label, url) => {
@@ -260,6 +261,7 @@ export function LinkEditPopover({
   display: initialDisplay = "link",
   canEmbed = false,
   mirrorCount = 0,
+  focus,
   onSubmit,
   onClose,
 }: {
@@ -270,6 +272,8 @@ export function LinkEditPopover({
   display?: DisplayAs;
   canEmbed?: boolean;
   mirrorCount?: number;
+  /** Creation focuses the URL; editing follows the initial display mode. */
+  focus?: "label" | "url";
   onSubmit: (label: string, url: string, display: DisplayAs) => void;
   onClose: () => void;
 }) {
@@ -277,7 +281,8 @@ export function LinkEditPopover({
   const [label, setLabel] = useState(initialLabel);
   const [url, setUrl] = useState(initialUrl);
   const [display, setDisplay] = useState(initialDisplay);
-  const mobile = useIsMobile();
+  // Keep the shell chosen at open so rotation preserves the form and draft.
+  const [mobile] = useState(useIsMobile());
   const [sheetOpen, setSheetOpen] = useState(true);
   const pendingSubmit = useRef<{
     label: string;
@@ -288,6 +293,13 @@ export function LinkEditPopover({
   const id = useId();
   const supportsEmbed = canEmbed && !!embedResource(url);
   const showChoices = prefs.ready && prefs.embeds && !!initialUrl;
+  const focusField = focus ?? (initialDisplay === "link" ? "label" : "url");
+  const focusProps = (field: "label" | "url") =>
+    field !== focusField
+      ? {}
+      : mobile
+        ? { "data-sheet-autofocus": true }
+        : { autoFocus: true };
 
   useDismissable(ref, onClose, !mobile);
   const close = () => {
@@ -337,7 +349,7 @@ export function LinkEditPopover({
             placeholder="https://…"
             inputMode="url"
             spellCheck={false}
-            autoFocus={!mobile && display !== "link"}
+            {...focusProps("url")}
           />
         </Field>
         {showChoices && (
@@ -400,7 +412,7 @@ export function LinkEditPopover({
             aria-label="Link text"
             placeholder="Use the page title"
             disabled={display !== "link"}
-            autoFocus={!mobile && display === "link"}
+            {...focusProps("label")}
             onFocus={(e) => e.currentTarget.select()}
           />
         </Field>
@@ -437,7 +449,7 @@ export function LinkEditPopover({
   );
   return mobile ? (
     <MenuSheetContent
-      title="Edit link"
+      title={focus === "url" ? "Add link" : "Edit link"}
       compact
       isOpen={sheetOpen}
       onOpenChange={setSheetOpen}

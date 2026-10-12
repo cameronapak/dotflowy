@@ -183,6 +183,7 @@ import {
   guardProtected,
   ProtectionIndicator,
 } from "./protection";
+import { BOLD, ITALIC, STRIKE, UNDER } from "./selection-format";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
   SelectionFormatToolbar,
@@ -645,6 +646,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     commands,
     getCtx: pluginCtx,
   });
+  useNativeFormatInput(selectionFormatActions);
 
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
   // actions menu's ops. Installs window key/mouse listeners only while a
@@ -1044,6 +1046,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             component), so on desktop this renders nothing. ADR 0030. */}
         <MobileActionsBar
           actions={mobileBarActions}
+          formatActions={selectionFormatActions}
           findFocusedId={findFocusedId}
         />
 
@@ -1712,6 +1715,40 @@ function useSelectionFormatActions({
         : null,
     };
   }, [findFocusedId, commands, getCtx]);
+}
+
+/** The browser's own formatting commands, mapped onto our markers. */
+const NATIVE_FORMAT = new Map<string, MarkerPair>([
+  ["formatBold", BOLD],
+  ["formatItalic", ITALIC],
+  ["formatUnderline", UNDER],
+  ["formatStrikeThrough", STRIKE],
+]);
+
+/**
+ * Route native formatting input (ADR 0069) — the iOS selection menu's Format →
+ * Bold/Italic/Underline, and any platform shortcut that reaches the editor as
+ * `beforeinput` — into the same marker toggles as the toolbars. Every other
+ * `format*` input type is cancelled: the outline's text is markdown source, and
+ * a browser-inserted `<b>` or `<font>` would never round-trip.
+ */
+function useNativeFormatInput(actions: SelectionFormatActions): void {
+  useEffect(() => {
+    const onBeforeInput = (e: InputEvent) => {
+      if (!e.inputType.startsWith("format")) return;
+      if (!(e.target instanceof HTMLElement) || !e.target.closest(".node-text"))
+        return;
+      e.preventDefault();
+      // A history restore in flight blocks editing; read it directly rather
+      // than trusting listener order to have set defaultPrevented.
+      if (getHistoryState().busy) return;
+      const marker = NATIVE_FORMAT.get(e.inputType);
+      if (marker) actions.toggleMarker(marker);
+    };
+    document.addEventListener("beforeinput", onBeforeInput, true);
+    return () =>
+      document.removeEventListener("beforeinput", onBeforeInput, true);
+  }, [actions]);
 }
 
 interface NodeCommandsArgs {

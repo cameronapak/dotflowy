@@ -183,3 +183,31 @@ export function toggleHighlightSelection(
   else setSelectionOffsets(el, innerStart, innerStart + sel.length);
   return true;
 }
+
+/** A saved selection inside the focused contentEditable, in SOURCE offsets. */
+export interface SelectionSnapshot {
+  el: HTMLElement;
+  start: number;
+  end: number;
+}
+
+/** Save the focused span's selection, for a touch toolbar press (ADR 0069).
+ *  Null when nothing is focused or the selection is collapsed. */
+export function snapshotSelection(): SelectionSnapshot | null {
+  const el = activeEditable();
+  if (!el) return null;
+  const range = getSelectionRange(el);
+  if (!range || range.start === range.end) return null;
+  return { el, start: range.start, end: range.end };
+}
+
+/** Put a saved selection back if the press collapsed it in between. Touch
+ *  WebKit may drop a range on a tap elsewhere even with `pointerdown`
+ *  prevented; the action must still see what the finger landed on. A no-op
+ *  when the selection survived or focus moved to another span. */
+export function restoreSelection(snap: SelectionSnapshot | null): void {
+  if (!snap || activeEditable() !== snap.el) return;
+  const range = getSelectionRange(snap.el);
+  if (range && range.start === snap.start && range.end === snap.end) return;
+  setSelectionOffsets(snap.el, snap.start, snap.end);
+}
