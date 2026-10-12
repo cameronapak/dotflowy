@@ -281,8 +281,7 @@ export function LinkEditPopover({
   const [label, setLabel] = useState(initialLabel);
   const [url, setUrl] = useState(initialUrl);
   const [display, setDisplay] = useState(initialDisplay);
-  // Keep the shell chosen at open so rotation preserves the form and draft.
-  const [mobile] = useState(useIsMobile());
+  const mobile = useIsMobile();
   const [sheetOpen, setSheetOpen] = useState(true);
   const pendingSubmit = useRef<{
     label: string;
@@ -294,12 +293,12 @@ export function LinkEditPopover({
   const supportsEmbed = canEmbed && !!embedResource(url);
   const showChoices = prefs.ready && prefs.embeds && !!initialUrl;
   const focusField = focus ?? (initialDisplay === "link" ? "label" : "url");
-  const focusProps = (field: "label" | "url") =>
-    field !== focusField
-      ? {}
-      : mobile
-        ? { "data-sheet-autofocus": true }
-        : { autoFocus: true };
+  // Creation is ready for typing a URL. Editing opens display choices without
+  // summoning a touch keyboard, preserving the unified editor's behavior.
+  const focusProps = (field: "label" | "url") => ({
+    autoFocus: !mobile && field === focusField,
+    "data-sheet-autofocus": mobile && focus === field ? true : undefined,
+  });
 
   useDismissable(ref, onClose, !mobile);
   const close = () => {
