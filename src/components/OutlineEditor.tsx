@@ -183,6 +183,7 @@ import {
   guardProtected,
   ProtectionIndicator,
 } from "./protection";
+import { useNativeFormatInput } from "./selection-format";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
   SelectionFormatToolbar,
@@ -645,6 +646,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     commands,
     getCtx: pluginCtx,
   });
+  const ownsFormatEditable = useCallback(
+    (el: HTMLElement) => {
+      const key = findFocusedId();
+      return key !== null && refs.get(key) === el;
+    },
+    [findFocusedId, refs],
+  );
+  useNativeFormatInput(ownsFormatEditable, selectionFormatActions.toggleMarker);
 
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
   // actions menu's ops. Installs window key/mouse listeners only while a
@@ -1044,6 +1053,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             component), so on desktop this renders nothing. ADR 0030. */}
         <MobileActionsBar
           actions={mobileBarActions}
+          formatActions={selectionFormatActions}
           findFocusedId={findFocusedId}
         />
 

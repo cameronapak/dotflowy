@@ -122,6 +122,8 @@ test("link opens the edit popover and creates a link", async ({ page }) => {
 
   // The popover opens prefilled with the selected text as the label.
   const popover = page.locator("[data-link-edit-popover]");
+  // Create focuses the url: the label is the selection just made (ADR 0069).
+  await expect(popover.getByLabel("Link URL")).toBeFocused();
   await expect(popover).toBeVisible();
   await popover.getByLabel("Link URL").fill("https://example.com");
   await popover.getByRole("button", { name: "Done" }).click();

@@ -1339,9 +1339,12 @@ test.describe("mobile link editor sheet", () => {
       "data-expanded",
     );
     await editor.getByLabel("Link text").fill("Keep my draft");
+    await editor.getByRole("button", { name: "Plain URL", exact: true }).tap();
     await page.setViewportSize({ width: 768, height: 844 });
     await expect(page.locator(".sheet-surface")).toHaveCount(0);
     await expect(editor.getByLabel("Link text")).toHaveValue("Keep my draft");
+    await expect(editor.getByLabel("Link text")).toBeDisabled();
+    await expect(editor.getByLabel("Link URL")).toBeFocused();
     await page.setViewportSize({ width: 320, height: 640 });
     await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
       "data-expanded",
@@ -1356,6 +1359,7 @@ test.describe("mobile link editor sheet", () => {
     const box = await editor.boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(8);
     expect(box!.x + box!.width).toBeLessThanOrEqual(312);
+    await editor.getByRole("button", { name: "Link Title", exact: true }).tap();
     await editor.getByRole("button", { name: "Done" }).tap();
     await expect(editor).toHaveCount(0);
     await expect(note(page, "link").getByRole("link")).toHaveText(

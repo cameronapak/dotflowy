@@ -331,8 +331,11 @@ export function HistoryRestoreDialog() {
         event.preventDefault();
         return;
       }
-      const range = getSelectionRange(el);
       const type = event instanceof InputEvent ? event.inputType : event.type;
+      // Native format input becomes a marker toggle, recorded like a toolbar
+      // press, not typing; it never produces an input event (ADR 0069).
+      if (type.startsWith("format")) return;
+      const range = getSelectionRange(el);
       const now = Date.now();
       const contiguous =
         textRun?.el === el &&

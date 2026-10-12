@@ -9,7 +9,9 @@ grouped: `[outdent ⇤][indent ⇥] | [undo ↺][redo ↻] | [complete ☑][/]`.
 structural + history actions that on desktop are keyboard shortcuts (`Tab`/`Shift+Tab`, `Mod+Z`/`Mod+Shift+Z`,
 `Mod+Enter`) plus the `/` command palette — none of which a software keyboard exposes. Shipped compiled
 default ON behind an `isMobileBar()` localStorage escape-hatch flag (the ADR 0019 shape); the flag was
-deleted once dogfooded (2026-07-12) — the bar now mounts unconditionally and self-gates on pointer type.
+deleted once dogfooded (2026-07-12) — the bar now mounts unconditionally and self-gates on pointer type. A text
+selection inside one bullet swaps these buttons for the formatting set
+([ADR 0069](./0069-touch-selection-formatting.md)).
 
 **Signal assignment (the load-bearing decision).** Three orthogonal browser signals drive three orthogonal
 behaviors, and keeping them separate is what makes the bar robust:

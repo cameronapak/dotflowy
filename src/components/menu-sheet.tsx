@@ -59,6 +59,8 @@ export function MenuSheetContent({
   title: string;
   compact?: boolean;
   children: ReactNode;
+  /** Controlled open state, for a sheet opened imperatively with no trigger
+   *  (ADR 0069's link form). Omit both to follow the enclosing SheetTrigger. */
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   onAfterClose?: () => void;
@@ -125,10 +127,13 @@ export function MenuSheetContent({
                   {...props}
                   onFocus={(e) => {
                     props.onFocus?.(e);
+                    // A form marks its first field with data-sheet-autofocus:
+                    // a plain autoFocus scrolls the page in WebKit mid-entry and
+                    // strands the sheet offscreen (ADR 0069).
                     if (e.target === e.currentTarget)
                       e.currentTarget
-                        .querySelector<HTMLButtonElement>(
-                          'button[role^="menuitem"]:not(:disabled)',
+                        .querySelector<HTMLElement>(
+                          '[data-sheet-autofocus], button[role^="menuitem"]:not(:disabled)',
                         )
                         ?.focus({ preventScroll: true });
                   }}
