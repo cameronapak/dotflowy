@@ -138,6 +138,7 @@ import {
   pasteIntoBullet,
 } from "./paste";
 import { setQuickAddOpener } from "./quick-add-opener";
+import { useNativeFormatInput } from "./selection-format";
 import { useSlashMenu } from "./slash-menu";
 import { typingSuggestionsHeight } from "./typing-suggestions";
 import {
@@ -154,6 +155,7 @@ import {
   ResponsivePopoverContent as PopoverContent,
   ResponsivePopoverTrigger as PopoverTrigger,
 } from "./ui/responsive-popover";
+import { type MarkerPair, toggleWrapSelection } from "./wrap";
 
 /** A concrete destination a target pick yields: the parent node id (null = top
  *  level) plus its label. The overlay wraps it into a lazy {@link
@@ -254,6 +256,17 @@ const MiniNodeEditor = forwardRef<
   const caretWatchRef = useRef<(() => void) | null>(null);
   useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
+  const ownsFormatEditable = useCallback(
+    (el: HTMLElement) => ref.current === el,
+    [],
+  );
+  const toggleNativeMarker = useCallback(
+    (marker: MarkerPair) => {
+      toggleWrapSelection(node.id, marker, (_id, text) => onText(text), true);
+    },
+    [node.id, onText],
+  );
+  useNativeFormatInput(ownsFormatEditable, toggleNativeMarker);
 
   useImperativeHandle(
     handle,

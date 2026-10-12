@@ -13,8 +13,10 @@ import {
   UnderlineIcon,
   type LucideIcon,
 } from "lucide-react";
+import { useEffect } from "react";
 
-import { getSelectedAtom } from "./inline-code";
+import { getHistoryState } from "../data/history";
+import { getSelectedAtom, getSelectionRange } from "./inline-code";
 import {
   detectMarkerWrap,
   type MarkerPair,
@@ -44,6 +46,47 @@ export const STRIKE: MarkerPair = { pre: "~~", post: "~~" };
 export const UNDER: MarkerPair = { pre: "~", post: "~" };
 const HIGHLIGHT: MarkerPair = { pre: "==", post: "==" };
 const SPOILER: MarkerPair = { pre: "||", post: "||" };
+
+const NATIVE_FORMAT = new Map<string, MarkerPair>([
+  ["formatBold", BOLD],
+  ["formatItalic", ITALIC],
+  ["formatUnderline", UNDER],
+  ["formatStrikeThrough", STRIKE],
+]);
+
+/** Native formatting uses the focused editor's writer, never another owner's
+ *  facade. Cancel all format input so browser HTML cannot enter text source;
+ *  only representable ranges inside this owner's editable can toggle markers. */
+export function useNativeFormatInput(
+  ownsEditable: (el: HTMLElement) => boolean,
+  toggleMarker: SelectionFormatActions["toggleMarker"],
+): void {
+  useEffect(() => {
+    const onBeforeInput = (e: InputEvent) => {
+      if (
+        !e.inputType.startsWith("format") ||
+        !(e.target instanceof HTMLElement)
+      )
+        return;
+      const el = e.target.closest<HTMLElement>(".node-text");
+      if (!el || !ownsEditable(el)) return;
+      e.preventDefault();
+      if (
+        getHistoryState().busy ||
+        document.activeElement !== el ||
+        !el.isContentEditable ||
+        !getSelectionRange(el) ||
+        getSelectedAtom(el)
+      )
+        return;
+      const marker = NATIVE_FORMAT.get(e.inputType);
+      if (marker) toggleMarker(marker);
+    };
+    document.addEventListener("beforeinput", onBeforeInput, true);
+    return () =>
+      document.removeEventListener("beforeinput", onBeforeInput, true);
+  }, [ownsEditable, toggleMarker]);
+}
 
 export interface FormatButton {
   key: string;

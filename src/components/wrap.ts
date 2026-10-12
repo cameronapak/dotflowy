@@ -209,5 +209,8 @@ export function restoreSelection(snap: SelectionSnapshot | null): void {
   if (!snap || activeEditable() !== snap.el) return;
   const range = getSelectionRange(snap.el);
   if (range && range.start === snap.start && range.end === snap.end) return;
+  // The press may have moved the caret out of a revealed run, folding it into
+  // an atom. Reveal it again before mapping interior offsets into the live DOM.
+  decorate(snap.el, readSource(snap.el), snap.end, false);
   setSelectionOffsets(snap.el, snap.start, snap.end);
 }

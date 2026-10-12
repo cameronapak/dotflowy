@@ -71,6 +71,50 @@ async function parentIdOf(page: Page, text: string): Promise<string | null> {
     );
 }
 
+test("native formatting edits the capture, not the outline, and undoes separately", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+  await type(page, "Capture this");
+  // Wait for the draft's asynchronous birth before checking separate edit undo.
+  await expect(editor(page)).not.toHaveAttribute(
+    "data-history-node-id",
+    "__quick_add_draft__",
+  );
+  await editor(page).evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+  const fire = (inputType: string) =>
+    editor(page).evaluate(
+      (el, type) =>
+        !el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      inputType,
+    );
+  expect(await fire("formatBold")).toBe(true);
+  await expect(editor(page).locator("strong")).toHaveText("Capture this");
+  expect(await fire("formatSuperscript")).toBe(true);
+  await expect(editor(page).locator("sup")).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(editor(page)).toHaveText("Capture this");
+  await expect(editor(page).locator("strong")).toHaveCount(0);
+  await expect(page.locator('li[data-node-id="alpha"] .node-text')).toHaveText(
+    "Alpha",
+  );
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toHaveCount(0);
+});
+
 test("first-paste unfurl stays with its saved draft across a rapid next capture", async ({
   page,
 }) => {

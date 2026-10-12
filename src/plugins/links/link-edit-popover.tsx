@@ -272,7 +272,7 @@ export function LinkEditPopover({
   display?: DisplayAs;
   canEmbed?: boolean;
   mirrorCount?: number;
-  /** Creation focuses the URL; editing follows the initial display mode. */
+  /** Creation focuses the URL; editing follows the current display mode. */
   focus?: "label" | "url";
   onSubmit: (label: string, url: string, display: DisplayAs) => void;
   onClose: () => void;
@@ -292,7 +292,7 @@ export function LinkEditPopover({
   const id = useId();
   const supportsEmbed = canEmbed && !!embedResource(url);
   const showChoices = prefs.ready && prefs.embeds && !!initialUrl;
-  const focusField = focus ?? (initialDisplay === "link" ? "label" : "url");
+  const focusField = focus ?? (display === "link" ? "label" : "url");
   // Creation is ready for typing a URL. Editing opens display choices without
   // summoning a touch keyboard, preserving the unified editor's behavior.
   const focusProps = (field: "label" | "url") => ({

@@ -333,6 +333,50 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await page.mouse.up();
     await expect(bar(page)).toHaveAttribute("data-mode", "edit");
     await expect(text(page, "n").locator("strong")).toHaveCount(0);
+
+    // Source offsets inside a revealed token must survive the token refolding.
+    await seedOutline(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "**hello** tail" },
+    ]);
+    await page.goto("/");
+    await placeCaret(text(page, "n"), 4);
+    await text(page, "n")
+      .locator("strong")
+      .evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection()!;
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
+    await expect(btn(page, "Bold")).toHaveAttribute("aria-pressed", "true");
+    await page.evaluate(() =>
+      document.addEventListener(
+        "pointerdown",
+        () => {
+          const el = document.activeElement!;
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.collapse(false);
+          const sel = window.getSelection()!;
+          sel.removeAllRanges();
+          sel.addRange(range);
+        },
+        { once: true },
+      ),
+    );
+    const toggleBox = (await btn(page, "Bold").boundingBox())!;
+    await page.mouse.move(
+      toggleBox.x + toggleBox.width / 2,
+      toggleBox.y + toggleBox.height / 2,
+    );
+    await page.mouse.down();
+    await expect(
+      text(page, "n").locator('strong[contenteditable="false"]'),
+    ).toHaveCount(1);
+    await page.mouse.up();
+    await expect(text(page, "n")).toHaveText("hello tail");
+    await expect(text(page, "n").locator("strong")).toHaveCount(0);
   });
 
   test("highlight toggles off and stays in format mode", async ({ page }) => {
@@ -422,10 +466,17 @@ test("never mounts on a fine pointer even while editing", async ({ page }) => {
 test("native format input toggles markers and never injects HTML", async ({
   page,
 }) => {
-  await seedOutline(page, ONE);
+  await seedOutline(page, [
+    ...ONE,
+    {
+      id: "other",
+      parentId: null,
+      prevSiblingId: "n",
+      text: "untouched",
+    },
+  ]);
   await page.goto("/");
   await expect(text(page, "n")).toBeVisible({ timeout: 15_000 });
-  await selectAll(page, "n");
   const fire = (inputType: string) =>
     text(page, "n").evaluate(
       (el, type) =>
@@ -439,12 +490,34 @@ test("native format input toggles markers and never injects HTML", async ({
       inputType,
     );
 
+  await placeCaret(text(page, "n"), "end");
+  await text(page, "n").evaluate((el) => {
+    const other = document.querySelector(
+      'li[data-node-id="other"] .node-text',
+    )!;
+    const range = document.createRange();
+    range.setStart(el.firstChild!, 2);
+    range.setEnd(other.firstChild!, 4);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
   expect(await fire("formatBold")).toBe(true);
-  await expect(text(page, "n").locator("strong")).toHaveText("alphabravo");
+  await expect(text(page, "n")).toHaveText("alphabravo");
+  await expect(text(page, "other")).toHaveText("untouched");
+
+  await placeCaret(text(page, "n"), "end");
+  await page.keyboard.type("tail");
+  await selectAll(page, "n");
+  expect(await fire("formatBold")).toBe(true);
+  await expect(text(page, "n").locator("strong")).toHaveText("alphabravotail");
 
   // Chromium's InputEvent constructor drops some types (formatFontColor),
   // so probe the cancel path with one it keeps.
   expect(await fire("formatSuperscript")).toBe(true);
   await expect(text(page, "n").locator("sup")).toHaveCount(0);
-  await expect(text(page, "n").locator("strong")).toHaveText("alphabravo");
+  await expect(text(page, "n").locator("strong")).toHaveText("alphabravotail");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(text(page, "n")).toHaveText("alphabravotail");
+  await expect(text(page, "n").locator("strong")).toHaveCount(0);
 });
