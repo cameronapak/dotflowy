@@ -10,7 +10,7 @@ Keep this file brief. Put task-specific guidance behind a pointer.
 
 ## Guardrails
 
-- **Grill first.** New plugin, route, seam, `Node` field, side-collection, or ADR-worthy behavior: read the matching ADRs, then ask the user to run `/grill-with-docs` (user-invoked only). If they waive it, hold the design against those ADRs by hand. An agent can invoke `/domain-modeling`, `/code-review`, `/security-review`, and `/ft-create-concise-pr`.
+- **Grill first.** New plugin, route, seam, `Node` field, side-collection, or ADR-worthy behavior: read the matching ADRs, then ask the user to run `/grill-with-docs` (user-invoked only). If they waive it, hold the design against those ADRs by hand. An agent can invoke `/domain-modeling`, `/code-review`, and `/security-review`.
 - **There is no client-side data migration.**
 - **Key the DO through `resolveUserId`**, never the email. The one exception is the owner-continuity bridge to `'default'`.
 - **The `/api` session check trusts the server session.**
@@ -67,7 +67,7 @@ Retirement, recovery, and retained internal exports: [ADR 0061](./docs/adr/0061-
 
 ## Review
 
-PR description: `/ft-create-concise-pr`. Review: `/code-review`. Auth, SSRF, Worker-to-DO trust, or signup gate: `/security-review`.
+Review: `/code-review`. Auth, SSRF, Worker-to-DO trust, or signup gate: `/security-review`.
 
 ## Release
 

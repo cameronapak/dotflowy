@@ -336,9 +336,6 @@ Rules of thumb:
   path, repo structure), fix the affected doc (`AGENTS.md` and/or `README.md`)
   in the same change. Ask first before changing policy, philosophy, or
   positioning.
-- **PR descriptions follow the snapshot template** in
-  `.agents/skills/ft-create-concise-pr/SKILL.md` (agents: run
-  `/ft-create-concise-pr`) — one consistent, skimmable shape for every review.
 
 ## CLI release setup
 
