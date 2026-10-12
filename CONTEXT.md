@@ -13,12 +13,16 @@ An owner-controlled state that prevents changes to a node's content and its full
 _Avoid_: read-only, frozen, protected
 
 **Kind**:
-Which of the mutually exclusive presentations a node has: bullet, task, or paragraph. Exactly one — converting between kinds is allowed, combining is not. Independent of Completed.
+Which of the mutually exclusive presentations a node has: bullet, task, paragraph, or Embed. Exactly one — converting between kinds is allowed, combining is not. Independent of Completed.
 _Avoid_: type, mode, style
 
 **Paragraph**:
 A node that reads as prose rather than a list item — a paragraph glyph (an align-left mark) stands where a bullet shows its dot, carrying the same zoom and drag affordance. Full tree citizen: children, collapse, zoom, complete.
 _Avoid_: text node, block, prose node
+
+**Embed**:
+A node devoted to displaying one external resource identified by a URL. The external content is read-only and is not part of the outline's text; the node can have child notes, move, collapse, zoom, and be mirrored like other nodes.
+_Avoid_: oEmbed (the protocol, not the node), preview (also describes ordinary link metadata)
 
 **Completed**:
 Done-status on any node, regardless of kind: "I'm done with it, mentally archiving it, but it still exists." Not deletion, and not task-only — a checkbox is a Kind; done-ness is state.

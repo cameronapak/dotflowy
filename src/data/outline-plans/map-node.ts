@@ -43,7 +43,7 @@ export function rowToNode(doc: NodeDocLike): OutlineNode {
     updatedAt: Number(doc.updatedAt ?? 0),
     // SAFETY: Lunora rows store origin as string | null; the fallback absorbs a legacy undefined.
     origin: (doc.origin as string | null) ?? null,
-    kind: doc.kind === "paragraph" ? "paragraph" : null,
+    kind: doc.kind === "paragraph" || doc.kind === "embed" ? doc.kind : null,
     userId: String(doc.userId ?? ""),
   };
 }

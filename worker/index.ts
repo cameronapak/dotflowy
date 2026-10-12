@@ -51,6 +51,7 @@ import {
   isSupportedSnapshotVersion,
 } from "./backup";
 import { handleCaptureKeys, handleCaptureRequest } from "./capture";
+import { lookupEmbedE } from "./embeds";
 import {
   OWNER_DO_ID,
   isAdminSession,
@@ -79,7 +80,8 @@ import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
-import { isHttpUrlString, unfurlTitleE } from "./unfurl";
+import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
+import { unfurlTextE } from "./unfurl-text";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
@@ -181,6 +183,10 @@ const KV_COLLECTIONS = new Set([
   "saved-queries",
   "account-prefs",
 ]);
+const ExternalEmbedsPreference = Schema.Struct({
+  key: Schema.Literal("external-embeds"),
+  enabled: Schema.Literal(true),
+});
 
 /**
  * The provenance stamp for an MCP write: the human-facing name of the OAuth
@@ -1172,7 +1178,45 @@ function handleApiRequest(
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
-      return yield* handleMcp(request, classicStub, origin, mcpPlan !== "free");
+      return yield* handleMcp(
+        request,
+        classicStub,
+        origin,
+        mcpPlan !== "free",
+        (writes) => {
+          executionCtx.waitUntil(
+            Effect.runPromise(
+              Effect.forEach(
+                writes,
+                (write) =>
+                  Effect.gen(function* () {
+                    const text = yield* unfurlTextE(
+                      write.before,
+                      write.text,
+                      (url) =>
+                        rateLimitedTitleE(
+                          url,
+                          env.UNFURL_LIMIT,
+                          resolveUserId(token.userId, env),
+                        ),
+                    );
+                    if (text !== write.text)
+                      yield* Effect.promise(() =>
+                        classicStub.upgradeLinkText(
+                          write.nodeId,
+                          write.text,
+                          text,
+                        ),
+                      );
+                  }),
+                { concurrency: 3, discard: true },
+              ),
+            ).catch(() => {
+              console.warn("MCP title lookup failed");
+            }),
+          );
+        },
+      );
     }
 
     // Identity = the validated session's stable user id. No session → 401.
@@ -1225,6 +1269,26 @@ function handleApiRequest(
       request.method === "GET" && userId === OWNER_DO_ID
         ? ensureSeededE(stub, env)
         : Effect.sync(() => {});
+
+    if (url.pathname === "/api/embeds") {
+      if (request.method !== "GET")
+        return json({ error: "method not allowed" }, 405);
+      const target = url.searchParams.get("url");
+      if (!target) return json({ embed: null });
+      yield* maybeSeed;
+      const preferencesResult = Schema.decodeUnknownOption(
+        Schema.Array(Schema.Unknown),
+      )(yield* Effect.promise(() => stub.getKv("account-prefs")));
+      const preferences =
+        preferencesResult._tag === "Some" ? preferencesResult.value : [];
+      const enabled = preferences.some(Schema.is(ExternalEmbedsPreference));
+      if (!enabled) return json({ embed: null });
+      const { success } = yield* Effect.promise(() =>
+        env.UNFURL_LIMIT.limit({ key: userId }),
+      );
+      if (!success) return json({ error: "rate limited" }, 429);
+      return json({ embed: yield* lookupEmbedE(target) });
+    }
 
     // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
     // hibernation-accepts it and streams outline changes. The session is

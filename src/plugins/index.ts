@@ -10,6 +10,7 @@ import type { PluginDef } from "./types";
 
 import code from "./code";
 import daily from "./daily";
+import embeds from "./embeds";
 import emphasis from "./emphasis";
 import highlight from "./highlight";
 import links from "./links";
@@ -29,6 +30,7 @@ export const plugins: PluginDef[] = [
   provenance,
   code,
   links,
+  embeds,
   nodeLinks,
   routeBible,
   tags,
@@ -43,4 +45,5 @@ export const plugins: PluginDef[] = [
 export const editorFeaturePlugins = new Map<PluginDef, EditorFeature>([
   [routeBible, "bible"],
   [daily, "daily"],
+  [embeds, "embeds"],
 ]);

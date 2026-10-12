@@ -46,6 +46,7 @@ import {
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
+import { NodeBody } from "./node-body";
 import { NodeDecorations } from "./NodeDecorations";
 import {
   copySourceSelection,
@@ -426,7 +427,7 @@ function RowChrome({
         position: "absolute",
         top: 0,
         left: 0,
-        width: "100%",
+        width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
         transform: `translateY(${start - scrollMargin}px)`,
         paddingInlineStart: depth * INDENT_PX,
       }}
@@ -491,6 +492,7 @@ function RowChrome({
               registerRef(rowKey, el);
             }}
             className={`node-text${isPivot ? " vt-morph" : ""}`}
+            data-kind={content.kind ?? undefined}
             style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
             contentEditable={!locked}
             tabIndex={locked ? 0 : undefined}
@@ -573,6 +575,7 @@ function RowChrome({
               if (next !== null) syncedRef.current = next;
             }}
             onFocus={(e) => {
+              if (e.target !== e.currentTarget) return;
               clearSelection();
               const el = e.currentTarget;
               caretWatchRef.current?.();
@@ -586,11 +589,17 @@ function RowChrome({
               });
             }}
             onBlur={(e) => {
+              if (e.target !== e.currentTarget) return;
               slash.close();
               menus.close();
               caretWatchRef.current?.();
               caretWatchRef.current = null;
               const el = e.currentTarget;
+              if (
+                e.relatedTarget instanceof HTMLElement &&
+                el.contains(e.relatedTarget)
+              )
+                return;
               const text = readSource(el);
               const restored = healProtectedText(content.id, text, el);
               if (restored !== null) {
@@ -610,6 +619,7 @@ function RowChrome({
               slash.handleKeyDown(e);
             }}
           />
+          <NodeBody node={content} position="row:body" getCtx={pluginCtx} />
         </div>
         {/* Trailing decoration zone (Seam F `row:after-text`, ADR 0031). Flex
             sibling of `.row-body`, hugs the trailing edge; dormant until a
@@ -660,7 +670,7 @@ function MirrorMissingRow({
         position: "absolute",
         top: 0,
         left: 0,
-        width: "100%",
+        width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
         transform: `translateY(${start - scrollMargin}px)`,
         paddingInlineStart: depth * INDENT_PX,
       }}

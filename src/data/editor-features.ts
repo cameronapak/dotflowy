@@ -13,12 +13,19 @@ import { queryClient } from "./query-client";
 const KEYS = {
   bible: "editor-feature:bible",
   daily: "editor-feature:daily",
+  embeds: "editor-feature:embeds",
+  externalEmbeds: "external-embeds",
   weekStart: "daily:week-start",
 } as const;
-export type EditorFeature = "bible" | "daily";
+export type EditorFeature = "bible" | "daily" | "embeds";
 
 const featureRowSchema = Schema.Struct({
-  key: Schema.Literals([KEYS.bible, KEYS.daily]),
+  key: Schema.Literals([
+    KEYS.bible,
+    KEYS.daily,
+    KEYS.embeds,
+    KEYS.externalEmbeds,
+  ]),
   enabled: Schema.Boolean,
 });
 const weekStartRowSchema = Schema.Struct({
@@ -29,7 +36,13 @@ const rowSchema = Schema.Union([featureRowSchema, weekStartRowSchema]);
 type PreferenceRow = Schema.Schema.Type<typeof rowSchema>;
 const isPreferenceKey = Schema.is(
   Schema.Struct({
-    key: Schema.Literals([KEYS.bible, KEYS.daily, KEYS.weekStart]),
+    key: Schema.Literals([
+      KEYS.bible,
+      KEYS.daily,
+      KEYS.embeds,
+      KEYS.externalEmbeds,
+      KEYS.weekStart,
+    ]),
   }),
 );
 
@@ -65,6 +78,9 @@ const collection = createCollection(
 interface FeatureSnapshot {
   bible: boolean;
   daily: boolean;
+  embeds: boolean;
+  externalEmbeds: boolean;
+  externalEmbedsSaving: boolean;
   weekStart: WeekStart;
   ready: boolean;
   error: boolean;
@@ -72,6 +88,9 @@ interface FeatureSnapshot {
 const INITIAL: FeatureSnapshot = {
   bible: true,
   daily: true,
+  embeds: true,
+  externalEmbeds: false,
+  externalEmbedsSaving: false,
   weekStart: DEFAULT_WEEK_START,
   ready: false,
   error: false,
@@ -79,15 +98,30 @@ const INITIAL: FeatureSnapshot = {
 let snapshot = INITIAL;
 let syncedWeekStart: WeekStart | null = null;
 let started = false;
+let externalEmbedsPendingSaves = 0;
+let externalEmbedsMaskedOff = false;
+let externalEmbedsSaveTail = Promise.resolve();
+let externalEmbedsIntent = 0;
 const listeners = new Set<() => void>();
 
 function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const rows = collection.toArray;
   const bibleRow = rows.find((r) => r.key === KEYS.bible);
   const dailyRow = rows.find((r) => r.key === KEYS.daily);
+  const embedsRow = rows.find((r) => r.key === KEYS.embeds);
+  const externalEmbedsRow = rows.find((r) => r.key === KEYS.externalEmbeds);
   const weekStartRow = rows.find((r) => r.key === KEYS.weekStart);
   const bible = bibleRow?.key === KEYS.bible ? bibleRow.enabled : true;
   const daily = dailyRow?.key === KEYS.daily ? dailyRow.enabled : true;
+  const embeds = embedsRow?.key === KEYS.embeds ? embedsRow.enabled : true;
+  // External loading fails closed. A local revoke masks even stale/refetched
+  // server truth, and readiness alone never implies consent.
+  const externalEmbeds =
+    ready &&
+    !externalEmbedsMaskedOff &&
+    externalEmbedsRow?.key === KEYS.externalEmbeds &&
+    externalEmbedsRow.enabled;
+  const externalEmbedsSaving = externalEmbedsPendingSaves > 0;
   const weekStart =
     syncedWeekStart ??
     (weekStartRow?.key === KEYS.weekStart
@@ -96,12 +130,24 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   if (
     snapshot.bible === bible &&
     snapshot.daily === daily &&
+    snapshot.embeds === embeds &&
+    snapshot.externalEmbeds === externalEmbeds &&
+    snapshot.externalEmbedsSaving === externalEmbedsSaving &&
     snapshot.weekStart === weekStart &&
     snapshot.ready === ready &&
     snapshot.error === error
   )
     return;
-  snapshot = { bible, daily, weekStart, ready, error };
+  snapshot = {
+    bible,
+    daily,
+    embeds,
+    externalEmbeds,
+    externalEmbedsSaving,
+    weekStart,
+    ready,
+    error,
+  };
   for (const listener of listeners) listener();
 }
 
@@ -128,7 +174,7 @@ function ensureStarted() {
   });
   subscribeCalendarSync((calendar) => {
     syncedWeekStart = calendar.weekStart;
-    rebuild(true, false);
+    rebuild(snapshot.ready, snapshot.error);
     void collection.utils.refetch({ throwOnError: true }).then(
       () => {
         if (syncedWeekStart === calendar.weekStart) syncedWeekStart = null;
@@ -184,6 +230,40 @@ export async function setEditorFeature(
       })
     : collection.insert({ key, enabled });
   await transaction.isPersisted.promise;
+}
+
+/** Persist account-wide permission to contact supported embed providers.
+ * Enabling is pessimistic; revocation is locally effective before its write. */
+export function setExternalEmbeds(enabled: boolean): Promise<void> {
+  const intent = ++externalEmbedsIntent;
+  externalEmbedsPendingSaves += 1;
+  // Revoke immediately; approval (including after a failed revoke) waits for persistence.
+  externalEmbedsMaskedOff = true;
+  rebuild();
+
+  const save = externalEmbedsSaveTail.then(async () => {
+    try {
+      await loadEditorFeatures();
+      await kvPut("account-prefs", [
+        {
+          key: KEYS.externalEmbeds,
+          value: { key: KEYS.externalEmbeds, enabled },
+        },
+      ]);
+      await collection.utils.refetch({ throwOnError: true });
+      if (intent === externalEmbedsIntent) externalEmbedsMaskedOff = !enabled;
+      rebuild(true, false);
+    } catch (cause) {
+      if (intent === externalEmbedsIntent) externalEmbedsMaskedOff = true;
+      rebuild(snapshot.ready, true);
+      throw cause;
+    } finally {
+      externalEmbedsPendingSaves -= 1;
+      rebuild();
+    }
+  });
+  externalEmbedsSaveTail = save.catch(() => undefined);
+  return save;
 }
 
 export class WeekStartMigrationError extends Data.TaggedError(

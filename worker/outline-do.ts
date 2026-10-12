@@ -166,7 +166,7 @@ function rowToNode(r: NodeRow): Node {
     // The column is a plain TEXT, so narrow it back to the literal union: an
     // unrecognized value reads as a bullet rather than escaping into a frame the
     // client's `ServerMessageSchema` would then reject (ADR 0045 / ADR 0014).
-    kind: r.kind === "paragraph" ? "paragraph" : null,
+    kind: r.kind === "paragraph" || r.kind === "embed" ? r.kind : null,
   };
 }
 
@@ -940,6 +940,29 @@ export class UserOutlineDO extends DurableObject<Env> {
         )
         .toArray()[0];
       if (!row) return [];
+      const value = { ...rowToNode(row), text, updatedAt: Date.now() };
+      if (validateLockedWrite(this.getNodes(), [{ op: "update", value }]))
+        return [];
+      return this.recordChange([this.putNode(value)]);
+    });
+    this.broadcastChange(frames);
+    return frames.length > 0;
+  }
+
+  /** Best-effort metadata must never overwrite a concurrent edit. The text
+   * comparison and patch share one transaction, including the lock guard. */
+  upgradeLinkText(nodeId: string, expected: string, text: string): boolean {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const row = this.sql
+        .exec<NodeRow & Record<string, SqlStorageValue>>(
+          "SELECT * FROM nodes WHERE id = ? AND text = ?",
+          nodeId,
+          expected,
+        )
+        .toArray()[0];
+      if (!row || row.mirrorOf || row.kind === "embed" || text === expected)
+        return [];
       const value = { ...rowToNode(row), text, updatedAt: Date.now() };
       if (validateLockedWrite(this.getNodes(), [{ op: "update", value }]))
         return [];

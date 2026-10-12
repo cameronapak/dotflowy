@@ -148,7 +148,9 @@ async function commitPlan(ctx: MutatorCtx, plan: OutlinePlan): Promise<void> {
 const userIdArg = v.string();
 const idArg = v.string();
 const tsArg = v.number();
-const kindArg = v.optional(v.literal("paragraph").nullable());
+const kindArg = v.optional(
+  v.union(v.literal("paragraph"), v.literal("embed")).nullable(),
+);
 
 /** Compose smoke mutator — proves codegen + SHARD wiring without dual auth UX. */
 export const hello = defineMutator({
@@ -471,7 +473,7 @@ export const setKind = defineMutator({
   args: {
     id: idArg,
     userId: userIdArg,
-    kind: v.literal("paragraph").nullable(),
+    kind: v.union(v.literal("paragraph"), v.literal("embed")).nullable(),
     updatedAt: tsArg,
   },
   server: async (ctx, args) => {
@@ -521,7 +523,7 @@ const nodeSnapshotArg = v.object({
   createdAt: tsArg,
   updatedAt: tsArg,
   origin: v.string().nullable(),
-  kind: v.literal("paragraph").nullable(),
+  kind: v.union(v.literal("paragraph"), v.literal("embed")).nullable(),
 });
 
 /**
@@ -570,7 +572,7 @@ export const restoreNodes = defineMutator({
     const target: OutlineNode[] = args.nodes.map((n) => ({
       ...n,
       userId: args.userId,
-      kind: n.kind === "paragraph" ? "paragraph" : null,
+      kind: n.kind === "paragraph" || n.kind === "embed" ? n.kind : null,
     }));
     const plan = planRestoreNodes(current, target);
     await commitPlan(mctx, plan);
@@ -605,7 +607,8 @@ export const importNodes = defineMutator({
       const node: OutlineNode = {
         ...raw,
         userId: args.userId,
-        kind: raw.kind === "paragraph" ? "paragraph" : null,
+        kind:
+          raw.kind === "paragraph" || raw.kind === "embed" ? raw.kind : null,
       };
       const id = node.id as Id<"nodes">;
       const existing = await mctx.db.get(id, "nodes");

@@ -154,7 +154,7 @@ function newNode(args: {
     text: args.text,
     // The kind exclusivity invariant, enforced at the trust boundary exactly as
     // the client funnels enforce it (`setKind` clears `isTask`).
-    isTask: kind === "paragraph" ? false : (args.isTask ?? false),
+    isTask: kind !== null ? false : (args.isTask ?? false),
     kind,
     mirrorOf: args.mirrorOf ?? null,
     origin: args.origin ?? null,
@@ -274,7 +274,7 @@ export function planUpdateNode(
   // discover (ADR 0045).
   if (changes.kind !== undefined) {
     patchFor(contentId).kind = changes.kind;
-    if (changes.kind === "paragraph") patchFor(contentId).isTask = false;
+    if (changes.kind !== null) patchFor(contentId).isTask = false;
   }
 
   const ops: ChangeOp[] = [];
@@ -1228,7 +1228,7 @@ export function flattenSubtree(
       // so the agent must see the same node the user does: an illegal pair from a
       // raw PATCH or a stale client reads as a paragraph with no checkbox, never
       // as a `- [ ]` to-do the app never draws.
-      isTask: content.kind === "paragraph" ? false : content.isTask,
+      isTask: content.kind === null ? content.isTask : false,
       completed: content.completed,
       locked: isNodeLocked(index, contentId),
       kind: content.kind,
@@ -1273,7 +1273,7 @@ export function formatOutlineLines(lines: ReadonlyArray<OutlineLine>): string {
       const indent = "  ".repeat(l.depth);
       const check = l.isTask ? (l.completed ? "[x] " : "[ ] ") : "";
       const meta: string[] = [`id: ${l.id}`];
-      if (l.kind === "paragraph") meta.push("paragraph");
+      if (l.kind) meta.push(l.kind);
       if (l.mirrorOf) meta.push(`mirror of ${l.mirrorOf}`);
       if (l.capped) meta.push("cycle capped");
       if (!l.isTask && l.completed) meta.push("completed");
@@ -1324,7 +1324,7 @@ export function searchNodes(
       id: node.id,
       text: node.text,
       kind: node.kind,
-      isTask: node.kind !== "paragraph" && node.isTask,
+      isTask: node.kind === null && node.isTask,
       completed: node.completed,
       locked: isNodeLocked(safeIndex, node.id),
       mirrorOf: node.mirrorOf,

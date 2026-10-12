@@ -71,6 +71,51 @@ async function parentIdOf(page: Page, text: string): Promise<string | null> {
     );
 }
 
+test("first-paste unfurl stays with its saved draft across a rapid next capture", async ({
+  page,
+}) => {
+  let release!: () => void;
+  const unfurl = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/unfurl?*", async (route) => {
+    await unfurl;
+    await route.fulfill({ json: { title: "Captured article" } });
+  });
+  await load(page);
+  await openQuickAdd(page);
+  const gate = await holdDailyClaims(page);
+  await editor(page).evaluate((el) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "https://captured.test");
+    el.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await gate.seen;
+  await commitNext(page);
+  await expect(editor(page)).toHaveText("");
+  await type(page, "My second thought");
+  await expect(editor(page)).toHaveText("My second thought");
+  gate.release();
+  release();
+  await expect(
+    dialog(page).getByText("[Captured article](https://captured.test)", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(editor(page)).toHaveText("My second thought");
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
+  await todayButton(page).click();
+  await expect(rowWithText(page, "Captured article")).toHaveCount(1);
+  await expect(rowWithText(page, "My second thought")).toHaveCount(1);
+});
+
 test("the 'q' hotkey opens the overlay and Esc closes it", async ({ page }) => {
   await load(page);
   await pressQuickAddKey(page);

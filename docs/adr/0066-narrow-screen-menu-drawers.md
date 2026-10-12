@@ -39,7 +39,9 @@ Remove the patch when an upstream release handles those batches. CSS rounds
 intrinsic sheet heights where `calc-size` is supported so Chromium's pixel-rounded
 snap offset does not leave fractional content outside the visibility observer.
 While a sheet is present, release the page's stable scrollbar gutter: otherwise
-it clips React Aria's viewport-wide stage on narrow desktop windows.
+it clips React Aria's viewport-wide stage on narrow desktop windows. Reserve the
+released width as body padding until the sheet exits, so the outline does not
+widen or clamp its horizontal scroll. Nested sheets reuse the outer reservation.
 
 Header toggles stay open. One-shot actions and navigation close the sheet.
 Header and breadcrumb menus share open state across the width breakpoint and

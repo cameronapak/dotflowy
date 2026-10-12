@@ -1,4 +1,4 @@
-import type { Node } from "../schema";
+import type { Node, NodeKind } from "../schema";
 import type { TreeIndex } from "../tree";
 import type { OutlineNode, OutlinePlan, PlanPatch } from "./types";
 
@@ -32,7 +32,7 @@ export function planInsertSibling(
     afterId: string | null;
     text: string;
     isTask?: boolean;
-    kind?: "paragraph" | null;
+    kind?: NodeKind;
     createdAt: number;
     updatedAt: number;
   },
@@ -58,7 +58,7 @@ export function planInsertSibling(
       parentId: args.parentId,
       prevSiblingId: args.afterId,
       text: args.text,
-      isTask: args.isTask ?? false,
+      isTask: args.kind == null ? (args.isTask ?? false) : false,
       kind: args.kind ?? null,
       createdAt: args.createdAt,
       updatedAt: args.updatedAt,
@@ -245,7 +245,7 @@ export function planInsertChildAtStart(
     parentId: string | null;
     text: string;
     isTask?: boolean;
-    kind?: "paragraph" | null;
+    kind?: NodeKind;
     createdAt: number;
     updatedAt: number;
   },
@@ -265,7 +265,7 @@ export function planAppendChild(
     parentId: string | null;
     text: string;
     isTask?: boolean;
-    kind?: "paragraph" | null;
+    kind?: NodeKind;
     createdAt: number;
     updatedAt: number;
   },
@@ -345,7 +345,7 @@ export function planSetIsTask(
 export function planSetKind(
   index: TreeIndex,
   nodeId: string,
-  kind: "paragraph" | null,
+  kind: NodeKind,
   updatedAt: number,
 ): OutlinePlan | null {
   if (!index.byId.has(nodeId)) return null;
@@ -482,7 +482,7 @@ export function planSplitNode(
     leftText: string;
     rightText: string;
     isTask?: boolean;
-    kind?: "paragraph" | null;
+    kind?: NodeKind;
     createdAt: number;
     updatedAt: number;
   },
@@ -495,7 +495,7 @@ export function planSplitNode(
     afterId: args.afterId,
     text: args.rightText,
     isTask: args.isTask,
-    kind: args.kind,
+    kind: args.kind === "embed" ? null : args.kind,
     createdAt: args.createdAt,
     updatedAt: args.updatedAt,
   });

@@ -58,6 +58,9 @@ export function insertSibling(
   kind: NodeKind = null,
   id = createId(),
 ): string {
+  // Enter after an Embed always creates an ordinary sibling. An Embed stores
+  // one indivisible URL, so it is never inherited onto a split sibling.
+  if (kind === "embed") kind = null;
   const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.
@@ -106,6 +109,7 @@ export function insertChildAtStart(
   id = createId(),
   kind: NodeKind = null,
 ): string {
+  if (kind === "embed") kind = null;
   const head = childrenOf(index, parentId)[0] ?? null;
 
   nodesCollection.insert(
@@ -897,7 +901,7 @@ export function toggleCompleted(nodeId: string, completed: boolean) {
  * keeps whatever done-status it had. See ADR 0001.
  *
  * Clearing `kind` is the ONE half of the kind exclusivity invariant this funnel
- * owns (ADR 0045): bullet | task | paragraph are mutually exclusive, and the
+ * owns (ADR 0045): bullet | task | paragraph | Embed are mutually exclusive, and the
  * two-field encoding cannot say so, so every make-it-a-task gesture (`/todo`,
  * the `[]` autoformat) and every back-to-a-plain-bullet gesture (`/bullet`,
  * Backspace on the checkbox) writes both fields in one PATCH. Redundant on a
@@ -909,15 +913,15 @@ export function setIsTask(nodeId: string, isTask: boolean) {
 }
 
 /**
- * Make a node a paragraph (a paragraph glyph where the dot would be) or, with `null`,
- * a plain bullet. The other half of the exclusivity invariant: a paragraph is
- * never a task, so this clears `isTask`. See ADR 0045.
+ * Make a node a paragraph, an Embed, or, with `null`, a plain bullet.
+ * These kinds are never tasks, so this clears `isTask`. See ADR 0045.
  *
- * A FIELD edit, like `setIsTask` — a single-field PATCH, already atomic. Never
+ * A FIELD edit, like `setIsTask` — one PATCH, already atomic. Never
  * wrap it in `runStructural`.
  */
-export function setKind(nodeId: string, kind: NodeKind) {
-  update(nodeId, { kind, isTask: false });
+export function setKind(nodeId: string, kind: NodeKind, text?: string) {
+  const patch = { kind, isTask: false };
+  update(nodeId, text === undefined ? patch : { ...patch, text });
 }
 
 export function toggleCollapsed(nodeId: string, collapsed: boolean) {

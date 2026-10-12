@@ -141,7 +141,7 @@ export interface SeedNode {
   /** Provenance: agent harness name if created via MCP; omit/null for human. */
   origin?: string | null;
   /** Node kind (ADR 0045); omit/null for a bullet-or-task. */
-  kind?: "paragraph" | null;
+  kind?: "paragraph" | "embed" | null;
 }
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
@@ -160,7 +160,7 @@ export interface ApiNode {
   createdAt: number;
   updatedAt: number;
   origin: string | null;
-  kind: "paragraph" | null;
+  kind: "paragraph" | "embed" | null;
 }
 
 /** One op in a change frame, as the DO broadcasts and the batch POST carries.

@@ -36,6 +36,18 @@ const runFail = (src: string, options?: { maxLength?: number }) =>
 const doc = (body: string): string =>
   `<?xml version="1.0"?>\n<opml version="2.0"><head></head><body>${body}</body></opml>`;
 
+test("imports Embed identity and children, with kind outranking task", () => {
+  const { forest } = run(
+    doc(
+      '<outline _kind="embed" _task="true" text="https://example.com/post"><outline text="My note" /></outline>',
+    ),
+  );
+  expect(forest[0]?.kind).toBe("embed");
+  expect(forest[0]?.isTask).toBe(false);
+  expect(forest[0]?.text).toBe("https://example.com/post");
+  expect(forest[0]?.children[0]?.text).toBe("My note");
+});
+
 test("the crafted Workflowy sample imports with the fidelity probe's exact counts", () => {
   const { forest, report } = run(sampleOpml);
   const root = forest[0]!;

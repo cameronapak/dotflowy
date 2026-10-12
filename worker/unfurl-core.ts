@@ -96,10 +96,10 @@ function mappedIpv4(host: string): string | null {
   return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
 }
 
-/** The SSRF target guard: a fully-formed http(s) URL whose host isn't an obvious
- *  internal destination. Re-run on every redirect hop -- a 302 to an internal
- *  target is the classic redirect bounce. A blocked target yields `{title:null}`
- *  (200), NOT a 400: from the client's view it's just "no title". */
+/** The outbound target guard: exclude internal destinations and browser-only
+ *  X content. Run before cache reads and on every redirect hop. A blocked
+ *  target yields `{title:null}` (200), NOT a 400: from the client's view it's
+ *  just "no title". */
 export function isAllowedUnfurlTarget(raw: string): boolean {
   let u: URL;
   try {
@@ -108,8 +108,15 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
     return false;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  const host = u.hostname.toLowerCase().replace(/^\[|]$/g, ""); // strip IPv6 brackets
+  const host = u.hostname.toLowerCase().replace(/^\[|]$|\.$/g, ""); // IPv6 brackets / DNS root dot
   if (!host) return false;
+  if (
+    host === "x.com" ||
+    host.endsWith(".x.com") ||
+    host === "twitter.com" ||
+    host.endsWith(".twitter.com")
+  )
+    return false;
   if (host === "localhost" || host.endsWith(".localhost")) return false;
   if (host.endsWith(".local") || host.endsWith(".internal")) return false;
   if (host === "0.0.0.0" || host === "::" || host === "::1") return false;

@@ -18,6 +18,7 @@
 // Add a component here only when a plugin needs it; that keeps the surface a
 // decision, not a dumping ground.
 
+export { MenuSheetContent } from "@/components/menu-sheet";
 export * from "@/components/ui/badge";
 export * from "@/components/ui/badge-variants";
 export * from "@/components/ui/button";
@@ -26,6 +27,7 @@ export * from "@/components/ui/card";
 export * from "@/components/ui/checkbox";
 export * from "@/components/ui/dialog";
 export * from "@/components/ui/dropdown-menu";
+export * from "@/components/ui/field";
 export * from "@/components/ui/input";
 export * from "@/components/ui/popover";
 export * from "@/components/ui/responsive-popover";
@@ -35,4 +37,5 @@ export * from "@/components/ui/skeleton";
 export * from "@/components/ui/switch";
 export * from "@/components/ui/tabs";
 export * from "@/components/ui/textarea";
+export * from "@/components/ui/toggle-group";
 export * from "@/components/ui/tooltip";

@@ -60,13 +60,14 @@ function cacheKey(url: string): Request {
 /** GET the page with redirects handled manually so each hop is re-validated
  *  against the SSRF guard. Returns the final non-redirect Response, or null if a
  *  hop is disallowed / there are too many hops / a hop has no Location. */
-const fetchManualE = Effect.fnUntraced(function* (
+export const fetchManualE = Effect.fnUntraced(function* (
   url: string,
   accept = HTML_ACCEPT,
+  allowedTarget: (target: string) => boolean = () => true,
 ) {
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    if (!isAllowedUnfurlTarget(current)) return null;
+    if (!isAllowedUnfurlTarget(current) || !allowedTarget(current)) return null;
     const res: Response = yield* Effect.tryPromise({
       try: (signal) =>
         fetch(current, {
@@ -95,7 +96,7 @@ const fetchManualE = Effect.fnUntraced(function* (
 /** Read at most MAX_BYTES of the body as text, then cancel the stream. This
  *  bounds memory/time; providers whose useful metadata sits deeper must expose
  *  a bounded metadata endpoint, as YouTube does through oEmbed. */
-function readCappedTextE(res: Response): Effect.Effect<string, unknown> {
+export function readCappedTextE(res: Response): Effect.Effect<string, unknown> {
   const reader = res.body?.getReader();
   if (!reader) return Effect.succeed("");
   return Effect.tryPromise({
@@ -106,8 +107,11 @@ function readCappedTextE(res: Response): Effect.Effect<string, unknown> {
       while (total < MAX_BYTES) {
         const { done, value } = await reader.read();
         if (done) break;
-        total += value.byteLength;
-        out += decoder.decode(value, { stream: true });
+        const remaining = MAX_BYTES - total;
+        const chunk =
+          value.byteLength > remaining ? value.subarray(0, remaining) : value;
+        total += chunk.byteLength;
+        out += decoder.decode(chunk, { stream: true });
       }
       out += decoder.decode();
       return out;
@@ -269,3 +273,14 @@ export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
 export function unfurlTitle(url: string): Promise<string | null> {
   return Effect.runPromise(unfurlTitleE(url));
 }
+
+/** Background authoring paths share the authenticated endpoint's quota. */
+export const rateLimitedTitleE = Effect.fn("Unfurl.rateLimitedTitle")(
+  function* (url: string, limiter: RateLimit, key: string) {
+    const allowed = yield* Effect.tryPromise({
+      try: () => limiter.limit({ key }),
+      catch: (cause) => cause,
+    }).pipe(Effect.orElseSucceed(() => ({ success: false })));
+    return allowed.success ? yield* unfurlTitleE(url) : null;
+  },
+);

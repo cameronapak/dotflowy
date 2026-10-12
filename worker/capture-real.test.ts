@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { build } from "esbuild";
-import { Miniflare } from "miniflare";
+import { Miniflare, Response as FixtureResponse } from "miniflare";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { EmbedDescriptor } from "../src/data/embed-providers";
 import type { Node } from "../src/data/wire-schema";
 import type { OutlineSnapshot } from "./backup";
 import type {
@@ -18,6 +19,7 @@ import type { FixtureInput } from "./capture-real-fixture";
 
 let mf: Miniflare;
 let directory: string;
+const outboundUrls: string[] = [];
 
 type Key = { key: string; entry: { id: string; suffix: string } };
 type Inspection = {
@@ -162,6 +164,37 @@ beforeAll(async () => {
           exports: {
             UserOutlineDO: { type: "durable-object", storage: "sqlite" },
             ShardDO: { type: "durable-object", storage: "sqlite" },
+          },
+        },
+        dev: {
+          outboundService: {
+            type: "fetcher",
+            async handler(request) {
+              const url = new URL(request.url);
+              if (
+                url.hostname === "fixture.unfurl.test" ||
+                ["x.com", "twitter.com", "mobile.twitter.com"].includes(
+                  url.hostname,
+                )
+              ) {
+                outboundUrls.push(request.url);
+                const redirect = url.searchParams.get("redirect");
+                return redirect
+                  ? new FixtureResponse(null, {
+                      status: 302,
+                      headers: { location: redirect },
+                    })
+                  : new FixtureResponse("<title>Ordinary page</title>", {
+                      headers: { "content-type": "text/html" },
+                    });
+              }
+              // Preserve the existing opt-in provider smoke test's live transport.
+              const response = await fetch(request.url);
+              return new FixtureResponse(await response.arrayBuffer(), {
+                status: response.status,
+                headers: Object.fromEntries(response.headers),
+              });
+            },
           },
         },
       },
@@ -387,6 +420,129 @@ test("title upgrade only changes the untouched captured node", async () => {
     snapshot.nodes.find((node) => node.id === b.receipt.nodeId)?.text,
   ).toBe("mine");
 });
+
+test("generic link upgrade compares current text atomically and never recreates deleted nodes", async () => {
+  const { userId } = await account();
+  const created = await fixture<{ receipt: { nodeId: string } }>("capture", {
+    userId,
+    attemptId: randomUUID(),
+    date: "2026-10-08",
+    text: "Read https://first.test",
+  });
+  const nodeId = created.receipt.nodeId;
+  expect(
+    await fixture<{ upgraded: boolean }>("upgrade-link", {
+      userId,
+      nodeId,
+      expected: "Read https://first.test",
+      updatedText: "Read [First](https://first.test)",
+    }),
+  ).toEqual({ upgraded: true });
+  await fixture("edit", { userId, nodeId, updatedText: "My custom text" });
+  expect(
+    await fixture<{ upgraded: boolean }>("upgrade-link", {
+      userId,
+      nodeId,
+      expected: "Read [First](https://first.test)",
+      updatedText: "Late result",
+    }),
+  ).toEqual({ upgraded: false });
+  const { snapshot } = await fixture<Inspection>("inspect", { userId });
+  expect(snapshot.nodes.find((node) => node.id === nodeId)?.text).toBe(
+    "My custom text",
+  );
+  await fixture("edit", {
+    userId,
+    nodeId,
+    updatedText: "https://example.com/",
+    kind: "embed",
+  });
+  expect(
+    await fixture<{ upgraded: boolean }>("upgrade-link", {
+      userId,
+      nodeId,
+      expected: "https://example.com/",
+      updatedText: "[Title](https://example.com/)",
+    }),
+  ).toEqual({ upgraded: false });
+  await fixture("delete", { userId, nodeId });
+  expect(
+    await fixture<{ upgraded: boolean }>("upgrade-link", {
+      userId,
+      nodeId,
+      expected: "My custom text",
+      updatedText: "Resurrection",
+    }),
+  ).toEqual({ upgraded: false });
+  const after = await fixture<Inspection>("inspect", { userId });
+  expect(after.snapshot.nodes.some((node) => node.id === nodeId)).toBe(false);
+});
+
+test("unfurl rejects X before cache reads and on redirect hops, while ordinary pages still unfurl", async () => {
+  outboundUrls.length = 0;
+  for (const target of [
+    "https://x.com/jack/status/20",
+    "https://twitter.com/jack/status/20",
+    "https://mobile.twitter.com/jack/status/20",
+  ]) {
+    expect(
+      await fixture<{ title: string | null }>("unfurl", {
+        userId: "unfurl",
+        text: target,
+      }),
+    ).toEqual({ title: null });
+    expect(outboundUrls).toEqual([]);
+    expect(
+      await fixture<{ title: string | null }>("unfurl", {
+        userId: "unfurl",
+        text: target,
+        cachedTitle: "Legacy tweet-derived title",
+      }),
+    ).toEqual({ title: null });
+    expect(outboundUrls).toEqual([]);
+    const redirect = `https://fixture.unfurl.test/?redirect=${encodeURIComponent(target)}`;
+    expect(
+      await fixture<{ title: string | null }>("unfurl", {
+        userId: "unfurl",
+        text: redirect,
+      }),
+    ).toEqual({ title: null });
+    expect(outboundUrls).toEqual([redirect]);
+    outboundUrls.length = 0;
+  }
+  expect(
+    await fixture<{ title: string | null }>("unfurl", {
+      userId: "unfurl",
+      text: "https://fixture.unfurl.test/ordinary",
+    }),
+  ).toEqual({ title: "Ordinary page" });
+  expect(outboundUrls).toEqual(["https://fixture.unfurl.test/ordinary"]);
+});
+
+test.skipIf(!process.env.LIVE_EMBEDS)(
+  "live official oEmbed responses return provider descriptors",
+  async () => {
+    const urls = [
+      ["youtube", "https://www.youtube.com/watch?v=M7lc1UVf-VE&t=90"],
+      ["vimeo", "https://vimeo.com/22439234"],
+      ["spotify", "https://open.spotify.com/episode/7makk4oTQel546B0PZlDM5"],
+    ] as const;
+    for (const [provider, url] of urls) {
+      const response = await fixture<{ embed: EmbedDescriptor | null }>(
+        "embed",
+        {
+          userId: "live-smoke",
+          text: url,
+        },
+      );
+      expect(response.embed, provider).not.toBeNull();
+      expect(response.embed?.provider).toBe(provider);
+      if (provider === "youtube")
+        expect(response.embed?.src).toContain("start=90");
+    }
+  },
+  120000,
+);
 
 test("key storage, expiry boundary, revocation, tenant isolation, and password version fail closed", async () => {
   const first = await account();

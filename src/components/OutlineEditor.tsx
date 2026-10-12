@@ -44,11 +44,11 @@ import type { NodeCommands } from "./node-commands";
 
 import { echoedTextFor } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
+import { embedUrl } from "../data/embed-url";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop, getHistoryState } from "../data/history";
 import { planJoinPrevious } from "../data/join-previous";
-import { hasLink } from "../data/links";
 import { getLiveNodes } from "../data/live-nodes";
 import {
   indent,
@@ -122,6 +122,7 @@ import {
   dispatchPointerUp,
   externalDropTargets,
   getProtection,
+  hasFoldingToken,
   keymapSpecs,
   pluginPreloads,
   usePluginChrome,
@@ -159,9 +160,10 @@ import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
+import { NodeBody } from "./node-body";
 import { NodeDecorations } from "./NodeDecorations";
 import { OutlineLoading } from "./OutlineLoading";
-import { OutlineRow } from "./OutlineRow";
+import { INDENT_PX, OutlineRow } from "./OutlineRow";
 import {
   copySourceSelection,
   cutSourceSelection,
@@ -238,6 +240,29 @@ function onContentMouseDown(e: ReactMouseEvent) {
 // is ~32px (node-text min-height 24 + row padding); 36 errs slightly tall so the
 // initial window over-renders rather than leaving a gap. See ADR 0019.
 const ROW_ESTIMATE = 36;
+
+/** Reveal one node within the horizontal outline canvas without moving the
+ * window vertically. The row, not only its text, is the readable unit. */
+function revealOutlineRow(target: HTMLElement, onlyIfHidden = false) {
+  const row = target.closest<HTMLElement>(".outline-row");
+  const viewport = target.closest<HTMLElement>(".outline-canvas-viewport");
+  if (!row || !viewport) return;
+  const rowRect = row.getBoundingClientRect();
+  const viewportRect = viewport.getBoundingClientRect();
+  const viewportLeft = viewportRect.left + viewport.clientLeft;
+  const viewportRight = viewportLeft + viewport.clientWidth;
+  if (
+    onlyIfHidden &&
+    rowRect.right > viewportLeft &&
+    rowRect.left < viewportRight
+  )
+    return;
+  if (rowRect.left < viewportLeft) {
+    viewport.scrollBy({ left: rowRect.left - viewportLeft });
+  } else if (rowRect.right > viewportRight) {
+    viewport.scrollBy({ left: rowRect.right - viewportRight });
+  }
+}
 
 /**
  * Top-level outline editor. Owns:
@@ -329,6 +354,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // indicator knows how wide to draw and the window virtualizer can measure its
   // document-top offset (scrollMargin).
   const listRef = useRef<HTMLElement | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
+  const pointerFocus = useRef(false);
   // The sticky header block above the list. Observed so scrollMargin re-measures
   // when its height changes (tag-filter subheader opening, breadcrumb wrap, the
   // daily-progress bar) without a route remount -- else windowed rows drift by
@@ -460,6 +487,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
       (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ?? null,
     getListEl: () => listRef.current,
+    getHorizontalScrollEl: () => canvasViewportRef.current,
     getExternalDropTargets: () => externalDropTargets,
     // Resolved only on pointer-up, after the drag hook's own cleanup. Like the
     // delegated Seam-B handlers above, this reads the live event-time context.
@@ -673,6 +701,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
   const rows = useVisibleRows(rootId, isHidden, filter);
+  const deepestVisibleDepth = useMemo(
+    () => rows.reduce((deepest, row) => Math.max(deepest, row.depth), 0),
+    [rows],
+  );
   const measurements = useRef<readonly { start: number; size: number }[]>([]);
   const onHiddenFocus = useCallback(
     (previous: VisibleRow[], next: VisibleRow[], exiting: Set<string>) => {
@@ -736,6 +768,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onHiddenFocus,
   });
   const renderedRows = presentation.rows;
+  const previousVisibleDepth = useRef(deepestVisibleDepth);
+  // Expansion preserves the view. After collapse's native clamp, reveal the
+  // focused parent only if it is completely outside the remaining viewport.
+  useLayoutEffect(() => {
+    const shrank = deepestVisibleDepth < previousVisibleDepth.current;
+    previousVisibleDepth.current = deepestVisibleDepth;
+    if (!shrank) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) revealOutlineRow(active, true);
+  }, [deepestVisibleDepth]);
   // Mirror `rows` into the selection-fill module (2e-2) so each row's own
   // `useSelectionFill` read covers its visible descendants, not just a selected
   // root -- the flat list has no DOM nesting for a root's tint to paint behind
@@ -804,6 +846,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     if (!header || !hasResizeObserver()) return;
     const ro = new ResizeObserver(measure);
     ro.observe(header);
+    const titleBody = document.querySelector("[data-title-body]");
+    if (titleBody) ro.observe(titleBody);
     return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
@@ -826,6 +870,24 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       : undefined,
   });
   const virtualItems = virtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    // A provider can finish loading while the user types farther down the
+    // outline. Anchor that editor, not only rows above the viewport.
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
+      item,
+      _delta,
+      instance,
+    ) => {
+      const focused =
+        document.activeElement?.closest<HTMLElement>("li[data-index]");
+      const editing = document.activeElement?.matches(".node-text");
+      if (editing && focused) return item.index < Number(focused.dataset.index);
+      return item.start < (instance.scrollOffset ?? 0);
+    };
+    return () => {
+      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined;
+    };
+  }, [virtualizer]);
   useLayoutEffect(() => {
     measurements.current = virtualizer.measurementsCache;
     presentation.animateMounted();
@@ -927,8 +989,55 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onClick={onContentClick}
         onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}
-        onFocus={() => setFocusedFilterKey(findFocusedId())}
-        onBlur={() => setFocusedFilterKey(null)}
+        onPointerDownCapture={() => {
+          pointerFocus.current = true;
+        }}
+        onPointerCancelCapture={() => {
+          pointerFocus.current = false;
+        }}
+        onClickCapture={() => {
+          // Dead-space taps focus text during click, after pointerup. Clear
+          // after dispatch so those taps preserve the view too.
+          queueMicrotask(() => {
+            pointerFocus.current = false;
+          });
+        }}
+        onKeyDownCapture={() => {
+          pointerFocus.current = false;
+        }}
+        onFocus={(event) => {
+          setFocusedFilterKey(findFocusedId());
+          if (
+            !pointerFocus.current &&
+            event.target instanceof HTMLElement &&
+            event.target.classList.contains("node-text")
+          )
+            revealOutlineRow(event.target);
+        }}
+        onBlur={(event) => {
+          // Portaled row menus sit outside this region in the DOM. Keep the
+          // focused-row subscription while focus is in one, or this state
+          // change would detach the menu before its click lands.
+          const next = event.relatedTarget;
+          if (
+            next instanceof HTMLElement &&
+            next.closest('[data-slot="dropdown-menu-content"]')
+          )
+            return;
+          // Base UI can move focus after blur dispatch, leaving relatedTarget
+          // null. Wait through the pointer event's default focus transfer before
+          // deciding the row is truly unfocused.
+          window.setTimeout(() => {
+            if (
+              document.activeElement instanceof HTMLElement &&
+              document.activeElement.closest(
+                '[data-slot="dropdown-menu-content"]',
+              )
+            )
+              return;
+            setFocusedFilterKey(null);
+          }, 0);
+        }}
       >
         {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
             pointer and only while a bullet is focused (both gated inside the
@@ -997,85 +1106,95 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             {noMatches && renderedRows.length === 0 && filter?.emptyMessage ? (
               <div className="outline-empty">{filter.emptyMessage}</div>
             ) : (
-              <>
-                <ul
-                  className="outline-list"
-                  ref={(el) => {
-                    listRef.current = el;
-                  }}
+              <div
+                ref={canvasViewportRef}
+                className="outline-canvas-viewport scroll-fade-x"
+              >
+                <div
+                  className="outline-canvas"
                   style={{
-                    position: "relative",
-                    height: virtualizer.getTotalSize(),
+                    width: `max(100%, calc(${deepestVisibleDepth * INDENT_PX}px + var(--outline-node-min-width)))`,
                   }}
                 >
-                  {virtualItems.map((vi) => {
-                    const row = renderedRows[vi.index];
-                    if (!row) return null;
-                    return (
-                      <OutlineRow
-                        key={vi.key}
-                        nodeId={row.id}
-                        rowKey={row.key}
-                        contentId={row.contentId}
-                        isMirror={row.isMirror}
-                        capped={row.capped}
-                        broken={row.broken}
-                        depth={row.depth}
-                        ancestorCompleted={row.ancestorCompleted}
-                        exiting={presentation.exiting.has(row.key)}
-                        exitInert={
-                          presentation.exiting.get(row.key)?.fading ?? false
-                        }
-                        commands={commands}
-                        pluginCtx={pluginCtx}
-                        registerRef={registerRef}
-                        pivotId={pivotId}
-                        isHidden={isHidden}
-                        filter={filter}
-                        pendingFocus={pendingFocus}
-                        pendingFocusAtStart={pendingFocusAtStart}
-                        pendingFlash={pendingFlash}
-                        index={vi.index}
-                        start={vi.start}
-                        scrollMargin={virtualizer.options.scrollMargin}
-                        measureRef={virtualizer.measureElement}
-                      />
-                    );
-                  })}
-                </ul>
-                {/* Click in the whitespace below the list adds a new top-level
+                  <ul
+                    className="outline-list"
+                    ref={(el) => {
+                      listRef.current = el;
+                    }}
+                    style={{
+                      position: "relative",
+                      height: virtualizer.getTotalSize(),
+                    }}
+                  >
+                    {virtualItems.map((vi) => {
+                      const row = renderedRows[vi.index];
+                      if (!row) return null;
+                      return (
+                        <OutlineRow
+                          key={vi.key}
+                          nodeId={row.id}
+                          rowKey={row.key}
+                          contentId={row.contentId}
+                          isMirror={row.isMirror}
+                          capped={row.capped}
+                          broken={row.broken}
+                          depth={row.depth}
+                          ancestorCompleted={row.ancestorCompleted}
+                          exiting={presentation.exiting.has(row.key)}
+                          exitInert={
+                            presentation.exiting.get(row.key)?.fading ?? false
+                          }
+                          commands={commands}
+                          pluginCtx={pluginCtx}
+                          registerRef={registerRef}
+                          pivotId={pivotId}
+                          isHidden={isHidden}
+                          filter={filter}
+                          pendingFocus={pendingFocus}
+                          pendingFocusAtStart={pendingFocusAtStart}
+                          pendingFlash={pendingFlash}
+                          index={vi.index}
+                          start={vi.start}
+                          scrollMargin={virtualizer.options.scrollMargin}
+                          measureRef={virtualizer.measureElement}
+                        />
+                      );
+                    })}
+                  </ul>
+                  {/* Click in the whitespace below the list adds a new top-level
                 bullet. Hidden while filtering -- there's no "add here" then.
                 `size="icon"` (32px) is what puts the glyph on the same vertical
                 axis as the bullets above and the breadcrumb Home button. */}
-                {!filter && (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Add node"
-                    data-outline-add=""
-                    onClick={() =>
-                      runStructural(() => {
-                        capture(getTreeIndex(), null, null, {
-                          label: "create",
-                        });
-                        const siblings = childrenOf(getTreeIndex(), rootId);
-                        const afterId = siblings.length
-                          ? siblings[siblings.length - 1]!.id
-                          : null;
-                        const newId = insertSibling(
-                          getTreeIndex(),
-                          rootId,
-                          afterId,
-                        );
-                        pendingFocus.current = newId;
-                      })
-                    }
-                  >
-                    <PlusIcon />
-                  </Button>
-                )}
-              </>
+                  {!filter && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Add node"
+                      data-outline-add=""
+                      onClick={() =>
+                        runStructural(() => {
+                          capture(getTreeIndex(), null, null, {
+                            label: "create",
+                          });
+                          const siblings = childrenOf(getTreeIndex(), rootId);
+                          const afterId = siblings.length
+                            ? siblings[siblings.length - 1]!.id
+                            : null;
+                          const newId = insertSibling(
+                            getTreeIndex(),
+                            rootId,
+                            afterId,
+                          );
+                          pendingFocus.current = newId;
+                        })
+                      }
+                    >
+                      <PlusIcon />
+                    </Button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -1707,7 +1826,8 @@ function useNodeCommands({
               // text is the source's content, so a split would either desync every
               // instance or strand the tail on a local node. Treat it as the empty-
               // tail case: add a node, leave the source text whole (ADR 0022, 2c).
-              const caretAtEnd = isMirrorRow || after.length === 0;
+              const caretAtEnd =
+                isMirrorRow || content.kind === "embed" || after.length === 0;
               // Pressing Enter at the end of an open (expanded, has-children) bullet
               // adds a child at the top of its list rather than a sibling -- you're
               // diving into the thing you just finished naming. "Open" reads the
@@ -1750,7 +1870,7 @@ function useNodeCommands({
                   instance.parentId,
                   instanceId,
                   content.isTask,
-                  isMirrorRow ? "" : after,
+                  "",
                   content.kind,
                 );
               }
@@ -2083,12 +2203,23 @@ function useNodeCommands({
         // onSetTask: one PATCH, no `runStructural`, no echo wait. No protection
         // gate -- a paragraph is still a plain text node, so none of the four
         // protected-node rules (delete/blank/to-do/complete) are in play.
-        onSetKind: (id, kind) => {
+        onSetKind: (id, kind, text) => {
           if (guardLocked(getTreeIndex(), id, rowOf(id))) return;
           const node = getTreeIndex().byId.get(id);
-          if (node?.kind === kind && !node.isTask) return;
+          if (kind === "embed") {
+            if (guardProtected(id, "task", rowOf(id))) return;
+            const url = embedUrl(text ?? node?.text ?? "");
+            if (!url) return;
+            text = url;
+          }
+          if (
+            node?.kind === kind &&
+            !node.isTask &&
+            (text === undefined || node.text === text)
+          )
+            return;
           capture(getTreeIndex(), id, null, { label: "kind" });
-          setKind(id, kind);
+          setKind(id, kind, text);
         },
 
         onSetLocked: (id, locked) => {
@@ -2340,145 +2471,165 @@ function ZoomedTitle({
   );
 
   return (
-    <h2 className="zoomed-title">
-      {/* Block cell so a wrapped title flows UNDER the slot icons, mirroring
+    <>
+      <h2 className="zoomed-title">
+        {/* Block cell so a wrapped title flows UNDER the slot icons, mirroring
           the list row's .row-body (floated icons shorten only the first line
           box). A span, not a div -- an h2 only permits phrasing content. */}
-      <span className="row-body">
-        {beforeTextSlots.map((slot) => (
-          <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
-        ))}
-        <span
-          ref={(el) => {
-            ref.current = el;
-            registerRef(node.id, el);
-          }}
-          className={`node-text zoomed-title-text${isPivot ? " vt-morph" : ""}`}
-          style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
-          contentEditable={!locked}
-          tabIndex={locked ? 0 : undefined}
-          suppressContentEditableWarning
-          spellCheck={false}
-          aria-label="Title"
-          aria-readonly={locked}
-          aria-multiline="true"
-          data-completed={node.completed}
-          data-history-key={node.id}
-          data-history-node-id={node.id}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            const text = readSource(el);
-            onTextChange(text);
-            slash.handleInput();
-            menus.handleInput();
-            // Re-decorate live, revealing the link under the caret. Suspended
-            // during IME composition; compositionend handles that case.
-            if (!composingRef.current) {
+        <span className="row-body">
+          {beforeTextSlots.map((slot) => (
+            <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
+          ))}
+          <span
+            ref={(el) => {
+              ref.current = el;
+              registerRef(node.id, el);
+            }}
+            className={`node-text zoomed-title-text${isPivot ? " vt-morph" : ""}`}
+            data-kind={node.kind ?? undefined}
+            style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
+            contentEditable={!locked}
+            tabIndex={locked ? 0 : undefined}
+            suppressContentEditableWarning
+            spellCheck={false}
+            aria-label="Title"
+            aria-readonly={locked}
+            aria-multiline="true"
+            data-completed={node.completed}
+            data-history-key={node.id}
+            data-history-node-id={node.id}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              const text = readSource(el);
+              onTextChange(text);
+              slash.handleInput();
+              menus.handleInput();
+              // Re-decorate live, revealing the link under the caret. Suspended
+              // during IME composition; compositionend handles that case.
+              if (!composingRef.current) {
+                decorate(el, text, getCaretOffset(el), true);
+                syncedRef.current = text;
+              }
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={(e) => {
+              composingRef.current = false;
+              const el = e.currentTarget;
+              const text = readSource(el);
+              onTextChange(text);
               decorate(el, text, getCaretOffset(el), true);
               syncedRef.current = text;
-            }
-          }}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={(e) => {
-            composingRef.current = false;
-            const el = e.currentTarget;
-            const text = readSource(el);
-            onTextChange(text);
-            decorate(el, text, getCaretOffset(el), true);
-            syncedRef.current = text;
-          }}
-          onPaste={(e) => {
-            const el = e.currentTarget;
-            const next = pasteIntoBullet(e, el, node.id, getCtx, onTextChange, {
-              // THE exception (ADR 0044): the title's siblings live outside the
-              // view, so inserting one would make it vanish. Remaining pasted
-              // roots become the title's prepended children instead.
-              placement: "child-prepend",
-              activeKey: node.id,
-              rowEl: el.closest(".zoomed-title"),
-              focus: {
-                setPendingFocus,
-                placeCaretHere: (text, offset) => {
-                  decorate(el, text, offset, true);
-                  setCaretOffset(el, offset);
-                  syncedRef.current = text;
+            }}
+            onPaste={(e) => {
+              const el = e.currentTarget;
+              const next = pasteIntoBullet(
+                e,
+                el,
+                node.id,
+                getCtx,
+                onTextChange,
+                {
+                  // THE exception (ADR 0044): the title's siblings live outside the
+                  // view, so inserting one would make it vanish. Remaining pasted
+                  // roots become the title's prepended children instead.
+                  placement: "child-prepend",
+                  activeKey: node.id,
+                  rowEl: el.closest(".zoomed-title"),
+                  focus: {
+                    setPendingFocus,
+                    placeCaretHere: (text, offset) => {
+                      decorate(el, text, offset, true);
+                      setCaretOffset(el, offset);
+                      syncedRef.current = text;
+                    },
+                  },
                 },
-              },
-            });
-            if (next !== null) syncedRef.current = next;
-          }}
-          // Copy/cut hand back the markdown SOURCE (a folded link's rendered
-          // text drops the url half). See copySourceSelection (ADR 0005).
-          onCopy={(e) => copySourceSelection(e, e.currentTarget)}
-          onCut={(e) => {
-            const el = e.currentTarget;
-            const next = cutSourceSelection(e, el, onTextChange);
-            if (next !== null) syncedRef.current = next;
-          }}
-          onFocus={(e) => {
-            // Caret and node selection are mutually exclusive (ADR 0018): focusing
-            // the title leaves selection mode.
-            clearSelection();
-            // Per-link reveal in the title (ADR 0005): watch the caret, and
-            // reveal the link it's currently on. Link-free is a no-op so the
-            // native caret stands.
-            const el = e.currentTarget;
-            caretWatchRef.current?.();
-            caretWatchRef.current = watchCaretReveal(
-              el,
-              () => composingRef.current,
-            );
-            // Deferred to the next frame so a CLICK at the title's end settles on
-            // the folded layout before the link expands; see revealLinkAtCaret.
-            if (!hasLink(node.text)) return;
-            revealLinkAtCaret(el, (t) => {
-              syncedRef.current = t;
-            });
-          }}
-          onBlur={(e) => {
-            slash.close();
-            menus.close();
-            const el = e.currentTarget;
-            caretWatchRef.current?.();
-            caretWatchRef.current = null;
-            const text = readSource(el);
-            // A protected node left empty heals: restore its name + shake/toast.
-            const restored = healProtectedText(node.id, text, el);
-            if (restored !== null) syncedRef.current = restored;
-            else if (hasLink(text)) {
-              decorate(el, text, null, false);
-              syncedRef.current = text;
-            }
-          }}
-          onKeyDown={(e) => {
-            if (locked && e.key === "/" && !slash.isOpen) {
-              e.preventDefault();
-              slash.openWithoutInput();
-              return;
-            }
-            // While a menu is open its Enter/Arrow/Escape/Tab are handled here;
-            // the title keymap above is suspended, so these are the sole
-            // consumers. Both no-op when closed. A caret menu (#, [[) wins over
-            // the `/` palette (they never co-open, but mirror OutlineRow's order).
-            if (menus.handleKeyDown(e)) return;
-            slash.handleKeyDown(e);
-          }}
-        />
-      </span>
-      {/* Trailing decoration zone for the zoomed title (Seam F
+              );
+              if (next !== null) syncedRef.current = next;
+            }}
+            // Copy/cut hand back the markdown SOURCE (a folded link's rendered
+            // text drops the url half). See copySourceSelection (ADR 0005).
+            onCopy={(e) => copySourceSelection(e, e.currentTarget)}
+            onCut={(e) => {
+              const el = e.currentTarget;
+              const next = cutSourceSelection(e, el, onTextChange);
+              if (next !== null) syncedRef.current = next;
+            }}
+            onFocus={(e) => {
+              if (e.target !== e.currentTarget) return;
+              // Caret and node selection are mutually exclusive (ADR 0018): focusing
+              // the title leaves selection mode.
+              clearSelection();
+              // Per-link reveal in the title (ADR 0005): watch the caret, and
+              // reveal the link it's currently on. Link-free is a no-op so the
+              // native caret stands.
+              const el = e.currentTarget;
+              caretWatchRef.current?.();
+              caretWatchRef.current = watchCaretReveal(
+                el,
+                () => composingRef.current,
+              );
+              // Deferred to the next frame so a CLICK at the title's end settles on
+              // the folded layout before the link expands; see revealLinkAtCaret.
+              if (!hasFoldingToken(node.text)) return;
+              revealLinkAtCaret(el, (t) => {
+                syncedRef.current = t;
+              });
+            }}
+            onBlur={(e) => {
+              if (e.target !== e.currentTarget) return;
+              slash.close();
+              menus.close();
+              const el = e.currentTarget;
+              caretWatchRef.current?.();
+              caretWatchRef.current = null;
+              if (
+                e.relatedTarget instanceof HTMLElement &&
+                el.contains(e.relatedTarget)
+              )
+                return;
+              const text = readSource(el);
+              // A protected node left empty heals: restore its name + shake/toast.
+              const restored = healProtectedText(node.id, text, el);
+              if (restored !== null) syncedRef.current = restored;
+              else if (hasFoldingToken(text)) {
+                decorate(el, text, null, false);
+                syncedRef.current = text;
+              }
+            }}
+            onKeyDown={(e) => {
+              if (locked && e.key === "/" && !slash.isOpen) {
+                e.preventDefault();
+                slash.openWithoutInput();
+                return;
+              }
+              // While a menu is open its Enter/Arrow/Escape/Tab are handled here;
+              // the title keymap above is suspended, so these are the sole
+              // consumers. Both no-op when closed. A caret menu (#, [[) wins over
+              // the `/` palette (they never co-open, but mirror OutlineRow's order).
+              if (menus.handleKeyDown(e)) return;
+              slash.handleKeyDown(e);
+            }}
+          />
+        </span>
+        {/* Trailing decoration zone for the zoomed title (Seam F
           `title:after-text`, ADR 0031) -- mirrors OutlineRow's `row:after-text`
           so the two render paths can't drift. Dormant until a trailing slot
           registers. */}
-      <NodeDecorations
-        node={node}
-        position="title:after-text"
-        getCtx={getCtx}
-      />
-      {slash.menu}
-      {menus.menu}
-    </h2>
+        <NodeDecorations
+          node={node}
+          position="title:after-text"
+          getCtx={getCtx}
+        />
+        {slash.menu}
+        {menus.menu}
+      </h2>
+      <div data-title-body>
+        <NodeBody node={node} position="title:body" getCtx={getCtx} />
+      </div>
+    </>
   );
 }
 

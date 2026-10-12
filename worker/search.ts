@@ -34,7 +34,7 @@ export const SearchPage = Schema.Struct({
     Schema.Struct({
       id: Schema.String,
       text: Schema.String,
-      kind: Schema.NullOr(Schema.Literal("paragraph")),
+      kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
       isTask: Schema.Boolean,
       completed: Schema.Boolean,
       locked: Schema.Boolean,

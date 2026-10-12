@@ -20,6 +20,7 @@ const INDENT = "  ";
  * will see. Kind outranks `isTask` here as it does in the renderer.
  */
 function prefixFor(node: Node, text: string): string {
+  if (node.kind === "embed") return "- ";
   if (node.kind === "paragraph") return paragraphRoundTrips(text) ? "" : "- ";
   if (node.isTask) return node.completed ? "- [x] " : "- [ ] ";
   return "- ";

@@ -164,7 +164,7 @@ export interface PluginContext {
      *  focus theft; the content below just swaps. Use when the destination
      *  isn't rendered in the outgoing view (so there's no element to morph
      *  FROM), or when a separate element already carries the motion (the week
-     *  strip's horizontal pill handoff IS the transition -- ADR 0054). */
+     *  strip's layoutId pill IS the transition -- ADR 0054). */
     open: (id: string) => void;
   };
   /** Show (or dismiss, with null) a self-managing overlay -- a portaled popover
@@ -340,8 +340,12 @@ export interface PasteInput {
  *  link). Async follow-up work writes back through `ctx.mutations`. ADR 0016. */
 export interface AfterPasteInput {
   inserted: string;
+  /** Full source before and after insertion, including enclosing code/spoilers. */
+  before: string;
+  text: string;
   nodeId: string;
-  el: HTMLElement;
+  /** Structural pastes may create offscreen nodes without an element. */
+  el?: HTMLElement;
 }
 
 /** What an autoformat transform is told: the just-typed SOURCE text and the
@@ -464,7 +468,10 @@ export type SlotPosition =
   | "row:before-text"
   | "title:before-text"
   | "row:after-text"
-  | "title:after-text";
+  | "title:after-text"
+  // Reviewed block content outside contentEditable, never runtime plugin HTML.
+  | "row:body"
+  | "title:body";
 
 export interface SlotSpec {
   id: string;

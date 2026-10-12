@@ -50,7 +50,7 @@ export const NodeSchema = Schema.Struct({
   // prose. Additive + nullable so `isTask` never had to migrate; the literal
   // union widens if more kinds arrive. Same required-and-nullable boundary shape
   // as `mirrorOf`/`origin`, backfilled the same three ways.
-  kind: Schema.NullOr(Schema.Literal("paragraph")),
+  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
 });
 export type Node = Schema.Schema.Type<typeof NodeSchema>;
 

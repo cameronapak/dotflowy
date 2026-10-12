@@ -292,7 +292,7 @@ function emitNode(
   if (content.isTask) attrs += ' _task="true"';
   // ADR 0045. Present only for a paragraph, so an absent `_kind` means bullet:
   // foreign OPML and every export that predates this attribute import unchanged.
-  if (content.kind === "paragraph") attrs += ' _kind="paragraph"';
+  if (content.kind !== null) attrs += ` _kind="${content.kind}"`;
   if (!inExpansion) {
     if (state.sourcesNeedingId.has(id)) attrs += ` id="${escapeXmlAttr(id)}"`;
     if (isMirror) attrs += ` _mirror="${escapeXmlAttr(contentId)}"`;

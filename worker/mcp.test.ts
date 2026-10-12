@@ -13,13 +13,157 @@ import { Clock, Effect, Schema } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
-import type { OutlineStore } from "./mcp-tools";
+import type { AfterTextWrite, OutlineStore } from "./mcp-tools";
 
 import { createNode } from "../src/data/tree";
 import { handleMcp } from "./mcp";
 import { SearchPage } from "./search";
 
 // --- In-memory store fake -----------------------------------------------------
+
+test("text-authoring MCP tools notify after commit with old and new source", async () => {
+  const { store, nodes } = makeStore();
+  const writes: Parameters<AfterTextWrite>[0] = [];
+  const notify: AfterTextWrite = (batch) => {
+    for (const write of batch)
+      expect(nodes.get(write.nodeId)?.text).toBe(write.text);
+    writes.push(...batch);
+  };
+  for (const [name, args] of [
+    ["add_node", { text: "https://first.test" }],
+    [
+      "add_subtree",
+      {
+        nodes: [
+          {
+            text: "https://second.test",
+            children: [{ text: "https://child.test" }],
+          },
+        ],
+      },
+    ],
+    ["add_to_today", { date: "2026-10-08", text: "https://today.test" }],
+    [
+      "add_subtree",
+      { date: "2026-10-09", nodes: [{ text: "https://daily-forest.test" }] },
+    ],
+  ] satisfies Array<[string, RpcParams]>) {
+    const response = await rpc(
+      store,
+      "tools/call",
+      { name, arguments: args },
+      1,
+      "TestAgent",
+      true,
+      undefined,
+      notify,
+    );
+    expect(await response.text()).not.toContain('"isError":true');
+  }
+  expect(
+    writes
+      .filter((write) => write.text.startsWith("https://"))
+      .map((write) => write.text),
+  ).toEqual([
+    "https://first.test",
+    "https://second.test",
+    "https://child.test",
+    "https://today.test",
+    "https://daily-forest.test",
+  ]);
+  const first = writes[0]!;
+  writes.length = 0;
+  await rpc(
+    store,
+    "tools/call",
+    {
+      name: "update_node",
+      arguments: {
+        nodeId: first.nodeId,
+        text: first.text + " https://new.test",
+      },
+    },
+    1,
+    "TestAgent",
+    true,
+    undefined,
+    notify,
+  );
+  expect(writes).toEqual([
+    {
+      nodeId: first.nodeId,
+      before: first.text,
+      text: first.text + " https://new.test",
+    },
+  ]);
+  writes.length = 0;
+  await rpc(
+    store,
+    "tools/call",
+    {
+      name: "update_node",
+      arguments: { nodeId: first.nodeId, completed: true },
+    },
+    1,
+    "TestAgent",
+    true,
+    undefined,
+    notify,
+  );
+  expect(writes).toEqual([]);
+});
+
+test("Embed writes normalize URLs, preserve kind and child notes, and never schedule title lookup", async () => {
+  const { store, nodes } = makeStore();
+  const writes: Parameters<AfterTextWrite>[0] = [];
+  const url = "https://www.youtube.com/watch?v=M7lc1UVf-VE&t=90";
+  for (const [name, args] of [
+    ["add_node", { text: `[Video](${url})`, kind: "embed", isTask: true }],
+    [
+      "add_subtree",
+      {
+        nodes: [{ text: url, kind: "embed", children: [{ text: "My notes" }] }],
+      },
+    ],
+    ["add_to_today", { date: "2026-10-08", text: url, kind: "embed" }],
+  ] satisfies Array<[string, RpcParams]>) {
+    const response = await rpc(
+      store,
+      "tools/call",
+      { name, arguments: args },
+      1,
+      "TestAgent",
+      true,
+      undefined,
+      (batch) => writes.push(...batch),
+    );
+    expect(await response.text()).not.toContain('"isError":true');
+  }
+  const embeds = [...nodes.values()].filter((node) => node.kind === "embed");
+  expect(embeds).toHaveLength(3);
+  expect(embeds.every((node) => node.text === url && !node.isTask)).toBe(true);
+  expect(writes.some((write) => write.text.includes(url))).toBe(false);
+  const child = [...nodes.values()].find((node) => node.text === "My notes")!;
+  expect(nodes.get(child.parentId!)?.kind).toBe("embed");
+  const invalid = await callTool(store, "update_node", {
+    nodeId: child.id,
+    kind: "embed",
+    text: "prose https://example.com",
+  });
+  expect(invalid.result?.isError).toBe(true);
+  expect(nodes.get(child.id)?.text).toBe("My notes");
+  const converted = await callTool(store, "update_node", {
+    nodeId: child.id,
+    kind: "embed",
+    text: url,
+  });
+  expect(converted.result?.isError).not.toBe(true);
+  expect(nodes.get(child.id)?.kind).toBe("embed");
+  expect(toolText(await callTool(store, "get_outline", {}))).toContain("embed");
+  expect(
+    [...nodes.values()].filter((node) => node.kind === "embed"),
+  ).toHaveLength(4);
+});
 
 interface FakeStore {
   store: OutlineStore;
@@ -98,6 +242,7 @@ async function rpc(
   agentAccess = true,
   // Pins "now" through Effect's TestClock; omit for the real clock.
   now?: number,
+  afterTextWrite?: AfterTextWrite,
 ) {
   const body: RpcRequestBody = { jsonrpc: "2.0", method };
   if (id !== null) body.id = id;
@@ -107,7 +252,13 @@ async function rpc(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const program = handleMcp(request, store, origin, agentAccess);
+  const program = handleMcp(
+    request,
+    store,
+    origin,
+    agentAccess,
+    afterTextWrite,
+  );
   if (now === undefined) return Effect.runPromise(program);
   return Effect.runPromise(
     Effect.gen(function* () {

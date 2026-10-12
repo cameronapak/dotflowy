@@ -20,7 +20,7 @@ export const wireNodeArg = v.object({
   createdAt: v.number(),
   updatedAt: v.number(),
   origin: v.string().nullable(),
-  kind: v.literal("paragraph").nullable(),
+  kind: v.union(v.literal("paragraph"), v.literal("embed")).nullable(),
 });
 
 export const changeOpArg = v.union(

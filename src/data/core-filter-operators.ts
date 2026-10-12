@@ -20,16 +20,18 @@ import type { FilterOperator } from "./filter-query";
 export const CORE_FILTER_OPERATORS: FilterOperator[] = [
   {
     key: "is",
-    values: ["todo", "bullet", "paragraph", "mirror"],
-    description: "Filter by node kind (todo, bullet, paragraph, mirror)",
+    values: ["todo", "bullet", "paragraph", "embed", "mirror"],
+    description: "Filter by node kind (todo, bullet, paragraph, embed, mirror)",
     predicate: (node, _index, value) => {
       switch (value) {
         case "paragraph":
           return node.kind === "paragraph";
+        case "embed":
+          return node.kind === "embed";
         case "todo":
-          return node.kind !== "paragraph" && node.isTask;
+          return node.kind === null && node.isTask;
         case "bullet":
-          return node.kind !== "paragraph" && !node.isTask;
+          return node.kind === null && !node.isTask;
         case "mirror":
           return node.mirrorOf != null;
         default:

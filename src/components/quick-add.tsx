@@ -79,7 +79,6 @@ import {
   finishHistoryScope,
   trackPendingCapture,
 } from "../data/history";
-import { hasLink } from "../data/links";
 import { getLiveNodes } from "../data/live-nodes";
 import {
   appendChild,
@@ -92,7 +91,8 @@ import {
 } from "../data/mutations";
 import { isNodesLimitError } from "../data/nodes-client-effect";
 import { appRuntime } from "../data/runtime";
-import { runStructural } from "../data/structural";
+import { notifySaveFailed } from "../data/save-failure";
+import { runStructural, runStructuralTracked } from "../data/structural";
 import {
   buildTreeIndex,
   childrenOf,
@@ -107,7 +107,9 @@ import { hasWindow } from "../env";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import {
+  afterPaste,
   getCaptureDestination,
+  hasFoldingToken,
   keymapSpecs,
   usePluginChrome,
 } from "../plugins/registry";
@@ -225,6 +227,7 @@ const MiniNodeEditor = forwardRef<
     node: Node;
     getCtx: () => PluginContext;
     onText: (text: string) => void;
+    onAfterPaste: typeof afterPaste;
     /** Enter: commit the single node & close the overlay (toast if off-page). */
     onCommit: () => void;
     /** Cmd+Enter: commit & keep going -- clear the editor, overlay stays open. */
@@ -233,7 +236,16 @@ const MiniNodeEditor = forwardRef<
     onHistory: (kind: "undo" | "redo") => void;
   }
 >(function MiniNodeEditor(
-  { node, getCtx, onText, onCommit, onCommitNext, onEscape, onHistory },
+  {
+    node,
+    getCtx,
+    onText,
+    onAfterPaste,
+    onCommit,
+    onCommitNext,
+    onEscape,
+    onHistory,
+  },
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -372,10 +384,17 @@ const MiniNodeEditor = forwardRef<
           const el = e.currentTarget;
           // `structural=null`: a multi-line paste joins with spaces rather than
           // creating a subtree -- the capture stays a single node (ADR 0049;
-          // markdown-tree paste is the outline's). `onText` borns the node from
-          // the pasted text; unfurl (afterPaste) writes back only once the node
-          // has a real id (a paste into an already-born capture).
-          const next = pasteIntoBullet(e, el, node.id, getCtx, onText, null);
+          // markdown-tree paste is the outline's). Post-paste work waits for
+          // this draft's real, persisted ID, even if capture closes meanwhile.
+          const next = pasteIntoBullet(
+            e,
+            el,
+            node.id,
+            getCtx,
+            onText,
+            null,
+            onAfterPaste,
+          );
           if (next !== null) syncedRef.current = next;
         }}
         onCopy={(e) => copySourceSelection(e, e.currentTarget)}
@@ -385,25 +404,32 @@ const MiniNodeEditor = forwardRef<
           if (next !== null) syncedRef.current = next;
         }}
         onFocus={(e) => {
+          if (e.target !== e.currentTarget) return;
           const el = e.currentTarget;
           caretWatchRef.current?.();
           caretWatchRef.current = watchCaretReveal(
             el,
             () => composingRef.current,
           );
-          if (!hasLink(readSource(el))) return;
+          if (!hasFoldingToken(readSource(el))) return;
           revealLinkAtCaret(el, (t) => {
             syncedRef.current = t;
           });
         }}
         onBlur={(e) => {
+          if (e.target !== e.currentTarget) return;
           slash.close();
           menus.close();
           const el = e.currentTarget;
           caretWatchRef.current?.();
           caretWatchRef.current = null;
+          if (
+            e.relatedTarget instanceof HTMLElement &&
+            el.contains(e.relatedTarget)
+          )
+            return;
           const text = readSource(el);
-          if (hasLink(text)) {
+          if (hasFoldingToken(text)) {
             decorate(el, text, null, false);
             syncedRef.current = text;
           }
@@ -793,7 +819,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       // and be lost. Coalescing into one batch removes the race (ADR 0009).
       const intents = d.intents;
       d.intents = [];
-      runStructural(() => {
+      const { persisted } = runStructuralTracked(() => {
         capture(index, null, d.birthHistory?.tag ?? null, {
           label: "capture",
           scope: d.scope,
@@ -811,6 +837,13 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       d.lastId = newId;
       if (d.finished) finishHistoryScope(d.scope);
       if (mountedRef.current && draftRef.current === d) setDraftId(newId);
+      try {
+        await persisted;
+      } catch (error) {
+        notifySaveFailed(error);
+        d.id = null;
+        return null;
+      }
       return newId;
     })();
     d.promise = p;
@@ -1062,7 +1095,8 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       onToggleCompleted: (_id, completed) =>
         runNodeIntent((id) => toggleCompleted(id, completed)),
       onSetTask: (_id, isTask) => runNodeIntent((id) => setIsTask(id, isTask)),
-      onSetKind: (_id, kind) => runNodeIntent((id) => setKind(id, kind)),
+      onSetKind: (_id, kind, text) =>
+        runNodeIntent((id) => setKind(id, kind, text)),
       onSetLocked: noop,
       onRequestMove: noop,
       onRequestMirror: noop,
@@ -1099,6 +1133,29 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     }),
     [commands],
   );
+
+  const onAfterPaste: typeof afterPaste = (input, ctx) => {
+    const draft = draftRef.current!;
+    void (draft.promise ?? startBorn(draft)).then((id) => {
+      if (!id) return;
+      afterPaste(
+        { ...input, nodeId: id },
+        {
+          ...ctx,
+          mutations: {
+            ...ctx.mutations,
+            // Never route a late result through commitText: the user may have
+            // already started another capture or closed this overlay.
+            onTextChange: (nodeId, text) => {
+              if (!getTreeIndex().byId.has(nodeId)) return;
+              setText(nodeId, text);
+              if (draft.id === nodeId) draft.text = text;
+            },
+          },
+        },
+      );
+    });
+  };
 
   const index = getTreeIndex();
 
@@ -1186,6 +1243,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                   node={node}
                   getCtx={getCtx}
                   onText={commitText}
+                  onAfterPaste={onAfterPaste}
                   onCommit={commitAndClose}
                   onCommitNext={commitAndNext}
                   onEscape={close}

@@ -5,9 +5,8 @@
 // import's sliced apply once the batch is big enough to freeze the main thread.
 //
 // This is CORE, deliberately: structural paste *creates nodes*, and every guard
-// that makes node creation safe is core. It runs BEFORE the Seam I plugin chain,
-// which is why a bare URL inside a pasted line stays plain text while a lone
-// pasted URL still becomes a chip (ADR 0044: "a transfer preserves").
+// that makes node creation safe is core. Parsing precedes the plugin chain;
+// post-paste effects run only after the created nodes have persisted.
 
 import { toast } from "sonner";
 
@@ -25,7 +24,8 @@ import {
   type MdPastePlacement,
   type MdPastePlan,
 } from "../data/markdown-import";
-import { runStructural, runStructuralSliced } from "../data/structural";
+import { notifySaveFailed } from "../data/save-failure";
+import { runStructuralTracked, runStructuralSliced } from "../data/structural";
 import { buildTreeIndex, createNode, now } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
@@ -65,6 +65,9 @@ export interface MarkdownPasteArgs {
   /** The `.outline-row` to shake when a protection guard rejects. */
   rowEl: Element | null;
   focus: PasteFocusSink;
+  onApplied?: (
+    writes: Array<{ nodeId: string; before: string; text: string }>,
+  ) => void;
 }
 
 /**
@@ -165,16 +168,31 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole paste.
   capture(index, activeKey, null, { label: "paste" });
 
+  const notify = () => {
+    const literalIds = new Set(plan.literalIds);
+    const writes = [
+      { nodeId: anchorId, before: anchor?.text ?? "", text: plan.anchor.text },
+      // The tail may have moved to a new node. Its old URLs are not new input.
+      ...plan.inserts.map((node) => ({
+        nodeId: node.id,
+        before: head + tail,
+        text: node.text,
+      })),
+    ];
+    args.onApplied?.(writes.filter(({ nodeId }) => !literalIds.has(nodeId)));
+  };
+
   if (opCount < RESTORE_SLICE_OPS) {
     // The keystroke-adjacent path. It must stay synchronous: no confirm step, no
     // modal, no await. `DELETE_CONFIRM_THRESHOLD` exists because deletion is
     // destructive; a paste is additive and one Cmd+Z away.
     try {
-      runStructural(() => {
+      const { persisted } = runStructuralTracked(() => {
         writeAnchor();
         for (let i = 0; i < plan.inserts.length; i++) writeInsert(i);
         writeRepoints();
       });
+      void persisted.then(notify, notifySaveFailed);
     } catch (err) {
       drop();
       throw err;
@@ -200,6 +218,8 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     writeInsert,
     writeRepoints,
     count,
+  }).then((applied) => {
+    if (applied) notify();
   });
   return true;
 }
