@@ -1,6 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
+import {
+  placeCaret,
+  seedOutline,
+  type ApiNode,
+  type SeedNode,
+} from "./fixtures";
 
 // Rich links (ADR 0005): markdown `[label](url)` in node.text that folds to a
 // clean <a> while the bullet is blurred and BRACKET-reveals while the caret is
@@ -33,13 +38,209 @@ async function load(page: Page, tree: SeedNode[]) {
       };
     }) as typeof window.open;
   });
-  await seedOutline(page, tree);
+  // Inline-link behavior with the Embed display-choice menu disabled.
+  const fixture = await seedOutline(page, tree, {
+    kv: {
+      "account-prefs": [
+        {
+          key: "editor-feature:embeds",
+          value: { key: "editor-feature:embeds", enabled: false },
+        },
+      ],
+    },
+  });
   await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await expect(text(page, tree[0]!.id)).toBeVisible({ timeout: 15000 });
+  return fixture;
 }
 
-// Dispatch a synthetic paste carrying clipboard data. The caret/selection must
-// already be set on `locator` -- the handler splices into the current range.
+// Live descriptor lookup stays in the Worker suite; frame isolation needs a browser.
+test("provider Embed frames render isolated from their child notes", async ({
+  page,
+}) => {
+  for (const [provider, url, src] of [
+    [
+      "youtube",
+      "https://www.youtube.com/watch?v=M7lc1UVf-VE&t=90",
+      "https://www.youtube.com/embed/M7lc1UVf-VE?start=90",
+    ],
+    [
+      "vimeo",
+      "https://vimeo.com/22439234",
+      "https://player.vimeo.com/video/22439234",
+    ],
+    [
+      "spotify",
+      "https://open.spotify.com/episode/7makk4oTQel546B0PZlDM5",
+      "https://open.spotify.com/embed/episode/7makk4oTQel546B0PZlDM5",
+    ],
+  ]) {
+    await seedOutline(
+      page,
+      [
+        {
+          id: "media",
+          parentId: null,
+          prevSiblingId: null,
+          text: url!,
+          kind: "embed",
+        },
+        {
+          id: "note",
+          parentId: "media",
+          prevSiblingId: null,
+          text: "My notes remain separate from the provider.",
+        },
+      ],
+      {
+        kv: {
+          "account-prefs": [
+            {
+              key: "external-embeds",
+              value: { key: "external-embeds", enabled: true },
+            },
+          ],
+        },
+      },
+    );
+    await page.route("**/api/embeds?**", (route) =>
+      route.fulfill({
+        json: {
+          embed: { provider, src, width: 480, height: 360, title: "Provider" },
+        },
+      }),
+    );
+    await page.route(src!, (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<html><body>Provider frame</body></html>",
+      }),
+    );
+    await page.goto("/");
+    const frame = page.locator('[data-node-body="media"] iframe');
+    await expect(frame).toHaveCSS("opacity", "1", { timeout: 25000 });
+    await expect(frame).toHaveAttribute("src", src!);
+    expect(
+      await frame.evaluate((el: HTMLIFrameElement) => el.contentDocument),
+    ).toBeNull();
+    await expect(text(page, "note")).toContainText("My notes remain separate");
+    await page.unroute("**/api/embeds?**");
+  }
+});
+
+test("prose paste enriches new URLs only and preserves protected content", async ({
+  page,
+}) => {
+  const requested: string[] = [];
+  await page.route("**/api/unfurl?*", async (route) => {
+    const url = new URL(route.request().url()).searchParams.get("url")!;
+    requested.push(url);
+    await route.fulfill({
+      json: {
+        title: url.includes("first") ? "First article" : "Second article",
+      },
+    });
+  });
+  await load(page, [
+    {
+      id: "n",
+      parentId: null,
+      prevSiblingId: null,
+      text: "Old https://old.test ",
+    },
+  ]);
+  await focusBullet(page, "n");
+  await text(page, "n").evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  });
+  await pasteInto(text(page, "n"), {
+    plain:
+      "Read https://first.test and https://second.test. `https://code.test` ||https://spoiler.test|| [Mine](https://custom.test)",
+  });
+  await blurActive(page);
+  await expect(
+    text(page, "n").getByRole("link", { name: "First article" }),
+  ).toBeVisible();
+  await expect(
+    text(page, "n").getByRole("link", { name: "Second article" }),
+  ).toBeVisible();
+  await expect(text(page, "n")).toContainText("Old https://old.test");
+  expect(requested.sort()).toEqual([
+    "https://first.test",
+    "https://second.test",
+  ]);
+});
+
+test("structural paste unfurls newly persisted nodes, but literal paste never fetches", async ({
+  page,
+}) => {
+  const requested: string[] = [];
+  await page.route("**/api/unfurl?*", async (route) => {
+    requested.push(new URL(route.request().url()).searchParams.get("url")!);
+    await route.fulfill({ json: { title: "Pasted article" } });
+  });
+  await load(page, [
+    { id: "n", parentId: null, prevSiblingId: null, text: "" },
+  ]);
+  await focusBullet(page, "n");
+  await pasteInto(text(page, "n"), {
+    plain:
+      "- First https://first.test\n```\nhttps://fenced.test\n```\n- Second https://second.test",
+  });
+  await blurActive(page);
+  await expect(
+    page.locator(".outline-row a[data-link]", { hasText: "Pasted article" }),
+  ).toHaveCount(2);
+  await expect(
+    page.locator(".node-text").filter({ hasText: "https://fenced.test" }),
+  ).toHaveText("https://fenced.test");
+  await focusBullet(page, "n");
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "V",
+        metaKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    ),
+  );
+  await pasteInto(text(page, "n"), { plain: " https://literal.test " });
+  await page.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "V" })),
+  );
+  await expect(text(page, "n")).toContainText("https://literal.test");
+  expect(requested.sort()).toEqual([
+    "https://first.test",
+    "https://second.test",
+  ]);
+});
+
+test("Add Link with an empty label fetches a title", async ({ page }) => {
+  await page.route("**/api/unfurl?*", (route) =>
+    route.fulfill({ json: { title: "Created article" } }),
+  );
+  await load(page, [
+    { id: "n", parentId: null, prevSiblingId: null, text: "" },
+  ]);
+  await focusBullet(page, "n");
+  await page.keyboard.type("/link");
+  await page.keyboard.press("Enter");
+  const popover = page.locator("[data-link-edit-popover]");
+  await expect(popover).toBeVisible();
+  await popover.getByPlaceholder("https://…").fill("https://created.test");
+  await popover.getByRole("button", { name: "Done" }).click();
+  await blurActive(page);
+  await expect(
+    text(page, "n").getByRole("link", { name: "Created article" }),
+  ).toBeVisible();
+});
+
+// Dispatch a synthetic paste carrying clipboard data at the current selection.
 async function pasteInto(
   locator: Locator,
   data: { plain?: string; html?: string },
@@ -111,7 +312,9 @@ test("a blurred bullet folds the link to a clean <a>; focusing bracket-reveals i
     "src",
     "https://www.google.com/s2/favicons?domain=anthropic.com&sz=64",
   );
-  await expect(anchor.locator(".link-edit-icon")).toHaveCount(1);
+  await expect(
+    text(page, "n").getByRole("button", { name: "Edit link" }),
+  ).toHaveCount(1);
 
   // Focus reveals the BRACKETS around the editable label, but the url stays
   // folded behind the `(✎)` chip (its data-src is the bare url) -- it never
@@ -607,10 +810,21 @@ test("the pencil on a folded link opens the editor; Done rewrites label and url"
     },
   ]);
 
-  await text(page, "n").locator("a[data-link] .link-edit-icon").click();
+  const pencil = text(page, "n").getByRole("button", { name: "Edit link" });
+  const buttonBox = await pencil.boundingBox();
+  await pencil.click();
 
   // The popover opens prefilled -- and the pencil click did NOT open the url.
   await expect(popover(page)).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await popover(page).boundingBox();
+      return Math.round(box!.x + box!.width / 2);
+    })
+    .toBe(Math.round(buttonBox!.x + buttonBox!.width / 2));
+  await expect
+    .poll(async () => Math.round((await popover(page).boundingBox())!.y))
+    .toBe(Math.round(buttonBox!.y + buttonBox!.height + 6));
   await expect(popover(page).getByLabel("Link text")).toHaveValue("Anthropic");
   await expect(popover(page).getByLabel("Link URL")).toHaveValue(
     "https://anthropic.com",
@@ -637,7 +851,7 @@ test("Cancel leaves the link untouched", async ({ page }) => {
     { id: "n", parentId: null, prevSiblingId: null, text: LINK },
   ]);
 
-  await text(page, "n").locator("a[data-link] .link-edit-icon").click();
+  await text(page, "n").getByRole("button", { name: "Edit link" }).click();
   await popover(page).getByLabel("Link text").fill("changed");
   await popover(page).getByRole("button", { name: "Cancel" }).click();
 
@@ -645,6 +859,75 @@ test("Cancel leaves the link untouched", async ({ page }) => {
   await expect.poll(() => activeNodeId(page)).toBe("n");
   await expect.poll(() => readSrc(page, "n")).toBe(LINK);
 });
+
+for (const revealed of [false, true]) {
+  test(`editing the second URL preserves earlier destinations (${revealed ? "revealed" : "folded"})`, async ({
+    page,
+  }) => {
+    const url = "https://example.com/";
+    const prefix = `[Earlier](${url}) and `;
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: prefix + url },
+    ]);
+    if (revealed) {
+      await placeCaret(text(page, "n"), "end");
+      await page.keyboard.press("ArrowLeft");
+      await expect(text(page, "n").locator(".link-url-chip")).toHaveCount(0);
+    }
+    await text(page, "n")
+      .getByRole("button", { name: "Edit link" })
+      .nth(1)
+      .click();
+    await popover(page).getByLabel("Link URL").fill("https://later.example/");
+    await popover(page).getByRole("button", { name: "Done" }).click();
+    await expect
+      .poll(() => readSrc(page, "n"))
+      .toBe(`${prefix}https://later.example/`);
+
+    // Identical Markdown links are separate source occurrences too.
+    const fixture = await load(page, [
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: `${LINK} and ${LINK}`,
+      },
+    ]);
+    if (revealed) {
+      await placeCaret(text(page, "n"), "end");
+      await page.keyboard.press("ArrowLeft");
+      await expect(text(page, "n").locator(".link-url-chip")).toBeVisible();
+    }
+    await text(page, "n")
+      .getByRole("button", { name: "Edit link" })
+      .nth(1)
+      .click();
+    await popover(page).getByLabel("Link text").fill("Second");
+    await popover(page).getByRole("button", { name: "Done" }).click();
+    await expect
+      .poll(() => readSrc(page, "n"))
+      .toBe(`${LINK} and [Second](https://anthropic.com)`);
+    await text(page, "n")
+      .getByRole("button", { name: "Edit link" })
+      .nth(1)
+      .click();
+    await popover(page).getByLabel("Link text").fill("Stale draft");
+    const nodes: ApiNode[] = await page.evaluate(() =>
+      fetch("/api/nodes").then((response) => response.json()),
+    );
+    const movedSource = `New prefix ${LINK} and [Second](https://anthropic.com)`;
+    await fixture.injectExternalChange([
+      {
+        op: "update",
+        value: { ...nodes[0]!, text: movedSource, updatedAt: 100 },
+      },
+    ]);
+    await expect.poll(() => readSrc(page, "n")).toBe(movedSource);
+    await popover(page).getByRole("button", { name: "Done" }).click();
+    await expect(popover(page)).toHaveCount(0);
+    await expect.poll(() => readSrc(page, "n")).toBe(movedSource);
+  });
+}
 
 test("the revealed link's (✎) chip opens the editor too", async ({ page }) => {
   await load(page, [

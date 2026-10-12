@@ -46,7 +46,7 @@ type McpNode = {
   createdAt: number;
   updatedAt: number;
   origin: string | null;
-  kind: "paragraph" | null;
+  kind: "paragraph" | "embed" | null;
 };
 
 function assertOwner(ctx: QueryCtx | MutationCtx, userId: string): void {

@@ -265,7 +265,7 @@ export function getSelectionRange(
 // folded-link source lengths, and stops once the point is reached. Handles both
 // a text-node caret (container is the text node) and an element caret (container
 // is an element, offset is a child index).
-function sourceOffsetUpTo(
+export function sourceOffsetUpTo(
   el: HTMLElement,
   container: Node,
   offset: number,

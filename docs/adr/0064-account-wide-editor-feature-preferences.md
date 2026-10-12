@@ -67,3 +67,17 @@ unavailable until a successful retry; a failed focus refresh retains the last
 known preferences. Focus refresh does not move an already-started capture or
 override a destination the user explicitly chose. The next capture uses the
 current default.
+
+## October 8 amendment: Embeds and external loading
+
+Embeds adds the optional `editor-feature:embeds` switch, enabled by default.
+Turning it off removes provider bodies and embed commands, not stored Kind,
+URLs, or children. A separate `external-embeds` account preference defaults off
+and controls provider loading across devices. External tools cannot grant it.
+
+Consent is not optimistic: a successful initial read and persisted approval are
+required before any embed request. Local revocation unmounts frames immediately;
+failed revocation keeps this tab off but cannot claim to revoke other devices.
+Focus refresh remains the cross-device contract. Permission requests are
+serialized, and a later revoke masks an earlier in-flight approval. Calendar
+sync events do not stand in for the initial preference read.

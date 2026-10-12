@@ -99,6 +99,8 @@ interface DragDeps {
   getRowEl: (key: string) => HTMLElement | null;
   /** The `ul.outline-list` element, for the indicator's right edge. */
   getListEl: () => HTMLElement | null;
+  /** Horizontal owner for deeply nested rows (ADR 0069). */
+  getHorizontalScrollEl: () => HTMLElement | null;
   /** Plugin-owned controls that can receive this structural drag (Seam M). */
   getExternalDropTargets: () => readonly ExternalDropTargetSpec[];
   /** Live plugin context, resolved only when an external drop commits. */
@@ -428,8 +430,9 @@ export function useDragReorder(deps: DragDeps) {
     }
   }, []);
 
-  // Auto-scroll loop: while the pointer sits in a top/bottom edge band, scroll
-  // the window and re-project so off-screen drop targets become reachable.
+  // Auto-scroll loop: while the pointer sits in a viewport edge band, scroll
+  // the window vertically or the outline canvas horizontally, then re-project
+  // so off-screen drop targets and depths become reachable.
   const tickScroll = useCallback(() => {
     const s = state.current;
     if (!s || !s.dragging) return;
@@ -438,8 +441,19 @@ export function useDragReorder(deps: DragDeps) {
     let dy = 0;
     if (y < EDGE) dy = -SCROLL_MAX * (1 - y / EDGE);
     else if (y > h - EDGE) dy = SCROLL_MAX * (1 - (h - y) / EDGE);
-    if (dy !== 0) {
-      window.scrollBy(0, dy);
+    const horizontal = depsRef.current.getHorizontalScrollEl();
+    const rect = horizontal?.getBoundingClientRect();
+    let dx = 0;
+    if (rect && rect.width < horizontal!.scrollWidth) {
+      if (s.lastX < rect.left + EDGE) {
+        dx = -SCROLL_MAX * (1 - (s.lastX - rect.left) / EDGE);
+      } else if (s.lastX > rect.right - EDGE) {
+        dx = SCROLL_MAX * (1 - (rect.right - s.lastX) / EDGE);
+      }
+    }
+    if (dy !== 0) window.scrollBy(0, dy);
+    if (dx !== 0) horizontal?.scrollBy(dx, 0);
+    if (dx !== 0 || dy !== 0) {
       project(s.lastX, s.lastY);
     }
     s.raf = requestAnimationFrame(tickScroll);

@@ -10,6 +10,18 @@ import {
 } from "./markdown-import";
 import { buildTreeIndex, createNode, type Node, type NodeKind } from "./tree";
 
+test("an Embed exports its URL and children but intentionally loses kind", () => {
+  const nodes = [
+    createNode({ id: "e", text: "https://example.com/post", kind: "embed" }),
+    createNode({ id: "c", parentId: "e", text: "notes" }),
+  ];
+  const markdown = outlineToMarkdown(buildTreeIndex(nodes), ["e"]);
+  expect(markdown).toBe("- https://example.com/post\n  - notes");
+  const forest = parseMarkdownForest(markdown);
+  expect(forest[0]!.kind).toBeNull();
+  expect(forest[0]!.children[0]!.text).toBe("notes");
+});
+
 // --- helpers ------------------------------------------------------------------
 
 /** The outline the round-trip compares: `outlineToMarkdown` carries text, task

@@ -15,8 +15,10 @@ import { useEffect, type RefObject } from "react";
 export function useDismissable(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
+  enabled = true,
 ): void {
   useEffect(() => {
+    if (!enabled) return;
     const onPointerDown = (e: PointerEvent) => {
       // SAFETY: a pointer event's target is the DOM node hit
       if (!ref.current?.contains(e.target as Node)) onClose();
@@ -34,5 +36,5 @@ export function useDismissable(
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [ref, onClose]);
+  }, [ref, onClose, enabled]);
 }

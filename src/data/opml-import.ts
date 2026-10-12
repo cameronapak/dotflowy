@@ -590,8 +590,9 @@ function convertOutline(el: XmlElement, state: MapState): OpmlImportNode {
   const completed = el.attributes["_complete"] === "true";
   // Absent (foreign OPML, and every export that predates ADR 0045) = a bullet.
   // An unrecognized value reads as a bullet too, never as a decode failure.
+  const rawKind = el.attributes["_kind"];
   const kind: NodeKind =
-    el.attributes["_kind"] === "paragraph" ? "paragraph" : null;
+    rawKind === "paragraph" || rawKind === "embed" ? rawKind : null;
   // Kind exclusivity (ADR 0045), enforced here because OPML is a trust boundary
   // like the MCP one: a hand-written or hostile document can carry BOTH
   // `_task="true"` and `_kind="paragraph"`, and `planOpmlImport` would persist

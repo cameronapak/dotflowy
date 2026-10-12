@@ -31,7 +31,8 @@ function toOutlineNode(
     createdAt: Number(value.createdAt ?? 0),
     updatedAt: Number(value.updatedAt ?? 0),
     origin: value.origin ?? null,
-    kind: value.kind === "paragraph" ? "paragraph" : null,
+    kind:
+      value.kind === "paragraph" || value.kind === "embed" ? value.kind : null,
     userId,
   };
 }

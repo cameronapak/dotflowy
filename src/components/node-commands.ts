@@ -36,7 +36,7 @@ export interface NodeCommands {
   onSetTask: (id: string, isTask: boolean) => void;
   // Set the node's kind: "paragraph" (paragraph glyph, prose) or null (plain bullet).
   // Clears `isTask` -- the kinds are mutually exclusive (ADR 0045).
-  onSetKind: (id: string, kind: NodeKind) => void;
+  onSetKind: (id: string, kind: NodeKind, text?: string) => void;
   // Set direct owner lock intent on the node's true source (ADR 0067).
   onSetLocked: (id: string, locked: boolean) => void;
   // Open the `/move` destination picker for this bullet.

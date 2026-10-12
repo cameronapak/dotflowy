@@ -5,7 +5,7 @@ import { Data, Effect, Schema } from "effect";
 import type { CaptureResult } from "./capture-input";
 import type { UserOutlineDO } from "./outline-do";
 
-import { encodeUrlForMarkdown, sanitizeLinkLabel } from "../src/data/links";
+import { bareHttpUrl } from "../src/data/links";
 import {
   CaptureBody,
   CaptureKeyCreateBody,
@@ -21,7 +21,8 @@ import {
 } from "./capture-keys";
 import { resolveUserId } from "./identity";
 import { getPlan, nodeLimitForPlan } from "./plan";
-import { unfurlTitleE } from "./unfurl";
+import { rateLimitedTitleE } from "./unfurl";
+import { unfurlTextE } from "./unfurl-text";
 
 interface CaptureEnv {
   DB: D1Database;
@@ -209,30 +210,32 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
               console.warn("capture last-used update failed");
             }),
         );
-        const url = normalized.unfurlUrl;
-        if (url && !result.replayed) {
+        if (!result.replayed) {
           ctx.waitUntil(
             Effect.runPromise(
               Effect.gen(function* () {
-                const { success } = yield* Effect.promise(() =>
-                  env.UNFURL_LIMIT.limit({
-                    key: resolveUserId(key.userId, env),
-                  }),
+                // A supplied title only labels a standalone URL, never prose.
+                const before =
+                  input.title?.trim() && bareHttpUrl(input.text)
+                    ? normalized.text
+                    : "";
+                const text = yield* unfurlTextE(
+                  before,
+                  normalized.text,
+                  (url) =>
+                    rateLimitedTitleE(
+                      url,
+                      env.UNFURL_LIMIT,
+                      resolveUserId(key.userId, env),
+                    ),
                 );
-                if (!success) return;
-                const title = yield* unfurlTitleE(url);
-                const label = title ? sanitizeLinkLabel(title) : "";
-                if (!label) return;
+                if (text === normalized.text) return;
                 const liveKey = yield* Effect.promise(() =>
                   authenticateCaptureKey(env.DB, authorization, Date.now()),
                 );
                 if (!liveKey) return;
                 yield* Effect.promise(() =>
-                  stub.upgradeCaptureText(
-                    attemptId,
-                    normalized.text,
-                    `[${label}](${encodeUrlForMarkdown(url)})`,
-                  ),
+                  stub.upgradeCaptureText(attemptId, normalized.text, text),
                 );
               }),
             ).catch(() => {

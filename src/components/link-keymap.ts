@@ -65,6 +65,9 @@ function openLinkEditAtCaret(
     {
       nodeId,
       token: text.slice(link.start, link.end),
+      source: text,
+      start: link.start,
+      end: link.end,
       label: link.label,
       url: link.url,
       x: rect.left,

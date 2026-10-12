@@ -3,6 +3,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { mergeProps, mergeRefs } from "@react-aria/utils";
 import {
   cloneElement,
+  useCallback,
+  useLayoutEffect,
+  useRef,
   useState,
   type ComponentProps,
   type ReactElement,
@@ -49,18 +52,57 @@ export function MenuSheetContent({
   title,
   compact = false,
   children,
+  isOpen,
+  onOpenChange,
+  onAfterClose,
 }: {
   title: string;
   compact?: boolean;
   children: ReactNode;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onAfterClose?: () => void;
 }) {
   const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
+  const [pageGutter] = useState(() =>
+    Math.max(
+      0,
+      window.innerWidth -
+        document.documentElement.getBoundingClientRect().width,
+    ),
+  );
+  const afterClose = useRef(onAfterClose);
+  useLayoutEffect(() => {
+    afterClose.current = isOpen === false ? onAfterClose : undefined;
+  }, [isOpen, onAfterClose]);
+  const overlayRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) return;
+      // The sheet needs a viewport-wide stage, but releasing the root's stable
+      // gutter must not widen the outline and clamp its horizontal scroll.
+      const compensate = pageGutter > 0 && !element.hasAttribute("data-nested");
+      const body = document.body;
+      const padding = body.style.paddingInlineEnd;
+      if (compensate)
+        body.style.paddingInlineEnd = `${parseFloat(getComputedStyle(body).paddingInlineEnd) + pageGutter}px`;
+      // The native overlay removes its DOM only after the exit gesture completes.
+      // Programmatic callers can then release their host and restore focus.
+      return () => {
+        if (compensate) body.style.paddingInlineEnd = padding;
+        afterClose.current?.();
+      };
+    },
+    [pageGutter],
+  );
   const parentDialog = anchor?.closest<HTMLElement>('[role="dialog"]');
   return (
     <>
       <span ref={setAnchor} className="contents" />
       {anchor && (
         <SheetOverlay
+          ref={overlayRef}
+          isOpen={isOpen}
+          onOpenChange={onOpenChange}
           className="menu-sheet-overlay"
           data-nested={parentDialog ? "" : undefined}
           UNSTABLE_portalContainer={parentDialog ? anchor : undefined}

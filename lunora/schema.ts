@@ -24,7 +24,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     origin: v.string().nullable(),
-    kind: v.literal("paragraph").nullable(),
+    kind: v.union(v.literal("paragraph"), v.literal("embed")).nullable(),
     userId: v.string(),
   })
     .shardBy("userId")

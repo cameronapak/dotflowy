@@ -38,6 +38,18 @@ test.each([
   ["http://8.8.8.8/", true],
   ["http://172.32.0.1/", true], // just outside 172.16/12
   ["http://[::ffff:8.8.8.8]/", true], // IPv4-mapped IPv6 to a public address
+  // X stays browser-only, including alternate hosts and redirect targets.
+  ["https://x.com/jack/status/20", false],
+  ["https://www.x.com/jack/status/20", false],
+  ["https://mobile.twitter.com/jack/status/20", false],
+  [
+    "https://publish.twitter.com/oembed?url=https://x.com/jack/status/20",
+    false,
+  ],
+  ["https://X.COM./jack/status/20", false],
+  ["https://twitter.com./jack/status/20", false],
+  ["https://notx.com/", true],
+  ["https://x.com.example.com/", true],
   // Non-http(s) schemes and unparseable input.
   ["ftp://example.com", false],
   ["file:///etc/passwd", false],

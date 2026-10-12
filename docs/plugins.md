@@ -5,8 +5,8 @@ The editor is a clean core extended by **plugins**: modules compiled into the bu
 Read [ADR 0001](./adr/0001-plugin-architecture.md) before adding a seam, and [ADR 0031](./adr/0031-two-lane-plugin-trust.md) before giving a plugin new privileges. Widget-mode tokens: [ADR 0006](./adr/0006-react-token-widgets.md).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ExternalDropTargetSpec`, `NodeProtection`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
-- **`index.ts`** — the one explicit ordered array `plugins = [todos, provenance, code, links, nodeLinks, routeBible, tags, emphasis, highlight, spoiler, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order. `editorFeaturePlugins` maps the two reviewed optional plugins to their account preference keys.
-- **`registry.ts`** — derives the token regex, dispatch, transforms, menus, commands, keymaps, slots, protection, search providers, and input chain from that array. Optional Bible and Daily editor seams refresh when account preferences change; widget registration, protection, and preloads remain unconditional. React consumers read dynamic slots and commands through `usePluginChrome`. The core consumes these and stays generic.
+- **`index.ts`** — the one explicit ordered array `plugins = [todos, provenance, code, links, embeds, nodeLinks, routeBible, tags, emphasis, highlight, spoiler, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order. `editorFeaturePlugins` maps the three reviewed optional plugins to their account preference keys.
+- **`registry.ts`** — derives the token regex, dispatch, transforms, menus, commands, keymaps, slots, protection, search providers, and input chain from that array. Optional Bible, Daily, and Embeds editor seams refresh when account preferences change; widget registration, protection, and preloads remain unconditional. React consumers read dynamic slots and commands through `usePluginChrome`. The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
 
@@ -39,9 +39,9 @@ Add a new side-collection to `KV_COLLECTIONS` in `worker/index.ts`. The e2e kv m
 
 ## Optional editor features
 
-Settings → Editor features controls Bible references and Daily notes, both on
+Settings → Editor features controls Bible references, Daily notes, and Embeds, all on
 by default. `src/data/editor-features.ts` stores `editor-feature:bible` and
-`editor-feature:daily` in the existing per-user `account-prefs` namespace. Local
+`editor-feature:daily`, plus `editor-feature:embeds`, in the per-user `account-prefs` namespace. Local
 changes apply optimistically, failed saves roll back, and other tabs and devices
 refresh on focus. Optional controls wait for the initial preference read.
 
@@ -52,6 +52,15 @@ omits Daily date suggestions. All three editor render paths redecorate from DOM
 source text while preserving the caret; composing text waits until IME ends.
 CLI and MCP daily operations remain available. See
 [ADR 0064](./adr/0064-account-wide-editor-feature-preferences.md).
+
+Embeds also requires the independent `external-embeds` account permission,
+off by default. Approval must persist before provider requests start. The reviewed
+`row:body` and `title:body` positions render below editable text through
+`NodeBody`; these block slots are outside the trailing decoration budget.
+Quick-add does not render them. Core preserves the source link with the plugin
+off. Provider HTML never enters the authenticated app document. See
+[ADR 0016](./adr/0016-link-title-unfurl.md) and
+[ADR 0031](./adr/0031-two-lane-plugin-trust.md).
 
 ## Editor render paths
 

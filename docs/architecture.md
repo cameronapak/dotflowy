@@ -37,7 +37,7 @@ reconstructed in memory at read time.
 Node {
   id, parentId, prevSiblingId,        // tree shape + sibling order
   text, isTask, completed, collapsed, // content + UI state
-  kind,                               // null (a bullet, or a task per isTask) or "paragraph"
+  kind,                               // null (bullet/task), "paragraph", or "embed"
   bookmarkedAt,                       // null, or the ms it was pinned (also the bookmark sort key)
   locked,                             // direct owner lock; effective state inherits through subtrees and mirrors
   mirrorOf,                           // null, or the id of the node this one windows
@@ -46,10 +46,12 @@ Node {
 }
 ```
 
-A bullet, a to-do, and a paragraph are the three **kinds** of node — mutually
+A bullet, a to-do, a paragraph, and an Embed are the four **kinds** of node — mutually
 exclusive presentations of the same thing, converted between but never
 combined. `completed` is orthogonal: any node can be done. See
-[paragraph nodes](./adr/0045-paragraph-node-kind.md).
+[paragraph nodes](./adr/0045-paragraph-node-kind.md) and
+[Embed nodes](./adr/0016-link-title-unfurl.md). An Embed stores only its URL in
+`text`; provider content and dimensions are not outline data.
 
 Sibling order is a linked list via `prevSiblingId` (the Workflowy/Notion
 approach). Inserting between two bullets is O(1) and never requires

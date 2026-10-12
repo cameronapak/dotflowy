@@ -37,7 +37,7 @@ export interface Doc_nodes {
     createdAt: number;
     updatedAt: number;
     origin: string;
-    kind: "paragraph";
+    kind: "paragraph" | "embed";
     userId: string;
 }
 
@@ -178,7 +178,7 @@ export interface Insert_nodes {
     createdAt: number;
     updatedAt: number;
     origin: string;
-    kind: "paragraph";
+    kind: "paragraph" | "embed";
     userId: string;
 }
 

@@ -90,3 +90,17 @@ exception to silently drop node state rather than shift presentation.
   `planOpmlImport` emits through the client's `makeNode`, not through `outline-ops.ts`, so a
   document carrying both `_task="true"` and `_kind="paragraph"` would otherwise persist the illegal
   pair. `convertOutline` normalizes it (kind wins) before the plan is built.
+
+## October 8 amendment: Embed is the fourth kind
+
+ADR 0016 widens `kind` to `null | "paragraph" | "embed"`. An Embed uses `text`
+for its source URL, without persisted provider content or dimensions. Non-null
+kind still outranks `isTask`. Enter never splits an Embed URL or inherits its
+kind onto a new note. Children, mirrors, completion, and tree operations remain
+ordinary core behavior.
+
+OPML preserves `_kind="embed"`; CLI/MCP expose `kind: "embed"`. Explicit
+creation/conversion validates a single credential-free HTTPS URL. Markdown
+exports the URL and child notes as ordinary bullets, intentionally losing the
+Embed kind on reimport. This is the agreed exception to the round-trip rule,
+chosen over a proprietary Markdown extension.

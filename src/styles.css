@@ -372,29 +372,6 @@ h2 span.protection-indicator {
   }
 }
 
-/* Daily note day-to-day handoff (ADR 0054). The keyed editor remount means a
-   shared-layout animation also absorbs window scroll restoration into y/scale.
-   This destination pill animates only the captured horizontal delta. */
-@keyframes week-calendar-selection-slide {
-  from {
-    transform: translateX(var(--week-calendar-selection-x));
-  }
-  to {
-    transform: translateX(0);
-  }
-}
-
-.week-calendar-selection-slide {
-  animation: week-calendar-selection-slide 200ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .week-calendar-selection-slide {
-    animation: none;
-    transform: none;
-  }
-}
-
 /*
  * Spotlight focus mode (ADR 0033). `spotlight-on` on <body> = mode enabled; the
  * dim itself is PURE CSS. While a bullet caret is focused (`:has(.node-text:
@@ -963,7 +940,7 @@ h2.zoomed-title .row-body > .title-paragraph {
 
 /* Every before-text decoration (checkbox, badges, lock, provenance mark)
    floats; the 6px replaces the flex row's gap it no longer receives. */
-.row-body > :not(.node-text) {
+.row-body > :not(.node-text, .node-body-slot) {
   float: left;
   margin-right: 6px;
 }
@@ -977,6 +954,9 @@ h2.zoomed-title .row-body > .title-paragraph {
  */
 :root {
   --reading-font-size: 17px;
+  /* ADR 0069: minimum row width once indentation would otherwise squeeze it.
+     The viewport cap preserves the 16px mobile gutters. */
+  --outline-node-min-width: min(288px, calc(100vw - 2rem));
   /* The first-line box height (font-size x line-height). Leading decorations
      center on it via `calc(var(--reading-line-box) / 2 - Kpx)` so their vertical
      offset tracks the reading size instead of a margin frozen at the old 16px
@@ -986,9 +966,11 @@ h2.zoomed-title .row-body > .title-paragraph {
 }
 :root[data-text-size="small"] {
   --reading-font-size: 15px;
+  --outline-node-min-width: min(256px, calc(100vw - 2rem));
 }
 :root[data-text-size="large"] {
   --reading-font-size: 19px;
+  --outline-node-min-width: min(320px, calc(100vw - 2rem));
 }
 
 .node-text {
@@ -1498,6 +1480,11 @@ body.dragging-active * {
 /* The site favicon, leading a folded link (Google s2/favicons). It sits inside the <a>
    but contributes no textContent, so caret math is unaffected. A fixed em box
    keeps it aligned with the text regardless of the source icon's size. */
+.link-start {
+  /* Keep the favicon with the first character, not an entire unbreakable URL. */
+  white-space: nowrap;
+}
+
 .link-favicon {
   display: inline-block;
   width: 0.95em;
@@ -1519,7 +1506,7 @@ body.dragging-active * {
   display: none;
 }
 
-.node-link.link-unfurling::before {
+.node-link.link-unfurling .link-start::before {
   content: "";
   display: inline-block;
   width: 0.95em;
@@ -1541,7 +1528,7 @@ body.dragging-active * {
 
 /* Reduced motion: hold a static ring instead of spinning. */
 @media (prefers-reduced-motion: reduce) {
-  .node-link.link-unfurling::before {
+  .node-link.link-unfurling .link-start::before {
     animation: none;
   }
 }
@@ -1573,9 +1560,8 @@ body.dragging-active * {
 
 /* The edit affordance (ADR 0005, bracket reveal): a small pencil painted with
    the current text color via an SVG mask (lucide `pencil`). It trails the label
-   inside a folded <a> and fills the revealed link's `(✎)` chip -- a text-free
-   span, so source/caret math is unaffected. Clicking it opens the Edit Link
-   popover (Seam B). */
+   beside a folded <a> and fills the revealed link's `(✎)` button. The icon is
+   text-free, so source/caret math is unaffected. */
 .link-edit-icon {
   display: inline-block;
   width: 0.7em;
@@ -1591,8 +1577,72 @@ body.dragging-active * {
 }
 
 .node-link:hover .link-edit-icon,
+.link-edit-button:hover .link-edit-icon,
 .link-url-chip:hover .link-edit-icon {
   opacity: 1;
+}
+
+.link-edit-button,
+.link-url-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  min-height: 1.4em;
+  margin-left: 0.12em;
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
+  color: var(--muted-foreground);
+}
+
+.link-with-editor {
+  --link-edit-size: 1.4em;
+}
+
+.link-with-editor > .node-link {
+  /* Reserve the pencil on the last line of the anchor, then place the sibling
+     button into that space. Both stay inline without nesting two controls or
+     giving the pencil a separate line-breaking opportunity. */
+  padding-inline-end: calc(var(--link-edit-size) + 0.12em);
+}
+
+.link-with-editor:has(> .node-link) > .link-edit-button {
+  min-width: var(--link-edit-size);
+  margin-left: calc(-1 * var(--link-edit-size));
+}
+
+.link-edit-button .link-edit-icon {
+  margin-left: 0;
+}
+
+.link-edit-button:focus-visible,
+.link-url-chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .link-with-editor {
+    --link-edit-size: max(24px, 1.4em);
+  }
+
+  .link-edit-button,
+  .link-url-chip {
+    /* Like the bullet, keep a compact horizontal target beside editable text.
+       Enlarge only its touch height, not the line box or the gap after a link. */
+    min-width: 24px;
+  }
+
+  .link-edit-button::before,
+  .link-url-chip::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    height: max(100%, 44px);
+    top: 50%;
+    transform: translateY(-50%);
+  }
 }
 
 /* The revealed link's folded URL: the pencil stands in for the bare url
@@ -1603,6 +1653,12 @@ body.dragging-active * {
   cursor: pointer;
   user-select: none;
   color: oklch(0.5 0.18 255);
+  /* The literal parentheses already frame this inline control. Do not carry
+     the folded button's horizontal padding into `(✎)` or enlarge its line. */
+  min-width: 0;
+  min-height: 0;
+  margin-left: 0;
+  vertical-align: -0.02em;
 }
 
 .dark .link-url-chip {
@@ -1656,6 +1712,70 @@ dotflowy-widget[data-bible-ref][data-atom-selected] > span {
 
 [data-highlight-reveal]:hover .highlight-pen-icon {
   opacity: 1;
+}
+
+/* A reviewed block slot, outside editable text and the inline decoration budget. */
+.node-body-slot {
+  clear: both;
+  width: 100%;
+  max-width: 40rem;
+  font-size: 1rem;
+  font-weight: normal;
+  line-height: 1.5;
+}
+.node-body-slot:empty {
+  display: none;
+}
+.outline-canvas-viewport {
+  /* Row widths depend on this viewport, not on deeper children widening the
+     canvas. Inline containment leaves window-owned vertical sizing intact. */
+  container-type: inline-size;
+  width: calc(100% + 16px);
+  max-width: none;
+  margin-inline-start: -16px;
+  padding-inline-start: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+}
+.outline-canvas-viewport::-webkit-scrollbar {
+  display: none;
+}
+.outline-canvas {
+  min-width: 100%;
+}
+.embed-frame {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+/* X's official widget cannot shrink below 250px. Widen its owning content
+   cell rather than clipping or scaling the provider. The outline canvas
+   contains any overflow and keeps the page chrome fixed. */
+.outline-row:has([data-x-embed]) {
+  /* Content + bullet + gap + row padding. Do not use min-content: the
+     provider resizes its iframe to its host and would feed back into sizing. */
+  min-width: calc(250px + 16px + 6px + 12px);
+}
+
+.row-body:has([data-x-embed]) {
+  min-width: 250px;
+}
+
+@media (pointer: coarse) {
+  .outline-row:has([data-x-embed]) {
+    min-width: calc(250px + 44px + 24px + 6px + 8px);
+  }
+
+  .row-body:has([data-x-embed]) {
+    /* Include the existing right-edge chevron reserve in the border box. */
+    min-width: calc(250px + 44px);
+  }
 }
 
 :root {

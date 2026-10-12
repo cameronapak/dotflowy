@@ -10,10 +10,12 @@ export type FixtureInput = {
   attemptId?: string;
   date?: string;
   text?: string;
+  cachedTitle?: string;
   fingerprint?: string;
   limit?: number | null;
   nodeId?: string;
   updatedText?: string;
+  kind?: "embed";
   expected?: string;
   id?: string;
   sessionCreatedAt?: number;

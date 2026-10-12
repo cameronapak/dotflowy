@@ -29,7 +29,12 @@ import {
   Schema,
 } from "effect";
 
-import { type OutlineStore, type ToolResult, tools } from "./mcp-tools";
+import {
+  type AfterTextWrite,
+  type OutlineStore,
+  type ToolResult,
+  tools,
+} from "./mcp-tools";
 import { APP_VERSION } from "./version";
 
 // --- Protocol constants -------------------------------------------------------
@@ -223,6 +228,7 @@ function handleToolCall(
   params: RpcJson,
   store: OutlineStore,
   origin: string | null,
+  afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params);
   if (!call) {
@@ -240,7 +246,7 @@ function handleToolCall(
   return decodeInput(call.arguments ?? {}).pipe(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>
-      tool.handle(input, store, origin).pipe(
+      tool.handle(input, store, origin, afterTextWrite).pipe(
         Effect.map((result) =>
           rpcResult(
             id,
@@ -275,6 +281,7 @@ function dispatch(
   store: OutlineStore,
   origin: string | null,
   agentAccess: boolean,
+  afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -293,7 +300,7 @@ function dispatch(
       // connection can handshake and see WHY, but every tool call — read AND
       // write — is refused until the plan includes agent access (#170).
       return agentAccess
-        ? handleToolCall(id, message.params, store, origin)
+        ? handleToolCall(id, message.params, store, origin, afterTextWrite)
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
@@ -323,6 +330,7 @@ export function handleMcp(
   store: OutlineStore,
   origin: string | null,
   agentAccess: boolean,
+  afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   switch (request.method) {
     case "OPTIONS":
@@ -363,7 +371,7 @@ export function handleMcp(
         rpcError(null, INVALID_REQUEST, issue.message),
       ),
     );
-    return yield* dispatch(message, store, origin, agentAccess);
+    return yield* dispatch(message, store, origin, agentAccess, afterTextWrite);
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),

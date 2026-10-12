@@ -18,7 +18,7 @@ export const nodes = sqliteTable("nodes", {
     createdAt: real("createdAt").notNull(),
     updatedAt: real("updatedAt").notNull(),
     origin: text("origin").notNull(),
-    kind: text("kind").notNull(),
+    kind: text("kind", { mode: "json" }).$type<"paragraph" | "embed">().notNull(),
     userId: text("userId").notNull(),
 }, (t) => ({
     by_parent: index("by_parent").on(t.parentId),

@@ -59,13 +59,14 @@ export const nodeSchema = Schema.Struct({
   origin: Schema.NullOr(Schema.String),
   // Node kind (ADR 0045). `null` = a bullet or a task, decided by `isTask`;
   // `"paragraph"` = prose, drawn with a paragraph glyph where the bullet dot would be.
-  // The three kinds are mutually exclusive, but the TYPE cannot say so: `kind`
+  // `"embed"` = one external URL, with a plugin-rendered body below its text.
+  // The four kinds are mutually exclusive, but the TYPE cannot say so: `kind`
   // is additive precisely so `isTask` never had to migrate. Exclusivity is an
   // invariant of the mutation funnels instead (setKind clears `isTask`;
   // setIsTask clears `kind`), and the renderer tie-breaks in `kind`'s favor if a
   // stale client ever writes the illegal pair. Required + nullable, no default
   // (ADR 0003) -- createNode() sets it to null.
-  kind: Schema.NullOr(Schema.Literal("paragraph")),
+  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
 });
 
 export type Node = Schema.Schema.Type<typeof nodeSchema>;

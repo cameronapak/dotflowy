@@ -35,6 +35,7 @@ import { downloadTextFile } from "../data/download";
 import {
   retryEditorFeatures,
   setEditorFeature,
+  setExternalEmbeds,
   setWeekStart,
   useEditorFeatures,
   type EditorFeature,
@@ -807,6 +808,18 @@ function EditorFeaturesSection() {
   const [saving, setSaving] = useState<EditorFeature | null>(null);
   const [details, setDetails] = useState<EditorFeature | null>(null);
   const [savingWeekStart, setSavingWeekStart] = useState(false);
+  const [revokeFailed, setRevokeFailed] = useState(false);
+  const saveConsent = (enabled: boolean) => {
+    setRevokeFailed(false);
+    void setExternalEmbeds(enabled).catch(() => {
+      setRevokeFailed(!enabled);
+      toast.error(
+        enabled
+          ? "Couldn't allow external embeds. External content remains off in this tab."
+          : "Couldn't save the revocation. External embeds remain off in this tab; retry to update your account.",
+      );
+    });
+  };
   const features = [
     {
       id: "bible",
@@ -817,6 +830,11 @@ function EditorFeaturesSection() {
       id: "daily",
       name: "Daily notes",
       description: "A place for each day, with Today and calendar navigation.",
+    },
+    {
+      id: "embeds",
+      name: "Embeds",
+      description: "Show supported external resources as embed nodes.",
     },
   ] as const;
 
@@ -838,7 +856,9 @@ function EditorFeaturesSection() {
                       Off.{" "}
                       {feature.id === "bible"
                         ? "References stay as plain text."
-                        : "Your existing notes stay in your outline."}
+                        : feature.id === "daily"
+                          ? "Your existing notes stay in your outline."
+                          : "Embed nodes stay as usable links."}
                     </span>
                   )}
                 </>
@@ -902,7 +922,7 @@ function EditorFeaturesSection() {
                       Passage chips and Bible-specific controls stop appearing.
                     </li>
                   </>
-                ) : (
+                ) : feature.id === "daily" ? (
                   <>
                     <li>
                       Today, calendar navigation, date chips, and daily commands
@@ -914,6 +934,15 @@ function EditorFeaturesSection() {
                       protected from deletion.
                     </li>
                     <li>Explicit CLI and MCP daily commands still work.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>
+                      Embed nodes, their source URLs, and child notes remain.
+                    </li>
+                    <li>
+                      External previews stop appearing; links stay usable.
+                    </li>
                   </>
                 )}
               </ul>
@@ -966,7 +995,37 @@ function EditorFeaturesSection() {
             </div>
           </div>
         ))}
+        <SettingRow
+          title="Allow external embeds"
+          description="Automatically load supported providers on all devices signed in to your account. This sends requests to those providers, which may use cookies or tracking."
+          action={
+            <div className="flex size-11 items-center justify-center">
+              <Switch
+                aria-label="Allow external embeds"
+                checked={preferences.externalEmbeds}
+                disabled={
+                  !preferences.ready || preferences.externalEmbedsSaving
+                }
+                onCheckedChange={saveConsent}
+              />
+            </div>
+          }
+        />
       </RowGroup>
+      {revokeFailed && (
+        <div role="alert" className="text-sm text-muted-foreground">
+          Account permission could not be revoked. Other devices may still load
+          embeds.
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={preferences.externalEmbedsSaving}
+            onClick={() => saveConsent(false)}
+          >
+            Retry revocation
+          </Button>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground">
         Turning a feature off never deletes your notes. These settings follow
         your account across devices.

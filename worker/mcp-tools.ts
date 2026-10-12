@@ -27,6 +27,7 @@ import {
   scaffoldLabel,
   type WeekStart,
 } from "../src/data/date-links";
+import { embedUrl } from "../src/data/embed-url";
 import { exportOpml } from "../src/data/opml-export";
 import {
   OPML_MCP_MAX_NODES,
@@ -121,6 +122,14 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+export type AfterTextWrite = (
+  writes: Array<{
+    nodeId: string;
+    before: string;
+    text: string;
+  }>,
+) => void;
+
 export interface ToolDef {
   name: string;
   description: string;
@@ -140,6 +149,7 @@ export interface ToolDef {
     input: any,
     store: OutlineStore,
     origin: string | null,
+    afterTextWrite?: AfterTextWrite,
   ) => Effect.Effect<string | ToolResult, ToolError>;
 }
 
@@ -179,6 +189,35 @@ const commit = (
         : new ToolError({ reason: String(error) }),
   });
 
+/** Only explicit text-authoring tools schedule enrichment, never moves,
+ * imports, mirrors, or generic persistence. The response need not wait. */
+const commitText = (
+  store: OutlineStore,
+  ops: readonly ChangeOp[],
+  index: TreeIndex,
+  afterTextWrite: AfterTextWrite | undefined,
+  expectedWeekStart?: WeekStart,
+) =>
+  commit(store, ops, expectedWeekStart).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        const writes = ops.flatMap((op) => {
+          if (
+            op.op === "delete" ||
+            op.value.mirrorOf ||
+            op.value.kind === "embed"
+          )
+            return [];
+          const before = index.byId.get(op.value.id)?.text ?? "";
+          return before === op.value.text
+            ? []
+            : [{ nodeId: op.value.id, before, text: op.value.text }];
+        });
+        afterTextWrite?.(writes);
+      }),
+    ),
+  );
+
 /** Lift a planner's value-shaped failure into the tool error channel,
  *  narrowing the success side (the planners' errors all extend `Error`). */
 const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
@@ -186,6 +225,33 @@ const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
     ? Effect.fail(new ToolError({ reason: result.message }))
     : // SAFETY: the instanceof Error branch above removed the Error side of A.
       Effect.succeed(result as Exclude<A, Error>);
+
+const explicitText = (
+  kind: "paragraph" | "embed" | null | undefined,
+  text: string,
+): Effect.Effect<string, ToolError> => {
+  if (kind !== "embed") return Effect.succeed(text);
+  const url = embedUrl(text);
+  return url
+    ? Effect.succeed(url)
+    : Effect.fail(
+        new ToolError({
+          reason:
+            "Embed text must be a single HTTPS URL without credentials (a sole markdown link is also accepted)",
+        }),
+      );
+};
+
+const normalizeForest = (
+  nodes: ReadonlyArray<SubtreeInput>,
+): Effect.Effect<SubtreeInput[], ToolError> =>
+  Effect.forEach(nodes, (node) =>
+    Effect.gen(function* () {
+      const text = yield* explicitText(node.kind, node.text);
+      const children = yield* normalizeForest(node.children ?? []);
+      return { ...node, text, children };
+    }),
+  );
 
 // --- Daily-index claims -------------------------------------------------------
 
@@ -497,12 +563,11 @@ const guardScaffoldUpdate = (
 const optional = <S extends Schema.Top>(schema: S) =>
   Schema.optional(Schema.NullOr(schema));
 
-/** Node kind (ADR 0045). The only value is `"paragraph"`; omit it (or pass null)
- *  for a plain bullet or, with `isTask`, a to-do. `kind` overrides `isTask`. */
+/** Core node kind. Omit it (or pass null) for an ordinary bullet/to-do. */
 const kindField = optional(
-  Schema.Literal("paragraph").annotate({
+  Schema.Literals(["paragraph", "embed"]).annotate({
     description:
-      "Create as a paragraph (prose, drawn with a paragraph glyph instead of a bullet) rather than a list item. Mutually exclusive with isTask, which it overrides.",
+      "Create as paragraph prose or as an Embed. Embed text must be one HTTPS URL (a sole markdown link is accepted and normalized). Mutually exclusive with isTask.",
   }),
 );
 
@@ -634,9 +699,9 @@ const UpdateNodeInput = Schema.Struct({
   // explicit null both decode to "no change" everywhere else in this schema set,
   // so null cannot also mean "make it a bullet". `"bullet"` says it out loud.
   kind: optional(
-    Schema.Literals(["paragraph", "bullet"]).annotate({
+    Schema.Literals(["paragraph", "embed", "bullet"]).annotate({
       description:
-        'Turn the node into a paragraph ("paragraph") or back into a plain list item ("bullet"). Overrides isTask in the same call.',
+        "Turn the node into a paragraph, Embed, or plain bullet. Embed requires text in this call to contain one HTTPS URL. Overrides isTask.",
     }),
   ),
 });
@@ -891,7 +956,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           .map((h) => {
             const path = h.path.length ? ` — in: ${h.path.join(" > ")}` : "";
             const meta = [`id: ${h.id}`];
-            if (h.kind === "paragraph") meta.push("paragraph");
+            if (h.kind) meta.push(h.kind);
             if (h.mirrorOf) meta.push(`mirror of ${h.mirrorOf}`);
             if (h.completed) meta.push("completed");
             if (h.locked) meta.push("locked");
@@ -918,14 +983,15 @@ export const tools: ReadonlyArray<ToolDef> = [
       'Add a new bullet to the outline — under a parent node or at the top level. Pass kind: "paragraph" for prose. Returns the new node id.',
     input: AddNodeInput,
     readOnly: false,
-    handle: (input: typeof AddNodeInput.Type, store, origin) =>
+    handle: (input: typeof AddNodeInput.Type, store, origin, afterTextWrite) =>
       Effect.gen(function* () {
+        const text = yield* explicitText(input.kind, input.text);
         const index = yield* loadIndex(store);
         const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planAddNode(index, {
             id: createId(),
-            text: input.text,
+            text,
             parentId: input.parentId ?? null,
             position: input.position ?? "last",
             isTask: input.isTask ?? false,
@@ -934,7 +1000,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             timestamp,
           }),
         );
-        yield* commit(store, plan.ops);
+        yield* commitText(store, plan.ops, index, afterTextWrite);
         const parentText = plan.parentId
           ? index.byId.get(plan.parentId)?.text
           : undefined;
@@ -950,7 +1016,12 @@ export const tools: ReadonlyArray<ToolDef> = [
       "Add a whole nested outline — a forest of bullets, each with its own children — in ONE atomic call. Use this instead of many add_node calls when building structure. Target a parent (parentId), the top level (omit both), or the user's daily note (date). Returns the created bullets with their ids.",
     input: AddSubtreeInput,
     readOnly: false,
-    handle: (input: typeof AddSubtreeInput.Type, store, origin) =>
+    handle: (
+      input: typeof AddSubtreeInput.Type,
+      store,
+      origin,
+      afterTextWrite,
+    ) =>
       Effect.gen(function* () {
         if (input.parentId != null && input.date != null) {
           return yield* Effect.fail(
@@ -958,6 +1029,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           );
         }
         const timestamp = yield* Clock.currentTimeMillis;
+        const nodes = yield* normalizeForest(input.nodes);
 
         // Daily path: claim the container + day ids atomically, then ensure-and-
         // append the forest under the day (position is ignored — always last).
@@ -970,7 +1042,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           // Validate the forest BEFORE claiming any daily-index ids, so an empty
           // or over-cap forest can't leave orphan container/day mappings pointing
           // at nodes we never insert (ADR 0028 all-or-nothing).
-          const sizeError = guardForestSize(input.nodes, MAX_BATCH_NODES);
+          const sizeError = guardForestSize(nodes, MAX_BATCH_NODES);
           if (sizeError != null) {
             return yield* Effect.fail(
               new ToolError({ reason: sizeError.message }),
@@ -982,7 +1054,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           const index = scaffold.index;
           const plan = yield* unwrap(
             planAddSubtreeToDaily(index, {
-              nodes: input.nodes,
+              nodes,
               dateKey,
               ...scaffold,
               origin,
@@ -991,7 +1063,13 @@ export const tools: ReadonlyArray<ToolDef> = [
               maxNodes: MAX_BATCH_NODES,
             }),
           );
-          yield* commit(store, plan.ops, scaffold.weekStart);
+          yield* commitText(
+            store,
+            plan.ops,
+            index,
+            afterTextWrite,
+            scaffold.weekStart,
+          );
           return mcpReceipt(
             `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
           );
@@ -1001,7 +1079,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         const index = yield* loadIndex(store);
         const plan = yield* unwrap(
           planAddSubtree(index, {
-            nodes: input.nodes,
+            nodes,
             parentId: input.parentId ?? null,
             position: input.position ?? "last",
             origin,
@@ -1010,7 +1088,7 @@ export const tools: ReadonlyArray<ToolDef> = [
             maxNodes: MAX_BATCH_NODES,
           }),
         );
-        yield* commit(store, plan.ops);
+        yield* commitText(store, plan.ops, index, afterTextWrite);
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
           : "at the top level";
@@ -1026,7 +1104,12 @@ export const tools: ReadonlyArray<ToolDef> = [
       "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears. WARNING: spoiler runs (||...||) are redacted to `[spoiler]` when you read a node, so passing that read-back text as the new `text` DESTROYS the hidden spoiler content. When editing a node that shows `[spoiler]`, ask the user for the intended full text instead of writing back what you were given.",
     input: UpdateNodeInput,
     readOnly: false,
-    handle: (input: typeof UpdateNodeInput.Type, store) =>
+    handle: (
+      input: typeof UpdateNodeInput.Type,
+      store,
+      _origin,
+      afterTextWrite,
+    ) =>
       Effect.gen(function* () {
         // Built field by field: only present fields are edited (absent =
         // untouched); `"bullet"` is the explicit kind reset (stored nullable).
@@ -1035,8 +1118,19 @@ export const tools: ReadonlyArray<ToolDef> = [
         if (input.isTask != null) changes.isTask = input.isTask;
         if (input.completed != null) changes.completed = input.completed;
         if (input.collapsed != null) changes.collapsed = input.collapsed;
-        if (input.kind != null)
+        if (input.kind === "embed") {
+          if (input.text == null) {
+            return yield* Effect.fail(
+              new ToolError({
+                reason: "converting to Embed requires text in the same call",
+              }),
+            );
+          }
+          changes.kind = "embed";
+          changes.text = yield* explicitText("embed", input.text);
+        } else if (input.kind != null) {
           changes.kind = input.kind === "paragraph" ? "paragraph" : null;
+        }
         if (!Object.keys(changes).length) {
           return yield* Effect.fail(
             new ToolError({
@@ -1052,7 +1146,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         const plan = yield* unwrap(
           planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }),
         );
-        yield* commit(store, plan.ops);
+        yield* commitText(store, plan.ops, index, afterTextWrite);
         return `Updated ${Object.keys(changes).join(", ")} on node ${input.nodeId}.`;
       }),
   },
@@ -1119,8 +1213,14 @@ export const tools: ReadonlyArray<ToolDef> = [
       "Add a new bullet to the user's daily note, creating today's note (and the Daily container) if needed. One of the fastest ways to capture something for the user.",
     input: AddToTodayInput,
     readOnly: false,
-    handle: (input: typeof AddToTodayInput.Type, store, origin) =>
+    handle: (
+      input: typeof AddToTodayInput.Type,
+      store,
+      origin,
+      afterTextWrite,
+    ) =>
       Effect.gen(function* () {
+        const text = yield* explicitText(input.kind, input.text);
         const now = yield* Clock.currentTimeMillis;
         const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
@@ -1132,13 +1232,19 @@ export const tools: ReadonlyArray<ToolDef> = [
           dateKey,
           ...scaffold,
           newNodeId: createId(),
-          text: input.text,
+          text,
           isTask: input.isTask ?? false,
           kind: input.kind ?? null,
           origin,
           timestamp,
         });
-        yield* commit(store, plan.ops, scaffold.weekStart);
+        yield* commitText(
+          store,
+          plan.ops,
+          index,
+          afterTextWrite,
+          scaffold.weekStart,
+        );
         return mcpReceipt(
           `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`,
         );

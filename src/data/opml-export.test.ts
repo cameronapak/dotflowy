@@ -26,6 +26,19 @@ const exportNodes = (nodes: Node[], rootId: string | null = null): string =>
 const reimport = (opml: string): OpmlImportResult =>
   Effect.runSync(parseOpml(opml));
 
+test("preserves the Embed kind and URL", () => {
+  const nodes = [
+    createNode({
+      id: "embed",
+      text: "https://example.com/post/1",
+      kind: "embed",
+    }),
+  ];
+  expect(exportNodes(nodes, "embed")).toContain(
+    '_kind="embed" text="https://example.com/post/1"',
+  );
+});
+
 test("document shape: shell, present-iff-true flags, no view state, zoom scope", () => {
   const nodes = [
     createNode({

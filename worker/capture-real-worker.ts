@@ -9,8 +9,10 @@ import type { FixtureInput } from "./capture-real-fixture";
 import { handleCaptureKeys } from "./capture";
 import { captureDigest } from "./capture-input";
 import { authenticateCaptureKey, createCaptureKey } from "./capture-keys";
+import { lookupEmbedE } from "./embeds";
 import { resolveUserId } from "./identity";
 import productionWorker from "./index";
+import { unfurlTitleE } from "./unfurl";
 
 export { UserOutlineDO } from "./outline-do";
 export { ShardDO } from "./lunora-app";
@@ -34,6 +36,28 @@ export default {
     }
 
     const input = await request.json<FixtureInput>();
+    if (url.pathname === "/fixture/embed") {
+      return Response.json({
+        embed: await Effect.runPromise(lookupEmbedE(input.text!)),
+      });
+    }
+    if (url.pathname === "/fixture/unfurl") {
+      if (input.cachedTitle)
+        await caches.default.put(
+          new Request(
+            `https://unfurl-cache.dotflowy.invalid/?u=${encodeURIComponent(input.text!)}`,
+          ),
+          Response.json(
+            { title: input.cachedTitle },
+            {
+              headers: { "cache-control": "public, max-age=86400" },
+            },
+          ),
+        );
+      return Response.json({
+        title: await Effect.runPromise(unfurlTitleE(input.text!)),
+      });
+    }
     const stub = env.USER_OUTLINE.get(
       env.USER_OUTLINE.idFromName(resolveUserId(input.userId, env)),
     );
@@ -153,6 +177,7 @@ export default {
         {
           ...node,
           text: input.updatedText!,
+          kind: input.kind ?? node.kind,
           updatedAt: node.updatedAt + 1,
         } satisfies Node,
       ]);
@@ -166,6 +191,15 @@ export default {
       return Response.json({
         upgraded: await stub.upgradeCaptureText(
           input.attemptId!,
+          input.expected!,
+          input.updatedText!,
+        ),
+      });
+    }
+    if (url.pathname === "/fixture/upgrade-link") {
+      return Response.json({
+        upgraded: await stub.upgradeLinkText(
+          input.nodeId!,
           input.expected!,
           input.updatedText!,
         ),
