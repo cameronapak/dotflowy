@@ -1,5 +1,15 @@
 # dotflowy
 
+## 1.24.0
+
+### Minor Changes
+
+- 2a66ed4: Add optional Embed nodes with account-wide permission for YouTube, Vimeo, Spotify, and X previews. Preserve source links, child notes, mirrors, and OPML kind metadata. CLI and MCP can explicitly create Embeds. X uses the official client widget without server-side tweet data.
+
+  Edit a link's URL, title, and display from one pencil button. Use a native sheet on mobile and an anchored popover on desktop. Apply the draft with Done or discard it on dismissal.
+
+- 2a66ed4: Fetch titles for new URLs in prose, structural paste, Add Link, Quick-add, external capture, and CLI/MCP text writes. Preserve custom labels, code, spoilers, literal paste, and existing URLs. Late results do not replace edited text or recreate deleted nodes.
+
 ## 1.23.3
 
 ### Patch Changes
