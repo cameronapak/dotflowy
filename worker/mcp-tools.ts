@@ -132,6 +132,8 @@ export type AfterTextWrite = (
 
 export interface ToolDef {
   name: string;
+  /** Human-readable name published as MCP `annotations.title`. */
+  title: string;
   description: string;
   /** Input contract; also the source of the published JSON Schema. Typed as
    *  the decode-ready schema seam (never services) so consumers of the
@@ -141,6 +143,8 @@ export interface ToolDef {
   output?: Schema.Top & { readonly DecodingServices: never };
   /** MCP `readOnlyHint` — true for tools that never write. */
   readOnly: boolean;
+  /** True when the tool can delete or overwrite existing node content. */
+  destructive: boolean;
   /** `origin` is the caller's provenance stamp — the OAuth client's harness name
    *  (worker/index.ts resolves it from the bearer token), written onto every node
    *  a write tool creates so the editor can tell agent edits from the user's own.
@@ -919,10 +923,12 @@ const renderImportReceipt = (args: {
 export const tools: ReadonlyArray<ToolDef> = [
   {
     name: "get_outline",
+    title: "Get outline",
     description:
       "Read the outline (or one node and its subtree) as an indented bullet list. Every line carries its node id — use those ids with the other tools.",
     input: GetOutlineInput,
     readOnly: true,
+    destructive: false,
     handle: (input: typeof GetOutlineInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
@@ -941,11 +947,13 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "search_nodes",
+    title: "Search nodes",
     description:
       "Find nodes with DQL, the same grammar as the app filter: is:todo -is:complete #dotflowy, has:link, highlight:red, is:agent, is:mirror, phrases, negation, and adjacent-term OR. Tags are exact and case-sensitive; text is case-insensitive. Mirrors match source content. Spoiler interiors cannot match. Returns readable text and structured nodes with ids and breadcrumbs. Pages default to 25 matches; use nextCursor until null for a complete list. Restart if searchable data changes.",
     input: SearchInput,
     output: SearchPage,
     readOnly: true,
+    destructive: false,
     handle: (input: typeof SearchInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
@@ -979,10 +987,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "add_node",
+    title: "Add node",
     description:
       'Add a new bullet to the outline — under a parent node or at the top level. Pass kind: "paragraph" for prose. Returns the new node id.',
     input: AddNodeInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof AddNodeInput.Type, store, origin, afterTextWrite) =>
       Effect.gen(function* () {
         const text = yield* explicitText(input.kind, input.text);
@@ -1012,10 +1022,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "add_subtree",
+    title: "Add subtree",
     description:
       "Add a whole nested outline — a forest of bullets, each with its own children — in ONE atomic call. Use this instead of many add_node calls when building structure. Target a parent (parentId), the top level (omit both), or the user's daily note (date). Returns the created bullets with their ids.",
     input: AddSubtreeInput,
     readOnly: false,
+    destructive: false,
     handle: (
       input: typeof AddSubtreeInput.Type,
       store,
@@ -1100,10 +1112,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "update_node",
+    title: "Update node",
     description:
       "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears. WARNING: spoiler runs (||...||) are redacted to `[spoiler]` when you read a node, so passing that read-back text as the new `text` DESTROYS the hidden spoiler content. When editing a node that shows `[spoiler]`, ask the user for the intended full text instead of writing back what you were given.",
     input: UpdateNodeInput,
     readOnly: false,
+    destructive: true,
     handle: (
       input: typeof UpdateNodeInput.Type,
       store,
@@ -1152,10 +1166,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "delete_node",
+    title: "Delete node",
     description:
       "Delete a node and its whole subtree. This cannot be undone by the agent.",
     input: DeleteNodeInput,
     readOnly: false,
+    destructive: true,
     handle: (input: typeof DeleteNodeInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
@@ -1171,10 +1187,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "move_nodes",
+    title: "Move nodes",
     description:
       "Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.",
     input: MoveNodesInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof MoveNodesInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
@@ -1209,10 +1227,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "add_to_today",
+    title: "Add to daily note",
     description:
       "Add a new bullet to the user's daily note, creating today's note (and the Daily container) if needed. One of the fastest ways to capture something for the user.",
     input: AddToTodayInput,
     readOnly: false,
+    destructive: false,
     handle: (
       input: typeof AddToTodayInput.Type,
       store,
@@ -1252,10 +1272,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "mirror_node",
+    title: "Mirror node",
     description:
       "Mirror a node (a live synced instance, like a Notion synced block) into another parent — the node appears in both places and edits sync. Omit parentId to mirror to the top level.",
     input: MirrorNodeInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof MirrorNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
@@ -1280,10 +1302,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "mirror_to_today",
+    title: "Mirror to daily note",
     description:
       "Mirror an existing node onto the user's daily note — it stays where it is AND appears under today, fully synced. Creates today's note if needed.",
     input: MirrorToTodayInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
@@ -1309,10 +1333,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "import_opml",
+    title: "Import OPML",
     description:
       "Import an OPML document (e.g. a Workflowy export) as new bullets — under a parent (parentId), onto the user's daily note (date), or at the top level. Lands as ONE atomic batch and returns a compact receipt (root ids, counts, any fidelity degradations), never the echoed outline. Ceiling: 5,000 nodes — a full Workflowy migration belongs in the app's own OPML import. Pass dryRun to preview the receipt without writing.",
     input: ImportOpmlInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof ImportOpmlInput.Type, store, origin) =>
       Effect.gen(function* () {
         if (input.parentId != null && input.date != null) {
@@ -1461,10 +1487,12 @@ export const tools: ReadonlyArray<ToolDef> = [
   },
   {
     name: "export_opml",
+    title: "Export OPML",
     description:
       "Export the outline (or one node and its whole subtree via nodeId) as an OPML 2.0 document in the Workflowy dialect. Returns the raw OPML string with no preamble. Ceiling: 5,000 nodes — pass nodeId to scope a large outline.",
     input: ExportOpmlInput,
     readOnly: true,
+    destructive: false,
     handle: (input: typeof ExportOpmlInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
