@@ -51,6 +51,15 @@ const SERVER_INFO = {
   name: "dotflowy",
   title: "Dotflowy",
   version: APP_VERSION,
+  // Additive display metadata: icon-aware clients can render it without
+  // changing the protocol revisions this server actually implements.
+  icons: [
+    {
+      src: "https://app.dotflowy.com/icon-192.png",
+      mimeType: "image/png",
+      sizes: ["192x192"],
+    },
+  ],
 };
 
 const SERVER_INSTRUCTIONS =
@@ -170,7 +179,7 @@ type RpcResult =
   | {
       protocolVersion: string;
       capabilities: { tools: { listChanged: boolean } };
-      serverInfo: { name: string; title: string; version: string };
+      serverInfo: typeof SERVER_INFO;
       instructions: string;
     }
   | { tools: ToolDescriptor[] }
