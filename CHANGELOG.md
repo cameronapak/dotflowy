@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.25.1
+
+### Patch Changes
+
+- b7bc41d: Shorten zoom, filter, and collapse animations. Make keyboard Spotlight alignment instant and respect reduced motion in overlays, the filter band, and Daily-note loading feedback.
+
 ## 1.25.0
 
 ### Minor Changes
