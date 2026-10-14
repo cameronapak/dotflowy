@@ -97,12 +97,13 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
       animate={
         !measured
           ? undefined
-          : reduceMotion
-            ? { height: open ? "auto" : 0 }
-            : { height: open ? height : 0, opacity: open ? 1 : 0 }
+          : {
+              height: open ? (reduceMotion ? "auto" : height) : 0,
+              opacity: open ? 1 : 0,
+            }
       }
       transition={
-        !snapOpen
+        !snapOpen && !reduceMotion
           ? { duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }
           : { duration: 0 }
       }

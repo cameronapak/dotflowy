@@ -558,7 +558,7 @@ h2 span.protection-indicator {
  * open/close reads as one continuous motion instead of an icon swap.
  */
 .collapse-toggle svg {
-  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
+  transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .collapse-toggle[data-collapsed="false"] svg {
@@ -1394,11 +1394,11 @@ body.dragging-active * {
    crossfade across it, so the pivot text grows/shrinks between bullet and
    title. */
 ::view-transition-group(zoom-target) {
-  animation-duration: 0.32s;
+  animation-duration: 0.2s;
   animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* Keep the rest-of-page crossfade quick so the morph reads as the lead. */
+/* The rest-of-page crossfade settles with the zoom morph. */
 ::view-transition-group(root) {
   animation-duration: 0.2s;
 }
@@ -1411,6 +1411,21 @@ body.dragging-active * {
   }
 
   .collapse-toggle svg {
+    transition: none !important;
+  }
+
+  /* Shared overlays must snap on entry AND exit, including caller overrides.
+     React Aria's mobile sheets keep their own reduced-motion handling. */
+  [data-slot="dialog-overlay"],
+  [data-slot="dialog-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"],
+  [data-slot="popover-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="hover-card-content"],
+  [data-slot="sheet-overlay"],
+  [data-slot="sheet-content"] {
+    animation: none !important;
     transition: none !important;
   }
 }
@@ -1540,16 +1555,16 @@ body.dragging-active * {
 @keyframes filter-popover-in {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.98);
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
 [data-filter-popover] {
-  animation: filter-popover-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
+  animation: filter-popover-in 140ms cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
