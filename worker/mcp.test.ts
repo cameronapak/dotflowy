@@ -336,6 +336,13 @@ describe("MCP transport", () => {
     expect(init.result.protocolVersion).toBe("2025-03-26");
     expect(init.result.capabilities.tools).toBeDefined();
     expect(init.result.serverInfo.name).toBe("dotflowy");
+    expect(init.result.serverInfo.icons).toEqual([
+      {
+        src: "https://app.dotflowy.com/icon-192.png",
+        mimeType: "image/png",
+        sizes: ["192x192"],
+      },
+    ]);
 
     // An unknown requested version is countered with the latest supported one.
     // SAFETY: parsed from the initialize response our own handler serializes; field checked by the expect below.
