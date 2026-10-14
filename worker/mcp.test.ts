@@ -369,8 +369,29 @@ describe("MCP transport", () => {
 
     expect(tool("add_node").inputSchema.type).toBe("object");
     expect(tool("add_node").inputSchema.required).toEqual(["text"]);
-    expect(tool("add_node").annotations.readOnlyHint).toBe(false);
-    expect(tool("get_outline").annotations.readOnlyHint).toBe(true);
+    const expectedHints = {
+      get_outline: [true, false],
+      search_nodes: [true, false],
+      export_opml: [true, false],
+      add_node: [false, false],
+      add_subtree: [false, false],
+      add_to_today: [false, false],
+      mirror_node: [false, false],
+      mirror_to_today: [false, false],
+      import_opml: [false, false],
+      update_node: [false, true],
+      delete_node: [false, true],
+      move_nodes: [false, false],
+    };
+    expect(json.result.tools).toHaveLength(Object.keys(expectedHints).length);
+    for (const [name, [readOnlyHint, destructiveHint]] of Object.entries(
+      expectedHints,
+    )) {
+      expect(tool(name).annotations.title).toEqual(expect.any(String));
+      expect(tool(name).annotations.title.trim().length).toBeGreaterThan(0);
+      expect(tool(name).annotations.readOnlyHint).toBe(readOnlyHint);
+      expect(tool(name).annotations.destructiveHint).toBe(destructiveHint);
+    }
 
     // Creation tools take `kind: "paragraph"`; none of them REQUIRE it.
     for (const name of ["add_node", "add_to_today"]) {

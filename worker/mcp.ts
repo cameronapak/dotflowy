@@ -170,7 +170,11 @@ interface ToolDescriptor {
   description: string;
   inputSchema: EffectJsonSchema.JsonSchema;
   outputSchema?: EffectJsonSchema.JsonSchema;
-  annotations: { readOnlyHint: boolean };
+  annotations: {
+    title: string;
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+  };
 }
 
 /** The result payloads this server returns: handshake metadata, the tool
@@ -199,7 +203,11 @@ const toolList: ToolDescriptor[] = tools.map((tool) => {
     name: tool.name,
     description: tool.description,
     inputSchema: publishedSchema(tool.input),
-    annotations: { readOnlyHint: tool.readOnly },
+    annotations: {
+      title: tool.title,
+      readOnlyHint: tool.readOnly,
+      destructiveHint: tool.destructive,
+    },
   };
   if (tool.output) descriptor.outputSchema = publishedSchema(tool.output);
   return descriptor;
