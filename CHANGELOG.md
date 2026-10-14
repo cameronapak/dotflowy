@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.25.2
+
+### Patch Changes
+
+- ff3e54b: Dotflowy's MCP connection now advertises its icon for clients that support displaying it.
+
 ## 1.25.1
 
 ### Patch Changes
