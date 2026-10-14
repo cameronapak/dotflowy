@@ -28,6 +28,8 @@ export default defineConfig({
   build: sentryAuthToken ? { sourcemap: true } : {},
   server: {
     port: 3000,
+    // Amp orb portals proxy the dev server through *.onamp.dev.
+    allowedHosts: [".onamp.dev"],
     // Dev only: proxy the data API to a locally-running Worker + D1
     // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
     // UI while the real /api/nodes path is served by the Worker against a local

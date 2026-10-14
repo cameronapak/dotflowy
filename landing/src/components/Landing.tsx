@@ -1,461 +1,252 @@
-import { Play } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ProvenanceTip, Spoiler } from "@/components/home/app-parts";
+import {
+  Dot,
+  FaqList,
+  H2,
+  Lede,
+  OutlineMock,
+  PricingCompact,
+  Section,
+  StartFree,
+  recentReleaseCount,
+  type Faq,
+} from "@/components/home/blocks";
+import { HeroGraphic } from "@/components/home/HeroGraphic";
+import { Footer, GITHUB_URL, Nav } from "@/components/SiteChrome";
 
-import { ChangelogList } from "@/components/Changelog";
-import { APP_URL, Footer, LinkButton, Nav } from "@/components/SiteChrome";
-import { releases } from "@/lib/changelog-data";
-import { cn } from "@/lib/utils";
+/* The dotflowy.com homepage. "One outline for everything. Yours to keep."
+ * Audience: the evaluator, someone who already keeps an outline (often in
+ * Workflowy), is wary of lock-in, and is curious about AI. Every line states a
+ * checkable fact; no adjectives the product has to live up to. Everything is
+ * in the prerendered HTML at full opacity: no scroll-reveal gating. */
 
-/** The bullet dot, the page's structural through-line. Solid, like the app's. */
-function Dot({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "size-1.5 shrink-0 rounded-full bg-foreground/70",
-        className,
-      )}
-    />
-  );
-}
-
-// One bullet per stage of the job: capture, retrieve, shape.
-const POINTS = [
-  "Quick capture without leaving what you're doing.",
-  "Find it later with tags, filters, and Cmd+K.",
-  "Drag, nest, zoom, mirror. Thoughts you can move.",
+export const FAQ: Faq[] = [
+  {
+    q: "What counts as a bullet?",
+    a: "Every line in your outline: bullets, tasks, and paragraphs. Free includes 10,000.",
+  },
+  {
+    q: "Can I export my outline?",
+    a: "Yes. Export as OPML or Markdown on every plan, even after you reach the free limit.",
+  },
+  {
+    q: "What can AI agents see?",
+    a: "Only your outline, and only after you approve the connection. Text in a spoiler reaches them redacted. Their edits are labeled as theirs. AI agents need Unlimited or Founding.",
+  },
+  {
+    q: "Is Dotflowy open source?",
+    a: "Yes. The code is on GitHub under the O'Saasy license: read it, change it, and self-host it on Cloudflare. The one limit is selling it as a competing hosted service.",
+  },
+  {
+    q: "Is there a phone app?",
+    a: "Dotflowy runs in any modern browser on desktop and phone, and syncs live between them. There's no App Store app; you can add it to your home screen.",
+  },
+  {
+    q: "Can I share an outline or collaborate?",
+    a: "Not yet. Each outline belongs to one person.",
+  },
 ];
 
-const VIDEO_ID = "S07dI6pIr_Q";
-const YT_ORIGINS = [
-  "https://www.youtube-nocookie.com",
-  "https://www.google.com",
+const PROOF = [
+  "Import from Workflowy",
+  "MCP server and CLI for your AI agents",
+  "Syncs live between browser and phone",
 ];
 
-/** YouTube facade: the self-hosted poster + a play button, and nothing from
- * YouTube until the visitor clicks — then the real iframe drops in with
- * autoplay, so one click still starts playback. Hover/focus preconnects to
- * the player origins so the handshake is done by click time. */
-function DemoVideo() {
-  const [playing, setPlaying] = useState(false);
-  const warmed = useRef(false);
-
-  const warm = () => {
-    if (warmed.current) return;
-    warmed.current = true;
-    for (const href of YT_ORIGINS) {
-      const link = document.createElement("link");
-      link.rel = "preconnect";
-      link.href = href;
-      document.head.append(link);
-    }
-  };
-
-  return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-card shadow-[0_16px_40px_-12px_rgb(0_0_0/0.12)] outline outline-1 outline-black/10 dark:shadow-none dark:outline-white/10">
-      {playing ? (
-        <iframe
-          className="absolute inset-0 size-full"
-          src={`https://www.youtube-nocookie.com/embed/${VIDEO_ID}?autoplay=1&rel=0`}
-          title="Dotflowy demo video"
-          allow="autoplay; encrypted-media; picture-in-picture"
-          allowFullScreen
-        />
-      ) : (
-        <button
-          type="button"
-          aria-label="Play the demo video"
-          onClick={() => {
-            warm();
-            setPlaying(true);
-          }}
-          onPointerEnter={warm}
-          onFocus={warm}
-          className="group absolute inset-0 block size-full cursor-pointer"
-        >
-          <img
-            src="/demo-thumb.jpg"
-            alt="Dotflowy demo — overview of the outliner"
-            width={1280}
-            height={720}
-            loading="eager"
-            fetchPriority="high"
-            className="size-full object-cover object-center"
-          />
-          <span className="absolute inset-0 flex items-center justify-center">
-            <span className="flex size-16 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform duration-200 group-hover:scale-105 group-active:scale-[0.96] motion-reduce:transition-none">
-              {/* Optical centering: the triangle reads centered nudged right */}
-              <Play className="ml-1 size-6 fill-current" />
-            </span>
-          </span>
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** The hero is set like an outline: the H1 is the root bullet, the sub-copy
- * and CTA its children, and the screenshot below is the zoomed node. */
 function Hero() {
   return (
-    <section className="pt-14 pb-24 sm:pt-20">
-      <div className="mx-auto w-full max-w-2xl px-6">
-        <div className="relative pl-7 sm:pl-9">
-          {/* The root bullet — the same solid dot the app draws on every row. */}
-          <span
-            aria-hidden
-            className="absolute top-[0.42em] left-0 size-3 rounded-full bg-foreground text-5xl sm:size-3.5 sm:text-6xl"
-          />
+    <section className="overflow-hidden pt-12 pb-20 sm:pt-16">
+      <div className="mx-auto grid w-full max-w-6xl gap-12 px-6 lg:grid-cols-[minmax(0,26rem)_1fr] lg:items-center">
+        <div>
           <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
-            Free up your mind.
+            One outline for everything. Yours to keep.
           </h1>
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-            Get your thoughts and tasks out. Organize them later, or don't.
+          <p className="mt-6 text-lg leading-relaxed text-pretty text-muted-foreground">
+            Dotflowy is an outliner for notes, tasks, and ideas. Zoom into any
+            bullet to focus on it. Press ⌘K to jump anywhere.
           </p>
-          <div className="mt-9">
-            <LinkButton
-              href={APP_URL}
-              size="lg"
-              className="h-11 px-5 text-[15px]"
-            >
-              Start free
-            </LinkButton>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Already have an account?{" "}
-              <a
-                href={APP_URL}
-                className="underline underline-offset-2 hover:text-foreground"
-              >
-                Sign in
-              </a>
+          <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
+            <StartFree />
+            <p className="text-sm text-muted-foreground">
+              Free for 10,000 bullets.
             </p>
           </div>
+          <ul className="mt-8 grid gap-2.5 text-sm text-muted-foreground">
+            {PROOF.map((p) => (
+              <li key={p} className="flex items-start gap-2.5">
+                <Dot className="mt-1.5" />
+                {p}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="lg:-mr-10">
+          <HeroGraphic />
         </div>
       </div>
-
-      {/* The zoomed node: the app itself, breaking out of the text column.
-       * 16:9 so the exported poster's crop is unambiguous. */}
-      <Reveal delay={120} className="mx-auto mt-14 w-full max-w-5xl px-6">
-        <DemoVideo />
-      </Reveal>
-
-      <div className="mx-auto w-full max-w-2xl px-6">
-        <ul className="mt-10 grid gap-6 text-[15px] text-muted-foreground">
-          {POINTS.map((p) => (
-            <li key={p} className="flex items-start gap-2.5">
-              {/* mt centers the dot on the first text line when a bullet wraps */}
-              <Dot className="mt-2" />
-              {p}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-8 text-xs text-muted-foreground">
-          Open source Workflowy alternative. Real-time sync. Export anytime.
-        </p>
-      </div>
     </section>
   );
 }
 
-/** Differentiated beats from the product demo — one idea each, no feature dump. */
-const BEATS = [
-  {
-    title: "Hide what AI shouldn't see.",
-    body: "Wrap text in a spoiler. You can still find it. Agents see it redacted.",
-  },
-  {
-    title: "One thought, many places.",
-    body: "Mirror a bullet into today, a project, or a week. Edit it once and it updates everywhere it lives.",
-  },
-  {
-    title: "When it's too much, spotlight one line.",
-    body: "Cmd+K, turn on Spotlight. The rest of the outline dims so you can finish the thought in front of you.",
-  },
+const STEPS = [
+  "In Workflowy, export your outline as OPML.",
+  "In Dotflowy, import the file. Your nesting comes with it.",
+  "Keep typing. Enter, Tab, and Shift+Tab work the way you expect.",
 ];
 
-function OnlyHere() {
-  return (
-    <section className="border-t border-border/60">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-14 px-6 py-20 sm:py-24">
-        {BEATS.map((beat, i) => (
-          <Reveal key={beat.title} delay={i * 80}>
-            <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
-              {beat.title}
-            </h2>
-            <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-pretty text-muted-foreground">
-              {beat.body}
-            </p>
-          </Reveal>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** Latest releases — proof the product is moving. Full history on /changelog. */
-function WhatsNew() {
-  return (
-    <section className="border-t border-border/60">
-      <div className="mx-auto w-full max-w-2xl px-6 py-20 sm:py-24">
-        <Reveal>
-          <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-            What&apos;s new
-          </h2>
-          <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-pretty text-muted-foreground">
-            Recent updates to Dotflowy. No sign-in required.
-          </p>
-        </Reveal>
-        <Reveal delay={80} className="mt-10">
-          <ChangelogList releases={releases} limit={3} />
-        </Reveal>
-        <Reveal delay={140} className="mt-10">
-          <a
-            href="/changelog"
-            className="text-[15px] font-medium text-foreground underline-offset-4 hover:underline"
-          >
-            See all updates
-          </a>
-        </Reveal>
-      </div>
-    </section>
-  );
-}
-
-/** Scroll-reveal: opacity + a small translateY, once, on entering the viewport.
- * Strong ease-out curve, ≤300ms. Honours prefers-reduced-motion (shows at once,
- * no movement) and never blocks — content is always in the DOM for crawlers. */
-function Reveal({
-  children,
-  delay = 0,
-  className,
-}: {
-  children: ReactNode;
-  delay?: number;
-  className?: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [shown, setShown] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setShown(true);
-      return;
-    }
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setShown(true);
-          io.disconnect();
-        }
-      },
-      { rootMargin: "0px 0px -10% 0px", threshold: 0.1 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
-        transitionDelay: shown ? `${delay}ms` : "0ms",
-      }}
-      className={cn(
-        "transition-[opacity,transform] duration-300 motion-reduce:transition-none",
-        // Hint the compositor before the reveal; drop it once shown so we don't
-        // keep a GPU layer alive for the life of the page.
-        shown
-          ? "translate-y-0 opacity-100"
-          : "translate-y-2 opacity-0 will-change-[opacity,transform]",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-type Tier = {
-  name: string;
-  price: ReactNode;
-  tagline: string;
-  features: string[];
-  // One quiet label above the name — a first-party note, not a fabricated stat.
-  label?: string;
-  // The emphasized tier (Unlimited): brand-blue accent + ring.
-  accent?: boolean;
-  // The limited offer (Founding): a distinct muted fill.
-  distinct?: boolean;
-  // Founding's honest renewal disclosure (a hard requirement — Stripe can't
-  // pre-schedule non-renewal).
-  note?: string;
-};
-
-const TIERS: Tier[] = [
-  {
-    name: "Free",
-    price: (
-      <span className="text-4xl font-semibold tracking-tight tabular-nums">
-        $0
-      </span>
-    ),
-    tagline: "Keep every thought. Pay nothing.",
-    features: [
-      "The full editor: daily notes, tags, filters, real-time sync.",
-      "10,000 nodes to fill (Workflowy's free plan allows only 100 new nodes a month).",
-      "Import from Workflowy (OPML), or export as OPML or Markdown. Your outline stays yours.",
-      "Hit the cap and nothing locks. Keep reading, editing, and exporting. Upgrade only when you need more room.",
-    ],
-  },
-  {
-    name: "Unlimited",
-    label: "Recommended",
-    accent: true,
-    price: (
-      <div>
-        <span className="text-4xl font-semibold tracking-tight tabular-nums">
-          $5
-        </span>
-        <span className="ml-1.5 text-sm text-muted-foreground">/mo</span>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          or $48/yr. That's $4/mo, billed yearly.
-        </p>
-      </div>
-    ),
-    tagline: "When your outline outgrows Free.",
-    features: [
-      "Everything in Free.",
-      "Unlimited nodes. No ceiling on how much you hold.",
-      "AI agents: connect Claude and others to your outline over MCP.",
-    ],
-  },
-  {
-    name: "Founding",
-    label: "Limited · 50 seats",
-    distinct: true,
-    price: (
-      <div>
-        <span className="text-4xl font-semibold tracking-tight tabular-nums">
-          $99
-        </span>
-        <span className="ml-1.5 text-sm text-muted-foreground">
-          for 3 years
-        </span>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          ≈ <span className="tabular-nums">$2.75</span>/mo. Save{" "}
-          <span className="tabular-nums">$81</span> vs Unlimited at{" "}
-          <span className="tabular-nums">$5</span>/mo.
-        </p>
-      </div>
-    ),
-    tagline: "Back Dotflowy early. Lock in three years.",
-    features: [
-      "Everything in Unlimited.",
-      "One payment covers three full years of Unlimited.",
-    ],
-    note: "Renews after 3 years unless you cancel. Cancel anytime.",
-  },
+const FEATURES = [
+  "Zoom into any bullet and it becomes the page. The breadcrumb takes you back.",
+  "Press ⌘K and type a few letters to jump to any bullet.",
+  "Press q to add a thought to today without leaving what you're doing.",
+  "Tag as you type, then filter the whole outline by a tag.",
+  "Mirror a bullet into more than one place. Edit it once and every copy changes.",
+  "Every day gets its own page, with tasks you can check off.",
 ];
-
-function PricingCard({ tier }: { tier: Tier }) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border p-6 sm:p-7",
-        tier.distinct ? "bg-secondary" : "bg-card",
-        tier.accent
-          ? "border-brand-blue/40 ring-brand-blue/20 ring-1"
-          : "border-border",
-      )}
-    >
-      {tier.label && (
-        <p
-          className={cn(
-            "text-[11px] font-medium tracking-wider uppercase",
-            tier.accent ? "text-brand-blue" : "text-muted-foreground",
-          )}
-        >
-          {tier.label}
-        </p>
-      )}
-      <h3
-        className={cn(
-          "mt-1 text-lg font-semibold tracking-tight",
-          tier.accent && "text-brand-blue",
-        )}
-      >
-        {tier.name}
-      </h3>
-      <div className="mt-3">{tier.price}</div>
-      <p className="mt-3 text-[15px] text-muted-foreground">{tier.tagline}</p>
-      <ul className="mt-5 space-y-2.5 text-[15px] text-muted-foreground">
-        {tier.features.map((f) => (
-          <li key={f} className="flex items-start gap-2.5">
-            {/* mt centers the dot on the first text line when a line wraps */}
-            <Dot className="mt-2" />
-            <span>{f}</span>
-          </li>
-        ))}
-      </ul>
-      {tier.note && (
-        <p className="mt-5 border-t border-border/60 pt-4 text-xs leading-relaxed text-muted-foreground">
-          {tier.note}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** Pricing. Three tiers, one emphasized (Unlimited), Founding as the distinct
- * limited offer. Signups are open, so the page's single action is: start free. */
-function Pricing() {
-  return (
-    <section className="border-t border-border/60">
-      <div className="mx-auto w-full max-w-2xl px-6 py-20 sm:py-24">
-        <Reveal>
-          <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-            Honest pricing.
-          </h2>
-          <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-pretty text-muted-foreground">
-            Start free with room to spare. Upgrade only when you outgrow it.
-            Import from Workflowy, or export as OPML or Markdown on any plan.
-            Your outline stays yours.
-          </p>
-        </Reveal>
-
-        <div className="mt-10 flex flex-col gap-4">
-          {TIERS.map((tier, i) => (
-            <Reveal key={tier.name} delay={i * 70}>
-              <PricingCard tier={tier} />
-            </Reveal>
-          ))}
-        </div>
-
-        <Reveal delay={TIERS.length * 70} className="mt-8">
-          <LinkButton
-            href={APP_URL}
-            size="lg"
-            className="h-11 px-5 text-[15px]"
-          >
-            Start free
-          </LinkButton>
-        </Reveal>
-      </div>
-    </section>
-  );
-}
 
 export function Landing() {
+  const shipped = recentReleaseCount();
   return (
     <div className="flex min-h-screen flex-col">
       <Nav />
       <main className="flex-1">
         <Hero />
-        <OnlyHere />
-        <WhatsNew />
-        <Pricing />
+
+        <Section>
+          <H2>Everything is a bullet.</H2>
+          <ul className="mt-10 grid gap-5 text-[15px] text-muted-foreground">
+            {FEATURES.map((f) => (
+              <li key={f} className="flex items-start gap-2.5">
+                <Dot className="mt-2" />
+                {f}
+              </li>
+            ))}
+          </ul>
+        </Section>
+
+        <Section>
+          <H2>Coming from Workflowy?</H2>
+          <ol className="mt-10 grid gap-6">
+            {STEPS.map((step, i) => (
+              <li key={step} className="flex items-start gap-4">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border text-sm font-medium tabular-nums">
+                  {i + 1}
+                </span>
+                <p className="pt-0.5 text-[15px] text-muted-foreground">
+                  {step}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </Section>
+
+        <Section>
+          <p className="text-brand-blue mb-3 text-sm font-medium">
+            AI agents · Unlimited and Founding
+          </p>
+          <H2>Let Claude tidy your outline. Keep your secrets.</H2>
+          <Lede>
+            Connect Claude or any MCP client and approve it once. Ask it to sort
+            today&apos;s notes, plan under a bullet, or list your open tasks.
+            Its edits appear live, labeled as its own.
+          </Lede>
+          <OutlineMock
+            className="mt-10"
+            crumbs={["Projects", "Apartment move #home"]}
+            rows={[
+              { text: "Movers: get 3 quotes", task: "open" },
+              { text: "Grouped by room", agent: true },
+              { text: "Kitchen: 6 boxes, fragile", depth: 1 },
+              { text: "Office: desk breaks down first", depth: 1 },
+              {
+                text: (
+                  <>
+                    Lockbox code <Spoiler>||4417||</Spoiler>
+                  </>
+                ),
+              },
+            ]}
+            footer={
+              <div className="mt-[0.9em] flex flex-wrap items-center gap-[0.6em] border-t border-border pt-[0.8em] text-[0.8em] text-muted-foreground">
+                <ProvenanceTip className="text-[1em]" />
+                <span>What Claude reads: “Lockbox code [spoiler]”</span>
+              </div>
+            }
+          />
+          <ul className="mt-8 grid gap-3 text-[15px] text-muted-foreground">
+            <li className="flex items-start gap-2.5">
+              <Dot className="mt-2" />
+              Text in a spoiler reaches agents redacted. You can still search
+              it.
+            </li>
+            <li className="flex items-start gap-2.5">
+              <Dot className="mt-2" />
+              Prefer the terminal? The same tools come as the dotflowy CLI on
+              npm.
+            </li>
+            <li className="flex items-start gap-2.5">
+              <Dot className="mt-2" />
+              <span>
+                Setup, tools, and security:{" "}
+                <a
+                  href="/mcp"
+                  className="text-foreground underline underline-offset-2"
+                >
+                  read the MCP guide
+                </a>
+                .
+              </span>
+            </li>
+          </ul>
+        </Section>
+
+        <Section>
+          <H2>Dotflowy is open source.</H2>
+          <div className="mt-8 flex items-start gap-4">
+            <img
+              src="/cameron-pak.png"
+              alt="Cameron Pak"
+              width={48}
+              height={48}
+              className="size-12 rounded-full"
+            />
+            <p className="text-[15px] leading-relaxed text-pretty text-muted-foreground">
+              Built in the open by Cameron Pak and contributors. {shipped}{" "}
+              releases in the last 30 days:{" "}
+              <a
+                href="/changelog"
+                className="text-foreground underline underline-offset-2"
+              >
+                read the changelog
+              </a>{" "}
+              or the{" "}
+              <a
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-foreground underline underline-offset-2"
+              >
+                code on GitHub
+              </a>
+              .
+            </p>
+          </div>
+        </Section>
+
+        <Section>
+          <H2>Pricing</H2>
+          <Lede>Every plan has the full editor, import, and export.</Lede>
+          <PricingCompact className="mt-10" />
+          <div className="mt-8">
+            <StartFree />
+          </div>
+        </Section>
+
+        <Section>
+          <H2>Questions</H2>
+          <div className="mt-10">
+            <FaqList items={FAQ} />
+          </div>
+        </Section>
       </main>
       <Footer />
     </div>

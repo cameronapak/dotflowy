@@ -15,10 +15,14 @@ const landingSrc = join(dirname(fileURLToPath(import.meta.url)), "src");
 // to dodge localStorage/collection access during SSR), the landing has no such
 // constraint, so it's fully PRERENDERED to static HTML: the hero copy and <head>
 // meta are baked into index.html for SEO + instant first paint, then it hydrates
-// one interactive island (the waitlist form). Output is pure static assets —
+// for the hero graphic's pointer parallax. Output is pure static assets —
 // no runtime server — served from Cloudflare on dotflowy.com.
 export default defineConfig({
-  server: { port: 3100 },
+  server: {
+    port: 3100,
+    // Amp orb portals proxy the dev server through *.onamp.dev.
+    allowedHosts: [".onamp.dev"],
+  },
   plugins: [
     // Same archive the in-app dialog uses (ADR 0046). packageVersion is the
     // ROOT app's version — landing's own package.json is unrelated.

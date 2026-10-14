@@ -9,13 +9,11 @@ import {
 
 import "../styles.css";
 
-// The hero leads with the job ("free up your mind"); the meta description is a
-// SEARCH surface, so the category + "Workflowy alternative" keywords live
-// here on purpose (OSS/comparison is a channel, not the pitch — see
-// .agents/product-marketing.md).
-const TITLE = "Dotflowy — free up your mind";
+// The title and description are SEARCH surfaces: lead with the category
+// ("outliner") and the concrete jobs. The page itself carries the pitch.
+const TITLE = "Dotflowy: an outliner for notes, tasks, and ideas";
 const DESCRIPTION =
-  "Get everything out of your head, shape it when you're ready, and find it when it matters. A calm, fast, open-source outliner — a Workflowy alternative your AI agents can edit too.";
+  "One outline for everything. Zoom into any bullet, jump anywhere with Cmd+K, import from Workflowy, and export OPML or Markdown on every plan. Free for 10,000 bullets.";
 const URL = "https://dotflowy.com";
 
 // Respect the visitor's system theme with no flash of the wrong one. The app's
@@ -49,6 +47,23 @@ export const Route = createRootRoute({
       { name: "twitter:title", content: TITLE },
       { name: "twitter:description", content: DESCRIPTION },
       { name: "twitter:image", content: `${URL}/og.png` },
+    ],
+    links: [
+      // Same marks as the app (../public). The SVG pair follows the OS theme.
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: "/favicon-light.svg",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: "/favicon-dark.svg",
+        media: "(prefers-color-scheme: dark)",
+      },
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   component: RootComponent,
