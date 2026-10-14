@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // The /settings page (#171): the home for plan & billing, account, connections,
 // data, and appearance — and the reason the header More menu slimmed down.
@@ -27,6 +27,12 @@ async function mockFreePlan(page: Page) {
         body: "[]",
       }),
   );
+}
+
+async function openSettings(page: Page) {
+  await page.goto("/settings");
+  // Route loading uses the test budget; behavior assertions keep their 5s budget.
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
 }
 
 interface CapturedDownload {
@@ -62,16 +68,12 @@ async function interceptDownloads(page: Page) {
   });
 }
 
-const nodeText = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-
 test("More menu → Settings navigates to the settings page", async ({
   page,
 }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/");
-  await expect(nodeText(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await page.getByRole("button", { name: /more/i }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
@@ -89,7 +91,7 @@ test("CLI setup explains install, login, and a safe read against this deployment
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/settings");
+  await openSettings(page);
   await page.getByRole("button", { name: "Set up command line (CLI)" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Use Dotflowy from your terminal",
@@ -138,6 +140,11 @@ test("CLI setup explains install, login, and a safe read against this deployment
   await expect(
     mcp.getByRole("tab", { name: "Claude Claude", exact: true }),
   ).toBeVisible();
+  const mcpDocs = mcp.getByRole("link", { name: /MCP documentation/ });
+  await expect(mcpDocs).toHaveAttribute("href", "https://dotflowy.com/mcp");
+  await expect(mcpDocs).toHaveAttribute("target", "_blank");
+  await mcp.getByRole("tab", { name: "ChatGPT", exact: true }).click();
+  await expect(mcpDocs).toBeVisible();
 });
 
 test("primary sections render and Other settings reveals billing, account, and data", async ({
@@ -145,7 +152,7 @@ test("primary sections render and Other settings reveals billing, account, and d
 }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/settings");
+  await openSettings(page);
 
   for (const name of [
     "Connections",
@@ -169,7 +176,7 @@ test("free plan shows the usage meter and all three upgrade CTAs", async ({
 }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/settings");
+  await openSettings(page);
 
   await page.locator("summary", { hasText: "Other settings" }).click();
   // Current-plan card reads "Free" and shows the usage meter.
@@ -196,7 +203,7 @@ test("free plan shows the usage meter and all three upgrade CTAs", async ({
 test("the free connections nudge points at Unlimited", async ({ page }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/settings");
+  await openSettings(page);
 
   await expect(page.getByText(/Connecting AI apps requires/i)).toBeVisible();
 });
@@ -209,7 +216,7 @@ test("free accounts can opt into experimental capture key management", async ({
   await page.route("**/api/capture-keys", (route) =>
     route.fulfill({ json: { keys: [] } }),
   );
-  await page.goto("/settings");
+  await openSettings(page);
   await expect(
     page.getByText("Available on every plan.", { exact: false }),
   ).toBeVisible();
@@ -239,7 +246,7 @@ test("experimental quick-add is default-off, persists opt-in, and reacts to roll
     keyRequests += 1;
     return route.fulfill({ json: { keys: [] } });
   });
-  await page.goto("/settings");
+  await openSettings(page);
   const toggle = page.getByRole("switch", {
     name: "Enable experimental quick-add",
   });
@@ -294,8 +301,7 @@ test("Data → Export downloads the whole outline as OPML", async ({ page }) => 
   await mockFreePlan(page);
   // Load the outline first so the tree store is populated, then SPA-navigate
   // to /settings (the store survives the client-side route change).
-  await page.goto("/");
-  await expect(nodeText(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await page.getByRole("button", { name: /more/i }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
@@ -319,7 +325,7 @@ test("Appearance → theme segmented control switches to dark", async ({
 }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/settings");
+  await openSettings(page);
 
   await page
     .getByRole("radiogroup", { name: "Theme" })
@@ -331,8 +337,7 @@ test("Appearance → theme segmented control switches to dark", async ({
 test("the More menu no longer holds the moved items", async ({ page }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.goto("/");
-  await expect(nodeText(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await page.getByRole("button", { name: /more/i }).click();
 

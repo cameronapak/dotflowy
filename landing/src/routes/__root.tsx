@@ -50,7 +50,6 @@ export const Route = createRootRoute({
       { name: "twitter:description", content: DESCRIPTION },
       { name: "twitter:image", content: `${URL}/og.png` },
     ],
-    links: [{ rel: "canonical", href: URL }],
   }),
   component: RootComponent,
 });

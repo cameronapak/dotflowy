@@ -124,6 +124,9 @@ export function Footer() {
           >
             What&apos;s new
           </a>
+          <a href="/mcp" className="transition-colors hover:text-foreground">
+            MCP documentation
+          </a>
           <a
             href={GITHUB_URL}
             target="_blank"
