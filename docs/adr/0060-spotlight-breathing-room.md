@@ -78,15 +78,15 @@ back with every piece of machinery that made #340 heavy removed:
 **The modality split (reused from the dim, ADR 0033).** The dim eases on
 pointer focus and snaps on keyboard nav; the align rides the same
 `spotlight-fade` modality class. A pointer jump eases ~200ms — a deliberate
-click can afford the travel. Keyboard takes a short ~120ms beat, so fast
-arrowing chases the caret without swimming; each new focus cancels the
-in-flight tween and retargets. Keyboard moves (Cmd+Shift+Up/Down) align the
+click can afford the travel. Keyboard alignment snaps, so repeated arrow
+navigation adds no scroll tween; each new focus cancels an in-flight pointer
+tween. This supersedes the original ~120ms keyboard beat. Keyboard moves
+(Cmd+Shift+Up/Down) align the
 moved row explicitly: a move-up can reuse the DOM span, so focus never leaves
 and no `focusin` fires — the move commands schedule the align themselves,
 two frames out, and the focusin path covers every other focus change.
-`prefers-reduced-motion` snaps. The keyboard
-duration is one constant (`KEYBOARD_SLIDE_MS`); if 120ms ever feels slow, the
-fix is that constant, not a redesign.
+`prefers-reduced-motion` snaps. The keyboard duration stays one constant
+(`KEYBOARD_SLIDE_MS`, now zero), not a second alignment implementation.
 
 **Consequences accepted.**
 

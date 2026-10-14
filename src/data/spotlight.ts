@@ -87,8 +87,8 @@ const onKeyDown = () => document.body.classList.remove(SPOTLIGHT_FADE);
 
 // -- centering (ADR 0060) ----------------------------------------------------
 
-/** Keyboard takes a short beat; a pointer jump can afford a fuller ease. */
-export const KEYBOARD_SLIDE_MS = 120;
+/** Frequent keyboard navigation snaps; a pointer jump can afford a short ease. */
+export const KEYBOARD_SLIDE_MS = 0;
 export const POINTER_SLIDE_MS = 200;
 
 /** The breathing-room grow/collapse: one beat, matching the old CSS ease. */
