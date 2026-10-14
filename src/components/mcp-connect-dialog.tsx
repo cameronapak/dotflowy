@@ -40,19 +40,8 @@ import {
 import { Separator } from "./ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
-/**
- * "Connect to your AI apps" dialog (opened from the header More menu).
- *
- * Dotflowy's MCP server is a REMOTE, OAuth-gated Streamable-HTTP endpoint
- * (`POST /mcp`, ADR 0026), so every client's setup reduces to "point at the
- * server URL and sign in" -- there is no API key to paste anywhere. That's the
- * spine of this dialog: one canonical URL up top, then a per-client rail with
- * the exact command / config / deeplink for that app.
- *
- * v1 is a self-contained modal (the fastest, matches "a header menu option").
- * A shareable `/connect` route + an "active connections" panel is the clean v2
- * promotion when it earns its weight.
- */
+// Quick setup stays in the dialog; the public MCP guide owns the full tool,
+// permission, and troubleshooting documentation.
 
 // Real users always view this on the prod origin, so `origin + /mcp` yields the
 // correct copyable URL and self-heals if the domain ever moves; the fallback
@@ -163,22 +152,19 @@ const CLIENTS: Client[] = [
     name: "Claude",
     icon: SiClaude,
     content: (
-      <>
-        <p className="text-sm text-muted-foreground">
-          Claude.ai and Claude Desktop connect to remote MCP servers directly.
-        </p>
-        <Steps>
-          <li>
-            Open <span className="text-foreground">Settings → Connectors</span>.
-          </li>
-          <li>
-            Click <span className="text-foreground">Add custom connector</span>.
-          </li>
-          <li>Paste the server URL and continue.</li>
-          <li>Sign in when the Dotflowy window opens.</li>
-        </Steps>
-        <CopyField value={MCP_URL} />
-      </>
+      <Steps>
+        <li>
+          Open <span className="text-foreground">Customize → Connectors</span>{" "}
+          in Claude and select{" "}
+          <span className="text-foreground">Add custom connector</span>.
+        </li>
+        <li>
+          Paste the server URL above. If asked, choose{" "}
+          <span className="text-foreground">Register automatically</span> for
+          the OAuth client.
+        </li>
+        <li>Sign in with Dotflowy, then enable it for your conversation.</li>
+      </Steps>
     ),
   },
   {
@@ -249,16 +235,20 @@ const CLIENTS: Client[] = [
     content: (
       <>
         <p className="text-sm text-muted-foreground">
-          Requires connectors / developer mode (availability varies by plan).
+          Requires developer mode. Availability depends on your plan and
+          workspace settings.
         </p>
         <Steps>
           <li>
-            Open <span className="text-foreground">Settings → Connectors</span>.
+            In ChatGPT settings, enable developer mode under{" "}
+            <span className="text-foreground">Apps &amp; Connectors</span>.
           </li>
-          <li>Add a connector and paste the server URL.</li>
-          <li>Authenticate with your Dotflowy account.</li>
+          <li>
+            Create a connector with the server URL above and OAuth
+            authentication.
+          </li>
+          <li>Sign in with Dotflowy.</li>
         </Steps>
-        <CopyField value={MCP_URL} />
       </>
     ),
   },
@@ -267,17 +257,10 @@ const CLIENTS: Client[] = [
     name: "Other apps",
     icon: PuzzleIcon,
     content: (
-      <>
-        <p className="text-sm text-muted-foreground">
-          Cline, Windsurf, Zed, Codex and most MCP clients take the URL
-          directly. The universal installer writes the config for you:
-        </p>
-        <CopyBlock code={`npx install-mcp ${MCP_URL} --client <your-client>`} />
-        <p className="text-sm text-muted-foreground">
-          Dotflowy is a Streamable-HTTP server with OAuth, so any spec-compliant
-          client works.
-        </p>
-      </>
+      <p className="text-sm text-muted-foreground">
+        Add the server URL above in an app that supports Streamable HTTP with
+        OAuth, then sign in with Dotflowy.
+      </p>
     ),
   },
 ];
@@ -338,8 +321,8 @@ export function McpConnectDialog({
         <DialogHeader className="px-5 pt-5 pb-3">
           <DialogTitle>Connect to your AI apps</DialogTitle>
           <DialogDescription>
-            Dotflowy speaks MCP. Connect any AI app to read and edit your
-            outline — no API key, you just sign in.
+            Connect a compatible AI app to read, edit, and delete content across
+            your whole outline. Sign in with Dotflowy; no API key needed.
           </DialogDescription>
         </DialogHeader>
 
@@ -348,17 +331,20 @@ export function McpConnectDialog({
             Server URL
           </span>
           <CopyField value={MCP_URL} />
-          {/* ADR 0043: state the spoiler boundary plainly. It's a context-
-              hygiene default, not access control -- the agent signs in as you
-              and can drop the fences itself -- so we don't let a user mistake a
-              spoiler for a security guarantee. */}
+          {/* ADR 0043: redaction is context hygiene, not access control. */}
           <p className="text-xs text-muted-foreground">
             Spoilers (<span className="font-mono">||hidden||</span>) are
-            redacted from connected apps by default, to keep flagged text out of
-            an AI's context. This is a convenience, not a security guarantee —
-            an app signed in as you can still be shown that text if you choose
-            to reveal it.
+            redacted by default. This is not access control.
           </p>
+          <a
+            href="https://dotflowy.com/mcp"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="mt-1 w-fit text-sm underline underline-offset-4 hover:text-foreground"
+          >
+            MCP documentation
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
         </div>
 
         <Separator />

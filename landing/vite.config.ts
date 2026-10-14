@@ -31,6 +31,7 @@ export default defineConfig({
       pages: [
         { path: "/", prerender: { enabled: true } },
         { path: "/changelog", prerender: { enabled: true } },
+        { path: "/mcp", prerender: { enabled: true } },
       ],
     }),
     // Order matters: react's plugin must come after Start's.
