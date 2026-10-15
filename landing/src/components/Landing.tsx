@@ -80,8 +80,7 @@ function Hero() {
           </h1>
           <p className="mt-6 text-lg leading-relaxed text-pretty text-muted-foreground">
             Dotflowy keeps your notes, tasks, and ideas in one nested outline.
-            Zoom into any bullet to focus on it, zoom back out to see how it
-            connects, and press ⌘K to jump anywhere.
+            Get everything out of your head, then find it the moment it matters.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-3">
             <StartFree />
