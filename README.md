@@ -1,71 +1,130 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="/public/logo-dark.svg" />
-    <img src="/public/logo-light.svg" alt="Dotflowy" width="316" height="64" />
+    <source media="(prefers-color-scheme: dark)" srcset="./public/logo-dark.svg" />
+    <img src="./public/logo-light.svg" alt="Dotflowy" width="316" height="64" />
   </picture>
 </p>
 
 <p align="center">
-  <strong>Room to think — get everything out of your head, shape it when you're ready, and find it when it matters.</strong><br/>
-	<span>An open-source Workflowy alternative, extensible with plugins like Obsidian. Agent-native via MCP.</span>
+  <strong>An outliner that moves as fast as you think.</strong><br/>
+  Dotflowy keeps your notes, tasks, and ideas in one nested outline.<br/>
+  Get everything out of your head, then find it the moment it matters.
 </p>
 
 <p align="center">
-  <a href="https://dotflowy.com"><strong>dotflowy.com</strong></a>
+  <a href="https://app.dotflowy.com"><strong>Start free</strong></a> ·
+  <a href="https://dotflowy.com/try">Try the demo</a> ·
+  <a href="https://dotflowy.com/changelog">What's new</a>
 </p>
 
----
+<p align="center">
+  <a href="https://dotflowy.com/try">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./docs/images/hero-dark.png" />
+      <img src="./docs/images/hero-light.png" alt="Dotflowy's homepage graphic: nested pages for Home, Projects, and Apartment move, with tasks, tags, and a command center for jumping between nodes." width="720" />
+    </picture>
+  </a>
+</p>
 
-Dotflowy is an outliner: one big tree of bullets you can zoom, filter, and
-rearrange without friction. It's local-first at heart — a static SPA built with
-[TanStack Start](https://tanstack.com/start) and
-[TanStack DB](https://tanstack.com/db) — with a Cloudflare backend that syncs
-your outline live across devices via a per-user
-[Durable Object](https://developers.cloudflare.com/durable-objects/), behind
-[Better Auth](https://www.better-auth.com) accounts.
+Use Dotflowy in your browser on desktop or phone. Your outline syncs live
+across devices. No App Store app is required; you can add it to your home screen.
 
 ## Highlights
 
-- **Everything is a bullet** — nest, collapse, zoom into any node as a
-  temporary root, drag the dot to reorder and reparent in one drop
-- **Three node kinds** — bullet, task (checkbox + a "show completed" toggle),
-  and paragraph (reads as prose)
-- **Markdown-style rich text** — `inline code`, bold / italic / strikethrough /
-  underline, highlights, links that fold to a clean label, and `||spoilers||`
-  hidden from humans until the caret enters and redacted from AI agents
-- **Organize as you type** — `#tags` filter in place (right-click to color),
-  `[[node links]]` with backlinks, mirrors that window one node into many
-  places, daily notes with a Today button and `[[YYYY-MM-DD]]` date chips
-- **Keyboard-first** — a `/` command palette, a `Cmd/Ctrl+K` command center,
-  whole-node selection, quick-add capture, undo / redo
-  ([all shortcuts](./docs/keyboard.md))
-- **In and out freely** — multi-line paste lands as real nodes, copy gives
-  markdown back, OPML import / export speaks the Workflowy dialect
-- **Agent-native** — an OAuth-gated [MCP server](./docs/mcp.md) lets AI agents
-  read and edit the outline, with edits syncing live into open editors
+- **One nested outline.** Nest, collapse, drag, and zoom into any node.
+  Choose bullets, tasks, paragraphs, or embeds.
+- **Capture without losing your place.** Quick-add a thought to today's
+  daily note, then organize it when you're ready.
+- **Find what matters.** Filter by `#tags`, connect nodes with `[[links]]`
+  and backlinks, or press `Cmd/Ctrl+K` to jump anywhere.
+- **Keep one source in several places.** Mirror a node into another part of
+  your outline. Edit either instance and both update.
+- **Bring your notes, take them with you.** Import OPML from Workflowy.
+  Export as OPML or Markdown, and paste nested text as real nodes.
+- **Work with your AI agent.** Connect an MCP client or use the CLI. Agent
+  changes appear live with attribution; text inside `||spoilers||` reaches
+  agents redacted.
 
-Not built yet: sharing.
+<p align="center">
+  <a href="https://dotflowy.com/try">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./docs/images/outline-dark.png" />
+      <img src="./docs/images/outline-light.png" alt="The real Dotflowy editor running the demo outline, with nested notes, tasks, and colored tags." width="960" />
+    </picture>
+  </a>
+</p>
 
-## Command-line access
+[Try the live demo](https://dotflowy.com/try), no account needed.
+For editing commands, see the [keyboard shortcuts](./docs/keyboard.md).
 
-The [Dotflowy CLI](./cli/README.md) provides all MCP tools, browser login, and
-JSON output for scripts. Install the published `dotflowy` npm package with
-`npm install --global dotflowy`. Use Node.js 22.19.0 or newer.
-In the app, open Settings → Connections → Command line (CLI) for setup
-commands that target your deployment.
+## Coming from Workflowy?
 
-## Run it locally
+1. In Workflowy, export your outline as OPML.
+2. In Dotflowy, import the file. Your nesting comes with it.
+3. Keep typing. Enter, Tab, and Shift+Tab work the way you expect.
+
+## AI agents and command line
+
+Connect ChatGPT, Claude, Cursor, or another MCP client through OAuth.
+Ask your agent to sort today's notes, plan under a node, or list your open
+tasks. Its changes sync into the editor with attribution. Spoiler text is
+redacted before it reaches agents, not just hidden visually.
+
+The [MCP guide](./docs/mcp.md) covers connections, tools, and security.
+The [Dotflowy CLI](./cli/README.md) uses the same tools, with browser login
+and JSON output for scripts. Use Node.js 22.19.0 or newer:
+
+```sh
+npm install --global dotflowy
+dotflowy login
+dotflowy status
+```
+
+For commands that target your deployment, open **Settings → Connections →
+Command line (CLI)** in the app.
+
+## Hosted plans
+
+- **Free:** 10,000 nodes, with the full editor, import, and export. Reaching
+  the limit does not prevent you from reading, editing, or exporting.
+- **Unlimited and Founding:** no node limit, plus AI agents over MCP and
+  the CLI.
+
+See [current pricing](https://dotflowy.com/) for prices and availability.
+Each outline belongs to one person. Sharing and collaboration are not available yet.
+
+## For developers
+
+Dotflowy is a static React SPA built with
+[TanStack Start](https://tanstack.com/start) and
+[TanStack DB](https://tanstack.com/db). A Cloudflare Worker syncs each user's
+outline through a dedicated
+[Durable Object](https://developers.cloudflare.com/durable-objects/), with
+[Better Auth](https://www.better-auth.com) accounts.
+
+Editor features extend a small core through an
+[internal plugin registry](./docs/plugins.md). Plugins are compiled into
+the app, not installed at runtime.
+
+### Run it locally
 
 ```sh
 bun install
-bun run setup      # once: secrets + local database schema
-bun run dev        # vite (:3000) + worker (:8787) in one command
-bun run seed:user  # optional: a ready-made dev account to sign in with
+bun run setup   # once: secrets + local database schema
+bun run cf:dev  # SPA + Worker on port 8787
 ```
 
-Open http://localhost:3000 and sign in as `dev@dotflowy.local` /
-`dotflowy-dev`. Everything runs offline — no Cloudflare account needed until
-you deploy. [`CONTRIBUTING.md`](./CONTRIBUTING.md) has the full setup guide.
+Once the server is running, create a dev account in another terminal:
+
+```sh
+bun run seed:user
+```
+
+Open http://localhost:8787 and sign in as `dev@dotflowy.local` /
+`dotflowy-dev`. Local development needs no Cloudflare account.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, the faster HMR
+loop, and testing, or the [deployment guide](./docs/deploying.md) to self-host
+on Cloudflare.
 
 ## Documentation
 
