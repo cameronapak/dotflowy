@@ -13,7 +13,7 @@ import "../styles.css";
 // ("outliner") and the concrete jobs. The page itself carries the pitch.
 const TITLE = "Dotflowy: an outliner for notes, tasks, and ideas";
 const DESCRIPTION =
-  "One outline for everything. Zoom into any bullet, jump anywhere with Cmd+K, import from Workflowy, and export OPML or Markdown on every plan. Free for 10,000 bullets.";
+  "A fast outliner for notes, tasks, and ideas in one nested outline. Zoom into any bullet, jump anywhere with Cmd+K, import from Workflowy, and export OPML or Markdown on every plan. Free for 10,000 bullets.";
 const URL = "https://dotflowy.com";
 
 // Respect the visitor's system theme with no flash of the wrong one. The app's

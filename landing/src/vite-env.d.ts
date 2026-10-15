@@ -21,3 +21,8 @@ declare module "@dotflowy/changelog-markdown" {
     | { kind: "strong"; value: string };
   export function parseInlineMarkdown(summary: string): InlineSegment[];
 }
+
+interface ImportMetaEnv {
+  /** Origin of the app the hero's live demo frames. Defaults to production. */
+  readonly VITE_DEMO_APP_URL?: string;
+}

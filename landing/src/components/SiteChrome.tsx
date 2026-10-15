@@ -20,8 +20,10 @@ function useGithubStars() {
     fetch(GITHUB_API)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { stargazers_count?: number } | null) => {
-        if (!cancelled && typeof data?.stargazers_count === "number") {
-          setStars(data.stargazers_count);
+        // GitHub's JSON is unchecked: keep only a real, non-negative count.
+        const count = Number(data?.stargazers_count ?? Number.NaN);
+        if (!cancelled && Number.isSafeInteger(count) && count >= 0) {
+          setStars(count);
         }
       })
       .catch(() => {});
@@ -77,12 +79,13 @@ export function Nav() {
           >
             What&apos;s new
           </LinkButton>
+          {/* The narrowest phones can't fit all three; GitHub is in the footer. */}
           <LinkButton
             href={GITHUB_URL}
             external
             variant="ghost"
             size="sm"
-            className="min-h-10 min-w-10 gap-1.5 px-2.5 sm:min-w-0 sm:pr-2.5 sm:pl-2"
+            className="min-h-10 min-w-10 gap-1.5 px-2.5 max-[359px]:hidden sm:min-w-0 sm:pr-2.5 sm:pl-2"
           >
             <Star className="size-4" />
             <span className="hidden sm:inline">Star on GitHub</span>
