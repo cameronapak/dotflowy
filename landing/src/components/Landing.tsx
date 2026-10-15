@@ -14,6 +14,8 @@ import {
   recentReleaseCount,
   type Faq,
 } from "@/components/home/blocks";
+import { ClientRow } from "@/components/home/clients";
+import { FeatureRows } from "@/components/home/features";
 import { HeroGraphic } from "@/components/home/HeroGraphic";
 import { LiveDemo } from "@/components/home/LiveDemo";
 import { Footer, GITHUB_URL, LinkButton, Nav } from "@/components/SiteChrome";
@@ -131,15 +133,6 @@ const STEPS = [
   "Keep typing. Enter, Tab, and Shift+Tab work the way you expect.",
 ];
 
-const FEATURES = [
-  "Zoom into any bullet and it becomes the page. The breadcrumb takes you back.",
-  "Press ⌘K and type a few letters to jump to any bullet.",
-  "Press q to add a thought to today without leaving what you're doing.",
-  "Tag as you type, then filter the whole outline by a tag.",
-  "Mirror a bullet into more than one place. Edit it once and every copy changes.",
-  "Every day gets its own page, with tasks you can check off.",
-];
-
 export function Landing() {
   const shipped = recentReleaseCount();
   return (
@@ -148,16 +141,9 @@ export function Landing() {
       <main className="flex-1">
         <Hero />
 
-        <Section>
+        <Section className="max-w-5xl">
           <H2>Everything is a bullet.</H2>
-          <ul className="mt-10 grid gap-5 text-[15px] text-muted-foreground">
-            {FEATURES.map((f) => (
-              <li key={f} className="flex items-start gap-2.5">
-                <Dot className="mt-2" />
-                {f}
-              </li>
-            ))}
-          </ul>
+          <FeatureRows />
         </Section>
 
         <Section>
@@ -186,6 +172,7 @@ export function Landing() {
             once. Ask it to sort today&apos;s notes, plan under a bullet, or
             list your open tasks. Its edits appear live, labeled with its name.
           </Lede>
+          <ClientRow className="mt-8" />
           <OutlineMock
             className="mt-10"
             crumbs={["Projects", "Apartment move #home"]}
@@ -283,6 +270,25 @@ export function Landing() {
           <div className="mt-10">
             <FaqList items={FAQ} />
           </div>
+        </Section>
+
+        <Section>
+          <H2>Start with one bullet.</H2>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <StartFree />
+            <LinkButton
+              href="/try"
+              variant="outline"
+              size="lg"
+              className="h-11 px-5 text-[15px]"
+            >
+              <Play aria-hidden />
+              Try the live demo
+            </LinkButton>
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Generous free plan. No credit card required.
+          </p>
         </Section>
       </main>
       <Footer />
