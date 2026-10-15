@@ -167,8 +167,8 @@ function Keycap({
 }
 
 /* ── B. Zoom stack ─────────────────────────────────────────────────────────
- * Nesting as depth: Home → Projects → Apartment move, each zoom a card
- * closer to you. The breadcrumb is the path you just walked. */
+ * Nesting as depth: Home → Projects → Apartment move, left to right, each
+ * zoom a card further along and closer to you. The breadcrumb is the path you just walked. */
 
 export function HeroGraphic() {
   const card = (z: number) =>
@@ -178,7 +178,7 @@ export function HeroGraphic() {
     );
   return (
     <Stage
-      aspect="10 / 9.4"
+      aspect="10 / 8.2"
       scale={2.3}
       label="Three Dotflowy pages stacked in depth: Home, Projects, and Apartment move, showing zooming into a bullet"
     >
@@ -193,7 +193,7 @@ export function HeroGraphic() {
             transformStyle: "preserve-3d",
           }}
         >
-          <Piece x="24%" y="0%" depth={0.6}>
+          <Piece x="0%" y="2%" depth={0.6}>
             <AppPage crumbs={[]} toolbar={false} className={card(1)}>
               <Row collapsed>Daily</Row>
               <Row collapsed accent>
@@ -201,7 +201,7 @@ export function HeroGraphic() {
               </Row>
             </AppPage>
           </Piece>
-          <Piece x="13%" y="21%" depth={1.4}>
+          <Piece x="15%" y="22%" depth={1.4}>
             <AppPage
               crumbs={["Projects"]}
               toolbar={false}
@@ -217,7 +217,7 @@ export function HeroGraphic() {
               <Row collapsed>Taxes 2026</Row>
             </AppPage>
           </Piece>
-          <Piece x="1%" y="50%" depth={2.4}>
+          <Piece x="30%" y="45%" depth={2.4}>
             <AppPage
               crumbs={["Projects", "Apartment move #home"]}
               title={
@@ -245,19 +245,19 @@ export function HeroGraphic() {
       </div>
 
       {/* Floating in front of the stack, not on it. */}
-      <Piece x="62%" y="6%" rotate={4} depth={3.4} float={0.4}>
+      <Piece x="76%" y="4%" rotate={4} depth={3.4} float={0.4}>
         <div className={cn("flex items-center gap-[0.4em] text-[1.1em]")}>
           <Keycap>⌘</Keycap>
           <Keycap>K</Keycap>
         </div>
       </Piece>
-      <Piece x="62%" y="38%" rotate={-3} depth={3} float={1.5}>
+      <Piece x="-4%" y="62%" rotate={-3} depth={3} float={1.5}>
         <NodeSwitcher
           query="apart"
           match="Apart"
           rest="ment move #home"
           path="Projects"
-          className={cn("w-[17em]", lift(3))}
+          className={cn("w-[15em]", lift(3))}
         />
       </Piece>
     </Stage>
