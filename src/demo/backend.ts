@@ -1,7 +1,10 @@
 import { Schema } from "effect";
 
+import type { WeekStart } from "../data/date-links";
 import type { ChangeOp, ServerMessage } from "../data/realtime";
 import type { Node } from "../data/schema";
+import type { DailyIndexRow } from "../data/week-start-migration";
+import type { CalendarSyncState } from "../data/wire-schema";
 
 import {
   KvClaimBody,
@@ -17,6 +20,8 @@ import {
   spotifyFallbackDescriptor,
   type EmbedDescriptor,
 } from "../data/embed-providers";
+import { createId } from "../data/tree";
+import { planWeekStartMigration } from "../data/week-start-migration";
 import { hasWindow } from "../env";
 import { demoSeed } from "./outline";
 
@@ -40,7 +45,8 @@ import { demoSeed } from "./outline";
 export const DEMO_FRAME_NAME = "dotflowy-demo";
 
 /** Demo mode is chosen once, at boot: a `/demo` URL, or a reload inside the
- *  landing page's named iframe. A top-level tab never inherits it by name. */
+ *  landing page's named iframe. A top-level tab never inherits it by name,
+ *  and a top-level `/demo` is sent to the landing page (install.ts). */
 export function isDemoBoot(): boolean {
   if (!hasWindow()) return false;
   if (/^\/demo\/?$/.test(window.location.pathname)) return true;
@@ -100,7 +106,58 @@ function demoEmbed(text: string): EmbedDescriptor | null {
   }
 }
 
+/** Web Storage that lives and dies with this page. Seeded from the real
+ *  store so the demo opens in the visitor's theme and text size, but no
+ *  preference set in the demo writes back to (or signals) the real app. */
+class MemoryStorage implements Storage {
+  readonly #items: Map<string, string>;
+  constructor(seed: Storage | null) {
+    this.#items = new Map();
+    if (!seed) return;
+    for (let i = 0; i < seed.length; i++) {
+      const key = seed.key(i);
+      if (key !== null) this.#items.set(key, seed.getItem(key) ?? "");
+    }
+  }
+  get length(): number {
+    return this.#items.size;
+  }
+  clear(): void {
+    this.#items.clear();
+  }
+  getItem(key: string): string | null {
+    return this.#items.get(key) ?? null;
+  }
+  key(index: number): string | null {
+    return [...this.#items.keys()][index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.#items.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.#items.set(key, String(value));
+  }
+}
+
+/** Swap both Web Storage areas for page-lifetime copies. Reading storage can
+ *  throw (blocked third-party storage); the demo then starts empty. */
+function isolateStorage(): void {
+  for (const area of ["localStorage", "sessionStorage"] as const) {
+    let seed: Storage | null = null;
+    try {
+      seed = window[area];
+    } catch {
+      // Blocked storage: start from nothing.
+    }
+    Object.defineProperty(window, area, {
+      value: new MemoryStorage(seed),
+      configurable: true,
+    });
+  }
+}
+
 export function installDemoBackend(): void {
+  isolateStorage();
   const store = new Map<string, Node>();
   const seed = demoSeed();
   for (const n of seed.nodes) store.set(n.id, n);
@@ -115,9 +172,19 @@ export function installDemoBackend(): void {
 
   let seq = 0;
   const sockets = new Set<DemoSocket>();
-  const broadcast = (ops: readonly ChangeOp[], clientId?: string): number => {
+  const broadcast = (
+    ops: readonly ChangeOp[],
+    clientId?: string,
+    calendar?: CalendarSyncState,
+  ): number => {
     seq += 1;
-    const frame: ServerMessage = { type: "change", seq, ops, clientId };
+    const frame: ServerMessage = {
+      type: "change",
+      seq,
+      ops,
+      clientId,
+      calendar,
+    };
     for (const s of sockets) s.deliver(frame);
     return seq;
   };
@@ -199,22 +266,49 @@ export function installDemoBackend(): void {
     }
   }
 
+  const currentWeekStart = (): WeekStart => {
+    // SAFETY: only the seed and this route write this key, in this shape.
+    const pref = ns("account-prefs").get("daily:week-start") as
+      | { weekStart?: WeekStart }
+      | undefined;
+    return pref?.weekStart ?? "monday";
+  };
+
+  /** Move the daily calendar with the preference, as the DO does atomically
+   *  (worker/outline-do.ts applyWeekStartMigration), with the same planner. */
   async function weekStart(request: Request): Promise<Response> {
     const body = await bodyOf(WeekStartPostBody, request);
-    const prefs = ns("account-prefs");
-    // SAFETY: only this route writes this key, always in this shape.
-    const current = prefs.get("daily:week-start") as
-      | { weekStart?: "sunday" | "monday" }
-      | undefined;
-    const value =
-      body.operation === "set"
-        ? body.weekStart
-        : (current?.weekStart ?? "monday");
-    prefs.set("daily:week-start", {
+    const target =
+      body.operation === "set" ? body.weekStart : currentWeekStart();
+    const index = ns("daily-index");
+    // SAFETY: the seed and the claim route only store `{ key, nodeId }` rows here.
+    const rows = [...index.values()] as DailyIndexRow[];
+    const plan = planWeekStartMigration(
+      [...store.values()],
+      rows,
+      target,
+      Date.now(),
+      createId,
+    );
+    const changed =
+      target !== currentWeekStart() ||
+      plan.ops.length > 0 ||
+      plan.upserts.length > 0 ||
+      plan.deletes.length > 0;
+    if (!changed) return json({ weekStart: target, seq });
+    for (const key of plan.deletes) index.delete(key);
+    for (const row of plan.upserts) index.set(row.key, row);
+    ns("account-prefs").set("daily:week-start", {
       key: "daily:week-start",
-      weekStart: value,
+      weekStart: target,
     });
-    return json({ weekStart: value, seq });
+    apply(plan.ops);
+    const at = broadcast(plan.ops, undefined, {
+      weekStart: target,
+      upserts: plan.upserts,
+      deletes: plan.deletes,
+    });
+    return json({ weekStart: target, seq: at });
   }
 
   async function handle(request: Request, url: URL): Promise<Response> {
@@ -287,7 +381,12 @@ export function installDemoBackend(): void {
 
     /** The only client frame is `hello`; answer it with the current outline. */
     send(_data: string): void {
-      this.deliver({ type: "snapshot", seq, nodes: [...store.values()] });
+      this.deliver({
+        type: "snapshot",
+        seq,
+        nodes: [...store.values()],
+        calendar: { weekStart: currentWeekStart() },
+      });
     }
 
     deliver(frame: ServerMessage): void {

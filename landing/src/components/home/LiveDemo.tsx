@@ -46,6 +46,10 @@ export function DemoFrame({
       name={DEMO_FRAME_NAME}
       src={`${DEMO_APP_URL}/demo`}
       title="Dotflowy, running live"
+      // Copy as Markdown needs the clipboard; the demo's YouTube and Spotify
+      // players need playback and fullscreen delegated through this frame.
+      allow="clipboard-write; fullscreen; autoplay; encrypted-media; picture-in-picture"
+      allowFullScreen
       // Focus the frame once the app is up, so ⌘K works without a click.
       onLoad={(e) => e.currentTarget.focus()}
       className={cn("block w-full bg-background", className)}
