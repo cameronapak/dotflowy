@@ -52,6 +52,7 @@ import {
 } from "./backup";
 import { handleCaptureKeys, handleCaptureRequest } from "./capture";
 import { lookupEmbedE } from "./embeds";
+import { withFramePolicy } from "./frame-policy";
 import {
   OWNER_DO_ID,
   isAdminSession,
@@ -1411,8 +1412,9 @@ const handler = {
     // The static shell + assets are PUBLIC so the login screen can load. Serve
     // them without instantiating auth — only the data API (and the token-gated
     // `/mcp`, handled in the pipeline below) is gated.
+    // Framing is limited to the landing page's live demo (frame-policy.ts).
     if (url.pathname !== "/mcp" && !url.pathname.startsWith("/api/")) {
-      return env.ASSETS.fetch(request);
+      return withFramePolicy(await env.ASSETS.fetch(request));
     }
 
     // Run the typed pipeline. Typed errors (validation) are caught here and

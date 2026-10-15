@@ -1,3 +1,6 @@
+import { Play } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
 import { ProvenanceTip, Spoiler } from "@/components/home/app-parts";
 import {
   Dot,
@@ -12,9 +15,12 @@ import {
   type Faq,
 } from "@/components/home/blocks";
 import { HeroGraphic } from "@/components/home/HeroGraphic";
-import { Footer, GITHUB_URL, Nav } from "@/components/SiteChrome";
+import { LiveDemo } from "@/components/home/LiveDemo";
+import { Footer, GITHUB_URL, LinkButton, Nav } from "@/components/SiteChrome";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { cn } from "@/lib/utils";
 
-/* The dotflowy.com homepage. "One outline for everything. Yours to keep."
+/* The dotflowy.com homepage. "An outliner that moves as fast as you think."
  * Audience: the evaluator, someone who already keeps an outline (often in
  * Workflowy), is wary of lock-in, and is curious about AI. Every line states a
  * checkable fact; no adjectives the product has to live up to. Everything is
@@ -47,43 +53,74 @@ export const FAQ: Faq[] = [
   },
 ];
 
-const PROOF = [
-  "Import from Workflowy",
-  "MCP server and CLI for your AI agents",
-  "Syncs live between browser and phone",
-];
-
 function Hero() {
+  // The live demo loads the whole app, so it waits for a visitor to ask. It
+  // opens below the hero, which stays put, so nothing above it shifts.
+  const [demo, setDemo] = useState(false);
+  const demoRef = useRef<HTMLDivElement>(null);
+  const tryRef = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
+  const showDemo = () =>
+    demoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  useEffect(() => {
+    if (demo) {
+      opened.current = true;
+      showDemo();
+    } else if (opened.current) {
+      // Closing returns focus to the button that opened it.
+      tryRef.current?.focus();
+    }
+  }, [demo]);
   return (
-    <section className="overflow-hidden pt-12 pb-20 sm:pt-16">
-      <div className="mx-auto grid w-full max-w-6xl gap-12 px-6 lg:grid-cols-[minmax(0,26rem)_1fr] lg:items-center">
+    <section className="overflow-hidden pt-6 pb-20 sm:pt-8">
+      <div className="mx-auto grid w-full max-w-5xl gap-12 px-6 lg:grid-cols-[minmax(0,26rem)_1fr] lg:items-center">
         <div>
           <h1 className="text-5xl leading-[1.02] font-semibold tracking-tight text-balance sm:text-6xl">
-            One outline for everything. Yours to keep.
+            An outliner that moves as fast as you think.
           </h1>
           <p className="mt-6 text-lg leading-relaxed text-pretty text-muted-foreground">
-            Dotflowy is an outliner for notes, tasks, and ideas. Zoom into any
-            bullet to focus on it. Press ⌘K to jump anywhere.
+            Dotflowy keeps your notes, tasks, and ideas in one nested outline.
+            Get everything out of your head, then find it the moment it matters.
           </p>
-          <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-3">
             <StartFree />
-            <p className="text-sm text-muted-foreground">
-              Free for 10,000 bullets.
-            </p>
+            <button
+              ref={tryRef}
+              type="button"
+              onClick={() => (demo ? showDemo() : setDemo(true))}
+              className={cn(
+                buttonVariants({ variant: "outline", size: "lg" }),
+                "hidden h-11 px-5 text-[15px] md:inline-flex",
+              )}
+            >
+              <Play aria-hidden />
+              Try the live demo
+            </button>
+            {/* Framed inline, an outliner traps a phone's scroll; the demo
+                gets the whole screen instead. */}
+            <LinkButton
+              href="/try"
+              variant="outline"
+              size="lg"
+              className="h-11 px-5 text-[15px] md:hidden"
+            >
+              <Play aria-hidden />
+              Try the live demo
+            </LinkButton>
           </div>
-          <ul className="mt-8 grid gap-2.5 text-sm text-muted-foreground">
-            {PROOF.map((p) => (
-              <li key={p} className="flex items-start gap-2.5">
-                <Dot className="mt-1.5" />
-                {p}
-              </li>
-            ))}
-          </ul>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Generous free plan. No credit card required.
+          </p>
         </div>
-        <div className="lg:-mr-10">
+        <div>
           <HeroGraphic />
         </div>
       </div>
+      {demo && (
+        <div ref={demoRef} className="mx-auto mt-16 w-full max-w-5xl px-6">
+          <LiveDemo onClose={() => setDemo(false)} />
+        </div>
+      )}
     </section>
   );
 }
@@ -143,11 +180,11 @@ export function Landing() {
           <p className="text-brand-blue mb-3 text-sm font-medium">
             AI agents · Unlimited and Founding
           </p>
-          <H2>Let Claude tidy your outline. Keep your secrets.</H2>
+          <H2>Let your AI agent tidy your outline. Keep your secrets.</H2>
           <Lede>
-            Connect Claude or any MCP client and approve it once. Ask it to sort
-            today&apos;s notes, plan under a bullet, or list your open tasks.
-            Its edits appear live, labeled as its own.
+            Connect ChatGPT, Claude, Cursor, or any MCP client and approve it
+            once. Ask it to sort today&apos;s notes, plan under a bullet, or
+            list your open tasks. Its edits appear live, labeled with its name.
           </Lede>
           <OutlineMock
             className="mt-10"
@@ -168,7 +205,7 @@ export function Landing() {
             footer={
               <div className="mt-[0.9em] flex flex-wrap items-center gap-[0.6em] border-t border-border pt-[0.8em] text-[0.8em] text-muted-foreground">
                 <ProvenanceTip className="text-[1em]" />
-                <span>What Claude reads: “Lockbox code [spoiler]”</span>
+                <span>What your agent reads: “Lockbox code [spoiler]”</span>
               </div>
             }
           />

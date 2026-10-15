@@ -1,6 +1,6 @@
 # Dotflowy Privacy Policy
 
-**Effective date:** July 11, 2026
+**Effective date:** July 11, 2026 · **Last updated:** October 15, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company. This policy says exactly what data we handle, where it lives, who can see it, and what we will never do with it. We'd rather over-disclose than hide anything.
 
@@ -48,6 +48,7 @@ We share data with exactly these processors, for exactly these purposes:
 - **Cloudflare** — hosts everything: the app, your outline database, account records, and transactional email delivery (e.g., password resets).
 - **Stripe** — payment processing and subscription state.
 - **Google** — only if you use Google sign-in (we receive your basic profile), and one small thing worth disclosing: when a note contains a web link, **your browser** loads that site's icon from Google's favicon service, so Google sees the link's domain (not the full URL, and never your note's content).
+- **YouTube, Vimeo, Spotify, and X** — only when an embed is shown: after you turn on **Allow external embeds** in Settings, or when you open one in the live demo on dotflowy.com. **Your browser** then loads the player straight from that provider, which sees your IP address and may set its own cookies or track you under its own privacy policy. To find the player for a YouTube, Vimeo, or Spotify link, our server asks that provider about the link's URL; X posts load entirely in your browser. Turning the setting off stops embeds from loading.
 - **Sentry** — error reporting. When something crashes, we send Sentry the technical details of the error so we can fix it; we scrub personal data and request contents first, so **your note text never rides an error report**.
 
 Two more behaviors in the spirit of full disclosure:
@@ -59,7 +60,13 @@ We never sell your data, share it for advertising, or use it to train AI models.
 
 ## Cookies
 
-One cookie: your login session. No tracking cookies. Preferences like theme and view settings are stored locally in your browser.
+We set one cookie: your login session. We set no tracking cookies. Preferences like theme and view settings are stored locally in your browser.
+
+Embedded media is the exception we don't control: when a YouTube, Vimeo, Spotify, or X embed loads, that provider may set its own cookies. You only get them if you turn on external embeds, or if you open an embed in the live demo.
+
+## The live demo
+
+The live demo on dotflowy.com runs the real app entirely in your browser. You don't sign in, nothing you type is sent to us or saved, and it's gone when you leave or reset it. The demo's sample outline includes embeds, so opening them loads those providers as described above.
 
 ## Data durability
 

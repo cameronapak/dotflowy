@@ -287,7 +287,7 @@ export function AppPage({
 }
 
 /** The ⌘K node switcher: filled search field, a "Nodes" group, the fuzzy
- * match highlighted, the path underneath, and the Actions affordance. */
+ * match highlighted, and the path underneath. */
 export function NodeSwitcher({
   query,
   match,
@@ -322,18 +322,12 @@ export function NodeSwitcher({
       <p className="px-[0.6em] pt-[0.6em] pb-[0.3em] text-[0.8em] text-muted-foreground">
         Nodes
       </p>
-      <div className="flex items-center justify-between gap-[1em] rounded-[0.55em] bg-muted px-[0.6em] py-[0.4em]">
-        <div>
-          <p className="whitespace-nowrap">
-            <span className="rounded-[0.15em] bg-foreground/15">{match}</span>
-            {rest}
-          </p>
-          <p className="text-[0.85em] text-muted-foreground">{path}</p>
-        </div>
-        <span className="flex items-center gap-[0.2em] text-[0.75em] whitespace-nowrap text-muted-foreground">
-          Actions{" "}
-          <ChevronRight className="size-[1em]" strokeWidth={2} aria-hidden />
-        </span>
+      <div className="rounded-[0.55em] bg-muted px-[0.6em] py-[0.4em]">
+        <p className="whitespace-nowrap">
+          <span className="rounded-[0.15em] bg-foreground/15">{match}</span>
+          {rest}
+        </p>
+        <p className="text-[0.85em] text-muted-foreground">{path}</p>
       </div>
     </div>
   );

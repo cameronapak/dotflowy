@@ -1,6 +1,8 @@
 // Sentry init must run before any app code (#227). SPA mode has no client entry
 // file, so the root route module is the earliest reliable place. Keep first.
 import "../instrument.client";
+// Before anything can fetch: a `/demo` boot answers /api in the browser.
+import "../demo/install";
 import type { ReactNode } from "react";
 
 import {
