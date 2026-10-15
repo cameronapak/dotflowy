@@ -157,13 +157,14 @@ export function Footer() {
           FAITH TOOLS SOFTWARE SOLUTIONS, LLC © {year}
         </p>
       </div>
-      {/* Nominative-fair-use disclaimer: naming Workflowy is lawful, but state
-       * plainly that we're independent and unaffiliated. */}
+      {/* Nominative-fair-use disclaimer: naming Workflowy and the MCP clients
+       * is lawful, but state plainly that we're independent and unaffiliated. */}
       <div className="mx-auto w-full max-w-2xl px-6 pb-6">
         <p className="text-xs leading-relaxed text-muted-foreground/70">
-          Workflowy is a trademark of its respective owner. Dotflowy is an
-          independent, open-source project and is not affiliated with, sponsored
-          by, or endorsed by Workflowy.
+          Workflowy, Amp, ChatGPT, Claude, Cursor, Kody, and other product names
+          are trademarks of their respective owners. Dotflowy is an independent,
+          open-source project and is not affiliated with, sponsored by, or
+          endorsed by them.
         </p>
       </div>
       <div className="mx-auto w-full max-w-2xl px-6 pb-10">
