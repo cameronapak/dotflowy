@@ -34,6 +34,7 @@ import type {
   TokenView,
   ViewContext,
   ViewFilter,
+  ViewStream,
   ViewTransform,
   WidgetEl,
 } from "./types";
@@ -600,6 +601,36 @@ export function getCaptureDestination(): CaptureDestination {
   return { label: "Top level", resolve: async () => null };
 }
 
+// --- Seam N: view streams (ADR 0070) ----------------------------------------
+
+let viewStreamProviders: NonNullable<PluginDef["viewStream"]>[] = [];
+const viewStreamSignals = plugins.flatMap((p) =>
+  p.viewStreamChanged ? [p.viewStreamChanged] : [],
+);
+
+/** The stream to show around `rootId`, or null for an ordinary zoom view.
+ *  First non-null across ENABLED plugins wins. */
+export function getViewStream(rootId: string | null): ViewStream | null {
+  if (rootId === null) return null;
+  for (const fn of viewStreamProviders) {
+    const stream = fn(rootId);
+    if (stream) return stream;
+  }
+  return null;
+}
+
+/** Subscribe to anything that can change a stream: editor preferences and
+ *  each plugin's own section signal. */
+export function subscribeViewStreams(cb: () => void): () => void {
+  const offs = [
+    subscribeEditorFeatures(cb),
+    ...viewStreamSignals.map((signal) => signal(cb)),
+  ];
+  return () => {
+    for (const off of offs) off();
+  };
+}
+
 // A stable external-store snapshot makes dynamic editor chrome a real React
 // input, including under React Compiler. Never mutate a published slots map.
 let chrome = {
@@ -667,6 +698,9 @@ function refreshOptionalSeams(
   );
   captureDestinationProviders = active.flatMap((p) =>
     p.captureDestination ? [p.captureDestination] : [],
+  );
+  viewStreamProviders = active.flatMap((p) =>
+    p.viewStream ? [p.viewStream] : [],
   );
   chrome = {
     headerSlots,

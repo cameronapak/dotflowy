@@ -34,11 +34,15 @@ import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import {
   retryEditorFeatures,
+  setDailyToggle,
   setEditorFeature,
+  setEmptyDaysMode,
   setExternalEmbeds,
   setWeekStart,
   useEditorFeatures,
+  type DailyToggle,
   type EditorFeature,
+  type EmptyDaysMode,
 } from "../data/editor-features";
 import {
   setExperimentalCaptureEnabled,
@@ -166,6 +170,85 @@ function SettingRow({
 }
 
 /** A radio-style segmented control (theme, text size). */
+/** The Daily notes options (ADR 0070): the Day stream, how it presents Empty
+ *  days, and the week strip. Account-wide and optimistic; a failed save rolls
+ *  back and says so. */
+function DailyNotesOptions() {
+  const preferences = useEditorFeatures();
+  const [saving, setSaving] = useState(false);
+  const disabled = !preferences.ready || !preferences.daily || saving;
+  const save = (run: () => Promise<void>, label: string) => {
+    setSaving(true);
+    void run()
+      .catch(() =>
+        toast.error(
+          `Couldn't save ${label}. Your previous setting was restored.`,
+        ),
+      )
+      .finally(() => setSaving(false));
+  };
+  const toggle = (option: DailyToggle, label: string) => (enabled: boolean) =>
+    save(() => setDailyToggle(option, enabled), label);
+  return (
+    <div className="mt-4 flex flex-col gap-4 border-t pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Day stream</p>
+          <p className="text-muted-foreground">
+            Scroll from one day to the next instead of opening one day at a
+            time.
+          </p>
+        </div>
+        <div className="flex size-11 items-center justify-center">
+          <Switch
+            aria-label="Day stream"
+            checked={preferences.dayStream}
+            disabled={disabled}
+            onCheckedChange={toggle("dayStream", "the day stream")}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Empty days</p>
+          <p className="text-muted-foreground">
+            How the day stream shows days with nothing written.
+          </p>
+        </div>
+        <Segmented<EmptyDaysMode>
+          label="Empty days"
+          value={preferences.emptyDays}
+          disabled={disabled || !preferences.dayStream}
+          onChange={(mode) =>
+            save(() => setEmptyDaysMode(mode), "how empty days show")
+          }
+          options={[
+            { value: "show", label: "Show" },
+            { value: "fold", label: "Fold" },
+            { value: "skip", label: "Skip" },
+          ]}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Week strip</p>
+          <p className="text-muted-foreground">
+            Show the week's days above a daily note.
+          </p>
+        </div>
+        <div className="flex size-11 items-center justify-center">
+          <Switch
+            aria-label="Week strip"
+            checked={preferences.weekStrip}
+            disabled={disabled}
+            onCheckedChange={toggle("weekStrip", "the week strip")}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Segmented<T extends string>({
   value,
   onChange,
@@ -992,6 +1075,7 @@ function EditorFeaturesSection() {
                   </div>
                 </div>
               ) : null}
+              {feature.id === "daily" ? <DailyNotesOptions /> : null}
             </div>
           </div>
         ))}

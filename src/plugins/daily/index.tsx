@@ -62,6 +62,7 @@ import { parseGoToDateTargets } from "../../data/parse-go-to-date";
 import { clearSelection } from "../../data/selection-state";
 import { runStructural } from "../../data/structural";
 import { buildTreeIndex, childrenOf } from "../../data/tree";
+import { scrollStreamTo } from "../../data/view-stream";
 import {
   definePlugin,
   type NodeProtection,
@@ -79,6 +80,7 @@ import {
   useScaffoldKey,
 } from "./daily-index";
 import { DateLinkChip } from "./date-chip";
+import { dayStreamFor } from "./day-stream";
 import {
   getOrCreateDay,
   getOrCreateDayResult,
@@ -216,6 +218,11 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
               seedEntryLine: true,
             });
             if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
+            // Inside the Day stream, Today is a section: scroll to it and land
+            // the caret on its last line instead of navigating (ADR 0070).
+            const kids = childrenOf(buildTreeIndex(getLiveNodes()), dayId);
+            const last = kids[kids.length - 1];
+            if (scrollStreamTo(localDateKey(), last?.id)) return;
             navigate({
               to: "/$nodeId",
               params: { nodeId: dayId },
@@ -584,6 +591,11 @@ export default definePlugin({
   // this the core's `useIsProtected` only re-evaluates on an unrelated re-render
   // (e.g. zoom), so the lock appears late.
   protectsChanged: subscribeDailyIndex,
+
+  // Seam N (ADR 0070): a zoomed day note reads as the Day stream. A day gaining
+  // its node is a daily-index change, not only a tree change.
+  viewStream: dayStreamFor,
+  viewStreamChanged: subscribeDailyIndex,
 
   // Start the daily-index kv fetch at editor mount, so the date badges and the
   // container lock are (usually) resolvable by the time the outline snapshot

@@ -15,6 +15,7 @@ import type { ComponentType, ReactNode } from "react";
 import type { NodeCommands } from "../components/node-commands";
 import type { FilterOperator } from "../data/filter-query";
 import type { Node, TreeIndex } from "../data/tree";
+import type { ViewStream } from "../data/view-stream";
 
 export type { FilterOperator } from "../data/filter-query";
 
@@ -276,6 +277,8 @@ export interface RouteSearch {
   q?: string;
   /** Focus landing hint, e.g. `focus=last` from /today. */
   focus?: string;
+  /** The day stream's in-view day (ADR 0070). */
+  day?: string;
 }
 
 /**
@@ -704,6 +707,15 @@ export interface CaptureDestination {
   resolve(): Promise<string | null>;
 }
 
+// --- Seam N: view streams (ADR 0070) ----------------------------------------
+//
+// A zoom root may continue into neighboring roots, read as one scrolling list
+// (the Daily plugin's day stream). The plugin names the sections and what an
+// empty one means; core owns the windowed list, the caret walk across sections,
+// and scroll. See src/data/view-stream.ts.
+
+export type { ViewStream } from "../data/view-stream";
+
 // --- The plugin object ------------------------------------------------------
 
 /**
@@ -786,6 +798,13 @@ export interface PluginDef {
    *  daily plugin returns today's note). First non-null across plugins wins; with
    *  no provider quick-add falls back to the top level. */
   captureDestination?(): CaptureDestination | null;
+  /** Seam N: the stream to show around this zoom root, or null for an ordinary
+   *  zoom view (ADR 0070). Return the SAME object until something it reports
+   *  changes, so the editor's cached list stays warm. First non-null wins. */
+  viewStream?(rootId: string): ViewStream | null;
+  /** Seam N: notify when any stream's sections may have changed without a tree
+   *  change (a section gained its node). Returns an unsubscribe. */
+  viewStreamChanged?(cb: () => void): () => void;
 }
 
 /** Identity helper -- gives a plugin object its type without a cast (D5). */
