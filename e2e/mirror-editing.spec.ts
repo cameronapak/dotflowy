@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Node mirrors (ADR 0022), slice 2c: full editing parity INSIDE a mirror. Stage 1
 // shipped render + the field split; 2a/2b made focus + caret nav path-addressed.
@@ -67,7 +73,8 @@ function watchChainErrors(page: Page): string[] {
 test("Enter-split inside a mirror splits the source and lands focus under the mirror", async ({
   page,
 }) => {
-  await load(page, MIRROR_TREE);
+  await seedOutline(page, MIRROR_TREE);
+  await openSeededOutline(page, { anchorId: "A" });
   await expect(text(page, "a1")).toHaveCount(2);
 
   // Split the WINDOWED copy of a1 (under M) at "child|one". The split edits the
@@ -85,6 +92,42 @@ test("Enter-split inside a mirror splits the source and lands focus under the mi
   // Focus landed on the WINDOWED copy (doc order: nth(0)=under source, nth(1)=
   // under the mirror), NOT the source's row -- no cross-instance focus bleed.
   await expect(ones.nth(1)).toBeFocused();
+
+  // Paste reuses its post-write index for seam and focus. A transport failure
+  // must not send the caret to the source or duplicate nodes on retry.
+  await page.waitForLoadState("networkidle");
+  let attempts = 0;
+  await page.route("**/api/nodes", async (route) => {
+    if (route.request().method() === "POST" && ++attempts === 1) {
+      await route.abort("internetdisconnected");
+      return;
+    }
+    await route.fallback();
+  });
+  await placeCaret(ones.nth(1), "end");
+  await ones.nth(1).evaluate((el) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "part\nlast");
+    el.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  const last = page.locator(".node-text").filter({ hasText: /^last$/ });
+  await expect(last).toHaveCount(2);
+  await expect(last.nth(1)).toBeFocused();
+  await expect.poll(() => attempts).toBe(2);
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await expect(last).toHaveCount(2);
+  expect(
+    await page.evaluate(
+      async () => (await (await fetch("/api/nodes")).json()).length,
+    ),
+  ).toBe(7);
 });
 
 test("Enter at the end of a mirror's own row adds a child to the source", async ({

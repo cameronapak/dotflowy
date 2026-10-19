@@ -26,7 +26,7 @@ import {
 } from "../data/markdown-import";
 import { notifySaveFailed } from "../data/save-failure";
 import { runStructuralTracked, runStructuralSliced } from "../data/structural";
-import { buildTreeIndex, createNode, now } from "../data/tree";
+import { buildTreeIndex, createNode, now, type TreeIndex } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
   getViewFilter,
@@ -150,10 +150,14 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       draft.updatedAt = timestamp;
     });
   };
-  const writeInsert = (i: number) => {
-    const node = plan.inserts[i]!;
+  const writeInserts = (start: number, end: number) => {
+    if (start === end) return;
     nodesCollection.insert(
-      createNode({ ...node, createdAt: timestamp, updatedAt: timestamp }),
+      plan.inserts
+        .slice(start, end)
+        .map((node) =>
+          createNode({ ...node, createdAt: timestamp, updatedAt: timestamp }),
+        ),
     );
   };
   const writeRepoints = () => {
@@ -189,7 +193,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     try {
       const { persisted } = runStructuralTracked(() => {
         writeAnchor();
-        for (let i = 0; i < plan.inserts.length; i++) writeInsert(i);
+        writeInserts(0, plan.inserts.length);
         writeRepoints();
       });
       void persisted.then(notify, notifySaveFailed);
@@ -197,13 +201,17 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       drop();
       throw err;
     }
-    const seam = resolveSeam(plan, anchorId, count);
+    // Both walks must see the same post-write state. Do not reuse the subscribed
+    // index: its notification can lag the optimistic collection writes.
+    const fresh =
+      plan.focusId === anchorId ? null : buildTreeIndex(getLiveNodes());
+    const seam = resolveSeam(plan, anchorId, count, fresh);
     if (seam.id === anchorId)
       focus.placeCaretHere(plan.anchor.text, seam.offset);
     else {
       // The seam row may not be mounted (a long paste in the windowed list), so
       // scroll it in and let it claim the pending focus on mount (ADR 0019).
-      const key = focusKeyFor(seam.id, activeKey);
+      const key = focusKeyFor(seam.id, activeKey, fresh ?? undefined);
       focus.setPendingFocus(key, seam.offset);
       scrollRowIntoView(key);
     }
@@ -215,7 +223,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   // passed (`history-restore.tsx` drops the caret the same way).
   void runSliced(plan.insertCount, opCount, {
     writeAnchor,
-    writeInsert,
+    writeInserts,
     writeRepoints,
     count,
   }).then((applied) => {
@@ -234,18 +242,19 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
  * changed nothing on screen -- the one silent outcome -- so it is disclosed,
  * loudly, because a toast is the only disclosure surface a paste has.
  */
-function resolveSeam(plan: MdPastePlan, anchorId: string, count: number) {
-  if (plan.focusId === anchorId)
-    return { id: anchorId, offset: plan.focusOffset };
+function resolveSeam(
+  plan: MdPastePlan,
+  anchorId: string,
+  count: number,
+  fresh: TreeIndex | null,
+) {
+  if (!fresh) return { id: anchorId, offset: plan.focusOffset };
 
-  // Build the visible set from a FRESH index off the live store --
-  // synchronously current after `runStructural` -- not `getTreeIndex()`, whose
-  // change-notify can lag the optimistic apply and drop the just-inserted seam
-  // node from the walk (the exact reason `focusKeyFor`, called right after this,
-  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c).
+  // Visibility uses the active filter; focus-key derivation deliberately uses
+  // an unfiltered walk because filter membership can still be pre-edit.
   const visible = new Set(
     buildVisibleRows(
-      buildTreeIndex(getLiveNodes()),
+      fresh,
       getViewRootId(),
       getViewIsHidden(),
       getViewFilter(),
@@ -273,7 +282,7 @@ async function runSliced(
   opCount: number,
   w: {
     writeAnchor: () => void;
-    writeInsert: (i: number) => void;
+    writeInserts: (start: number, end: number) => void;
     writeRepoints: () => void;
     count: number;
   },
@@ -288,7 +297,7 @@ async function runSliced(
   for (let i = 0; i < insertCount; i += RESTORE_SLICE_OPS) {
     const end = Math.min(i + RESTORE_SLICE_OPS, insertCount);
     slices.push(() => {
-      for (let j = i; j < end; j++) w.writeInsert(j);
+      w.writeInserts(i, end);
       applied += end - i;
     });
   }

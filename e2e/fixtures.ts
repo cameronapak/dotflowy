@@ -142,6 +142,8 @@ export interface SeedNode {
   origin?: string | null;
   /** Node kind (ADR 0045); omit/null for a bullet-or-task. */
   kind?: "paragraph" | "embed" | null;
+  /** Optional timestamp for benchmark controls; ordinary tests default to zero. */
+  updatedAt?: number;
 }
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
@@ -183,7 +185,7 @@ function toNode(n: SeedNode): ApiNode {
     locked: n.locked ?? false,
     mirrorOf: n.mirrorOf ?? null,
     createdAt: 0,
-    updatedAt: 0,
+    updatedAt: n.updatedAt ?? 0,
     // Every seeded node is "human" (null) — the origin marker only lights up for
     // MCP-created nodes, which the e2e mock never produces. Required by the wire
     // schema the client decodes inbound frames against, so it must be present.

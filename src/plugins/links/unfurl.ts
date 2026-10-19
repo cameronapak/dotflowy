@@ -3,7 +3,7 @@ import { Duration, Effect, Schema } from "effect";
 import type { PluginContext } from "../types";
 
 import { applyUnfurlTitle, newUnfurlLinks } from "../../data/link-unfurl";
-import { getLiveNodes } from "../../data/live-nodes";
+import { getLiveNode } from "../../data/live-nodes";
 
 const pending = new Map<string, Set<{ cancelled: boolean }>>();
 export function cancelNodeUnfurl(nodeId: string): void {
@@ -41,8 +41,7 @@ export function unfurlNodeLinks(
   ctx: PluginContext,
   el?: HTMLElement,
 ): void {
-  if (getLiveNodes().find((node) => node.id === nodeId)?.kind === "embed")
-    return;
+  if (getLiveNode(nodeId)?.kind === "embed") return;
   const links = newUnfurlLinks(before, text);
   const urls = [...new Set(links.map((link) => link.url))];
   if (!urls.length) return;
@@ -74,7 +73,7 @@ export function unfurlNodeLinks(
           );
           if (!title || request.cancelled) return;
           // Collection reads see other titles' optimistic writes immediately.
-          const node = getLiveNodes().find((node) => node.id === nodeId);
+          const node = getLiveNode(nodeId);
           if (node?.kind === "embed") return;
           const current = node?.text;
           if (current == null) return;

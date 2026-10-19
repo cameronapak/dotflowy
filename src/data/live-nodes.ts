@@ -15,3 +15,8 @@ export function getLiveNodes(): Node[] {
   // SAFETY: nodesCollection rows are schema-validated Node values (collection.ts), so toArray already yields Node[].
   return nodesCollection.toArray as Node[];
 }
+
+/** A keyed event-time read without materializing the whole outline. */
+export function getLiveNode(id: string): Node | undefined {
+  return nodesCollection.get(id);
+}

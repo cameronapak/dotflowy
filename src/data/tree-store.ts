@@ -105,9 +105,8 @@ function notify() {
  * re-deriving on every change; we just scope the re-sort to touched parents.
  * Field-only edits touch no parent, so they re-sort nothing and stay O(1).
  *
- * NOTE: this kills the index-rebuild O(n). The remaining O(visible) per-keystroke
- * cost is the `useVisibleChildIds` getSnapshot fan-out across *mounted* parents
- * -- that's what Phase B's windowing cuts, not this.
+ * Child-list snapshots share structureRev's visibility invalidation contract;
+ * unchanged structure never rescans a wide parent's children on a keystroke.
  */
 function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   const dirty = new Set<string>(); // parents whose child order may have changed
@@ -310,16 +309,17 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // Bump the flat-list signal on a structural change OR a visibility flip; a
   // pure text/isTask edit leaves it untouched (the typing hot path). See
   // useVisibleRows.
-  if (dirty.size > 0 || visibilityChanged) structureRev++;
+  if (dirty.size > 0 || visibilityChanged || mirrorsChanged) structureRev++;
   notify();
 }
 
 /** Append an id to a parent's child list (the dirty re-sort fixes its position).
- *  Guards against a duplicate from a redelivered change. */
+ *  applyChanges calls this only for an absent id or a changed parent. A
+ *  redelivered insert already has a byId entry, so it cannot append twice. */
 function addChildId(key: string, id: string) {
   const ids = index.childrenByParent.get(key);
   if (ids) {
-    if (!ids.includes(id)) ids.push(id);
+    ids.push(id);
   } else {
     index.childrenByParent.set(key, [id]);
   }
@@ -544,14 +544,36 @@ export function useVisibleChildIds(
   // Cache the last (key, ids) so getSnapshot returns a referentially stable
   // array while the structure is unchanged. Starts null -- the first call
   // always populates, so there is no sentinel key to collide with.
-  const cache = useRef<{ key: string; ids: string[] } | null>(null);
+  const cache = useRef<{
+    rev: number;
+    parentId: string | null;
+    isHidden: (node: Node) => boolean;
+    key: string;
+    ids: string[];
+  } | null>(null);
   const getSnapshot = useCallback(() => {
+    const rev = getStructureRev();
+    const prev = cache.current;
+    // Same visibility contract as useVisibleRows: structural/mirror changes,
+    // collapse/completion, and a new predicate all invalidate this read.
+    if (
+      prev &&
+      prev.rev === rev &&
+      prev.parentId === parentId &&
+      prev.isHidden === isHidden
+    )
+      return prev.ids;
     const kids = childrenOf(getTreeIndex(), parentId);
     const ids: string[] = [];
     for (const n of kids) if (!isHidden(n)) ids.push(n.id);
     const key = ids.join("\n");
-    if (!cache.current || cache.current.key !== key)
-      cache.current = { key, ids };
+    cache.current = {
+      rev,
+      parentId,
+      isHidden,
+      key,
+      ids: prev?.key === key ? prev.ids : ids,
+    };
     return cache.current.ids;
   }, [parentId, isHidden]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_IDS);

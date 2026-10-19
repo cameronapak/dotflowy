@@ -157,14 +157,18 @@ test("per-result: -> opens a picked node's action sub-view", async ({
   page,
 }) => {
   await load(page);
-  await openPalette(page); // opened from home -> no ambient block
+  await openPalette(page);
+  await page.keyboard.press("Escape");
+  // Reopening must read edits made while the closed palette skips its scan.
+  await text(page, "zephyr").fill("Kestrel");
+  await openPalette(page);
 
-  await page.keyboard.type("zephyr");
-  await expect(page.getByRole("option", { name: /Zephyr/ })).toBeVisible();
+  await page.keyboard.type("kestrel");
+  await expect(page.getByRole("option", { name: /Kestrel/ })).toBeVisible();
 
   // Arrow-right on the highlighted node result drills into its actions.
   await page.keyboard.press("ArrowRight");
-  await expect(page.getByText(/Actions on:\s*Zephyr/)).toBeVisible();
+  await expect(page.getByText(/Actions on:\s*Kestrel/)).toBeVisible();
 
   // Delete the node from the sub-view; its row disappears.
   await page.getByRole("option", { name: /Delete/ }).click();

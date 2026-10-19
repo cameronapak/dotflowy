@@ -335,6 +335,39 @@ CI runs only the focused browser guards, not the full e2e suite. Failed CI runs
 retain browser diagnostics, including retry traces, for seven days in the
 `editor-performance-results` artifact.
 
+For repeatable large-outline measurements, run `bun run bench:outline` against
+`bun run cf:dev` (or a production build served by `vite preview` on port 8787).
+If you use `vite preview`, restart it after each build so it loads the new assets.
+The harness uses synthetic 10k and 100k outlines with mixed and wide sibling
+lists. It mocks auth, HTTP, and WebSocket transport through `e2e/fixtures.ts`;
+it does not write to your account or measure backend latency.
+
+```sh
+LABEL=before bun run bench:outline
+# Rebuild with the change, then repeat with no other benchmarks running.
+LABEL=after bun run bench:outline
+# Optional CPU profile of one action, separate from the timing comparison:
+LABEL=profile REPEATS=1 SIZES=100000 TOPOLOGIES=mixed PROFILE_ACTION=drag bun run bench:outline
+```
+
+JSON results go to `/tmp/dotflowy-benchmark` (`BENCH_OUT` overrides it).
+`BENCH_URL`, `CHROME_PATH`, `SIZES`, `TOPOLOGIES`, and `REPEATS` override the server,
+browser executable, node counts, tree topologies, and repetitions. Defaults use three
+fresh browser contexts per topology and size. Actions cover typing, filtering,
+keyboard reorder, drag, paste, undo, and redo; paste/history checks compare all
+persisted fields except `updatedAt`. Set `TYPING_ONLY=true` for a focused load
+and typing comparison. `PROFILE_ACTION` accepts comma-separated action names.
+CDP `taskMs` includes the action, its DOM
+check, and two animation frames. It measures main-thread CPU, not INP or actual
+paint latency. Compare medians and raw samples; three repetitions cannot
+establish p95. Keep CPU profiles separate because profiling adds overhead.
+
+The default seed uses `updatedAt: 0`, like the other browser fixtures. Also run
+with `SEED_UPDATED_AT=1700000000000` to compare timestamp-sized inputs. The first
+edit changes zero into an epoch timestamp; Chromium's object-copy costs can
+differ substantially between these cases. Keep both results rather than
+discarding the zero-timestamp stress case.
+
 ### Review and release conventions
 
 Rules of thumb:

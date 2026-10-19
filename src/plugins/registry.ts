@@ -50,6 +50,7 @@ import {
   buildFilterOperatorMap,
   buildQueryFilter,
   collectOperatorKeyInfos,
+  type QueryFilter,
 } from "../data/filter-query";
 import { isMirrorsEnabled } from "../data/flags";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
@@ -335,7 +336,7 @@ export function useViewFilter(
     ctx: ViewContext;
     isHidden: (node: Node) => boolean;
     focusedKey: string | null;
-    filter: ViewFilter | null;
+    filter: QueryFilter | null;
   } | null>(null);
   const getSnapshot = useCallback(() => {
     const index = getTreeIndex();
@@ -348,7 +349,27 @@ export function useViewFilter(
       prev.focusedKey === focusedKey
     )
       return prev.filter;
-    const filter = buildViewFilter(index, ctx, isHidden, focusedKey);
+    let filter: QueryFilter | null = buildViewFilter(
+      index,
+      ctx,
+      isHidden,
+      focusedKey,
+    );
+    const previous = prev?.filter;
+    // Still evaluate every change: operator predicates can inspect the whole
+    // index. But unchanged membership must not invalidate the visible-row list
+    // or virtualizer geometry. Focus-only retention is part of that contract.
+    if (
+      filter &&
+      previous &&
+      filter.retainedKey === previous.retainedKey &&
+      filter.emptyMessage === previous.emptyMessage &&
+      filter.visibleIds.size === previous.visibleIds.size &&
+      filter.matchIds.size === previous.matchIds.size &&
+      [...filter.visibleIds].every((id) => previous.visibleIds.has(id)) &&
+      [...filter.matchIds].every((id) => previous.matchIds.has(id))
+    )
+      filter = previous;
     cache.current = { index, ctx, isHidden, focusedKey, filter };
     return filter;
   }, [ctx, isHidden, focusedKey]);
