@@ -28,7 +28,7 @@ export interface ViewStream {
     after: number,
   ): { keys: string[]; atStart: boolean; atEnd: boolean };
   /** Signed section distance from the anchor, or null when `key` is not a
-   *  section of this stream. */
+   *  section of this stream, including one past its bounds. */
   offsetOf(key: string): number | null;
   /** The section's node id, or null while it has none yet. Live. */
   resolve(key: string): string | null;

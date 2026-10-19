@@ -79,12 +79,30 @@ function createDayStream(
   emptyMode: ViewStream["emptyMode"],
   today: string,
 ): ViewStream {
+  // The daily index can drop rows for a moment while a claim re-syncs it.
+  // Remember each day's node, and never narrow the bounds, so that gap does not
+  // turn written days into placeholders or clip loaded sections. buildStream
+  // still checks the remembered node exists in the tree.
+  const known = new Map<string, string>();
+  const resolve = (key: string): string | null => {
+    const id = getMappedId(key);
+    if (id) {
+      known.set(key, id);
+      return id;
+    }
+    return known.get(key) ?? null;
+  };
+  let reach = { first: anchor, last: anchor };
   // Bounds are read per call: a day created while scrolling widens them.
   const bounds = () => {
     const { first, last } = mappedDayRange();
+    reach = {
+      first: minKey(first, reach.first, today),
+      last: maxKey(last, reach.last, today),
+    };
     return {
-      first: addDays(minKey(first, anchor, today), -PAST_REACH),
-      last: addDays(maxKey(last, anchor, today), FUTURE_REACH),
+      first: addDays(reach.first, -PAST_REACH),
+      last: addDays(reach.last, FUTURE_REACH),
     };
   };
   return {
@@ -99,11 +117,16 @@ function createDayStream(
       return { keys, atStart: start > -before, atEnd: end < after };
     },
     offsetOf(key) {
-      return scaffoldKeyKind(key) === "day" ? dayDiff(anchor, key) : null;
+      if (scaffoldKeyKind(key) !== "day") return null;
+      // A day past the bounds is not a section: the caller navigates there
+      // instead, which anchors a new stream on it.
+      const { first, last } = bounds();
+      if (key < first || key > last) return null;
+      return dayDiff(anchor, key);
     },
-    resolve: getMappedId,
+    resolve,
     isEmpty(key, index) {
-      const id = getMappedId(key);
+      const id = resolve(key);
       return id === null || !index.byId.has(id) || isDayEmpty(index, id);
     },
     pinned: (key) => key === anchor || key === today,
@@ -144,18 +167,27 @@ function createDayStream(
   };
 }
 
-let cached: { stream: ViewStream; sig: string } | null = null;
+let cached: { rootId: string; stream: ViewStream; sig: string } | null = null;
 
 /** Seam N: the Day stream for a zoomed day note, or null when the root is not
  *  a day or the Day stream option is off. Same object until its inputs change. */
 export function dayStreamFor(rootId: string): ViewStream | null {
   const features = getEditorFeatures();
   if (!features.dayStream) return null;
-  const key = getKeyForNode(rootId);
+  // The index can drop a row for a moment while a claim re-syncs it (a
+  // quick-add into today). A day root keeps its day through that gap, so the
+  // stream does not collapse to one day and lose the scroll position.
+  const key =
+    getKeyForNode(rootId) ??
+    (cached?.rootId === rootId ? cached.stream.anchor : null);
   if (key === null || scaffoldKeyKind(key) !== "day") return null;
   const today = localDateKey();
-  const sig = `${key}|${features.emptyDays}|${today}`;
+  const sig = `${rootId}|${key}|${features.emptyDays}|${today}`;
   if (cached?.sig !== sig)
-    cached = { sig, stream: createDayStream(key, features.emptyDays, today) };
+    cached = {
+      rootId,
+      sig,
+      stream: createDayStream(key, features.emptyDays, today),
+    };
   return cached.stream;
 }

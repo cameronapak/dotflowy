@@ -912,7 +912,8 @@ test.describe("narrow-screen drawers", () => {
     const day = drawer(page).locator('[data-day-key="2030-07-15"]');
     expect((await day.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await day.tap();
-    await expect(page).toHaveURL(new RegExp(`/${TARGET}$`));
+    // A day page is a Day stream: the pick scrolls there (ADR 0070).
+    await expect(page).toHaveURL(/\/tagged\?day=2030-07-15$/);
     await expect(drawer(page)).toBeHidden();
   });
 });

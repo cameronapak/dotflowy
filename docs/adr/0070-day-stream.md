@@ -49,8 +49,9 @@ options.
    entries. Only the search param changes, so `rootId` and the zoom, focus, and
    morph effects keyed on it stay untouched, and the caret stays where it is while
    you edit. The param is dropped when the day in view is the anchor. On load, the
-   stream anchors on `rootId` and then scrolls to `?day`. A day key works for Empty
-   days, which have no node id. `validateOutlineSearch` allows `day` and drops a
+   stream anchors on `rootId` and then scrolls to `?day`, once the daily index
+   has loaded. The URL keeps `?day` until that day is in view or you scroll. A
+   day key works for Empty days, which have no node id. `validateOutlineSearch` allows `day` and drops a
    malformed value. Rejected: rewriting `/$nodeId` on scroll, which refires the
    zoom effects and cannot address an Empty day. Rejected: a bare
    `history.replaceState` outside the router, which leaves the router's location
@@ -58,7 +59,10 @@ options.
 
 5. **Both directions, loaded lazily.** The stream extends into the past and the
    future, so it also works for planning ahead. Days load in windows at either
-   edge. Prepending keeps the day in view fixed on screen.
+   edge. Prepending keeps the day in view fixed on screen. The stream reaches 30
+   days before and 60 days after the outermost day with a note, today, and the
+   anchor. A calendar pick past that reach navigates to the day instead, which
+   anchors a new stream there.
 
 6. **Scroll settles on day starts with proximity snapping.** Each day is at least
    one viewport tall minus a peek of the next day's title. Long days scroll

@@ -111,6 +111,7 @@ import {
   setStreamView,
   streamNeighbor,
   useStreamView,
+  type ViewStream,
 } from "../data/view-stream";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import {
@@ -749,24 +750,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // stream (ADR 0070): the day stream around a daily note. A filter shows the
   // single root, because a filter transforms one root.
   const stream = useViewStream(rootId, filter === null);
-  // `?day=` on load: start the stream there. Read once; later writes follow
-  // the scroll position and must not move it.
-  const [initial] = useState(() => {
-    const section = routeSearch.day ?? null;
-    const offset = section ? (stream?.offsetOf(section) ?? null) : null;
-    // Start AT the earlier of the anchor and `?day=`, so the page opens at the
-    // top like a single zoom view. Earlier sections load in above it with the
-    // scroll position held (see the extend effect below); a later `?day=`
-    // scrolls down to it once it renders.
-    return {
-      range: {
-        before: offset !== null && offset < 0 ? -offset : 0,
-        after: Math.max(STREAM_CHUNK, (offset ?? 0) + STREAM_CHUNK),
-      },
-      scrollTo: offset !== null && offset > 0 ? section : null,
-    };
-  });
-  const [range, setRange] = useState(initial.range);
+  // `?day=` on load: start the stream there. Planned once, when the stream is
+  // first ready -- on a cold load the daily index arrives after the first
+  // render, so the plan waits for it. Later writes follow the scroll position
+  // and must not move it.
+  const [initial] = useState(() =>
+    stream ? planStreamOpening(stream, routeSearch.day ?? null) : null,
+  );
+  const [range, setRange] = useState(
+    initial?.range ?? planStreamOpening(null, null).range,
+  );
   // Sections the user unfolded or worked in. They stay visible even while
   // empty, so a fold never swallows the section holding the caret.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
@@ -958,10 +951,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const [scrollMargin, setScrollMargin] = useState(0);
   // The sticky header's height: a stream aligns sections just below it.
   const [headerHeight, setHeaderHeight] = useState(0);
+  // The tallest the header has been in this view. Pages size from it, so a
+  // header that shrinks for a moment (the week strip collapsing while the
+  // daily index re-syncs) does not resize every page above the day in view.
+  const [pageHeader, setPageHeader] = useState(0);
   // One section's page: a screen below the header, minus a peek of the next
   // section's title.
   const streamPage =
-    (hasWindow() ? window.innerHeight : 0) - headerHeight - STREAM_PEEK;
+    (hasWindow() ? window.innerHeight : 0) - pageHeader - STREAM_PEEK;
   // The first index of each section's items, for page-end sizing.
   const sectionStarts = useMemo(() => {
     const m = new Map<string, number>();
@@ -975,7 +972,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const measure = () => {
       const el = listRef.current;
       if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
-      setHeaderHeight(headerRef.current?.offsetHeight ?? 0);
+      const next = headerRef.current?.offsetHeight ?? 0;
+      setHeaderHeight(next);
+      setPageHeader((prev) => Math.max(prev, next));
     };
     measure();
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
@@ -1015,6 +1014,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // caret (ADR 0070).
     rangeExtractor: (range) => {
       const indexes = defaultRangeExtractor(range);
+      // Only a stream needs this; outside one a focused row scrolled out of
+      // the window unmounts as before (a filter relies on it).
+      if (!stream) return indexes;
       // The same for the item a stream load is holding in place.
       const keep = [hasWindow() ? findFocusedId() : null, heldRef.current?.key]
         .map((key) => (key ? rowIndex.get(key) : undefined))
@@ -1156,7 +1158,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // height the new sections added above it.
   const extendingRef = useRef(false);
   const seatedRef = useRef(false);
-  const routeSearchDayRef = useRef(routeSearch.day ?? null);
+  // The section the stream opens on, and the `?day=` still being restored.
+  // While a restore is pending the URL keeps its `?day=` (see the URL effect).
+  const routeSearchDayRef = useRef(initial?.day ?? null);
+  const restoringDayRef = useRef(initial?.day ?? null);
+  const plannedRef = useRef(initial !== null);
+  const latestSearchDayRef = useRef(routeSearch.day ?? null);
+  latestSearchDayRef.current = routeSearch.day ?? null;
+  // Cancels the post-prepend pin loop, so a deliberate scroll (a pill, Today)
+  // is not dragged back to the held item.
+  const stopPinRef = useRef<(() => void) | null>(null);
   const maybeExtend = useCallback(() => {
     if (!streamRef.current || extendingRef.current) return;
     const snapshot = snapshotRef.current;
@@ -1238,6 +1249,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         const cancel = () => {
           stop = true;
         };
+        stopPinRef.current = cancel;
         window.addEventListener("wheel", cancel, { once: true });
         window.addEventListener("touchstart", cancel, { once: true });
         const pin = () => {
@@ -1269,7 +1281,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   // Scroll to a section once it is in the list: a pill click, Today, or a
   // later `?day=` on load.
-  const pendingSectionRef = useRef<string | null>(initial.scrollTo);
+  const pendingSectionRef = useRef<string | null>(initial?.scrollTo ?? null);
+  // Cold load: the stream became ready after mount. Plan the opening now.
+  useLayoutEffect(() => {
+    if (!stream || plannedRef.current) return;
+    plannedRef.current = true;
+    const plan = planStreamOpening(stream, latestSearchDayRef.current);
+    routeSearchDayRef.current = plan.day;
+    restoringDayRef.current = plan.day;
+    pendingSectionRef.current = plan.scrollTo;
+    seatedRef.current = false;
+    setRange(plan.range);
+  }, [stream]);
   useLayoutEffect(() => {
     const key = pendingSectionRef.current;
     if (!key || !stream) return;
@@ -1280,6 +1303,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     );
     if (i < 0) return;
     pendingSectionRef.current = null;
+    stopPinRef.current?.();
     virtualizer.scrollToIndex(i, { align: "start" });
   });
 
@@ -1298,6 +1322,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     let settle = 0;
     const markGesture = () => {
       gesture = true;
+      // The user scrolling ends a `?day=` restore: the URL follows them now.
+      restoringDayRef.current = null;
     };
     const snap = () => {
       if (!gesture) return;
@@ -1368,6 +1394,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // zoom root, and every effect keyed on it, stays put.
   useEffect(() => {
     if (!stream || !inViewSection) return;
+    // A `?day=` restore ends once its day is in view. Until then the URL keeps
+    // it, so the anchor showing first does not erase the link's destination.
+    const restoring = restoringDayRef.current;
+    if (restoring !== null) {
+      if (inViewSection !== restoring) return;
+      restoringDayRef.current = null;
+    }
     const day = inViewSection === stream.anchor ? undefined : inViewSection;
     if (routeSearch.day === day) return;
     const timer = window.setTimeout(() => {
@@ -1389,6 +1422,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     setStreamScroller((key, focusKey) => {
       const offset = stream.offsetOf(key);
       if (offset === null) return false;
+      // A deliberate jump supersedes a `?day=` restore and a held position.
+      restoringDayRef.current = null;
+      stopPinRef.current?.();
       if (focusKey) {
         const text = getTreeIndex().byId.get(focusKey)?.text ?? "";
         commands.setPendingFocus(focusKey, text.length);
@@ -1439,6 +1475,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     };
   }, [stream, virtualizer, commands, refs, pendingFocus]);
 
+  // Without a stream (a filter, or the option off) commands target the zoom
+  // root again: a section override left behind would aim them at another day.
+  useEffect(() => {
+    if (!stream) setViewSectionRoot(null);
+  }, [stream]);
+
   /** Point commands at the section an element belongs to, and keep that
    *  section visible while it is being worked in. */
   const activateSectionAt = (target: EventTarget | null) => {
@@ -1461,40 +1503,74 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // its seeded entry line. The typed text moves into the new row, and the
   // caret follows it.
   const writingRef = useRef(new Set<string>());
+  // Typing holds still waiting on a day's creation; unmount cancels them.
+  const holdsRef = useRef(new Set<() => void>());
+  useEffect(() => {
+    const holds = holdsRef.current;
+    return () => {
+      for (const cancel of holds) cancel();
+      holds.clear();
+    };
+  }, []);
   const writeIntoSection = (section: string, el: HTMLElement) => {
     if (!stream || writingRef.current.has(section)) return;
     writingRef.current.add(section);
     // Creation is async, and the entry line unmounts as soon as the day exists,
-    // which drops focus to the body. Hold typed characters until the real row
-    // takes the caret, so a fast typist loses nothing.
+    // which drops focus to the body. Hold characters typed while focus is
+    // nowhere, so a fast typist loses nothing. The hold belongs to this one
+    // editing interaction: a click, or focus landing anywhere else, ends it
+    // and leaves the caret where the user put it.
     let held = "";
+    let holding = true;
     const hold = (e: KeyboardEvent) => {
-      if (document.activeElement === el) return;
+      const active = document.activeElement;
+      if (active === el) return;
+      if (active && active !== document.body) return endHold();
       if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
       e.preventDefault();
       held += e.key;
     };
-    document.addEventListener("keydown", hold, true);
-    const release = () => {
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target !== el) endHold();
+    };
+    const endHold = () => {
+      if (!holding) return;
+      holding = false;
       document.removeEventListener("keydown", hold, true);
+      document.removeEventListener("pointerdown", endHold, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+      holdsRef.current.delete(endHold);
+    };
+    document.addEventListener("keydown", hold, true);
+    document.addEventListener("pointerdown", endHold, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    holdsRef.current.add(endHold);
+    const release = () => {
+      // Read before ending: an ended hold means the user moved on.
+      const kept = holding;
+      endHold();
       writingRef.current.delete(section);
+      return kept;
     };
     const finish = (entryId: string) => {
-      release();
+      const keepCaret = release();
       const text = (el.textContent ?? "") + held;
       setViewSectionRoot(stream.resolve(section));
       setExpanded((prev) =>
         prev.has(section) ? prev : new Set(prev).add(section),
       );
-      commands.setPendingFocus(entryId, text.length);
       const mounted = refs.get(entryId);
       // A seeded entry row is already mounted and empty: fill its DOM before
       // the store write, so the sync effect keeps the caret at the end.
-      if (mounted) {
+      if (mounted && mounted !== document.activeElement)
         mounted.textContent = text;
-        mounted.focus();
-        applyPendingCaret(mounted, entryId, false);
-        pendingFocus.current = null;
+      if (keepCaret) {
+        commands.setPendingFocus(entryId, text.length);
+        if (mounted) {
+          mounted.focus();
+          applyPendingCaret(mounted, entryId, false);
+          pendingFocus.current = null;
+        }
       }
       if (text) commands.onTextChange(entryId, text);
     };
@@ -2990,6 +3066,25 @@ function useNodeCommands({
     // eslint-disable-next-line react-doctor/exhaustive-deps
     [navigateZoom, startDrag, consumeClick],
   );
+}
+
+/** Where a stream opens: AT the earlier of the anchor and `day`, so the page
+ *  opens at the top like a single zoom view. Earlier sections load in above it
+ *  with the scroll position held; a later `day` scrolls down to it once it
+ *  renders. A `day` that is not a section of the stream is dropped. */
+function planStreamOpening(
+  stream: ViewStream | null,
+  requested: string | null,
+) {
+  const offset = requested && stream ? stream.offsetOf(requested) : null;
+  return {
+    day: offset === null ? null : requested,
+    range: {
+      before: offset !== null && offset < 0 ? -offset : 0,
+      after: Math.max(STREAM_CHUNK, (offset ?? 0) + STREAM_CHUNK),
+    },
+    scrollTo: offset !== null && offset > 0 ? requested : null,
+  };
 }
 
 /** Whether a list item starts a stream section. */
