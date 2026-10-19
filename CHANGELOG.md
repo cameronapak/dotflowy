@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.26.2
+
+### Patch Changes
+
+- bc39c7e: Reduce repeated work when pasting, undoing, and editing large outlines.
+
 ## 1.26.1
 
 ### Patch Changes
