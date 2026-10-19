@@ -5,7 +5,9 @@
 
 import type { ReactNode } from "react";
 
-import { useRef } from "react";
+import { memo, useRef } from "react";
+
+import type { ViewStream } from "../data/view-stream";
 
 interface ShellProps {
   kind: "title" | "placeholder" | "fold" | "end";
@@ -52,13 +54,15 @@ export function StreamShell({
 
 /** The title of a section that has no node yet. Read-only: the date is the
  *  identity, and nothing exists to rename. */
-export function StreamPlaceholderTitle({
-  title,
-  badge,
+export const StreamPlaceholderTitle = memo(function StreamPlaceholderTitle({
+  stream,
+  section,
 }: {
-  title: string;
-  badge: string | null;
+  stream: ViewStream;
+  section: string;
 }) {
+  const title = stream.placeholderTitle(section);
+  const badge = stream.badge(section);
   return (
     <h2 className="zoomed-title stream-title" data-placeholder="">
       <span className="row-body">
@@ -69,14 +73,14 @@ export function StreamPlaceholderTitle({
       </span>
     </h2>
   );
-}
+});
 
 /**
  * The faint first line of an empty section. Typing in it starts the section:
  * `onWrite` runs once, on the first input, and owns creating the node and
  * moving the caret to the real row. Enter does nothing until then.
  */
-export function StreamEntryLine({
+export const StreamEntryLine = memo(function StreamEntryLine({
   section,
   onWrite,
 }: {
@@ -118,7 +122,7 @@ export function StreamEntryLine({
       />
     </div>
   );
-}
+});
 
 /** One line standing in for a run of empty sections. Expands on click. */
 export function StreamFold({

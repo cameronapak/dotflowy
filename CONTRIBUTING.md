@@ -216,7 +216,8 @@ browser.
   `Meta+`.
 - Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
   `waitForTimeout`.
-- **e2e does not run in CI.** It is a local pre-PR gate.
+- **Only the focused editor performance suite runs in CI** (`bun run test:perf`).
+  The full e2e suite remains a local pre-PR gate.
   `bun run test:e2e:app --workers=2` is the clean-signal app-only run;
   `bun run test:e2e` also runs the isolated real-Worker suite. Use
   `bun run test:e2e:serial` when chasing a flake. A
@@ -264,6 +265,7 @@ bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run typecheck:e2e   # tsc over app Playwright specs and fixtures, no browser
 bun run test            # bun test — unit tests plus the Miniflare Worker suite (src + worker/)
+bun run test:perf       # focused editor performance browser suite, also runs in CI
 bun run test:e2e        # playwright (chromium) — app plus isolated real-Worker suite
 bunx changeset          # describe your change for the changelog (see below)
 bun run check:changeset # verify the committed branch carries that decision
@@ -300,6 +302,38 @@ they do not require development-only app hooks. The committed Playwright config
 invokes the installed Vite entry point directly
 to avoid nested Bun script PATH failures. It rejects a busy port instead of
 adopting another checkout's server; set `E2E_PORT` for concurrent runs.
+
+### Profile editor performance
+
+Run `bun run test:perf` after changing editor rendering, subscriptions, or
+virtualization. This browser suite runs locally and in CI. It checks render isolation, layout-cache
+reuse, resize behavior, mounted-row bounds, and hotkey registration counts.
+The day-stream guard must observe real editor renders before asserting that
+unchanged content and layout stay cached. It adds no production counters.
+
+Use [React Doctor](https://www.react.doctor/docs/overview/quickstart) for two
+different tasks:
+
+- **Static audit:** `bunx react-doctor@0.9.18 --scope changed --base HEAD --verbose --no-score --no-supply-chain`
+  checks uncommitted tracked changes against `HEAD`. For a branch audit, use
+  `--base origin/main`. Treat findings as hypotheses, not measured costs. Keep
+  the editor's intentional compiler opt-out and manual memos (ADR 0019 and
+  ADR 0004).
+- **Runtime profile:** with `bun run cf:dev` running, use
+  `bunx react-doctor@0.9.18 scan http://localhost:8787 --trace-out /tmp/dotflowy-scroll.json.gz`.
+  Sign in in the profiler's browser, open a populated Daily note, reproduce one
+  interaction, then press Enter in the terminal to finish. Profile typing and
+  scrolling separately. Chrome DevTools Performance and React DevTools Profiler
+  are alternatives. Keep traces private: they can contain URLs and outline data.
+
+Compare the same outline, viewport, and interaction before and after a fix.
+Distinguish viewport renders, new mounts, and real resizes from unchanged-content
+renders and full-list rebuilds. Test a populated day, empty days, loading earlier
+days, and viewport resizing. Preserve a countable regression guard rather than
+a machine-dependent millisecond budget. React Doctor remains a manual audit;
+CI runs only the focused browser guards, not the full e2e suite. Failed CI runs
+retain browser diagnostics, including retry traces, for seven days in the
+`editor-performance-results` artifact.
 
 ### Review and release conventions
 

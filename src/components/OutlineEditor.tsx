@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -955,10 +956,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // header that shrinks for a moment (the week strip collapsing while the
   // daily index re-syncs) does not resize every page above the day in view.
   const [pageHeader, setPageHeader] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    hasWindow() ? window.innerHeight : 0,
+  );
   // One section's page: a screen below the header, minus a peek of the next
   // section's title.
-  const streamPage =
-    (hasWindow() ? window.innerHeight : 0) - pageHeader - STREAM_PEEK;
+  const streamPage = viewportHeight - pageHeader - STREAM_PEEK;
   // The first index of each section's items, for page-end sizing.
   const sectionStarts = useMemo(() => {
     const m = new Map<string, number>();
@@ -975,17 +978,21 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       const next = headerRef.current?.offsetHeight ?? 0;
       setHeaderHeight(next);
       setPageHeader((prev) => Math.max(prev, next));
+      setViewportHeight(window.innerHeight);
     };
     measure();
+    window.addEventListener("resize", measure);
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
     // query-param change, not a remount, so the deps below never fire for it).
     const header = headerRef.current;
-    if (!header || !hasResizeObserver()) return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(header);
+    const ro = hasResizeObserver() ? new ResizeObserver(measure) : null;
+    if (header) ro?.observe(header);
     const titleBody = document.querySelector("[data-title-body]");
-    if (titleBody) ro.observe(titleBody);
-    return () => ro.disconnect();
+    if (titleBody) ro?.observe(titleBody);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro?.disconnect();
+    };
   }, [rootId, zoomedNode?.id, stream]);
   // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
   // render ADDRESS (row.key), not the bare id: a source descendant appears under
@@ -1007,6 +1014,32 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     start: number;
     top: number | null;
   } | null>(null);
+  // A new getItemKey invalidates the virtualizer's geometry for EVERY loaded
+  // item, even when the keys are unchanged. Scroll-only renders must reuse it.
+  // Rotate both callbacks when page geometry changes: estimateSize alone is
+  // not a measurement-cache dependency in TanStack Virtual.
+  const sizing = useMemo(
+    () => ({
+      getItemKey: (i: number) => items[i]?.key ?? i,
+      estimateSize: (i: number) => {
+        const item = items[i];
+        if (!item || item.kind === "row") return ROW_ESTIMATE;
+        if (item.kind !== "end") return STREAM_ESTIMATE[item.kind];
+        // Estimate an unmeasured section at its full page height, so loading
+        // earlier sections does not move the day in view.
+        const first = sectionStarts.get(item.section);
+        if (first === undefined) return 0;
+        let above = 0;
+        for (let j = first; j < i; j++) {
+          const prior = items[j]!;
+          above +=
+            prior.kind === "row" ? ROW_ESTIMATE : STREAM_ESTIMATE[prior.kind];
+        }
+        return Math.max(0, streamPage - above);
+      },
+    }),
+    [items, sectionStarts, streamPage],
+  );
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
     // Keep the row holding the caret mounted even outside the window. Loading
     // sections above it renders once at the old scroll offset before the
@@ -1026,33 +1059,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         : indexes;
     },
     count: items.length,
-    estimateSize: (i) => {
-      const item = items[i];
-      if (!item || item.kind === "row") return ROW_ESTIMATE;
-      if (item.kind !== "end") return STREAM_ESTIMATE[item.kind];
-      // A page end tops its section up to one screen, so estimate exactly
-      // that: an unmeasured section above the viewport then already has its
-      // real height, and loading earlier sections holds the scroll position.
-      const first = sectionStarts.get(item.section);
-      if (first === undefined) return 0;
-      let above = 0;
-      for (let j = first; j < i; j++) {
-        const prior = items[j]!;
-        above +=
-          prior.kind === "row" ? ROW_ESTIMATE : STREAM_ESTIMATE[prior.kind];
-      }
-      return Math.max(0, streamPage - above);
-    },
+    ...sizing,
     // A stream scrolls sections to just below the sticky header.
     scrollPaddingStart: stream ? headerHeight : 0,
     overscan: 8,
     scrollMargin,
-    // Key by the row's render ADDRESS, not its node id: inside a mirror a
-    // source's descendant appears under every instance, so its bare id is no
-    // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
-    // the 99% outline keeps today's identity and the virtualizer's measurement
-    // cache is unaffected.
-    getItemKey: (i) => items[i]?.key ?? i,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
     // Without it the window virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
@@ -1121,12 +1132,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Event-time reads go through refs, like the commands: the scroll listener
   // and bridges stay mounted across renders.
   const itemsRef = useRef(items);
+  const sectionStartsRef = useRef(sectionStarts);
   const streamRef = useRef(stream);
   const snapshotRef = useRef(streamSnapshot);
   const headerHeightRef = useRef(headerHeight);
   const rangeRef = useRef(range);
   useLayoutEffect(() => {
     itemsRef.current = items;
+    sectionStartsRef.current = sectionStarts;
     streamRef.current = stream;
     snapshotRef.current = streamSnapshot;
     headerHeightRef.current = headerHeight;
@@ -1135,20 +1148,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
 
   /** The section whose start sits at or above the sticky header's bottom. */
   const sectionInView = useCallback((): string | null => {
-    const list = itemsRef.current;
     const cache = virtualizer.measurementsCache;
     const line = window.scrollY + headerHeightRef.current + 48;
     let found: string | null = null;
-    for (let i = 0; i < list.length; i++) {
-      const item = list[i]!;
-      if (item.kind !== "title" && item.kind !== "placeholder") continue;
+    for (const [section, i] of sectionStartsRef.current) {
       const m = cache[i];
       if (!m) break;
       if (m.start > line) {
-        found ??= item.section;
+        found ??= section;
         break;
       }
-      found = item.section;
+      found = section;
     }
     return found;
   }, [virtualizer]);
@@ -1330,13 +1340,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       gesture = false;
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed) return;
-      const list = itemsRef.current;
       const cache = virtualizer.measurementsCache;
       const line = window.scrollY + headerHeightRef.current;
       let nearest: number | null = null;
-      for (let i = 0; i < list.length; i++) {
-        const item = list[i]!;
-        if (item.kind !== "title" && item.kind !== "placeholder") continue;
+      for (const i of sectionStartsRef.current.values()) {
         const m = cache[i];
         if (!m) continue;
         const d = m.start - line;
@@ -1512,82 +1519,85 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       holds.clear();
     };
   }, []);
-  const writeIntoSection = (section: string, el: HTMLElement) => {
-    if (!stream || writingRef.current.has(section)) return;
-    writingRef.current.add(section);
-    // Creation is async, and the entry line unmounts as soon as the day exists,
-    // which drops focus to the body. Hold characters typed while focus is
-    // nowhere, so a fast typist loses nothing. The hold belongs to this one
-    // editing interaction: a click, or focus landing anywhere else, ends it
-    // and leaves the caret where the user put it.
-    let held = "";
-    let holding = true;
-    const hold = (e: KeyboardEvent) => {
-      const active = document.activeElement;
-      if (active === el) return;
-      if (active && active !== document.body) return endHold();
-      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
-      e.preventDefault();
-      held += e.key;
-    };
-    const onFocusIn = (e: FocusEvent) => {
-      if (e.target !== el) endHold();
-    };
-    const endHold = () => {
-      if (!holding) return;
-      holding = false;
-      document.removeEventListener("keydown", hold, true);
-      document.removeEventListener("pointerdown", endHold, true);
-      document.removeEventListener("focusin", onFocusIn, true);
-      holdsRef.current.delete(endHold);
-    };
-    document.addEventListener("keydown", hold, true);
-    document.addEventListener("pointerdown", endHold, true);
-    document.addEventListener("focusin", onFocusIn, true);
-    holdsRef.current.add(endHold);
-    const release = () => {
-      // Read before ending: an ended hold means the user moved on.
-      const kept = holding;
-      endHold();
-      writingRef.current.delete(section);
-      return kept;
-    };
-    const finish = (entryId: string) => {
-      const keepCaret = release();
-      const text = (el.textContent ?? "") + held;
-      setViewSectionRoot(stream.resolve(section));
-      setExpanded((prev) =>
-        prev.has(section) ? prev : new Set(prev).add(section),
-      );
-      const mounted = refs.get(entryId);
-      // A seeded entry row is already mounted and empty: fill its DOM before
-      // the store write, so the sync effect keeps the caret at the end.
-      if (mounted && mounted !== document.activeElement)
-        mounted.textContent = text;
-      if (keepCaret) {
-        commands.setPendingFocus(entryId, text.length);
-        if (mounted) {
-          mounted.focus();
-          applyPendingCaret(mounted, entryId, false);
-          pendingFocus.current = null;
+  const writeIntoSection = useCallback(
+    (section: string, el: HTMLElement) => {
+      if (!stream || writingRef.current.has(section)) return;
+      writingRef.current.add(section);
+      // Creation is async, and the entry line unmounts as soon as the day exists,
+      // which drops focus to the body. Hold characters typed while focus is
+      // nowhere, so a fast typist loses nothing. The hold belongs to this one
+      // editing interaction: a click, or focus landing anywhere else, ends it
+      // and leaves the caret where the user put it.
+      let held = "";
+      let holding = true;
+      const hold = (e: KeyboardEvent) => {
+        const active = document.activeElement;
+        if (active === el) return;
+        if (active && active !== document.body) return endHold();
+        if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+        e.preventDefault();
+        held += e.key;
+      };
+      const onFocusIn = (e: FocusEvent) => {
+        if (e.target !== el) endHold();
+      };
+      const endHold = () => {
+        if (!holding) return;
+        holding = false;
+        document.removeEventListener("keydown", hold, true);
+        document.removeEventListener("pointerdown", endHold, true);
+        document.removeEventListener("focusin", onFocusIn, true);
+        holdsRef.current.delete(endHold);
+      };
+      document.addEventListener("keydown", hold, true);
+      document.addEventListener("pointerdown", endHold, true);
+      document.addEventListener("focusin", onFocusIn, true);
+      holdsRef.current.add(endHold);
+      const release = () => {
+        // Read before ending: an ended hold means the user moved on.
+        const kept = holding;
+        endHold();
+        writingRef.current.delete(section);
+        return kept;
+      };
+      const finish = (entryId: string) => {
+        const keepCaret = release();
+        const text = (el.textContent ?? "") + held;
+        setViewSectionRoot(stream.resolve(section));
+        setExpanded((prev) =>
+          prev.has(section) ? prev : new Set(prev).add(section),
+        );
+        const mounted = refs.get(entryId);
+        // A seeded entry row is already mounted and empty: fill its DOM before
+        // the store write, so the sync effect keeps the caret at the end.
+        if (mounted && mounted !== document.activeElement)
+          mounted.textContent = text;
+        if (keepCaret) {
+          commands.setPendingFocus(entryId, text.length);
+          if (mounted) {
+            mounted.focus();
+            applyPendingCaret(mounted, entryId, false);
+            pendingFocus.current = null;
+          }
         }
+        if (text) commands.onTextChange(entryId, text);
+      };
+      const existing = stream.resolve(section);
+      if (existing && getTreeIndex().byId.has(existing)) {
+        const entryId = runStructural(() => {
+          capture(getTreeIndex(), existing, null, { label: "create" });
+          return insertChildAtStart(getTreeIndex(), existing);
+        });
+        finish(entryId);
+        return;
       }
-      if (text) commands.onTextChange(entryId, text);
-    };
-    const existing = stream.resolve(section);
-    if (existing && getTreeIndex().byId.has(existing)) {
-      const entryId = runStructural(() => {
-        capture(getTreeIndex(), existing, null, { label: "create" });
-        return insertChildAtStart(getTreeIndex(), existing);
+      void stream.create(section).then((created) => {
+        if (created) finish(created.entryId);
+        else release();
       });
-      finish(entryId);
-      return;
-    }
-    void stream.create(section).then((created) => {
-      if (created) finish(created.entryId);
-      else release();
-    });
-  };
+    },
+    [stream, commands, refs, pendingFocus],
+  );
 
   const renderStreamItem = (
     item: Exclude<ListItem, { kind: "row" }>,
@@ -1630,10 +1640,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           section={item.section}
           {...shell}
         >
-          <StreamPlaceholderTitle
-            title={stream.placeholderTitle(item.section)}
-            badge={stream.badge(item.section)}
-          />
+          <StreamPlaceholderTitle stream={stream} section={item.section} />
           <StreamEntryLine section={item.section} onWrite={writeIntoSection} />
         </StreamShell>
       );
@@ -3097,7 +3104,7 @@ function startsSection(item: ListItem | undefined): boolean {
  * list item, so every section reads like its own zoom view. ArrowUp on its
  * first line continues into the previous section.
  */
-function StreamSectionTitle({
+const StreamSectionTitle = memo(function StreamSectionTitle({
   nodeId,
   isPivot,
   registerRef,
@@ -3135,7 +3142,7 @@ function StreamSectionTitle({
       <Backlinks nodeId={node.id} />
     </>
   );
-}
+});
 
 /**
  * The zoomed node rendered as an editable page title. Mirrors OutlineRow's

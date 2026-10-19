@@ -42,6 +42,19 @@ jobs:
         run: bun run typecheck:e2e
       - name: Unit tests
         run: bun run test
+      - name: Install Chromium for editor performance tests
+        run: bunx --no-install playwright install --with-deps chromium
+      - name: Editor performance tests
+        timeout-minutes: 10
+        run: bun run test:perf
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-performance-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Release automation tests
         run: |
           bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts

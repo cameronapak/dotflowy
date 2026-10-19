@@ -54,6 +54,7 @@
     "test:e2e:serial": "bun run test:e2e:app --workers=1 && bun run test:e2e:real",
     "test:e2e:retirement": "playwright test --config e2e/retirement.config.ts",
     "test:e2e:ui": "playwright test --ui",
+    "test:perf": "playwright test e2e/day-stream.spec.ts e2e/zoom-perf.spec.ts e2e/virtualized-windowing.spec.ts --workers=1",
     "effect:src": "opensrc path Effect-TS/effect-smol",
     "effect:src:update": "opensrc remove Effect-TS/effect-smol && opensrc fetch Effect-TS/effect-smol",
     "lunora:codegen": "lunora codegen"
