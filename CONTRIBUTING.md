@@ -216,10 +216,13 @@ browser.
   `Meta+`.
 - Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
   `waitForTimeout`.
-- **CI's `quality` job runs the full app and real-Worker suites**, sequentially,
-  with one worker, zero retries, and retained failure traces. It stops at the
-  first failure. Require that job in branch rules before relying on it instead
-  of a full local browser run.
+- **CI's `quality` gate requires all checks and the full browser regression.**
+  Nonbrowser checks and the real-Worker suite run once, then four isolated CI
+  runners each run one app shard with one worker, zero retries, and retained
+  failure traces. Every app test runs on exactly one shard; each shard stops at
+  its first failure without canceling the others. Per-test JSON timing reports
+  are uploaded on every run. Require `quality` in branch rules before relying
+  on it instead of a full local browser run.
   PRs run CI directly; `main` uses deployment's exact-commit call, not a second
   standalone CI run.
   The full app run includes the editor performance cases; use `bun run test:perf`
@@ -258,6 +261,7 @@ prevent port collisions, not resource contention.
 - Keep the one-worker browser default. Each extra worker adds a test process
   and a browser process tree alongside the shared Vite server. The real-Worker
   suite already uses one worker, and `test:e2e` runs the two suites in sequence.
+  CI sharding uses separate machines, not additional workers inside one Orb.
 - Stop idle development services before the full browser run. Playwright owns
   its Vite server; the app fixtures mock the data API, and the real-Worker suite
   owns an isolated Miniflare runtime. Neither needs a separate `cf:dev` server.

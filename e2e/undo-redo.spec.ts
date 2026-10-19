@@ -323,6 +323,7 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   await page.keyboard.press("q");
   const draft = page.getByRole("textbox", { name: "Quick add", exact: true });
   await expect(draft).toBeVisible();
+  await expect(draft).toBeFocused();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(alpha).toHaveText("Alpha kept");
   await draft.click();

@@ -15,9 +15,9 @@ permissions:
   contents: read
 
 jobs:
-  quality:
+  checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,19 +66,68 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           bun run check:changeset
-      # Keep the existing quality check as the gate, including when this
-      # workflow is called by deployment. Browser suites run sequentially.
+      - name: Real Worker regression
+        run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1
+      - name: Upload Worker failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-worker-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  app:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Finish other shards so one failure does not hide independent failures.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
       - name: Install test browsers
         run: bunx playwright install --with-deps chromium webkit
       - name: App browser regression
-        run: bun run test:e2e:app --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure
-      - name: Real Worker regression
-        run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure
+        run: bun run test:e2e:app --shard=${{ matrix.shard }}/4 --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
+      - name: Upload browser timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-timings-${{ matrix.shard }}
+          path: test-results/results.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload failure traces
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-failure-traces
+          name: e2e-failure-traces-${{ matrix.shard }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Preserve the existing required check name. A skipped or failed prerequisite
+  # must fail this gate, including when deployment calls the workflow.
+  quality:
+    if: always()
+    needs: [checks, app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every check and browser shard
+        run: |
+          test "${{ needs.checks.result }}" = success
+          test "${{ needs.app.result }}" = success
