@@ -252,7 +252,12 @@ function SwitcherDialog({
   const navigate = useNavigate();
   const bridge = getNodeActionBridge();
 
-  const nodes = useMemo(() => Array.from(index.byId.values()), [index]);
+  // A closed command center must not scan the outline on every keystroke.
+  // Opening it reads the current index, including edits made while closed.
+  const nodes = useMemo(
+    () => (open ? Array.from(index.byId.values()) : []),
+    [open, index],
+  );
 
   const fuse = useMemo(
     () => (open ? buildFuse(index, nodes, aliasProviders) : null),

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
 
 // ADR 0019: the windowed render mounts only ~viewport rows, regardless of how
 // many nodes exist. These specs prove the DOM row count stays bounded as the
@@ -105,4 +105,41 @@ test("a deep node still indents by depth", async ({ page }) => {
     "data-depth",
     "1",
   );
+});
+
+test("typing reuses a wide parent's child list; completion and inserts invalidate it", async ({
+  page,
+}) => {
+  await loadBig(page);
+  await placeCaret(text(page, "p0c0"), "end");
+  // Observe the public index, not production counters. A cached subscription
+  // must not look up the parent's child array at all on an ordinary keystroke.
+  await page.evaluate(async () => {
+    const path = "/src/data/tree-store.ts";
+    const { getTreeIndex } = await import(path);
+    const children: Map<string, string[]> = getTreeIndex().childrenByParent;
+    const get = children.get.bind(children);
+    document.documentElement.dataset.childReads = "0";
+    children.get = (key) => {
+      if (key === "p0")
+        document.documentElement.dataset.childReads = String(
+          Number(document.documentElement.dataset.childReads) + 1,
+        );
+      return get(key);
+    };
+  });
+  await page.keyboard.type(" appended");
+  await expect(text(page, "p0c0")).toHaveText("Item 0.0 appended");
+  expect(await page.locator("html").getAttribute("data-child-reads")).toBe("0");
+
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect
+    .poll(async () =>
+      Number(await page.locator("html").getAttribute("data-child-reads")),
+    )
+    .toBeGreaterThan(0);
+  await page.keyboard.press("Enter");
+  await expect(
+    page.locator('li[data-parent-id="p0"] .node-text:focus'),
+  ).toHaveText("");
 });

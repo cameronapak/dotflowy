@@ -1,8 +1,6 @@
-import type { Node } from "./schema";
-
 import { isMirrorsEnabled } from "./flags";
 import { getLiveNodes } from "./live-nodes";
-import { buildTreeIndex } from "./tree";
+import { buildTreeIndex, type TreeIndex } from "./tree";
 import { getViewIsHidden, getViewRootId } from "./view-state";
 import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
 
@@ -14,19 +12,23 @@ import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
  * anchor, so a child added to a source lands under the mirror you were in (not the
  * source's far-away copy).
  *
- * Off the flag (the 99% path) a node id is unique, so we return it directly and
+ * With mirrors disabled a node id is unique, so we return it directly and
  * skip the rebuild entirely. With the flag on we build a fresh index from
- * `getLiveNodes()` -- synchronously current after `runStructural` (classic
- * `nodesCollection` or Lunora `wholeOutline`) -- rather than `getTreeIndex()`,
- * whose change-notify can lag the optimistic apply.
+ * `getLiveNodes()` -- synchronously current after `runStructural` -- rather
+ * than `getTreeIndex()`, whose change-notify can lag the optimistic apply.
  *
  * Lives here rather than beside its first caller because the markdown paste
  * (ADR 0044) needs it too, from a module the editor imports.
  */
-export function focusKeyFor(instanceId: string, activeKey: string): string {
+export function focusKeyFor(
+  instanceId: string,
+  activeKey: string,
+  fresh?: TreeIndex,
+): string {
   if (!isMirrorsEnabled()) return instanceId;
-  // SAFETY: getLiveNodes() already returns Node[]; the cast only satisfies a redundant legacy annotation.
-  const index = buildTreeIndex(getLiveNodes() as Node[]);
+  // Callers may share an event-time index only if no writes occurred since its read.
+  const index = fresh ?? buildTreeIndex(getLiveNodes());
+  if (index.mirrorsBySource.size === 0) return instanceId;
   const rows = buildVisibleRows(
     index,
     getViewRootId(),

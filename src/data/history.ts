@@ -45,8 +45,8 @@ export function setHistoryLocationReader(reader: typeof readLocation): void {
  * ones). TanStack DB has no built-in undo -- its rollback only covers failed
  * sync -- so we own this. Snapshots beat inverse-patches here because the
  * sibling-relinking mutations are intricate and a snapshot can't drift out of
- * sync with them. The outline is small (a personal doc), so copying the whole
- * node set per action is cheap; we still cap the stack to bound memory.
+ * sync with them. Capture still copies the whole node set per action; the
+ * stack cap bounds the number of snapshots, not their outline-dependent size.
  *
  * Redo is the mirror image: undo pushes the pre-undo state onto a redo stack
  * before restoring, and redo pops it back (pushing the pre-redo state onto the
@@ -348,7 +348,7 @@ function planRestore(
   for (let i = 0; i < deletes.length; i += RESTORE_SLICE_OPS) {
     const chunk = deletes.slice(i, i + RESTORE_SLICE_OPS);
     slices.push(() => {
-      for (const id of chunk) nodesCollection.delete(id);
+      nodesCollection.delete(chunk);
       applied += chunk.length;
     });
   }
@@ -357,6 +357,7 @@ function planRestore(
     slices.push(() => {
       // Insert-vs-update is decided at apply time: an earlier slice (or the
       // surrounding transaction) may already have written the row.
+      const inserts: Node[] = [];
       for (const node of chunk) {
         if (nodesCollection.has(node.id)) {
           nodesCollection.update(node.id, (draft) => {
@@ -367,9 +368,10 @@ function planRestore(
             draft.updatedAt = Date.now();
           });
         } else {
-          nodesCollection.insert({ ...node });
+          inserts.push({ ...node });
         }
       }
+      if (inserts.length) nodesCollection.insert(inserts);
       applied += chunk.length;
     });
   }

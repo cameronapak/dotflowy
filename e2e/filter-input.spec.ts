@@ -216,7 +216,24 @@ test("a row that still matches after editing stays visible on blur", async ({
   await page.goto("/?q=milk");
   const editor = row(page, "milk").locator(".node-text");
   await expect(editor).toBeVisible();
+  await placeCaret(editor, "end");
+  const before = await page.evaluateHandle(async () => {
+    const path = "/src/data/view-state.ts";
+    return (await import(path)).getViewFilter();
+  });
   await editor.fill("Buy more milk #work");
+  // Membership did not change, so list consumers keep the same snapshot.
+  // Let the editor's effects publish the post-edit view before comparing.
+  expect(
+    await page.evaluate(async (previous) => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const path = "/src/data/view-state.ts";
+      return previous === (await import(path)).getViewFilter();
+    }, before),
+  ).toBe(true);
+  await before.dispose();
   await input(page).focus();
   await expect(editor).toHaveText("Buy more milk #work");
   await expect(editor).toBeVisible();

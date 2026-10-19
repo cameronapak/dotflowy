@@ -6,7 +6,13 @@ import {
   type Page,
 } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  placeCaret,
+  seedOutline,
+  text,
+  type ApiNode,
+  type SeedNode,
+} from "./fixtures";
 
 // Markdown paste (ADR 0044): a multi-line paste builds a TREE of bullets, not
 // one mashed line. The design is anchored on `parse(outlineToMarkdown(t)) === t`
@@ -157,6 +163,65 @@ test("one Cmd+Z removes the whole paste", async ({ page }) => {
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => rows(page)).toEqual(["0:"]);
+});
+
+test("sliced paste batches notifications, restores exact rows, and rolls back a failed paste", async ({
+  page,
+}) => {
+  const server = await seedOutline(page, one, { echoChunks: 2 });
+  await page.goto("/");
+  await expect(text(page, "n")).toBeVisible();
+  await caretAt(page, "n", 0);
+  await page.evaluate(async () => {
+    const path = "/src/data/collection.ts";
+    const { nodesCollection } = await import(path);
+    nodesCollection.subscribeChanges((changes: { type: string }[]) => {
+      for (const type of ["insert", "delete"]) {
+        const count = changes.filter((change) => change.type === type).length;
+        document.documentElement.dataset[type] = String(
+          Math.max(Number(document.documentElement.dataset[type] ?? 0), count),
+        );
+      }
+    });
+  });
+  const saved = (): Promise<ApiNode[]> =>
+    page.evaluate(async () => (await fetch("/api/nodes")).json());
+  const authoring = (nodes: ApiNode[]) =>
+    nodes
+      .map((node) => ({ ...node, updatedAt: 0 }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  const original = authoring(await saved());
+  const input = Array.from({ length: 502 }, (_, i) => `Line ${i}`).join("\n");
+  await pasteInto(text(page, "n"), input);
+  await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
+  await expect.poll(async () => (await saved()).length).toBe(502);
+  // The 501 inserts cross the 500-write slice boundary; the first slice must
+  // publish together rather than recomputing the entire outline 500 times.
+  expect(
+    Number(await page.locator("html").getAttribute("data-insert")),
+  ).toBeGreaterThanOrEqual(500);
+  const pasted = authoring(await saved());
+  await caretAt(page, "n", 0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(async () => authoring(await saved())).toEqual(original);
+  expect(
+    Number(await page.locator("html").getAttribute("data-delete")),
+  ).toBeGreaterThanOrEqual(500);
+  await page.getByRole("button", { name: /^More actions/ }).click();
+  await page.getByRole("menuitem", { name: /^Redo/ }).click();
+  await expect.poll(async () => authoring(await saved())).toEqual(pasted);
+  await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
+  await caretAt(page, "n", 0);
+  server.failNextWrite();
+  await pasteInto(text(page, "n"), input);
+  await expect(
+    page.getByText("The paste could not be saved. Nothing was pasted."),
+  ).toBeVisible();
+  await expect.poll(async () => authoring(await saved())).toEqual(pasted);
+  // Reload verifies the persisted graph, not only the optimistic DOM.
+  await page.reload();
+  await expect(text(page, "n")).toHaveText("Line 0");
+  expect(authoring(await saved())).toEqual(pasted);
 });
 
 test("a single-line paste is untouched (the links plugin still wraps a URL)", async ({
