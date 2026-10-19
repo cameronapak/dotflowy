@@ -9,7 +9,10 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import {
+  defaultRangeExtractor,
+  useWindowVirtualizer,
+} from "@tanstack/react-virtual";
 import { Cause, Effect, Fiber } from "effect";
 import {
   ChevronRight,
@@ -34,6 +37,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import type { OutlineSearch } from "../data/tags";
 import type {
   PluginContext,
   RouteSearch,
@@ -97,9 +101,18 @@ import {
   getViewFilter,
   getViewIsHidden,
   getViewRootId,
+  setViewSectionRoot,
   useSyncViewFilter,
   useSyncViewState,
 } from "../data/view-state";
+import {
+  setStreamNeighbor,
+  setStreamScroller,
+  setStreamView,
+  streamNeighbor,
+  useStreamView,
+  type ViewStream,
+} from "../data/view-stream";
 import { scrollRowIntoView, setVirtualNav } from "../data/virtual-nav";
 import {
   buildVisibleRows,
@@ -192,6 +205,12 @@ import {
 import { useShowCompleted } from "./show-completed-provider";
 import { useSlashMenu } from "./slash-menu";
 import { useSpotlightEnabled } from "./spotlight-mode";
+import {
+  StreamEntryLine,
+  StreamFold,
+  StreamPlaceholderTitle,
+  StreamShell,
+} from "./stream-sections";
 import { Subheader } from "./Subheader";
 import { Button } from "./ui/button";
 import {
@@ -201,8 +220,15 @@ import {
   ResponsiveMenuTrigger as DropdownMenuTrigger,
 } from "./ui/responsive-menu";
 import { Sheet, SheetContent } from "./ui/sheet";
+import { atLineStart } from "./use-bullet-keymap";
 import { useCompletionTransition } from "./use-completion-transition";
 import { useDragReorder } from "./use-drag-reorder";
+import {
+  interleaveStream,
+  type ListItem,
+  useStreamBuild,
+  useViewStream,
+} from "./use-view-stream";
 import {
   toggleHighlightSelection,
   toggleWrapSelection,
@@ -241,6 +267,12 @@ function onContentMouseDown(e: ReactMouseEvent) {
 // is ~32px (node-text min-height 24 + row padding); 36 errs slightly tall so the
 // initial window over-renders rather than leaving a gap. See ADR 0019.
 const ROW_ESTIMATE = 36;
+
+// View stream (ADR 0070): sections loaded per step at either edge, and how much
+// of the next section's title peeks above the bottom of a section's page.
+const STREAM_CHUNK = 14;
+const STREAM_PEEK = 96;
+const STREAM_ESTIMATE = { title: 72, placeholder: 120, fold: 44, end: 0 };
 
 /** Reveal one node within the horizontal outline canvas without moving the
  * window vertically. The row, not only its text, is the readable unit. */
@@ -321,9 +353,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // memoized OutlineRow from re-rendering on a sibling's keystroke (ADR 0014).
   // Depends on the whole view context for forward-correctness, though today's
   // only hide rule reads showCompleted.
+  // The view reads `q` and `focus` only. The day stream's `?day=` follows the
+  // scroll position (ADR 0070) and must not rebuild the visibility prune.
+  const viewSearch = useMemo<RouteSearch>(
+    () => ({ q: routeSearch.q, focus: routeSearch.focus }),
+    [routeSearch.q, routeSearch.focus],
+  );
   const viewCtx = useMemo<ViewContext>(
-    () => ({ showCompleted, search: routeSearch, rootId }),
-    [showCompleted, routeSearch, rootId],
+    () => ({ showCompleted, search: viewSearch, rootId }),
+    [showCompleted, viewSearch, rootId],
   );
   const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
   // Mirror the live view state (zoom root + visibility prune) into view-state's
@@ -674,7 +712,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
   const zoomedNode = useNode(rootId ?? "") ?? null;
-  const trail = useTrail(rootId);
   const hasNodes = useHasNodes();
 
   // Loading vs empty. `hasNodes` (byId.size > 0) can't tell "still syncing" from
@@ -709,7 +746,47 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // --- Windowed rendering (ADR 0019) ----------------------------------------
   // The flat visible list, the window virtualizer over it, and the event-time
   // bridge that lets the stable focus/drag closures scroll an off-screen row in.
-  const rows = useVisibleRows(rootId, isHidden, filter);
+  // A zoomed root a plugin continues into neighboring roots reads as one
+  // stream (ADR 0070): the day stream around a daily note. A filter shows the
+  // single root, because a filter transforms one root.
+  const stream = useViewStream(rootId, filter === null);
+  // `?day=` on load: start the stream there. Planned once, when the stream is
+  // first ready -- on a cold load the daily index arrives after the first
+  // render, so the plan waits for it. Later writes follow the scroll position
+  // and must not move it.
+  const [initial] = useState(() =>
+    stream ? planStreamOpening(stream, routeSearch.day ?? null) : null,
+  );
+  const [range, setRange] = useState(
+    initial?.range ?? planStreamOpening(null, null).range,
+  );
+  // Sections the user unfolded or worked in. They stay visible even while
+  // empty, so a fold never swallows the section holding the caret.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const streamSnapshot = useStreamBuild(
+    stream,
+    range.before,
+    range.after,
+    isHidden,
+    expanded,
+  );
+  // The plain zoom list. Under a stream its rows come from the stream build,
+  // so this walks nothing (an id no node has).
+  const zoomRows = useVisibleRows(stream ? "" : rootId, isHidden, filter);
+  const rows = stream ? streamSnapshot.rows : zoomRows;
+  // The section under the sticky header drives the breadcrumb (and the week
+  // strip, through the same store). A nodeless section borrows its nearest
+  // existing ancestor's trail.
+  const streamView = useStreamView();
+  const inViewSection =
+    stream && streamView?.anchor === stream.anchor ? streamView.inView : null;
+  const trailRoot =
+    stream && inViewSection
+      ? (stream.resolve(inViewSection) ?? stream.trailFor(inViewSection))
+      : rootId;
+  const trail = useTrail(trailRoot);
   const deepestVisibleDepth = useMemo(
     () => rows.reduce((deepest, row) => Math.max(deepest, row.depth), 0),
     [rows],
@@ -756,9 +833,26 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
     [refs, rootId, pendingFocus, pendingFocusAtStart],
   );
+  const streamSectionsRef = useRef(streamSnapshot.sections);
+  useLayoutEffect(() => {
+    streamSectionsRef.current = streamSnapshot.sections;
+  });
   const eligibleRows = useCallback(() => {
     const index = getTreeIndex();
     const neverHidden = () => false;
+    if (stream) {
+      return streamSectionsRef.current.flatMap((section) =>
+        section.kind === "node"
+          ? buildVisibleRows(
+              index,
+              section.nodeId,
+              neverHidden,
+              null,
+              isMirrorsEnabled(),
+            )
+          : [],
+      );
+    }
     return buildVisibleRows(
       index,
       rootId,
@@ -766,7 +860,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       buildViewFilter(index, viewCtx, neverHidden),
       isMirrorsEnabled(),
     );
-  }, [rootId, viewCtx]);
+  }, [rootId, viewCtx, stream]);
   const presentation = useCompletionTransition({
     rows,
     eligibleRows,
@@ -777,6 +871,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     onHiddenFocus,
   });
   const renderedRows = presentation.rows;
+  // The windowed list: the presented rows, plus section chrome in a stream.
+  const items = useMemo<ListItem[]>(
+    () =>
+      stream
+        ? interleaveStream(
+            streamSnapshot.sections,
+            streamSnapshot.rowSection,
+            renderedRows,
+          )
+        : renderedRows.map((row) => ({ kind: "row", key: row.key, row })),
+    [stream, streamSnapshot, renderedRows],
+  );
   const previousVisibleDepth = useRef(deepestVisibleDepth);
   // Expansion preserves the view. After collapse's native clamp, reveal the
   // focused parent only if it is completely outside the remaining viewport.
@@ -843,10 +949,32 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // key), so a one-shot mount measure is current. listRef is set in the branch
   // below, so this runs after the list paints once.
   const [scrollMargin, setScrollMargin] = useState(0);
+  // The sticky header's height: a stream aligns sections just below it.
+  const [headerHeight, setHeaderHeight] = useState(0);
+  // The tallest the header has been in this view. Pages size from it, so a
+  // header that shrinks for a moment (the week strip collapsing while the
+  // daily index re-syncs) does not resize every page above the day in view.
+  const [pageHeader, setPageHeader] = useState(0);
+  // One section's page: a screen below the header, minus a peek of the next
+  // section's title.
+  const streamPage =
+    (hasWindow() ? window.innerHeight : 0) - pageHeader - STREAM_PEEK;
+  // The first index of each section's items, for page-end sizing.
+  const sectionStarts = useMemo(() => {
+    const m = new Map<string, number>();
+    items.forEach((item, i) => {
+      if (item.kind === "title" || item.kind === "placeholder")
+        m.set(item.section, i);
+    });
+    return m;
+  }, [items]);
   useLayoutEffect(() => {
     const measure = () => {
       const el = listRef.current;
       if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
+      const next = headerRef.current?.offsetHeight ?? 0;
+      setHeaderHeight(next);
+      setPageHeader((prev) => Math.max(prev, next));
     };
     measure();
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
@@ -858,10 +986,65 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const titleBody = document.querySelector("[data-title-body]");
     if (titleBody) ro.observe(titleBody);
     return () => ro.disconnect();
-  }, [rootId, zoomedNode?.id]);
+  }, [rootId, zoomedNode?.id, stream]);
+  // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
+  // render ADDRESS (row.key), not the bare id: a source descendant appears under
+  // every instance, so scrollRowIntoView/virtualRowRect must resolve the exact
+  // row (ADR 0022). key === id for every mirror-free row, so the lookup is
+  // unchanged for the 99% outline. Rebuilt only when the flat list changes
+  // identity (structure), not on keystrokes.
+  const rowIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    items.forEach((item, i) => {
+      if (item.kind !== "row" || !presentation.exiting.has(item.key))
+        m.set(item.key, i);
+    });
+    return m;
+  }, [items, presentation.exiting]);
+  // The item a stream load holds in place on screen (see maybeExtend).
+  const heldRef = useRef<{
+    key: string;
+    start: number;
+    top: number | null;
+  } | null>(null);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
-    count: renderedRows.length,
-    estimateSize: () => ROW_ESTIMATE,
+    // Keep the row holding the caret mounted even outside the window. Loading
+    // sections above it renders once at the old scroll offset before the
+    // offset is corrected; unmounting the focused row there would drop the
+    // caret (ADR 0070).
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range);
+      // Only a stream needs this; outside one a focused row scrolled out of
+      // the window unmounts as before (a filter relies on it).
+      if (!stream) return indexes;
+      // The same for the item a stream load is holding in place.
+      const keep = [hasWindow() ? findFocusedId() : null, heldRef.current?.key]
+        .map((key) => (key ? rowIndex.get(key) : undefined))
+        .filter((i): i is number => i !== undefined && !indexes.includes(i));
+      return keep.length
+        ? [...new Set([...indexes, ...keep])].sort((a, b) => a - b)
+        : indexes;
+    },
+    count: items.length,
+    estimateSize: (i) => {
+      const item = items[i];
+      if (!item || item.kind === "row") return ROW_ESTIMATE;
+      if (item.kind !== "end") return STREAM_ESTIMATE[item.kind];
+      // A page end tops its section up to one screen, so estimate exactly
+      // that: an unmeasured section above the viewport then already has its
+      // real height, and loading earlier sections holds the scroll position.
+      const first = sectionStarts.get(item.section);
+      if (first === undefined) return 0;
+      let above = 0;
+      for (let j = first; j < i; j++) {
+        const prior = items[j]!;
+        above +=
+          prior.kind === "row" ? ROW_ESTIMATE : STREAM_ESTIMATE[prior.kind];
+      }
+      return Math.max(0, streamPage - above);
+    },
+    // A stream scrolls sections to just below the sticky header.
+    scrollPaddingStart: stream ? headerHeight : 0,
     overscan: 8,
     scrollMargin,
     // Key by the row's render ADDRESS, not its node id: inside a mirror a
@@ -869,7 +1052,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // longer unique (ADR 0022). `key` equals `id` for every mirror-free row, so
     // the 99% outline keeps today's identity and the virtualizer's measurement
     // cache is unaffected.
-    getItemKey: (i) => renderedRows[i]?.key ?? i,
+    getItemKey: (i) => items[i]?.key ?? i,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
     // Without it the window virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
@@ -908,19 +1091,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       setFocusedFilterKey(null);
     }
   }, [focusedFilterKey, findFocusedId, filter, virtualItems]);
-  // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
-  // render ADDRESS (row.key), not the bare id: a source descendant appears under
-  // every instance, so scrollRowIntoView/virtualRowRect must resolve the exact
-  // row (ADR 0022). key === id for every mirror-free row, so the lookup is
-  // unchanged for the 99% outline. Rebuilt only when the flat list changes
-  // identity (structure), not on keystrokes.
-  const rowIndex = useMemo(() => {
-    const m = new Map<string, number>();
-    renderedRows.forEach((r, i) => {
-      if (!presentation.exiting.has(r.key)) m.set(r.key, i);
-    });
-    return m;
-  }, [renderedRows, presentation.exiting]);
+
   const presentationReady = useMemo(
     () => rows.every((row) => rowIndex.has(row.key)),
     [rows, rowIndex],
@@ -945,6 +1116,573 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     });
     return () => setVirtualNav(null);
   }, [virtualizer]);
+
+  // --- View stream behavior (ADR 0070) ---------------------------------------
+  // Event-time reads go through refs, like the commands: the scroll listener
+  // and bridges stay mounted across renders.
+  const itemsRef = useRef(items);
+  const streamRef = useRef(stream);
+  const snapshotRef = useRef(streamSnapshot);
+  const headerHeightRef = useRef(headerHeight);
+  const rangeRef = useRef(range);
+  useLayoutEffect(() => {
+    itemsRef.current = items;
+    streamRef.current = stream;
+    snapshotRef.current = streamSnapshot;
+    headerHeightRef.current = headerHeight;
+    rangeRef.current = range;
+  });
+
+  /** The section whose start sits at or above the sticky header's bottom. */
+  const sectionInView = useCallback((): string | null => {
+    const list = itemsRef.current;
+    const cache = virtualizer.measurementsCache;
+    const line = window.scrollY + headerHeightRef.current + 48;
+    let found: string | null = null;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i]!;
+      if (item.kind !== "title" && item.kind !== "placeholder") continue;
+      const m = cache[i];
+      if (!m) break;
+      if (m.start > line) {
+        found ??= item.section;
+        break;
+      }
+      found = item.section;
+    }
+    return found;
+  }, [virtualizer]);
+
+  // Load more sections near either edge. Prepending holds the item at the top
+  // of the viewport in place: the layout effect below scrolls by exactly the
+  // height the new sections added above it.
+  const extendingRef = useRef(false);
+  const seatedRef = useRef(false);
+  // The section the stream opens on, and the `?day=` still being restored.
+  // While a restore is pending the URL keeps its `?day=` (see the URL effect).
+  const routeSearchDayRef = useRef(initial?.day ?? null);
+  const restoringDayRef = useRef(initial?.day ?? null);
+  const plannedRef = useRef(initial !== null);
+  const latestSearchDayRef = useRef(routeSearch.day ?? null);
+  latestSearchDayRef.current = routeSearch.day ?? null;
+  // Cancels the post-prepend pin loop, so a deliberate scroll (a pill, Today)
+  // is not dragged back to the held item.
+  const stopPinRef = useRef<(() => void) | null>(null);
+  const maybeExtend = useCallback(() => {
+    if (!streamRef.current || extendingRef.current) return;
+    const snapshot = snapshotRef.current;
+    const list = itemsRef.current;
+    const cache = virtualizer.measurementsCache;
+    const first = cache[0];
+    const last = cache[cache.length - 1];
+    if (!first || !last || cache.length !== list.length) return;
+    const y = window.scrollY;
+    const vh = window.innerHeight;
+    if (!snapshot.atStart && y - first.start < vh * 1.5) {
+      const top = y + headerHeightRef.current;
+      let held = 0;
+      for (let i = 0; i < cache.length; i++) {
+        if (cache[i]!.start <= top) held = i;
+        else break;
+      }
+      // The first load holds the opening section's title instead, to seat it.
+      if (!seatedRef.current) {
+        const opening = routeSearchDayRef.current ?? streamRef.current.anchor;
+        const i = list.findIndex(
+          (item) =>
+            startsSection(item) &&
+            "section" in item &&
+            item.section === opening,
+        );
+        if (i >= 0) held = i;
+      }
+      // Hold the item's on-screen position: its DOM rect when mounted (exact),
+      // else its measured start.
+      const el = listRef.current?.querySelector<HTMLElement>(
+        `:scope > li[data-index="${held}"]`,
+      );
+      heldRef.current = {
+        key: list[held]!.key,
+        start: cache[held]!.start,
+        top: el ? el.getBoundingClientRect().top : null,
+      };
+      extendingRef.current = true;
+      setRange((r) => ({ ...r, before: r.before + STREAM_CHUNK }));
+    } else if (
+      !snapshot.atEnd &&
+      last.start + last.size - (y + vh) < vh * 1.5
+    ) {
+      extendingRef.current = true;
+      setRange((r) => ({ ...r, after: r.after + STREAM_CHUNK }));
+    }
+  }, [virtualizer]);
+  useLayoutEffect(() => {
+    extendingRef.current = false;
+    const held = heldRef.current;
+    heldRef.current = null;
+    if (held) {
+      const i = items.findIndex((item) => item.key === held.key);
+      const el =
+        i >= 0 && held.top !== null
+          ? listRef.current?.querySelector<HTMLElement>(
+              `:scope > li[data-index="${i}"]`,
+            )
+          : null;
+      const m = i >= 0 ? virtualizer.measurementsCache[i] : undefined;
+      // The first load above the opening section seats that section's title
+      // just under the sticky header, where a single zoom view puts it.
+      const seat = !seatedRef.current && el ? headerHeightRef.current : null;
+      seatedRef.current = true;
+      const delta = el
+        ? el.getBoundingClientRect().top - (seat ?? held.top!)
+        : m
+          ? m.start - held.start
+          : 0;
+      if (delta) window.scrollBy(0, delta);
+      // Sections measured after this frame (an estimate corrected, a page end
+      // re-padded) can still nudge the held item. Keep it pinned for a few
+      // frames, unless the user starts scrolling.
+      const target = el ? (seat ?? held.top!) : null;
+      if (target !== null) {
+        let frames = 8;
+        let stop = false;
+        const cancel = () => {
+          stop = true;
+        };
+        stopPinRef.current = cancel;
+        window.addEventListener("wheel", cancel, { once: true });
+        window.addEventListener("touchstart", cancel, { once: true });
+        const pin = () => {
+          if (stop || frames-- <= 0) {
+            window.removeEventListener("wheel", cancel);
+            window.removeEventListener("touchstart", cancel);
+            return;
+          }
+          const at = itemsRef.current.findIndex(
+            (item) => item.key === held.key,
+          );
+          const node = listRef.current?.querySelector<HTMLElement>(
+            `:scope > li[data-index="${at}"]`,
+          );
+          const drift = node ? node.getBoundingClientRect().top - target : 0;
+          if (Math.abs(drift) >= 1) window.scrollBy(0, drift);
+          requestAnimationFrame(pin);
+        };
+        requestAnimationFrame(pin);
+      }
+    }
+    // Keep loading while still near an edge (a short stretch, or the first
+    // load above the anchor right after mount).
+    const frame = requestAnimationFrame(maybeExtend);
+    return () => cancelAnimationFrame(frame);
+    // Runs once per committed range change: `items` is that range's list.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
+  }, [range, stream]);
+
+  // Scroll to a section once it is in the list: a pill click, Today, or a
+  // later `?day=` on load.
+  const pendingSectionRef = useRef<string | null>(initial?.scrollTo ?? null);
+  // Cold load: the stream became ready after mount. Plan the opening now.
+  useLayoutEffect(() => {
+    if (!stream || plannedRef.current) return;
+    plannedRef.current = true;
+    const plan = planStreamOpening(stream, latestSearchDayRef.current);
+    routeSearchDayRef.current = plan.day;
+    restoringDayRef.current = plan.day;
+    pendingSectionRef.current = plan.scrollTo;
+    seatedRef.current = false;
+    setRange(plan.range);
+  }, [stream]);
+  useLayoutEffect(() => {
+    const key = pendingSectionRef.current;
+    if (!key || !stream) return;
+    const i = items.findIndex(
+      (item) =>
+        (item.kind === "title" || item.kind === "placeholder") &&
+        item.section === key,
+    );
+    if (i < 0) return;
+    pendingSectionRef.current = null;
+    stopPinRef.current?.();
+    virtualizer.scrollToIndex(i, { align: "start" });
+  });
+
+  // Publish the section in view, load at the edges, and settle a scroll
+  // gesture that ends near a section start onto it (proximity snapping).
+  useEffect(() => {
+    if (!stream) {
+      setStreamView(null);
+      return;
+    }
+    const publish = () => {
+      const inView = sectionInView();
+      if (inView) setStreamView({ anchor: stream.anchor, inView });
+    };
+    let gesture = false;
+    let settle = 0;
+    const markGesture = () => {
+      gesture = true;
+      // The user scrolling ends a `?day=` restore: the URL follows them now.
+      restoringDayRef.current = null;
+    };
+    const snap = () => {
+      if (!gesture) return;
+      gesture = false;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      const list = itemsRef.current;
+      const cache = virtualizer.measurementsCache;
+      const line = window.scrollY + headerHeightRef.current;
+      let nearest: number | null = null;
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i]!;
+        if (item.kind !== "title" && item.kind !== "placeholder") continue;
+        const m = cache[i];
+        if (!m) continue;
+        const d = m.start - line;
+        if (nearest === null || Math.abs(d) < Math.abs(nearest)) nearest = d;
+      }
+      const limit = Math.min(160, window.innerHeight * 0.2);
+      if (
+        nearest === null ||
+        Math.abs(nearest) < 2 ||
+        Math.abs(nearest) > limit
+      )
+        return;
+      window.scrollTo({
+        top: window.scrollY + nearest,
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+      });
+    };
+    const onScroll = () => {
+      publish();
+      maybeExtend();
+      window.clearTimeout(settle);
+      settle = window.setTimeout(snap, 180);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        ["PageUp", "PageDown", "Home", "End", " "].includes(e.key) &&
+        !(e.target instanceof HTMLElement && e.target.isContentEditable)
+      )
+        gesture = true;
+    };
+    publish();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("wheel", markGesture, { passive: true });
+    window.addEventListener("touchstart", markGesture, { passive: true });
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(settle);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("wheel", markGesture);
+      window.removeEventListener("touchstart", markGesture);
+      window.removeEventListener("keydown", onKey);
+      setStreamView(null);
+    };
+  }, [stream, virtualizer, sectionInView, maybeExtend]);
+  // The list changing under a still viewport (a section created, a fold
+  // opened) can change the section in view too.
+  useEffect(() => {
+    if (!stream) return;
+    const inView = sectionInView();
+    if (inView) setStreamView({ anchor: stream.anchor, inView });
+  }, [stream, items, sectionInView]);
+
+  // The URL follows the section in view with a replace, so a reload or a
+  // shared link returns to it. Only the search param changes: the route's
+  // zoom root, and every effect keyed on it, stays put.
+  useEffect(() => {
+    if (!stream || !inViewSection) return;
+    // A `?day=` restore ends once its day is in view. Until then the URL keeps
+    // it, so the anchor showing first does not erase the link's destination.
+    const restoring = restoringDayRef.current;
+    if (restoring !== null) {
+      if (inViewSection !== restoring) return;
+      restoringDayRef.current = null;
+    }
+    const day = inViewSection === stream.anchor ? undefined : inViewSection;
+    if (routeSearch.day === day) return;
+    const timer = window.setTimeout(() => {
+      void navigate({
+        to: ".",
+        search: (prev: OutlineSearch) => ({ ...prev, day }),
+        replace: true,
+        resetScroll: false,
+        state: (prev) => prev,
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [stream, inViewSection, routeSearch.day, navigate]);
+
+  // Bridges for event-time callers: the strip and Today scroll the stream;
+  // the caret walk follows the list across sections.
+  useLayoutEffect(() => {
+    if (!stream) return;
+    setStreamScroller((key, focusKey) => {
+      const offset = stream.offsetOf(key);
+      if (offset === null) return false;
+      // A deliberate jump supersedes a `?day=` restore and a held position.
+      restoringDayRef.current = null;
+      stopPinRef.current?.();
+      if (focusKey) {
+        const text = getTreeIndex().byId.get(focusKey)?.text ?? "";
+        commands.setPendingFocus(focusKey, text.length);
+        const mounted = refs.get(focusKey);
+        if (mounted) {
+          mounted.focus({ preventScroll: true });
+          applyPendingCaret(mounted, focusKey, false);
+          pendingFocus.current = null;
+        }
+      }
+      const { before, after } = rangeRef.current;
+      if (offset < -before || offset > after)
+        setRange({
+          before: Math.max(before, -offset + STREAM_CHUNK),
+          after: Math.max(after, offset + STREAM_CHUNK),
+        });
+      setExpanded((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+      pendingSectionRef.current = key;
+      const i = itemsRef.current.findIndex(
+        (item) =>
+          (item.kind === "title" || item.kind === "placeholder") &&
+          item.section === key,
+      );
+      if (i >= 0) {
+        pendingSectionRef.current = null;
+        virtualizer.scrollToIndex(i, { align: "start" });
+      }
+      return true;
+    });
+    setStreamNeighbor((key, direction) => {
+      const list = itemsRef.current;
+      const from = rowIndexRef.current.get(key);
+      if (from === undefined) return null;
+      const step = direction === "up" ? -1 : 1;
+      for (let i = from + step; i >= 0 && i < list.length; i += step) {
+        const item = list[i]!;
+        if (
+          (item.kind === "row" || item.kind === "title") &&
+          rowIndexRef.current.has(item.key)
+        )
+          return item.key;
+      }
+      return null;
+    });
+    return () => {
+      setStreamScroller(null);
+      setStreamNeighbor(null);
+    };
+  }, [stream, virtualizer, commands, refs, pendingFocus]);
+
+  // Without a stream (a filter, or the option off) commands target the zoom
+  // root again: a section override left behind would aim them at another day.
+  useEffect(() => {
+    if (!stream) setViewSectionRoot(null);
+  }, [stream]);
+
+  /** Point commands at the section an element belongs to, and keep that
+   *  section visible while it is being worked in. */
+  const activateSectionAt = (target: EventTarget | null) => {
+    if (!stream || !(target instanceof Element)) return;
+    const li = target.closest<HTMLElement>("li[data-index]");
+    const item = li ? itemsRef.current[Number(li.dataset.index)] : undefined;
+    if (!item || item.kind === "fold") return;
+    const section =
+      item.kind === "row"
+        ? snapshotRef.current.rowSection.get(item.key)
+        : item.section;
+    if (!section) return;
+    setViewSectionRoot(stream.resolve(section));
+    if (stream.emptyMode !== "show" && !expanded.has(section))
+      setExpanded((prev) => new Set(prev).add(section));
+  };
+
+  // First keystroke in an empty section starts it (ADR 0070 decision 3): a
+  // section with a node gains its first child; one without is created with
+  // its seeded entry line. The typed text moves into the new row, and the
+  // caret follows it.
+  const writingRef = useRef(new Set<string>());
+  // Typing holds still waiting on a day's creation; unmount cancels them.
+  const holdsRef = useRef(new Set<() => void>());
+  useEffect(() => {
+    const holds = holdsRef.current;
+    return () => {
+      for (const cancel of holds) cancel();
+      holds.clear();
+    };
+  }, []);
+  const writeIntoSection = (section: string, el: HTMLElement) => {
+    if (!stream || writingRef.current.has(section)) return;
+    writingRef.current.add(section);
+    // Creation is async, and the entry line unmounts as soon as the day exists,
+    // which drops focus to the body. Hold characters typed while focus is
+    // nowhere, so a fast typist loses nothing. The hold belongs to this one
+    // editing interaction: a click, or focus landing anywhere else, ends it
+    // and leaves the caret where the user put it.
+    let held = "";
+    let holding = true;
+    const hold = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (active === el) return;
+      if (active && active !== document.body) return endHold();
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      held += e.key;
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target !== el) endHold();
+    };
+    const endHold = () => {
+      if (!holding) return;
+      holding = false;
+      document.removeEventListener("keydown", hold, true);
+      document.removeEventListener("pointerdown", endHold, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+      holdsRef.current.delete(endHold);
+    };
+    document.addEventListener("keydown", hold, true);
+    document.addEventListener("pointerdown", endHold, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    holdsRef.current.add(endHold);
+    const release = () => {
+      // Read before ending: an ended hold means the user moved on.
+      const kept = holding;
+      endHold();
+      writingRef.current.delete(section);
+      return kept;
+    };
+    const finish = (entryId: string) => {
+      const keepCaret = release();
+      const text = (el.textContent ?? "") + held;
+      setViewSectionRoot(stream.resolve(section));
+      setExpanded((prev) =>
+        prev.has(section) ? prev : new Set(prev).add(section),
+      );
+      const mounted = refs.get(entryId);
+      // A seeded entry row is already mounted and empty: fill its DOM before
+      // the store write, so the sync effect keeps the caret at the end.
+      if (mounted && mounted !== document.activeElement)
+        mounted.textContent = text;
+      if (keepCaret) {
+        commands.setPendingFocus(entryId, text.length);
+        if (mounted) {
+          mounted.focus();
+          applyPendingCaret(mounted, entryId, false);
+          pendingFocus.current = null;
+        }
+      }
+      if (text) commands.onTextChange(entryId, text);
+    };
+    const existing = stream.resolve(section);
+    if (existing && getTreeIndex().byId.has(existing)) {
+      const entryId = runStructural(() => {
+        capture(getTreeIndex(), existing, null, { label: "create" });
+        return insertChildAtStart(getTreeIndex(), existing);
+      });
+      finish(entryId);
+      return;
+    }
+    void stream.create(section).then((created) => {
+      if (created) finish(created.entryId);
+      else release();
+    });
+  };
+
+  const renderStreamItem = (
+    item: Exclude<ListItem, { kind: "row" }>,
+    index: number,
+    start: number,
+  ) => {
+    if (!stream) return null;
+    const shell = {
+      index,
+      start,
+      scrollMargin: virtualizer.options.scrollMargin,
+      measureRef: virtualizer.measureElement,
+    };
+    if (item.kind === "fold") {
+      return (
+        <StreamShell
+          key={item.key}
+          kind="fold"
+          section={item.sections[0]!}
+          {...shell}
+        >
+          <StreamFold
+            label={stream.foldLabel(item.sections)}
+            onExpand={() =>
+              setExpanded((prev) => {
+                const next = new Set(prev);
+                for (const key of item.sections) next.add(key);
+                return next;
+              })
+            }
+          />
+        </StreamShell>
+      );
+    }
+    if (item.kind === "placeholder") {
+      return (
+        <StreamShell
+          key={item.key}
+          kind="placeholder"
+          section={item.section}
+          {...shell}
+        >
+          <StreamPlaceholderTitle
+            title={stream.placeholderTitle(item.section)}
+            badge={stream.badge(item.section)}
+          />
+          <StreamEntryLine section={item.section} onWrite={writeIntoSection} />
+        </StreamShell>
+      );
+    }
+    if (item.kind === "end") {
+      // Top the section up to one screen, minus a peek of the next title.
+      const first = sectionStarts.get(item.section);
+      const cache = virtualizer.measurementsCache;
+      const from = first === undefined ? undefined : cache[first];
+      const to = cache[index];
+      const pad =
+        from && to
+          ? Math.max(0, Math.round(streamPage - (to.start - from.start)))
+          : 0;
+      return (
+        <StreamShell
+          key={item.key}
+          kind="end"
+          section={item.section}
+          height={pad}
+          {...shell}
+        >
+          {item.emptyNodeId ? (
+            <StreamEntryLine
+              section={item.section}
+              onWrite={writeIntoSection}
+            />
+          ) : null}
+        </StreamShell>
+      );
+    }
+    return (
+      <StreamShell
+        key={item.key}
+        kind="title"
+        section={item.section}
+        {...shell}
+      >
+        <StreamSectionTitle
+          nodeId={item.nodeId}
+          isPivot={pivotId === item.nodeId}
+          registerRef={registerRef}
+          getCtx={pluginCtx}
+          commands={commands}
+          pendingFocus={pendingFocus}
+        />
+      </StreamShell>
+    );
+  };
 
   // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && hasNodes) {
@@ -974,7 +1712,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}
-            rootId={rootId || null}
+            rootId={trailRoot || null}
             onNavigate={navigateZoom}
           />
         </Header>
@@ -998,8 +1736,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         onClick={onContentClick}
         onKeyDown={onContentKeyDown}
         onContextMenu={onContentContextMenu}
-        onPointerDownCapture={() => {
+        onPointerDownCapture={(event) => {
           pointerFocus.current = true;
+          activateSectionAt(event.target);
         }}
         onPointerCancelCapture={() => {
           pointerFocus.current = false;
@@ -1015,6 +1754,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           pointerFocus.current = false;
         }}
         onFocus={(event) => {
+          activateSectionAt(event.target);
           setFocusedFilterKey(findFocusedId());
           if (
             !pointerFocus.current &&
@@ -1080,7 +1820,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           <OutlineLoading />
         ) : (
           <div className={revealOnLoad ? "outline-reveal" : undefined}>
-            {zoomedNode && (
+            {zoomedNode && !stream && (
               <>
                 <ZoomedTitle
                   node={zoomedNode}
@@ -1137,8 +1877,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                     }}
                   >
                     {virtualItems.map((vi) => {
-                      const row = renderedRows[vi.index];
-                      if (!row) return null;
+                      const item = items[vi.index];
+                      if (!item) return null;
+                      if (item.kind !== "row")
+                        return renderStreamItem(item, vi.index, vi.start);
+                      const row = item.row;
                       return (
                         <OutlineRow
                           key={vi.key}
@@ -1175,7 +1918,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                 bullet. Hidden while filtering -- there's no "add here" then.
                 `size="icon"` (32px) is what puts the glyph on the same vertical
                 axis as the bullets above and the breadcrumb Home button. */}
-                  {!filter && (
+                  {!filter && !stream && (
                     <Button
                       type="button"
                       size="icon"
@@ -2265,15 +3008,20 @@ function useNodeCommands({
           // a mirror-free row findFocusedId() === id, so this is unchanged. Fall
           // back to the passed id when focus is somehow outside the registry.
           const from = findFocusedId() ?? id;
-          const target = findVisibleNeighbor(
-            getTreeIndex(),
-            getViewRootId(),
-            from,
-            direction,
-            getViewIsHidden(),
-            getViewFilter(),
-            isMirrorsEnabled(),
-          );
+          // A view stream walks its rendered list, across sections (ADR 0070).
+          const crossed = streamNeighbor(from, direction);
+          const target =
+            crossed !== undefined
+              ? crossed
+              : findVisibleNeighbor(
+                  getTreeIndex(),
+                  getViewRootId(),
+                  from,
+                  direction,
+                  getViewIsHidden(),
+                  getViewFilter(),
+                  isMirrorsEnabled(),
+                );
           if (!target) return;
           const el = refs.get(target);
           if (el) {
@@ -2320,6 +3068,75 @@ function useNodeCommands({
   );
 }
 
+/** Where a stream opens: AT the earlier of the anchor and `day`, so the page
+ *  opens at the top like a single zoom view. Earlier sections load in above it
+ *  with the scroll position held; a later `day` scrolls down to it once it
+ *  renders. A `day` that is not a section of the stream is dropped. */
+function planStreamOpening(
+  stream: ViewStream | null,
+  requested: string | null,
+) {
+  const offset = requested && stream ? stream.offsetOf(requested) : null;
+  return {
+    day: offset === null ? null : requested,
+    range: {
+      before: offset !== null && offset < 0 ? -offset : 0,
+      after: Math.max(STREAM_CHUNK, (offset ?? 0) + STREAM_CHUNK),
+    },
+    scrollTo: offset !== null && offset > 0 ? requested : null,
+  };
+}
+
+/** Whether a list item starts a stream section. */
+function startsSection(item: ListItem | undefined): boolean {
+  return item?.kind === "title" || item?.kind === "placeholder";
+}
+
+/**
+ * A view stream section's title (ADR 0070): the zoomed title, rendered as a
+ * list item, so every section reads like its own zoom view. ArrowUp on its
+ * first line continues into the previous section.
+ */
+function StreamSectionTitle({
+  nodeId,
+  isPivot,
+  registerRef,
+  getCtx,
+  commands,
+  pendingFocus,
+}: {
+  nodeId: string;
+  isPivot: boolean;
+  registerRef: (id: string, el: HTMLSpanElement | null) => void;
+  getCtx: () => PluginContext;
+  commands: NodeCommands;
+  pendingFocus: RefObject<string | null>;
+}) {
+  const node = useNode(nodeId);
+  if (!node) return null;
+  return (
+    <>
+      <ZoomedTitle
+        node={node}
+        isPivot={isPivot}
+        registerRef={registerRef}
+        getCtx={getCtx}
+        setPendingFocus={commands.setPendingFocus}
+        onTextChange={(text) => commands.onTextChange(node.id, text)}
+        onAddChild={() =>
+          runStructural(() => {
+            capture(getTreeIndex(), node.id, null, { label: "create" });
+            pendingFocus.current = insertChildAtStart(getTreeIndex(), node.id);
+          })
+        }
+        onArrowDown={() => commands.onMoveFocus(node.id, "down")}
+        onArrowUp={() => commands.onMoveFocus(node.id, "up")}
+      />
+      <Backlinks nodeId={node.id} />
+    </>
+  );
+}
+
 /**
  * The zoomed node rendered as an editable page title. Mirrors OutlineRow's
  * contentEditable text-sync so the caret is never clobbered during typing.
@@ -2332,6 +3149,7 @@ function ZoomedTitle({
   onTextChange,
   onAddChild,
   onArrowDown,
+  onArrowUp,
   setPendingFocus,
 }: {
   node: Node;
@@ -2343,6 +3161,9 @@ function ZoomedTitle({
   onTextChange: (text: string) => void;
   onAddChild: () => void;
   onArrowDown: () => void;
+  /** ArrowUp on the title's first line. Only a view stream has something
+   *  above a title (the previous section, ADR 0070). */
+  onArrowUp?: () => void;
   /** Hand the caret to the seam bullet a structural paste created (ADR 0044). */
   setPendingFocus: (key: string, offset: number) => void;
 }) {
@@ -2458,6 +3279,20 @@ function ZoomedTitle({
     [
       { hotkey: "Enter", callback: () => onAddChild() },
       { hotkey: "ArrowDown", callback: () => onArrowDown() },
+      ...(onArrowUp
+        ? [
+            {
+              hotkey: "ArrowUp" as const,
+              callback: (e: KeyboardEvent) => {
+                const el = ref.current;
+                if (!el || !atLineStart(el)) return;
+                e.preventDefault();
+                onArrowUp();
+              },
+              options: { preventDefault: false },
+            },
+          ]
+        : []),
       ...keymapSpecs.map((k) => ({
         // SAFETY: KeymapSpec.hotkey is documented as a react-hotkeys combo string
         hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],

@@ -16,8 +16,16 @@ const KEYS = {
   embeds: "editor-feature:embeds",
   externalEmbeds: "external-embeds",
   weekStart: "daily:week-start",
+  dayStream: "daily:day-stream",
+  weekStrip: "daily:week-strip",
+  emptyDays: "daily:empty-days",
 } as const;
 export type EditorFeature = "bible" | "daily" | "embeds";
+/** A Daily notes option that is a plain on/off switch (ADR 0070). */
+export type DailyToggle = "dayStream" | "weekStrip";
+export const EMPTY_DAYS_MODES = ["show", "fold", "skip"] as const;
+/** How the Day stream presents Empty days (ADR 0070). */
+export type EmptyDaysMode = (typeof EMPTY_DAYS_MODES)[number];
 
 const featureRowSchema = Schema.Struct({
   key: Schema.Literals([
@@ -32,7 +40,20 @@ const weekStartRowSchema = Schema.Struct({
   key: Schema.Literal(KEYS.weekStart),
   weekStart: Schema.Literals(["sunday", "monday"]),
 });
-const rowSchema = Schema.Union([featureRowSchema, weekStartRowSchema]);
+const dailyToggleRowSchema = Schema.Struct({
+  key: Schema.Literals([KEYS.dayStream, KEYS.weekStrip]),
+  enabled: Schema.Boolean,
+});
+const emptyDaysRowSchema = Schema.Struct({
+  key: Schema.Literal(KEYS.emptyDays),
+  emptyDays: Schema.Literals(EMPTY_DAYS_MODES),
+});
+const rowSchema = Schema.Union([
+  featureRowSchema,
+  weekStartRowSchema,
+  dailyToggleRowSchema,
+  emptyDaysRowSchema,
+]);
 type PreferenceRow = Schema.Schema.Type<typeof rowSchema>;
 const isPreferenceKey = Schema.is(
   Schema.Struct({
@@ -42,6 +63,9 @@ const isPreferenceKey = Schema.is(
       KEYS.embeds,
       KEYS.externalEmbeds,
       KEYS.weekStart,
+      KEYS.dayStream,
+      KEYS.weekStrip,
+      KEYS.emptyDays,
     ]),
   }),
 );
@@ -82,6 +106,9 @@ interface FeatureSnapshot {
   externalEmbeds: boolean;
   externalEmbedsSaving: boolean;
   weekStart: WeekStart;
+  dayStream: boolean;
+  weekStrip: boolean;
+  emptyDays: EmptyDaysMode;
   ready: boolean;
   error: boolean;
 }
@@ -92,6 +119,9 @@ const INITIAL: FeatureSnapshot = {
   externalEmbeds: false,
   externalEmbedsSaving: false,
   weekStart: DEFAULT_WEEK_START,
+  dayStream: true,
+  weekStrip: true,
+  emptyDays: "show",
   ready: false,
   error: false,
 };
@@ -111,6 +141,18 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const embedsRow = rows.find((r) => r.key === KEYS.embeds);
   const externalEmbedsRow = rows.find((r) => r.key === KEYS.externalEmbeds);
   const weekStartRow = rows.find((r) => r.key === KEYS.weekStart);
+  const dayStreamRow = rows.find((r) => r.key === KEYS.dayStream);
+  const weekStripRow = rows.find((r) => r.key === KEYS.weekStrip);
+  const emptyDaysRow = rows.find((r) => r.key === KEYS.emptyDays);
+  // Missing rows mean the defaults (ADR 0070).
+  const dayStream =
+    dayStreamRow && "enabled" in dayStreamRow ? dayStreamRow.enabled : true;
+  const weekStrip =
+    weekStripRow && "enabled" in weekStripRow ? weekStripRow.enabled : true;
+  const emptyDays =
+    emptyDaysRow && "emptyDays" in emptyDaysRow
+      ? emptyDaysRow.emptyDays
+      : "show";
   const bible = bibleRow?.key === KEYS.bible ? bibleRow.enabled : true;
   const daily = dailyRow?.key === KEYS.daily ? dailyRow.enabled : true;
   const embeds = embedsRow?.key === KEYS.embeds ? embedsRow.enabled : true;
@@ -134,6 +176,9 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.externalEmbeds === externalEmbeds &&
     snapshot.externalEmbedsSaving === externalEmbedsSaving &&
     snapshot.weekStart === weekStart &&
+    snapshot.dayStream === dayStream &&
+    snapshot.weekStrip === weekStrip &&
+    snapshot.emptyDays === emptyDays &&
     snapshot.ready === ready &&
     snapshot.error === error
   )
@@ -145,6 +190,9 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     externalEmbeds,
     externalEmbedsSaving,
     weekStart,
+    dayStream,
+    weekStrip,
+    emptyDays,
     ready,
     error,
   };
@@ -229,6 +277,34 @@ export async function setEditorFeature(
         if ("enabled" in draft) draft.enabled = enabled;
       })
     : collection.insert({ key, enabled });
+  await transaction.isPersisted.promise;
+}
+
+/** Persist one Daily notes on/off option (ADR 0070). Optimistic, like
+ *  {@link setEditorFeature}: the collection rolls back on a failed save. */
+export async function setDailyToggle(
+  option: DailyToggle,
+  enabled: boolean,
+): Promise<void> {
+  await loadEditorFeatures();
+  const key = KEYS[option];
+  const transaction = collection.has(key)
+    ? collection.update(key, (draft) => {
+        if ("enabled" in draft) draft.enabled = enabled;
+      })
+    : collection.insert({ key, enabled });
+  await transaction.isPersisted.promise;
+}
+
+/** Persist how the Day stream presents Empty days (ADR 0070). */
+export async function setEmptyDaysMode(mode: EmptyDaysMode): Promise<void> {
+  await loadEditorFeatures();
+  const key = KEYS.emptyDays;
+  const transaction = collection.has(key)
+    ? collection.update(key, (draft) => {
+        if ("emptyDays" in draft) draft.emptyDays = mode;
+      })
+    : collection.insert({ key, emptyDays: mode });
   await transaction.isPersisted.promise;
 }
 

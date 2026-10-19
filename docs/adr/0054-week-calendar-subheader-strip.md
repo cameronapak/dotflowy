@@ -7,6 +7,8 @@ and one-click navigation between days. Adapted (heavily) from iconiqui's
 MIT-licensed week-calendar component; most of that component was deliberately
 cut.
 
+Amended by [ADR 0070](./0070-day-stream.md): the strip now scrolls the day stream instead of navigating, and an account option can turn it off.
+
 ## Decisions
 
 1. **The strip is a daily-plugin subheader slot (Seam F) — the seam's first

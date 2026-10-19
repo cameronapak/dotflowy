@@ -490,7 +490,7 @@ function caretLineRect(): DOMRect | null {
   return rect.height === 0 ? null : rect;
 }
 
-function atLineStart(el: HTMLElement): boolean {
+export function atLineStart(el: HTMLElement): boolean {
   const rect = caretLineRect();
   // No measurable caret (e.g. empty bullet) -> treat as the first line so Up
   // crosses to the neighbor.

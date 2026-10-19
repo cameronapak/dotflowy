@@ -1,3 +1,4 @@
+import { isValidDateKey } from "./date-links";
 import { type TreeIndex } from "./tree";
 
 /**
@@ -90,12 +91,16 @@ export function collectTagCorpus(corpus: Map<string, TagEntry>): string[] {
 export interface OutlineSearch {
   q?: string;
   focus?: "last";
+  /** The day stream's in-view day (ADR 0070), so a reload or shared link
+   *  returns to it. Written with a replace while scrolling; never navigates. */
+  day?: string;
 }
 
 /** Search params as the router hands them over: unvalidated query-string values. */
 interface RawSearch {
   q?: unknown;
   focus?: unknown;
+  day?: unknown;
 }
 
 /** Type-guard predicate: search params carry unknown values. */
@@ -109,5 +114,6 @@ export function validateOutlineSearch(search: RawSearch): OutlineSearch {
   // search, so any key not returned here is dropped before it reaches the
   // editor (which is why the redirect's ?focus=last was silently a no-op).
   if (search.focus === "last") out.focus = "last";
+  if (isString(search.day) && isValidDateKey(search.day)) out.day = search.day;
   return out;
 }

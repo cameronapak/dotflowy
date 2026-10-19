@@ -40,12 +40,26 @@ async function clientNavigate(page: Page, path: string) {
   }, path);
 }
 
+// This spec covers the strip's own behavior (ADR 0054), which holds with the
+// Day stream off. Inside the stream a pill scrolls instead of navigating; the
+// day-stream spec covers that (ADR 0070).
+const DAY_STREAM_OFF = {
+  key: "daily:day-stream",
+  value: { key: "daily:day-stream", enabled: false },
+};
+
 async function load(
   page: Page,
   tree: SeedNode[],
-  kv: Parameters<typeof seedOutline>[2],
+  opts: Parameters<typeof seedOutline>[2],
 ) {
-  await seedOutline(page, tree, kv);
+  await seedOutline(page, tree, {
+    ...opts,
+    kv: {
+      ...opts?.kv,
+      "account-prefs": [...(opts?.kv?.["account-prefs"] ?? []), DAY_STREAM_OFF],
+    },
+  });
   await openSeededOutline(page, { anchorId: "alpha" });
 }
 

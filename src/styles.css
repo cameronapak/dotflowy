@@ -1992,3 +1992,79 @@ body:has(.typing-suggestions) [data-mobile-bar] {
     transition: none;
   }
 }
+
+/*
+ * View stream (ADR 0070): section chrome in the windowed list. A section title
+ * is the zoomed title in a list item; the space above it separates one day's
+ * page from the previous one.
+ */
+.stream-item[data-stream-item="title"],
+.stream-item[data-stream-item="placeholder"] {
+  padding-top: 28px;
+}
+
+.stream-item[data-stream-item="title"] .zoomed-title,
+.stream-title {
+  margin-bottom: 6px;
+}
+
+.stream-placeholder-text {
+  display: block;
+  padding: 3px 0;
+}
+
+.stream-badge {
+  float: left;
+  margin: 4px 8px 0 0;
+  border-radius: 9999px;
+  padding: 2px 10px;
+  font-size: calc(var(--reading-font-size) * 0.75);
+  font-weight: 500;
+  line-height: 1.4;
+  @apply border border-border text-muted-foreground;
+}
+
+.stream-entry .bullet-dot {
+  @apply bg-accent-foreground/25;
+}
+
+.stream-entry-text {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 24px;
+  padding: 3px 0;
+  font-size: var(--reading-font-size);
+  line-height: 1.5;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+
+.stream-entry-text:empty::before {
+  content: attr(data-placeholder);
+  @apply text-muted-foreground/70;
+}
+
+.stream-fold {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  border-block: 1px dashed var(--border);
+  padding: 10px 8px;
+  font-size: 14px;
+  text-align: start;
+  @apply text-muted-foreground;
+}
+
+.stream-fold:hover {
+  @apply text-foreground;
+}
+
+.stream-fold-mark {
+  width: 16px;
+  text-align: center;
+  letter-spacing: 1px;
+}

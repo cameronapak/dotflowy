@@ -23,6 +23,7 @@ import {
   shiftMonthKey,
   type WeekStart,
 } from "../../data/date-links";
+import { scrollStreamTo } from "../../data/view-stream";
 import { useDaysWithContent } from "./days-with-content";
 import { goToDate } from "./get-or-create";
 
@@ -140,7 +141,8 @@ export function MonthPickerButton({
                   disabled={!inMonth}
                   onClick={() => {
                     if (!inMonth) return;
-                    if (key !== selectedDayKey) {
+                    // In the Day stream, scroll to the day (ADR 0070).
+                    if (key !== selectedDayKey && !scrollStreamTo(key)) {
                       const ctx = getCtx();
                       ctx.run(
                         Effect.promise(() =>

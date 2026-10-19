@@ -44,6 +44,7 @@ import {
   weekLabel,
 } from "../../data/date-links";
 import { useEditorFeatures } from "../../data/editor-features";
+import { scrollStreamTo, useStreamView } from "../../data/view-stream";
 import { useScaffoldKey } from "./daily-index";
 import { useDaysWithContent } from "./days-with-content";
 import { getOrCreateDay } from "./get-or-create";
@@ -67,15 +68,20 @@ let pendingSelectionHandoff: SelectionHandoff | null = null;
 let latestSelectionRequest = 0;
 
 export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
-  const { weekStart } = useEditorFeatures();
+  const { weekStart, weekStrip } = useEditorFeatures();
   const params = useParams({ strict: false });
   const rootId = params.nodeId ?? null;
   // Reactive: the zoom root's scaffold key (null unless it maps to a scaffold
   // node). The strip only shows for a DAY -- week/month/year/container pages and
   // non-daily pages get nothing ("which day is selected?" has no answer there).
   const scaffoldKey = useScaffoldKey(rootId ?? "");
-  const dayKey =
+  const routeDay =
     scaffoldKey && scaffoldKeyKind(scaffoldKey) === "day" ? scaffoldKey : null;
+  // In the Day stream the selected day follows the scroll (ADR 0070): the day
+  // in view, not the route's anchor day.
+  const streamView = useStreamView();
+  const inStream = routeDay !== null && streamView?.anchor === routeDay;
+  const dayKey = inStream ? streamView.inView : routeDay;
 
   const reduceMotion = useReducedMotion();
   // Ephemeral paging offset from the zoomed day's week (ADR 0054, decision 5):
@@ -130,9 +136,10 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
       ? undefined
       : { "--week-calendar-selection-x": `${selectionInitialX}px` };
 
-  // Guard AFTER every hook (rules of hooks): render nothing on a non-day page, so
-  // the subheader band collapses.
-  if (!dayKey || !visibleWeek || days.length !== 7) return null;
+  // Guard AFTER every hook (rules of hooks): render nothing on a non-day page,
+  // or with the Week strip option off (ADR 0070), so the subheader band
+  // collapses.
+  if (!weekStrip || !dayKey || !visibleWeek || days.length !== 7) return null;
 
   const today = localDateKey();
   const monthKey = weekKeyToMonthKey(visibleWeek);
@@ -242,6 +249,12 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                 onClick={(event) => {
                   // Clicking the already-selected day is a no-op (ADR 0054).
                   if (key === dayKey) return;
+                  // In the Day stream a pill scrolls to its day; nothing is
+                  // created until you write there (ADR 0070).
+                  if (inStream && scrollStreamTo(key)) {
+                    setOffset(0);
+                    return;
+                  }
                   const request = ++latestSelectionRequest;
                   const calendar = event.currentTarget.closest("nav");
                   const ctx = getCtx();

@@ -91,6 +91,14 @@ _Avoid_: saved search (a filter stays put; see Filter), smart view
 The node identified with one local calendar day. It owns that day's captured and organized nodes as its children; the Daily note is the dated parent, not each entry beneath it.
 _Avoid_: day page, journal entry (that names a child, not the dated parent)
 
+**Day stream**:
+How a zoomed Daily note reads: one page per calendar day, continuing into the days before and after it, so scrolling steps through days in order. Shown only for day notes, never for weeks, months, years, or the Daily container.
+_Avoid_: day view, journal, feed, timeline
+
+**Empty day**:
+A calendar day with nothing written in it, whether or not its Daily note exists yet. Showing an Empty day never creates its Daily note; writing in it does.
+_Avoid_: blank day, missing day, unminted day (implementation detail)
+
 **Calendar week**:
 A seven-day period in Daily notes whose first day is the account's Week start. It belongs whole to the month and year containing its fourth day.
 _Avoid_: ISO week (only Monday-start Calendar weeks follow ISO boundaries), week row
