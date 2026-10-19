@@ -28,9 +28,18 @@ if [[ ! -x "$BUN_INSTALL/bin/bun" ]] || \
     'curl -fsSL https://bun.com/install | bash -s -- "bun-v$1"' _ "$bun_version"
 fi
 
-profile_marker="# dotflowy orb Bun"
-if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
-  cat >> "$HOME/.bash_profile" <<EOF
+if [[ -n "${AMP_ORB:-}" ]]; then
+  # Agent commands need not be login shells, and worktrees can be siblings of
+  # this checkout. Select the installed pin through the Orb's default PATH.
+  if [[ "$BUN_INSTALL/bin/bun" != /usr/local/bin/bun ]]; then
+    step "Select pinned Bun for Orb commands" \
+      sudo ln -sfn "$BUN_INSTALL/bin/bun" /usr/local/bin/bun
+  fi
+  sudo ln -sfn /usr/local/bin/bun /usr/local/bin/bunx
+else
+  profile_marker="# dotflowy orb Bun"
+  if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<EOF
 
 $profile_marker
 if [[ "\${PWD}" == "$repo_root" ]]; then
@@ -38,6 +47,7 @@ if [[ "\${PWD}" == "$repo_root" ]]; then
   export PATH="\$BUN_INSTALL/bin:\$PATH"
 fi
 EOF
+  fi
 fi
 
 step "Install root dependencies" bun install --frozen-lockfile
@@ -71,17 +81,17 @@ step "Prepare local Worker configuration and D1" env CI=1 bun run setup
 if [[ "$(uname -s)" == "Linux" ]]; then
   playwright_version="$(bunx playwright --version)"
   playwright_version="${playwright_version#Version }"
-  playwright_deps_marker="$HOME/.cache/ms-playwright/.dotflowy-deps-$playwright_version"
+  playwright_deps_marker="$HOME/.cache/ms-playwright/.dotflowy-deps-$playwright_version-chromium-webkit"
   if [[ ! -f "$playwright_deps_marker" ]]; then
-    step "Install Playwright Chromium and system dependencies" \
-      bunx playwright install --with-deps chromium
+    step "Install Playwright Chromium, WebKit, and system dependencies" \
+      bunx playwright install --with-deps chromium webkit
     mkdir -p "$(dirname "$playwright_deps_marker")"
     touch "$playwright_deps_marker"
   else
-    step "Install Playwright Chromium" bunx playwright install chromium
+    step "Install Playwright Chromium and WebKit" bunx playwright install chromium webkit
   fi
 else
-  step "Install Playwright Chromium" bunx playwright install chromium
+  step "Install Playwright Chromium and WebKit" bunx playwright install chromium webkit
 fi
 
 printf '\n[orb setup] Dotflowy is ready.\n'

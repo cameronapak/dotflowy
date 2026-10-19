@@ -216,14 +216,63 @@ browser.
   `Meta+`.
 - Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
   `waitForTimeout`.
-- **Only the focused editor performance suite runs in CI** (`bun run test:perf`).
-  The full e2e suite remains a local pre-PR gate.
-  `bun run test:e2e:app --workers=2` is the clean-signal app-only run;
+- **CI's `quality` job runs the full app and real-Worker suites**, sequentially,
+  with one worker, zero retries, and retained failure traces. It stops at the
+  first failure. Require that job in branch rules before relying on it instead
+  of a full local browser run.
+  PRs run CI directly; `main` uses deployment's exact-commit call, not a second
+  standalone CI run.
+  The full app run includes the editor performance cases; use `bun run test:perf`
+  for focused local iteration, not a duplicate CI run.
+  `bun run test:e2e:app` is the app-only run;
   `bun run test:e2e` also runs the isolated real-Worker suite. Use
-  `bun run test:e2e:serial` when chasing a flake. A
-  parallel-contention flake isn't a real failure. The app suite runs its own Vite
+  `--workers=2` only when the machine has spare capacity. Both suites default to
+  one worker; `bun run test:e2e:serial` also explicitly pins the app worker count.
+  Investigate contention failures rather than masking them with retries.
+  The app suite runs its own Vite
   server on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set the
   Selection range directly. `toHaveText` normalizes whitespace.
+
+### Test within a medium Orb's budget
+
+A medium Orb exposes 4 CPUs and 8 GB of host RAM, but command workloads can have
+a smaller cgroup limit: the investigated Orb allowed 6 GiB. Inspect
+`/proc/self/cgroup` and the ancestor slice's `memory.max`, `memory.current`, and
+`memory.events`; host free memory and summed process RSS do not measure that
+budget. The cgroup count includes filesystem cache; inspect `memory.stat`'s
+`anon` and `file` values and event deltas before attributing usage to live
+processes. CPU at 100% alone does not establish memory pressure.
+
+Root build, test, and typecheck scripts automatically share one heavy-work lane
+when `AMP_ORB` is set. The native `flock` lock is shared across worktrees and
+lives in the Orb's shared temporary directory. It is released when the command
+exits; nested commands inherit it. `cf:dev` rebuilds use the same build script.
+Outside an Orb, the wrapper runs commands directly.
+For direct tools or package-local commands, use
+`bun scripts/heavy-lane.ts <command> [args...]`. Different `E2E_PORT` values
+prevent port collisions, not resource contention.
+
+- During iteration, run the affected files before the full gate:
+  `bun scripts/heavy-lane.ts bun test ./src/data/tree.test.ts` or
+  `bun run test:e2e:app e2e/keyboard-nav.spec.ts`.
+- Keep the one-worker browser default. Each extra worker adds a test process
+  and a browser process tree alongside the shared Vite server. The real-Worker
+  suite already uses one worker, and `test:e2e` runs the two suites in sequence.
+- Stop idle development services before the full browser run. Playwright owns
+  its Vite server; the app fixtures mock the data API, and the real-Worker suite
+  owns an isolated Miniflare runtime. Neither needs a separate `cf:dev` server.
+  In an Orb, inspect `amp orb service list` and stop only services you own with
+  `amp orb service stop <name>`.
+- Keep coverage, Playwright UI mode, and traces off during routine runs.
+  The existing config records a trace on the first retry, not for every test.
+  For a focused failure, opt in with `--trace=retain-on-failure`.
+- Orb setup selects the pinned Bun for both login and non-login shells and
+  installs Chromium, WebKit, and their Linux dependencies. Resume does not
+  reinstall them. Verify `command -v bun` and `bun --version` before benchmarking.
+
+Sustained memory pressure, killed processes, and contention-induced timeouts
+are reasons to reduce overlap, not to increase retries or timeouts. Lowering
+browser concurrency trades throughput for memory headroom without skipping tests.
 
 ### Keep test seams out of production
 
@@ -254,8 +303,10 @@ a pruning pass.
 
 ## Before you open a PR
 
-Run the full gate. These mirror CI — except `bun run test:e2e`, which is
-local-only — and are the same checks the review process expects to pass:
+Run these nonbrowser checks and the affected browser specs locally. CI owns the
+full browser regression once its `quality` job is required and green on the PR.
+Until then, also run `bun run test:e2e:serial` locally. A green required full CI
+run replaces the duplicate full local run, not focused checks or visual review.
 
 ```sh
 bun run fmt:check       # oxfmt
@@ -265,8 +316,8 @@ bun run typecheck:worker # tsc over worker/ (workers-types)
 bun run typecheck:test  # tsc over the unit tests (bun types)
 bun run typecheck:e2e   # tsc over app Playwright specs and fixtures, no browser
 bun run test            # bun test — unit tests plus the Miniflare Worker suite (src + worker/)
-bun run test:perf       # focused editor performance browser suite, also runs in CI
-bun run test:e2e        # playwright (chromium) — app plus isolated real-Worker suite
+bun test scripts/release.test.ts scripts/shortcut.test.ts scripts/heavy-lane.test.ts
+bun run check:docs
 bunx changeset          # describe your change for the changelog (see below)
 bun run check:changeset # verify the committed branch carries that decision
 ```

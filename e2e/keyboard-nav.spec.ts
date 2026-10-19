@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  openSeededOutline,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -22,10 +23,7 @@ async function load(
       window.localStorage.setItem("dotflowy:show-completed", "false");
     });
   }
-  await page.goto("/");
-  // Wait for the seeded tree to render before driving the keyboard. Any node
-  // works; use the first so this holds for custom trees too.
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 test("ArrowDown walks focus through every visible bullet, top to bottom", async ({
@@ -201,8 +199,7 @@ test("arrows walk the FILTERED rows while a ?q= filter is active", async ({
     { id: "D", parentId: "P2", prevSiblingId: null, text: "deep #go" },
   ];
   await seedOutline(page, tree);
-  await page.goto("/?q=%23go");
-  await expect(text(page, "A")).toBeVisible();
+  await openSeededOutline(page, { path: "/?q=%23go", anchorId: "A" });
   // Sanity: B is pruned out of the DOM; D is revealed despite P2's collapse.
   await expect(text(page, "B")).toHaveCount(0);
   await expect(text(page, "D")).toBeVisible();

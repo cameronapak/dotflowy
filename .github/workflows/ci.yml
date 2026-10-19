@@ -1,8 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # Main is checked through deploy.yml's exact-commit workflow_call. A second
+  # push trigger would duplicate the entire browser regression on each merge.
   pull_request:
   workflow_call:
     inputs:
@@ -17,6 +17,7 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,6 +25,9 @@ jobs:
           # `changeset status --since` diffs against the base branch, so the
           # shallow default clone isn't enough.
           fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
@@ -42,24 +46,12 @@ jobs:
         run: bun run typecheck:e2e
       - name: Unit tests
         run: bun run test
-      - name: Install browsers for editor performance and touch tests
-        run: bunx --no-install playwright install --with-deps chromium webkit
-      - name: Editor performance tests
-        timeout-minutes: 10
-        run: bun run test:perf
-      - name: Upload browser failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: editor-performance-results
-          path: test-results/
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Release automation tests
         run: |
-          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts
+          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts scripts/heavy-lane.ts scripts/heavy-lane.test.ts scripts/cf-dev.ts
           bun test scripts/release.test.ts
           bun test scripts/shortcut.test.ts
+          bun test scripts/heavy-lane.test.ts
       # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
       # rest. That trade is only safe while every pointer resolves: an agent
       # reads a miss, shrugs, and proceeds without the constraint it was meant
@@ -74,3 +66,19 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           bun run check:changeset
+      # Keep the existing quality check as the gate, including when this
+      # workflow is called by deployment. Browser suites run sequentially.
+      - name: Install test browsers
+        run: bunx playwright install --with-deps chromium webkit
+      - name: App browser regression
+        run: bun run test:e2e:app --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure
+      - name: Real Worker regression
+        run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-traces
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

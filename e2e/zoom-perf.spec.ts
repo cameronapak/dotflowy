@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type {} from "../src/components/hotkey-devtools";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Zoom performance guard.
 //
@@ -85,10 +85,7 @@ async function settledRegistrationCount(page: Page): Promise<number> {
 
 async function load(page: Page) {
   await seedOutline(page, perfTree());
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="few"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "few" });
 }
 
 test("zooming into a node with hundreds of children keeps hotkey registrations bounded", async ({
