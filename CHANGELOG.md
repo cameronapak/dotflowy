@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.26.1
+
+### Patch Changes
+
+- fd41273: Reuse day-stream layout and unchanged day content while scrolling, and keep empty-day page sizes current when the viewport resizes.
+
 ## 1.26.0
 
 ### Minor Changes
