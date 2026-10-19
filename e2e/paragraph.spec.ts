@@ -42,7 +42,7 @@ const checkbox = (page: Page, id: string) =>
 async function load(page: Page, path = "/", ready?: ReturnType<typeof text>) {
   await seedOutline(page, TREE);
   await page.goto(path);
-  await expect(ready ?? text(page, "a")).toBeVisible();
+  await (ready ?? text(page, "a")).waitFor({ state: "visible" });
 }
 
 /** Run a `/` command against the focused, empty bullet. */
