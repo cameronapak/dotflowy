@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // The provenance plugin marks nodes an agent created via MCP (the write-once
 // `origin` field) apart from what the user typed. The mark is a Seam F slot in
@@ -19,8 +19,6 @@ const TREE: SeedNode[] = [
   },
 ];
 
-const text = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 // The mark is a SparkleIcon carrying `data-origin` (the harness name) and an
 // aria-label attribution -- the same hook styles.css keys its alignment rule on.
 const mark = (page: Page, id: string) =>
@@ -28,8 +26,7 @@ const mark = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(text(page, "mine")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "mine" });
 }
 
 test("marks an agent-created node and leaves the user's own unmarked", async ({

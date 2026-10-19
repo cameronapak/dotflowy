@@ -7,6 +7,7 @@ import {
 } from "@playwright/test";
 
 import {
+  openSeededOutline,
   placeCaret,
   seedOutline,
   text,
@@ -22,8 +23,7 @@ import {
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 /** Every rendered bullet as `depth:text`, in display order. */
@@ -366,18 +366,28 @@ test("a plain Cmd+V after it is NOT literal (the arm is one-shot)", async ({
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await load(page, one);
   await page.evaluate(() =>
-    navigator.clipboard.writeText("https://example.com"),
+    navigator.clipboard.write([
+      new ClipboardItem({
+        "text/plain": new Blob(["Example"], { type: "text/plain" }),
+        "text/html": new Blob(
+          ['<a href="https://example.com/article">Example</a>'],
+          { type: "text/html" },
+        ),
+      }),
+    ]),
   );
   await caretAt(page, "n", 0);
 
   await pressLiteralPaste(page, context);
+  await expect.poll(() => rows(page)).toEqual(["0:Example"]);
   await expect(page.locator('li[data-node-id="n"] a')).toHaveCount(0);
 
   // Same bullet, same clipboard, caret still at the end -- only the chord
-  // differs, and now the links plugin's Seam I wrap fires.
+  // differs, and now the links plugin's rich-anchor wrap fires. A bare URL
+  // would concatenate with the first paste and follows the display-choice path.
   await page.keyboard.press("ControlOrMeta+V");
   await expect(page.locator('li[data-node-id="n"] a')).toHaveAttribute(
     "href",
-    "https://example.com",
+    "https://example.com/article",
   );
 });

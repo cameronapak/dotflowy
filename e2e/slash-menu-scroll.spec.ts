@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, STANDARD_TREE, text } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  STANDARD_TREE,
+  text,
+} from "./fixtures";
 
 /**
  * One round-trip read of the open menu. Geometry lives here (not in locators)
@@ -41,8 +47,7 @@ const menuField =
 
 async function openOutline(page: Page) {
   await seedOutline(page, STANDARD_TREE);
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 /** Open the `/` palette on a bullet: the "/" must follow whitespace to trigger. */

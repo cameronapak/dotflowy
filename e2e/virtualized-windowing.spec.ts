@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // ADR 0019: the windowed render mounts only ~viewport rows, regardless of how
 // many nodes exist. These specs prove the DOM row count stays bounded as the
@@ -40,10 +46,7 @@ const rowCount = (page: Page) => page.locator("li[data-node-id]").count();
 
 async function loadBig(page: Page) {
   await seedOutline(page, bigTree());
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="p0"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "p0" });
 }
 
 test("renders only ~viewport rows out of thousands", async ({ page }) => {

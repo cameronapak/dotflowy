@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Completion is now the todos plugin (ADR 0018 D9): the checkbox (Seam F), the
 // `[]` autoformat (Seam I), Mod+Enter/Mod+D (Seam D), and `/todo` (Seam C) all
@@ -26,8 +32,7 @@ const checkbox = (page: Page, id: string) =>
 
 async function load(page: Page, tree: SeedNode[] = TREE) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, "c")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "c" });
 }
 
 // Software keyboards can deliver deletion intent without a Backspace keydown.

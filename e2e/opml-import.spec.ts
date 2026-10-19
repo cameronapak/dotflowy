@@ -8,7 +8,7 @@ import { expect, test, type FileChooser, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { openSeededOutline, seedOutline, STANDARD_TREE } from "./fixtures";
 
 const SAMPLE_PATH = fileURLToPath(
   new URL(
@@ -27,8 +27,7 @@ const containerRow = (page: Page) =>
 
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 // Run "Import OPML…" via Cmd+K (the More menu's import moved to /settings with

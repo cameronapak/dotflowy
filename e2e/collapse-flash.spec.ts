@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { openSeededOutline, seedOutline, STANDARD_TREE } from "./fixtures";
 
 // A node's OWN editable text span, its row, and its collapse chevron.
 const text = (page: Page, id: string) =>
@@ -12,8 +12,7 @@ const chevron = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 // The windowed list drops the reveal animation (ADR 0019), so a deliberate

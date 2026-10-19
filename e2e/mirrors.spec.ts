@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Node mirrors (ADR 0022), slice 1b: render + field split. A node carrying
 // `mirrorOf` windows its source's text + children; all instances are editable
@@ -32,8 +37,7 @@ const MIRROR_TREE: SeedNode[] = [
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, "A")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "A" });
 }
 
 test("a mirror windows its source's text and children", async ({ page }) => {

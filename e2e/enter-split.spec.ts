@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  openSeededOutline,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -47,8 +48,7 @@ async function load(
       window.localStorage.setItem("dotflowy:show-completed", "false");
     });
   }
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 // Focus `id` and drop the caret at absolute character offset `col`. We set the

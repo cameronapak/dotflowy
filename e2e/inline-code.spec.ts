@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Inline code (`` `code` ``) is a FOLDING token (ADR 0025's reveal-on-proximity,
 // shared with emphasis + links): the backticks hide (the run folds to a clean
@@ -9,8 +15,7 @@ import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 // Place the caret at a SOURCE offset, walking the live DOM like the app's
