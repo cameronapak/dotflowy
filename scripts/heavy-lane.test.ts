@@ -102,3 +102,57 @@ test.skipIf(process.platform !== "linux")(
   },
   10_000,
 );
+
+test.skipIf(process.platform !== "linux")(
+  "cancelling an Orb command stops its descendants and releases the lane",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "dotflowy-heavy-cancel-"));
+    const env = {
+      ...process.env,
+      AMP_ORB: "1",
+      DOTFLOWY_HEAVY_LANE: "",
+      TMPDIR: directory,
+    };
+    // Keep a shell between the wrapper and the workload, as build:cf does.
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        wrapper,
+        "sh",
+        "-c",
+        '"$BUN" -e \'console.log("ready"); setTimeout(() => {}, 2500)\'; echo finished',
+      ],
+      {
+        env: { ...env, BUN: process.execPath },
+        stdout: "pipe",
+        stderr: "inherit",
+      },
+    );
+    try {
+      const output = child.stdout.getReader();
+      expect(new TextDecoder().decode((await output.read()).value)).toBe(
+        "ready\n",
+      );
+      child.kill("SIGTERM");
+      expect(await child.exited).toBe(143);
+      // EOF requires the descendant holding this pipe to have stopped too.
+      expect(
+        await Promise.race([
+          output.read().then(({ done }) => done),
+          Bun.sleep(1000).then(() => false),
+        ]),
+      ).toBe(true);
+      output.releaseLock();
+      const next = Bun.spawn(
+        ["timeout", "3s", process.execPath, wrapper, "true"],
+        { env, stdout: "ignore", stderr: "inherit" },
+      );
+      expect(await next.exited).toBe(0);
+    } finally {
+      child.kill();
+      await child.exited;
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  5000,
+);

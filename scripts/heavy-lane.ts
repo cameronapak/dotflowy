@@ -28,17 +28,32 @@ const child = Bun.spawn(
   {
     stdio: ["inherit", "inherit", "inherit"],
     env: acquire ? { ...process.env, DOTFLOWY_HEAVY_LANE: "1" } : process.env,
+    // Own the entire workload group, including shell/build descendants.
+    detached: acquire,
   },
 );
 
 let signalExitCode: number | undefined;
-process.on("SIGINT", () => {
-  signalExitCode = 130;
-  child.kill("SIGINT");
-});
-process.on("SIGTERM", () => {
-  signalExitCode = 143;
-  child.kill("SIGTERM");
-});
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+] as const) {
+  process.on(signal, () => {
+    signalExitCode = code;
+    if (!acquire) {
+      child.kill(signal);
+      return;
+    }
+    try {
+      process.kill(-child.pid, signal);
+    } catch (error) {
+      // The group can exit between receiving the signal and forwarding it.
+      if (
+        !(error instanceof Error && "code" in error && error.code === "ESRCH")
+      )
+        throw error;
+    }
+  });
+}
 const exitCode = await child.exited;
 process.exit(signalExitCode ?? exitCode);
