@@ -6,6 +6,7 @@ import {
   seedOutline,
   STANDARD_TREE,
   text,
+  type ApiNode,
 } from "./fixtures";
 
 // ADR 0070: a zoomed day note continues into the days around it. Fixed days far
@@ -79,6 +80,584 @@ const pill = (page: Page, key: string) =>
   page
     .getByRole("navigation", { name: "Week calendar" })
     .locator(`[data-day-key="${key}"]`);
+
+test.describe("day navigation on touch", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  for (const spotlight of [false, true]) {
+    test(`Today owns the title until editing takes over, spotlight ${spotlight}`, async ({
+      page,
+    }) => {
+      await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
+      const entries = Array.from({ length: 80 }, (_, i) => ({
+        id: `entry-${i}`,
+        parentId: "the-day",
+        prevSiblingId: i ? `entry-${i - 1}` : "standup",
+        text: `Entry ${i}`,
+      }));
+      const controller = await seedOutline(
+        page,
+        [
+          ...TREE,
+          ...entries,
+          {
+            id: "hidden-tail",
+            parentId: "the-day",
+            prevSiblingId: "entry-79",
+            text: "Completed final child",
+            completed: true,
+          },
+        ],
+        { kv: KV },
+      );
+      await page.addInitScript((enabled) => {
+        localStorage.setItem("dotflowy:spotlight", String(enabled));
+        localStorage.setItem("dotflowy:show-completed", "false");
+      }, spotlight);
+      await openSeededOutline(page, { anchorId: "alpha" });
+      // Model a standalone iPhone's nonzero safe-area top inset.
+      await page.addStyleTag({ content: ".outline-chrome { top: 24px; }" });
+      const today = page.getByRole("button", {
+        name: "Today's daily note",
+        exact: true,
+      });
+      const title = section(page, DAY, "title");
+      const last = text(page, "entry-79");
+      const gap = () =>
+        title.evaluate(
+          (el) =>
+            el.getBoundingClientRect().top -
+            document
+              .querySelector<HTMLElement>(".outline-chrome")!
+              .getBoundingClientRect().bottom,
+        );
+      const seated = async () => {
+        await expect.poll(async () => Math.abs(await gap())).toBeLessThan(2);
+        await expect(page.locator(".outline-chrome")).toBeInViewport({
+          ratio: 1,
+        });
+        await expect(last).toBeFocused();
+      };
+
+      // Home -> Today uses the same title/focus contract as an in-stream tap.
+      // The last child starts far outside the virtual window.
+      await today.tap();
+      await seated();
+      await expect(page.locator(".outline-chrome")).toHaveCSS("top", "24px");
+      await expect(text(page, "hidden-tail")).not.toBeAttached();
+      expect(await page.locator("li[data-node-id]").count()).toBeLessThan(50);
+      const nodes: ApiNode[] = await page.evaluate(() =>
+        fetch("/api/nodes").then((r) => r.json()),
+      );
+      await controller.injectExternalChange([
+        {
+          op: "update",
+          value: {
+            ...nodes.find((n) => n.id === "standup")!,
+            text: "Delayed content that wraps on a narrow screen. ".repeat(40),
+          },
+        },
+      ]);
+      await expect(text(page, "standup")).toContainText("Delayed content");
+      await seated();
+      await page.setViewportSize({ width: 390, height: 868 });
+      await seated();
+
+      await pill(page, PREV).tap();
+      await expect(section(page, PREV, "title")).toBeInViewport();
+      await controller.injectExternalChange([
+        {
+          op: "update",
+          value: {
+            ...nodes.find((n) => n.id === "dentist")!,
+            text: "Earlier day content arrives after navigation. ".repeat(20),
+          },
+        },
+      ]);
+      await expect(text(page, "dentist")).toContainText("Earlier day content");
+      await expect
+        .poll(() =>
+          section(page, PREV, "title").evaluate((el) =>
+            Math.abs(
+              el.getBoundingClientRect().top -
+                document
+                  .querySelector<HTMLElement>(".outline-chrome")!
+                  .getBoundingClientRect().bottom,
+            ),
+          ),
+        )
+        .toBeLessThan(2);
+      await today.tap();
+      await seated();
+      // Observe every frame, not just a final position that two scroll
+      // writers might eventually agree on.
+      const drift = await title.evaluate(async (el) => {
+        let maximum = 0;
+        for (let i = 0; i < 30; i++) {
+          await new Promise(requestAnimationFrame);
+          maximum = Math.max(
+            maximum,
+            Math.abs(
+              el.getBoundingClientRect().top -
+                document
+                  .querySelector<HTMLElement>(".outline-chrome")!
+                  .getBoundingClientRect().bottom,
+            ),
+          );
+        }
+        return maximum;
+      });
+      expect(drift).toBeLessThan(2);
+
+      // Dictation/replacement and IME paths need no keydown or pointerdown.
+      // Each must release before a subsequent layout change.
+      for (const event of ["beforeinput", "compositionstart", "input"]) {
+        await today.tap();
+        await seated();
+        await last.evaluate(
+          (el, event) =>
+            el.dispatchEvent(
+              event === "compositionstart"
+                ? new CompositionEvent(event, { bubbles: true, data: "" })
+                : new InputEvent(event, {
+                    bubbles: true,
+                    inputType: "insertText",
+                    data: "",
+                  }),
+            ),
+          event,
+        );
+        await expect(page.locator(".outline-chrome")).toHaveCSS(
+          "position",
+          "relative",
+        );
+        await expect(last).toBeInViewport({ ratio: 1 });
+        await expect
+          .poll(() =>
+            page.evaluate(() => {
+              const caret = window
+                .getSelection()!
+                .getRangeAt(0)
+                .getBoundingClientRect();
+              const bar = document
+                .querySelector("[data-mobile-bar]")
+                ?.getBoundingClientRect();
+              return caret.top >= 0 && caret.bottom < (bar?.top ?? innerHeight);
+            }),
+          )
+          .toBe(true);
+        const beforeScroll = await page.evaluate(() => window.scrollY);
+        await page.evaluate(() => window.scrollBy(0, 260));
+        await expect
+          .poll(() => page.evaluate(() => window.scrollY))
+          .toBeGreaterThan(beforeScroll + 200);
+        await expect(last).toBeFocused();
+        if (event === "compositionstart")
+          await last.dispatchEvent("compositionend", { data: "" });
+        // End this editing session before starting the next independent input
+        // path. Mobile intentionally unsticks chrome while editing.
+        if (event !== "input") await last.evaluate((el) => el.blur());
+      }
+      // Real input still goes to the last child and persists normally.
+      await page.keyboard.insertText(" appended");
+      await expect(last).toHaveText("Entry 79 appended");
+      await expect
+        .poll(() =>
+          page.evaluate(async () => {
+            const nodes: ApiNode[] = await fetch("/api/nodes").then((r) =>
+              r.json(),
+            );
+            return nodes.find((node) => node.id === "entry-79")?.text;
+          }),
+        )
+        .toBe("Entry 79 appended");
+      await last.evaluate((el) => el.blur());
+      await pill(page, PREV).tap();
+      await expect(page).toHaveURL(/day=2030-06-11/);
+      // The node snapshot can beat daily-index on a cold direct focus=last
+      // route. Stream adoption must supersede the ordinary outline landing,
+      // but keep the saved day rather than letting focus=last reset to Today.
+      let releaseIndex!: () => void;
+      const indexHeld = new Promise<void>((resolve) => {
+        releaseIndex = resolve;
+      });
+      await page.route(
+        (url) =>
+          url.pathname === "/api/kv" &&
+          url.searchParams.get("collection") === "daily-index",
+        async (route) => {
+          await indexHeld;
+          await route.fallback();
+        },
+      );
+      await page.reload();
+      await expect(last).toHaveText("Entry 79 appended");
+      releaseIndex();
+      await expect
+        .poll(() =>
+          section(page, PREV, "title").evaluate((el) =>
+            Math.abs(
+              el.getBoundingClientRect().top -
+                document
+                  .querySelector(".outline-chrome")!
+                  .getBoundingClientRect().bottom,
+            ),
+          ),
+        )
+        .toBeLessThan(2);
+      await expect(page).toHaveURL(/day=2030-06-11/);
+      await expect(last).toBeFocused();
+      await today.tap();
+      await seated();
+    });
+
+    test(`input reveals a short day's caret behind the toolbar, spotlight ${spotlight}`, async ({
+      page,
+    }) => {
+      await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
+      await seedOutline(page, TREE, { kv: KV });
+      await page.addInitScript((enabled) => {
+        localStorage.setItem("dotflowy:spotlight", String(enabled));
+      }, spotlight);
+      await openSeededOutline(page, { anchorId: "alpha" });
+      await page
+        .getByRole("button", { name: "Today's daily note", exact: true })
+        .tap();
+      const editor = text(page, "standup");
+      await expect(editor).toBeFocused();
+      const caretBottom = await editor.evaluate(
+        (el) => el.getBoundingClientRect().bottom,
+      );
+      // A reduced viewport puts this short day's last line inside the screen
+      // but behind the toolbar, unlike the long day's fully offscreen caret.
+      await page.setViewportSize({
+        width: 390,
+        height: Math.ceil(caretBottom + 8),
+      });
+      const caretClear = () =>
+        editor.evaluate((el) => {
+          const caret = el.getBoundingClientRect();
+          const bar = document
+            .querySelector("[data-mobile-bar]")!
+            .getBoundingClientRect();
+          return {
+            inViewport: caret.top >= 0 && caret.bottom < innerHeight,
+            aboveToolbar: caret.bottom < bar.top,
+          };
+        });
+      await expect.poll(caretClear).toEqual({
+        inViewport: true,
+        aboveToolbar: false,
+      });
+      await page.keyboard.insertText(" appended");
+      await expect(editor).toHaveText("Standup appended");
+      await expect(editor).toBeFocused();
+      await expect.poll(caretClear).toEqual({
+        inViewport: true,
+        aboveToolbar: true,
+      });
+      const before = await page.evaluate(() => scrollY);
+      await page.evaluate(() => window.scrollBy(0, 100));
+      await expect
+        .poll(() => page.evaluate(() => scrollY))
+        .toBeGreaterThan(before + 90);
+    });
+  }
+});
+
+test.describe("touch momentum", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  for (const input of ["touch", "pointer"] as const) {
+    test(`prepending folded days waits for ${input} scrolling to settle`, async ({
+      page,
+      context,
+    }) => {
+      await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
+      const days = Array.from({ length: 22 }, (_, i) => ({
+        id: `note-${i}`,
+        key: new Date(Date.UTC(2030, 5, 12 - i * 2)).toISOString().slice(0, 10),
+      }));
+      await seedOutline(
+        page,
+        days.flatMap(({ id }, i) => [
+          {
+            id,
+            parentId: null,
+            prevSiblingId: i ? `note-${i - 1}` : null,
+            text: "",
+          },
+          {
+            id: `${id}-entry`,
+            parentId: id,
+            prevSiblingId: null,
+            text: "A day's entry",
+          },
+        ]),
+        {
+          kv: {
+            "daily-index": days.map(({ id, key }) => ({
+              key,
+              value: { key, nodeId: id },
+            })),
+            "account-prefs": [
+              {
+                key: "daily:empty-days",
+                value: { key: "daily:empty-days", emptyDays: "fold" },
+              },
+            ],
+          },
+        },
+      );
+      await openSeededOutline(page, { path: "/note-0" });
+      await expect(section(page, DAY, "title")).toBeInViewport();
+      await page
+        .getByRole("button", { name: "Previous week", exact: true })
+        .tap();
+      await page
+        .getByRole("button", { name: "Tuesday, June 4, 2030", exact: true })
+        .tap();
+      await expect(section(page, "2030-06-04", "title")).toBeInViewport();
+      await expect(
+        page.locator('[data-stream-item="fold"]').first(),
+      ).toBeAttached();
+      // Start just outside the prepend threshold regardless of how many
+      // chunks the cold opening needed. Follow a visible title from here.
+      await page.keyboard.press("Escape");
+      await page.evaluate(async () => {
+        window.scrollTo(0, 1900);
+        for (let i = 0; i < 30; i++) await new Promise(requestAnimationFrame);
+      });
+      const heldKey = await page.evaluate(() => {
+        const titles = [
+          ...document.querySelectorAll<HTMLElement>(
+            '[data-stream-item="title"]',
+          ),
+        ];
+        return titles.find((el) => {
+          const top = el.getBoundingClientRect().top;
+          return top >= 150 && top < 900;
+        })!.dataset.section!;
+      });
+      const held = section(page, heldKey, "title");
+      const before = await held.evaluate((el) => ({
+        top: el.getBoundingClientRect().top,
+        start: el.getBoundingClientRect().top + scrollY,
+      }));
+
+      // CDP sends trusted native touch input. Keep sampling the same title's
+      // screen position across the prepend, rather than comparing scrollY,
+      // which legitimately grows by the height of the inserted days.
+      await page.evaluate((key) => {
+        const samples: { top: number; start: number; ended: boolean }[] = [];
+        let ended = false;
+        let moves = 0;
+        addEventListener("touchmove", () => moves++, { passive: true });
+        addEventListener(
+          "touchend",
+          () => {
+            ended = true;
+          },
+          { once: true },
+        );
+        addEventListener(
+          "pointerup",
+          () => {
+            ended = true;
+          },
+          { once: true },
+        );
+        const sample = () => {
+          const el = document.querySelector(
+            `[data-stream-item="title"][data-section="${key}"]`,
+          );
+          if (el) {
+            const top = el.getBoundingClientRect().top;
+            samples.push({ top, start: top + scrollY, ended });
+          }
+          raf = requestAnimationFrame(sample);
+        };
+        let raf = requestAnimationFrame(sample);
+        Object.assign(window, {
+          readTouch: () => ({ samples, moves }),
+          stopTouch: () => cancelAnimationFrame(raf),
+        });
+      }, heldKey);
+      const cdp = await context.newCDPSession(page);
+      if (input === "touch") {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchStart",
+          touchPoints: [{ x: 195, y: 230 }],
+        });
+        for (let y = 270; y <= 750; y += 40) {
+          await cdp.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{ x: 195, y }],
+          });
+          await page.evaluate(
+            () =>
+              new Promise((resolve) =>
+                requestAnimationFrame(() => requestAnimationFrame(resolve)),
+              ),
+          );
+        }
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchEnd",
+          touchPoints: [],
+        });
+      } else {
+        // One pointer gesture, followed by browser offsets without more input
+        // events: the same event contract as dragging the native scrollbar.
+        await page.mouse.move(388, 230);
+        await page.mouse.down();
+        await page.evaluate(async () => {
+          for (let i = 0; i < 13; i++) {
+            window.scrollBy(0, -40);
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+          }
+        });
+        await page.mouse.up();
+      }
+      // CDP touch dispatch does not produce reliable native inertia. Model the
+      // browser's post-touch scroll events without another input gesture. This
+      // tests our deferral contract, not physical iOS momentum physics.
+      await page.evaluate(async () => {
+        for (let i = 0; i < 10; i++) {
+          window.scrollBy(0, -30);
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+        }
+        for (let i = 0; i < 30; i++) await new Promise(requestAnimationFrame);
+      });
+      await expect
+        .poll(() =>
+          held.evaluate((el) => el.getBoundingClientRect().top + scrollY),
+        )
+        .toBeGreaterThan(before.start + 1000);
+      const result = await page.evaluate(() => {
+        // SAFETY: this test installed the observer immediately above.
+        const observer = window as typeof window & {
+          readTouch(): {
+            samples: { top: number; start: number; ended: boolean }[];
+            moves: number;
+          };
+          stopTouch(): void;
+        };
+        observer.stopTouch();
+        return observer.readTouch();
+      });
+      await cdp.detach();
+      if (input === "touch") expect(result.moves).toBeGreaterThan(0);
+      expect(
+        result.samples
+          .filter((s) => !s.ended)
+          .every((s) => Math.abs(s.start - before.start) < 2),
+      ).toBe(true);
+      const inserted = result.samples.findIndex(
+        (s) => s.start > before.start + 1000,
+      );
+      expect(inserted).toBeGreaterThan(0);
+      expect(
+        Math.abs(
+          result.samples[inserted]!.top - result.samples[inserted - 1]!.top,
+        ),
+      ).toBeLessThan(2);
+      // Insertion waits for coasting too, not merely touchend. Proximity snap
+      // may move to a nearby boundary AFTER insertion, so inspect the gesture
+      // through the insertion frame, not that later, intentional movement.
+      const gesture = result.samples.slice(0, inserted + 1);
+      const moving = gesture.filter(
+        (s, i) => i > 0 && s.top - result.samples[i - 1]!.top > 2,
+      );
+      expect(
+        moving.filter((s) => Math.abs(s.start - before.start) >= 2),
+      ).toEqual([]);
+      expect(gesture.at(-1)!.top).toBeGreaterThan(before.top + 500);
+      const coasting = gesture.filter((s) => s.ended);
+      expect(coasting.at(-1)!.top - coasting[0]!.top).toBeGreaterThan(40);
+      const jumps = gesture
+        .slice(1)
+        .map((s, i) => s.top - result.samples[i]!.top);
+      expect(Math.min(...jumps)).toBeGreaterThan(-40);
+      expect(Math.max(...jumps)).toBeLessThan(120);
+    });
+  }
+});
+
+test("row-targeted navigation into a long day keeps the target in view", async ({
+  page,
+}) => {
+  const entries = Array.from({ length: 80 }, (_, i) => ({
+    id: `entry-${i}`,
+    parentId: "the-day",
+    prevSiblingId: i ? `entry-${i - 1}` : "standup",
+    text: `Entry ${i}`,
+  }));
+  await seedOutline(
+    page,
+    [
+      ...TREE.map((node) =>
+        node.id === "the-day"
+          ? { ...node, text: "Long day", bookmarkedAt: 100 }
+          : node,
+      ),
+      ...entries,
+    ],
+    { kv: KV },
+  );
+  let releaseIndex!: () => void;
+  const indexHeld = new Promise<void>((resolve) => {
+    releaseIndex = resolve;
+  });
+  await page.route(
+    (url) =>
+      url.pathname === "/api/kv" &&
+      url.searchParams.get("collection") === "daily-index",
+    async (route) => {
+      await indexHeld;
+      await route.fallback();
+    },
+  );
+  await page.goto("/entry-79");
+  await expect(page.locator(".zoomed-title")).toHaveText("Entry 79");
+  await page.keyboard.press("ControlOrMeta+,");
+  const last = text(page, "entry-79");
+  await expect(last).toBeFocused();
+  await expect(last).toBeInViewport();
+  releaseIndex();
+  await expect(
+    page.getByRole("navigation", { name: "Week calendar" }),
+  ).toBeVisible();
+  await expect(last).toBeFocused();
+  await expect(last).toBeInViewport();
+  await page.setViewportSize({ width: 900, height: 650 });
+  await expect(last).toBeInViewport();
+
+  await clientNavigate(page, "/");
+  await placeCaret(text(page, "alpha"), "end");
+  await page.keyboard.type(" /move");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page
+    .getByRole("dialog")
+    .getByRole("option", { name: "Long day" })
+    .click();
+  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await expect(page).toHaveURL(/\/the-day/);
+  await expect(text(page, "alpha")).toBeFocused();
+  await expect(text(page, "alpha")).toBeInViewport();
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expect(text(page, "alpha")).toBeInViewport();
+});
 
 test("a pill scrolls the stream, and the URL and strip follow the day in view", async ({
   page,

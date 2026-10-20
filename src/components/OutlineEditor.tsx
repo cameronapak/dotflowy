@@ -78,7 +78,11 @@ import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
-import { centerAfterMutation, centerAfterNavigation } from "../data/spotlight";
+import {
+  centerAfterMutation,
+  centerAfterNavigation,
+  holdSpotlightScroll,
+} from "../data/spotlight";
 import { runStructural } from "../data/structural";
 import {
   buildTreeIndex,
@@ -145,6 +149,7 @@ import {
 } from "../plugins/registry";
 import { Backlinks } from "./backlinks";
 import { TitleParagraphGlyph } from "./bullet-glyph";
+import { caretPosition } from "./caret-menu-utils";
 import {
   caretFromPoint,
   placeCaretAtEnd,
@@ -405,14 +410,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Zoom navigation: the shared-element morph between a node's title and list-
   // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation
   // focus landing. See useZoomNavigation.
-  const { navigateZoom, pivotId } = useZoomNavigation({
+  const { navigateZoom, pivotId, rowNavigation } = useZoomNavigation({
     rootId,
     isHidden,
     refs,
     navigate,
     pendingFocus,
     pendingFlash,
-    focusLast,
   });
 
   // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
@@ -1011,9 +1015,36 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // The item a stream load holds in place on screen (see maybeExtend).
   const heldRef = useRef<{
     key: string;
-    start: number;
-    top: number | null;
+    top: number;
+    scrollY: number;
   } | null>(null);
+  // Navigation owns the title, not the caret it optionally lands. Keep that
+  // ownership through lazy measurements until a new user gesture takes over.
+  const titleAnchorRef = useRef<{
+    section: string;
+    focusKey?: string;
+    releaseSpotlight: () => void;
+  } | null>(null);
+  const releaseTitle = useCallback(() => {
+    const anchored = titleAnchorRef.current !== null;
+    titleAnchorRef.current?.releaseSpotlight();
+    titleAnchorRef.current = null;
+    heldRef.current = null;
+    headerRef.current?.removeAttribute("data-title-anchored");
+    return anchored;
+  }, []);
+  useLayoutEffect(() => {
+    if (!stream) releaseTitle();
+  }, [stream, releaseTitle]);
+  useLayoutEffect(
+    () => () => {
+      releaseTitle();
+      openedStreamRef.current = false;
+      landedLastRef.current = null;
+    },
+    [releaseTitle],
+  );
+  const stopSnapRef = useRef<(() => void) | null>(null);
   // A new getItemKey invalidates the virtualizer's geometry for EVERY loaded
   // item, even when the keys are unchanged. Scroll-only renders must reuse it.
   // Rotate both callbacks when page geometry changes: estimateSize alone is
@@ -1051,8 +1082,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // the window unmounts as before (a filter relies on it).
       if (!stream) return indexes;
       // The same for the item a stream load is holding in place.
-      const keep = [hasWindow() ? findFocusedId() : null, heldRef.current?.key]
+      const anchor = titleAnchorRef.current;
+      const keep = [
+        hasWindow() ? findFocusedId() : null,
+        heldRef.current?.key,
+        anchor?.focusKey,
+      ]
         .map((key) => (key ? rowIndex.get(key) : undefined))
+        .concat(anchor ? sectionStarts.get(anchor.section) : undefined)
         .filter((i): i is number => i !== undefined && !indexes.includes(i));
       return keep.length
         ? [...new Set([...indexes, ...keep])].sort((a, b) => a - b)
@@ -1081,6 +1118,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       _delta,
       instance,
     ) => {
+      if (titleAnchorRef.current || heldRef.current) return false;
       const focused =
         document.activeElement?.closest<HTMLElement>("li[data-index]");
       const editing = document.activeElement?.matches(".node-text");
@@ -1167,7 +1205,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // of the viewport in place: the layout effect below scrolls by exactly the
   // height the new sections added above it.
   const extendingRef = useRef(false);
-  const seatedRef = useRef(false);
+  const deferPrependRef = useRef(false);
   // The section the stream opens on, and the `?day=` still being restored.
   // While a restore is pending the URL keeps its `?day=` (see the URL effect).
   const routeSearchDayRef = useRef(initial?.day ?? null);
@@ -1175,9 +1213,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const plannedRef = useRef(initial !== null);
   const latestSearchDayRef = useRef(routeSearch.day ?? null);
   latestSearchDayRef.current = routeSearch.day ?? null;
-  // Cancels the post-prepend pin loop, so a deliberate scroll (a pill, Today)
-  // is not dragged back to the held item.
-  const stopPinRef = useRef<(() => void) | null>(null);
   const maybeExtend = useCallback(() => {
     if (!streamRef.current || extendingRef.current) return;
     const snapshot = snapshotRef.current;
@@ -1189,33 +1224,32 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const y = window.scrollY;
     const vh = window.innerHeight;
     if (!snapshot.atStart && y - first.start < vh * 1.5) {
+      // iOS cancels momentum on a programmatic scroll write. Defer insertion
+      // AND its compensation until idle, not just the compensating scroll.
+      if (deferPrependRef.current) return;
       const top = y + headerHeightRef.current;
       let held = 0;
       for (let i = 0; i < cache.length; i++) {
         if (cache[i]!.start <= top) held = i;
         else break;
       }
-      // The first load holds the opening section's title instead, to seat it.
-      if (!seatedRef.current) {
-        const opening = routeSearchDayRef.current ?? streamRef.current.anchor;
-        const i = list.findIndex(
-          (item) =>
-            startsSection(item) &&
-            "section" in item &&
-            item.section === opening,
+      // Page-end padding and folded runs can change during a prepend. Hold
+      // the next content row instead, through all of its late measurements.
+      while (
+        held < list.length - 1 &&
+        (list[held]!.kind === "end" || list[held]!.kind === "fold")
+      )
+        held++;
+      if (!titleAnchorRef.current && !heldRef.current) {
+        const el = listRef.current?.querySelector<HTMLElement>(
+          `:scope > li[data-index="${held}"]`,
         );
-        if (i >= 0) held = i;
+        heldRef.current = {
+          key: list[held]!.key,
+          top: el ? el.getBoundingClientRect().top : cache[held]!.start - y,
+          scrollY: y,
+        };
       }
-      // Hold the item's on-screen position: its DOM rect when mounted (exact),
-      // else its measured start.
-      const el = listRef.current?.querySelector<HTMLElement>(
-        `:scope > li[data-index="${held}"]`,
-      );
-      heldRef.current = {
-        key: list[held]!.key,
-        start: cache[held]!.start,
-        top: el ? el.getBoundingClientRect().top : null,
-      };
       extendingRef.current = true;
       setRange((r) => ({ ...r, before: r.before + STREAM_CHUNK }));
     } else if (
@@ -1228,59 +1262,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   }, [virtualizer]);
   useLayoutEffect(() => {
     extendingRef.current = false;
-    const held = heldRef.current;
-    heldRef.current = null;
-    if (held) {
-      const i = items.findIndex((item) => item.key === held.key);
-      const el =
-        i >= 0 && held.top !== null
-          ? listRef.current?.querySelector<HTMLElement>(
-              `:scope > li[data-index="${i}"]`,
-            )
-          : null;
-      const m = i >= 0 ? virtualizer.measurementsCache[i] : undefined;
-      // The first load above the opening section seats that section's title
-      // just under the sticky header, where a single zoom view puts it.
-      const seat = !seatedRef.current && el ? headerHeightRef.current : null;
-      seatedRef.current = true;
-      const delta = el
-        ? el.getBoundingClientRect().top - (seat ?? held.top!)
-        : m
-          ? m.start - held.start
-          : 0;
-      if (delta) window.scrollBy(0, delta);
-      // Sections measured after this frame (an estimate corrected, a page end
-      // re-padded) can still nudge the held item. Keep it pinned for a few
-      // frames, unless the user starts scrolling.
-      const target = el ? (seat ?? held.top!) : null;
-      if (target !== null) {
-        let frames = 8;
-        let stop = false;
-        const cancel = () => {
-          stop = true;
-        };
-        stopPinRef.current = cancel;
-        window.addEventListener("wheel", cancel, { once: true });
-        window.addEventListener("touchstart", cancel, { once: true });
-        const pin = () => {
-          if (stop || frames-- <= 0) {
-            window.removeEventListener("wheel", cancel);
-            window.removeEventListener("touchstart", cancel);
-            return;
-          }
-          const at = itemsRef.current.findIndex(
-            (item) => item.key === held.key,
-          );
-          const node = listRef.current?.querySelector<HTMLElement>(
-            `:scope > li[data-index="${at}"]`,
-          );
-          const drift = node ? node.getBoundingClientRect().top - target : 0;
-          if (Math.abs(drift) >= 1) window.scrollBy(0, drift);
-          requestAnimationFrame(pin);
-        };
-        requestAnimationFrame(pin);
-      }
-    }
     // Keep loading while still near an edge (a short stretch, or the first
     // load above the anchor right after mount).
     const frame = requestAnimationFrame(maybeExtend);
@@ -1289,9 +1270,37 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // eslint-disable-next-line react-doctor/exhaustive-deps
   }, [range, stream]);
 
-  // Scroll to a section once it is in the list: a pill click, Today, or a
-  // later `?day=` on load.
-  const pendingSectionRef = useRef<string | null>(initial?.scrollTo ?? null);
+  const jumpToSection = useCallback(
+    (key: string, focusKey?: string) => {
+      const active = streamRef.current;
+      const offset = active?.offsetOf(key);
+      if (offset === null || offset === undefined) return false;
+      releaseTitle();
+      stopSnapRef.current?.();
+      titleAnchorRef.current = {
+        section: key,
+        focusKey,
+        releaseSpotlight: holdSpotlightScroll(),
+      };
+      headerRef.current?.setAttribute("data-title-anchored", "");
+      restoringDayRef.current = null;
+      heldRef.current = null;
+      // Stop an already-running native smooth snap before seating the title.
+      window.scrollTo({ top: window.scrollY, behavior: "instant" });
+      const { before, after } = rangeRef.current;
+      if (offset < -before || offset > after)
+        setRange({
+          before: Math.max(before, -offset + STREAM_CHUNK),
+          after: Math.max(after, offset + STREAM_CHUNK),
+        });
+      // Also commit an already expanded target: its title and optional offscreen
+      // focus row must enter the virtual range before the layout effect runs.
+      setExpanded((prev) => new Set(prev).add(key));
+      return true;
+    },
+    [releaseTitle],
+  );
+
   // Cold load: the stream became ready after mount. Plan the opening now.
   useLayoutEffect(() => {
     if (!stream || plannedRef.current) return;
@@ -1299,22 +1308,52 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const plan = planStreamOpening(stream, latestSearchDayRef.current);
     routeSearchDayRef.current = plan.day;
     restoringDayRef.current = plan.day;
-    pendingSectionRef.current = plan.scrollTo;
-    seatedRef.current = false;
     setRange(plan.range);
   }, [stream]);
+  const openedStreamRef = useRef(false);
   useLayoutEffect(() => {
-    const key = pendingSectionRef.current;
-    if (!key || !stream) return;
-    const i = items.findIndex(
-      (item) =>
-        (item.kind === "title" || item.kind === "placeholder") &&
-        item.section === key,
+    if (!stream || openedStreamRef.current) return;
+    openedStreamRef.current = true;
+    // Zoom/pivot and /move -> Go own a row landing, including when the stream
+    // mapping arrives later. The navigation hook records that intent first.
+    if (rowNavigation.current) return;
+    jumpToSection(routeSearchDayRef.current ?? stream.anchor);
+    restoringDayRef.current = routeSearchDayRef.current;
+  }, [stream, jumpToSection, rowNavigation]);
+
+  // One correction owns measurements: a navigation title, or the reading row
+  // held by an idle prepend. Either releases before the next user gesture.
+  useLayoutEffect(() => {
+    const anchor = titleAnchorRef.current;
+    const held = heldRef.current;
+    if ((!anchor && !held) || !stream) return;
+    const i = anchor
+      ? sectionStarts.get(anchor.section)
+      : rowIndex.get(held!.key);
+    if (i === undefined) return;
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `:scope > li[data-index="${i}"]`,
     );
-    if (i < 0) return;
-    pendingSectionRef.current = null;
-    stopPinRef.current?.();
-    virtualizer.scrollToIndex(i, { align: "start" });
+    const start = virtualizer.measurementsCache[i]?.start;
+    const target = anchor
+      ? (headerRef.current?.getBoundingClientRect().bottom ?? headerHeight)
+      : held!.top;
+    const delta = el
+      ? el.getBoundingClientRect().top - target
+      : start === undefined
+        ? 0
+        : start - window.scrollY - target;
+    if (Math.abs(delta) >= 1)
+      window.scrollBy({ top: delta, behavior: "instant" });
+    if (held) held.scrollY = window.scrollY;
+    if (anchor?.focusKey) {
+      const focus = refs.get(anchor.focusKey);
+      if (focus) {
+        focus.focus({ preventScroll: true });
+        placeCaretAtEnd(focus);
+        anchor.focusKey = undefined;
+      }
+    }
   });
 
   // Publish the section in view, load at the edges, and settle a scroll
@@ -1329,14 +1368,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       if (inView) setStreamView({ anchor: stream.anchor, inView });
     };
     let gesture = false;
+    let touching = false;
     let settle = 0;
+    stopSnapRef.current = () => {
+      gesture = false;
+      touching = false;
+      deferPrependRef.current = false;
+      window.clearTimeout(settle);
+    };
     const markGesture = () => {
+      releaseTitle();
       gesture = true;
       // The user scrolling ends a `?day=` restore: the URL follows them now.
       restoringDayRef.current = null;
     };
     const snap = () => {
-      if (!gesture) return;
+      if (!gesture || titleAnchorRef.current) return;
       gesture = false;
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed) return;
@@ -1356,18 +1403,71 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         Math.abs(nearest) > limit
       )
         return;
+      // A smooth snap can cross the load threshold too. Let it settle before
+      // inserting rows, rather than compensating against its moving target.
+      heldRef.current = null;
+      deferPrependRef.current = true;
       window.scrollTo({
         top: window.scrollY + nearest,
         behavior: prefersReducedMotion() ? "auto" : "smooth",
       });
     };
+    const onSettled = () => {
+      if (touching) return;
+      deferPrependRef.current = false;
+      maybeExtend();
+      // The insertion's compensating scroll schedules the eventual snap.
+      if (!extendingRef.current) snap();
+    };
     const onScroll = () => {
+      // A scrollbar drag or keyboard scroll can continue without another
+      // pointer/key event. Only our own correction keeps the reading hold.
+      const held = heldRef.current;
+      if (held && Math.abs(window.scrollY - held.scrollY) >= 1)
+        heldRef.current = null;
+      deferPrependRef.current = true;
       publish();
       maybeExtend();
       window.clearTimeout(settle);
-      settle = window.setTimeout(snap, 180);
+      settle = window.setTimeout(onSettled, 180);
+    };
+    const onTouchStart = () => {
+      touching = true;
+      heldRef.current = null;
+      deferPrependRef.current = true;
+      window.clearTimeout(settle);
+    };
+    const onTouchEnd = () => {
+      touching = false;
+      window.clearTimeout(settle);
+      settle = window.setTimeout(onSettled, 180);
+    };
+    const onEdit = (e: Event) => {
+      if (!(e.target instanceof HTMLElement && e.target.isContentEditable))
+        return;
+      if (!releaseTitle()) return;
+      // Today can focus a last child far below its title. WebKit does not
+      // always reveal it on input-only edits, so hand off to the caret once.
+      const { y } = caretPosition(e.target);
+      const viewport = window.visualViewport;
+      const top =
+        (viewport?.offsetTop ?? 0) +
+        (parseFloat(getComputedStyle(e.target).lineHeight) || 24) +
+        8;
+      const bar = document
+        .querySelector("[data-mobile-bar]")
+        ?.getBoundingClientRect();
+      const bottom =
+        Math.min(
+          (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
+          bar?.height ? bar.top : Infinity,
+        ) - 8;
+      const delta = y < top || y > bottom ? y - (top + bottom) / 2 : 0;
+      if (delta) window.scrollBy({ top: delta, behavior: "instant" });
     };
     const onKey = (e: KeyboardEvent) => {
+      onEdit(e);
+      releaseTitle();
       if (
         ["PageUp", "PageDown", "Home", "End", " "].includes(e.key) &&
         !(e.target instanceof HTMLElement && e.target.isContentEditable)
@@ -1375,19 +1475,45 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         gesture = true;
     };
     publish();
-    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("scroll", onScroll, {
+      passive: true,
+      capture: true,
+    });
     window.addEventListener("wheel", markGesture, { passive: true });
-    window.addEventListener("touchstart", markGesture, { passive: true });
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", markGesture, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    window.addEventListener("keydown", onKey, true);
+    // Do not move a sticky control out from under the finger before its click.
+    const onPointer = (e: PointerEvent) => {
+      if (
+        !(e.target instanceof Element && headerRef.current?.contains(e.target))
+      )
+        releaseTitle();
+    };
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("click", releaseTitle, true);
+    for (const event of ["beforeinput", "compositionstart", "input"])
+      window.addEventListener(event, onEdit, true);
     return () => {
+      stopSnapRef.current = null;
+      deferPrependRef.current = false;
       window.clearTimeout(settle);
-      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("wheel", markGesture);
-      window.removeEventListener("touchstart", markGesture);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", markGesture);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("click", releaseTitle, true);
+      for (const event of ["beforeinput", "compositionstart", "input"])
+        window.removeEventListener(event, onEdit, true);
       setStreamView(null);
     };
-  }, [stream, virtualizer, sectionInView, maybeExtend]);
+  }, [stream, virtualizer, sectionInView, maybeExtend, releaseTitle]);
   // The list changing under a still viewport (a section created, a fold
   // opened) can change the section in view too.
   useEffect(() => {
@@ -1426,41 +1552,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // the caret walk follows the list across sections.
   useLayoutEffect(() => {
     if (!stream) return;
-    setStreamScroller((key, focusKey) => {
-      const offset = stream.offsetOf(key);
-      if (offset === null) return false;
-      // A deliberate jump supersedes a `?day=` restore and a held position.
-      restoringDayRef.current = null;
-      stopPinRef.current?.();
-      if (focusKey) {
-        const text = getTreeIndex().byId.get(focusKey)?.text ?? "";
-        commands.setPendingFocus(focusKey, text.length);
-        const mounted = refs.get(focusKey);
-        if (mounted) {
-          mounted.focus({ preventScroll: true });
-          applyPendingCaret(mounted, focusKey, false);
-          pendingFocus.current = null;
-        }
-      }
-      const { before, after } = rangeRef.current;
-      if (offset < -before || offset > after)
-        setRange({
-          before: Math.max(before, -offset + STREAM_CHUNK),
-          after: Math.max(after, offset + STREAM_CHUNK),
-        });
-      setExpanded((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-      pendingSectionRef.current = key;
-      const i = itemsRef.current.findIndex(
-        (item) =>
-          (item.kind === "title" || item.kind === "placeholder") &&
-          item.section === key,
-      );
-      if (i >= 0) {
-        pendingSectionRef.current = null;
-        virtualizer.scrollToIndex(i, { align: "start" });
-      }
-      return true;
-    });
+    setStreamScroller(jumpToSection);
     setStreamNeighbor((key, direction) => {
       const list = itemsRef.current;
       const from = rowIndexRef.current.get(key);
@@ -1480,7 +1572,53 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       setStreamScroller(null);
       setStreamNeighbor(null);
     };
-  }, [stream, virtualizer, commands, refs, pendingFocus]);
+  }, [stream, jumpToSection]);
+
+  // All write-intent route entries (Today, /today, command search) use the
+  // same title-first jump as the header inside an existing stream.
+  // Nodes can arrive before the stream's mapping on a cold load. Let stream
+  // adoption replace that ordinary landing, including its offscreen focus.
+  const landedLastRef = useRef<"outline" | "stream" | null>(null);
+  useEffect(() => {
+    if (
+      landedLastRef.current === "stream" ||
+      (!stream && landedLastRef.current === "outline") ||
+      pivotId ||
+      !focusLast ||
+      !rootId ||
+      loading
+    )
+      return;
+    const children = childrenOf(getTreeIndex(), rootId).filter(
+      (n) => !isHidden(n),
+    );
+    const lastChild = children[children.length - 1];
+    if (!lastChild) return;
+    landedLastRef.current = stream ? "stream" : "outline";
+    if (stream) {
+      pendingFocus.current = null;
+      jumpToSection(routeSearchDayRef.current ?? stream.anchor, lastChild.id);
+      return;
+    }
+    const el = refs.get(lastChild.id);
+    if (!el) {
+      if (scrollRowIntoView(lastChild.id)) pendingFocus.current = lastChild.id;
+      return;
+    }
+    el.focus({ preventScroll: true });
+    placeCaretAtEnd(el);
+    el.scrollIntoView({ block: "nearest" });
+  }, [
+    stream,
+    loading,
+    rootId,
+    focusLast,
+    pivotId,
+    isHidden,
+    refs,
+    pendingFocus,
+    jumpToSection,
+  ]);
 
   // Without a stream (a filter, or the option off) commands target the zoom
   // root again: a section override left behind would aim them at another day.
@@ -2173,10 +2311,6 @@ interface ZoomNavigationArgs {
   // windowed list (the row claims pendingFocus/pendingFlash on its mount).
   pendingFocus: RefObject<string | null>;
   pendingFlash: RefObject<string | null>;
-  /** When true, land focus on the LAST visible child on mount (used by /today
-   *  via ?focus=last so a journal-style note opens ready to append). Only
-   *  applies on a fresh load (no pivotId). */
-  focusLast?: boolean;
 }
 
 /**
@@ -2193,13 +2327,18 @@ function useZoomNavigation({
   navigate,
   pendingFocus,
   pendingFlash,
-  focusLast,
 }: ZoomNavigationArgs) {
   // The "pivot" of the last zoom: the node that swaps between title and list-
   // item roles. The incoming view reads it from history state and names that
   // node's element so the browser morphs it across the navigation.
   const location = useLocation();
   const pivotId = location.state.pivotId ?? null;
+  const rowNavigation = useRef(pivotId !== null);
+  const flashAfterNav = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    flashAfterNav.current ??= consumeFlashAfterNav();
+    if (flashAfterNav.current) rowNavigation.current = true;
+  }, []);
   // pivotId is read only at event time (navigateZoom's morph-retarget), so
   // mirror it into a ref written AFTER commit -- not during render -- so nothing
   // here trips the React Compiler's ref-during-render bailout. One reader, so a
@@ -2274,26 +2413,6 @@ function useZoomNavigation({
   // is written in OutlineRow's own passive effect, so only by now is the list
   // laid out at its real heights.
   useEffect(() => {
-    // Fresh load with ?focus=last (e.g. /today redirecting to a daily note):
-    // land on the last visible child so a journal-style note opens ready to
-    // append, not the title. No pivotId on a fresh page load.
-    if (!pivotId && focusLast && rootId) {
-      const children = childrenOf(getTreeIndex(), rootId).filter(
-        (n) => !isHidden(n),
-      );
-      const lastChild = children[children.length - 1];
-      if (!lastChild) return;
-      const el = refs.get(lastChild.id);
-      if (!el) {
-        if (scrollRowIntoView(lastChild.id))
-          pendingFocus.current = lastChild.id;
-        return;
-      }
-      el.focus({ preventScroll: true });
-      placeCaretAtEnd(el);
-      el.scrollIntoView({ block: "nearest" });
-      return;
-    }
     if (!pivotId) return;
     const index = getTreeIndex();
     let targetId: string | null = pivotId;
@@ -2330,7 +2449,7 @@ function useZoomNavigation({
   // /move's "Go" jumps to the destination's zoom view and asks us to focus and
   // flash the moved node so it's easy to spot. Mount-only/passive, like above.
   useEffect(() => {
-    const flashId = consumeFlashAfterNav();
+    const flashId = flashAfterNav.current;
     if (!flashId) return;
     const el = refs.get(flashId);
     if (!el) {
@@ -2350,7 +2469,7 @@ function useZoomNavigation({
     // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
 
-  return { navigateZoom, pivotId };
+  return { navigateZoom, pivotId, rowNavigation };
 }
 
 /**
@@ -3090,13 +3209,7 @@ function planStreamOpening(
       before: offset !== null && offset < 0 ? -offset : 0,
       after: Math.max(STREAM_CHUNK, (offset ?? 0) + STREAM_CHUNK),
     },
-    scrollTo: offset !== null && offset > 0 ? requested : null,
   };
-}
-
-/** Whether a list item starts a stream section. */
-function startsSection(item: ListItem | undefined): boolean {
-  return item?.kind === "title" || item?.kind === "placeholder";
 }
 
 /**

@@ -158,8 +158,10 @@
     padding-bottom: 50vh;
   }
 
-  /* Keep chrome's positioning stable as a typed trigger opens/closes a menu. */
-  body:has(.node-text:focus) .outline-chrome {
+  /* Keep chrome's positioning stable as a typed trigger opens/closes a menu.
+     A day jump can focus an offscreen entry while still showing its title and
+     navigation. Editing releases that title anchor before opening a menu. */
+  body:has(.node-text:focus) .outline-chrome:not([data-title-anchored]) {
     position: relative;
     top: 0;
   }
