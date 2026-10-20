@@ -267,6 +267,7 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
 
   await page.goto("/alpha");
   const title = page.locator("h2.zoomed-title .node-text");
+  await title.waitFor({ state: "visible" });
   await expect(title).toHaveCSS("font-family", '"Redacted Script"');
   await expect(page.locator("header")).not.toHaveCSS(
     "font-family",

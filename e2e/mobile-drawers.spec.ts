@@ -99,19 +99,25 @@ async function swipeSheet(page: Page) {
     (await sheetDialog(page).boundingBox())!.height * 0.7,
   );
   const cdp = await page.context().newCDPSession(page);
+  // A short sheet needs a flick to reach the native dismissal snap point.
+  // Describe a 100ms gesture instead of letting CDP/runner latency set its speed.
+  const start = Date.now() / 1000;
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchStart",
     touchPoints: [{ x, y }],
+    timestamp: start,
   });
   for (let step = 1; step <= 5; step++) {
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchMove",
       touchPoints: [{ x, y: y + (step * distance) / 5 }],
+      timestamp: start + step * 0.02,
     });
   }
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchEnd",
     touchPoints: [],
+    timestamp: start + 0.1,
   });
   await cdp.detach();
 }
