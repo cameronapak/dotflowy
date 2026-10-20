@@ -95,6 +95,25 @@ export const POINTER_SLIDE_MS = 200;
 export const BREATH_MS = 200;
 
 let tweenRaf = 0;
+let alignmentEpoch = 0;
+let navigationOwnsScroll = false;
+
+/** A section jump keeps its title visible even when it also lands a caret.
+ * Cancel old work as well as future focus alignment until user intent wins. */
+export function holdSpotlightScroll(): () => void {
+  const epoch = ++alignmentEpoch;
+  navigationOwnsScroll = true;
+  cancelTween();
+  breathAnimating = false;
+  const region = outlineRegion();
+  if (region) {
+    region.style.paddingTop = "";
+    region.style.overflowAnchor = "";
+  }
+  return () => {
+    if (alignmentEpoch === epoch) navigationOwnsScroll = false;
+  };
+}
 
 function cancelTween(): void {
   if (!tweenRaf) return;
@@ -179,6 +198,10 @@ function animateBreath(
   scrollDelta: number,
 ): void {
   const region = outlineRegion();
+  if (navigationOwnsScroll) {
+    if (region) region.style.paddingTop = "";
+    return;
+  }
   const from = window.scrollY;
   breathAnimating = true;
   if (region) {
@@ -266,11 +289,12 @@ function lineOf(target: EventTarget | null): HTMLElement | null {
 
 const onFocusIn = (e: FocusEvent) => {
   const li = lineOf(e.target);
-  if (!li) return;
+  if (!li || navigationOwnsScroll) return;
+  const epoch = alignmentEpoch;
   // One layout pass after the browser's own focus-scroll, so the rect we read
   // is the one the user sees.
   requestAnimationFrame(() => {
-    if (!installed || !li.isConnected) return;
+    if (!installed || !li.isConnected || epoch !== alignmentEpoch) return;
     // A drag-select inside the row must not be yanked mid-gesture.
     const sel = document.getSelection();
     if (sel && !sel.isCollapsed && li.contains(sel.anchorNode)) return;
@@ -292,7 +316,8 @@ const onFocusIn = (e: FocusEvent) => {
  *  sticky header on mobile). No-op when the engine is off, the breath tween
  *  is running, or the element has no box yet. */
 export function centerElement(el: HTMLElement, ms: number): void {
-  if (!installed || breathAnimating || !el.isConnected) return;
+  if (!installed || breathAnimating || navigationOwnsScroll || !el.isConnected)
+    return;
   const rect = el.getBoundingClientRect();
   if (rect.height === 0) return;
   slideBy(alignScrollDelta(rect.top, rect.height), ms);
@@ -301,7 +326,11 @@ export function centerElement(el: HTMLElement, ms: number): void {
 /** Center a target after a navigation (e.g. zooming into a childless node).
  *  Deliberate travel, so it uses the fuller pointer ease. */
 export function centerAfterNavigation(el: HTMLElement): void {
-  requestAnimationFrame(() => centerElement(el, POINTER_SLIDE_MS));
+  if (navigationOwnsScroll) return;
+  const epoch = alignmentEpoch;
+  requestAnimationFrame(() => {
+    if (epoch === alignmentEpoch) centerElement(el, POINTER_SLIDE_MS);
+  });
 }
 
 /**
@@ -312,8 +341,11 @@ export function centerAfterNavigation(el: HTMLElement): void {
  * the same place). Keyboard mutation, so the short beat.
  */
 export function centerAfterMutation(getEl: () => HTMLElement | null): void {
+  if (navigationOwnsScroll) return;
+  const epoch = alignmentEpoch;
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
+      if (epoch !== alignmentEpoch) return;
       const el = getEl();
       if (el) centerElement(el, KEYBOARD_SLIDE_MS);
     }),
@@ -328,7 +360,8 @@ export function installSpotlight(animate = true): void {
   window.addEventListener("pointerdown", onPointerDown, true);
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("focusin", onFocusIn, true);
-  if (!animate) return;
+  if (!animate || navigationOwnsScroll) return;
+  const epoch = alignmentEpoch;
   // Enable (ADR 0060): grow the breathing room and center the lit line as
   // ONE animation. The `pt-[50vh]` class just applied at render; pin the pad
   // back to its pre-toggle value NOW (this runs in a layout effect, before
@@ -353,7 +386,7 @@ export function installSpotlight(animate = true): void {
     region.style.paddingTop = `${padFrom}px`;
   }
   const grow = () => {
-    if (!installed) return;
+    if (!installed || navigationOwnsScroll || epoch !== alignmentEpoch) return;
     const active = document.activeElement;
     const row =
       active instanceof HTMLElement && active.classList.contains("node-text")

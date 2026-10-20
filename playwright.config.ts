@@ -25,7 +25,15 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "day-stream-webkit",
+      testMatch: "day-stream.spec.ts",
+      grep: /day navigation on touch/,
+      use: { ...devices["iPhone 13"] },
+    },
+  ],
   // Always boot our own Vite server, NEVER adopt one already on the port.
   // `dev`/`dev:web` serve :3000, so the only thing that ever answers on this
   // port is another Playwright run -- a zombie from an aborted suite, or a

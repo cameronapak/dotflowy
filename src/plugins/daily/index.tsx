@@ -62,6 +62,7 @@ import { parseGoToDateTargets } from "../../data/parse-go-to-date";
 import { clearSelection } from "../../data/selection-state";
 import { runStructural } from "../../data/structural";
 import { buildTreeIndex, childrenOf } from "../../data/tree";
+import { getViewIsHidden } from "../../data/view-state";
 import { scrollStreamTo } from "../../data/view-stream";
 import {
   definePlugin,
@@ -220,7 +221,11 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
             if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
             // Inside the Day stream, Today is a section: scroll to it and land
             // the caret on its last line instead of navigating (ADR 0070).
-            const kids = childrenOf(buildTreeIndex(getLiveNodes()), dayId);
+            const isHidden = getViewIsHidden();
+            const kids = childrenOf(
+              buildTreeIndex(getLiveNodes()),
+              dayId,
+            ).filter((node) => !isHidden(node));
             const last = kids[kids.length - 1];
             if (scrollStreamTo(localDateKey(), last?.id)) return;
             navigate({

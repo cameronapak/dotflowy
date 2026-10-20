@@ -42,8 +42,8 @@ jobs:
         run: bun run typecheck:e2e
       - name: Unit tests
         run: bun run test
-      - name: Install Chromium for editor performance tests
-        run: bunx --no-install playwright install --with-deps chromium
+      - name: Install browsers for editor performance and touch tests
+        run: bunx --no-install playwright install --with-deps chromium webkit
       - name: Editor performance tests
         timeout-minutes: 10
         run: bun run test:perf
