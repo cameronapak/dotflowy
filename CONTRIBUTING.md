@@ -386,9 +386,9 @@ Distinguish viewport renders, new mounts, and real resizes from unchanged-conten
 renders and full-list rebuilds. Test a populated day, empty days, loading earlier
 days, and viewport resizing. Preserve a countable regression guard rather than
 a machine-dependent millisecond budget. React Doctor remains a manual audit;
-CI runs only the focused browser guards, not the full e2e suite. Failed CI runs
-retain browser diagnostics, including retry traces, for seven days in the
-`editor-performance-results` artifact.
+CI includes these guards in the full app suite, without a duplicate focused run.
+Failed shards retain browser diagnostics, including first-failure traces, for
+seven days in the `e2e-failure-traces-<shard>` artifact.
 
 For repeatable large-outline measurements, run `bun run bench:outline` against
 `bun run cf:dev` (or a production build served by `vite preview` on port 8787).
