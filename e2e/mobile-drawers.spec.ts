@@ -804,7 +804,8 @@ test.describe("narrow-screen drawers", () => {
       (el) => getComputedStyle(el).maskImage,
     );
     await settleSheet(page);
-    await page.mouse.wheel(0, 240);
+    const scrollDistance = await body.evaluate((el) => el.scrollHeight);
+    await page.mouse.wheel(0, scrollDistance);
     await expect
       .poll(() => body.evaluate((el) => el.scrollTop))
       .toBeGreaterThan(0);
@@ -818,7 +819,7 @@ test.describe("narrow-screen drawers", () => {
       body.getByRole("button", { name: "Close", exact: true }),
     ).toBeInViewport();
     await settleSheet(page);
-    await page.mouse.wheel(0, -240);
+    await page.mouse.wheel(0, -scrollDistance);
     await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(0);
 
     // Start inside the content at its upper scroll boundary. Native chaining
