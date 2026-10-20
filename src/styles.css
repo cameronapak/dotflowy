@@ -1405,10 +1405,29 @@ body.dragging-active * {
   animation-duration: 0.2s;
 }
 
+/* Only the selection pill moves across a day switch; sticky chrome must not
+   inherit the outgoing page's vertical scroll or scale (ADR 0054). */
+.week-calendar-selection-slide {
+  animation: week-calendar-selection-slide 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes week-calendar-selection-slide {
+  from {
+    transform: translateX(var(--week-calendar-selection-x));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
   ::view-transition-old(*),
   ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .week-calendar-selection-slide {
     animation: none !important;
   }
 

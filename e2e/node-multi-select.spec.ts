@@ -56,8 +56,7 @@ const MOD = "ControlOrMeta";
 
 async function load(page: Page, tree: SeedNode[] = FLAT) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 // Focus a bullet so it holds the caret (entry point for Shift+arrow / Cmd+A).

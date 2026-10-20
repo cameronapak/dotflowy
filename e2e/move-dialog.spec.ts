@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  openSeededOutline,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -13,8 +14,7 @@ const text = (page: Page, id: string) =>
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 /**

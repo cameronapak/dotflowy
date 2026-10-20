@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // Node links + backlinks (ADR 0032): a `[[nodeId]]` token renders as a chip
 // showing the TARGET's live text (Seam A widget), click zooms to the target
@@ -29,8 +34,7 @@ const chipIn = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(text(page, TARGET)).toBeVisible();
+  await openSeededOutline(page, { anchorId: TARGET });
 }
 
 /** Focus a bullet and place the caret at the end of its text via the Selection

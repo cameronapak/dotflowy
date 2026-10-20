@@ -18,6 +18,10 @@ export default defineConfig({
   // this Vite server.
   testIgnore: ["lunora-retirement-real.spec.ts"],
   fullyParallel: true,
+  // Each worker owns a browser in addition to the shared Vite server. Leave
+  // room for the agent and other checks on a medium Orb (4 CPUs, 8 GB RAM).
+  // Larger machines can opt in to more parallelism with --workers=N.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",

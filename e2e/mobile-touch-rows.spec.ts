@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, STANDARD_TREE, text } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  STANDARD_TREE,
+  text,
+} from "./fixtures";
 
 // Coarse-pointer row redesign (ADR 0029, Workflowy-mobile parity): on touch the
 // collapse chevron moves to the row's RIGHT edge and a tap on a row's dead space
@@ -22,8 +27,7 @@ const chevron = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 test("mobile emulation actually reports a coarse pointer", async ({ page }) => {
@@ -171,8 +175,7 @@ test("the task checkbox reaches a ~24px target without overlapping neighbours", 
       isTask: true,
     },
   ]);
-  await page.goto("/");
-  await expect(text(page, "task")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "task" });
 
   const m = await page.evaluate(() => {
     const li = document.querySelector('li[data-node-id="task"]')!;

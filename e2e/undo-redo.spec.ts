@@ -322,8 +322,15 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   await alpha.evaluate((el: HTMLElement) => el.blur());
   await page.keyboard.press("q");
   const draft = page.getByRole("textbox", { name: "Quick add", exact: true });
+  const historyBusy = () =>
+    page.evaluate(async () => {
+      const historyPath = "/src/data/history.ts";
+      return (await import(historyPath)).getHistoryState().busy;
+    });
   await expect(draft).toBeVisible();
+  await expect(draft).toBeFocused();
   await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(historyBusy).toBe(false);
   await expect(alpha).toHaveText("Alpha kept");
   await draft.click();
   await page.keyboard.type("first thought");
@@ -334,6 +341,8 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   await page.keyboard.press("ControlOrMeta+Enter");
   await expect(draft).toHaveText("");
   await page.keyboard.press("ControlOrMeta+z");
+  // Even a scoped no-op drains pending captures/writes before releasing input.
+  await expect.poll(historyBusy).toBe(false);
   await expect(
     page
       .getByRole("dialog", { name: "Quick add", exact: true })
@@ -343,6 +352,7 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   await page.clock.setFixedTime(new Date(2030, 5, 11, 12));
   const gate = await holdDailyClaims(page);
   await page.keyboard.type("second thought");
+  await expect(draft).toHaveText("second thought");
   await gate.seen;
   await page.keyboard.press("Enter");
   await expect(draft).toHaveCount(0);

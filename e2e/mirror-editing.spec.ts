@@ -52,8 +52,7 @@ const nodeOrder = (page: Page) =>
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, "A")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "A" });
 }
 
 // The DEV structural-write tripwire only console.errors "sibling-chain invariant

@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Highlight plugin (ADR 0035). `==text==` renders as a FOLDING token (the
 // emphasis model): fences hidden while folded, revealed as real walk-through
@@ -10,8 +16,7 @@ import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 const mark = (page: Page, id: string) => text(page, id).locator("mark");

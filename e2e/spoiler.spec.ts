@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Spoiler plugin (ADR 0043). `||text||` renders as the sixth FOLDING token:
 // folded, the run is one atomic span skinned as an opaque bar (fences hidden);
@@ -19,8 +25,7 @@ const btn = (page: Page, label: string) =>
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 // Drop the caret at a SOURCE offset within `id`'s span (the highlight spec's

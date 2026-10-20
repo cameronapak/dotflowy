@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  openSeededOutline,
   placeCaret,
   seedOutline,
   type ApiNode,
@@ -150,7 +151,7 @@ test("disabled plugin keeps source links and children without provider requests"
       ],
     },
   });
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "media" });
   await expect(note(page, "media").getByRole("link")).toHaveAttribute(
     "href",
     URL,
@@ -221,7 +222,7 @@ test("X uses the official client widget without sending tweet data to the Worker
     ],
     { kv: { "account-prefs": [allowed] } },
   );
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "media" });
   await expect(page.getByTestId("official-x-widget")).toHaveText(
     "Tweet 123456 (dnt: true, align: left)",
   );

@@ -1215,6 +1215,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   latestSearchDayRef.current = routeSearch.day ?? null;
   const maybeExtend = useCallback(() => {
     if (!streamRef.current || extendingRef.current) return;
+    // Native sheets capture the document offset on entry. A background prepend
+    // moves that stage out of view and dismisses it; resume on the next scroll.
+    if (document.querySelector(".menu-sheet-overlay")) return;
     const snapshot = snapshotRef.current;
     const list = itemsRef.current;
     const cache = virtualizer.measurementsCache;

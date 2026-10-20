@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // App OPML export (ADR 0037, issue #127): the "Export OPML" More-menu item /
 // Cmd+K global action downloads the current view (zoom root INCLUDED, or the
@@ -164,8 +164,7 @@ test("home export includes every top-level node under the default filename", asy
 }) => {
   await interceptDownloads(page);
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(nodeText(page, "root")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "root" });
 
   await runMenuExport(page);
   const { filename, text } = await capturedDownload(page);

@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // Route Bible plugin (ADR 0026): a Scripture reference in node.text renders as a
 // non-folding chip (Seam A) that opens a passage edit popover on click (Seam B).
@@ -38,8 +43,7 @@ async function load(page: Page, tree: SeedNode[]) {
     }) as typeof window.open;
   });
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 const opened = (page: Page) =>

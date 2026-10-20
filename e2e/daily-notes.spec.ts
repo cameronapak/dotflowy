@@ -12,6 +12,7 @@ import {
 } from "../src/data/date-links";
 import { KvClaimBody } from "../worker/wire";
 import {
+  openSeededOutline,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -907,10 +908,7 @@ test("days sort chronologically ascending under their week (sorted insertion, no
       text: `[[${LATE}]] [[${EARLY}]]`,
     },
   ]);
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="chips"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "chips" });
 
   const chip = (key: string) =>
     page.locator(`li[data-node-id="chips"] [data-date-link="${key}"]`);
@@ -1049,7 +1047,7 @@ test("the first daily touch migrates flat pre-hierarchy days under their weeks (
       },
     },
   );
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "mig-container" });
   await expect(rowWithText(page, "Daily")).toBeVisible();
 
   // Pre-migration: both days are DIRECT children of the container (flat).

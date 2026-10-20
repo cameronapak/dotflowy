@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Emphasis plugin (ADR 0025). Inline `*italic*`, `**bold**`, `~~strike~~`, and
 // Bear-style `~underline~` render as FOLDING tokens (modelled on the rich-link
@@ -10,8 +16,7 @@ import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 // The styled element for one emphasis kind on `id`'s text. `em`/`strong`/`del`/

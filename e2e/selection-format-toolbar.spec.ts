@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // Desktop selection formatting toolbar (ADR 0036). A fine-pointer-only floating
 // capsule that appears over a text selection inside one bullet/title and toggles
@@ -16,8 +21,7 @@ const run = (page: Page, id: string, tag: "em" | "strong" | "del" | "u") =>
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(text(page, tree[0]!.id)).toBeVisible();
+  await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
 // Select the whole text of `id` by setting the DOM Selection directly (Home/End

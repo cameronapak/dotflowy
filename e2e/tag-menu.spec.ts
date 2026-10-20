@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // The `#` autocomplete is now a plugin menu (ADR 0018 Seam H): the tags plugin
 // registers a MenuSpec, and the generic core engine (menu-engine.tsx) detects
@@ -19,8 +24,7 @@ const text = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, TAGGED_TREE);
-  await page.goto("/");
-  await expect(text(page, "a")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "a" });
 }
 
 test("typing #<query> lists matching existing tags; picking one completes it", async ({
