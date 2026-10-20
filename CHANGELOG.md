@@ -1,5 +1,18 @@
 # dotflowy
 
+## 1.27.0
+
+### Minor Changes
+
+- 178f605: Add Scribble mode for writing without rereading, with Cmd+K, More, and a header off-switch. Existing editor feature and Daily options are also available through Cmd+K.
+
+### Patch Changes
+
+- e9979c2: The week calendar's selection slides between days again, and snaps when reduced motion is enabled.
+  Opening a mobile sheet no longer lets background Day stream loading dismiss it.
+- 8d4f11c: Daily notes restore focus when entries arrive after the editor loads, and keep earlier days from appearing during a held scroll gesture.
+- d05b3fa: Typing right after opening Today keeps your entry in view while earlier days load above it.
+
 ## 1.26.3
 
 ### Patch Changes
