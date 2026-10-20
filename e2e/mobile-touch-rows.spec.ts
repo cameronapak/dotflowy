@@ -175,8 +175,7 @@ test("the task checkbox reaches a ~24px target without overlapping neighbours", 
       isTask: true,
     },
   ]);
-  await page.goto("/");
-  await expect(text(page, "task")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "task" });
 
   const m = await page.evaluate(() => {
     const li = document.querySelector('li[data-node-id="task"]')!;
