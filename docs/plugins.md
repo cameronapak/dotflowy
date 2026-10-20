@@ -5,7 +5,7 @@ The editor is a clean core extended by **plugins**: modules compiled into the bu
 Read [ADR 0001](./adr/0001-plugin-architecture.md) before adding a seam, and [ADR 0031](./adr/0031-two-lane-plugin-trust.md) before giving a plugin new privileges. Widget-mode tokens: [ADR 0006](./adr/0006-react-token-widgets.md).
 
 - **`types.ts`** — the typed contract (`definePlugin`, `El`/`WidgetEl`, `TokenSpec`, `InteractionSpec`, `CommandSpec`, `KeymapSpec`, `SlotSpec`, `HeaderSlotSpec`, `SubheaderSlotSpec`, `ExternalDropTargetSpec`, `NodeProtection`, `ViewTransform`, `MenuSpec`, `InputSpec`, the Seam-J `Search*` types, `PluginContext`).
-- **`index.ts`** — the one explicit ordered array `plugins = [todos, provenance, code, links, embeds, nodeLinks, routeBible, tags, emphasis, highlight, spoiler, daily]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order. `editorFeaturePlugins` maps the three reviewed optional plugins to their account preference keys.
+- **`index.ts`** — the one explicit ordered array `plugins = [todos, provenance, code, links, embeds, nodeLinks, routeBible, tags, emphasis, highlight, spoiler, daily, scribble]`. Add a plugin = add a folder + one line. Array order is the precedence tiebreak and dispatch order. `editorFeaturePlugins` maps the three reviewed optional plugins to their account preference keys.
 - **`registry.ts`** — derives the token regex, dispatch, transforms, menus, commands, keymaps, slots, protection, search providers, and input chain from that array. Optional Bible, Daily, and Embeds editor seams refresh when account preferences change; widget registration, protection, and preloads remain unconditional. React consumers read dynamic slots and commands through `usePluginChrome`. The core consumes these and stays generic.
 
 Seams wired today (each row: the contract, who owns it):
@@ -31,6 +31,20 @@ Seams wired today (each row: the contract, who owns it):
 | —                           | **overlay host** `ctx.openOverlay(node\|null)` (self-positioning popover) + **Tier-3 panel host** `ctx.openPanel(node\|null)` (a `Sheet` slide-in with backdrop + dismiss, mounted in `OutlineEditor` — the contained home for rich UI, the node-decoration overflow target, and the only surface a future Lane-B MCP App may render into — ADR 0031); **protected nodes** `protects(id) → boolean \| NodeProtection` — the plugin only _declares which_ nodes; the **core enforces all four rules** (no delete / blank / to-do / complete) in `components/protection.tsx` (`guardProtected` on the command funnels, `signalRejection` on the blur heal) with a shake (`rejectRow`) + toast. A bare `true` is enough (core supplies default copy and a shield); the descriptor is **all overrides** (`reason`, `blankReason`/`taskReason`/`completeReason`, `canonicalText`, optional plugin-owned `indicator`). Reactive `<ProtectionIndicator>` via `useIsProtected` tracks async protection like the daily index. [ADR 0015](./adr/0015-protected-nodes.md). | tags (picker), daily (container)                                                                                    |
 
 Feature → seams: **code** A · **links** A+B+C+I+K · **node-links** A(widget)+B+H · **route-bible** A(widget)+B · **tags** A+B+E+H (plus a `#tag` term into the CORE `?q=` filter on chip click) · **provenance** F+K · **emphasis** A(folding)+C+D · **highlight** A(folding)+B+C+D+K · **spoiler** A(folding)+C+D · **todos** C+D+F(row+title)+G+I+K · **daily** A(widget)+B+C+F(header)+F(subheader)+F(row+title)+J+L+M+N+protected. The `?q=` filter grammar itself is CORE (Seam K operators + `buildQueryFilter`), not a plugin. Seam **L** feeds the CORE quick-add surface (ADR 0049), not a plugin render path.
+
+**Global actions and editor font (ADR 0071).** `globalActions()` returns node-less
+Cmd+K commands; IDs are namespaced by plugin. Optional `menuLabel` and `checked`
+also project a toggle into More. These actions remain available when optional
+editor seams are off, so Bible, Daily, and Embeds can be re-enabled. Daily also
+exposes its existing calendar preferences. External-embed permission opens
+Settings with its existing disclosure rather than granting consent directly.
+`editorFont()` supplies only a font family (first non-null wins); core applies
+it to `.node-text` and inline descendants in all three writing paths, plus
+the Day stream's empty-section entry line, never navigation or embed bodies.
+`chromeChanged` publishes changes to browser-local
+mode state without rebuilding tokens. Scribble uses these seams plus an
+existing header slot for its active-only off-switch. No arbitrary CSS seam.
+See [ADR 0071](./adr/0071-plugin-global-actions-and-editor-font.md).
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineRow`; the bullet-vs-paragraph glyph reads `kind` there too (core's own field, ADR 0045); the `/` palette still runs `useSlashMenu` (only its command _list_ is registry-driven).
 

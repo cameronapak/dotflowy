@@ -11,6 +11,7 @@
 // caret jumps over it). The pure layer (pattern + parse + URL) lives in ./bible.ts.
 
 import { openUrlInFocusedTab } from "../../components/open-url";
+import { featureToggleAction } from "../feature-actions";
 import { resolveNodeId } from "../token-kit";
 import { definePlugin, type WidgetEl } from "../types";
 import { BIBLE_REF_PATTERN, resolveBibleRef } from "./bible";
@@ -78,6 +79,7 @@ function openEditForChip(
 
 export default definePlugin({
   id: "route-bible",
+  globalActions: () => [featureToggleAction("bible", "Bible references")],
   tokens: [
     {
       id: "bible-ref",

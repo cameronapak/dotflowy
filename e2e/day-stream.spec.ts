@@ -760,18 +760,31 @@ test("writing in an Empty day creates its note and keeps every keystroke", async
 }) => {
   await openDay(page);
   await expect(section(page, NEXT, "placeholder")).toBeAttached();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder(/Search nodes and actions/).fill("scribble");
+  await page.getByRole("option", { name: /Turn on Scribble mode/ }).click();
+  const claim = await holdClaim(page, NEXT);
 
   await pill(page, NEXT).click();
-  await page.locator(`[data-stream-entry="${NEXT}"]`).click();
+  const entry = page.locator(`[data-stream-entry="${NEXT}"]`);
+  await entry.click();
   await page.keyboard.type("Gym at 7");
+  await claim.claimSeen;
+  await expect(entry).toHaveText("Gym at 7");
+  await expect(entry).toHaveCSS("font-family", '"Redacted Script"');
+  claim.release();
 
   // The placeholder became a real day, and the caret moved into its row.
   await expect(section(page, NEXT, "title")).toBeVisible();
   await expect(section(page, NEXT, "placeholder")).toHaveCount(0);
   const active = page.locator(":focus");
   await expect(active).toHaveText("Gym at 7");
+  await expect(active).toHaveCSS("font-family", '"Redacted Script"');
   await page.keyboard.type("!");
   await expect(active).toHaveText("Gym at 7!");
+  const written = page.locator(".node-text").filter({ hasText: /^Gym at 7!$/ });
+  await page.getByRole("button", { name: "Turn off Scribble mode" }).click();
+  await expect(written).not.toHaveCSS("font-family", '"Redacted Script"');
 });
 
 test("a click elsewhere while an Empty day is being created keeps typing there", async ({

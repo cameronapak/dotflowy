@@ -15,6 +15,7 @@ import type { Node } from "../../data/schema";
 import type { PluginContext } from "../types";
 
 import { readSource } from "../../components/inline-code";
+import { openSettings } from "../../components/settings-nav";
 import {
   getEditorFeatures,
   loadEditorFeatures,
@@ -29,6 +30,7 @@ import {
 import { embedUrl } from "../../data/embed-url";
 import { bareHttpUrl, encodeUrlForMarkdown } from "../../data/links";
 import { queryClient } from "../../data/query-client";
+import { featureToggleAction } from "../feature-actions";
 import {
   Button,
   Skeleton,
@@ -510,6 +512,24 @@ function EmbedBody({
 
 export default definePlugin({
   id: "embeds",
+  globalActions: () => [
+    featureToggleAction("embeds", "Embeds"),
+    {
+      id: "permission",
+      label: "Manage external embed permission",
+      description: "Review provider requests and tracking in Settings",
+      icon: EmbedIcon,
+      keywords: [
+        "settings",
+        "allow",
+        "external",
+        "embeds",
+        "consent",
+        "privacy",
+      ],
+      run: openSettings,
+    },
+  ],
   commands: [
     {
       id: "embed",

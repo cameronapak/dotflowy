@@ -975,6 +975,15 @@ h2.zoomed-title .row-body > .title-paragraph {
   --outline-node-min-width: min(320px, calc(100vw - 2rem));
 }
 
+/* Reviewed plugin font override. Descendants include code and React token
+   chips with their own fonts; SVG icons and non-text bodies remain unchanged.
+   No DOM rewrite: source offsets, selection, copy, and spoilers stay intact. */
+:root[data-plugin-editor-font] .stream-entry-text,
+:root[data-plugin-editor-font] .node-text,
+:root[data-plugin-editor-font] .node-text :not(svg, svg *) {
+  font-family: var(--plugin-editor-font) !important;
+}
+
 .node-text {
   /* Block, not the span default inline: an inline contentEditable only spans
      its text, killing click-to-focus in the empty space after it. (In the

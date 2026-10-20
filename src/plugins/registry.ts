@@ -654,6 +654,26 @@ export function subscribeViewStreams(cb: () => void): () => void {
 
 // A stable external-store snapshot makes dynamic editor chrome a real React
 // input, including under React Compiler. Never mutate a published slots map.
+const chromeListeners = new Set<() => void>();
+function subscribeChrome(notify: () => void) {
+  chromeListeners.add(notify);
+  return () => {
+    chromeListeners.delete(notify);
+  };
+}
+function readPluginChrome() {
+  return {
+    // Keep disabled plugins' enable switches reachable without an editor target.
+    globalActions: plugins.flatMap((p) =>
+      (p.globalActions?.() ?? []).map((action) => ({
+        ...action,
+        id: `plugin:${p.id}:${action.id}`,
+      })),
+    ),
+    editorFont:
+      plugins.map((p) => p.editorFont?.()).find((font) => font != null) ?? null,
+  };
+}
 let chrome = {
   headerSlots,
   subheaderSlots,
@@ -661,16 +681,30 @@ let chrome = {
   commandSpecs,
   selectionCommandSpecs,
   aliasProviders,
+  ...readPluginChrome(),
 };
 export function usePluginChrome() {
   return useSyncExternalStore(
-    subscribeEditorFeatures,
+    subscribeChrome,
     () => {
       getEditorFeatures();
       return chrome;
     },
     () => chrome,
   );
+}
+
+function publishChrome() {
+  chrome = {
+    headerSlots,
+    subheaderSlots,
+    slotsByPosition,
+    commandSpecs,
+    selectionCommandSpecs,
+    aliasProviders,
+    ...readPluginChrome(),
+  };
+  for (const notify of chromeListeners) notify();
 }
 
 // Bible and Daily contribute only these optional editor seams. Widgets remain
@@ -723,14 +757,7 @@ function refreshOptionalSeams(
   viewStreamProviders = active.flatMap((p) =>
     p.viewStream ? [p.viewStream] : [],
   );
-  chrome = {
-    headerSlots,
-    subheaderSlots,
-    slotsByPosition,
-    commandSpecs,
-    selectionCommandSpecs,
-    aliasProviders,
-  };
+  publishChrome();
 }
 subscribeEditorFeatures(() => {
   const features = getEditorFeatures();
@@ -739,3 +766,4 @@ subscribeEditorFeatures(() => {
 // Do not expose write-intent Daily controls before the account read settles.
 // This initialization is inert: it never fetches before the signed-in AuthGate.
 refreshOptionalSeams({});
+for (const plugin of plugins) plugin.chromeChanged?.(publishChrome);

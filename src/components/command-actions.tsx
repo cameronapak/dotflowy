@@ -31,6 +31,7 @@ import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
+import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
@@ -64,6 +65,7 @@ export function useGlobalActions(opts: {
   openConnect: () => void;
 }): CommandCenterAction[] {
   const { openConnect } = opts;
+  const { globalActions } = usePluginChrome();
   const { daily } = useEditorFeatures();
   const { theme, setTheme } = useTheme();
   const { textSize, setTextSize } = useTextSize();
@@ -312,8 +314,15 @@ export function useGlobalActions(opts: {
       },
     );
 
-    return a;
+    return [
+      ...a,
+      ...globalActions.map((action) => ({
+        ...action,
+        scope: "global" as const,
+      })),
+    ];
   }, [
+    globalActions,
     history,
     theme,
     setTheme,

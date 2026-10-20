@@ -189,3 +189,110 @@ test("global action: a More-menu action runs from the palette", async ({
   await expect(text(page, "alpha-1")).toBeHidden();
   await expect(text(page, "alpha")).toBeVisible();
 });
+
+test("Scribble mode covers active text, tokens, titles, and Quick-add without changing source", async ({
+  page,
+}) => {
+  const source =
+    "Draft **bold** `code` #focus [link](https://example.com) John 3:16 ||spoiler||";
+  await seedOutline(
+    page,
+    TREE.map((node) =>
+      node.id === "alpha" ? { ...node, text: source } : node,
+    ),
+  );
+  await page.goto("/");
+  const row = text(page, "alpha");
+  await expect(row).toBeVisible({ timeout: 15000 });
+  await openPalette(page);
+  await page.getByPlaceholder(/Search nodes and actions/).fill("scribble");
+  await page.getByRole("option", { name: /Turn on Scribble mode/ }).click();
+  const off = page.getByRole("button", {
+    name: "Turn off Scribble mode",
+    exact: true,
+  });
+  await expect(off).toBeVisible();
+  await expect(row).toHaveCSS("font-family", '"Redacted Script"');
+  expect(
+    await page.evaluate(
+      async () => (await document.fonts.load('17px "Redacted Script"')).length,
+    ),
+  ).toBeGreaterThan(0);
+  // Code and React widget text must not escape the font through their own styles.
+  await expect(row.locator("code")).toHaveCSS(
+    "font-family",
+    '"Redacted Script"',
+  );
+  await expect(row.locator("[data-bible-ref]")).toBeVisible();
+  await expect(row.locator("[data-bible-ref] span").first()).toHaveCSS(
+    "font-family",
+    '"Redacted Script"',
+  );
+  await text(page, "bravo").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" writing");
+  await expect(text(page, "bravo")).toBeFocused();
+  await expect(text(page, "bravo")).toHaveCSS(
+    "font-family",
+    '"Redacted Script"',
+  );
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type("!");
+  await expect(text(page, "bravo")).toHaveText("Bravo writin!g");
+  await openPalette(page);
+  await page
+    .getByPlaceholder(/Search nodes and actions/)
+    .fill("Spotlight mode");
+  await page.getByRole("option", { name: /Spotlight mode/ }).click();
+  await text(page, "bravo").click();
+  await expect(text(page, "bravo")).toHaveCSS(
+    "font-family",
+    '"Redacted Script"',
+  );
+  await expect(
+    page.getByRole("button", { name: "Turn off spotlight mode" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Turn off spotlight mode" }).click();
+  await page.reload();
+  await expect(off).toBeVisible();
+  await expect(text(page, "bravo")).toHaveText("Bravo writin!g");
+  await expect(row).toHaveCSS("font-family", '"Redacted Script"');
+  expect(
+    await page.evaluate(async () => (await fetch("/api/nodes")).json()),
+  ).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "alpha", text: source }),
+    ]),
+  );
+
+  await page.goto("/alpha");
+  const title = page.locator("h2.zoomed-title .node-text");
+  await title.waitFor({ state: "visible" });
+  await expect(title).toHaveCSS("font-family", '"Redacted Script"');
+  await expect(page.locator("header")).not.toHaveCSS(
+    "font-family",
+    '"Redacted Script"',
+  );
+  await openPalette(page);
+  await page.getByPlaceholder(/Search nodes and actions/).fill("quick add");
+  await page.getByRole("option", { name: /Quick add/ }).click();
+  const capture = page.getByRole("textbox", { name: "Quick add", exact: true });
+  await expect(capture).toBeFocused();
+  await page.keyboard.type("A new thought");
+  await expect(capture).toHaveCSS("font-family", '"Redacted Script"');
+  await page.keyboard.press("Escape");
+  await off.click();
+  await expect(title).not.toHaveCSS("font-family", '"Redacted Script"');
+  await expect(off).toHaveCount(0);
+
+  await page.getByRole("button", { name: /^More actions/ }).click();
+  await page
+    .getByRole("menuitemcheckbox", { name: "Scribble mode", exact: true })
+    .click();
+  await expect(off).toBeVisible();
+  await page.keyboard.press("Escape");
+  await openPalette(page);
+  await page.getByPlaceholder(/Search nodes and actions/).fill("scribble");
+  await page.getByRole("option", { name: /Turn off Scribble mode/ }).click();
+  await expect(title).not.toHaveCSS("font-family", '"Redacted Script"');
+});

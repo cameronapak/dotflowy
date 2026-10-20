@@ -13,6 +13,7 @@ import type { ComponentType, ReactNode } from "react";
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
 import type { NodeCommands } from "../components/node-commands";
+import type { CommandCenterAction } from "../data/command-center-types";
 import type { FilterOperator } from "../data/filter-query";
 import type { Node, TreeIndex } from "../data/tree";
 import type { ViewStream } from "../data/view-stream";
@@ -718,12 +719,28 @@ export type { ViewStream } from "../data/view-stream";
 
 // --- The plugin object ------------------------------------------------------
 
+/** A node-less action. Optional checked/menuLabel projects a toggle into More.
+ * IDs are local to the plugin; the registry namespaces them. */
+export interface GlobalActionSpec extends Omit<CommandCenterAction, "scope"> {
+  menuLabel?: string;
+  checked?: boolean;
+}
+
 /**
  * One plugin: a default-exported object registering into whatever seams it
  * needs (D5). Seam keys are added to this interface as features migrate.
  */
 export interface PluginDef {
   id: string;
+  /** Node-less commands, retained even when optional editor seams are off so
+   * users can re-enable a feature. Read-only snapshot; no hooks or side effects. */
+  globalActions?(): GlobalActionSpec[];
+  /** Narrow appearance seam: first non-null font family wins, applied by the
+   * core ONLY to node text and its inline descendants, never app chrome. */
+  editorFont?(): string | null;
+  /** Notify when global actions or editorFont change. Account preferences are
+   * already observed by the registry; browser-local modes supply this signal. */
+  chromeChanged?(notify: () => void): () => void;
   // NOTE: there is deliberately NO `styles` seam (ADR 0031 retired raw plugin
   // CSS -- a plugin could restyle the whole app through it). A plugin styles its
   // own tokens/slots with Tailwind utility classes on the `El`/JSX it returns
