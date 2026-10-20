@@ -12,6 +12,57 @@ const TREE: SeedNode[] = [
   },
 ];
 
+test("Cmd+K plugin settings stay reachable when disabled and share Settings preferences", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await seedOutline(page, TREE);
+  await page.goto("/");
+  await expect(
+    page.locator('li[data-node-id="reflection"] .node-text'),
+  ).toBeVisible({ timeout: 15000 });
+  const action = async (query: string, label: string) => {
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByPlaceholder(/Search nodes and actions/).fill(query);
+    await page.getByRole("option", { name: label, exact: false }).click();
+  };
+  await action("Bible references", "Turn off Bible references");
+  await expect(page.locator("[data-bible-ref]")).toHaveCount(0);
+  await action("Bible references", "Turn on Bible references");
+  await expect(page.locator("[data-bible-ref]")).toBeVisible();
+  await action("Day stream", "Turn off Day stream");
+  await action("Week strip", "Turn off Week strip");
+  await action("Daily notes", "Turn off Daily notes");
+  await action("Daily notes", "Turn on Daily notes");
+  await action("Embeds", "Turn off Embeds");
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("switch", { name: "Daily notes", exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.getByRole("switch", { name: "Bible references", exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.getByRole("switch", { name: "Embeds", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("switch", { name: "Allow external embeds", exact: true }),
+  ).not.toBeChecked();
+  await page.getByRole("button", { name: "Daily notes Details" }).click();
+  await expect(
+    page.getByRole("switch", { name: "Day stream", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("switch", { name: "Week strip", exact: true }),
+  ).not.toBeChecked();
+  await page.reload();
+  await expect(
+    page.getByRole("switch", { name: "Embeds", exact: true }),
+  ).not.toBeChecked();
+});
+
 test("feature switches default on and save independently across reloads", async ({
   page,
 }) => {
@@ -63,6 +114,14 @@ test("Week start remains available while Daily is off and activates after migrat
   );
   await seedOutline(page, TREE);
   let weekStart: "sunday" | "monday" = "monday";
+  let release!: () => void;
+  let markSeen!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seen = new Promise<void>((resolve) => {
+    markSeen = resolve;
+  });
   await page.route(
     (url) =>
       url.pathname === "/api/kv" &&
@@ -84,7 +143,11 @@ test("Week start remains available while Daily is off and activates after migrat
       operation: "canonicalize" | "set";
       weekStart?: "sunday" | "monday";
     };
-    if (body.operation === "set" && body.weekStart) weekStart = body.weekStart;
+    if (body.operation === "set" && body.weekStart) {
+      markSeen();
+      await pending;
+      weekStart = body.weekStart;
+    }
     await route.fulfill({ json: { weekStart, seq: 0 } });
   });
 
@@ -97,9 +160,33 @@ test("Week start remains available while Daily is off and activates after migrat
   await expect(monday).toBeChecked();
   await expect(sunday).toBeEnabled();
 
-  await sunday.click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page
+    .getByPlaceholder(/Search nodes and actions/)
+    .fill("Week starts on");
+  await page.getByRole("option", { name: /Week starts on: Sunday/ }).click();
+  await seen;
+  await expect(monday).toBeChecked();
+  await expect(monday).toBeDisabled();
+  await expect(sunday).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page
+    .getByPlaceholder(/Search nodes and actions/)
+    .fill("Week starts on");
+  await expect(
+    page.getByRole("option", { name: /Week starts on: Sunday/ }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await expect(
+    page.getByRole("option", { name: /Week starts on: Monday/ }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+  release();
   await expect(sunday).toBeChecked();
-  await expect(page.getByText("Weeks now start on Sunday")).toBeVisible();
+  await expect(monday).toBeEnabled();
+  await monday.click();
+  await expect(monday).toBeChecked();
+  await expect(sunday).toBeEnabled();
+  await expect(page.getByText("Weeks now start on Monday")).toBeVisible();
   await expect(daily).not.toBeChecked();
 });
 

@@ -106,6 +106,7 @@ interface FeatureSnapshot {
   externalEmbeds: boolean;
   externalEmbedsSaving: boolean;
   weekStart: WeekStart;
+  weekStartSaving: boolean;
   dayStream: boolean;
   weekStrip: boolean;
   emptyDays: EmptyDaysMode;
@@ -119,6 +120,7 @@ const INITIAL: FeatureSnapshot = {
   externalEmbeds: false,
   externalEmbedsSaving: false,
   weekStart: DEFAULT_WEEK_START,
+  weekStartSaving: false,
   dayStream: true,
   weekStrip: true,
   emptyDays: "show",
@@ -128,6 +130,7 @@ const INITIAL: FeatureSnapshot = {
 let snapshot = INITIAL;
 let syncedWeekStart: WeekStart | null = null;
 let started = false;
+let weekStartSaving = false;
 let externalEmbedsPendingSaves = 0;
 let externalEmbedsMaskedOff = false;
 let externalEmbedsSaveTail = Promise.resolve();
@@ -176,6 +179,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.externalEmbeds === externalEmbeds &&
     snapshot.externalEmbedsSaving === externalEmbedsSaving &&
     snapshot.weekStart === weekStart &&
+    snapshot.weekStartSaving === weekStartSaving &&
     snapshot.dayStream === dayStream &&
     snapshot.weekStrip === weekStrip &&
     snapshot.emptyDays === emptyDays &&
@@ -190,6 +194,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     externalEmbeds,
     externalEmbedsSaving,
     weekStart,
+    weekStartSaving,
     dayStream,
     weekStrip,
     emptyDays,
@@ -244,6 +249,11 @@ export function subscribeEditorFeatures(listener: () => void): () => void {
 
 export function getEditorFeatures(): FeatureSnapshot {
   ensureStarted();
+  return snapshot;
+}
+
+/** Read-only snapshot for plugin registrations, which run before auth. */
+export function peekEditorFeatures(): FeatureSnapshot {
   return snapshot;
 }
 
@@ -428,10 +438,17 @@ export async function ensureWeekStartCanonical(): Promise<void> {
  *  the old account model. */
 export async function setWeekStart(weekStart: WeekStart): Promise<void> {
   await loadEditorFeatures();
-  if (snapshot.weekStart === weekStart) {
-    await ensureWeekStartCanonical();
-    return;
+  weekStartSaving = true;
+  rebuild();
+  try {
+    if (snapshot.weekStart === weekStart) {
+      await ensureWeekStartCanonical();
+      return;
+    }
+    await requestWeekStartMigration({ operation: "set", weekStart });
+    canonicalWeekStart = weekStart;
+  } finally {
+    weekStartSaving = false;
+    rebuild();
   }
-  await requestWeekStartMigration({ operation: "set", weekStart });
-  canonicalWeekStart = weekStart;
 }

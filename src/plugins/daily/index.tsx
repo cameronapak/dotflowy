@@ -69,6 +69,7 @@ import {
   type NodeProtection,
   type PluginContext,
 } from "../types";
+import { dailyGlobalActions } from "./actions";
 import {
   DAILY_CONTAINER_TEXT,
   formatDayBadge,
@@ -340,6 +341,7 @@ function WeekBadge({
 
 export default definePlugin({
   id: "daily",
+  globalActions: dailyGlobalActions,
 
   // Seam A: the `[[YYYY-MM-DD]]` date token (ADR 0038), rendered as a
   // badge-language chip (a BibleChip-class TSX atom -- ADR 0006).

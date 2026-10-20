@@ -118,3 +118,7 @@ _Avoid_: account key (implies broader access), MCP token (a different credential
 **Editor feature**:
 An optional reading or authoring convenience, such as Bible references or Daily notes. Turning it off changes the editor experience, not the outline's content or external tools' permissions.
 _Avoid_: plugin unloading, access control
+
+**Scribble mode**:
+A writing view that displays outline text in a scribble font, including the active node, to reduce distraction and rereading while you write. It changes appearance, not text source, and is distinct from a Spoiler.
+_Avoid_: redaction, hidden text, privacy mode

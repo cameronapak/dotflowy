@@ -890,7 +890,6 @@ function EditorFeaturesSection() {
   const preferences = useEditorFeatures();
   const [saving, setSaving] = useState<EditorFeature | null>(null);
   const [details, setDetails] = useState<EditorFeature | null>(null);
-  const [savingWeekStart, setSavingWeekStart] = useState(false);
   const [revokeFailed, setRevokeFailed] = useState(false);
   const saveConsent = (enabled: boolean) => {
     setRevokeFailed(false);
@@ -1042,7 +1041,7 @@ function EditorFeaturesSection() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2" aria-live="polite">
-                    {savingWeekStart ? (
+                    {preferences.weekStartSaving ? (
                       <Loader2Icon
                         className="size-4 animate-spin text-muted-foreground"
                         aria-label="Reorganizing Daily calendar"
@@ -1051,9 +1050,10 @@ function EditorFeaturesSection() {
                     <Segmented
                       label="Week starts on"
                       value={preferences.weekStart}
-                      disabled={!preferences.ready || savingWeekStart}
+                      disabled={
+                        !preferences.ready || preferences.weekStartSaving
+                      }
                       onChange={(weekStart) => {
-                        setSavingWeekStart(true);
                         void setWeekStart(weekStart)
                           .then(() =>
                             toast.success(
@@ -1064,8 +1064,7 @@ function EditorFeaturesSection() {
                             toast.error(
                               "Couldn't change when weeks start. Nothing was moved.",
                             ),
-                          )
-                          .finally(() => setSavingWeekStart(false));
+                          );
                       }}
                       options={[
                         { value: "sunday", label: "Sunday" },

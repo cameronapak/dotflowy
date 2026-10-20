@@ -23,6 +23,7 @@ import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
 import { OAuthCallbackErrorToast } from "../components/oauth-callback-error";
 import { OpmlImportDialog } from "../components/opml-import-dialog";
+import { PluginEditorAppearance } from "../components/plugin-editor-appearance";
 import { QuickAdd } from "../components/quick-add";
 import { SettingsNavRegistrar } from "../components/settings-nav-registrar";
 import { ShowCompletedProvider } from "../components/show-completed-provider";
@@ -166,6 +167,7 @@ function RootComponent() {
                 <MirrorPlaces />
                 <TagColorStyles />
                 <SpotlightController />
+                <PluginEditorAppearance />
                 {/* A distinct mechanism from the changelog (ADR 0046): the
                     changelog says WHAT changed; this says THIS TAB is stale. */}
                 <UpdateAvailableToast />

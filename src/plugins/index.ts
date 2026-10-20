@@ -17,6 +17,7 @@ import links from "./links";
 import nodeLinks from "./node-links";
 import provenance from "./provenance";
 import routeBible from "./route-bible";
+import scribble from "./scribble";
 import spoiler from "./spoiler";
 import tags from "./tags";
 import todos from "./todos";
@@ -38,6 +39,7 @@ export const plugins: PluginDef[] = [
   highlight,
   spoiler,
   daily,
+  scribble,
 ];
 
 // Only these reviewed plugins have optional editor conveniences (ADR 0064).

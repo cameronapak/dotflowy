@@ -33,6 +33,7 @@ import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
+import { usePluginChrome } from "../plugins/registry";
 import { openAppleShortcut } from "./apple-shortcut-opener";
 import { openChangelog } from "./changelog-opener";
 import { restoreHistory, useHistoryState } from "./history-restore";
@@ -183,6 +184,7 @@ export function setViewCollapsed(collapsed: boolean) {
  */
 export function HeaderMoreMenu() {
   const navigate = useNavigate();
+  const { globalActions } = usePluginChrome();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
   const experimentalCapture = useExperimentalCaptureEnabled();
@@ -262,6 +264,20 @@ export function HeaderMoreMenu() {
           <FocusIcon />
           Spotlight mode
         </DropdownMenuCheckboxItem>
+
+        {globalActions
+          .filter((action) => action.menuLabel && action.checked !== undefined)
+          .map((action) => (
+            <DropdownMenuCheckboxItem
+              key={action.id}
+              checked={action.checked}
+              disabled={action.disabled}
+              onCheckedChange={() => action.run()}
+            >
+              <action.icon />
+              {action.menuLabel}
+            </DropdownMenuCheckboxItem>
+          ))}
 
         <DropdownMenuSeparator />
 
