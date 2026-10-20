@@ -239,8 +239,29 @@ test("deployment builds validated main before atomic push, publishing, and deplo
   );
   expect(steps[3]?.run).toBe("bun run release:publish");
   expect(steps[4]?.["working-directory"]).toBe("landing");
+  const dir = mkdtempSync(join(tmpdir(), "dotflowy-deploy-"));
+  fixtures.push(dir);
+  mkdirSync(join(dir, ".test-bin"));
+  mkdirSync(join(dir, "landing"));
+  for (const tool of ["bun", "bunx", "git"]) {
+    const path = join(dir, ".test-bin", tool);
+    writeFileSync(
+      path,
+      `#!/bin/sh
+if [ "$1" = -p ]; then echo 1.2.3; exit 0; fi
+exit 23
+`,
+    );
+    chmodSync(path, 0o755);
+  }
   for (const step of steps) {
     expect(step.if).toBeUndefined();
     expect(step["continue-on-error"]).not.toBe(true);
+    const result = run(
+      join(dir, step["working-directory"] ?? "."),
+      ["bash", "-e", "-o", "pipefail", "-c", step.run!],
+      { PATH: `${dir}/.test-bin:${process.env.PATH}` },
+    );
+    expect(result.code, step.name).toBe(23);
   }
 });

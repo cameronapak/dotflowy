@@ -716,6 +716,7 @@ test("failed revocation stays locally off and Settings retries revocation, not a
   const permission = page.getByRole("switch", {
     name: "Allow external embeds",
   });
+  await permission.waitFor({ state: "visible" });
   await expect(permission).toBeChecked();
   await permission.click();
   await expect(permission).not.toBeChecked();
