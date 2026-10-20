@@ -67,9 +67,7 @@ test('"Go" focuses and flashes the moved node in the destination view', async ({
 test("a keyboard move (Cmd+Shift+Down) flashes the moved row", async ({
   page,
 }) => {
-  await seedOutline(page, STANDARD_TREE);
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await load(page, STANDARD_TREE);
 
   // Focus alpha and nudge it past bravo among the top-level siblings.
   await text(page, "alpha").click();

@@ -202,6 +202,8 @@ export interface SeedOutlineController {
   injectExternalChange(ops: readonly ApiChangeOp[]): Promise<number>;
   /** Reconcile the socket, optionally replacing server truth without deltas. */
   sendSnapshot(nodes?: readonly ApiNode[]): void;
+  /** Hold initial/reconnect snapshots until the returned release runs. */
+  holdSnapshots(): () => void;
   /** Reject the next structural REST write before it mutates the store. */
   failNextWrite(): void;
 }
@@ -273,6 +275,7 @@ export async function seedOutline(
   // seq so the client can hold its optimistic overlay until the echo lands.
   let seq = 0;
   let socket: WebSocketRoute | null = null;
+  let snapshotGate: Promise<void> | null = null;
   const broadcast = (
     ops: readonly ApiChangeOp[],
     extraDelayMs = 0,
@@ -518,7 +521,8 @@ export async function seedOutline(
     (url) => url.pathname === "/api/sync",
     (ws) => {
       socket = ws;
-      ws.onMessage(() =>
+      ws.onMessage(async () => {
+        if (snapshotGate) await snapshotGate;
         ws.send(
           JSON.stringify({
             type: "snapshot",
@@ -526,8 +530,8 @@ export async function seedOutline(
             nodes: [...store.values()],
             serverVersion: opts.serverVersion,
           }),
-        ),
-      );
+        );
+      });
     },
   );
 
@@ -553,6 +557,16 @@ export async function seedOutline(
           serverVersion: opts.serverVersion,
         }),
       );
+    },
+    holdSnapshots() {
+      let release!: () => void;
+      snapshotGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        snapshotGate = null;
+        release();
+      };
     },
     failNextWrite() {
       failNextStructuralWrite = true;

@@ -294,8 +294,14 @@ test.describe("day navigation on touch", () => {
           await route.fallback();
         },
       );
+      const releaseSnapshot = controller.holdSnapshots();
       await page.reload();
+      // Deliver nodes after the editor mounts empty, before the daily index.
+      // Focus must wait for those rows to enter the presentation index too.
+      await page.getByRole("status", { name: "Loading outline" }).waitFor();
+      releaseSnapshot();
       await expect(last).toHaveText("Entry 79 appended");
+      await expect(last).toBeFocused();
       releaseIndex();
       await expect
         .poll(() =>
@@ -381,6 +387,7 @@ test.describe("touch momentum", () => {
       page,
       context,
     }) => {
+      if (input === "pointer") await page.clock.install();
       await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
       const days = Array.from({ length: 22 }, (_, i) => ({
         id: `note-${i}`,
@@ -525,6 +532,8 @@ test.describe("touch momentum", () => {
             await new Promise(requestAnimationFrame);
           }
         });
+        // A paused scrollbar drag is still held input, not an idle gesture.
+        await page.clock.runFor(300);
         await page.mouse.up();
       }
       // CDP touch dispatch does not produce reliable native inertia. Model the
