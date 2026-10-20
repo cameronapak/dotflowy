@@ -239,27 +239,28 @@ test.describe("narrow-screen drawers", () => {
         )
         .toBe(true);
     }
-    const exitingInert = page.evaluate(
-      () =>
-        new Promise<boolean>((resolve) => {
-          const observer = new MutationObserver(() => {
-            const menu = document.querySelector<HTMLElement>(
-              ".typing-suggestions[data-exiting]",
-            );
-            if (menu) {
-              observer.disconnect();
-              resolve(menu.inert);
-            }
-          });
-          observer.observe(document.body, {
-            attributes: true,
-            subtree: true,
-            attributeFilter: ["data-exiting", "inert"],
-          });
-        }),
-    );
+    // Await registration, not the exit itself, before sending Escape.
+    const exitingInert = await page.evaluateHandle(() => ({
+      result: new Promise<boolean>((resolve) => {
+        const observer = new MutationObserver(() => {
+          const menu = document.querySelector<HTMLElement>(
+            ".typing-suggestions[data-exiting]",
+          );
+          if (menu) {
+            observer.disconnect();
+            resolve(menu.inert);
+          }
+        });
+        observer.observe(document.body, {
+          attributes: true,
+          subtree: true,
+          attributeFilter: ["data-exiting", "inert"],
+        });
+      }),
+    }));
     await page.keyboard.press("Escape");
-    expect(await exitingInert).toBe(true);
+    expect(await exitingInert.evaluate(({ result }) => result)).toBe(true);
+    await exitingInert.dispose();
     await expect(editor(page)).toHaveText("/");
     await expect(editor(page)).toBeFocused();
     await expect(suggestions(page)).toHaveCount(0);
