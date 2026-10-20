@@ -348,6 +348,7 @@ test("Daily off removes daily slash commands, date suggestions, and command-cent
   });
   await page.goto("/");
   const row = page.locator('li[data-node-id="reflection"] .node-text');
+  await row.waitFor();
   await expect(
     page.getByRole("button", { name: "Today's daily note" }),
   ).toHaveCount(0);

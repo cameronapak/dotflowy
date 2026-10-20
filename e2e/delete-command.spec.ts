@@ -75,6 +75,7 @@ test("removes the node's whole subtree in one shot", async ({ page }) => {
 test("runs from the zoomed page title", async ({ page }) => {
   await load(page, STANDARD_TREE);
   await page.goto("/alpha"); // zoom in: `alpha` is now the page title
+  await title(page).waitFor();
   await expect(title(page)).toBeVisible();
 
   await placeCaret(title(page), "end");

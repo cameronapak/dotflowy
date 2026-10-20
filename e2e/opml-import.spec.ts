@@ -151,7 +151,7 @@ test("a multi-slice import (>500 nodes) applies in yielding slices yet lands as 
   // "saving" phase — deterministic proof the sliced optimistic apply
   // finished (applied === count) while the single wire batch is in flight.
   await seedOutline(page, STANDARD_TREE, { postDelayMs: 600 });
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
 
   // 1,250 bullets -> 1 container slice + 3 chunk slices of <=500.
@@ -177,7 +177,7 @@ test("a multi-slice import (>500 nodes) applies in yielding slices yet lands as 
 
   // ONE collapsed container, nothing rendered from inside it, and the whole
   // batch persisted to the (mock) server store across a reload.
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
   await expect(containerRow(page)).toHaveCount(1);
   await expect(
@@ -207,6 +207,7 @@ test("a truncated file shows the parse error (line/column) and writes nothing", 
   await expect(containerRow(page)).toHaveCount(0);
   // Reload: the (mock) server store received no write at all.
   await page.reload();
+  await text(page, "alpha").waitFor();
   await expect(text(page, "alpha")).toBeVisible();
   await expect(containerRow(page)).toHaveCount(0);
   await expect(page.locator("li[data-node-id]")).toHaveCount(

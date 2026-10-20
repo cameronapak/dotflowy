@@ -178,7 +178,7 @@ test("provider failure keeps notes and falls back to Link", async ({
     route.fulfill({ json: { title: "Fallback title" } }),
   );
   await seedOutline(page, TREE, { kv: { "account-prefs": [allowed] } });
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "next" });
   await expect(
     page.getByText("URL couldn’t be embedded, kept as a link instead."),
   ).toBeVisible();
@@ -595,7 +595,7 @@ test("saved consent waits for the initial account read", async ({ page }) => {
     if (route.request().method() === "GET") await hold;
     await route.fallback();
   });
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "next" });
   await expect(note(page, "media").getByRole("link")).toBeVisible();
   expect(requests()).toBe(0);
   await expect(page.locator("iframe")).toHaveCount(0);

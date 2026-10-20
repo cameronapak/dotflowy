@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Drag-reorder while a ?q= filter is active (issue #244 / the ADR 0047
 // amendment). Before the fix, buildRows passed `filter: null`, so the drag's
@@ -50,7 +50,10 @@ const visibleOrder = (page: Page) =>
 
 async function load(page: Page, tree: SeedNode[], query: string) {
   await seedOutline(page, tree);
-  await page.goto(`/?q=${encodeURIComponent(query)}`);
+  await openSeededOutline(page, {
+    path: `/?q=${encodeURIComponent(query)}`,
+    anchorId: tree[0]!.id,
+  });
 }
 
 test("a drop between two visible rows with hidden siblings lands after the visible predecessor", async ({

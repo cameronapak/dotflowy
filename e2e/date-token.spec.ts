@@ -152,7 +152,7 @@ test("backspace deletes the whole token (an atom, not folding)", async ({
   await seedOutline(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: `x [[${TODAY}]]` },
   ]);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "n" });
   await expect(chipIn(page, "n")).toBeVisible();
 
   await caretAtEnd(page, "n");
@@ -183,7 +183,7 @@ test("NL picker inserts [[YYYY-MM-DD]]; bare month offers no date row; mapped da
       },
     },
   );
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "blank" });
   await expect(text(page, "blank")).toBeVisible();
 
   await text(page, "blank").click();

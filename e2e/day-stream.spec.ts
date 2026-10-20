@@ -637,6 +637,7 @@ test("row-targeted navigation into a long day keeps the target in view", async (
     },
   );
   await page.goto("/entry-79");
+  await page.locator(".zoomed-title").waitFor();
   await expect(page.locator(".zoomed-title")).toHaveText("Entry 79");
   await page.keyboard.press("ControlOrMeta+,");
   const last = text(page, "entry-79");
