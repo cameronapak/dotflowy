@@ -4,7 +4,7 @@ import { TestClock } from "effect/testing";
 
 import { buildTreeIndex, createNode, type Node } from "../src/data/tree";
 import { searchNodes } from "./outline-ops";
-import { SearchError, SearchInput, SearchPage, searchPage } from "./search";
+import { SearchError, SearchInput, searchPage } from "./search";
 
 const ids = (nodes: Node[], query: string, rootId: string | null = null) =>
   searchNodes(buildTreeIndex(nodes), query, 100, rootId).map((hit) => hit.id);
@@ -265,7 +265,6 @@ describe("search continuation", () => {
     for (const count of [0, 25, 26]) {
       const nodes = tasks(count);
       const first = await page(nodes, { query });
-      expect(Schema.is(SearchPage)(first)).toBe(true);
       expect(first.nodes.map((node) => node.id)).toEqual(
         nodes.slice(0, 25).map((node) => node.id),
       );

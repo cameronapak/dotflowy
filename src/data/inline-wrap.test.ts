@@ -1,4 +1,4 @@
-import { describe, expect, it, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import { detectMarkerWrap, planMarkerToggle } from "./inline-wrap";
 
@@ -43,44 +43,39 @@ test.each<
   },
 );
 
-describe("planMarkerToggle", () => {
-  it("wraps a plain selection and re-selects the interior", () => {
-    const plan = planMarkerToggle("hello", 0, 5, BOLD);
-    expect(plan.removed).toBe(false);
-    expect(plan.next).toBe("**hello**");
-    // Interior "hello" sits at offsets 2..7 in the new source.
-    expect(plan.range).toEqual({ start: 2, end: 7 });
+test("wraps and unwraps a selection without changing surrounding text or selection", () => {
+  const on = planMarkerToggle("the word here", 4, 8, STRIKE);
+  expect(on).toEqual({
+    removed: false,
+    next: "the ~~word~~ here",
+    range: { start: 6, end: 10 },
   });
+  const off = planMarkerToggle(on.next, on.range.start, on.range.end, STRIKE);
+  expect(off).toEqual({
+    removed: true,
+    next: "the word here",
+    range: { start: 4, end: 8 },
+  });
+});
 
-  it("inserts an empty pair with a collapsed caret when nothing is selected", () => {
-    const plan = planMarkerToggle("", 0, 0, BOLD);
-    expect(plan.removed).toBe(false);
-    expect(plan.next).toBe("****");
-    expect(plan.range).toEqual({ start: 2, end: 2 });
-  });
+test("inserts an empty pair with a collapsed caret when nothing is selected", () => {
+  const plan = planMarkerToggle("", 0, 0, BOLD);
+  expect(plan.removed).toBe(false);
+  expect(plan.next).toBe("****");
+  expect(plan.range).toEqual({ start: 2, end: 2 });
+});
 
-  it("unwraps a marker-inclusive selection", () => {
-    const plan = planMarkerToggle("**bold**", 0, 8, BOLD);
-    expect(plan.removed).toBe(true);
-    expect(plan.next).toBe("bold");
-    expect(plan.range).toEqual({ start: 0, end: 4 });
-  });
+test("unwraps a marker-inclusive selection", () => {
+  const plan = planMarkerToggle("**bold**", 0, 8, BOLD);
+  expect(plan.removed).toBe(true);
+  expect(plan.next).toBe("bold");
+  expect(plan.range).toEqual({ start: 0, end: 4 });
+});
 
-  it("unwraps when the markers flank the selection", () => {
-    // "x **bold** y", select "bold" (offsets 4..8).
-    const plan = planMarkerToggle("x **bold** y", 4, 8, BOLD);
-    expect(plan.removed).toBe(true);
-    expect(plan.next).toBe("x bold y");
-    expect(plan.range).toEqual({ start: 2, end: 6 });
-  });
-
-  it("round-trips wrap then unwrap to the original", () => {
-    const src = "the word here";
-    const on = planMarkerToggle(src, 4, 8, STRIKE); // "word"
-    expect(on.next).toBe("the ~~word~~ here");
-    // Re-selecting the interior lands markers OUTSIDE the selection.
-    const off = planMarkerToggle(on.next, on.range.start, on.range.end, STRIKE);
-    expect(off.removed).toBe(true);
-    expect(off.next).toBe(src);
-  });
+test("unwraps when the markers flank the selection", () => {
+  // "x **bold** y", select "bold" (offsets 4..8).
+  const plan = planMarkerToggle("x **bold** y", 4, 8, BOLD);
+  expect(plan.removed).toBe(true);
+  expect(plan.next).toBe("x bold y");
+  expect(plan.range).toEqual({ start: 2, end: 6 });
 });

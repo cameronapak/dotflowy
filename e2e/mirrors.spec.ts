@@ -126,7 +126,7 @@ test("a broken mirror (missing source) renders a leaf, never hangs", async ({
     },
   ];
   await seedOutline(page, brokenTree);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "P" });
 
   const broken = page.locator('li[data-node-id="M"]');
   await expect(broken).toBeVisible();

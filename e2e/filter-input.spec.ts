@@ -48,39 +48,6 @@ async function summon(page: Page) {
   await expect(input(page)).toBeFocused();
 }
 
-test("Cmd+F opens the filter input, focused", async ({ page }) => {
-  await load(page);
-  await summon(page);
-});
-
-test("the header magnifier opens the filter input", async ({ page }) => {
-  await load(page);
-  await page.getByRole("button", { name: "Filter this view" }).click();
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-});
-
-test("the header magnifier toggles the filter closed", async ({ page }) => {
-  await load(page);
-  const magnifier = page.getByRole("button", { name: "Filter this view" });
-
-  await magnifier.click();
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-
-  // Empty summon: second press collapses the row.
-  await magnifier.click();
-  await expect(input(page)).toHaveCount(0);
-
-  // With an active query: second press clears `?q=` AND collapses.
-  await magnifier.click();
-  await input(page).fill("#work");
-  await expect(page).toHaveURL(/q=%23work/);
-  await magnifier.click();
-  await expect(page).not.toHaveURL(/q=/);
-  await expect(input(page)).toHaveCount(0);
-});
-
 test("the magnifier's three states track the stakes (ADR 0050)", async ({
   page,
 }) => {
@@ -100,8 +67,15 @@ test("the magnifier's three states track the stakes (ADR 0050)", async ({
   // This is the state the button previously lacked -- opening it now reads.
   await magnifier.click();
   await expect(input(page)).toBeVisible();
+  await expect(input(page)).toBeFocused();
   await expect(magnifier).toHaveAttribute("aria-pressed", "true");
   await expect(magnifier).toHaveClass(muted);
+
+  // The same toggle closes an empty summon, then opens it again.
+  await magnifier.click();
+  await expect(input(page)).toHaveCount(0);
+  await magnifier.click();
+  await expect(input(page)).toBeFocused();
 
   // Query applied: still pressed, now SOLID ("your view is altered") -- so the
   // toggle-off press that WIPES the query only fires while it reads as "on".
@@ -114,6 +88,7 @@ test("the magnifier's three states track the stakes (ADR 0050)", async ({
   // Toggle-off clears the query, collapses the row, and drops the lit state.
   await magnifier.click();
   await expect(page).not.toHaveURL(/q=/);
+  await expect(input(page)).toHaveCount(0);
   await expect(magnifier).toHaveAttribute("aria-pressed", "false");
   await expect(magnifier).not.toHaveClass(muted);
   await expect(magnifier).not.toHaveClass(solid);
@@ -168,9 +143,11 @@ for (const query of ["#work", "work"]) {
     page,
   }) => {
     await seedOutline(page, TREE);
-    await page.goto(`/?q=${encodeURIComponent(query)}`);
+    await openSeededOutline(page, {
+      path: `/?q=${encodeURIComponent(query)}`,
+      anchorId: "milk",
+    });
     const editor = row(page, "milk").locator(".node-text");
-    await expect(editor).toBeVisible();
     await placeCaret(editor, "end");
     await editor.press("Backspace");
 
@@ -194,9 +171,8 @@ test("editing the last match keeps the row until blur outside the outline", asyn
   page,
 }) => {
   await seedOutline(page, TREE);
-  await page.goto("/?q=milk");
+  await openSeededOutline(page, { path: "/?q=milk", anchorId: "milk" });
   const editor = row(page, "milk").locator(".node-text");
-  await expect(editor).toBeVisible();
   await editor.fill("Buy mil #work");
   await expect(editor).toHaveText("Buy mil #work");
   await expect(editor).toBeFocused();
@@ -213,9 +189,8 @@ test("a row that still matches after editing stays visible on blur", async ({
   page,
 }) => {
   await seedOutline(page, TREE);
-  await page.goto("/?q=milk");
+  await openSeededOutline(page, { path: "/?q=milk", anchorId: "milk" });
   const editor = row(page, "milk").locator(".node-text");
-  await expect(editor).toBeVisible();
   await placeCaret(editor, "end");
   const before = await page.evaluateHandle(async () => {
     const path = "/src/data/view-state.ts";
@@ -487,7 +462,7 @@ test("editing a mirrored descendant keeps only the focused path and its context 
   page,
 }) => {
   await seedOutline(page, tree);
-  await page.goto("/?q=%23child");
+  await openSeededOutline(page, { path: "/?q=%23child", anchorId: "project" });
   await expect(row(page, "child")).toHaveCount(2);
   const editor = row(page, "child").last().locator(".node-text");
   await editor.fill("Verify mirror traversal");
@@ -515,8 +490,7 @@ test("the same query selects source and mirror content, while is:mirror excludes
   page,
 }) => {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(row(page, "project")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "project" });
   await summon(page);
   await input(page).fill("is:todo -is:complete #dotflowy");
   await expect(row(page, "source")).toBeVisible();
@@ -547,7 +521,10 @@ test("a zoomed view finds descendants through a mirror with contextual ancestors
   page,
 }) => {
   await seedOutline(page, tree);
-  await page.goto("/scope?q=%23child");
+  await openSeededOutline(page, {
+    path: "/scope?q=%23child",
+    anchorId: "mirror",
+  });
   await expect(input(page)).toHaveValue("#child");
   await expect(row(page, "mirror")).toBeVisible();
   await expect(row(page, "mirror").locator(".outline-row")).toHaveAttribute(
@@ -588,7 +565,7 @@ test("collapse affects only the selected source or mirror path under a filter", 
       mirrorOf: "source",
     },
   ]);
-  await page.goto("/?q=%23project");
+  await openSeededOutline(page, { path: "/?q=%23project", anchorId: "source" });
   const child = row(page, "child");
   await expect(row(page, "source")).toBeVisible();
   await expect(row(page, "mirror")).toBeVisible();

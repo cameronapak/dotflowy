@@ -38,20 +38,24 @@ test.each<[string, HighlightParts]>([
   expect(parseHighlight(run)).toEqual(expected);
 });
 
-test("buildHighlightRun emits the bare form for blue and an emoji otherwise, and round-trips", () => {
-  expect(buildHighlightRun("blue", "hi")).toBe("==hi==");
-  expect(buildHighlightRun("red", "hi")).toBe("==🔴hi==");
-  expect(buildHighlightRun("green", "hi")).toBe("==🟢hi==");
-  for (const color of [
+test("buildHighlightRun emits the literal palette, with a bare blue default", () => {
+  const colors = [
     "red",
     "orange",
     "yellow",
     "green",
     "blue",
     "purple",
-  ] as const) {
-    expect(parseHighlight(buildHighlightRun(color, "x")).color).toBe(color);
-  }
+  ] as const;
+  // A parser round-trip can agree with an incorrect builder palette.
+  expect(colors.map((color) => buildHighlightRun(color, "hi"))).toEqual([
+    "==🔴hi==",
+    "==🟠hi==",
+    "==🟡hi==",
+    "==🟢hi==",
+    "==hi==",
+    "==🟣hi==",
+  ]);
 });
 
 test("stripHighlights drops fences and the color emoji, keeps everything else", () => {

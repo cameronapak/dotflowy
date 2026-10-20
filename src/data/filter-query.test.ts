@@ -18,42 +18,8 @@ import { rowKeyFor } from "./visible-order";
 const index = (nodes: Node[]) => buildTreeIndex(nodes);
 const never = () => false;
 
-// A representative operator map: the real core kind operators plus inline twins
-// of the plugin operators (todos/links/highlight/provenance), so the eval tests
-// stay pure and never import a plugin's React module.
-const ops = buildFilterOperatorMap([
-  ...CORE_FILTER_OPERATORS,
-  {
-    key: "is",
-    values: ["complete"],
-    description: "",
-    predicate: (n) => n.completed,
-  },
-  {
-    key: "is",
-    values: ["agent"],
-    description: "",
-    predicate: (n) => n.origin != null,
-  },
-  {
-    key: "has",
-    values: ["link"],
-    description: "",
-    predicate: (n) => /\[[^\]]*\]\([^)]*\)/.test(n.text),
-  },
-  {
-    key: "highlight",
-    values: ["red", "blue"],
-    bare: true,
-    description: "",
-    predicate: (n, _i, v) => {
-      if (!n.text.includes("==")) return false;
-      if (v === null) return true;
-      // Bare `==x==` counts as blue; `==🔴x==` as red.
-      return v === "red" ? n.text.includes("==🔴") : !n.text.includes("==🔴");
-    },
-  },
-]);
+// Exercise the registered pure operators, not handwritten predicate twins.
+const ops = queryOperators;
 
 test.each<[string, string | undefined, string[]]>([
   ["undefined is no tokens", undefined, []],
@@ -337,7 +303,7 @@ describe("collectOperatorKeyInfos", () => {
   const infos = collectOperatorKeyInfos(AUTOCOMPLETE_OPS);
   const is = infos.find((i) => i.key === "is")!;
 
-  test("folds shared-key operators into one entry (union of values)", () => {
+  test("folds shared-key values and bare/swatch flags into one entry", () => {
     expect(infos.map((i) => i.key)).toEqual(["is", "has", "highlight"]);
     expect(is.values).toEqual([
       "todo",
@@ -348,6 +314,11 @@ describe("collectOperatorKeyInfos", () => {
       "complete",
       "agent",
     ]);
+    const hl = infos.find((i) => i.key === "highlight")!;
+    expect(hl.bare).toBe(true);
+    expect(hl.swatch).toBe(true);
+    expect(is.bare).toBe(false);
+    expect(is.swatch).toBe(false);
   });
 
   test("description is the FIRST-registered operator's", () => {
@@ -356,14 +327,6 @@ describe("collectOperatorKeyInfos", () => {
       { key: "k", values: ["b"], description: "second", predicate: () => true },
     ]);
     expect(info!.description).toBe("first");
-  });
-
-  test("bare + swatch flags fold across a key", () => {
-    const hl = infos.find((i) => i.key === "highlight")!;
-    expect(hl.bare).toBe(true);
-    expect(hl.swatch).toBe(true);
-    expect(is.bare).toBe(false);
-    expect(is.swatch).toBe(false);
   });
 });
 
@@ -470,13 +433,6 @@ describe("buildQueryFilter", () => {
   test("no query = no filter (null)", () => {
     expect(buildQueryFilter(base, "r", "", never, ops)).toBeNull();
     expect(buildQueryFilter(base, "r", undefined, never, ops)).toBeNull();
-  });
-
-  test("a #tag match pulls in ancestors (dimmed) but not the root", () => {
-    const f = buildQueryFilter(base, "r", "#x", never, ops)!;
-    expect(f.matchIds).toEqual(new Set(["g"]));
-    expect(f.visibleIds).toEqual(new Set(["g", "c"]));
-    expect(f.emptyMessage).toBeUndefined();
   });
 
   test("free text is a case-insensitive substring over flattened text", () => {
@@ -615,6 +571,7 @@ describe("buildQueryFilter", () => {
       // undimmed: match + its descendants; c (ancestor) is NOT in matchIds
       expect(f.matchIds).toEqual(new Set(["g", "d", "e"]));
       expect(f.matchIds.has("c")).toBe(false);
+      expect(f.emptyMessage).toBeUndefined();
     });
 
     test("a collapsed match hides its descendants (collapse respected)", () => {

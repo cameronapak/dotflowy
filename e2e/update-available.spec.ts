@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { openSeededOutline, seedOutline, STANDARD_TREE } from "./fixtures";
 
 /**
  * The stale-tab reload affordance (ADR 0046).
@@ -23,15 +23,8 @@ const toast = (page: Page) => page.getByText("Dotflowy has been updated");
 
 async function load(page: Page, serverVersion?: string) {
   await seedOutline(page, STANDARD_TREE, { serverVersion });
-  await page.goto("/");
-  await expect(page.locator('li[data-node-id="alpha"]')).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
-
-test("a newer server raises a reload toast", async ({ page }) => {
-  await load(page, "99.0.0");
-  await expect(toast(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
-});
 
 test("a matching server says nothing", async ({ page }) => {
   await load(page, CURRENT);
@@ -47,9 +40,12 @@ test("a frame without serverVersion says nothing -- absence is not staleness", a
   await expect(toast(page)).toHaveCount(0);
 });
 
-test("the toast does not block editing", async ({ page }) => {
+test("a newer server offers reload without blocking editing", async ({
+  page,
+}) => {
   await load(page, "99.0.0");
   await expect(toast(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
 
   const alpha = page.locator('li[data-node-id="alpha"] .node-text').first();
   await alpha.click();

@@ -25,7 +25,7 @@ test("siblingChainRepairs: clean chains yield zero fixes", () => {
   expect(siblingChainRepairs([createNode({ id: "solo" })])).toEqual([]);
 });
 
-test.each<[string, Node[]]>([
+test.each<[string, Node[], { id: string; prevSiblingId: string }[]]>([
   [
     "a fan (two siblings sharing one prevSiblingId)",
     [
@@ -33,6 +33,7 @@ test.each<[string, Node[]]>([
       createNode({ id: "b", parentId: "p", prevSiblingId: null }),
       createNode({ id: "p" }),
     ],
+    [{ id: "b", prevSiblingId: "a" }],
   ],
   [
     "a dangle (pointer to a non-sibling)",
@@ -41,13 +42,17 @@ test.each<[string, Node[]]>([
       createNode({ id: "x", parentId: "p", prevSiblingId: null }),
       createNode({ id: "y", parentId: "p", prevSiblingId: "ghost" }),
     ],
+    [{ id: "y", prevSiblingId: "x" }],
   ],
-])("siblingChainRepairs: %s is detected and converges", (_name, nodes) => {
-  const fixes = siblingChainRepairs(nodes);
-  expect(fixes.length).toBeGreaterThan(0);
-  // applying the repairs makes the chain consistent -> second pass is clean
-  expect(siblingChainRepairs(applyFixes(nodes, fixes))).toEqual([]);
-});
+])(
+  "siblingChainRepairs: %s gets the minimal correction",
+  (_name, nodes, expected) => {
+    const fixes = siblingChainRepairs(nodes);
+    expect(fixes).toEqual(expected);
+    // applying the repairs makes the chain consistent -> second pass is clean
+    expect(siblingChainRepairs(applyFixes(nodes, fixes))).toEqual([]);
+  },
+);
 
 test("siblingChainRepairs: only the corrupt parent gets fixes", () => {
   const fixes = siblingChainRepairs([
@@ -60,6 +65,5 @@ test("siblingChainRepairs: only the corrupt parent gets fixes", () => {
     createNode({ id: "d1", parentId: "P2", prevSiblingId: null }),
     createNode({ id: "d2", parentId: "P2", prevSiblingId: null }),
   ]);
-  expect(fixes.length).toBeGreaterThan(0);
-  expect(fixes.every((f) => f.id === "d1" || f.id === "d2")).toBe(true);
+  expect(fixes).toEqual([{ id: "d2", prevSiblingId: "d1" }]);
 });

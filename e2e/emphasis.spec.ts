@@ -36,108 +36,75 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await placeCaret(text(page, id), target);
 }
 
-test("a *run* folds to <em> with the marker hidden and the source in data-src", async ({
+test("folded emphasis preserves each delimiter, flat precedence, and literal near-misses", async ({
   page,
 }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "a *hi* b" },
-  ]);
-  await expect(run(page, "n", "em")).toHaveText("hi");
+  const sources = [
+    ["asterisk", "a *hi* b"],
+    ["underscore", "a _hi_ b"],
+    ["intraword", "call foo_bar_baz()"],
+    ["kinds", "**b** ~~s~~ ~u~"],
+    ["bold", "**bold**"],
+    ["triple", "***x***"],
+    ["unclosed", "*unclosed"],
+    ["mixed", "*i* and **b**"],
+  ];
+  await load(
+    page,
+    sources.map(([id, source], i) => ({
+      id: id!,
+      parentId: null,
+      prevSiblingId: i ? sources[i - 1]![0]! : null,
+      text: source!,
+    })),
+  );
+  await expect(run(page, "asterisk", "em")).toHaveText("hi");
   // Folded = one atom: contenteditable=false, full source in data-src, markers
   // NOT in the DOM text (the visible line reads "a hi b").
-  await expect(run(page, "n", "em")).toHaveAttribute("data-src", "*hi*");
-  await expect(run(page, "n", "em")).toHaveAttribute(
+  await expect(run(page, "asterisk", "em")).toHaveAttribute("data-src", "*hi*");
+  await expect(run(page, "asterisk", "em")).toHaveAttribute(
     "contenteditable",
     "false",
   );
-  await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
-});
-
-test("a _run_ folds to the same <em> as *run* (underscore italic)", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "a _hi_ b" },
-  ]);
-  await expect(run(page, "n", "em")).toHaveText("hi");
+  await expect.poll(() => text(page, "asterisk").textContent()).toBe("a hi b");
+  await expect(run(page, "underscore", "em")).toHaveText("hi");
   // Same folded atom shape as the asterisk form: source in data-src (`_hi_`),
   // markers hidden (the visible line reads "a hi b").
-  await expect(run(page, "n", "em")).toHaveAttribute("data-src", "_hi_");
-  await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
-});
-
-test("intraword underscores are NOT emphasis (snake_case stays literal)", async ({
-  page,
-}) => {
-  await load(page, [
-    {
-      id: "n",
-      parentId: null,
-      prevSiblingId: null,
-      text: "call foo_bar_baz()",
-    },
-  ]);
-  await expect(run(page, "n", "em")).toHaveCount(0);
+  await expect(run(page, "underscore", "em")).toHaveAttribute(
+    "data-src",
+    "_hi_",
+  );
   await expect
-    .poll(() => text(page, "n").textContent())
+    .poll(() => text(page, "underscore").textContent())
+    .toBe("a hi b");
+  await expect(run(page, "intraword", "em")).toHaveCount(0);
+  await expect
+    .poll(() => text(page, "intraword").textContent())
     .toBe("call foo_bar_baz()");
-});
-
-test("**bold**, ~~strike~~, ~underline~ each fold into their host tag", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "**b** ~~s~~ ~u~" },
-  ]);
-  await expect(run(page, "n", "strong")).toHaveText("b");
-  await expect(run(page, "n", "del")).toHaveText("s");
-  await expect(run(page, "n", "u")).toHaveText("u");
+  await expect(run(page, "kinds", "strong")).toHaveText("b");
+  await expect(run(page, "kinds", "del")).toHaveText("s");
+  await expect(run(page, "kinds", "u")).toHaveText("u");
   // All markers hidden while blurred.
-  await expect.poll(() => text(page, "n").textContent()).toBe("b s u");
-});
-
-test("prefix disambiguation: **bold** wins over *italic* on the same span", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "**bold**" },
-  ]);
-  await expect(run(page, "n", "strong")).toHaveText("bold");
-  await expect(run(page, "n", "em")).toHaveCount(0);
-});
-
-test("flat-v1: `***triple***` does not nest -- bold wins, outer `*` is literal", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "***x***" },
-  ]);
-  await expect(run(page, "n", "strong")).toHaveText("x");
+  await expect.poll(() => text(page, "kinds").textContent()).toBe("b s u");
+  await expect(run(page, "bold", "strong")).toHaveText("bold");
+  await expect(run(page, "bold", "em")).toHaveCount(0);
+  await expect(run(page, "triple", "strong")).toHaveText("x");
   // The visible text is "*x*" (one literal `*` on each side of the bold run).
-  await expect.poll(() => text(page, "n").textContent()).toBe("*x*");
+  await expect.poll(() => text(page, "triple").textContent()).toBe("*x*");
+  await expect(run(page, "unclosed", "em")).toHaveCount(0);
+  await expect
+    .poll(() => text(page, "unclosed").textContent())
+    .toBe("*unclosed");
+  await expect(run(page, "mixed", "em")).toHaveText("i");
+  await expect(run(page, "mixed", "strong")).toHaveText("b");
 });
 
-test("an unclosed marker renders as literal text", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "*unclosed" },
-  ]);
-  await expect(run(page, "n", "em")).toHaveCount(0);
-  await expect.poll(() => text(page, "n").textContent()).toBe("*unclosed");
-});
-
-test("two emphasis kinds on one line coexist", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "*i* and **b**" },
-  ]);
-  await expect(run(page, "n", "em")).toHaveText("i");
-  await expect(run(page, "n", "strong")).toHaveText("b");
-});
-
-test("caret on the run reveals the markers as REAL text (not an atom)", async ({
+test("caret reveals real markers, edits inside the fence, then refolds on blur", async ({
   page,
 }) => {
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "*italics*" },
+    { id: "b", parentId: null, prevSiblingId: "n", text: "plain" },
   ]);
   // Focus, then drop the caret at the run's end (offset 9). Being in [0, 9]
   // reveals it.
@@ -149,18 +116,6 @@ test("caret on the run reveals the markers as REAL text (not an atom)", async ({
   await expect(text(page, "n").locator(".emphasis-reveal")).toHaveCount(1);
   await expect(text(page, "n").locator(".md-punct")).toHaveCount(2);
   await expect(run(page, "n", "em")).not.toHaveAttribute("data-src", /.*/);
-});
-
-test("the caret lands INSIDE the closing fence -- `*italics|*` is reachable", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "*italics*" },
-  ]);
-  await text(page, "n").click();
-  // Reveal first (caret at the end).
-  await caretAtSource(page, "n", 9);
-  await expect.poll(() => text(page, "n").textContent()).toBe("*italics*");
   // Now place the caret at source offset 8 -- BETWEEN the interior and the
   // closing `*` (the `*italics|*` position Cam specified). If the marker were
   // a virtual/CSS pseudo-element this position would be unreachable; because
@@ -170,19 +125,9 @@ test("the caret lands INSIDE the closing fence -- `*italics|*` is reachable", as
   await expect.poll(() => text(page, "n").textContent()).toBe("*italicsZ*");
   // Still one bold... italic run -- the interior grew, the marker stayed put.
   await expect(run(page, "n", "em")).toHaveText("italicsZ");
-});
-
-test("moving the caret away re-folds the run", async ({ page }) => {
-  await load(page, [
-    { id: "a", parentId: null, prevSiblingId: null, text: "*italics*" },
-    { id: "b", parentId: null, prevSiblingId: "a", text: "plain" },
-  ]);
-  await text(page, "a").click();
-  await caretAtSource(page, "a", 9);
-  await expect.poll(() => text(page, "a").textContent()).toBe("*italics*");
   // Focus the sibling: the first run folds again (markers hidden).
   await text(page, "b").click();
-  await expect.poll(() => text(page, "a").textContent()).toBe("italics");
+  await expect.poll(() => text(page, "n").textContent()).toBe("italicsZ");
 });
 
 test("Cmd+B wraps a selection in **bold**", async ({ page }) => {

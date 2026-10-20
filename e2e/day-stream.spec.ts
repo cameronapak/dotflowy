@@ -294,8 +294,14 @@ test.describe("day navigation on touch", () => {
           await route.fallback();
         },
       );
+      const releaseSnapshot = controller.holdSnapshots();
       await page.reload();
+      // Deliver nodes after the editor mounts empty, before the daily index.
+      // Focus must wait for those rows to enter the presentation index too.
+      await page.getByRole("status", { name: "Loading outline" }).waitFor();
+      releaseSnapshot();
       await expect(last).toHaveText("Entry 79 appended");
+      await expect(last).toBeFocused();
       releaseIndex();
       await expect
         .poll(() =>
@@ -381,6 +387,7 @@ test.describe("touch momentum", () => {
       page,
       context,
     }) => {
+      if (input === "pointer") await page.clock.install();
       await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
       const days = Array.from({ length: 22 }, (_, i) => ({
         id: `note-${i}`,
@@ -525,6 +532,8 @@ test.describe("touch momentum", () => {
             await new Promise(requestAnimationFrame);
           }
         });
+        // A paused scrollbar drag is still held input, not an idle gesture.
+        await page.clock.runFor(300);
         await page.mouse.up();
       }
       // CDP touch dispatch does not produce reliable native inertia. Model the
@@ -628,6 +637,7 @@ test("row-targeted navigation into a long day keeps the target in view", async (
     },
   );
   await page.goto("/entry-79");
+  await page.locator(".zoomed-title").waitFor();
   await expect(page.locator(".zoomed-title")).toHaveText("Entry 79");
   await page.keyboard.press("ControlOrMeta+,");
   const last = text(page, "entry-79");
@@ -740,12 +750,13 @@ test("a cold link to ?day= opens on that day and keeps it in the URL", async ({
   page,
 }) => {
   const LATER = "2030-07-12";
+  await page.clock.install();
   await seedOutline(page, TREE, { kv: KV });
   await openSeededOutline(page, { path: `/the-day?day=${LATER}` });
   await expect(section(page, LATER, "placeholder")).toBeInViewport();
   await expect(pill(page, LATER)).toHaveAttribute("data-selected", "");
-  // Past the URL debounce, the link's destination is still there.
-  await page.waitForTimeout(800);
+  // Advance beyond the URL debounce without sleeping in real time.
+  await page.clock.runFor(1_000);
   await expect(page).toHaveURL(new RegExp(`/the-day\\?day=${LATER}$`));
 });
 

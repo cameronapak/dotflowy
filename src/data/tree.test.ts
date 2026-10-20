@@ -212,7 +212,14 @@ describe("countSubtreeNodes + planRemoveSubtrees", () => {
   test("single root: deletes children-before-parent, repoints the follower", () => {
     const index = fixture();
     const plan = planRemoveSubtrees(index, ["p"]);
-    expect(plan.deleteIds).toHaveLength(6);
+    expect([...plan.deleteIds].sort()).toEqual([
+      "a",
+      "b",
+      "b1",
+      "b2",
+      "c",
+      "p",
+    ]);
     // reverse pre-order: the root is deleted LAST, every child before its parent
     expect(plan.deleteIds[plan.deleteIds.length - 1]).toBe("p");
     expect(plan.deleteIds.indexOf("b1")).toBeLessThan(
@@ -228,7 +235,7 @@ describe("countSubtreeNodes + planRemoveSubtrees", () => {
   test("contiguous run: the survivor walks the whole doomed chain to its head", () => {
     const index = fixture();
     const plan = planRemoveSubtrees(index, ["a", "b"]);
-    expect(plan.deleteIds).toHaveLength(4);
+    expect([...plan.deleteIds].sort()).toEqual(["a", "b", "b1", "b2"]);
     // c followed b; a and b are both doomed -> c becomes the head (null prev)
     expect(plan.repoints).toEqual([{ id: "c", prevSiblingId: null }]);
   });

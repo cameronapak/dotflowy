@@ -26,7 +26,7 @@ async function load(
   await openSeededOutline(page, { anchorId: tree[0]!.id });
 }
 
-test("ArrowDown walks focus through every visible bullet, top to bottom", async ({
+test("ArrowDown and ArrowUp walk every visible bullet and hold at both boundaries", async ({
   page,
 }) => {
   await load(page);
@@ -43,18 +43,7 @@ test("ArrowDown walks focus through every visible bullet, top to bottom", async 
   // Past the last bullet there's nowhere to go -- focus must hold, not jump.
   await page.keyboard.press("ArrowDown");
   await expect(text(page, "charlie")).toBeFocused();
-});
-
-test("ArrowUp walks focus back up through every visible bullet", async ({
-  page,
-}) => {
-  await load(page);
-
-  const order = ["charlie", "bravo", "alpha-2", "alpha-1", "alpha"];
-  await text(page, order[0]!).click();
-  await expect(text(page, order[0]!)).toBeFocused();
-
-  for (let i = 1; i < order.length; i++) {
+  for (let i = order.length - 2; i >= 0; i--) {
     await page.keyboard.press("ArrowUp");
     await expect(text(page, order[i]!)).toBeFocused();
   }

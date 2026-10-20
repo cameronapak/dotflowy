@@ -5,7 +5,13 @@
 // beside the float so the caret renders after the checkbox (see styles.css).
 import { expect, test } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 const TREE: SeedNode[] = [
   { id: "t1", parentId: null, prevSiblingId: null, text: "", isTask: true },
@@ -13,8 +19,7 @@ const TREE: SeedNode[] = [
 
 test("empty task caret sits to the right of the checkbox", async ({ page }) => {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(text(page, "t1")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "t1" });
 
   // Focus the empty task and place the caret in it.
   await text(page, "t1").click();

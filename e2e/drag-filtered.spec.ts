@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Drag-reorder while a ?q= filter is active (issue #244 / the ADR 0047
 // amendment). Before the fix, buildRows passed `filter: null`, so the drag's
@@ -50,7 +50,10 @@ const visibleOrder = (page: Page) =>
 
 async function load(page: Page, tree: SeedNode[], query: string) {
   await seedOutline(page, tree);
-  await page.goto(`/?q=${encodeURIComponent(query)}`);
+  await openSeededOutline(page, {
+    path: `/?q=${encodeURIComponent(query)}`,
+    anchorId: tree[0]!.id,
+  });
 }
 
 test("a drop between two visible rows with hidden siblings lands after the visible predecessor", async ({
@@ -110,6 +113,7 @@ test("a drop between two visible rows with hidden siblings lands after the visib
   // the hidden siblings -- immediately after the visible predecessor.
   await committed;
   await page.goto("/");
+  await page.locator('li[data-node-id="S1"] .node-text').waitFor();
   await expect(page.locator('li[data-node-id="V1"]')).toBeVisible();
   await expect
     .poll(() => visibleOrder(page))
@@ -169,6 +173,7 @@ test("a drop that lands the node hidden discloses with a toast and the node vani
   // ...but present once the filter clears, now a child of P.
   await committed;
   await page.goto("/");
+  await page.locator('li[data-node-id="A"] .node-text').waitFor();
   const c = page.locator('li[data-node-id="C"]');
   await expect(c).toBeVisible();
   await expect(c).toHaveAttribute("data-parent-id", "P");

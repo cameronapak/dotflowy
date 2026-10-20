@@ -88,6 +88,13 @@ test("a fresh account is seeded silently -- no badge for a release it never miss
   // on day one, that the badge isn't about change.
   await expect.poll(() => writes).toEqual([LATEST]);
   await expect(badge(page)).toHaveCount(0);
+
+  await page.getByTitle("More").click();
+  await whatsNewItem(page).click();
+  await expect(dialog(page)).toBeVisible();
+  await expect(page.getByTestId("changelog-release").first()).toContainText(
+    LATEST,
+  );
 });
 
 test("a caught-up account shows no badge, and does not re-seed", async ({
@@ -103,23 +110,7 @@ test("a caught-up account shows no badge, and does not re-seed", async ({
 
   await expect(badge(page)).toHaveCount(0);
   expect(writes).toEqual([]);
-});
 
-test("the More menu opens the dialog, newest release first", async ({
-  page,
-}) => {
-  await load(page);
-  await page.getByTitle("More").click();
-  await whatsNewItem(page).click();
-
-  await expect(dialog(page)).toBeVisible();
-  await expect(page.getByTestId("changelog-release").first()).toContainText(
-    LATEST,
-  );
-});
-
-test("Cmd+K opens the dialog", async ({ page }) => {
-  await load(page);
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("changelog");
   await page.keyboard.press("Enter");

@@ -26,19 +26,6 @@ const exportNodes = (nodes: Node[], rootId: string | null = null): string =>
 const reimport = (opml: string): OpmlImportResult =>
   Effect.runSync(parseOpml(opml));
 
-test("preserves the Embed kind and URL", () => {
-  const nodes = [
-    createNode({
-      id: "embed",
-      text: "https://example.com/post/1",
-      kind: "embed",
-    }),
-  ];
-  expect(exportNodes(nodes, "embed")).toContain(
-    '_kind="embed" text="https://example.com/post/1"',
-  );
-});
-
 test("document shape: shell, present-iff-true flags, no view state, zoom scope", () => {
   const nodes = [
     createNode({
@@ -62,6 +49,12 @@ test("document shape: shell, present-iff-true flags, no view state, zoom scope",
       text: "prose",
       kind: "paragraph",
     }),
+    createNode({
+      id: "embed",
+      prevSiblingId: "a",
+      text: "https://example.com/post/1",
+      kind: "embed",
+    }),
   ];
   const out = exportOpml(buildTreeIndex(nodes), null, { title: "my export" });
 
@@ -71,8 +64,9 @@ test("document shape: shell, present-iff-true flags, no view state, zoom scope",
   expect(out).toContain(
     '<outline _complete="true" _task="true" text="bravo" />',
   );
-  // `_kind` only for a paragraph (ADR 0045).
+  // Paragraph and Embed kinds carry their explicit export identities.
   expect(out).toContain('<outline _kind="paragraph" text="prose" />');
+  expect(out).toContain('_kind="embed" text="https://example.com/post/1"');
   // The parent has no flag set, so no attribute noise -- and its view state
   // and provenance stay out of the file.
   expect(out).toContain('<outline text="alpha">');
@@ -108,7 +102,7 @@ test("escaping: a newline in text is &#10;", () => {
   );
 });
 
-test.each<[string, string, string[]]>([
+test.each<[string, string, string[], string[]?]>([
   [
     "emphasis, code, and links project to Workflowy HTML",
     "**b** *i* ~u~ ~~s~~ `c` [l](https://e.com)",
@@ -133,6 +127,7 @@ test.each<[string, string, string[]]>([
       "&lt;mark class=&quot;colored bc-sky&quot;&gt;plain&lt;/mark&gt;",
       "&lt;mark class=&quot;colored bc-red&quot;&gt;hot&lt;/mark&gt;",
     ],
+    ["🔴"],
   ],
   [
     "the date token rebuilds <time start...> with a regenerated display",
@@ -145,6 +140,7 @@ test.each<[string, string, string[]]>([
     "the token time carries into startHour",
     "[[2024-02-03 13:00]]",
     ["startHour=&quot;13&quot;", "at 1:00pm"],
+    ["startMinute"],
   ],
   [
     "Bible refs project to route.bible links",
@@ -156,18 +152,10 @@ test.each<[string, string, string[]]>([
     "#tag and a lone * star",
     ['text="#tag and a lone * star"'],
   ],
-])("inline projection: %s", (_name, text, fragments) => {
+])("inline projection: %s", (_name, text, fragments, forbidden = []) => {
   const out = exportNodes([createNode({ id: "a", text })]);
   for (const fragment of fragments) expect(out).toContain(fragment);
-});
-
-test("inline projection: a highlight's color emoji and a :00 minute stay out", () => {
-  expect(
-    exportNodes([createNode({ id: "a", text: "==🔴hot==" })]),
-  ).not.toContain("🔴");
-  expect(
-    exportNodes([createNode({ id: "a", text: "[[2024-02-03 13:00]]" })]),
-  ).not.toContain("startMinute");
+  for (const fragment of forbidden) expect(out).not.toContain(fragment);
 });
 
 test("inline projection: node links become app URLs labeled with flattened target text", () => {

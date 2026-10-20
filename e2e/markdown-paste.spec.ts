@@ -169,8 +169,7 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   page,
 }) => {
   const server = await seedOutline(page, one, { echoChunks: 2 });
-  await page.goto("/");
-  await expect(text(page, "n")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "n" });
   await caretAt(page, "n", 0);
   await page.evaluate(async () => {
     const path = "/src/data/collection.ts";
@@ -220,6 +219,7 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   // Reload verifies the persisted graph, not only the optimistic DOM.
   await page.reload();
+  await text(page, "n").waitFor({ state: "visible" });
   await expect(text(page, "n")).toHaveText("Line 0");
   expect(authoring(await saved())).toEqual(pasted);
 });
@@ -283,6 +283,7 @@ test("remaining roots become the title's prepended children", async ({
   ]);
   await page.goto("/root");
   const title = page.locator("h2.zoomed-title .node-text");
+  await title.waitFor({ state: "visible" });
   await expect(title).toHaveText("Root");
 
   await placeCaret(title, "end");

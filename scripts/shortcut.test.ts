@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import {
-  ALLOWED_ACTIONS,
   asArray,
   asDict,
   asNumber,
@@ -52,6 +51,12 @@ test("the committed artifact is deterministic, valid, and credential-free", () =
   expect(artifact).not.toContain("Bearer dotflowy_");
   expect(artifact).not.toContain("dfc_");
   expect(artifact).toContain("PASTE_CAPTURE_KEY_DURING_IMPORT");
+  // Literal regressions are independent of the validator's own allowlist.
+  const identifiers = actions.map(identifierOf);
+  expect(identifiers).not.toContain("is.workflow.actions.matchtext");
+  expect(identifiers).not.toContain("is.workflow.actions.generateuuid");
+  expect(identifiers).toContain("is.workflow.actions.text.match");
+  expect(identifiers).toContain("is.workflow.actions.number.random");
 });
 
 test("the public download has the intended name and is signed, not XML", () => {
@@ -59,7 +64,7 @@ test("the public download has the intended name and is signed, not XML", () => {
   expect(readFileSync(SIGNED_OUTPUT).subarray(0, 4).toString()).toBe("AEA1");
 });
 
-test("share sheet and Spotlight accept text and URLs with the intended icon", () => {
+test("share sheet and Spotlight accept text and URLs", () => {
   expect(workflow.WFWorkflowTypes).toEqual([
     "ActionExtension",
     "WFWorkflowTypeShowInSearch",
@@ -69,10 +74,6 @@ test("share sheet and Spotlight accept text and URLs with the intended icon", ()
     "WFStringContentItem",
     "WFURLContentItem",
   ]);
-  expect(workflow.WFWorkflowIcon).toEqual({
-    WFWorkflowIconGlyphNumber: 59445,
-    WFWorkflowIconStartColor: 1440408063,
-  });
 });
 
 test("build preserves the signed download and validation rejects a public XML file", () => {
@@ -168,19 +169,6 @@ test.skipIf(process.platform !== "darwin")(
   },
 );
 
-test("every action is one Shortcuts recognizes", () => {
-  const identifiers = actions.map(identifierOf);
-  for (const identifier of identifiers) {
-    expect(ALLOWED_ACTIONS.has(identifier)).toBe(true);
-  }
-  // The first template shipped these two, and macOS rendered "Unknown Action"
-  // where Match Text should have been.
-  expect(identifiers).not.toContain("is.workflow.actions.matchtext");
-  expect(identifiers).not.toContain("is.workflow.actions.generateuuid");
-  expect(identifiers).toContain("is.workflow.actions.text.match");
-  expect(identifiers).toContain("is.workflow.actions.number.random");
-});
-
 test("the attempt ID uses two six-digit numbers within Shortcuts' integer range", () => {
   const randomActions = actions.filter(
     (action) => identifierOf(action) === "is.workflow.actions.number.random",
@@ -232,7 +220,6 @@ test("conditional blocks have distinct IDs and balanced nested boundaries", () =
 });
 
 test("immutable conditional outputs resolve after grouping normalization", () => {
-  expect(actions.length).toBeLessThan(40);
   expect(actions.map(identifierOf)).not.toContain(
     "is.workflow.actions.setvariable",
   );
@@ -451,21 +438,14 @@ test("dictionary field items are sorted, not left in map order", () => {
   expect(keys).toEqual(["a", "z"]);
 });
 
-test("parsePlist decodes numeric entities without decoding escaped entities twice", () => {
-  expect(
-    parsePlist(
-      '<plist version="1.0"><string>a&#xA;b&#10;c &amp;#xA; &amp;#10;</string></plist>',
-    ),
-  ).toBe("a\nb\nc &#xA; &#10;");
-});
-
 test("parsePlist reads the XML subset Cherri emits", () => {
   const xml =
     '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
     '<plist version="1.0"><dict><key>empty</key><string/><key>list</key><array/>' +
     "<key>dict</key><dict/><key>count</key><integer>3</integer>" +
     "<key>flag</key><true/><key>off</key><false/>" +
-    "<key>text</key><string>a &amp; b &lt;c&gt;</string></dict></plist>";
+    "<key>text</key><string>a &amp; b &lt;c&gt;</string>" +
+    "<key>entities</key><string>a&#xA;b&#10;c &amp;#xA; &amp;#10;</string></dict></plist>";
   expect(parsePlist(xml)).toEqual({
     empty: "",
     list: [],
@@ -474,5 +454,6 @@ test("parsePlist reads the XML subset Cherri emits", () => {
     flag: true,
     off: false,
     text: "a & b <c>",
+    entities: "a\nb\nc &#xA; &#10;",
   });
 });

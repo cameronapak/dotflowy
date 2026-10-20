@@ -101,7 +101,7 @@ test("crafted sample: summary discloses degradations; import lands one collapsed
   // after the seeded tree, created collapsed — none of its 23 descendants
   // render. Surviving the reload proves the batch persisted to the (mock)
   // server store, not just the optimistic overlay.
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
   const container = containerRow(page);
   await expect(container).toHaveCount(1);
@@ -136,6 +136,7 @@ test("one Cmd+Z removes the whole import (single pre-batch capture)", async ({
   }
   // And the undo's restore batch persisted: a reload still shows no container.
   await page.reload();
+  await text(page, "alpha").waitFor();
   await expect(text(page, "alpha")).toBeVisible();
   await expect(containerRow(page)).toHaveCount(0);
   await expect(page.locator("li[data-node-id]")).toHaveCount(
@@ -150,7 +151,7 @@ test("a multi-slice import (>500 nodes) applies in yielding slices yet lands as 
   // "saving" phase — deterministic proof the sliced optimistic apply
   // finished (applied === count) while the single wire batch is in flight.
   await seedOutline(page, STANDARD_TREE, { postDelayMs: 600 });
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
 
   // 1,250 bullets -> 1 container slice + 3 chunk slices of <=500.
@@ -176,7 +177,7 @@ test("a multi-slice import (>500 nodes) applies in yielding slices yet lands as 
 
   // ONE collapsed container, nothing rendered from inside it, and the whole
   // batch persisted to the (mock) server store across a reload.
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
   await expect(containerRow(page)).toHaveCount(1);
   await expect(
@@ -206,25 +207,10 @@ test("a truncated file shows the parse error (line/column) and writes nothing", 
   await expect(containerRow(page)).toHaveCount(0);
   // Reload: the (mock) server store received no write at all.
   await page.reload();
+  await text(page, "alpha").waitFor();
   await expect(text(page, "alpha")).toBeVisible();
   await expect(containerRow(page)).toHaveCount(0);
   await expect(page.locator("li[data-node-id]")).toHaveCount(
     STANDARD_TREE.length,
   );
-});
-
-test("Cmd+K runs the same Import OPML action (the ADR 0034 bridge)", async ({
-  page,
-}) => {
-  await load(page);
-  await page.keyboard.press("ControlOrMeta+k");
-  const input = page.getByPlaceholder(/Search nodes and actions/);
-  await expect(input).toBeVisible();
-  await input.fill("import opml");
-  await expect(page.getByRole("option", { name: /Import OPML/ })).toBeVisible();
-  const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("option", { name: /Import OPML/ }).click();
-  // The action fired the same hidden file input — the picker opening IS the
-  // proof both surfaces share one entry point.
-  await chooserPromise;
 });

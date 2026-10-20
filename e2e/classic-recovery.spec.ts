@@ -6,7 +6,7 @@ import {
   planClassicRecovery,
   planExperimentalPrimaryRecovery,
 } from "../worker/lunora-recovery";
-import { seedOutline } from "./fixtures";
+import { openSeededOutline, seedOutline } from "./fixtures";
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -98,12 +98,10 @@ for (const authority of ["classic", "experimental"] as const) {
           : value,
       );
       await seedOutline(page, [current, ...imported]);
-      await page.goto("/");
+      await openSeededOutline(page, { anchorId: current.id });
       const text = (id: string) =>
         page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-      await expect(text(current.id)).toHaveText(current.text, {
-        timeout: 15_000,
-      });
+      await expect(text(current.id)).toHaveText(current.text);
       await expect(text(plan.rootId!)).toHaveText(
         authority === "classic"
           ? "Recovered experimental content"
@@ -131,6 +129,7 @@ for (const authority of ["classic", "experimental"] as const) {
       );
       await expect(text(current.id)).toHaveText(current.text);
       await page.reload();
+      await text(current.id).waitFor({ state: "visible" });
       await expect(text(alternative.id)).toHaveText(
         "Edited recovered alternative",
       );

@@ -200,7 +200,7 @@ test("only today's note gets the distinct badge; other days stay plain", async (
       },
     },
   );
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "past-day" });
 
   const badge = page.locator("[data-daily-date]");
   await expect(badge).toBeVisible();
@@ -226,7 +226,7 @@ test("the zoomed-in day note carries its date badge in the title", async ({
   await expect(titleBadge).toHaveAttribute("data-daily-today", "");
 });
 
-test("deleting the protected Daily container shakes it instead of removing it", async ({
+test("Daily rejects deletion with feedback; ordinary nodes still delete", async ({
   page,
 }) => {
   await load(page);
@@ -263,6 +263,13 @@ test("deleting the protected Daily container shakes it instead of removing it", 
 
   // The class clears itself when the animation ends (so it can re-trigger).
   await expect(container).not.toHaveClass(/node-rejected/, { timeout: 4000 });
+
+  // The same gesture DOES delete an ordinary node -- the guard is specific.
+  await page
+    .locator('li[data-node-id="bravo"] > .outline-row .node-text')
+    .click();
+  await page.keyboard.press(`${modifier()}+Shift+Backspace`);
+  await expect(page.locator('li[data-node-id="bravo"]')).toHaveCount(0);
 });
 
 test("an existing Daily container shows its lock on first load, before any zoom", async ({
@@ -587,7 +594,7 @@ test("Cmd+K 'today' surfaces the existing note by its label, with no dup action"
   await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
 });
 
-test("Cmd+K NL / ISO go-to-date creates a missing future day (ADR 0055)", async ({
+test("Cmd+K creates and reopens an ISO day, then creates a prose date", async ({
   page,
 }) => {
   await load(page);
@@ -621,33 +628,18 @@ test("Cmd+K NL / ISO go-to-date creates a missing future day (ADR 0055)", async 
   await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
     "2031",
   );
-});
 
-test("Cmd+K 'August 12th' prose creates that day's note (ADR 0055)", async ({
-  page,
-}) => {
-  await load(page);
-  // Prose without year → chrono resolves against "now"; pin the year so the
-  // assertion stays stable (August 12 of the current year, or next if past).
-  const now = new Date();
-  const year =
-    now.getMonth() > 7 || (now.getMonth() === 7 && now.getDate() > 12)
-      ? now.getFullYear() + 1
-      : now.getFullYear();
-  await openSwitcherAndType(page, `August 12 ${year}`);
-  const go = page.getByRole("option", {
-    name: new RegExp(`Go to .*${year}`),
-  });
-  await expect(go).toBeVisible();
-  await go.click();
+  // A different date must still offer creation through the prose parser.
+  await goHome(page);
+  await openSwitcherAndType(page, "August 12 2032");
+  const prose = page.getByRole("option", { name: /Go to .*2032/ });
+  await expect(prose).toBeVisible();
+  await prose.click();
   await expect(page).toHaveURL(/\/[^/]+$/);
-  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-    String(year),
-  );
-  await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
-    "August",
-  );
-  await expect(page.locator("h2.zoomed-title .node-text")).toContainText("12");
+  const title = page.locator("h2.zoomed-title .node-text");
+  await expect(title).toContainText("2032");
+  await expect(title).toContainText("August");
+  await expect(title).toContainText("12");
 });
 
 test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
@@ -714,10 +706,7 @@ test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
     },
   );
 
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await todayButton(page).click();
 
@@ -768,10 +757,7 @@ test("orphaned kv mapping materializes the node instead of zooming to a ghost", 
     },
   });
 
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await todayButton(page).click();
 
@@ -789,29 +775,7 @@ test("orphaned kv mapping materializes the node instead of zooming to a ghost", 
   await expect(page.locator("[data-daily-date]")).toHaveText("Today");
 });
 
-test("the Daily container resists deletion; ordinary nodes still delete", async ({
-  page,
-}) => {
-  await load(page);
-  await todayButton(page).click();
-  // Settle the async create+zoom before going home (see the other Today tests).
-  await expect(page).toHaveURL(/\/[^/]+$/);
-  await goHome(page);
-
-  // Force-delete (Mod+Shift+Backspace) the protected container: a no-op.
-  await rowWithText(page, "Daily").locator(".node-text").click();
-  await page.keyboard.press(`${modifier()}+Shift+Backspace`);
-  await expect(rowWithText(page, "Daily")).toBeVisible();
-
-  // The same gesture DOES delete an ordinary node -- the guard is specific.
-  await page
-    .locator('li[data-node-id="bravo"] > .outline-row .node-text')
-    .click();
-  await page.keyboard.press(`${modifier()}+Shift+Backspace`);
-  await expect(page.locator('li[data-node-id="bravo"]')).toHaveCount(0);
-});
-
-test("/today redirects to today's daily note, creating it on first visit", async ({
+test("/today creates today's note once and returns to it on a second visit", async ({
   page,
 }) => {
   await seedOutline(page, STANDARD_TREE);
@@ -827,14 +791,6 @@ test("/today redirects to today's daily note, creating it on first visit", async
   const titleBadge = page.locator("h2.zoomed-title [data-daily-date]");
   await expect(titleBadge).toBeVisible();
   await expect(titleBadge).toHaveAttribute("data-daily-today", "");
-});
-
-test("/today is idempotent: a second visit lands on the same note", async ({
-  page,
-}) => {
-  await seedOutline(page, STANDARD_TREE);
-  await page.goto("/today");
-  await expect(page).not.toHaveURL(/\/today$/, { timeout: 15000 });
   const firstUrl = page.url();
 
   await goHome(page);

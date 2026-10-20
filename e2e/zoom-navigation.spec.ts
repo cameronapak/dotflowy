@@ -63,6 +63,7 @@ test("Home preserves collapsed ancestors and leaves unrelated expanded nodes ope
   await expect(text(page, "other-child")).toBeVisible();
 
   await page.reload();
+  await text(page, "other-child").waitFor();
   await expect(chevron(page, "projects")).toHaveAttribute(
     "data-collapsed",
     "true",
@@ -157,8 +158,10 @@ test("explicit expansion and keyboard collapse persist across navigation and rel
     "true",
   );
   await page.goto("/dotflowy");
+  await page.locator(".zoomed-title-text").waitFor();
   await expect(text(page, "idea-one")).toBeVisible();
   await page.reload();
+  await page.locator(".zoomed-title-text").waitFor();
   await expect(text(page, "idea-one")).toBeVisible();
 
   await text(page, "ideas").click();
@@ -167,6 +170,7 @@ test("explicit expansion and keyboard collapse persist across navigation and rel
   await collapsed;
   await expect(text(page, "idea-one")).toHaveCount(0);
   await page.reload();
+  await page.locator(".zoomed-title-text").waitFor();
   await expect(chevron(page, "ideas")).toHaveAttribute(
     "data-collapsed",
     "true",

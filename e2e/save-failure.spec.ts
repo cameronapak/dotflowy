@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, STANDARD_TREE, text } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  STANDARD_TREE,
+  text,
+} from "./fixtures";
 
 // Every visible bullet's raw text in document order (empty new bullets show as
 // ""), so a rolled-back insert is observable by the count returning to normal.
@@ -22,8 +28,7 @@ test("a failed structural write toasts and reverts the optimistic bullet", async
 }) => {
   // Seed loads normally; only structural-batch POSTs fail from here on.
   await seedOutline(page, STANDARD_TREE, { failStructuralWrites: true });
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   const before = await orderedTexts(page);
 

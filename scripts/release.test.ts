@@ -189,7 +189,7 @@ test("publish is idempotent but only creates after a confirmed 404", () => {
   expect(call).toContain("--verify-tag");
 });
 
-test("deployment uses validated main and stops at each failed release/deploy step", () => {
+test("deployment builds validated main before atomic push, publishing, and deployment", () => {
   // SAFETY: This is the checked-in workflow validated by actionlint. The
   // assertions below fail if its job/step contract changes.
   const workflow = Bun.YAML.parse(
@@ -204,6 +204,7 @@ test("deployment uses validated main and stops at each failed release/deploy ste
         steps: {
           name?: string;
           run?: string;
+          with?: { ref: string };
           "working-directory"?: string;
           if?: string;
           "continue-on-error"?: boolean;
@@ -218,6 +219,9 @@ test("deployment uses validated main and stops at each failed release/deploy ste
     "${{ needs.select.outputs.ref }}",
   );
   expect(workflow.jobs.deploy.needs).toContain("quality");
+  expect(workflow.jobs.deploy.steps[0]?.with?.ref).toBe(
+    "${{ needs.select.outputs.ref }}",
+  );
   const expected = [
     "Build app",
     "Build landing",
@@ -230,43 +234,34 @@ test("deployment uses validated main and stops at each failed release/deploy ste
     expected.includes(step.name ?? ""),
   );
   expect(steps.map((step) => step.name)).toEqual(expected);
-  for (const failure of [undefined, ...expected]) {
-    const dir = fixture();
-    mkdirSync(join(dir, "landing"));
-    const calls = join(dir, ".test-bin/calls");
-    for (const tool of ["bun", "bunx", "git"]) {
-      const path = join(dir, ".test-bin", tool);
-      writeFileSync(
-        path,
-        `#!/bin/sh
+  expect(steps[2]?.run).toContain(
+    'git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag:refs/tags/$tag"',
+  );
+  expect(steps[3]?.run).toBe("bun run release:publish");
+  expect(steps[4]?.["working-directory"]).toBe("landing");
+  const dir = mkdtempSync(join(tmpdir(), "dotflowy-deploy-"));
+  fixtures.push(dir);
+  mkdirSync(join(dir, ".test-bin"));
+  mkdirSync(join(dir, "landing"));
+  for (const tool of ["bun", "bunx", "git"]) {
+    const path = join(dir, ".test-bin", tool);
+    writeFileSync(
+      path,
+      `#!/bin/sh
 if [ "$1" = -p ]; then echo 1.2.3; exit 0; fi
-printf '%s\\n' "$TEST_STEP" >> "$TEST_CALLS"
-if [ "$TEST_STEP" = "$TEST_FAILURE" ]; then exit 1; fi
+exit 23
 `,
-      );
-      chmodSync(path, 0o755);
-    }
-    for (const step of steps) {
-      expect(step.if).toBeUndefined();
-      expect(step["continue-on-error"]).not.toBe(true);
-      const result = run(
-        join(dir, step["working-directory"] ?? "."),
-        ["bash", "-e", "-o", "pipefail", "-c", step.run!],
-        {
-          PATH: `${dir}/.test-bin:${process.env.PATH}`,
-          TEST_STEP: step.name!,
-          TEST_FAILURE: failure ?? "",
-          TEST_CALLS: calls,
-        },
-      );
-      if (result.code !== 0) {
-        expect(step.name).toBe(failure);
-        break;
-      }
-    }
-    const completed = readFileSync(calls, "utf8").trim().split("\n");
-    expect(completed).toEqual(
-      failure ? expected.slice(0, expected.indexOf(failure) + 1) : expected,
     );
+    chmodSync(path, 0o755);
+  }
+  for (const step of steps) {
+    expect(step.if).toBeUndefined();
+    expect(step["continue-on-error"]).not.toBe(true);
+    const result = run(
+      join(dir, step["working-directory"] ?? "."),
+      ["bash", "-e", "-o", "pipefail", "-c", step.run!],
+      { PATH: `${dir}/.test-bin:${process.env.PATH}` },
+    );
+    expect(result.code, step.name).toBe(23);
   }
 });

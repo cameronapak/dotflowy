@@ -24,12 +24,13 @@ async function loadWithSpotlight(page: Page, on: boolean) {
 // Spotlight focus mode (ADR 0033): while a bullet is focused, every other row
 // dims to 0.3 and ONLY the focused bullet stays full (single-node -- ancestors
 // dim too). Pure CSS via `.spotlight-on:has(.node-text:focus)` + `:focus-within`.
-test("focusing a bullet lights only it and dims everything else", async ({
+test("the indicator stays visible while spotlight follows the caret and restores opacity on blur", async ({
   page,
 }) => {
   await loadWithSpotlight(page, true);
 
   // Mode is on, but with no caret in the outline nothing dims (`:has` fails).
+  await expect(indicator(page)).toBeVisible();
   await expect(row(page, "alpha")).toHaveCSS("opacity", "1");
   await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
 
@@ -43,26 +44,10 @@ test("focusing a bullet lights only it and dims everything else", async ({
   // ...as do a sibling and an unrelated top-level node.
   await expect(row(page, "alpha-2")).toHaveCSS("opacity", "0.3");
   await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
-});
-
-test("the lit bullet follows the caret", async ({ page }) => {
-  await loadWithSpotlight(page, true);
-
-  await text(page, "alpha-1").click();
-  await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
-  await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
 
   await text(page, "bravo").click();
   await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
   await expect(row(page, "alpha-1")).toHaveCSS("opacity", "0.3");
-});
-
-test("blurring the outline returns every row to full opacity", async ({
-  page,
-}) => {
-  await loadWithSpotlight(page, true);
-  await text(page, "alpha-1").click();
-  await expect(row(page, "bravo")).toHaveCSS("opacity", "0.3");
 
   // No caret -> `:has(.node-text:focus)` fails -> nothing is dimmed.
   // SAFETY: activeElement is Element | null; HTMLElement is the blur target.
@@ -71,6 +56,7 @@ test("blurring the outline returns every row to full opacity", async ({
   );
   await expect(row(page, "bravo")).toHaveCSS("opacity", "1");
   await expect(row(page, "alpha-1")).toHaveCSS("opacity", "1");
+  await expect(indicator(page)).toBeVisible();
 });
 
 test("zoomed in, the page title dims while a child bullet is focused", async ({
@@ -100,6 +86,7 @@ test("zoomed in, the page title dims while a child bullet is focused", async ({
 
 test("with the mode off, focusing dims nothing", async ({ page }) => {
   await loadWithSpotlight(page, false);
+  await expect(indicator(page)).toHaveCount(0);
   await text(page, "alpha-1").click();
   await expect(text(page, "alpha-1")).toBeFocused();
 
@@ -111,19 +98,6 @@ test("with the mode off, focusing dims nothing", async ({ page }) => {
 // caret is in the outline) AND the one-click off-switch. Its presence == the
 // mode is active; clicking it turns the mode off, so the chip disappears.
 const indicator = (page: Page) => page.locator("[data-spotlight-indicator]");
-
-test("is absent when spotlight is off", async ({ page }) => {
-  await loadWithSpotlight(page, false);
-  await expect(indicator(page)).toHaveCount(0);
-});
-
-test("is present at rest when spotlight is on (no caret needed)", async ({
-  page,
-}) => {
-  await loadWithSpotlight(page, true);
-  // No bullet focused: the dim shows nothing, but the chip still signals on.
-  await expect(indicator(page)).toBeVisible();
-});
 
 test("clicking it turns spotlight off: chip vanishes and dimming stops", async ({
   page,

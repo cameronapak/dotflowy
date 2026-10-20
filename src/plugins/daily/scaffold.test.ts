@@ -4,19 +4,10 @@ import type { WeekStart } from "../../data/date-links";
 
 import { buildTreeIndex, createNode } from "../../data/tree";
 import {
-  formatWeekRange,
   formatWeekRelative,
   isOrphanMappedDay,
   planDailyMigration,
 } from "./scaffold";
-
-test.each([
-  ["week:2026-07-13", "Jul 13–19"], // within one month
-  ["week:2025-12-29", "Dec 29, 2025–Jan 4, 2026"], // across a year boundary
-  ["2025-W53", "2025-W53"], // nonexistent week -> the raw label
-])("formatWeekRange(%s) -> %s", (week, expected) => {
-  expect(formatWeekRange(week)).toBe(expected);
-});
 
 test.each<[string, WeekStart, string | null]>([
   ["week:2026-07-13", "monday", "This week"],

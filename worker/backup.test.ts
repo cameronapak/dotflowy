@@ -13,7 +13,6 @@ import type { Node } from "../src/data/wire-schema";
 
 import {
   OutlineSnapshotSchema,
-  SNAPSHOT_VERSION,
   backupKey,
   backupKeyForDate,
   backupPrefix,
@@ -42,7 +41,7 @@ const NODE: Node = {
 };
 
 const SNAPSHOT = {
-  version: SNAPSHOT_VERSION,
+  version: 2,
   exportedAt: 1_700_000_000_000,
   seq: 42,
   nodes: [NODE],

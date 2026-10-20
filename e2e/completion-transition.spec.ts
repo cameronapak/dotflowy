@@ -133,7 +133,9 @@ test("keyboard completion shows the checked subtree, fades, closes the measured 
     addTop - (afterTop - taskTop),
     0,
   );
+  await page.clock.resume();
   await page.reload();
+  await text(page, "before").waitFor();
   await expect(row(page, "task")).toHaveCount(0);
 });
 

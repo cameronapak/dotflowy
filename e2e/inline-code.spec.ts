@@ -27,25 +27,19 @@ async function caretAtSource(page: Page, id: string, target: number) {
 
 const codeEl = (page: Page, id: string) => text(page, id).locator("code");
 
-test("a `run` folds to <code> with the backticks hidden and source in data-src", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "a `snip` b" },
-  ]);
-  await expect(codeEl(page, "n")).toHaveText("snip");
-  await expect(codeEl(page, "n")).toHaveAttribute("data-src", "`snip`");
-  await expect(codeEl(page, "n")).toHaveAttribute("contenteditable", "false");
-  // Backticks hidden while blurred: the visible line reads "a snip b".
-  await expect.poll(() => text(page, "n").textContent()).toBe("a snip b");
-});
-
-test("caret on the run reveals the backticks as REAL, dimmed text (not an atom)", async ({
+test("inline code folds, reveals real backticks, accepts an inside-fence edit, and refolds", async ({
   page,
 }) => {
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "`snip`" },
+    { id: "b", parentId: null, prevSiblingId: "n", text: "a `snip` b" },
   ]);
+  await expect(codeEl(page, "n")).toHaveText("snip");
+  await expect(codeEl(page, "n")).toHaveAttribute("data-src", "`snip`");
+  await expect(codeEl(page, "n")).toHaveAttribute("contenteditable", "false");
+  await expect.poll(() => text(page, "n").textContent()).toBe("snip");
+  await expect(codeEl(page, "b")).toHaveText("snip");
+  await expect.poll(() => text(page, "b").textContent()).toBe("a snip b");
   await text(page, "n").click();
   await caretAtSource(page, "n", 6); // end of `snip` (in [0, 6]) -> reveal
   await expect.poll(() => text(page, "n").textContent()).toBe("`snip`");
@@ -56,17 +50,6 @@ test("caret on the run reveals the backticks as REAL, dimmed text (not an atom)"
   );
   await expect(codeEl(page, "n").locator(".md-punct")).toHaveCount(2);
   await expect(codeEl(page, "n")).not.toHaveAttribute("data-src", /.*/);
-});
-
-test("the caret walks INSIDE the fence -- `snip|` before the closing backtick", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "`snip`" },
-  ]);
-  await text(page, "n").click();
-  await caretAtSource(page, "n", 6);
-  await expect.poll(() => text(page, "n").textContent()).toBe("`snip`");
   // Offset 5 = between the interior and the closing backtick. A real caret
   // stop only because the backtick is real text, not a CSS pseudo-element.
   await caretAtSource(page, "n", 5);
@@ -76,18 +59,8 @@ test("the caret walks INSIDE the fence -- `snip|` before the closing backtick", 
   // inside it).
   await expect.poll(() => text(page, "n").textContent()).toBe("`snipX`");
   await expect(codeEl(page, "n")).toHaveText("`snipX`");
-});
-
-test("moving the caret away re-folds the run", async ({ page }) => {
-  await load(page, [
-    { id: "a", parentId: null, prevSiblingId: null, text: "`snip`" },
-    { id: "b", parentId: null, prevSiblingId: "a", text: "plain" },
-  ]);
-  await text(page, "a").click();
-  await caretAtSource(page, "a", 6);
-  await expect.poll(() => text(page, "a").textContent()).toBe("`snip`");
   await text(page, "b").click();
-  await expect.poll(() => text(page, "a").textContent()).toBe("snip");
+  await expect.poll(() => text(page, "n").textContent()).toBe("snipX");
 });
 
 test("a #tag inside a code run stays code (precedence holds)", async ({

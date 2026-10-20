@@ -58,7 +58,7 @@ async function openSlashMenu(page: Page, id: string) {
   await expect(page.getByRole("listbox")).toBeVisible();
 }
 
-test("scrolls the active option into view as the highlight walks past the window", async ({
+test("keyboard scrolling keeps options visible and wrapping restores the top", async ({
   page,
 }) => {
   await openOutline(page);
@@ -82,14 +82,11 @@ test("scrolls the active option into view as the highlight walks past the window
   await expect.poll(menuField(page, "activeIndex")).toBe(8);
   await expect.poll(menuField(page, "scrollTop")).toBeGreaterThan(0);
   await expect.poll(menuField(page, "activeFullyVisible")).toBe(true);
-});
-
-test("wrapping to the last option scrolls to the bottom, and back to the first returns to the top", async ({
-  page,
-}) => {
-  await openOutline(page);
-  await openSlashMenu(page, "bravo");
   const { count } = (await menuState(page))!;
+  // Return to the first option before exercising wrap in both directions.
+  for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowUp");
+  await expect.poll(menuField(page, "activeIndex")).toBe(0);
+  await expect.poll(menuField(page, "scrollTop")).toBe(0);
 
   // ArrowUp from the first option wraps to the last (see `wrap` in slash-menu).
   await page.keyboard.press("ArrowUp");
@@ -125,17 +122,4 @@ test("a stationary cursor never steals the highlight while arrowing", async ({
   await expect.poll(menuField(page, "activeIndex")).toBe(11); // the keyboard won, not the cursor
   await expect.poll(menuField(page, "scrollTop")).toBeGreaterThan(0); // and the list really did scroll
   await expect.poll(menuField(page, "activeFullyVisible")).toBe(true);
-});
-
-test("a real pointer move still selects the option under the cursor", async ({
-  page,
-}) => {
-  await openOutline(page);
-  await openSlashMenu(page, "bravo");
-
-  const second = page.getByRole("option").nth(2);
-  const box = (await second.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-
-  await expect.poll(menuField(page, "activeIndex")).toBe(2);
 });

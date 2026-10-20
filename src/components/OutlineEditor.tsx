@@ -1372,10 +1372,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     };
     let gesture = false;
     let touching = false;
+    let pointing = false;
     let settle = 0;
     stopSnapRef.current = () => {
       gesture = false;
       touching = false;
+      pointing = false;
       deferPrependRef.current = false;
       window.clearTimeout(settle);
     };
@@ -1416,7 +1418,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       });
     };
     const onSettled = () => {
-      if (touching) return;
+      if (touching || pointing) return;
       deferPrependRef.current = false;
       maybeExtend();
       // The insertion's compensating scroll schedules the eventual snap.
@@ -1490,12 +1492,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     window.addEventListener("keydown", onKey, true);
     // Do not move a sticky control out from under the finger before its click.
     const onPointer = (e: PointerEvent) => {
+      pointing = true;
+      deferPrependRef.current = true;
+      window.clearTimeout(settle);
       if (
         !(e.target instanceof Element && headerRef.current?.contains(e.target))
       )
         releaseTitle();
     };
+    const onPointerEnd = () => {
+      pointing = false;
+      window.clearTimeout(settle);
+      settle = window.setTimeout(onSettled, 180);
+    };
     window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("pointerup", onPointerEnd, true);
+    window.addEventListener("pointercancel", onPointerEnd, true);
     window.addEventListener("click", releaseTitle, true);
     for (const event of ["beforeinput", "compositionstart", "input"])
       window.addEventListener(event, onEdit, true);
@@ -1511,6 +1523,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       window.removeEventListener("touchcancel", onTouchEnd);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("pointerup", onPointerEnd, true);
+      window.removeEventListener("pointercancel", onPointerEnd, true);
       window.removeEventListener("click", releaseTitle, true);
       for (const event of ["beforeinput", "compositionstart", "input"])
         window.removeEventListener(event, onEdit, true);
@@ -1581,6 +1595,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // same title-first jump as the header inside an existing stream.
   // Nodes can arrive before the stream's mapping on a cold load. Let stream
   // adoption replace that ordinary landing, including its offscreen focus.
+  // Wait for presentation to index the rows before consuming the one-shot
+  // landing: the sync snapshot can arrive after the editor has mounted empty.
   const landedLastRef = useRef<"outline" | "stream" | null>(null);
   useEffect(() => {
     if (
@@ -1589,7 +1605,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       pivotId ||
       !focusLast ||
       !rootId ||
-      loading
+      loading ||
+      !presentationReady
     )
       return;
     const children = childrenOf(getTreeIndex(), rootId).filter(
@@ -1614,6 +1631,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   }, [
     stream,
     loading,
+    presentationReady,
     rootId,
     focusLast,
     pivotId,

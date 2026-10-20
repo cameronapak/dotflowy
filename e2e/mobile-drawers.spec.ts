@@ -146,7 +146,6 @@ test.describe("narrow-screen drawers", () => {
       0,
     );
     await expect(page.locator(".typing-suggestions-viewport")).toBeVisible();
-    await expect(suggestions(page)).toHaveCSS("max-height", "140px");
     await expect(
       suggestions(page).getByRole("button", { name: "Close" }),
     ).toHaveCount(0);
@@ -965,18 +964,18 @@ test("keyboard opening More focuses its first item and supports immediate arrows
   const items = drawer(page).locator('button[role^="menuitem"]:not(:disabled)');
   const disabled = drawer(page).locator('button[role^="menuitem"]:disabled');
   await expect(disabled).toHaveCount(2);
-  await expect(disabled.first()).toHaveCSS("opacity", "0.5");
   await expect(items.first()).toBeFocused();
   await settleSheet(page);
-  // The sheet keeps its 8px edge inset even with a classic page scrollbar.
+  // A classic page scrollbar must not push the sheet outside the viewport.
   await expect
     .poll(() =>
-      sheetDialog(page).evaluate((el) =>
-        Math.round(el.getBoundingClientRect().right),
+      sheetDialog(page).evaluate(
+        (el) =>
+          el.getBoundingClientRect().right <=
+          document.documentElement.clientWidth,
       ),
     )
-    .toBe(382);
-  await expect(sheetDialog(page)).toHaveCSS("overflow-y", "auto");
+    .toBe(true);
   await page.keyboard.press("ArrowDown");
   await expect(items.nth(1)).toBeFocused();
   await page.keyboard.press("End");

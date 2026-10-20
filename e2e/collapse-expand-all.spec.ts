@@ -48,7 +48,7 @@ async function runMenuAction(page: Page, name: RegExp) {
 async function load(page: Page, path = "/", ready = text(page, "alpha")) {
   await seedOutline(page, TREE);
   await page.goto(path);
-  await expect(ready).toBeVisible();
+  await ready.waitFor({ state: "visible" });
 }
 
 test("Collapse all folds every nested bullet; Expand all restores them", async ({
