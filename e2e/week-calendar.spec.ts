@@ -766,6 +766,9 @@ test("dragging a node onto a day pill moves its subtree, stays put, and undoes i
   );
   await page.mouse.up();
   await expect(page.locator('output[aria-live="polite"]')).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Go", exact: true }),
+  ).toHaveCount(0);
 
   await dragNodeToDay(page, "move-me", OTHER);
   await expect(pill(page, OTHER)).toHaveAttribute(
@@ -776,7 +779,11 @@ test("dragging a node onto a day pill moves its subtree, stays put, and undoes i
   await page.mouse.up();
 
   await expect(page).toHaveURL(/\/the-day$/);
-  await expect(page.locator('output[aria-live="polite"]')).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: /Notifications/ })
+      .getByText(/Tuesday, June 11, 2030/),
+  ).toBeVisible();
   await expect(page.locator('li[data-node-id="move-me"]')).toHaveCount(0);
 
   // One undo restores the entire subtree to the source day.
@@ -854,7 +861,9 @@ test("a selected run can be dragged by a descendant into a missing day in order"
   );
   await page.mouse.up();
 
-  await expect(page.locator('output[aria-live="polite"]')).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Go", exact: true }),
+  ).toBeVisible();
   await expect(page).toHaveURL(/\/the-day$/);
   await page.getByRole("button", { name: "Go" }).click();
 

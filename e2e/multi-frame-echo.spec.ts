@@ -8,7 +8,12 @@
 // partial revert at any point.
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 const FLAT: SeedNode[] = [
   { id: "a", parentId: null, prevSiblingId: null, text: "alpha" },
@@ -58,8 +63,7 @@ test("optimistic overlay holds across a multi-frame batch echo", async ({
   // One batch -> 3 frames at ~250 / ~500 / ~750 ms; POST replies with the
   // FINAL seq immediately (mirrors applyBatch returning after commit).
   await seedOutline(page, FLAT, { echoDelayMs: 250, echoChunks: 3 });
-  await page.goto("/");
-  await expect(text(page, "a")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "a" });
 
   // Select the [b, c, d] run and indent it under `a` -- >=3 ops in ONE batch.
   await text(page, "d").click();
@@ -95,7 +99,7 @@ test("optimistic overlay holds across a multi-frame batch echo", async ({
   // Hard proof the SYNCED layer (not a lingering overlay) holds the final
   // shape: reload -- the snapshot GET returns the mock store.
   await page.reload();
-  await expect(text(page, "a")).toBeVisible();
+  await text(page, "a").waitFor({ state: "visible" });
   for (const id of ["b", "c", "d"])
     await expect(indented(page, id)).toBeVisible();
 });
