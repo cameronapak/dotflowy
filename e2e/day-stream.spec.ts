@@ -372,6 +372,77 @@ test.describe("day navigation on touch", () => {
         .poll(() => page.evaluate(() => scrollY))
         .toBeGreaterThan(before + 90);
     });
+
+    test(`input during a title-held prepend keeps the caret revealed, spotlight ${spotlight}`, async ({
+      page,
+    }) => {
+      await page.clock.install();
+      await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
+      await seedOutline(page, TREE, { kv: KV });
+      await page.addInitScript((enabled) => {
+        localStorage.setItem("dotflowy:spotlight", String(enabled));
+      }, spotlight);
+      await openSeededOutline(page, { anchorId: "alpha" });
+      // Paused, no stream settle (180ms) can load days before the race below.
+      await page.clock.pauseAt(new Date("2030-06-12T12:00:01"));
+      await page
+        .getByRole("button", { name: "Today's daily note", exact: true })
+        .tap();
+      const editor = text(page, "standup");
+      await expect
+        .poll(async () => {
+          await page.clock.runFor(1);
+          return editor.evaluate((el) => el === document.activeElement);
+        })
+        .toBe(true);
+      await page.setViewportSize({
+        width: 390,
+        height: Math.ceil(
+          await editor.evaluate((el) => el.getBoundingClientRect().bottom + 8),
+        ),
+      });
+      const caretClear = () =>
+        editor.evaluate((el) => {
+          const caret = el.getBoundingClientRect();
+          const bar = document
+            .querySelector("[data-mobile-bar]")!
+            .getBoundingClientRect();
+          return caret.top >= 0 && caret.bottom < bar.top;
+        });
+      await expect.poll(caretClear).toBe(false);
+      // CI order: the settle dispatches a prepend while the title still owns
+      // corrections, then input releases the title before React commits it.
+      // A late resize scroll re-arms the settle, so follow its replacement.
+      await page.evaluate(() => {
+        const { setTimeout, clearTimeout } = window;
+        let settleId = 0;
+        const arm = () => {
+          // SAFETY: the stream arms its settle as setTimeout(callback, ms).
+          window.setTimeout = ((settle: () => void, ms?: number) => {
+            window.setTimeout = setTimeout;
+            settleId = setTimeout(() => {
+              window.clearTimeout = clearTimeout;
+              settle();
+              // Each keystroke releases again; neither may drop the hold.
+              document.execCommand("insertText", false, " ");
+              document.execCommand("insertText", false, "appended");
+            }, ms);
+            return settleId;
+          }) as typeof window.setTimeout;
+        };
+        window.clearTimeout = (id) => {
+          if (id === settleId) arm();
+          clearTimeout(id);
+        };
+        arm();
+        window.dispatchEvent(new PointerEvent("pointerup"));
+      });
+      await page.clock.runFor(500);
+      await expect(editor).toHaveText("Standup appended");
+      await expect.poll(caretClear).toBe(true);
+      // The raced settle did load the days above.
+      await expect(section(page, PREV, "title")).toBeAttached();
+    });
   }
 });
 
