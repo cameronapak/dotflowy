@@ -8,9 +8,9 @@
 // Both the outline bullets (OutlineRow) and the zoomed page title
 // (OutlineEditor's ZoomedTitle) render their stored markdown as live HTML:
 // the contentEditable always holds formatted output (mono chips, tag chips,
-// folded links), and each keystroke re-tokenizes the line and rebuilds its DOM.
-// The caret is saved as an absolute SOURCE-character offset before the rebuild
-// and restored after.
+// folded links), and each keystroke re-tokenizes the line, replacing only the
+// changed DOM range. The caret is saved as an absolute SOURCE-character offset
+// before the update and restored after.
 //
 // A #tag keeps its FULL source visible (the leading `#`), so its source string
 // and rendered text have identical length. FOLDING tokens (links, inline code,
@@ -210,12 +210,22 @@ export function readSource(el: HTMLElement): string {
   return out;
 }
 
-// Re-render `el` as formatted HTML, optionally keeping the caret put. The DOM
-// rebuild invalidates any (node, offset) selection, so we capture the caret as
+// React owns a widget's children, not the serializer's raw-source fallback.
+// Compare its host contract only, so a mounted chip is not a false change.
+function sameDecoration(current: Node, next: Node): boolean {
+  if (current.nodeName === WIDGET_TAG.toUpperCase()) {
+    return current.cloneNode(false).isEqualNode(next.cloneNode(false));
+  }
+  return current.isEqualNode(next);
+}
+
+// Re-render `el` as formatted HTML, optionally keeping the caret put. A DOM
+// update can invalidate a (node, offset) selection, so we capture the caret as
 // an absolute SOURCE-character offset first and re-derive it against the new
-// tree after. We rebuild only when the generated HTML actually changed (the
-// render cache), avoiding needless rebuilds -- and the caret flicker they cause
-// -- when the text and the active (revealed) link are both unchanged.
+// tree after. The render cache skips unchanged HTML. When it changes, keep the
+// equal prefix/suffix connected: rebuilding unchanged tokens would reload their
+// images on every keystroke. Native edits often already match the desired DOM,
+// in which case this leaves every child in place.
 //
 // `revealOffset` decides which link, if any, shows raw; see inlineMarkupHtml.
 export function decorate(
@@ -227,7 +237,33 @@ export function decorate(
   const html = inlineMarkupHtml(text, revealOffset);
   if (renderCache.get(el) === html) return;
   const offset = preserveCaret ? getCaretOffset(el) : -1;
-  el.innerHTML = html;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const next = template.content;
+  let start = el.firstChild;
+  while (start && next.firstChild && sameDecoration(start, next.firstChild)) {
+    start = start.nextSibling;
+    next.firstChild.remove();
+  }
+  let end: ChildNode | null = null;
+  let last = el.lastChild;
+  while (
+    start &&
+    last &&
+    last !== start.previousSibling &&
+    next.lastChild &&
+    sameDecoration(last, next.lastChild)
+  ) {
+    end = last;
+    last = last.previousSibling;
+    next.lastChild.remove();
+  }
+  while (start && start !== end) {
+    const following = start.nextSibling;
+    start.remove();
+    start = following;
+  }
+  el.insertBefore(next, end);
   renderCache.set(el, html);
   if (offset >= 0) setCaretOffset(el, offset);
 }

@@ -292,6 +292,96 @@ const activeNodeId = (page: Page) =>
 
 const LINK = "[Anthropic](https://anthropic.com)";
 
+test("typing around folded links keeps their loaded favicons connected", async ({
+  page,
+}) => {
+  await page.route("https://www.google.com/s2/favicons?**", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="green"/></svg>',
+    }),
+  );
+  const source = `Before ${LINK} between [[n_target_example]] [Example](https://example.com) after`;
+  await load(page, [
+    { id: "n", parentId: null, prevSiblingId: null, text: source },
+    {
+      id: "n_target_example",
+      parentId: null,
+      prevSiblingId: "n",
+      text: "Reference target",
+    },
+  ]);
+  const editor = text(page, "n");
+  await expect(editor.locator("dotflowy-widget")).toContainText(
+    "Reference target",
+  );
+  const icons = await editor.locator("img.link-favicon").elementHandles();
+  expect(icons).toHaveLength(2);
+  for (const icon of icons) {
+    await expect
+      .poll(() =>
+        icon.evaluate(
+          (el) =>
+            el instanceof HTMLImageElement &&
+            el.complete &&
+            el.naturalWidth > 0,
+        ),
+      )
+      .toBe(true);
+  }
+
+  // A detach/reinsert can flash even when it reuses the same image object.
+  // Observe removals as well as identity, including the link's ancestors.
+  await editor.evaluate((el) => {
+    el.setAttribute("data-favicon-removals", "0");
+    new MutationObserver((records) => {
+      const removals = records
+        .flatMap((record) => [...record.removedNodes])
+        .filter(
+          (node) =>
+            node instanceof Element &&
+            (node.matches("img.link-favicon") ||
+              node.querySelector("img.link-favicon")),
+        ).length;
+      if (removals)
+        el.setAttribute(
+          "data-favicon-removals",
+          String(Number(el.getAttribute("data-favicon-removals")) + removals),
+        );
+    }).observe(el, { childList: true, subtree: true });
+  });
+
+  // Exercise changed plain text, a newly formatted token before both links,
+  // and text between links. A whole-line HTML rebuild fails on the first key.
+  for (const [offset, input] of [
+    [source.length, " more"],
+    [0, "**Note** "],
+    ["**Note** Before ".length + LINK.length + " between".length, " extra"],
+  ] as const) {
+    await placeCaret(editor, offset);
+    for (const key of input) {
+      await page.keyboard.type(key);
+      for (const icon of icons) {
+        expect(await icon.evaluate((el) => el.isConnected)).toBe(true);
+      }
+      await expect(editor).toHaveAttribute("data-favicon-removals", "0");
+    }
+  }
+  await blurActive(page);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const nodes: ApiNode[] = await fetch("/api/nodes").then((response) =>
+          response.json(),
+        );
+        return nodes.find((node) => node.id === "n")?.text;
+      }),
+    )
+    .toBe(
+      `**Note** Before ${LINK} between extra [[n_target_example]] [Example](https://example.com) after more`,
+    );
+});
+
 test("a blurred bullet folds the link to a clean <a>; focusing bracket-reveals it", async ({
   page,
 }) => {
