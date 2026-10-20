@@ -1025,13 +1025,34 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     focusKey?: string;
     releaseSpotlight: () => void;
   } | null>(null);
+  // A stream load is dispatched and not yet committed (see maybeExtend).
+  const extendingRef = useRef(false);
   const releaseTitle = useCallback(() => {
-    const anchored = titleAnchorRef.current !== null;
-    titleAnchorRef.current?.releaseSpotlight();
+    const anchor = titleAnchorRef.current;
+    anchor?.releaseSpotlight();
     titleAnchorRef.current = null;
-    heldRef.current = null;
     headerRef.current?.removeAttribute("data-title-anchored");
-    return anchored;
+    // A dispatched load can commit after this release. Keep its correction: a
+    // reading hold stays, and a held title stays where it is as a reading row.
+    if (!extendingRef.current) heldRef.current = null;
+    else if (anchor) {
+      const i = sectionStartsRef.current.get(anchor.section);
+      const el =
+        i === undefined
+          ? null
+          : listRef.current?.querySelector<HTMLElement>(
+              `:scope > li[data-index="${i}"]`,
+            );
+      heldRef.current =
+        el && i !== undefined
+          ? {
+              key: itemsRef.current[i]!.key,
+              top: el.getBoundingClientRect().top,
+              scrollY: window.scrollY,
+            }
+          : null;
+    }
+    return anchor !== null;
   }, []);
   useLayoutEffect(() => {
     if (!stream) releaseTitle();
@@ -1204,7 +1225,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Load more sections near either edge. Prepending holds the item at the top
   // of the viewport in place: the layout effect below scrolls by exactly the
   // height the new sections added above it.
-  const extendingRef = useRef(false);
   const deferPrependRef = useRef(false);
   // The section the stream opens on, and the `?day=` still being restored.
   // While a restore is pending the URL keeps its `?day=` (see the URL effect).
@@ -1468,7 +1488,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           bar?.height ? bar.top : Infinity,
         ) - 8;
       const delta = y < top || y > bottom ? y - (top + bottom) / 2 : 0;
-      if (delta) window.scrollBy({ top: delta, behavior: "instant" });
+      if (!delta) return;
+      const from = window.scrollY;
+      window.scrollBy({ top: delta, behavior: "instant" });
+      // Keep a hold on the revealed caret, not where the title left it.
+      const held = heldRef.current;
+      if (held) {
+        held.top -= window.scrollY - from;
+        held.scrollY = window.scrollY;
+      }
     };
     const onKey = (e: KeyboardEvent) => {
       onEdit(e);
