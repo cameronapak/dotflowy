@@ -200,7 +200,7 @@ test("only today's note gets the distinct badge; other days stay plain", async (
       },
     },
   );
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "past-day" });
 
   const badge = page.locator("[data-daily-date]");
   await expect(badge).toBeVisible();
@@ -706,10 +706,7 @@ test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
     },
   );
 
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await todayButton(page).click();
 
@@ -760,10 +757,7 @@ test("orphaned kv mapping materializes the node instead of zooming to a ghost", 
     },
   });
 
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 
   await todayButton(page).click();
 

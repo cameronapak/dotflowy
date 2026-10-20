@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Tags are a plugin (ADR 0018): the chip render is a token, and the click ->
 // filter / right-click -> color picker route through the core's delegated
@@ -18,8 +18,7 @@ const row = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, TAGGED_TREE);
-  await page.goto("/");
-  await expect(row(page, "a").first()).toBeVisible();
+  await openSeededOutline(page, { anchorId: "a" });
 }
 
 test("a #tag chip filters to matches; Clear restores the view and closes the subheader", async ({

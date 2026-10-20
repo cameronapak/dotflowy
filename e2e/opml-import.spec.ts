@@ -101,7 +101,7 @@ test("crafted sample: summary discloses degradations; import lands one collapsed
   // after the seeded tree, created collapsed — none of its 23 descendants
   // render. Surviving the reload proves the batch persisted to the (mock)
   // server store, not just the optimistic overlay.
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "alpha" });
   await expect(text(page, "alpha")).toBeVisible();
   const container = containerRow(page);
   await expect(container).toHaveCount(1);
@@ -136,6 +136,7 @@ test("one Cmd+Z removes the whole import (single pre-batch capture)", async ({
   }
   // And the undo's restore batch persisted: a reload still shows no container.
   await page.reload();
+  await text(page, "alpha").waitFor();
   await expect(text(page, "alpha")).toBeVisible();
   await expect(containerRow(page)).toHaveCount(0);
   await expect(page.locator("li[data-node-id]")).toHaveCount(

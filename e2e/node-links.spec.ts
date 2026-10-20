@@ -66,6 +66,7 @@ test("a live link follows a rename, zooms to its target and returns through back
 
   // Re-enter the target directly so backlink hydration is covered too.
   await page.reload();
+  await page.locator(".zoomed-title").waitFor({ state: "visible" });
   await expect(page.locator(".zoomed-title")).toContainText(
     "Project Phoenix v2",
   );
@@ -82,7 +83,7 @@ test("a live link follows a rename, zooms to its target and returns through back
 
   // REF has a link IN its text but nothing links TO it.
   await page.goto(`/${REF}`);
-  await expect(page.locator(".zoomed-title")).toBeVisible();
+  await page.locator(".zoomed-title").waitFor({ state: "visible" });
   await expect(page.getByRole("button", { name: /backlink/ })).toHaveCount(0);
 });
 
@@ -97,7 +98,7 @@ test("hand-typed junk between double brackets stays literal text", async ({
       text: "see [[not an id]] here",
     },
   ]);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "a" });
 
   await expect(text(page, "a")).toContainText("[[not an id]]");
   await expect(text(page, "a").locator("[data-node-link]")).toHaveCount(0);
@@ -139,7 +140,7 @@ test("the [[ picker opens on the zoomed page title too", async ({ page }) => {
   await page.goto("/blank"); // zoom into the empty node -- it's now the title
 
   const title = page.locator(".zoomed-title .node-text");
-  await expect(title).toBeVisible();
+  await title.waitFor({ state: "visible" });
   await title.click();
   await page.keyboard.type("[[Phoe");
 

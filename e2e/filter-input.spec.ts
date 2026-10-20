@@ -143,9 +143,11 @@ for (const query of ["#work", "work"]) {
     page,
   }) => {
     await seedOutline(page, TREE);
-    await page.goto(`/?q=${encodeURIComponent(query)}`);
+    await openSeededOutline(page, {
+      path: `/?q=${encodeURIComponent(query)}`,
+      anchorId: "milk",
+    });
     const editor = row(page, "milk").locator(".node-text");
-    await expect(editor).toBeVisible();
     await placeCaret(editor, "end");
     await editor.press("Backspace");
 
@@ -169,9 +171,8 @@ test("editing the last match keeps the row until blur outside the outline", asyn
   page,
 }) => {
   await seedOutline(page, TREE);
-  await page.goto("/?q=milk");
+  await openSeededOutline(page, { path: "/?q=milk", anchorId: "milk" });
   const editor = row(page, "milk").locator(".node-text");
-  await expect(editor).toBeVisible();
   await editor.fill("Buy mil #work");
   await expect(editor).toHaveText("Buy mil #work");
   await expect(editor).toBeFocused();
@@ -188,9 +189,8 @@ test("a row that still matches after editing stays visible on blur", async ({
   page,
 }) => {
   await seedOutline(page, TREE);
-  await page.goto("/?q=milk");
+  await openSeededOutline(page, { path: "/?q=milk", anchorId: "milk" });
   const editor = row(page, "milk").locator(".node-text");
-  await expect(editor).toBeVisible();
   await placeCaret(editor, "end");
   const before = await page.evaluateHandle(async () => {
     const path = "/src/data/view-state.ts";
@@ -462,7 +462,7 @@ test("editing a mirrored descendant keeps only the focused path and its context 
   page,
 }) => {
   await seedOutline(page, tree);
-  await page.goto("/?q=%23child");
+  await openSeededOutline(page, { path: "/?q=%23child", anchorId: "project" });
   await expect(row(page, "child")).toHaveCount(2);
   const editor = row(page, "child").last().locator(".node-text");
   await editor.fill("Verify mirror traversal");
@@ -490,8 +490,7 @@ test("the same query selects source and mirror content, while is:mirror excludes
   page,
 }) => {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(row(page, "project")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "project" });
   await summon(page);
   await input(page).fill("is:todo -is:complete #dotflowy");
   await expect(row(page, "source")).toBeVisible();
@@ -522,7 +521,10 @@ test("a zoomed view finds descendants through a mirror with contextual ancestors
   page,
 }) => {
   await seedOutline(page, tree);
-  await page.goto("/scope?q=%23child");
+  await openSeededOutline(page, {
+    path: "/scope?q=%23child",
+    anchorId: "mirror",
+  });
   await expect(input(page)).toHaveValue("#child");
   await expect(row(page, "mirror")).toBeVisible();
   await expect(row(page, "mirror").locator(".outline-row")).toHaveAttribute(
@@ -563,7 +565,7 @@ test("collapse affects only the selected source or mirror path under a filter", 
       mirrorOf: "source",
     },
   ]);
-  await page.goto("/?q=%23project");
+  await openSeededOutline(page, { path: "/?q=%23project", anchorId: "source" });
   const child = row(page, "child");
   await expect(row(page, "source")).toBeVisible();
   await expect(row(page, "mirror")).toBeVisible();

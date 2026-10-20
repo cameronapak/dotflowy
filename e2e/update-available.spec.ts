@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-import { seedOutline, STANDARD_TREE } from "./fixtures";
+import { openSeededOutline, seedOutline, STANDARD_TREE } from "./fixtures";
 
 /**
  * The stale-tab reload affordance (ADR 0046).
@@ -23,8 +23,7 @@ const toast = (page: Page) => page.getByText("Dotflowy has been updated");
 
 async function load(page: Page, serverVersion?: string) {
   await seedOutline(page, STANDARD_TREE, { serverVersion });
-  await page.goto("/");
-  await expect(page.locator('li[data-node-id="alpha"]')).toBeVisible();
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 test("a matching server says nothing", async ({ page }) => {

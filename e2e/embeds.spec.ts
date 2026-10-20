@@ -112,6 +112,7 @@ test("consent defaults off, persists before loading, revokes and survives reload
   });
   await expect(page.locator("iframe")).toHaveCount(0);
   await page.reload();
+  await note(page, "note").waitFor();
   await expect(
     body(page).getByRole("button", { name: "Load embed" }),
   ).toBeEnabled();
@@ -160,6 +161,7 @@ test("disabled plugin keeps source links and children without provider requests"
   expect(requests()).toBe(0);
   await expect(note(page, "note")).toBeVisible();
   await page.goto("/media");
+  await page.locator(".zoomed-title-text").waitFor();
   await expect(
     page.locator(".zoomed-title-text").getByRole("link"),
   ).toBeVisible();
@@ -731,7 +733,7 @@ test("failed revocation stays locally off and Settings retries revocation, not a
   await page.getByRole("button", { name: "Retry revocation" }).click();
   await expect(permission).toBeEnabled();
   expect(saved).toEqual([false, false]);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "media" });
   await expect(
     body(page).getByRole("button", { name: "Load embed" }),
   ).toBeVisible();
@@ -756,7 +758,7 @@ test("Embed mirrors share the body while collapsing only their own child instanc
     ],
     { kv: { "account-prefs": [allowed] } },
   );
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "media" });
   await expect(body(page).locator("iframe")).toHaveCount(2);
   await expect(note(page, "note")).toHaveCount(2);
   const mirrorToggle = page.locator(

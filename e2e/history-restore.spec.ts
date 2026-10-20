@@ -69,12 +69,14 @@ test.describe("sliced history restore", () => {
     // The restore batch persisted to the (mock) server store, not just the
     // optimistic overlay: a reload still shows the whole subtree.
     await page.reload();
+    await text(page, "alpha").waitFor({ state: "visible" });
     await expect(text(page, "big")).toBeVisible();
     await expect(text(page, "charlie")).toBeVisible();
     // The children are back too (collapsed rows don't render at home, so zoom
     // in; the windowed list only mounts the first screenful — big-0 suffices,
     // the 601-op batch is atomic so partial restore can't persist).
     await page.goto("/big");
+    await page.locator("h2.zoomed-title").waitFor({ state: "visible" });
     await expect(text(page, "big-0")).toBeVisible();
   });
 
@@ -102,7 +104,7 @@ test.describe("sliced history restore", () => {
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
 
     await page.reload();
-    await expect(text(page, "alpha")).toBeVisible();
+    await text(page, "alpha").waitFor({ state: "visible" });
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
   });
 
@@ -124,6 +126,7 @@ test.describe("sliced history restore", () => {
     await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
     // And the restore persisted.
     await page.reload();
+    await page.locator(".outline-list").waitFor({ state: "visible" });
     await expect(text(page, "alpha")).toBeVisible();
   });
 });

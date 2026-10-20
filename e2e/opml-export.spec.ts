@@ -105,9 +105,6 @@ async function capturedDownload(page: Page): Promise<CapturedDownload> {
   );
 }
 
-const nodeText = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-
 // Run "Export OPML" via Cmd+K. The More menu's Export OPML moved to /settings
 // with #171 (a WHOLE-outline export there), but the CONTEXTUAL export (zoom
 // root included) lives on in the Cmd+K global action — same `exportOutlineAsOpml`
@@ -125,8 +122,7 @@ test("zoomed export: subtree only, root as top-level outline, dialect attrs, no 
 }) => {
   await interceptDownloads(page);
   await seedOutline(page, TREE);
-  await page.goto("/root");
-  await expect(nodeText(page, "done")).toBeVisible();
+  await openSeededOutline(page, { path: "/root", anchorId: "done" });
 
   await runMenuExport(page);
   const { filename, text } = await capturedDownload(page);

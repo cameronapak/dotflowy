@@ -117,12 +117,12 @@ test("hotkey registration count does not scale with the number of visible bullet
   await load(page);
 
   // Zoom into the small node: only a few bullets render.
-  await page.goto("/few");
+  await openSeededOutline(page, { path: "/few", anchorId: "few-c0" });
   await expect(page.locator('li[data-node-id="few-c0"]')).toBeVisible();
   const countFew = await settledRegistrationCount(page);
 
   // Zoom into the huge node: a full window of bullets renders.
-  await page.goto("/many");
+  await openSeededOutline(page, { path: "/many", anchorId: "many-c0" });
   await expect(page.locator('li[data-node-id="many-c0"]')).toBeVisible();
   const countMany = await settledRegistrationCount(page);
 

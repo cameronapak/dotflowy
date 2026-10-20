@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Saved filter queries (ADR 0048): a Pin toggle inside the filter input saves
 // the current `?q=` string to a synced side-collection, surfaced in the filter
@@ -27,8 +27,7 @@ const popover = (page: Page) => page.locator("[data-filter-popover]");
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(row(page, "milk").first()).toBeVisible();
+  await openSeededOutline(page, { anchorId: "milk" });
 }
 
 async function summon(page: Page) {

@@ -232,6 +232,7 @@ test("experimental quick-add is default-off, persists opt-in, and reacts to roll
     page.getByRole("button", { name: "Set up Apple Shortcut" }),
   ).toBeVisible();
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect(toggle).not.toBeChecked();
@@ -239,6 +240,7 @@ test("experimental quick-add is default-off, persists opt-in, and reacts to roll
     page.getByRole("button", { name: "Manage", exact: true }),
   ).toHaveCount(0);
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(toggle).not.toBeChecked();
 
   await toggle.click();

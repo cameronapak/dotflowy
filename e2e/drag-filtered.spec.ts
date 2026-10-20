@@ -110,6 +110,7 @@ test("a drop between two visible rows with hidden siblings lands after the visib
   // the hidden siblings -- immediately after the visible predecessor.
   await committed;
   await page.goto("/");
+  await page.locator('li[data-node-id="S1"] .node-text').waitFor();
   await expect(page.locator('li[data-node-id="V1"]')).toBeVisible();
   await expect
     .poll(() => visibleOrder(page))
@@ -169,6 +170,7 @@ test("a drop that lands the node hidden discloses with a toast and the node vani
   // ...but present once the filter clears, now a child of P.
   await committed;
   await page.goto("/");
+  await page.locator('li[data-node-id="A"] .node-text').waitFor();
   const c = page.locator('li[data-node-id="C"]');
   await expect(c).toBeVisible();
   await expect(c).toHaveAttribute("data-parent-id", "P");

@@ -38,6 +38,7 @@ test("feature switches default on and save independently across reloads", async 
   await expect(bible).not.toBeChecked();
   await expect(bible).toBeEnabled();
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(bible).toBeEnabled();
   await expect(bible).not.toBeChecked();
   await expect(daily).toBeChecked();
@@ -48,6 +49,7 @@ test("feature switches default on and save independently across reloads", async 
   await daily.click();
   await expect(daily).toBeEnabled();
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(daily).toBeEnabled();
   await expect(bible).not.toBeChecked();
   await expect(daily).not.toBeChecked();
@@ -133,6 +135,7 @@ test("disabled features leave source text intact in rows, titles, and quick-add"
   ).toHaveCount(0);
   await page.goto("/reflection");
   const title = page.locator(".zoomed-title-text");
+  await title.waitFor({ state: "visible" });
   await expect(title).toHaveText("Read John 3:16 and [[2030-04-12]]");
   await expect(title.locator("[data-bible-ref], [data-date-link]")).toHaveCount(
     0,
@@ -407,6 +410,7 @@ test("a failed save restores the previous switch and does not change the other f
   await expect(bible).toBeChecked();
   await expect(daily).toBeChecked();
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(bible).toBeEnabled();
   await expect(bible).toBeChecked();
 });
@@ -552,6 +556,7 @@ test("Daily off preserves every scaffold deletion guard and existing note access
   await page.keyboard.press("ControlOrMeta+Shift+Backspace");
   await expect(page.locator('li[data-node-id="reflection"]')).toHaveCount(0);
   await page.goto("/day");
+  await page.locator(".zoomed-title-text").waitFor({ state: "visible" });
   await expect(page.locator(".zoomed-title-text")).toHaveText(
     "October 3, 2026",
   );

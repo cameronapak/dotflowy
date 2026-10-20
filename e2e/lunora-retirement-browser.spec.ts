@@ -47,7 +47,7 @@ test("stale experimental preferences cannot bypass Classic sync", async ({
   await expect(text).toHaveText("Classic outline");
 
   await page.goto("/settings?lunora-sync=on");
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("switch", { name: "Upgraded outline sync beta" }),
   ).toHaveCount(0);
@@ -61,6 +61,7 @@ test("stale experimental preferences cannot bypass Classic sync", async ({
   await page.keyboard.type(" edited");
   await expect(text).toHaveText("Classic outline edited");
   await page.reload();
+  await text.waitFor({ state: "visible" });
   await expect(text).toHaveText("Classic outline edited");
   expect(experimentalRequests).toEqual([]);
 });

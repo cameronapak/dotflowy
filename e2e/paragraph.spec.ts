@@ -144,6 +144,7 @@ test("a zoomed paragraph shows a muted, inert paragraph glyph in the title", asy
   // title text starts exactly where the paragraph's did.
   await page.setViewportSize({ width: 900, height: 700 });
   await page.goto("/a");
+  await titleText.waitFor({ state: "visible" });
   await expect(titleText).toHaveText("alpha");
   await expect(page.locator("h2.zoomed-title .title-paragraph")).toHaveCount(0);
   await expect

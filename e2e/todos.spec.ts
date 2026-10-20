@@ -266,6 +266,7 @@ test.describe("software-keyboard deletion", () => {
     await expect(checkbox(page, "c")).toHaveCount(0);
     await expect(text(page, "c")).toBeFocused();
     await page.reload();
+    await page.locator(".outline-list").waitFor({ state: "visible" });
     await expect(text(page, "c")).toBeVisible();
     await expect(checkbox(page, "c")).toHaveCount(0);
     await expect(text(page, "c")).toHaveText("");

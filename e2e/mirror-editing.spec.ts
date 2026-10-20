@@ -121,6 +121,7 @@ test("Enter-split inside a mirror splits the source and lands focus under the mi
   await expect.poll(() => attempts).toBe(2);
   await page.waitForLoadState("networkidle");
   await page.reload();
+  await text(page, "A").waitFor({ state: "visible" });
   await expect(last).toHaveCount(2);
   expect(
     await page.evaluate(

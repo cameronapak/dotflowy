@@ -63,8 +63,7 @@ test("adding a second tag to a node that already has one still lists it", async 
   await seedOutline(page, [
     { id: "a", parentId: null, prevSiblingId: null, text: "#urgent" },
   ]);
-  await page.goto("/");
-  await expect(text(page, "a")).toBeVisible();
+  await openSeededOutline(page, { anchorId: "a" });
 
   // Focus + caret at the very end -- a plain click would land on
   // the "#urgent" chip and fire its filter interaction (Seam B), not the caret.
@@ -96,7 +95,7 @@ test("opens on the zoomed page title too (the second render path)", async ({
   await page.goto("/b"); // zoom into the empty node -- it's now the title
 
   const title = page.locator(".zoomed-title .node-text");
-  await expect(title).toBeVisible();
+  await title.waitFor({ state: "visible" });
   await title.click();
   await page.keyboard.type("#urg");
 
