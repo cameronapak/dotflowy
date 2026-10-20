@@ -47,7 +47,7 @@ async function selectAll(page: Page, id: string) {
   });
 }
 
-test("a ||run|| folds to an opaque-bar atom spanning the full source", async ({
+test("a spoiler folds to an opaque atom, reveals at the caret, and re-folds on leaving", async ({
   page,
 }) => {
   await load(page, [
@@ -57,6 +57,7 @@ test("a ||run|| folds to an opaque-bar atom spanning the full source", async ({
       prevSiblingId: null,
       text: "the answer is ||42||",
     },
+    { id: "plain", parentId: null, prevSiblingId: "n", text: "plain" },
   ]);
   // The bar's glyphs are the FULL source `||42||` (rendered transparent) so
   // the bar reserves the same width the revealed `||42||` occupies — entering
@@ -65,6 +66,21 @@ test("a ||run|| folds to an opaque-bar atom spanning the full source", async ({
   await expect(bar(page, "n")).toHaveClass(/text-transparent/);
   await expect(bar(page, "n")).toHaveAttribute("data-src", "||42||");
   await expect(bar(page, "n")).toHaveAttribute("contenteditable", "false");
+
+  await text(page, "n").click();
+  // Source offset 19 is just after the closing spoiler fence.
+  await caretAtSource(page, "n", 19);
+  await expect
+    .poll(() => text(page, "n").textContent())
+    .toBe("the answer is ||42||");
+  const revealed = text(page, "n").locator("[data-spoiler-reveal]");
+  await expect(revealed).toHaveCount(1);
+  await expect(revealed.locator(".md-punct")).toHaveCount(2);
+  await expect(bar(page, "n")).toHaveCount(0);
+
+  await text(page, "plain").click();
+  await expect(bar(page, "n")).toHaveAttribute("data-src", "||42||");
+  await expect(bar(page, "n")).toHaveClass(/text-transparent/);
 });
 
 test("an unclosed fence renders as literal text", async ({ page }) => {
@@ -84,40 +100,6 @@ test("a code run shields its interior — `||x||` inside code stays literal", as
   // Code wins (precedence 10 < 40): the run is a <code> atom, no spoiler bar.
   await expect(bar(page, "n")).toHaveCount(0);
   await expect(text(page, "n").locator("code")).toHaveCount(1);
-});
-
-test("caret on the run reveals the `||` fences inside the container", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "||secret||" },
-  ]);
-  await text(page, "n").click();
-  // Source length: 2 fences + 6 interior + 2 fences = 10.
-  await caretAtSource(page, "n", 10);
-  await expect.poll(() => text(page, "n").textContent()).toBe("||secret||");
-  await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveCount(1);
-  // Fences render as dimmed walk-through punctuation inside the container.
-  await expect(
-    text(page, "n").locator("[data-spoiler-reveal] .md-punct"),
-  ).toHaveCount(2);
-  // The revealed run is no longer an atom.
-  await expect(bar(page, "n")).toHaveCount(0);
-});
-
-test("moving the caret away re-folds the run to the bar", async ({ page }) => {
-  await load(page, [
-    { id: "a", parentId: null, prevSiblingId: null, text: "||hi||" },
-    { id: "b", parentId: null, prevSiblingId: "a", text: "plain" },
-  ]);
-  await text(page, "a").click();
-  await caretAtSource(page, "a", 6);
-  await expect.poll(() => text(page, "a").textContent()).toBe("||hi||");
-  await text(page, "b").click();
-  // Re-folded: the bar is back (its transparent glyphs are still the full
-  // source, so the visible line text is unchanged from the revealed form).
-  await expect(bar(page, "a")).toHaveAttribute("data-src", "||hi||");
-  await expect(bar(page, "a")).toHaveClass(/text-transparent/);
 });
 
 test("Mod+Shift+S wraps a selection in ||...||", async ({ page }) => {

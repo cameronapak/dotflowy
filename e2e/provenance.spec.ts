@@ -29,7 +29,7 @@ async function load(page: Page) {
   await openSeededOutline(page, { anchorId: "mine" });
 }
 
-test("marks an agent-created node and leaves the user's own unmarked", async ({
+test("agent attribution appears on its row and zoomed title, not the user's node", async ({
   page,
 }) => {
   await load(page);
@@ -43,12 +43,6 @@ test("marks an agent-created node and leaves the user's own unmarked", async ({
   await expect(agentMark).toBeVisible();
   await expect(agentMark).toHaveAttribute("data-origin", "Claude");
   await expect(agentMark).toHaveAttribute("aria-label", /Created by Claude/);
-});
-
-test("the mark rides the zoom into the page title (Seam F title slot)", async ({
-  page,
-}) => {
-  await load(page);
 
   // Zoom the agent node in by clicking its bullet dot.
   await page.locator(`li[data-node-id="ai"] .bullet`).first().click();

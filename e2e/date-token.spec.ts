@@ -62,7 +62,7 @@ async function caretAtEnd(page: Page, id: string) {
   await placeCaret(text(page, id), "end");
 }
 
-test("renders as a chip-voice chip in the row; near-misses stay literal; no minting at render", async ({
+test("date chips render without minting, preserve near-misses, then create and reuse a day on click", async ({
   page,
 }) => {
   await load(page);
@@ -89,25 +89,6 @@ test("renders as a chip-voice chip in the row; near-misses stay literal; no mint
   await expect(
     page.locator("li[data-node-id] > .outline-row", { hasText: "Daily" }),
   ).toHaveCount(0);
-});
-
-test("the chip renders in the zoomed-title path too", async ({ page }) => {
-  await seedOutline(page, TREE);
-  await page.goto("/today-node");
-  await page
-    .locator("h2.zoomed-title .node-text")
-    .waitFor({ state: "visible" });
-
-  const titleChip = page.locator("h2.zoomed-title [data-date-link]");
-  await expect(titleChip).toBeVisible();
-  await expect(titleChip).toContainText("Today");
-});
-
-test("clicking the chip creates + navigates to the day note; a second click reuses it", async ({
-  page,
-}) => {
-  await load(page);
-
   await chipIn(page, "tomorrow-node").click();
 
   // Zoomed into the created day note (URL left "/"); the title badge is the
@@ -127,6 +108,18 @@ test("clicking the chip creates + navigates to the day note; a second click reus
   await expect(page).toHaveURL(/\/$/);
   await chipIn(page, "tomorrow-node").click();
   await expect(page).toHaveURL(dayUrl);
+});
+
+test("the chip renders in the zoomed-title path too", async ({ page }) => {
+  await seedOutline(page, TREE);
+  await page.goto("/today-node");
+  await page
+    .locator("h2.zoomed-title .node-text")
+    .waitFor({ state: "visible" });
+
+  const titleChip = page.locator("h2.zoomed-title [data-date-link]");
+  await expect(titleChip).toBeVisible();
+  await expect(titleChip).toContainText("Today");
 });
 
 test("typing [[tomo in the picker offers Tomorrow; picking inserts the chip", async ({

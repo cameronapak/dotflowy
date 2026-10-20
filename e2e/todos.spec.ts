@@ -66,7 +66,7 @@ test("`[]` autoformat turns a plain bullet into a task (Seam I + F)", async ({
   await expect(text(page, "a")).toHaveAttribute("data-completed", "false");
 });
 
-test("clicking the checkbox completes / uncompletes (Seam F)", async ({
+test("checkboxes toggle completion in both the row and zoomed title", async ({
   page,
 }) => {
   await load(page);
@@ -76,26 +76,6 @@ test("clicking the checkbox completes / uncompletes (Seam F)", async ({
 
   await checkbox(page, "c").click();
   await expect(text(page, "c")).toHaveAttribute("data-completed", "false");
-});
-
-test("Mod+Enter toggles completion on any bullet (Seam D)", async ({
-  page,
-}) => {
-  await load(page);
-
-  await text(page, "a").click();
-  await page.keyboard.type("ship it");
-  await page.keyboard.press("ControlOrMeta+Enter");
-  await expect(text(page, "a")).toHaveAttribute("data-completed", "true");
-
-  await page.keyboard.press("ControlOrMeta+Enter");
-  await expect(text(page, "a")).toHaveAttribute("data-completed", "false");
-});
-
-test("the checkbox renders in the zoomed-in title and toggles there (Seam F title slot)", async ({
-  page,
-}) => {
-  await load(page);
 
   // Zoom into the task so it becomes the page title (h2), not a list bullet.
   // The checkbox is a title slot (`title:before-text`), so it must render here
@@ -113,6 +93,20 @@ test("the checkbox renders in the zoomed-in title and toggles there (Seam F titl
     "data-completed",
     "true",
   );
+});
+
+test("Mod+Enter toggles completion on any bullet (Seam D)", async ({
+  page,
+}) => {
+  await load(page);
+
+  await text(page, "a").click();
+  await page.keyboard.type("ship it");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(text(page, "a")).toHaveAttribute("data-completed", "true");
+
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(text(page, "a")).toHaveAttribute("data-completed", "false");
 });
 
 test("`/todo` makes a task and `/bullet` reverts it (Seam C)", async ({

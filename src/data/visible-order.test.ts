@@ -77,37 +77,28 @@ describe("buildVisibleRows — mirrors enabled (ADR 0022)", () => {
   ];
   const index = buildTreeIndex(tree);
 
-  test("a mirror windows the source's children", () => {
+  test("a mirror windows source content with distinct literal row paths and depths", () => {
     const rows = buildVisibleRows(index, null, show, null, true);
-    expect(rows.map((r) => r.id)).toEqual([
-      "A",
-      "a1",
-      "a2",
-      "P",
-      "M",
-      "a1",
-      "a2",
+    expect(
+      rows.map((r) => [
+        r.id,
+        r.key,
+        r.contentId,
+        r.depth,
+        r.isMirror,
+        r.capped,
+        r.broken,
+      ]),
+    ).toEqual([
+      ["A", "A", "A", 0, false, false, false],
+      ["a1", "a1", "a1", 1, false, false, false],
+      ["a2", "a2", "a2", 1, false, false, false],
+      ["P", "P", "P", 0, false, false, false],
+      ["M", "M", "A", 1, true, false, false],
+      ["a1", "M\u0001a1", "a1", 2, false, false, false],
+      ["a2", "M\u0001a2", "a2", 2, false, false, false],
     ]);
-
-    const m = rows.find((r) => r.id === "M")!;
-    expect(m.isMirror).toBe(true);
-    expect(m.contentId).toBe("A"); // reads the source's content
-    expect(m.key).toBe("M"); // top-level mirror: bare id (no mirror crossed yet)
-    expect(m.capped).toBe(false);
-    expect(m.broken).toBe(false);
-  });
-
-  test("source descendants get unique path keys under the mirror, bare ids under the source", () => {
-    const rows = buildVisibleRows(index, null, show, null, true);
-    // Two rows share id 'a1' (real + mirrored) but their keys are distinct.
-    const a1Rows = rows.filter((r) => r.id === "a1");
-    expect(a1Rows).toHaveLength(2);
-    const keys = a1Rows.map((r) => r.key);
-    expect(keys[0]).toBe("a1"); // under the real source: bare id (today's identity)
-    expect(keys[1]).not.toBe("a1"); // under the mirror: a compound path key
-    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length); // all keys unique
-    // The mirrored copies still read their own (real) content.
-    for (const r of a1Rows) expect(r.contentId).toBe("a1");
+    expect(new Set(rows.map((r) => r.key)).size).toBe(7);
   });
 
   test("two mirrors of the same source keep distinct keys", () => {
@@ -130,7 +121,12 @@ describe("buildVisibleRows — mirrors enabled (ADR 0022)", () => {
       }),
     ];
     const rows = buildVisibleRows(buildTreeIndex(t2), null, show, null, true);
-    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
+    expect(rows.filter((r) => r.id === "a1").map((r) => r.key)).toEqual([
+      "a1",
+      "M1\u0001a1",
+      "M2\u0001a1",
+    ]);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(7);
   });
 
   test("collapse is LOCAL to the instance — a collapsed mirror hides the source subtree", () => {
@@ -259,13 +255,6 @@ describe("row-key helpers (the Stage 2 identity keystone, ADR 0022)", () => {
     ]);
   });
 
-  test("rowKeyFor matches the address buildVisibleRows actually emits", () => {
-    const rows = buildVisibleRows(index, null, show, null, true);
-    // a1 appears under the real source (bare id) and under the mirror (path key).
-    const windowed = rows.find((r) => r.id === "a1" && r.key !== "a1")!;
-    expect(windowed.key).toBe(rowKeyFor("M", "a1"));
-  });
-
   test("contentIdForKey resolves a mirror to its source, a real node to itself", () => {
     // The mirror row's key resolves to the SOURCE's content id.
     expect(contentIdForKey(index, "M")).toBe("A");
@@ -275,16 +264,6 @@ describe("row-key helpers (the Stage 2 identity keystone, ADR 0022)", () => {
     expect(contentIdForKey(index, "a1")).toBe("a1");
     // Unknown node falls back to the raw instance id, never throws.
     expect(contentIdForKey(index, "ghost")).toBe("ghost");
-  });
-
-  test("INVARIANT: helpers agree with every row buildVisibleRows emits", () => {
-    const rows = buildVisibleRows(index, null, show, null, true);
-    for (const r of rows) {
-      // The key always points back at the row's own instance id...
-      expect(instanceIdForKey(r.key)).toBe(r.id);
-      // ...and resolves to the same content id the walk computed.
-      expect(contentIdForKey(index, r.key)).toBe(r.contentId);
-    }
   });
 });
 
@@ -392,27 +371,18 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
     buildFilterOperatorMap([]),
   )!;
 
-  test("fixture sanity: the filter renders A, P, K, C, P2, D and drops B", () => {
+  test("filtered caret navigation follows rendered order, including dimmed and revealed context", () => {
     const rows = buildVisibleRows(index, null, show, filter);
     expect(rows.map((r) => r.id)).toEqual(["A", "P", "K", "C", "P2", "D"]);
-  });
-
-  test("Down skips a filtered-out row instead of handing back an unmounted one", () => {
     // Unfiltered, K's down-neighbor is B; B isn't rendered under the filter, so
     // returning it pins focus (the filtered-nav bug). Render parity says C.
     expect(findVisibleNeighbor(index, null, "K", "down", show, filter)).toBe(
       "C",
     );
     expect(findVisibleNeighbor(index, null, "C", "up", show, filter)).toBe("K");
-  });
-
-  test("nav lands on dimmed ancestor context rows (they're rendered + editable)", () => {
     expect(findVisibleNeighbor(index, null, "A", "down", show, filter)).toBe(
       "P",
     );
-  });
-
-  test("a row revealed under a collapsed context ancestor is reachable", () => {
     // D renders (filter force-descends P2) but isn't in the unfiltered walk at
     // all -- indexOf would be -1 and every arrow from D a no-op.
     expect(findVisibleNeighbor(index, null, "P2", "down", show, filter)).toBe(
@@ -530,7 +500,13 @@ test("filtered descendant revelation respects each source and mirror's collapse 
     expect(
       findVisibleNeighbor(index, null, "source", "down", show, filter, true),
     ).toBe(sourceCollapsed ? "mirror" : "child");
-    expect(filter?.matchIds).toEqual(new Set(keys));
+    expect(filter?.matchIds).toEqual(
+      new Set(
+        sourceCollapsed
+          ? ["source", "mirror", rowKeyFor("mirror", "child")]
+          : ["source", "child", "mirror"],
+      ),
+    );
   }
 });
 

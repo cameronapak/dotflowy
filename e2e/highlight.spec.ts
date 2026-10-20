@@ -28,45 +28,37 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await placeCaret(text(page, id), target);
 }
 
-test("a bare ==run== folds to a blue <mark> with fences hidden", async ({
+test("a bare highlight folds, reveals at the caret, and refolds on blur", async ({
   page,
 }) => {
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "a ==hi== b" },
+    { id: "plain", parentId: null, prevSiblingId: "n", text: "plain" },
   ]);
   await expect(mark(page, "n")).toHaveText("hi");
   await expect(mark(page, "n")).toHaveAttribute("data-highlight", "blue");
   await expect(mark(page, "n")).toHaveAttribute("data-src", "==hi==");
   await expect(mark(page, "n")).toHaveAttribute("contenteditable", "false");
   await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
+
+  await caretAtSource(page, "n", 8);
+  await expect.poll(() => text(page, "n").textContent()).toBe("a ==hi== b");
+  await text(page, "plain").click();
+  await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
 });
 
-test("a color emoji names the color and is HIDDEN while folded", async ({
+test("a colored highlight folds, reveals, preserves its color through edits, and re-folds", async ({
   page,
 }) => {
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "==🔴urgent==" },
+    { id: "plain", parentId: null, prevSiblingId: "n", text: "plain" },
   ]);
   await expect(mark(page, "n")).toHaveText("urgent");
   await expect(mark(page, "n")).toHaveAttribute("data-highlight", "red");
   // The emoji is not in the visible line -- the Lettera trick.
   await expect.poll(() => text(page, "n").textContent()).toBe("urgent");
-});
 
-test("an unclosed fence renders as literal text", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "==unclosed" },
-  ]);
-  await expect(mark(page, "n")).toHaveCount(0);
-  await expect.poll(() => text(page, "n").textContent()).toBe("==unclosed");
-});
-
-test("caret on the run reveals fences; the emoji stays hidden behind the pen atom", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "==🔴urgent==" },
-  ]);
   await text(page, "n").click();
   // Source length: 2 fences + 2 (emoji is one astral code point = 2 UTF-16
   // units) + 6 interior + 2 fences = 12.
@@ -86,17 +78,7 @@ test("caret on the run reveals fences; the emoji stays hidden behind the pen ato
   await expect(text(page, "n").locator("mark .md-punct")).toHaveCount(2);
   // The revealed <mark> itself is no longer an atom.
   await expect(mark(page, "n")).not.toHaveAttribute("data-src", /.*/);
-});
 
-test("typing in a revealed colored run keeps the hidden emoji (color survives edits)", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "==🔴urgent==" },
-  ]);
-  await text(page, "n").click();
-  await caretAtSource(page, "n", 12);
-  await expect.poll(() => text(page, "n").textContent()).toBe("==urgent==");
   // Caret between the interior and the closing fence: `==🔴urgent|==`.
   await caretAtSource(page, "n", 10);
   await page.keyboard.type("!");
@@ -107,18 +89,18 @@ test("typing in a revealed colored run keeps the hidden emoji (color survives ed
     "data-src",
     "🔴",
   );
+
+  await text(page, "plain").click();
+  await expect.poll(() => text(page, "n").textContent()).toBe("urgent!");
+  await expect(mark(page, "n")).toHaveAttribute("data-src", "==🔴urgent!==");
 });
 
-test("moving the caret away re-folds the run", async ({ page }) => {
+test("an unclosed fence renders as literal text", async ({ page }) => {
   await load(page, [
-    { id: "a", parentId: null, prevSiblingId: null, text: "==hi==" },
-    { id: "b", parentId: null, prevSiblingId: "a", text: "plain" },
+    { id: "n", parentId: null, prevSiblingId: null, text: "==unclosed" },
   ]);
-  await text(page, "a").click();
-  await caretAtSource(page, "a", 6);
-  await expect.poll(() => text(page, "a").textContent()).toBe("==hi==");
-  await text(page, "b").click();
-  await expect.poll(() => text(page, "a").textContent()).toBe("hi");
+  await expect(mark(page, "n")).toHaveCount(0);
+  await expect.poll(() => text(page, "n").textContent()).toBe("==unclosed");
 });
 
 test("Cmd+Shift+H wraps a selection in ==...==", async ({ page }) => {
@@ -179,7 +161,9 @@ test("the revealed run's pen opens the color menu; picking recolors", async ({
     .toBe("==🟢hi==");
 });
 
-test("picking a color splices its emoji into the source", async ({ page }) => {
+test("the context menu recolors a folded highlight, resets to blue, and removes it", async ({
+  page,
+}) => {
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "a ==hi== b" },
   ]);
@@ -191,32 +175,25 @@ test("picking a color splices its emoji into the source", async ({ page }) => {
   await expect(mark(page, "n")).toHaveText("hi");
   // Still folded -- the emoji stays hidden.
   await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
-});
+  await expect(mark(page, "n")).toHaveAttribute("data-src", "==🔴hi==");
 
-test("picking the default color emits the BARE run (clean markdown)", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "==🔴urgent==" },
-  ]);
   await mark(page, "n").click({ button: "right" });
   await page
     .locator("[data-highlight-menu]")
     .getByRole("menuitemradio", { name: "blue" })
     .click();
   await expect(mark(page, "n")).toHaveAttribute("data-highlight", "blue");
-  await expect(mark(page, "n")).toHaveAttribute("data-src", "==urgent==");
-});
+  await expect(mark(page, "n")).toHaveAttribute("data-src", "==hi==");
 
-test("Remove highlight strips the run to its interior", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "a ==🟢go== b" },
-  ]);
+  // Removal must strip a colored run's emoji too, not leak it into the text.
+  await mark(page, "n").click({ button: "right" });
+  await menu.getByRole("menuitemradio", { name: "green" }).click();
+  await expect(mark(page, "n")).toHaveAttribute("data-src", "==🟢hi==");
   await mark(page, "n").click({ button: "right" });
   await page
     .locator("[data-highlight-menu]")
     .getByRole("menuitem", { name: "Remove highlight" })
     .click();
   await expect(mark(page, "n")).toHaveCount(0);
-  await expect(text(page, "n")).toHaveText("a go b");
+  await expect(text(page, "n")).toHaveText("a hi b");
 });

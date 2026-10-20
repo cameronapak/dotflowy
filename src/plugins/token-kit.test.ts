@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { isRevealed, spliceToken } from "./token-kit";
+import { isRevealed } from "./token-kit";
+import { spliceToken } from "./token-splice";
 
 test.each([
   [null, false], // no caret is never revealed

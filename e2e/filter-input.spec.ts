@@ -48,39 +48,6 @@ async function summon(page: Page) {
   await expect(input(page)).toBeFocused();
 }
 
-test("Cmd+F opens the filter input, focused", async ({ page }) => {
-  await load(page);
-  await summon(page);
-});
-
-test("the header magnifier opens the filter input", async ({ page }) => {
-  await load(page);
-  await page.getByRole("button", { name: "Filter this view" }).click();
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-});
-
-test("the header magnifier toggles the filter closed", async ({ page }) => {
-  await load(page);
-  const magnifier = page.getByRole("button", { name: "Filter this view" });
-
-  await magnifier.click();
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-
-  // Empty summon: second press collapses the row.
-  await magnifier.click();
-  await expect(input(page)).toHaveCount(0);
-
-  // With an active query: second press clears `?q=` AND collapses.
-  await magnifier.click();
-  await input(page).fill("#work");
-  await expect(page).toHaveURL(/q=%23work/);
-  await magnifier.click();
-  await expect(page).not.toHaveURL(/q=/);
-  await expect(input(page)).toHaveCount(0);
-});
-
 test("the magnifier's three states track the stakes (ADR 0050)", async ({
   page,
 }) => {
@@ -100,8 +67,15 @@ test("the magnifier's three states track the stakes (ADR 0050)", async ({
   // This is the state the button previously lacked -- opening it now reads.
   await magnifier.click();
   await expect(input(page)).toBeVisible();
+  await expect(input(page)).toBeFocused();
   await expect(magnifier).toHaveAttribute("aria-pressed", "true");
   await expect(magnifier).toHaveClass(muted);
+
+  // The same toggle closes an empty summon, then opens it again.
+  await magnifier.click();
+  await expect(input(page)).toHaveCount(0);
+  await magnifier.click();
+  await expect(input(page)).toBeFocused();
 
   // Query applied: still pressed, now SOLID ("your view is altered") -- so the
   // toggle-off press that WIPES the query only fires while it reads as "on".
@@ -114,6 +88,7 @@ test("the magnifier's three states track the stakes (ADR 0050)", async ({
   // Toggle-off clears the query, collapses the row, and drops the lit state.
   await magnifier.click();
   await expect(page).not.toHaveURL(/q=/);
+  await expect(input(page)).toHaveCount(0);
   await expect(magnifier).toHaveAttribute("aria-pressed", "false");
   await expect(magnifier).not.toHaveClass(muted);
   await expect(magnifier).not.toHaveClass(solid);

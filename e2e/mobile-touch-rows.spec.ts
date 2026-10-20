@@ -30,7 +30,9 @@ async function load(page: Page) {
   await openSeededOutline(page, { anchorId: "alpha" });
 }
 
-test("mobile emulation actually reports a coarse pointer", async ({ page }) => {
+test("coarse-pointer rows put the chevron on the right and align it with bullet and text", async ({
+  page,
+}) => {
   await load(page);
   const coarse = await page.evaluate(
     () => window.matchMedia("(pointer: coarse)").matches,
@@ -38,12 +40,6 @@ test("mobile emulation actually reports a coarse pointer", async ({ page }) => {
   // If this fails, the layout assertions below would be testing the DESKTOP
   // layout by accident. Switch the suite to force the media via a class then.
   expect(coarse).toBe(true);
-});
-
-test("a parent row's chevron sits at the right edge, not the left gutter", async ({
-  page,
-}) => {
-  await load(page);
   const rowBox = await row(page, "alpha").boundingBox();
   const chevBox = await chevron(page, "alpha").boundingBox();
   expect(rowBox).not.toBeNull();
@@ -56,14 +52,11 @@ test("a parent row's chevron sits at the right edge, not the left gutter", async
   expect(chevBox!.x + chevBox!.width).toBeGreaterThan(
     rowBox!.x + rowBox!.width - 12,
   );
-});
 
-test("bullet, chevron, and text share a vertical center", async ({ page }) => {
   // Regression guard: the coarse bullet's optical-align margin lives on
   // `.outline-row .bullet`, NOT a bare `.bullet` -- a media query adds no
   // specificity, so a bare selector silently loses to the base rule and the
   // dot drops ~4px below the text (the exact bug this asserts against).
-  await load(page);
   const m = await page.evaluate(() => {
     const li = document.querySelector('li[data-node-id="alpha"]')!;
     const dot = li.querySelector(".bullet-dot")!.getBoundingClientRect();
@@ -87,15 +80,6 @@ test("bullet, chevron, and text share a vertical center", async ({ page }) => {
   expect(Math.abs(m.dot - m.chev)).toBeLessThan(1);
   expect(Math.abs(m.dot - m.text)).toBeLessThan(2.5);
   expect(Math.abs(m.chev - m.text)).toBeLessThan(2.5);
-});
-
-test("tapping the right chevron still collapses the subtree", async ({
-  page,
-}) => {
-  await load(page);
-  await expect(text(page, "alpha-1")).toBeVisible();
-  await chevron(page, "alpha").click();
-  await expect(text(page, "alpha-1")).toBeHidden();
 });
 
 test("the right-edge chevron reads as an accordion: down collapsed, up expanded", async ({

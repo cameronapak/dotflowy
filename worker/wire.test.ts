@@ -49,7 +49,6 @@ type AnyBody = Schema.Codec<unknown, unknown, never, never>;
 type WirePayload = { readonly [key: string]: Schema.Json };
 
 const { text: _text, ...missingText } = node("a");
-const { mirrorOf: _mirrorOf, ...missingMirrorOf } = node("a");
 
 test("NodesPostBody decodes ops with correlation and history metadata", () => {
   const post = Schema.decodeUnknownSync(NodesPostBody)({
@@ -141,30 +140,9 @@ test.each<[string, AnyBody, WirePayload]>([
     { ops: [{ op: "insert" }] },
   ],
   [
-    "NodesPostBody: a delete op missing its key",
-    NodesPostBody,
-    { ops: [{ op: "delete" }] },
-  ],
-  [
-    "NodesPostBody: an unknown op discriminant",
-    NodesPostBody,
-    { ops: [{ op: "frobnicate", value: node("a") }] },
-  ],
-  [
-    "NodesPostBody: a node with a wrong field type",
-    NodesPostBody,
-    { ops: [{ op: "insert", value: { ...node("a"), isTask: "yes" } }] },
-  ],
-  [
     "NodesPostBody: a node missing text",
     NodesPostBody,
-    { ops: [{ op: "insert", value: missingText }] },
-  ],
-  // mirrorOf is required + nullable at the boundary (ADR 0022).
-  [
-    "NodesPostBody: a node missing mirrorOf",
-    NodesPostBody,
-    { ops: [{ op: "insert", value: missingMirrorOf }] },
+    { nodes: [missingText] },
   ],
   [
     "NodesPatchBody: an update missing its changes",

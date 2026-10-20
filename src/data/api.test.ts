@@ -145,10 +145,12 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
 
     // Burst while gen 1 is in flight: same id thrice (overlapping and new
     // fields) + a different id.
-    updateNodes([{ id: "a", changes: { text: "a2" } }]);
-    updateNodes([{ id: "a", changes: { completed: true } }]);
-    updateNodes([{ id: "a", changes: { text: "a3" } }]);
-    updateNodes([{ id: "b", changes: { text: "b1" } }]);
+    const burst = [
+      updateNodes([{ id: "a", changes: { text: "a2" } }]),
+      updateNodes([{ id: "a", changes: { completed: true } }]),
+      updateNodes([{ id: "a", changes: { text: "a3" } }]),
+      updateNodes([{ id: "b", changes: { text: "b1" } }]),
+    ];
     await tick();
     expect(pending.length).toBe(1); // gen 2 stays off the wire
 
@@ -162,7 +164,7 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
     ]);
 
     at(1).resolve(okField());
-    await expect(pA).resolves.toBeUndefined();
+    await Promise.all([pA, ...burst]);
   });
 
   test("a failed generation does not wedge the next", async () => {

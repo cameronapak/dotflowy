@@ -964,9 +964,9 @@ describe("reads", () => {
     return result;
   };
 
-  test("formatOutlineLines renders indentation, checkboxes, ids, and kind", () => {
+  test("outline reads redact spoilers and render indentation, checkboxes, ids, and kind", () => {
     const result = flatAll([
-      createNode({ id: "a", text: "alpha" }),
+      createNode({ id: "a", text: "alpha ||Bob||" }),
       createNode({
         id: "a1",
         text: "todo",
@@ -991,6 +991,7 @@ describe("reads", () => {
         kind: "paragraph",
       }),
     ]);
+    expect(result.lines[0]!.text).toBe("alpha [spoiler]");
     expect(result.lines.map((l) => l.kind)).toEqual([
       null,
       null,
@@ -1000,7 +1001,7 @@ describe("reads", () => {
     expect(result.lines.find((l) => l.id === "q")!.isTask).toBe(false);
     expect(formatOutlineLines(result.lines)).toBe(
       [
-        "- alpha (id: a)",
+        "- alpha [spoiler] (id: a)",
         "  - [x] todo (id: a1)",
         "  - alpha prose (id: p, paragraph)",
         "- prose (id: q, paragraph)",
@@ -1052,17 +1053,6 @@ describe("reads", () => {
 // tests guard the read and export paths: the same carve-out as
 // worker/wire.test.ts / worker/mcp.test.ts.
 describe("spoiler redaction at the MCP boundary", () => {
-  test("flattenSubtree redacts a spoiler run to the [spoiler] sentinel", () => {
-    const nodes = [createNode({ id: "a", text: "the killer is ||Bob||" })];
-    const result = flattenSubtree(index(nodes), null, {
-      maxDepth: 99,
-      maxNodes: 100,
-    });
-    if (result instanceof Error) throw result;
-    expect(result.lines[0]!.text).toBe("the killer is [spoiler]");
-    expect(result.lines[0]!.text.includes("Bob")).toBe(false);
-  });
-
   test("redactSpoilerIndex rebuilds an index over redacted text (export_opml path)", () => {
     const nodes = [
       createNode({ id: "a", text: "secret is ||42||" }),

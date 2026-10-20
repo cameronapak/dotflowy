@@ -1,37 +1,18 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import { isMirrorsEnabled } from "./flags";
 
-// bun test has no DOM — stub the surfaces flags.ts reads (see realtime.test.ts).
-const store = new Map<string, string>();
-const location = { href: "http://localhost/", search: "" };
-
-beforeEach(() => {
-  store.clear();
-  location.href = "http://localhost/";
-  location.search = "";
-  // SAFETY: test stub for the browser window flags.ts reads; bun test has no DOM, so this is the only window in scope.
-  (globalThis as { window?: unknown }).window = {
-    localStorage: {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        store.set(k, v);
-      },
-      removeItem: (k: string) => {
-        store.delete(k);
-      },
-    },
-    location,
+test("mirrors default on when no rollback preference is saved", () => {
+  // SAFETY: flags only reads localStorage.getItem; restore any prior test window.
+  const scope = globalThis as { window?: unknown };
+  const previous = scope.window;
+  scope.window = {
+    localStorage: { getItem: () => null },
   };
-});
-
-afterEach(() => {
-  // SAFETY: the property was assigned by the beforeEach stub above, so delete removes exactly that stub.
-  delete (globalThis as { window?: unknown }).window;
-});
-
-describe("isMirrorsEnabled (smoke)", () => {
-  test("still defaults ON", () => {
+  try {
     expect(isMirrorsEnabled()).toBe(true);
-  });
+  } finally {
+    if (previous === undefined) delete scope.window;
+    else scope.window = previous;
+  }
 });

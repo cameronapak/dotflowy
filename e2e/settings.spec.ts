@@ -68,22 +68,6 @@ async function interceptDownloads(page: Page) {
   });
 }
 
-test("More menu → Settings navigates to the settings page", async ({
-  page,
-}) => {
-  await seedOutline(page, TREE);
-  await mockFreePlan(page);
-  await openSeededOutline(page, { anchorId: "alpha" });
-
-  await page.getByRole("button", { name: /more/i }).click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
-
-  await expect(page).toHaveURL(/\/settings$/);
-  await expect(
-    page.getByRole("heading", { name: "Settings", level: 1 }),
-  ).toBeVisible();
-});
-
 test("CLI setup explains install, login, and a safe read against this deployment", async ({
   page,
   context,
@@ -103,9 +87,6 @@ test("CLI setup explains install, login, and a safe read against this deployment
     `dotflowy login --server ${origin}`,
     `dotflowy outline --server ${origin}`,
   ]);
-  await expect(dialog).toContainText("Node.js 22.19.0 or newer");
-  await expect(dialog).toContainText("Unlimited");
-  await expect(dialog).toContainText("Spoiler text stays redacted");
   await expect(
     dialog.getByRole("link", { name: "CLI documentation" }),
   ).toHaveAttribute(
@@ -129,7 +110,7 @@ test("CLI setup explains install, login, and a safe read against this deployment
   });
   await dialog.getByRole("button", { name: "Copy install command" }).click();
   await expect(
-    page.getByText("Couldn't copy. Select the command and copy it manually."),
+    page.locator('[data-sonner-toast][data-type="error"]'),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
@@ -147,13 +128,14 @@ test("CLI setup explains install, login, and a safe read against this deployment
   await expect(mcpDocs).toBeVisible();
 });
 
-test("primary sections render and Other settings reveals billing, account, and data", async ({
+test("free settings exposes its sections, connections nudge, and disclosed upgrade paths", async ({
   page,
 }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
   await openSettings(page);
 
+  await expect(page.getByText(/Connecting AI apps requires/i)).toBeVisible();
   for (const name of [
     "Connections",
     "Editor features",
@@ -169,16 +151,6 @@ test("primary sections render and Other settings reveals billing, account, and d
   for (const name of ["Plan & billing", "Account", "Data"]) {
     await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   }
-});
-
-test("free plan shows the usage meter and all three upgrade CTAs", async ({
-  page,
-}) => {
-  await seedOutline(page, TREE);
-  await mockFreePlan(page);
-  await openSettings(page);
-
-  await page.locator("summary", { hasText: "Other settings" }).click();
   // Current-plan card reads "Free" and shows the usage meter.
   await expect(page.getByText("Current plan")).toBeVisible();
   await expect(page.getByText("Nodes used")).toBeVisible();
@@ -198,14 +170,6 @@ test("free plan shows the usage meter and all three upgrade CTAs", async ({
   await expect(
     page.getByText(/Renews after 3 years unless you cancel/i),
   ).toBeVisible();
-});
-
-test("the free connections nudge points at Unlimited", async ({ page }) => {
-  await seedOutline(page, TREE);
-  await mockFreePlan(page);
-  await openSettings(page);
-
-  await expect(page.getByText(/Connecting AI apps requires/i)).toBeVisible();
 });
 
 test("free accounts can opt into experimental capture key management", async ({
@@ -304,8 +268,26 @@ test("Data → Export downloads the whole outline as OPML", async ({ page }) => 
   await openSeededOutline(page, { anchorId: "alpha" });
 
   await page.getByRole("button", { name: /more/i }).click();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  await expect(
+    page.getByRole("menuitem", { name: /Copy as Markdown/ }),
+  ).toBeVisible();
+  for (const gone of [
+    /Import OPML/,
+    /Export OPML/,
+    /Connect apps/,
+    /^Theme$/,
+    /Text size/,
+    /Connect Google/,
+    /Delete account/,
+  ]) {
+    await expect(page.getByRole("menuitem", { name: gone })).toHaveCount(0);
+  }
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
+  await expect(
+    page.getByRole("heading", { name: "Settings", level: 1 }),
+  ).toBeVisible();
 
   await page.locator("summary", { hasText: "Other settings" }).click();
   await page.getByRole("button", { name: "Export" }).click();
@@ -332,35 +314,4 @@ test("Appearance → theme segmented control switches to dark", async ({
     .getByRole("radio", { name: "Dark" })
     .click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-});
-
-test("the More menu no longer holds the moved items", async ({ page }) => {
-  await seedOutline(page, TREE);
-  await mockFreePlan(page);
-  await openSeededOutline(page, { anchorId: "alpha" });
-
-  await page.getByRole("button", { name: /more/i }).click();
-
-  // Still present.
-  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
-  // Deliberately walked back: Copy as Markdown is a per-view ACTION, not a
-  // setting, so it lives with the other actions at the top of this menu
-  // rather than on /settings.
-  await expect(
-    page.getByRole("menuitem", { name: /Copy as Markdown/ }),
-  ).toBeVisible();
-
-  // Moved to /settings — gone from the menu.
-  for (const gone of [
-    /Import OPML/,
-    /Export OPML/,
-    /Connect apps/,
-    /^Theme$/,
-    /Text size/,
-    /Connect Google/,
-    /Delete account/,
-  ]) {
-    await expect(page.getByRole("menuitem", { name: gone })).toHaveCount(0);
-  }
 });

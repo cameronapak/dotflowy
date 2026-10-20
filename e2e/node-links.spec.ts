@@ -43,7 +43,7 @@ async function caretAtEnd(page: Page, id: string) {
   await placeCaret(text(page, id), "end");
 }
 
-test("a [[id]] token renders as a chip with the target's LIVE text", async ({
+test("a live link follows a rename, zooms to its target and returns through backlinks", async ({
   page,
 }) => {
   await load(page);
@@ -57,6 +57,33 @@ test("a [[id]] token renders as a chip with the target's LIVE text", async ({
   await caretAtEnd(page, TARGET);
   await page.keyboard.type(" v2");
   await expect(chip).toContainText("Project Phoenix v2");
+
+  await chip.click();
+  await expect(page).toHaveURL(new RegExp(TARGET));
+  await expect(page.locator(".zoomed-title")).toContainText(
+    "Project Phoenix v2",
+  );
+
+  // Re-enter the target directly so backlink hydration is covered too.
+  await page.reload();
+  await expect(page.locator(".zoomed-title")).toContainText(
+    "Project Phoenix v2",
+  );
+
+  // Backlinks use the live label too, and count referring nodes rather than links.
+  const line = page.getByRole("button", { name: /1 backlink/ });
+  await expect(line).toBeVisible();
+  await line.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("kickoff for Project Phoenix v2");
+  await dialog.getByText("kickoff for").click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(text(page, REF)).toBeVisible();
+
+  // REF has a link IN its text but nothing links TO it.
+  await page.goto(`/${REF}`);
+  await expect(page.locator(".zoomed-title")).toBeVisible();
+  await expect(page.getByRole("button", { name: /backlink/ })).toHaveCount(0);
 });
 
 test("hand-typed junk between double brackets stays literal text", async ({
@@ -74,14 +101,6 @@ test("hand-typed junk between double brackets stays literal text", async ({
 
   await expect(text(page, "a")).toContainText("[[not an id]]");
   await expect(text(page, "a").locator("[data-node-link]")).toHaveCount(0);
-});
-
-test("clicking the chip zooms to the target", async ({ page }) => {
-  await load(page);
-
-  await chipIn(page, REF).click();
-  await expect(page).toHaveURL(new RegExp(TARGET));
-  await expect(page.locator(".zoomed-title")).toContainText("Project Phoenix");
 });
 
 test("typing [[ opens the picker; picking inserts the chip", async ({
@@ -132,36 +151,4 @@ test("the [[ picker opens on the zoomed page title too", async ({ page }) => {
   await option.click();
   await expect(page.getByRole("listbox")).toHaveCount(0);
   await expect(title.locator(`[data-node-link="${TARGET}"]`)).toBeVisible();
-});
-test("the zoomed target shows a backlink count; the list jumps to the referrer", async ({
-  page,
-}) => {
-  await seedOutline(page, TREE);
-  await page.goto(`/${TARGET}`);
-  await expect(page.locator(".zoomed-title")).toContainText("Project Phoenix");
-
-  // The quiet line under the title -- deduped by referring node, so one
-  // referrer = "1 backlink".
-  const line = page.getByRole("button", { name: /1 backlink/ });
-  await expect(line).toBeVisible();
-
-  await line.click();
-  const dialog = page.getByRole("dialog");
-  // The referrer's text, with the link flattened to the target's label.
-  await expect(dialog).toContainText("kickoff for Project Phoenix");
-
-  // Jumping shows the referring bullet in context (its parent view -- Home
-  // for a top-level referrer).
-  await dialog.getByText("kickoff for").click();
-  await expect(page).toHaveURL(/\/$/);
-  await expect(text(page, REF)).toBeVisible();
-});
-
-test("a node nothing links to renders no backlink chrome", async ({ page }) => {
-  await seedOutline(page, TREE);
-  // REF has a link IN its text but nothing links TO it.
-  await page.goto(`/${REF}`);
-  await expect(page.locator(".zoomed-title")).toBeVisible();
-
-  await expect(page.getByRole("button", { name: /backlink/ })).toHaveCount(0);
 });

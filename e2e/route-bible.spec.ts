@@ -84,7 +84,7 @@ const selectedBibleRef = (page: Page) =>
       : null;
   });
 
-test("a chapter:verse reference chips with the resolver URL; a non-reference stays plain text", async ({
+test("verse, chapter and multiple references chip independently; non-references stay plain", async ({
   page,
 }) => {
   await load(page, [
@@ -99,6 +99,18 @@ test("a chapter:verse reference chips with the resolver URL; a non-reference sta
       parentId: null,
       prevSiblingId: "ref",
       text: "just some text 3",
+    },
+    {
+      id: "chapter",
+      parentId: null,
+      prevSiblingId: "noref",
+      text: "See Genesis 1 for the start",
+    },
+    {
+      id: "multiple",
+      parentId: null,
+      prevSiblingId: "chapter",
+      text: "Compare John 3:16 with Romans 8:28",
     },
   ]);
 
@@ -121,38 +133,14 @@ test("a chapter:verse reference chips with the resolver URL; a non-reference sta
   // parser gate rejects it).
   await expect(chip(page, "noref")).toHaveCount(0);
   await expect(text(page, "noref")).toHaveText("just some text 3");
-});
 
-test("a whole-chapter reference (no verse) also chips", async ({ page }) => {
-  await load(page, [
-    {
-      id: "n",
-      parentId: null,
-      prevSiblingId: null,
-      text: "See Genesis 1 for the start",
-    },
-  ]);
-
-  await expect(chip(page, "n")).toHaveText("Genesis 1");
-  await expect(chip(page, "n")).toHaveAttribute(
+  await expect(chip(page, "chapter")).toHaveText("Genesis 1");
+  await expect(chip(page, "chapter")).toHaveAttribute(
     "data-href",
     "https://route.bible/gen.1?src=dotflowy",
   );
-});
 
-test("multiple references on one line each chip independently", async ({
-  page,
-}) => {
-  await load(page, [
-    {
-      id: "n",
-      parentId: null,
-      prevSiblingId: null,
-      text: "Compare John 3:16 with Romans 8:28",
-    },
-  ]);
-
-  const chips = chip(page, "n");
+  const chips = chip(page, "multiple");
   await expect(chips).toHaveCount(2);
   await expect(chips.nth(0)).toHaveText("John 3:16");
   await expect(chips.nth(1)).toHaveText("Romans 8:28");

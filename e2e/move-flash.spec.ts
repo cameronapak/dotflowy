@@ -77,6 +77,15 @@ test("a keyboard move (Cmd+Shift+Down) flashes the moved row", async ({
   await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
 
   // It moved (now after bravo) and the moved row flashes, focus intact.
+  await expect
+    .poll(() =>
+      page
+        .locator("li[data-node-id]:not([data-parent-id])")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-node-id")),
+        ),
+    )
+    .toEqual(["bravo", "alpha", "charlie"]);
   await expect(text(page, "alpha")).toBeFocused();
   await expect(row(page, "alpha")).toHaveClass(/node-acted/);
 });

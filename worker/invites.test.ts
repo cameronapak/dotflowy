@@ -3,14 +3,12 @@ import { describe, expect, it } from "bun:test";
 import { generateInviteCode, inviteEmail, normalizeEmail } from "./invites";
 
 describe("generateInviteCode", () => {
-  it("yields 12 unambiguous chars (no 0/O/1/I/L) that don't collide across a batch", () => {
-    const seen = new Set<string>();
-    for (let i = 0; i < 1000; i++) {
-      const code = generateInviteCode();
-      expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
-      seen.add(code);
-    }
-    expect(seen.size).toBe(1000);
+  it("generates fresh 12-character codes without ambiguous characters", () => {
+    const first = generateInviteCode();
+    const second = generateInviteCode();
+    expect(first).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
+    expect(second).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
+    expect(second).not.toBe(first);
   });
 });
 

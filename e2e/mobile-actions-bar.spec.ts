@@ -61,7 +61,7 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     viewport: { width: 412, height: 900 },
   });
 
-  test("mobile emulation actually reports a coarse pointer", async ({
+  test("on a coarse pointer the bar appears only while a bullet is focused", async ({
     page,
   }) => {
     await load(page);
@@ -70,16 +70,14 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     );
     // If this fails the visibility assertions below would test the desktop path.
     expect(coarse).toBe(true);
-  });
-
-  test("hidden until a bullet is focused, shown while editing", async ({
-    page,
-  }) => {
-    await load(page);
     // Nothing focused on load -> no bar.
     await expect(bar(page)).toHaveCount(0);
     await text(page, "alpha").click();
     await expect(bar(page)).toBeVisible();
+    // System Done/back dismisses the keyboard by blurring the editable span.
+    // SAFETY: text() selects the outline row's contentEditable HTML span.
+    await text(page, "alpha").evaluate((el) => (el as HTMLElement).blur());
+    await expect(bar(page)).toHaveCount(0);
   });
 
   test("fits the visible height and follows viewport panning without blocking editing", async ({
@@ -435,20 +433,6 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(
       text(page, "n").locator('.link-url-chip[data-src="https://example.com"]'),
     ).toHaveCount(1);
-  });
-
-  test("blur hides the bar (system Done / back dismisses the keyboard)", async ({
-    page,
-  }) => {
-    // There is no dismiss button (iOS's own Done / Android's back cover it, ADR
-    // 0030); blurring the bullet is what hides the bar. Simulate the dismiss by
-    // blurring the focused span directly.
-    await load(page);
-    await text(page, "alpha").click();
-    await expect(bar(page)).toBeVisible();
-    // SAFETY: text() selects the outline row's contentEditable HTML span.
-    await text(page, "alpha").evaluate((el) => (el as HTMLElement).blur());
-    await expect(bar(page)).toHaveCount(0);
   });
 });
 

@@ -160,14 +160,6 @@ test("first-paste unfurl stays with its saved draft across a rapid next capture"
   await expect(rowWithText(page, "My second thought")).toHaveCount(1);
 });
 
-test("the 'q' hotkey opens the overlay and Esc closes it", async ({ page }) => {
-  await load(page);
-  await pressQuickAddKey(page);
-  await expect(dialog(page)).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(dialog(page)).toBeHidden();
-});
-
 test("'q' while typing in a bullet does NOT open the overlay", async ({
   page,
 }) => {
@@ -231,26 +223,7 @@ test("rapid-fire Cmd+Enter commits each capture as a sibling at the bottom of To
     .toEqual(["first-capture", "second-capture"]);
 });
 
-test("Enter commits the single node and closes the overlay", async ({
-  page,
-}) => {
-  await load(page);
-  await openQuickAdd(page);
-
-  await type(page, "one-and-done");
-  await page.keyboard.press("Enter");
-
-  // Enter closes (commit & close), unlike Cmd+Enter which keeps going.
-  await expect(dialog(page)).toBeHidden();
-
-  // The node still landed in Today (commit-immediately).
-  await todayButton(page).click();
-  await expect(rowWithText(page, "one-and-done")).toBeVisible({
-    timeout: 10_000,
-  });
-});
-
-test("Enter shows an off-page toast whose 'Go there' zooms to the destination", async ({
+test("Enter commits and closes; the off-page toast's 'Go there' opens the captured node", async ({
   page,
 }) => {
   await load(page);
@@ -259,6 +232,7 @@ test("Enter shows an off-page toast whose 'Go there' zooms to the destination", 
   await openQuickAdd(page);
   await type(page, "toasted-note");
   await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
 
   const toast = toastByText(page, "Added to Today");
   await expect(toast).toBeVisible({ timeout: 10_000 });

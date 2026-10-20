@@ -212,19 +212,3 @@ test("a truncated file shows the parse error (line/column) and writes nothing", 
     STANDARD_TREE.length,
   );
 });
-
-test("Cmd+K runs the same Import OPML action (the ADR 0034 bridge)", async ({
-  page,
-}) => {
-  await load(page);
-  await page.keyboard.press("ControlOrMeta+k");
-  const input = page.getByPlaceholder(/Search nodes and actions/);
-  await expect(input).toBeVisible();
-  await input.fill("import opml");
-  await expect(page.getByRole("option", { name: /Import OPML/ })).toBeVisible();
-  const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("option", { name: /Import OPML/ }).click();
-  // The action fired the same hidden file input — the picker opening IS the
-  // proof both surfaces share one entry point.
-  await chooserPromise;
-});

@@ -55,7 +55,9 @@ async function showSavedSection(page: Page) {
   await expect(popover(page).getByText("Saved", { exact: true })).toBeVisible();
 }
 
-test("the pin saves the query and reflects pressed state", async ({ page }) => {
+test("the pin saves and unpins the query, reflecting both pressed states", async ({
+  page,
+}) => {
   await load(page);
   await summon(page);
 
@@ -70,11 +72,6 @@ test("the pin saves the query and reflects pressed state", async ({ page }) => {
   const unsave = page.getByRole("button", { name: "Unsave filter" });
   await expect(unsave).toBeVisible();
   await expect(unsave).toHaveAttribute("aria-pressed", "true");
-});
-
-test("unpinning removes the saved query", async ({ page }) => {
-  await load(page);
-  await saveWork(page);
 
   // Toggle it back off.
   await page.getByRole("button", { name: "Unsave filter" }).click();
@@ -113,7 +110,9 @@ test("the Saved section lists the query and clicking it applies the filter", asy
   await expect(row(page, "mom")).toHaveCount(0);
 });
 
-test("a saved query can be renamed inline", async ({ page }) => {
+test("a saved query can be renamed inline and deleted by its new name", async ({
+  page,
+}) => {
   await load(page);
   await saveWork(page);
   await showSavedSection(page);
@@ -131,14 +130,7 @@ test("a saved query can be renamed inline", async ({ page }) => {
   await expect(
     popover(page).getByRole("button", { name: "Rename My work" }),
   ).toBeVisible();
-});
-
-test("a saved query can be deleted", async ({ page }) => {
-  await load(page);
-  await saveWork(page);
-  await showSavedSection(page);
-
-  await popover(page).getByRole("button", { name: "Delete #work" }).click();
+  await popover(page).getByRole("button", { name: "Delete My work" }).click();
 
   // The section empties, so the "Saved" heading is gone.
   await expect(popover(page).getByText("Saved", { exact: true })).toHaveCount(

@@ -27,12 +27,6 @@ async function load(page: Page, serverVersion?: string) {
   await expect(page.locator('li[data-node-id="alpha"]')).toBeVisible();
 }
 
-test("a newer server raises a reload toast", async ({ page }) => {
-  await load(page, "99.0.0");
-  await expect(toast(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
-});
-
 test("a matching server says nothing", async ({ page }) => {
   await load(page, CURRENT);
   await expect(page.locator('li[data-node-id="bravo"]')).toBeVisible();
@@ -47,9 +41,12 @@ test("a frame without serverVersion says nothing -- absence is not staleness", a
   await expect(toast(page)).toHaveCount(0);
 });
 
-test("the toast does not block editing", async ({ page }) => {
+test("a newer server offers reload without blocking editing", async ({
+  page,
+}) => {
   await load(page, "99.0.0");
   await expect(toast(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
 
   const alpha = page.locator('li[data-node-id="alpha"] .node-text').first();
   await alpha.click();

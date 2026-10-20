@@ -740,12 +740,13 @@ test("a cold link to ?day= opens on that day and keeps it in the URL", async ({
   page,
 }) => {
   const LATER = "2030-07-12";
+  await page.clock.install();
   await seedOutline(page, TREE, { kv: KV });
   await openSeededOutline(page, { path: `/the-day?day=${LATER}` });
   await expect(section(page, LATER, "placeholder")).toBeInViewport();
   await expect(pill(page, LATER)).toHaveAttribute("data-selected", "");
-  // Past the URL debounce, the link's destination is still there.
-  await page.waitForTimeout(800);
+  // Advance beyond the URL debounce without sleeping in real time.
+  await page.clock.runFor(1_000);
   await expect(page).toHaveURL(new RegExp(`/the-day\\?day=${LATER}$`));
 });
 

@@ -92,7 +92,7 @@ test("file opt-in saves privately, isolates servers, and logout removes only sel
   );
 }, 15_000);
 
-test("environment credentials never touch the credential directory", async () => {
+test("environment credentials win over saved tokens without changing them", async () => {
   const dir = await directory();
   expect(
     await Effect.runPromise(
@@ -100,9 +100,20 @@ test("environment credentials never touch the credential directory", async () =>
     ),
   ).toBe("environment");
   expect(await readdir(dir)).toEqual([]);
-  await expect(
-    Effect.runPromise(accessToken("https://one.test", dir, "")),
-  ).rejects.toThrow();
+  const store = credentialStore(dir, "https://one.test");
+  await Effect.runPromise(store.save(credential, true));
+  expect(
+    await Effect.runPromise(
+      accessToken("https://one.test", dir, "environment"),
+    ),
+  ).toBe("environment");
+  const error = await Effect.runPromise(
+    accessToken("https://one.test", dir, "").pipe(Effect.flip),
+  );
+  expect(error.exitCode).toBe(3);
+  expect((await Effect.runPromise(store.load()))?.credential).toEqual(
+    credential,
+  );
 });
 
 test.skipIf(process.platform === "win32")(

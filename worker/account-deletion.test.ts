@@ -114,6 +114,7 @@ describe("deleteResidualUserRows", () => {
     await deleteResidualUserRows(db, "user-abc", "  User@Example.COM ");
 
     const bySql = (frag: string) => calls.find((c) => c.sql.includes(frag));
+    expect(bySql("DELETE FROM capture_key")!.args).toEqual(["user-abc"]);
     expect(bySql("oauthAccessToken")!.args).toEqual(["user-abc"]);
     expect(bySql("oauthConsent")!.args).toEqual(["user-abc"]);
     expect(bySql("oauthApplication")!.args).toEqual(["user-abc"]);

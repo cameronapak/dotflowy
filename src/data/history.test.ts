@@ -14,26 +14,7 @@ import {
 import { buildTreeIndex, createNode } from "./tree";
 import { rowKeyFor } from "./visible-order";
 
-// history.ts keeps the undo/redo stacks as module singletons with no exported
-// reset. undo/redo only SHUFFLE entries between the two stacks (the sum is
-// conserved), so neither can drain both. `capture` clears the redo stack, so
-// two captures leave it empty with an empty backup, and `drop` then pops the
-// undo entries back off -- draining all three pieces of state to a clean slate.
-//
-// The drain captures RESET_IDX, not EMPTY: `capture` refuses an empty index, so
-// an EMPTY capture would push nothing, clear nothing, and leave the redo stack
-// loaded for the next test.
 const EMPTY = buildTreeIndex([]);
-const RESET_IDX = buildTreeIndex([createNode({ id: "__reset" })]);
-function resetHistory(): void {
-  while (undo(EMPTY)) {
-    /* move every undo entry onto the redo stack */
-  }
-  capture(RESET_IDX);
-  capture(RESET_IDX);
-  drop();
-  drop();
-}
 
 function createNodes(count: number, prefix = "n"): Node[] {
   const nodes: Node[] = [];
@@ -42,7 +23,9 @@ function createNodes(count: number, prefix = "n"): Node[] {
   return nodes;
 }
 
-beforeEach(resetHistory);
+beforeEach(() => {
+  clearHistory();
+});
 
 test("a draft scope cannot undo older edits and collapses to one capture on close", () => {
   const base = buildTreeIndex([createNode({ id: "a", text: "before" })]);
@@ -122,7 +105,7 @@ test("undo and redo move one entry between the stacks; capture and drop manage r
   expect(redo(idx)).toBeNull();
 
   // drop with no redo to restore just pops the undo point.
-  resetHistory();
+  clearHistory();
   capture(idx, "a");
   drop();
   expect(undo(idx)).toBeNull();
@@ -276,7 +259,7 @@ test("planRestore slices upserts and deletes at 500 ops", () => {
   // All snapshot nodes are re-inserts against an EMPTY live tree.
   capture(buildTreeIndex(createNodes(500)), null);
   expect(undo(EMPTY)!.slices).toHaveLength(1);
-  resetHistory();
+  clearHistory();
   capture(buildTreeIndex(createNodes(501)), null);
   const over = undo(EMPTY)!;
   expect(over.opCount).toBe(501);
@@ -288,7 +271,7 @@ test("planRestore slices upserts and deletes at 500 ops", () => {
     [500, 1],
     [501, 2],
   ] as const) {
-    resetHistory();
+    clearHistory();
     const all = createNodes(deletes + 1);
     capture(buildTreeIndex([all[0]!]), null);
     const plan = undo(buildTreeIndex(all))!;

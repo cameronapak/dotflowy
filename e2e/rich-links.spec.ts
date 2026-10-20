@@ -459,7 +459,7 @@ const A = "[A](https://a.com)";
 const B = "[B](https://b.com)";
 const TWO = `${A} ${B}`;
 
-test("focusing a multi-link line reveals only the link under the caret", async ({
+test("focus reveals one link and moving the caret refolds it for the next", async ({
   page,
 }) => {
   await load(page, [
@@ -483,19 +483,6 @@ test("focusing a multi-link line reveals only the link under the caret", async (
   const folded = text(page, "n").locator("a[data-link]");
   await expect(folded).toHaveCount(1);
   await expect(folded).toHaveText("B");
-});
-
-test("moving the caret onto the other link reveals it and folds the first", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: TWO },
-  ]);
-
-  await focusBullet(page, "n");
-  await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
-    "A",
-  );
 
   // Move the caret to just before the still-folded second link. Setting the
   // selection fires selectionchange, which drives the per-link reflow (the
@@ -506,7 +493,6 @@ test("moving the caret onto the other link reveals it and folds the first", asyn
   await expect(text(page, "n").locator(".link-reveal .link-label")).toHaveText(
     "B",
   );
-  const folded = text(page, "n").locator("a[data-link]");
   await expect(folded).toHaveCount(1);
   await expect(folded).toHaveText("A");
 });
@@ -602,28 +588,7 @@ test("focusing does not synchronously expand a folded link", async ({
   await page.keyboard.type("!");
   await expect.poll(() => readSource(page, "n")).toBe(LONG + "!");
 });
-// Mirror of readSource: a folded <a> contributes its data-src, every other
-// node its textContent. A just-pasted link folds immediately, so the raw
-// markdown lives only in data-src (plus the trailing space we append).
-const readSrc = (page: Page, id: string) =>
-  text(page, id).evaluate((el: HTMLElement) => {
-    let out = "";
-    const visit = (n: Node) => {
-      if (n.nodeType === 3) {
-        out += n.textContent ?? "";
-        return;
-      }
-      if (n instanceof Element && n.hasAttribute("data-src")) {
-        out += n.getAttribute("data-src") ?? "";
-        return;
-      }
-      n.childNodes.forEach(visit);
-    };
-    el.childNodes.forEach(visit);
-    return out;
-  });
-
-test("pasting a bare URL auto-links it and folds it immediately", async ({
+test("bare URL paste folds immediately and keeps its URL when no title is returned", async ({
   page,
 }) => {
   await page.route(
@@ -646,9 +611,10 @@ test("pasting a bare URL auto-links it and folds it immediately", async ({
   const anchor = text(page, "n").locator("a[data-link]");
   await expect(anchor).toHaveText("https://example.com");
   await expect(anchor).toHaveAttribute("href", "https://example.com");
+  await expect(anchor).not.toHaveClass(/link-unfurling/);
   // Source is the link plus the appended space.
   await expect
-    .poll(() => readSrc(page, "n"))
+    .poll(() => readSource(page, "n"))
     .toBe("[https://example.com](https://example.com) ");
 });
 
@@ -676,7 +642,7 @@ test("pasting a URL over a selection wraps the selection as the label", async ({
     "data-src",
     "https://anthropic.com",
   );
-  await expect.poll(() => readSrc(page, "n")).toBe(LINK);
+  await expect.poll(() => readSource(page, "n")).toBe(LINK);
 });
 
 test("pasting a rich link (single anchor) inserts [title](url) and folds it", async ({
@@ -695,7 +661,7 @@ test("pasting a rich link (single anchor) inserts [title](url) and folds it", as
   const anchor = text(page, "n").locator("a[data-link]");
   await expect(anchor).toHaveText("Anthropic");
   await expect(anchor).toHaveAttribute("href", "https://anthropic.com");
-  await expect.poll(() => readSrc(page, "n")).toBe(`${LINK} `);
+  await expect.poll(() => readSource(page, "n")).toBe(`${LINK} `);
 });
 
 test("URLs with parens are percent-encoded so the link still parses", async ({
@@ -718,7 +684,7 @@ test("URLs with parens are percent-encoded so the link still parses", async ({
   );
   // Source keeps the literal label, the encoded url, and the trailing space.
   await expect
-    .poll(() => readSrc(page, "n"))
+    .poll(() => readSource(page, "n"))
     .toBe(
       "[https://en.wikipedia.org/wiki/Foo_(bar)](https://en.wikipedia.org/wiki/Foo_%28bar%29) ",
     );
@@ -767,35 +733,10 @@ test("pasting a bare URL fetches its title and swaps it into the label", async (
   await expect(swapped).toHaveText("Anthropic");
   await expect(swapped).not.toHaveClass(/link-unfurling/);
   await expect
-    .poll(() => readSrc(page, "n"))
+    .poll(() => readSource(page, "n"))
     .toBe("[Anthropic](https://anthropic.com) ");
 });
 
-test("a failed title fetch keeps the url placeholder", async ({ page }) => {
-  await page.route(
-    (url) => url.pathname === "/api/unfurl",
-    (route) =>
-      route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ title: null }),
-      }),
-  );
-
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "" },
-  ]);
-  await focusBullet(page, "n");
-  await pasteInto(text(page, "n"), { plain: "https://anthropic.com" });
-
-  // Nothing swaps, the spinner clears, the url-label placeholder stands -- it
-  // is the graceful fallback, already a working folded link.
-  const anchor = text(page, "n").locator("a[data-link]");
-  await expect(anchor).toHaveText("https://anthropic.com");
-  await expect(anchor).not.toHaveClass(/link-unfurling/);
-  await expect
-    .poll(() => readSrc(page, "n"))
-    .toBe("[https://anthropic.com](https://anthropic.com) ");
-});
 const popover = (page: Page) => page.locator("[data-link-edit-popover]");
 
 test("the pencil on a folded link opens the editor; Done rewrites label and url", async ({
@@ -842,7 +783,7 @@ test("the pencil on a folded link opens the editor; Done rewrites label and url"
   await expect(anchor).toHaveText("Claude");
   await expect(anchor).toHaveAttribute("href", "https://claude.ai");
   await expect
-    .poll(() => readSrc(page, "n"))
+    .poll(() => readSource(page, "n"))
     .toBe("before [Claude](https://claude.ai) after");
 });
 
@@ -857,7 +798,7 @@ test("Cancel leaves the link untouched", async ({ page }) => {
 
   await expect(popover(page)).toHaveCount(0);
   await expect.poll(() => activeNodeId(page)).toBe("n");
-  await expect.poll(() => readSrc(page, "n")).toBe(LINK);
+  await expect.poll(() => readSource(page, "n")).toBe(LINK);
 });
 
 for (const revealed of [false, true]) {
@@ -881,7 +822,7 @@ for (const revealed of [false, true]) {
     await popover(page).getByLabel("Link URL").fill("https://later.example/");
     await popover(page).getByRole("button", { name: "Done" }).click();
     await expect
-      .poll(() => readSrc(page, "n"))
+      .poll(() => readSource(page, "n"))
       .toBe(`${prefix}https://later.example/`);
 
     // Identical Markdown links are separate source occurrences too.
@@ -905,7 +846,7 @@ for (const revealed of [false, true]) {
     await popover(page).getByLabel("Link text").fill("Second");
     await popover(page).getByRole("button", { name: "Done" }).click();
     await expect
-      .poll(() => readSrc(page, "n"))
+      .poll(() => readSource(page, "n"))
       .toBe(`${LINK} and [Second](https://anthropic.com)`);
     await text(page, "n")
       .getByRole("button", { name: "Edit link" })
@@ -922,10 +863,10 @@ for (const revealed of [false, true]) {
         value: { ...nodes[0]!, text: movedSource, updatedAt: 100 },
       },
     ]);
-    await expect.poll(() => readSrc(page, "n")).toBe(movedSource);
+    await expect.poll(() => readSource(page, "n")).toBe(movedSource);
     await popover(page).getByRole("button", { name: "Done" }).click();
     await expect(popover(page)).toHaveCount(0);
-    await expect.poll(() => readSrc(page, "n")).toBe(movedSource);
+    await expect.poll(() => readSource(page, "n")).toBe(movedSource);
   });
 }
 
@@ -947,7 +888,7 @@ test("the revealed link's (✎) chip opens the editor too", async ({ page }) => 
   await popover(page).getByRole("button", { name: "Done" }).click();
 
   await expect
-    .poll(() => readSrc(page, "n"))
+    .poll(() => readSource(page, "n"))
     .toBe("[Anthropic](https://claude.ai)");
 });
 const SRC = `before ${LINK} after`;
@@ -973,7 +914,7 @@ const clip = (page: Page, id: string, type: "copy" | "cut") =>
     return dt.getData("text/plain");
   }, type);
 
-test("copying a selection spanning a folded link yields the markdown", async ({
+test("copy preserves folded-link source and cut removes the same selection", async ({
   page,
 }) => {
   await load(page, [
@@ -983,15 +924,6 @@ test("copying a selection spanning a folded link yields the markdown", async ({
   expect(await clip(page, "n", "copy")).toBe(SRC);
   // Copy doesn't disturb the line.
   await expect(text(page, "n").locator("a[data-link]")).toHaveText("Anthropic");
-});
-
-test("cut yields the markdown and removes the selection in source space", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: SRC },
-  ]);
-
   expect(await clip(page, "n", "cut")).toBe(SRC);
   await expect(text(page, "n")).toHaveText("");
 });

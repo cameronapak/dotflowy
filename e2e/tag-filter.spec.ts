@@ -22,7 +22,7 @@ async function load(page: Page) {
   await expect(row(page, "a").first()).toBeVisible();
 }
 
-test("clicking a #tag chip filters the outline to matching nodes", async ({
+test("a #tag chip filters to matches; Clear restores the view and closes the subheader", async ({
   page,
 }) => {
   await load(page);
@@ -40,6 +40,17 @@ test("clicking a #tag chip filters the outline to matching nodes", async ({
   await expect(row(page, "a").first()).toBeVisible();
   await expect(row(page, "c").first()).toBeVisible();
   await expect(row(page, "b")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page).not.toHaveURL(/q=/);
+  await expect(row(page, "b")).toBeVisible();
+  await expect(
+    page.getByRole("search", { name: "Filter", includeHidden: true }),
+  ).toHaveCount(0);
+
+  const subheader = page.locator('[aria-label="Active filters"]');
+  await expect(subheader).toHaveCSS("padding-top", "0px");
+  await expect(subheader).toHaveCSS("padding-bottom", "0px");
 });
 
 test("right-clicking a #tag chip opens the color picker overlay", async ({
@@ -56,21 +67,4 @@ test("right-clicking a #tag chip opens the color picker overlay", async ({
   await expect(
     page.getByRole("menu", { name: "Color for #work" }),
   ).toBeVisible();
-});
-
-test("clicking Clear collapses the filter subheader", async ({ page }) => {
-  await load(page);
-
-  await page.locator('.tag[data-tag="work"]').first().click();
-  await expect(page.getByRole("search", { name: "Filter" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Clear" }).click();
-  await expect(page).not.toHaveURL(/q=/);
-  await expect(
-    page.getByRole("search", { name: "Filter", includeHidden: true }),
-  ).toHaveCount(0);
-
-  const subheader = page.locator('[aria-label="Active filters"]');
-  await expect(subheader).toHaveCSS("padding-top", "0px");
-  await expect(subheader).toHaveCSS("padding-bottom", "0px");
 });

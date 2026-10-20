@@ -49,7 +49,9 @@ async function loadBig(page: Page) {
   await openSeededOutline(page, { anchorId: "p0" });
 }
 
-test("renders only ~viewport rows out of thousands", async ({ page }) => {
+test("the window bounds mounted rows, preserves depth, and follows scrolling", async ({
+  page,
+}) => {
   await loadBig(page);
 
   // 2040 nodes exist, but only a viewport's worth (+ overscan) are mounted.
@@ -59,13 +61,14 @@ test("renders only ~viewport rows out of thousands", async ({ page }) => {
 
   // A node deep in the list is NOT mounted yet (it's below the window).
   await expect(page.locator('li[data-node-id="p39c49"]')).toHaveCount(0);
-});
-
-test("the window follows the scroll: late rows mount, early rows unmount", async ({
-  page,
-}) => {
-  await loadBig(page);
-  await expect(page.locator('li[data-node-id="p0"]')).toBeVisible();
+  await expect(page.locator('li[data-node-id="p0"]')).toHaveAttribute(
+    "data-depth",
+    "0",
+  );
+  await expect(page.locator('li[data-node-id="p0c0"]')).toHaveAttribute(
+    "data-depth",
+    "1",
+  );
 
   // Scroll deep into the list and wait for the window to SETTLE there: a row
   // far down the flat order is mounted AND the top row (p0) is gone, read in
@@ -95,19 +98,6 @@ test("the window follows the scroll: late rows mount, early rows unmount", async
   // Scroll back to the top: the first node mounts again.
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect(page.locator('li[data-node-id="p0"]')).toBeVisible();
-});
-
-test("a deep node still indents by depth", async ({ page }) => {
-  await loadBig(page);
-  // Children render one level in (data-depth = 1); parents at depth 0.
-  await expect(page.locator('li[data-node-id="p0"]')).toHaveAttribute(
-    "data-depth",
-    "0",
-  );
-  await expect(page.locator('li[data-node-id="p0c0"]')).toHaveAttribute(
-    "data-depth",
-    "1",
-  );
 });
 
 test("typing reuses a wide parent's child list; completion and inserts invalidate it", async ({

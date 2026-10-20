@@ -328,7 +328,8 @@ test("replay after user edit or deletion preserves that state", async () => {
 });
 
 test("quota refusal rolls back receipt and all scaffold rows", async () => {
-  const { userId } = await account();
+  const userId = randomUUID();
+  await fixture("seed", { userId });
   const attemptId = randomUUID();
   const refused = await fixture<CaptureResult>("capture", {
     userId,
@@ -360,7 +361,8 @@ test("quota refusal rolls back receipt and all scaffold rows", async () => {
 });
 
 test("title upgrade only changes the untouched captured node", async () => {
-  const { userId } = await account();
+  const userId = randomUUID();
+  await fixture("seed", { userId });
   const untouched = randomUUID();
   const edited = randomUUID();
   const deleted = randomUUID();
@@ -422,7 +424,8 @@ test("title upgrade only changes the untouched captured node", async () => {
 });
 
 test("generic link upgrade compares current text atomically and never recreates deleted nodes", async () => {
-  const { userId } = await account();
+  const userId = randomUUID();
+  await fixture("seed", { userId });
   const created = await fixture<{ receipt: { nodeId: string } }>("capture", {
     userId,
     attemptId: randomUUID(),

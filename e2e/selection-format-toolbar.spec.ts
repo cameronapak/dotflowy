@@ -38,7 +38,7 @@ async function selectAll(page: Page, id: string) {
   });
 }
 
-test("appears over a text selection, hidden with a collapsed caret", async ({
+test("hidden at a collapsed caret, the toolbar toggles bold on and off over a selection", async ({
   page,
 }) => {
   await load(page, [
@@ -48,14 +48,6 @@ test("appears over a text selection, hidden with a collapsed caret", async ({
   await text(page, "n").click();
   await expect(bar(page)).toBeHidden();
   // Non-collapsed selection -> toolbar.
-  await selectAll(page, "n");
-  await expect(bar(page)).toBeVisible();
-});
-
-test("bold toggles the selection on and off", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
-  ]);
   await selectAll(page, "n");
   await expect(bar(page)).toBeVisible();
 
