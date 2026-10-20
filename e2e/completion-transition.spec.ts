@@ -571,7 +571,8 @@ test("late-mounted exiting rows join the fade and cannot take focus", async ({
   );
   await page.clock.runFor(32);
   const joined = await mounted;
-  expect(joined.elapsed).toBeGreaterThanOrEqual(40);
+  // Native animation time can represent 40ms as 39.99999999999915ms.
+  expect(Math.round(joined.elapsed)).toBeGreaterThanOrEqual(40);
   expect(joined.opacity).toBeGreaterThan(0);
   expect(joined.opacity).toBeLessThan(0.5);
   expect(joined.inert).toBe(true);
