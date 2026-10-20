@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.26.3
+
+### Patch Changes
+
+- 0f47af7: Keep the selected Day stream title below the header after tapping Today or a calendar day, even as content loads. Preserve the writing caret without competing scroll adjustments, and let scrolling or editing take over immediately.
+
 ## 1.26.2
 
 ### Patch Changes
