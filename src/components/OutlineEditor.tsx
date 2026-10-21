@@ -1151,6 +1151,26 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     };
   }, [virtualizer]);
   useLayoutEffect(() => {
+    if (!stream) return;
+    // A content measurement changes its page's filler in this commit. Seat
+    // that inverse size change before paint, not in a later ResizeObserver
+    // delivery that would briefly shift every following day. Leave React's
+    // commit before the virtualizer synchronously notifies its subscribers.
+    queueMicrotask(() => {
+      const ends = listRef.current?.querySelectorAll<HTMLLIElement>(
+        ':scope > li[data-stream-item="end"]',
+      );
+      for (const el of ends ?? []) {
+        const index = Number(el.dataset.index);
+        if (
+          virtualizer.measurementsCache[index]?.size !==
+          Number.parseFloat(el.style.minHeight)
+        )
+          virtualizer.resizeItem(index, el.offsetHeight);
+      }
+    });
+  });
+  useLayoutEffect(() => {
     measurements.current = virtualizer.measurementsCache;
     presentation.animateMounted();
   });
