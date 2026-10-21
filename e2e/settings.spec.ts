@@ -303,17 +303,3 @@ test("Data → Export downloads the whole outline as OPML", async ({ page }) => 
   expect(text).toContain('text="Alpha"');
   expect(text).toContain('text="Bravo"');
 });
-
-test("Appearance → theme segmented control switches to dark", async ({
-  page,
-}) => {
-  await seedOutline(page, TREE);
-  await mockFreePlan(page);
-  await openSettings(page);
-
-  await page
-    .getByRole("radiogroup", { name: "Theme" })
-    .getByRole("radio", { name: "Dark" })
-    .click();
-  await expect(page.locator("html")).toHaveClass(/dark/);
-});

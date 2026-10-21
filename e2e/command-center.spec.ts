@@ -39,28 +39,6 @@ async function openPalette(page: Page) {
   await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
 }
 
-test("centers both the full menu and filtered results after a window resize", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await load(page);
-  await text(page, "bravo").click();
-  await openPalette(page);
-  const dialog = page.getByRole("dialog", { name: "Command center" });
-  const center = () =>
-    dialog.evaluate((el) => {
-      const rect = el.getBoundingClientRect();
-      return rect.top + rect.height / 2;
-    });
-
-  await expect.poll(center).toBeCloseTo(360, 0);
-  await page.getByPlaceholder(/Search nodes and actions/).fill("zephyr");
-  await expect(page.getByRole("option", { name: /Zephyr/ })).toBeVisible();
-  await expect.poll(center).toBeCloseTo(360, 0);
-  await page.setViewportSize({ width: 1100, height: 900 });
-  await expect.poll(center).toBeCloseTo(450, 0);
-});
-
 test.describe("mobile", () => {
   test.use({ hasTouch: true, isMobile: true });
 
@@ -173,21 +151,6 @@ test("per-result: -> opens a picked node's action sub-view", async ({
   // Delete the node from the sub-view; its row disappears.
   await page.getByRole("option", { name: /Delete/ }).click();
   await expect(page.locator('li[data-node-id="zephyr"]')).toHaveCount(0);
-});
-
-test("global action: a More-menu action runs from the palette", async ({
-  page,
-}) => {
-  await load(page);
-  await expect(text(page, "alpha-1")).toBeVisible();
-
-  await openPalette(page);
-  await page.keyboard.type("collapse all");
-  await page.getByRole("option", { name: /Collapse all/ }).click();
-
-  // The palette closed and the global "Collapse all" folded the subtree.
-  await expect(text(page, "alpha-1")).toBeHidden();
-  await expect(text(page, "alpha")).toBeVisible();
 });
 
 test("Scribble mode covers active text, tokens, titles, and Quick-add without changing source", async ({

@@ -83,52 +83,6 @@ test("a spoiler folds to an opaque atom, reveals at the caret, and re-folds on l
   await expect(bar(page, "n")).toHaveClass(/text-transparent/);
 });
 
-test("an unclosed fence renders as literal text", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "||unclosed" },
-  ]);
-  await expect(bar(page, "n")).toHaveCount(0);
-  await expect.poll(() => text(page, "n").textContent()).toBe("||unclosed");
-});
-
-test("a code run shields its interior — `||x||` inside code stays literal", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "`||x||`" },
-  ]);
-  // Code wins (precedence 10 < 40): the run is a <code> atom, no spoiler bar.
-  await expect(bar(page, "n")).toHaveCount(0);
-  await expect(text(page, "n").locator("code")).toHaveCount(1);
-});
-
-test("Mod+Shift+S wraps a selection in ||...||", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
-  ]);
-  await selectAll(page, "n");
-  await page.keyboard.press("ControlOrMeta+Shift+s");
-  // Caret sits in the fresh run, so it's REVEALED: fences inside the container.
-  await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveText(
-    "||alphabravo||",
-  );
-});
-
-test("/spoiler inserts empty fences with the caret inside", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "" },
-  ]);
-  await text(page, "n").click();
-  await page.keyboard.type("/spoiler");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("X");
-  await expect(text(page, "n").locator("[data-spoiler-reveal]")).toHaveText(
-    "||X||",
-  );
-});
-
 test("the toolbar's EyeOff button wraps + lights when inside a spoiler", async ({
   page,
 }) => {

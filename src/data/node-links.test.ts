@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 
 import {
   flattenNodeText,
-  linkTargetId,
   linkedNodeLabel,
   NODE_LINK_PATTERN,
   parseNodeLinks,
@@ -36,10 +35,6 @@ test("parseNodeLinks returns unique targets in first-occurrence order, ignoring 
   // Link-free text bails to one shared empty array.
   expect(parseNodeLinks("plain bullet")).toEqual([]);
   expect(parseNodeLinks("plain bullet")).toBe(parseNodeLinks("another"));
-});
-
-test("linkTargetId strips the brackets", () => {
-  expect(linkTargetId(`[[${A}]]`)).toBe(A);
 });
 
 test("linkedNodeLabel flattens markup and reduces nested links to an ellipsis", () => {

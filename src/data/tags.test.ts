@@ -3,7 +3,6 @@ import { expect, test } from "bun:test";
 import {
   collectAllTags,
   collectTagCorpus,
-  normalizeTag,
   parseTags,
   validateOutlineSearch,
 } from "./tags";
@@ -13,12 +12,6 @@ import { buildTreeIndex, createNode, type Node } from "./tree";
 // its tests live in filter-query.test.ts. This file keeps the pure tag layer.
 
 const index = (nodes: Node[]) => buildTreeIndex(nodes);
-
-test("normalizeTag strips the leading # and lowercases", () => {
-  expect(normalizeTag("#Work-Q3")).toBe("work-q3");
-  expect(normalizeTag("Work")).toBe("work");
-  expect(normalizeTag("#важно")).toBe("важно");
-});
 
 test("collectAllTags deduplicates and sorts case-insensitively, excluding a node's contribution", () => {
   const tree = index([

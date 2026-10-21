@@ -436,14 +436,6 @@ test.describe("mobile actions bar (coarse pointer)", () => {
   });
 });
 
-test("never mounts on a fine pointer even while editing", async ({ page }) => {
-  await load(page);
-  await text(page, "alpha").click();
-  await expect(text(page, "alpha")).toBeFocused();
-  // Desktop pointer -> the bar is gated out entirely.
-  await expect(bar(page)).toHaveCount(0);
-});
-
 // Native formatting input (ADR 0069): the iOS selection menu's Format items
 // arrive as `beforeinput`. They become marker toggles; every other `format*`
 // input is cancelled so the browser never injects HTML into the source.

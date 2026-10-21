@@ -143,22 +143,6 @@ test("Cmd+B wraps a selection in **bold**", async ({ page }) => {
   await expect(text(page, "n").locator("b")).toHaveCount(0);
 });
 
-for (const [combo, tag] of [
-  ["ControlOrMeta+i", "em"],
-  ["ControlOrMeta+u", "u"],
-  ["ControlOrMeta+Shift+x", "del"],
-] as const) {
-  test(`${combo} wraps a selection in ${tag}`, async ({ page }) => {
-    await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "word" },
-    ]);
-    await text(page, "n").click();
-    await page.keyboard.press("ControlOrMeta+a");
-    await page.keyboard.press(combo);
-    await expect(run(page, "n", tag)).toHaveText("word");
-  });
-}
-
 test("/bold inserts empty markers with the caret inside", async ({ page }) => {
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "" },

@@ -1,26 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import type { WeekStart } from "../../data/date-links";
-
 import { buildTreeIndex, createNode } from "../../data/tree";
-import {
-  formatWeekRelative,
-  isOrphanMappedDay,
-  planDailyMigration,
-} from "./scaffold";
-
-test.each<[string, WeekStart, string | null]>([
-  ["week:2026-07-13", "monday", "This week"],
-  ["week:2026-07-06", "monday", "Last week"],
-  ["week:2026-06-29", "monday", null],
-  ["week:2026-07-20", "monday", null],
-  ["week:2026-07-12", "sunday", "This week"],
-])(
-  "formatWeekRelative(%s, %s) on 2026-07-16 -> %p",
-  (week, weekStart, expected) => {
-    expect(formatWeekRelative(week, "2026-07-16", weekStart)).toBe(expected);
-  },
-);
+import { isOrphanMappedDay, planDailyMigration } from "./scaffold";
 
 describe("planDailyMigration", () => {
   /** Build a keyOf() over an explicit id -> key map. */

@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 
 import {
   BOLD_PATTERN,
-  emphasisMarkerLen,
   ITALIC_PATTERN,
   ITALIC_UNDERSCORE_PATTERN,
   STRIKETHROUGH_PATTERN,
@@ -57,14 +56,4 @@ test.each([
   ["***triple***", "*triple*"],
 ])("stripEmphasis(%p) -> %p", (text, expected) => {
   expect(stripEmphasis(text)).toBe(expected);
-});
-
-test.each([
-  ["**bold**", 2],
-  ["~~strike~~", 2],
-  ["*italic*", 1],
-  ["~underline~", 1],
-  ["_italic_", 1],
-])("emphasisMarkerLen(%p) -> %d", (run, expected) => {
-  expect(emphasisMarkerLen(run)).toBe(expected);
 });

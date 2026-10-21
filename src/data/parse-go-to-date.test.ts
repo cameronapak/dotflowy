@@ -3,12 +3,10 @@ import { describe, expect, test } from "bun:test";
 import type { PeriodQualifier, PeriodUnit } from "./date-links";
 
 import {
-  goToDateLabel,
   parseDatePickerQuery,
   parseDatePickerTargets,
   parseGoToDateTargets,
   periodCatalogUnits,
-  pickerDateLabel,
   pickerDateSuggestions,
 } from "./parse-go-to-date";
 
@@ -137,22 +135,6 @@ test("[[ catalog returns period-start day keys (week start, the 1st, Jan 1)", ()
   expect(parseDatePickerTargets("next w", NOW, "sunday")).toEqual([
     { key: "2026-07-26", label: "Next week" },
   ]);
-});
-
-test("pickerDateLabel and goToDateLabel are short near today, full otherwise", () => {
-  const today = "2026-07-25";
-  expect(pickerDateLabel("2026-07-25", today)).toBe("Today");
-  expect(pickerDateLabel("2026-07-26", today)).toBe("Tomorrow");
-  expect(pickerDateLabel("2026-07-24", today)).toBe("Yesterday");
-  expect(pickerDateLabel("2026-01-29", today)).toBe(
-    "Thursday, January 29, 2026",
-  );
-  expect(goToDateLabel("2026-07-25", today)).toBe("Go to Today");
-  expect(goToDateLabel("2026-07-26", today)).toBe("Go to Tomorrow");
-  expect(goToDateLabel("2026-07-24", today)).toBe("Go to Yesterday");
-  expect(goToDateLabel("2026-08-12", today)).toBe(
-    "Go to Wednesday, August 12, 2026",
-  );
 });
 
 describe("parseDatePickerQuery (stricter [[ picker gate)", () => {

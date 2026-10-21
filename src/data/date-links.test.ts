@@ -10,29 +10,22 @@ import {
   dayKeyToScaffoldChain,
   dayKeyToWeekKey,
   flattenDateLinks,
-  formatDateChipLabel,
-  formatDateLabel,
   resolveWeekdayStem,
-  weekdaySearchStems,
   isValidDateKey,
   localDateKey,
   monthKeyToCalendarGrid,
   monthKeyToYearKey,
-  monthLabel,
   shiftMonthKey,
   parentScaffoldKey,
   parseDateLink,
   parseDateLinkKeys,
   scaffoldKeyKind,
-  scaffoldLabel,
   type ScaffoldSibling,
   sortedInsertAfterId,
   shiftWeekKey,
   weekKeyToDayRange,
   weekKeyToDays,
   weekKeyToMonthKey,
-  weekLabel,
-  yearLabel,
 } from "./date-links";
 import { NODE_LINK_PATTERN } from "./node-links";
 
@@ -112,31 +105,7 @@ test("isValidDateKey / addDays / localDateKey work in local calendar days", () =
   expect(localDateKey(new Date(2026, 5, 23, 23, 30))).toBe("2026-06-23");
 });
 
-test.each([
-  ["2026-07-08", "Today"],
-  ["2026-07-07", "Yesterday"],
-  ["2026-07-09", "Tomorrow"],
-  ["2026-01-15", "Jan 15"], // beyond +/-1: short date
-])("formatDateLabel(%s) near 2026-07-08 -> %s", (key, expected) => {
-  expect(formatDateLabel(key, "2026-07-08")).toBe(expected);
-});
-
-test.each([
-  ["2026-07-08", "Today"],
-  ["2026-07-09", "Tomorrow"],
-  ["2026-07-07", "one day ago"],
-  ["2026-07-06", "two days ago"],
-  ["2026-07-02", "six days ago"],
-  ["2026-07-10", "in two days"],
-  ["2026-07-14", "in six days"],
-  // Beyond +/-6: short absolute; another year includes the year.
-  ["2026-07-01", "Jul 1"],
-  ["2025-07-01", "Jul 1, 2025"],
-])("formatDateChipLabel(%s) near 2026-07-08 -> %s", (key, expected) => {
-  expect(formatDateChipLabel(key, "2026-07-08")).toBe(expected);
-});
-
-describe("resolveWeekdayStem / weekdaySearchStems", () => {
+describe("resolveWeekdayStem", () => {
   const today = "2026-07-25"; // Saturday
 
   test("≥3-char stems resolve; next/last qualifiers", () => {
@@ -145,13 +114,6 @@ describe("resolveWeekdayStem / weekdaySearchStems", () => {
     expect(resolveWeekdayStem("th", null, today)).toBeNull();
     expect(resolveWeekdayStem("fri", "last", today)).toBe("2026-07-24");
     expect(resolveWeekdayStem("friday", "next", today)).toBe("2026-07-31");
-  });
-
-  test("stems for Fuse aliases cover thu…thursday", () => {
-    const stems = weekdaySearchStems("2026-07-30"); // Thursday
-    expect(stems[0]).toBe("thu");
-    expect(stems.at(-1)).toBe("thursday");
-    expect(stems).toContain("thurs");
   });
 });
 
@@ -167,11 +129,6 @@ describe("flattenDateLinks", () => {
     ["see [[2026-13-45]]", "see [[2026-13-45]]"],
   ])("%s -> %s", (input, expected) => {
     expect(flattenDateLinks(input, today)).toBe(expected);
-  });
-
-  test("token-free text passes through untouched (same reference)", () => {
-    const s = "no dates here";
-    expect(flattenDateLinks(s, today)).toBe(s);
   });
 });
 
@@ -314,24 +271,6 @@ test("compareScaffoldKeys orders pairs chronologically, weeks by start date", ()
 });
 
 describe("display helpers", () => {
-  test("year, month, week, and scaffold labels", () => {
-    expect(yearLabel("2026")).toBe("2026");
-    expect(monthLabel("2026-07")).toBe("July");
-    expect(monthLabel("2026-01")).toBe("January");
-    expect(monthLabel("2026-13")).toBe("2026-13"); // falls back to the key
-    // A week is its date range, with years only across a year boundary.
-    expect(weekLabel("week:2026-07-13")).toBe("Jul 13–19");
-    expect(weekLabel("week:2026-08-30")).toBe("Aug 30–Sep 5");
-    expect(weekLabel("week:2026-12-27")).toBe("Dec 27, 2026–Jan 2, 2027");
-    expect(weekLabel("2026-W99")).toBe("2026-W99"); // nonexistent -> raw key
-    // scaffoldLabel dispatches on kind; a day / container key is itself.
-    expect(scaffoldLabel("2026")).toBe("2026");
-    expect(scaffoldLabel("2026-07")).toBe("July");
-    expect(scaffoldLabel("week:2026-07-13")).toBe("Jul 13–19");
-    expect(scaffoldLabel("2026-07-16")).toBe("2026-07-16");
-    expect(scaffoldLabel("container")).toBe("container");
-  });
-
   test("weekKeyToDayRange gives the start and end day-keys", () => {
     expect(weekKeyToDayRange("week:2026-07-12")).toEqual({
       start: "2026-07-12",

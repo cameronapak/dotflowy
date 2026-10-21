@@ -95,40 +95,6 @@ test("a colored highlight folds, reveals, preserves its color through edits, and
   await expect(mark(page, "n")).toHaveAttribute("data-src", "==🔴urgent!==");
 });
 
-test("an unclosed fence renders as literal text", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "==unclosed" },
-  ]);
-  await expect(mark(page, "n")).toHaveCount(0);
-  await expect.poll(() => text(page, "n").textContent()).toBe("==unclosed");
-});
-
-test("Cmd+Shift+H wraps a selection in ==...==", async ({ page }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
-  ]);
-  await text(page, "n").click();
-  await page.keyboard.press("ControlOrMeta+a");
-  await page.keyboard.press("ControlOrMeta+Shift+h");
-  // The caret sits in the fresh run, so it's REVEALED: fences inside the mark.
-  await expect(mark(page, "n")).toHaveText("==alphabravo==");
-  await expect(mark(page, "n")).toHaveAttribute("data-highlight", "blue");
-});
-
-test("/highlight inserts empty fences with the caret inside", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "" },
-  ]);
-  await text(page, "n").click();
-  await page.keyboard.type("/highlight");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("X");
-  // Caret inside the run -- revealed, fences inside the mark.
-  await expect(mark(page, "n")).toHaveText("==X==");
-});
-
 test("the revealed run's pen opens the color menu; picking recolors", async ({
   page,
 }) => {

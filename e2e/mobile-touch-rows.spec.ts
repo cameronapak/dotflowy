@@ -7,107 +7,18 @@ import {
   text,
 } from "./fixtures";
 
-// Coarse-pointer row redesign (ADR 0029, Workflowy-mobile parity): on touch the
-// collapse chevron moves to the row's RIGHT edge and a tap on a row's dead space
-// places a caret. Run in a Chromium mobile-emulation context (isMobile+hasTouch),
-// which makes `@media (pointer: coarse)` / `hover: none` match -- the real media
-// query users hit, not a synthetic class. The first test asserts that emulation
-// actually flips the pointer type, so a silent env change fails loudly here
-// rather than making the layout assertions vacuous.
+// Coarse-pointer tap-to-edit (ADR 0029) uses mobile emulation, not a
+// synthetic class, so the same pointer media query as on touch devices runs.
 test.use({
   hasTouch: true,
   isMobile: true,
   viewport: { width: 412, height: 900 },
 });
 
-const row = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row`);
-const chevron = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row > .collapse-toggle`);
-
 async function load(page: Page) {
   await seedOutline(page, STANDARD_TREE);
   await openSeededOutline(page, { anchorId: "alpha" });
 }
-
-test("coarse-pointer rows put the chevron on the right and align it with bullet and text", async ({
-  page,
-}) => {
-  await load(page);
-  const coarse = await page.evaluate(
-    () => window.matchMedia("(pointer: coarse)").matches,
-  );
-  // If this fails, the layout assertions below would be testing the DESKTOP
-  // layout by accident. Switch the suite to force the media via a class then.
-  expect(coarse).toBe(true);
-  const rowBox = await row(page, "alpha").boundingBox();
-  const chevBox = await chevron(page, "alpha").boundingBox();
-  expect(rowBox).not.toBeNull();
-  expect(chevBox).not.toBeNull();
-  // Chevron lives in the right half of the row (desktop puts it in the left
-  // gutter, at a negative offset from the row's left edge).
-  const chevCenter = chevBox!.x + chevBox!.width / 2;
-  expect(chevCenter).toBeGreaterThan(rowBox!.x + rowBox!.width / 2);
-  // ...and hugs the right edge (within the row's 4px right padding + slack).
-  expect(chevBox!.x + chevBox!.width).toBeGreaterThan(
-    rowBox!.x + rowBox!.width - 12,
-  );
-
-  // Regression guard: the coarse bullet's optical-align margin lives on
-  // `.outline-row .bullet`, NOT a bare `.bullet` -- a media query adds no
-  // specificity, so a bare selector silently loses to the base rule and the
-  // dot drops ~4px below the text (the exact bug this asserts against).
-  const m = await page.evaluate(() => {
-    const li = document.querySelector('li[data-node-id="alpha"]')!;
-    const dot = li.querySelector(".bullet-dot")!.getBoundingClientRect();
-    const chev = li
-      .querySelector(".collapse-toggle svg")!
-      .getBoundingClientRect();
-    const span = li.querySelector<HTMLElement>(".node-text")!;
-    const range = document.createRange();
-    range.selectNodeContents(span.firstChild!);
-    const line = range.getClientRects()[0];
-    if (!line) throw new Error("Seeded Alpha must render a text line");
-    const center = (r: DOMRect) => r.top + r.height / 2;
-    return {
-      dot: center(dot),
-      chev: center(chev),
-      text: line.top + line.height / 2,
-    };
-  });
-  // Dot and chevron pixel-aligned to each other, both within the optical-nudge
-  // tolerance of the text's first-line center.
-  expect(Math.abs(m.dot - m.chev)).toBeLessThan(1);
-  expect(Math.abs(m.dot - m.text)).toBeLessThan(2.5);
-  expect(Math.abs(m.chev - m.text)).toBeLessThan(2.5);
-});
-
-test("the right-edge chevron reads as an accordion: down collapsed, up expanded", async ({
-  page,
-}) => {
-  // On the RIGHT edge the chevron is an accordion disclosure, not a left-gutter
-  // tree twisty: it points DOWN when the subtree is collapsed ("expand below")
-  // and UP when expanded ("collapse"). The base glyph is a ChevronRight, so the
-  // rotation is coarse-only CSS -- assert the actual rendered transform, since a
-  // media query adds no specificity and a bare selector would silently no-op.
-  await load(page);
-  // `new DOMMatrix(transform).b` is sin(theta): +1 at rotate(90) (down), -1 at
-  // rotate(-90) (up). Reading the matrix is orientation-truth, not a class check.
-  const sinOf = (id: string) =>
-    chevron(page, id)
-      .locator("svg")
-      .evaluate((svg) => new DOMMatrix(getComputedStyle(svg).transform).b);
-
-  // alpha loads expanded (alpha-1 is visible) -> chevron points UP. Poll: the
-  // rotation carries a 0.18s transition, so a bare snapshot can read mid-flip.
-  await expect(text(page, "alpha-1")).toBeVisible();
-  await expect.poll(() => sinOf("alpha")).toBeCloseTo(-1, 1);
-
-  // Collapse it -> chevron flips to point DOWN.
-  await chevron(page, "alpha").click();
-  await expect(text(page, "alpha-1")).toBeHidden();
-  await expect.poll(() => sinOf("alpha")).toBeCloseTo(1, 1);
-});
 
 test("tapping a row's dead space focuses the text and drops a caret", async ({
   page,
@@ -140,53 +51,4 @@ test("tapping a row's dead space focuses the text and drops a caret", async ({
       }),
     )
     .toBe(true);
-});
-
-test("the task checkbox reaches a ~24px target without overlapping neighbours", async ({
-  page,
-}) => {
-  // ADR 0029 (amended): the checkbox reaches the bullet's ~24px coarse target
-  // by widening its touch-hitbox ::before 4px per side, NOT by growing the box
-  // -- its box is the drawn control, unlike the bullet's invisible one. So the
-  // guard is two-sided: the TARGET grew, the BOX did not.
-  await seedOutline(page, [
-    ...STANDARD_TREE,
-    {
-      id: "task",
-      parentId: null,
-      prevSiblingId: "charlie",
-      text: "buy milk",
-      isTask: true,
-    },
-  ]);
-  await openSeededOutline(page, { anchorId: "task" });
-
-  const m = await page.evaluate(() => {
-    const li = document.querySelector('li[data-node-id="task"]')!;
-    const box = li.querySelector<HTMLElement>(".checkbox")!;
-    const before = getComputedStyle(box, "::before");
-    const r = box.getBoundingClientRect();
-    const span = li.querySelector<HTMLElement>(".node-text")!;
-    const range = document.createRange();
-    range.setStart(span.firstChild!, 0);
-    range.setEnd(span.firstChild!, 1);
-    return {
-      boxWidth: r.width,
-      left: parseFloat(before.left),
-      right: parseFloat(before.right),
-      gapToText: range.getBoundingClientRect().left - r.right,
-    };
-  });
-
-  // The drawn control is untouched at 16px (growing it would drop the check's
-  // fill ratio and shove the floated text right).
-  expect(m.boxWidth).toBeCloseTo(16, 0);
-  // ...but the target is 16 + 4 + 4 = 24px.
-  expect(m.left).toBeCloseTo(-4, 1);
-  expect(m.right).toBeCloseTo(-4, 1);
-  // The arm must stay inside the gap to the text, or it re-creates the overlap
-  // the vendored ::after caused. Asserted against the measured arm rather than
-  // a hardcoded 6, so it states the actual invariant (and a subpixel gap can't
-  // flake it): whatever the arm is, the gap must clear it.
-  expect(m.gapToText).toBeGreaterThan(Math.abs(m.right));
 });

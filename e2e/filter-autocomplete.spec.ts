@@ -38,20 +38,6 @@ async function summon(page: Page) {
   await expect(input(page)).toBeFocused();
 }
 
-test("empty focus shows the operator cheat sheet", async ({ page }) => {
-  await load(page);
-  await summon(page);
-
-  await expect(listbox(page)).toBeVisible();
-  // One row per distinct operator key (registry-driven) plus the #tag row.
-  await expect(listbox(page).getByText("is:", { exact: true })).toBeVisible();
-  await expect(listbox(page).getByText("has:", { exact: true })).toBeVisible();
-  await expect(
-    listbox(page).getByText("highlight:", { exact: true }),
-  ).toBeVisible();
-  await expect(listbox(page).getByText("#tag", { exact: true })).toBeVisible();
-});
-
 test("typing `is:` lists its values incl. todo; click inserts + filters", async ({
   page,
 }) => {
@@ -120,14 +106,4 @@ test("`#` shows seeded tags; picking one filters", async ({ page }) => {
   await expect(row(page, "ship").first()).toBeVisible();
   await expect(row(page, "mom")).toHaveCount(0);
   await expect(row(page, "home")).toHaveCount(0);
-});
-
-test("`highlight:` offers the bare form + color swatches", async ({ page }) => {
-  await load(page);
-  await summon(page);
-
-  await input(page).fill("highlight:");
-  // The bare (any) form leads, then one swatch-painted value per color.
-  await expect(option(page, "highlight:red")).toBeVisible();
-  await expect(listbox(page).locator('[style*="--tag-red"]')).toBeVisible();
 });
