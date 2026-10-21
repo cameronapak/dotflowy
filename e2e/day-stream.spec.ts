@@ -520,7 +520,7 @@ test.describe("touch momentum", () => {
         id: `note-${i}`,
         key: new Date(Date.UTC(2030, 5, 12 - i * 2)).toISOString().slice(0, 10),
       }));
-      await seedOutline(
+      const controller = await seedOutline(
         page,
         days.flatMap(({ id }, i) => [
           {
@@ -652,6 +652,26 @@ test.describe("touch momentum", () => {
         // events: the same event contract as dragging the native scrollbar.
         await page.mouse.move(388, 230);
         await page.mouse.down();
+        // A late content measurement above the viewport must be absorbed by
+        // that day's filler before paint, not shift later titles for a frame.
+        const above = await page.evaluate(async () => {
+          const id = [
+            ...document.querySelectorAll<HTMLElement>("li[data-node-id]"),
+          ].find((el) => el.getBoundingClientRect().bottom < 0)!.dataset.nodeId;
+          const nodes: ApiNode[] = await fetch("/api/nodes").then((r) =>
+            r.json(),
+          );
+          return nodes.find((node) => node.id === id)!;
+        });
+        await controller.injectExternalChange([
+          {
+            op: "update",
+            value: { ...above, text: "A day's entry\nA late line" },
+          },
+        ]);
+        await expect(text(page, above.id)).toHaveText(
+          "A day's entry\nA late line",
+        );
         await page.evaluate(async () => {
           for (let i = 0; i < 13; i++) {
             window.scrollBy(0, -40);
