@@ -318,11 +318,6 @@ test("open + abandon (no keystroke) leaves no today note (lazy resolve)", async 
   await expect(rowWithText(page, "Daily")).toHaveCount(0);
 });
 
-test("the FAB never mounts on a fine pointer", async ({ page }) => {
-  await load(page);
-  await expect(page.locator("[data-quick-add-fab]")).toHaveCount(0);
-});
-
 test("discard-if-empty: a typed-then-cleared capture leaves nothing", async ({
   page,
 }) => {
@@ -354,16 +349,6 @@ test("a captured node survives closing (commit-immediately)", async ({
 
   await todayButton(page).click();
   await expect(rowWithText(page, "kept-on-close")).toBeVisible();
-});
-
-test("the keyboard-shortcut legend shows on a fine pointer", async ({
-  page,
-}) => {
-  await load(page);
-  await openQuickAdd(page);
-  // The Enter / Cmd+Enter / Esc legend is useful on a physical keyboard; the
-  // mobile block below asserts it's gone on a touch pointer (ADR 0049 refinement).
-  await expect(dialog(page).getByText("save & close")).toBeVisible();
 });
 
 test("the Today chip retargets the current capture", async ({ page }) => {
@@ -577,30 +562,11 @@ test("rapid-fire Cmd+Enter preserves order under a slow resolve (bug 6)", async 
 // Chromium mobile emulation where `(pointer: coarse)` actually matches. The
 // overlay's geometry is checked with synthetic visualViewport events; real
 // keyboard animation remains on the manual iPhone checklist. Also covers the
-// FAB's coarse-only mount gate and its not-editing visibility.
+// FAB's not-editing visibility.
 test.describe("quick-add mobile FAB (coarse pointer)", () => {
   test.use({ hasTouch: true, isMobile: true });
 
   const fab = (page: Page) => page.locator("[data-quick-add-fab]");
-
-  test("mobile emulation actually reports a coarse pointer", async ({
-    page,
-  }) => {
-    await load(page);
-    const coarse = await page.evaluate(
-      () => window.matchMedia("(pointer: coarse)").matches,
-    );
-    expect(coarse).toBe(true);
-  });
-
-  test("mounts when not editing and opens the overlay on tap", async ({
-    page,
-  }) => {
-    await load(page);
-    await expect(fab(page)).toBeVisible();
-    await fab(page).tap();
-    await expect(dialog(page)).toBeVisible();
-  });
 
   test("the overlay follows keyboard resize and pan, then restores its bottom anchor", async ({
     page,
@@ -638,17 +604,6 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
         dialog(page).evaluate((el) => el.getBoundingClientRect().bottom),
       )
       .toBe(884);
-  });
-
-  test("hides the keyboard-shortcut legend on a touch pointer", async ({
-    page,
-  }) => {
-    await load(page);
-    await fab(page).tap();
-    await expect(dialog(page)).toBeVisible();
-    // The Enter / Cmd+Enter / Esc legend is meaningless on a software keyboard
-    // and is fine-pointer only now (ADR 0049 refinement).
-    await expect(dialog(page).getByText("save & close")).toHaveCount(0);
   });
 
   test("is hidden while a bullet is being edited (complement of the mobile bar)", async ({

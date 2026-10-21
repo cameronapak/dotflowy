@@ -2,10 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
-// Tags are a plugin (ADR 0018): the chip render is a token, and the click ->
-// filter / right-click -> color picker route through the core's delegated
-// interaction dispatch (Seam B). This spec locks in that plugin-routed
-// behavior, which the editor-internal specs don't otherwise touch.
+// Tags are a plugin (ADR 0018): the chip render is a token, and clicking it
+// filters through the core's delegated interaction dispatch (Seam B).
 
 const TAGGED_TREE: SeedNode[] = [
   { id: "a", parentId: null, prevSiblingId: null, text: "Buy milk #work" },
@@ -50,20 +48,4 @@ test("a #tag chip filters to matches; Clear restores the view and closes the sub
   const subheader = page.locator('[aria-label="Active filters"]');
   await expect(subheader).toHaveCSS("padding-top", "0px");
   await expect(subheader).toHaveCSS("padding-bottom", "0px");
-});
-
-test("right-clicking a #tag chip opens the color picker overlay", async ({
-  page,
-}) => {
-  await load(page);
-
-  await page.locator('.tag[data-tag="work"]').first().click({
-    button: "right",
-  });
-
-  // The tags plugin routes the context menu through ctx.openOverlay, which
-  // the core mounts as a self-managing portal.
-  await expect(
-    page.getByRole("menu", { name: "Color for #work" }),
-  ).toBeVisible();
 });

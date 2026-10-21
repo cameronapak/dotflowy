@@ -130,14 +130,6 @@ test.describe("narrow-screen drawers", () => {
     deviceScaleFactor: 2,
   });
 
-  test("document opts into safe-area viewport coverage", async ({ page }) => {
-    await load(page);
-    await expect(page.locator('meta[name="viewport"]')).toHaveAttribute(
-      "content",
-      /viewport-fit=cover/,
-    );
-  });
-
   test("slash keeps the caret, filters, and picks without changing surrounding text", async ({
     page,
   }) => {

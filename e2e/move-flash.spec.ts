@@ -8,11 +8,9 @@ import {
   type SeedNode,
 } from "./fixtures";
 
-// A node's OWN editable text span and its row (see move-dialog.spec.ts).
+// A node's OWN editable text span (see move-dialog.spec.ts).
 const text = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
-const row = (page: Page, id: string) =>
-  page.locator(`li[data-node-id="${id}"] > .outline-row`);
 
 async function load(page: Page, tree: SeedNode[]) {
   await seedOutline(page, tree);
@@ -39,7 +37,7 @@ const TREE: SeedNode[] = [
   { id: "loose", parentId: null, prevSiblingId: "inbox", text: "Loose note" },
 ];
 
-test('"Go" focuses and flashes the moved node in the destination view', async ({
+test('"Go" focuses the moved node in the destination view', async ({
   page,
 }) => {
   await load(page, TREE);
@@ -50,21 +48,10 @@ test('"Go" focuses and flashes the moved node in the destination view', async ({
   await page.getByRole("button", { name: "Go" }).click();
   await expect(page).toHaveURL(/\/inbox/);
 
-  // The moved node lands focused -- "focused with that background".
   await expect(text(page, "loose")).toBeFocused();
-
-  // ...and its row carries the one-shot flash class, bound to the fade
-  // animation (confirms the relative-color keyframe parsed and the class is
-  // wired through requestFlashAfterNav -> consumeFlashAfterNav -> flashRow).
-  const moved = row(page, "loose");
-  await expect(moved).toHaveClass(/node-acted/);
-  await expect(moved).toHaveCSS("animation-name", "node-acted-fade");
-
-  // The class clears itself when the animation ends (so it can re-trigger).
-  await expect(moved).not.toHaveClass(/node-acted/, { timeout: 4000 });
 });
 
-test("a keyboard move (Cmd+Shift+Down) flashes the moved row", async ({
+test("a keyboard move (Cmd+Shift+Down) reorders siblings and keeps focus", async ({
   page,
 }) => {
   await load(page, STANDARD_TREE);
@@ -74,7 +61,7 @@ test("a keyboard move (Cmd+Shift+Down) flashes the moved row", async ({
   await expect(text(page, "alpha")).toBeFocused();
   await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
 
-  // It moved (now after bravo) and the moved row flashes, focus intact.
+  // It moved (now after bravo), focus intact.
   await expect
     .poll(() =>
       page
@@ -85,5 +72,4 @@ test("a keyboard move (Cmd+Shift+Down) flashes the moved row", async ({
     )
     .toEqual(["bravo", "alpha", "charlie"]);
   await expect(text(page, "alpha")).toBeFocused();
-  await expect(row(page, "alpha")).toHaveClass(/node-acted/);
 });

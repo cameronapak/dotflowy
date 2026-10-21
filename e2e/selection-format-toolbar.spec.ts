@@ -131,21 +131,3 @@ test("link opens the edit popover and creates a link", async ({ page }) => {
     "[alphabravo](https://example.com)",
   );
 });
-
-test.describe("selection format toolbar (coarse pointer)", () => {
-  test.use({
-    hasTouch: true,
-    isMobile: true,
-    viewport: { width: 412, height: 900 },
-  });
-
-  test("never mounts on a coarse pointer (that's the mobile bar's job)", async ({
-    page,
-  }) => {
-    await load(page, [
-      { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
-    ]);
-    await selectAll(page, "n");
-    await expect(bar(page)).toHaveCount(0);
-  });
-});

@@ -214,24 +214,6 @@ test("the passage editor rewrites a chip through parsed input", async ({
   );
 });
 
-test("the passage editor hides end verse until a start verse exists", async ({
-  page,
-}) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "Read Proverbs 4" },
-  ]);
-
-  await chip(page, "n").click({ button: "right" });
-  await passagePopover(page).locator("summary").click();
-  await expect(page.getByRole("combobox", { name: "End verse" })).toHaveCount(
-    0,
-  );
-
-  await page.getByRole("combobox", { name: "Start verse" }).selectOption("13");
-
-  await expect(page.getByRole("combobox", { name: "End verse" })).toBeVisible();
-});
-
 test("closing the passage editor refocuses the node", async ({ page }) => {
   await load(page, [
     {

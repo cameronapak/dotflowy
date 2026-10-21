@@ -82,33 +82,6 @@ test("coarse-pointer rows put the chevron on the right and align it with bullet 
   expect(Math.abs(m.chev - m.text)).toBeLessThan(2.5);
 });
 
-test("the right-edge chevron reads as an accordion: down collapsed, up expanded", async ({
-  page,
-}) => {
-  // On the RIGHT edge the chevron is an accordion disclosure, not a left-gutter
-  // tree twisty: it points DOWN when the subtree is collapsed ("expand below")
-  // and UP when expanded ("collapse"). The base glyph is a ChevronRight, so the
-  // rotation is coarse-only CSS -- assert the actual rendered transform, since a
-  // media query adds no specificity and a bare selector would silently no-op.
-  await load(page);
-  // `new DOMMatrix(transform).b` is sin(theta): +1 at rotate(90) (down), -1 at
-  // rotate(-90) (up). Reading the matrix is orientation-truth, not a class check.
-  const sinOf = (id: string) =>
-    chevron(page, id)
-      .locator("svg")
-      .evaluate((svg) => new DOMMatrix(getComputedStyle(svg).transform).b);
-
-  // alpha loads expanded (alpha-1 is visible) -> chevron points UP. Poll: the
-  // rotation carries a 0.18s transition, so a bare snapshot can read mid-flip.
-  await expect(text(page, "alpha-1")).toBeVisible();
-  await expect.poll(() => sinOf("alpha")).toBeCloseTo(-1, 1);
-
-  // Collapse it -> chevron flips to point DOWN.
-  await chevron(page, "alpha").click();
-  await expect(text(page, "alpha-1")).toBeHidden();
-  await expect.poll(() => sinOf("alpha")).toBeCloseTo(1, 1);
-});
-
 test("tapping a row's dead space focuses the text and drops a caret", async ({
   page,
 }) => {

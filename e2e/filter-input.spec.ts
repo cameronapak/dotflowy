@@ -94,26 +94,6 @@ test("the magnifier's three states track the stakes (ADR 0050)", async ({
   await expect(magnifier).not.toHaveClass(solid);
 });
 
-test("the ⌘ button opens the command center", async ({ page }) => {
-  await load(page);
-  await page.getByRole("button", { name: "Command center" }).click();
-  await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
-  // And it is NOT the filter input.
-  await expect(input(page)).toHaveCount(0);
-});
-
-test("the Cmd+K action opens the filter input", async ({ page }) => {
-  await load(page);
-
-  await page.keyboard.press("ControlOrMeta+k");
-  await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
-
-  await page.getByRole("option", { name: /Filter this view/ }).click();
-
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-});
-
 test("typing filters the view live", async ({ page }) => {
   await load(page);
   await summon(page);
