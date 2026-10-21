@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.27.2
+
+### Patch Changes
+
+- 69c914d: Keep the caret above the mobile editing toolbar when typing overlaps a viewport resize.
+
 ## 1.27.1
 
 ### Patch Changes
