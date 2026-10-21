@@ -217,6 +217,8 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
   ).toBeVisible();
   await page.getByRole("button", { name: "Turn off spotlight mode" }).click();
   await page.reload();
+  // The document loads before the lazy editor; check persistence once it mounts.
+  await row.waitFor({ state: "visible" });
   await expect(off).toBeVisible();
   await expect(text(page, "bravo")).toHaveText("Bravo writin!g");
   await expect(row).toHaveCSS("font-family", '"Redacted Script"');

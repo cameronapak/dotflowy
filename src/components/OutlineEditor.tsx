@@ -1487,13 +1487,21 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         (viewport?.offsetTop ?? 0) +
         (parseFloat(getComputedStyle(e.target).lineHeight) || 24) +
         8;
-      const bar = document
-        .querySelector("[data-mobile-bar]")
-        ?.getBoundingClientRect();
+      const bar = document.querySelector("[data-mobile-bar]");
+      const barRect = bar?.getBoundingClientRect();
+      const viewportBottom =
+        (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+      // A viewport shrink can beat the toolbar's React commit. Reserve its
+      // bottom inset in the live viewport, not in its still-tall fixed frame.
+      const frameBottom = bar?.parentElement?.getBoundingClientRect().bottom;
+      const frameOverflow =
+        (viewport?.scale ?? 1) > 1
+          ? 0 // The toolbar deliberately does not follow pinch zoom.
+          : Math.max(0, (frameBottom ?? viewportBottom) - viewportBottom);
       const bottom =
         Math.min(
-          (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
-          bar?.height ? bar.top : Infinity,
+          viewportBottom,
+          barRect?.height ? barRect.top - frameOverflow : Infinity,
         ) - 8;
       const delta = y < top || y > bottom ? y - (top + bottom) / 2 : 0;
       if (!delta) return;

@@ -375,6 +375,7 @@ test.describe("day navigation on touch", () => {
 
     test(`input during a title-held prepend keeps the caret revealed, spotlight ${spotlight}`, async ({
       page,
+      browserName,
     }) => {
       await page.clock.install();
       await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
@@ -395,6 +396,20 @@ test.describe("day navigation on touch", () => {
           return editor.evaluate((el) => el === document.activeElement);
         })
         .toBe(true);
+      // WebKit can deliver the toolbar's visualViewport resize after input.
+      // Keep Chromium's ordinary resize path; force the late delivery here.
+      const releaseResize =
+        browserName === "webkit"
+          ? await page.evaluateHandle(() => {
+              const viewport = window.visualViewport!;
+              const stop = (e: Event) => e.stopImmediatePropagation();
+              viewport.addEventListener("resize", stop, true);
+              return () => {
+                viewport.removeEventListener("resize", stop, true);
+                viewport.dispatchEvent(new Event("resize"));
+              };
+            })
+          : null;
       await page.setViewportSize({
         width: 390,
         height: Math.ceil(
@@ -409,7 +424,24 @@ test.describe("day navigation on touch", () => {
             .getBoundingClientRect();
           return caret.top >= 0 && caret.bottom < bar.top;
         });
-      await expect.poll(caretClear).toBe(false);
+      await expect
+        .poll(async () => {
+          await page.clock.runFor(1);
+          return editor.evaluate((el) => {
+            const caret = el.getBoundingClientRect();
+            const bar = document
+              .querySelector("[data-mobile-bar]")!
+              .getBoundingClientRect();
+            // Positive geometry, not !caretClear: above the viewport would
+            // satisfy that too, before the resized title has been seated.
+            return (
+              caret.top >= 0 &&
+              caret.bottom <= innerHeight &&
+              (bar.top > innerHeight || caret.bottom > bar.top)
+            );
+          });
+        })
+        .toBe(true);
       // CI order: the settle dispatches a prepend while the title still owns
       // corrections, then input releases the title before React commits it.
       // A late resize scroll re-arms the settle, so follow its replacement.
@@ -442,7 +474,16 @@ test.describe("day navigation on touch", () => {
         window.dispatchEvent(new PointerEvent("pointerup"));
       });
       await page.clock.runFor(500);
+      await releaseResize?.evaluate((release) => release());
+      await releaseResize?.dispose();
       await expect(editor).toHaveText("Standup appended");
+      await expect
+        .poll(() =>
+          page
+            .getByRole("toolbar", { name: "Editing actions" })
+            .evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight),
+        )
+        .toBe(true);
       await expect.poll(caretClear).toBe(true);
       // The raced settle did load the days above.
       await expect(section(page, PREV, "title")).toBeAttached();
