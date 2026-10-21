@@ -426,6 +426,10 @@ test.describe("day navigation on touch", () => {
               // Each keystroke releases again; neither may drop the hold.
               document.execCommand("insertText", false, " ");
               document.execCommand("insertText", false, "appended");
+              // A caret reveal can advance before the dispatched prepend
+              // commits. Its scroll must not discard that compensation.
+              window.scrollBy({ top: 8, behavior: "instant" });
+              window.dispatchEvent(new Event("scroll"));
             }, ms);
             return settleId;
           }) as typeof window.setTimeout;

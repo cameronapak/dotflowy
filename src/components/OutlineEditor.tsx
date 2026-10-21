@@ -1446,10 +1446,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     };
     const onScroll = () => {
       // A scrollbar drag or keyboard scroll can continue without another
-      // pointer/key event. Only our own correction keeps the reading hold.
+      // pointer/key event. Release a reading hold, but keep a dispatched
+      // prepend's compensation relative to the newly revealed position.
       const held = heldRef.current;
-      if (held && Math.abs(window.scrollY - held.scrollY) >= 1)
-        heldRef.current = null;
+      if (held) {
+        const moved = window.scrollY - held.scrollY;
+        if (Math.abs(moved) >= 1) {
+          if (extendingRef.current) {
+            held.top -= moved;
+            held.scrollY = window.scrollY;
+          } else heldRef.current = null;
+        }
+      }
       deferPrependRef.current = true;
       publish();
       maybeExtend();
