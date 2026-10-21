@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
+import { fileURLToPath } from "node:url";
 
 import manifest from "../package.json" with { type: "json" };
 import { callbackCode, trustedEndpoint } from "../src/auth.js";
 import { mergeInput, parse } from "../src/commands.js";
-import { io, serverUrl, terminalText, VERSION } from "../src/core.js";
+import { io, serverUrl, terminalText } from "../src/core.js";
 
 const parsed = async (args: string[]) => {
   const value = await Effect.runPromise(parse(args));
@@ -12,8 +13,21 @@ const parsed = async (args: string[]) => {
   return value;
 };
 
-test("version matches the distributable package", () =>
-  expect(VERSION).toBe(manifest.version));
+test("Node executable version matches the distributable package", async () => {
+  const child = Bun.spawn(
+    [
+      "node",
+      fileURLToPath(new URL("../dist/main.js", import.meta.url)),
+      "--version",
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  expect(await child.exited).toBe(0);
+  expect((await new Response(child.stdout).text()).trim()).toBe(
+    `dotflowy v${manifest.version}`,
+  );
+  expect(await new Response(child.stderr).text()).toBe("");
+});
 
 test("I/O errors expose safe operation codes without native messages", async () => {
   const error = Object.assign(new Error("token=secret"), { code: "EACCES" });
