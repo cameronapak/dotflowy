@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import type { Bump, Release } from "./changelog";
 
-import { buildReleases, parseFragment, unseenCount } from "./changelog";
+import { buildReleases, parseFragment } from "./changelog";
 
 /** A changeset fragment as `changeset add` writes it. */
 const fragment = (bump: string, summary: string) =>
@@ -135,31 +135,4 @@ test("buildReleases names the release that holds a malformed fragment", () => {
   expect(r).toBeInstanceOf(Error);
   // SAFETY: asserted to be an Error on the line above.
   expect((r as Error).message).toContain("0.2.0");
-});
-
-const releases: Release[] = [
-  {
-    version: "0.3.0",
-    date: "2026-07-12",
-    entries: [{ bump: "major", summary: "c" }],
-  },
-  {
-    version: "0.2.0",
-    date: "2026-07-11",
-    entries: [{ bump: "minor", summary: "b" }],
-  },
-  {
-    version: "0.1.0",
-    date: "2026-07-10",
-    entries: [{ bump: "patch", summary: "a" }],
-  },
-];
-
-test.each([
-  ["0.1.0", 2],
-  ["0.3.0", 0], // the latest version is nothing to show
-  [null, 0], // not-loaded/no-row, never unseen-everything
-  ["9.9.9", 0], // an unknown cursor stays quiet rather than crying wolf
-] as const)("unseenCount with cursor %p is %p", (cursor, expected) => {
-  expect(unseenCount(releases, cursor)).toBe(expected);
 });

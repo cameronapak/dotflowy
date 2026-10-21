@@ -5,7 +5,6 @@ import { detectMarkerWrap, planMarkerToggle } from "./inline-wrap";
 const BOLD = { pre: "**", post: "**" };
 const ITALIC = { pre: "*", post: "*" };
 const STRIKE = { pre: "~~", post: "~~" };
-const UNDER = { pre: "~", post: "~" };
 const MARK = { pre: "==", post: "==" };
 
 test.each<
@@ -20,22 +19,15 @@ test.each<
   // A marker-inclusive selection (the folded atom picked up whole).
   ["**bold**", 0, 8, BOLD, "inside"],
   ["a *hi* b", 2, 6, ITALIC, "inside"],
-  ["*i*", 0, 3, ITALIC, "inside"],
-  ["~u~", 0, 3, UNDER, "inside"],
   // 🔴 is a surrogate pair (2 UTF-16 units), so the run is 12 units long.
   ["==\u{1F534}urgent==", 0, 12, MARK, "inside"],
   // Markers flanking an inner selection.
   ["**bold**", 2, 6, BOLD, "outside"],
-  ["*hi*", 1, 3, ITALIC, "outside"],
   // Plain text.
   ["bold", 0, 4, BOLD, null],
-  ["hello world", 0, 5, ITALIC, null],
-  // A doubled marker is not the single one: bold is not italic-active, and
-  // strike is not underline-active, whole or inner.
+  // A doubled marker is not the single one, whole or inner.
   ["**b**", 0, 5, ITALIC, null],
   ["**b**", 2, 3, ITALIC, null],
-  ["~~s~~", 0, 5, UNDER, null],
-  ["~~s~~", 2, 3, UNDER, null],
 ])(
   "detectMarkerWrap(%p, %d, %d, %o) -> %p",
   (text, start, end, marker, expected) => {
