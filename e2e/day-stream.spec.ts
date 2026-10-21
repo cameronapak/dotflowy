@@ -503,8 +503,19 @@ test.describe("touch momentum", () => {
       page,
       context,
     }) => {
-      if (input === "pointer") await page.clock.install();
-      await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
+      await page.addInitScript(() => {
+        // Playwright's clock also replaces rAF with timer callbacks, which can
+        // sample between layout and its ResizeObserver compensation. Freeze
+        // only Date: this gesture needs real browser frames and idle timers.
+        const NativeDate = Date;
+        const now = new NativeDate("2030-06-12T12:00:00").getTime();
+        window.Date = new Proxy(NativeDate, {
+          apply: () => new NativeDate(now).toString(),
+          construct: (target, args) =>
+            Reflect.construct(target, args.length ? args : [now]),
+        });
+        window.Date.now = () => now;
+      });
       const days = Array.from({ length: 22 }, (_, i) => ({
         id: `note-${i}`,
         key: new Date(Date.UTC(2030, 5, 12 - i * 2)).toISOString().slice(0, 10),
@@ -649,7 +660,8 @@ test.describe("touch momentum", () => {
           }
         });
         // A paused scrollbar drag is still held input, not an idle gesture.
-        await page.clock.runFor(300);
+        // Deliberately exceed the 180ms settle delay without releasing input.
+        await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
         await page.mouse.up();
       }
       // CDP touch dispatch does not produce reliable native inertia. Model the
@@ -685,8 +697,8 @@ test.describe("touch momentum", () => {
       expect(
         result.samples
           .filter((s) => !s.ended)
-          .every((s) => Math.abs(s.start - before.start) < 2),
-      ).toBe(true);
+          .filter((s) => Math.abs(s.start - before.start) >= 2),
+      ).toEqual([]);
       const inserted = result.samples.findIndex(
         (s) => s.start > before.start + 1000,
       );
