@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.28.1
+
+### Patch Changes
+
+- 9174caf: Keep later days steady while earlier content resizes in the day stream.
+
 ## 1.28.0
 
 ### Minor Changes
