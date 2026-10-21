@@ -64,6 +64,16 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await trigger.click();
   await expect(items).toHaveCount(6);
 
+  // Wait for the drawer's resting snap point before Playwright scrolls the
+  // target into view; scrolling during entry can dismiss the native sheet.
+  await expect
+    .poll(() =>
+      page
+        .locator(".sheet-menu-content")
+        .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
+    )
+    .toBe(700);
+
   // Picking an intermediate ancestor navigates to it.
   await items.nth(2).click(); // n2
   await expect(page).toHaveURL(/\/n2$/);
