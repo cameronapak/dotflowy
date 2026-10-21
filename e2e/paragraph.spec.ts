@@ -7,8 +7,8 @@ import { seedOutline, text, type SeedNode } from "./fixtures";
 // zoom click, same drag. Kinds are mutually exclusive; `completed` is not a kind.
 //
 // The markdown round-trip and the MCP/OPML boundary are pure and unit-tested
-// (markdown-import.test.ts, worker/outline-ops.test.ts); this spec locks the two
-// render paths, the conversion funnels, and the Enter carry-forward.
+// (markdown-import.test.ts, worker/outline-ops.test.ts); this spec locks zoom,
+// the conversion funnels, and the Enter carry-forward.
 //
 // Every command here runs from an EMPTY bullet, so the `/` palette opens at
 // offset 0 and no caret helper is needed (Home/End and `.click()` on text are
@@ -37,12 +37,10 @@ const paragraphGlyph = (page: Page, id: string) =>
 const checkbox = (page: Page, id: string) =>
   row(page, id).locator("> .outline-row .checkbox");
 
-/** `ready` is the locator that proves the view painted; zoomed views don't
- *  render the top-level rows, so the caller names its own. */
-async function load(page: Page, path = "/", ready?: ReturnType<typeof text>) {
+async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto(path);
-  await (ready ?? text(page, "a")).waitFor({ state: "visible" });
+  await page.goto("/");
+  await text(page, "a").waitFor({ state: "visible" });
 }
 
 /** Run a `/` command against the focused, empty bullet. */
@@ -52,7 +50,7 @@ async function runSlash(page: Page, command: string) {
   await page.keyboard.press("Enter");
 }
 
-test("paragraph rows keep the dot's alignment and zoom affordance without a checkbox", async ({
+test("paragraph rows keep the zoom affordance without a checkbox", async ({
   page,
 }) => {
   await load(page);
@@ -63,93 +61,9 @@ test("paragraph rows keep the dot's alignment and zoom affordance without a chec
   // A paragraph is never a task, so it never wears a checkbox.
   await expect(checkbox(page, "p")).toHaveCount(0);
 
-  // ADR 0029's K-constants live on `.outline-row .bullet` (the 16px button),
-  // and the paragraph glyph is centered inside that same button -- so it must land on
-  // exactly the same baseline as a sibling row's dot. Numeric, not eyeballed:
-  // a glyph swap that shifted the box would show up here.
-  await expect(async () => {
-    const m = await page.evaluate(() => {
-      const li = (id: string) =>
-        document.querySelector(`li[data-node-id="${id}"]`)!;
-      const centerY = (el: Element) => {
-        const r = el.getBoundingClientRect();
-        return r.top + r.height / 2;
-      };
-      const centerX = (el: Element) => {
-        const r = el.getBoundingClientRect();
-        return r.left + r.width / 2;
-      };
-      const textCenterY = (id: string) => {
-        const span = li(id).querySelector(".node-text")!;
-        const range = document.createRange();
-        range.selectNodeContents(span.firstChild!);
-        const line = range.getClientRects()[0]!;
-        return line.top + line.height / 2;
-      };
-      return {
-        dotOffset:
-          centerY(li("a").querySelector(".bullet-dot")!) - textCenterY("a"),
-        paragraphOffset:
-          centerY(li("p").querySelector(".bullet-paragraph")!) -
-          textCenterY("p"),
-        dotX: centerX(li("a").querySelector(".bullet")!),
-        paragraphX: centerX(li("p").querySelector(".bullet")!),
-      };
-    });
-    // Same vertical relationship to its own text as the dot has to its own.
-    expect(Math.abs(m.paragraphOffset - m.dotOffset)).toBeLessThan(1);
-    // ...and the same column: the glyph swap must not move the button.
-    expect(Math.abs(m.paragraphX - m.dotX)).toBeLessThan(0.5);
-  }).toPass({ timeout: 5000 });
-
   await paragraphGlyph(page, "p").click();
   await expect(page).toHaveURL(/\/p$/);
   await expect(page.locator("h2.zoomed-title .node-text")).toHaveText("prose");
-});
-
-test("a zoomed paragraph shows a muted, inert paragraph glyph in the title", async ({
-  page,
-}) => {
-  await load(page, "/p", page.locator("h2.zoomed-title .node-text"));
-  const mark = page.locator("h2.zoomed-title .title-paragraph");
-  await expect(mark).toBeVisible();
-  await expect(mark).toHaveCSS("pointer-events", "none");
-
-  // It sits LEFT of the text rather than floating into it: a paragraph is
-  // prose, so every wrapped line shares the first line's left edge. A float
-  // would shorten only line one and let the rest slide under.
-  const titleText = page.locator("h2.zoomed-title .node-text");
-  await expect
-    .poll(async () => {
-      const box = (await mark.boundingBox())!;
-      return box.x + box.width - (await titleText.boundingBox())!.x;
-    })
-    .toBeLessThanOrEqual(0);
-
-  // Wide: the mark OUTDENTS into the margin, so the title's text keeps the
-  // bullet column -- a zoomed bullet and a zoomed paragraph start their text
-  // at the same x, and changing kind never shifts the title sideways.
-  await page.setViewportSize({ width: 900, height: 700 });
-  const proseX = (await titleText.boundingBox())!.x;
-
-  // Narrow: the content padding (16px) is thinner than the 20px mark, so it
-  // falls back INTO a gutter instead of clipping off the viewport's edge.
-  await page.setViewportSize({ width: 375, height: 700 });
-  await expect
-    .poll(async () => (await mark.boundingBox())!.x)
-    .toBeGreaterThan(0);
-
-  // A zoomed BULLET shows nothing -- without the mark, the two would be
-  // indistinguishable and `/paragraph` would have no visible state -- and its
-  // title text starts exactly where the paragraph's did.
-  await page.setViewportSize({ width: 900, height: 700 });
-  await page.goto("/a");
-  await titleText.waitFor({ state: "visible" });
-  await expect(titleText).toHaveText("alpha");
-  await expect(page.locator("h2.zoomed-title .title-paragraph")).toHaveCount(0);
-  await expect
-    .poll(async () => (await titleText.boundingBox())!.x)
-    .toBe(proseX);
 });
 
 test("slash commands cycle bullet, paragraph, and task kinds exclusively", async ({

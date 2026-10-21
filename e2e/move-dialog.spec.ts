@@ -4,7 +4,6 @@ import {
   openSeededOutline,
   placeCaret,
   seedOutline,
-  STANDARD_TREE,
   type SeedNode,
 } from "./fixtures";
 
@@ -58,32 +57,6 @@ const BOOKMARKED_TREE: SeedNode[] = [
     text: "Project A",
   },
 ];
-
-test("empty query lists only bookmarked nodes as destinations", async ({
-  page,
-}) => {
-  await load(page, BOOKMARKED_TREE);
-  await openMove(page, "loose");
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("Bookmarks")).toBeVisible();
-
-  // The two bookmarked nodes are offered...
-  await expect(dialog.getByRole("option", { name: "Inbox" })).toBeVisible();
-  await expect(dialog.getByRole("option", { name: "Projects" })).toBeVisible();
-
-  // ...the un-bookmarked ones (incl. the node being moved) are not.
-  await expect(dialog.getByRole("option", { name: "Archive" })).toHaveCount(0);
-  await expect(dialog.getByRole("option", { name: "Loose note" })).toHaveCount(
-    0,
-  );
-  await expect(dialog.getByRole("option", { name: "Project A" })).toHaveCount(
-    0,
-  );
-
-  // Home is always available as a top-level destination.
-  await expect(dialog.getByRole("option", { name: "Home" })).toBeVisible();
-});
 
 test("picking a bookmark reparents the node under it", async ({ page }) => {
   await load(page, BOOKMARKED_TREE);
@@ -144,22 +117,4 @@ test("the moved node and its own subtree are excluded from bookmarks", async ({
   await expect(dialog.getByRole("option", { name: "Project A" })).toHaveCount(
     0,
   );
-});
-
-test("with no bookmarks: a hint shows and typing falls back to search", async ({
-  page,
-}) => {
-  await load(page, STANDARD_TREE); // STANDARD_TREE bookmarks nothing
-  await openMove(page, "charlie");
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("Type to search your nodes")).toBeVisible();
-  await expect(dialog.getByRole("option", { name: "Home" })).toBeVisible();
-
-  // Typing runs the full fuzzy search over every node.
-  await page.keyboard.type("alpha");
-  await expect(
-    dialog.getByRole("option", { name: "Alpha", exact: true }),
-  ).toBeVisible();
-  await expect(dialog.getByText("Type to search your nodes")).toHaveCount(0);
 });

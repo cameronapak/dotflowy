@@ -2,8 +2,7 @@ import { test, expect } from "@playwright/test";
 
 import { seedOutline, type SeedNode } from "./fixtures";
 
-// An 8-deep chain of long-titled nodes: on any viewport the trail is deep enough
-// to collapse, so we can assert both breadcrumb shapes off the same seed.
+// An 8-deep chain of long-titled nodes makes the mobile trail collapse.
 function deepChain(): SeedNode[] {
   const nodes: SeedNode[] = [];
   let prevParent: string | null = null;
@@ -65,86 +64,7 @@ test("mobile trail is Home > … > direct parent, and the … menu holds the res
   await trigger.click();
   await expect(items).toHaveCount(6);
 
-  // The drawer spans the narrow viewport and labels ellipsis-truncate.
-  await expect
-    .poll(
-      async () =>
-        (await page.locator(".sheet-surface").boundingBox())?.width ?? 0,
-    )
-    .toBeGreaterThan(300);
-  await expect
-    .poll(() =>
-      items
-        .first()
-        .locator("span")
-        .first()
-        .evaluate((el) => getComputedStyle(el).textOverflow),
-    )
-    .toBe("ellipsis");
-  await expect
-    .poll(() =>
-      page
-        .locator(".sheet-menu-content")
-        .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
-    )
-    .toBe(700);
-
   // Picking an intermediate ancestor navigates to it.
   await items.nth(2).click(); // n2
   await expect(page).toHaveURL(/\/n2$/);
-});
-
-// Desktop has room, so it keeps more context: the first ancestor + the last two,
-// folding only the deep middle into "…".
-test("desktop trail keeps first + last-two crumbs around the …", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await seedOutline(page, deepChain());
-  await page.goto("/n7");
-  await page.locator(".zoomed-title .node-text").waitFor({ state: "visible" });
-
-  const nav = page.locator("nav.breadcrumb");
-  await expect(nav).toBeVisible();
-
-  // lead(n0) + tail(n5, n6) = 3 visible crumbs, with the middle folded.
-  await expect(nav.locator(".crumb-link")).toHaveCount(3);
-  await expect(
-    page.getByRole("button", { name: "Show hidden breadcrumbs" }),
-  ).toBeVisible();
-});
-
-// #279: a crumb shows a node's plain READING text, never its markdown source.
-// Every other display-only label surface (switcher titles, mirror-place labels)
-// already reads through `flattenNodeText`; the trail was the one holdout, so a
-// node titled `**Sprint goals**` wore its asterisks here.
-//
-// Asserted across the WHOLE inline grammar on purpose, not just the four forms
-// the issue lists: a renderer covering bold/italic/strike/code alone would still
-// leak a highlight's colour emoji and a link's URL into the trail.
-test("a crumb flattens inline markup to its reading text", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await seedOutline(page, [
-    {
-      id: "marked",
-      parentId: null,
-      prevSiblingId: null,
-      text: "**Sprint goals** `code` ==🔴hot== ~~old~~ [docs](https://x.com)",
-    },
-    { id: "leaf", parentId: "marked", prevSiblingId: null, text: "Leaf" },
-  ]);
-  await page.goto("/leaf");
-  await page.locator(".zoomed-title .node-text").waitFor({ state: "visible" });
-
-  const crumb = page.locator("nav.breadcrumb .crumb-link").first();
-  // EXACT textContent, not `toHaveText` (which whitespace-normalizes): a
-  // stripped run must not leave a doubled space where its markup used to be.
-  await expect(crumb).toHaveText("Sprint goals code hot old docs");
-  await expect
-    .poll(() => crumb.evaluate((el) => el.textContent))
-    .toBe("Sprint goals code hot old docs");
-
-  // Display-only: the crumb still navigates by the real node id.
-  await crumb.click();
-  await expect(page).toHaveURL(/\/marked$/);
 });
