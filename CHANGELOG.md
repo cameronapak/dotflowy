@@ -1,5 +1,12 @@
 # dotflowy
 
+## 1.27.1
+
+### Patch Changes
+
+- 0011c29: Keep the mobile caret in place when scrolling overlaps loading earlier days.
+- ccc8d9b: Keep link favicons from flashing while typing elsewhere in a node.
+
 ## 1.27.0
 
 ### Minor Changes
