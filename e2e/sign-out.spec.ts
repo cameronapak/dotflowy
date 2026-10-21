@@ -59,8 +59,10 @@ test("a successful sign-out hard-navigates to / (new document, marker gone)", as
   // SPA-only gate swap would have kept it.
   await expect.poll(() => hasMarker(page)).toBe(false);
   await expect(page).toHaveURL("/");
-  // The mocked get-session still answers, so the outline remounts fresh.
-  await expect(text(page, "alpha")).toBeVisible();
+  // The mocked get-session still answers, so the outline remounts fresh. This
+  // is a whole new document on a dev server, so wait within the test budget
+  // like openSeededOutline, not an interaction's 5s assertion budget.
+  await text(page, "alpha").waitFor({ state: "visible" });
 });
 
 test("a failed sign-out stays put and says so (no silent no-op)", async ({
