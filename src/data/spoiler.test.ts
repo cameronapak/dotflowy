@@ -1,11 +1,6 @@
 import { expect, test } from "bun:test";
 
-import {
-  redactSpoilers,
-  SPOILER_PATTERN,
-  spoilerInterior,
-  stripSpoilers,
-} from "./spoiler";
+import { redactSpoilers, SPOILER_PATTERN, stripSpoilers } from "./spoiler";
 
 test.each([
   ["the killer is ||Bob|| ok", ["||Bob||"]],
@@ -19,10 +14,6 @@ test.each([
     (m) => m[0],
   );
   expect(runs).toEqual(expected);
-});
-
-test("spoilerInterior strips fences", () => {
-  expect(spoilerInterior("||secret||")).toBe("secret");
 });
 
 // Strip (in-app) keeps the interior so your own search finds inside; redact

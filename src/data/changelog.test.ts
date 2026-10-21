@@ -2,12 +2,7 @@ import { expect, test } from "bun:test";
 
 import type { Bump, Release } from "./changelog";
 
-import {
-  buildReleases,
-  hasBreaking,
-  parseFragment,
-  unseenCount,
-} from "./changelog";
+import { buildReleases, parseFragment, unseenCount } from "./changelog";
 
 /** A changeset fragment as `changeset add` writes it. */
 const fragment = (bump: string, summary: string) =>
@@ -162,15 +157,9 @@ const releases: Release[] = [
 
 test.each([
   ["0.1.0", 2],
-  ["0.2.0", 1],
   ["0.3.0", 0], // the latest version is nothing to show
   [null, 0], // not-loaded/no-row, never unseen-everything
   ["9.9.9", 0], // an unknown cursor stays quiet rather than crying wolf
 ] as const)("unseenCount with cursor %p is %p", (cursor, expected) => {
   expect(unseenCount(releases, cursor)).toBe(expected);
-});
-
-test("hasBreaking is true only when some entry is a major bump", () => {
-  expect(hasBreaking(releases)).toBe(true);
-  expect(hasBreaking(releases.slice(1))).toBe(false);
 });

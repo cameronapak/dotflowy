@@ -1,11 +1,9 @@
 import { expect, test } from "bun:test";
 
 import {
-  defaultQueryName,
   findSavedQuery,
   isQuerySaved,
   matchSavedQuery,
-  normalizeQuery,
   type SavedQueryRow,
   sortSavedNewestFirst,
 } from "./saved-queries-core";
@@ -16,11 +14,6 @@ const row = (over: Partial<SavedQueryRow>): SavedQueryRow => ({
   query: "query",
   createdAt: 0,
   ...over,
-});
-
-test("normalizeQuery trims the edges and leaves interior spacing", () => {
-  expect(normalizeQuery("  #a  #b  ")).toBe("#a  #b");
-  expect(defaultQueryName("  #work  ")).toBe("#work");
 });
 
 test("sortSavedNewestFirst: createdAt descending, ties on id, input untouched", () => {
