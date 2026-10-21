@@ -155,166 +155,152 @@ test("CaptureKeysDialog retries list failures and confirms individual and all-ke
   expect(deletes[1]).toEqual({});
 });
 
-for (const entryPoint of ["More", "Settings"] as const) {
-  test(`${entryPoint} opens focused Apple Shortcut setup with manual copy and a separate manager`, async ({
-    page,
-  }) => {
-    await enableExternalCapture(page);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await seedOutline(page, []);
-    await page.route("**/api/auth/subscription/list", (route) =>
-      route.fulfill({ json: [] }),
-    );
-    await page.addInitScript(() => {
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: () => Promise.reject(new Error("Denied")) },
-      });
+test("Settings opens focused Apple Shortcut setup with manual copy and a separate manager", async ({
+  page,
+}) => {
+  await enableExternalCapture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedOutline(page, []);
+  await page.route("**/api/auth/subscription/list", (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: () => Promise.reject(new Error("Denied")) },
     });
-    const secret = "dfc_" + "b".repeat(64);
-    const requests: RequestRecord[] = [];
-    const keys: unknown[] = [];
-    await page.route("**/api/capture-keys", (route) => {
-      const request = route.request();
-      requests.push({
-        method: request.method(),
-        body: request.postDataJSON(),
-      });
-      if (request.method() === "GET") return route.fulfill({ json: { keys } });
-      const entry = {
-        id: "setup-key",
-        name: "My phone",
-        suffix: "bbbb",
-        createdAt: 1,
-        lastUsedAt: null,
-        expiresAt: 2,
-      };
-      keys.push(entry);
-      return route.fulfill({ json: { key: secret, entry } });
-    });
-
-    await page.goto(entryPoint === "More" ? "/" : "/settings");
-    if (entryPoint === "More") {
-      await page.getByRole("button", { name: /More actions/ }).click();
-      await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-        "data-expanded",
-      );
-      await page.getByRole("menuitem", { name: "Add Apple Shortcut" }).click();
-    } else {
-      await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
-    }
-    const dialog = page.getByRole("dialog", { name: "Add Apple Shortcut" });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(
-      "iPhone",
-    );
-    await expect(dialog.getByLabel("Expiration")).toHaveValue("never");
-    await expect(
-      dialog.getByRole("heading", { name: "Your keys" }),
-    ).toHaveCount(0);
-    await expect(
-      dialog.getByText(/Experimental. Installation and capture/),
-    ).toBeVisible();
-    await expect(
-      dialog.getByText(
-        "Open the signed Dotflowy.shortcut file in Shortcuts and paste your key during setup. Your installed shortcut contains the key, so treat it as a credential.",
-      ),
-    ).toBeVisible();
-    await expect(
-      dialog.getByText(/sharing a configured shortcut also shares/),
-    ).toHaveCount(0);
-    const install = dialog.getByRole("link", {
-      name: "Add to Apple Shortcuts",
-    });
-    await expect(install).toHaveAttribute(
-      "href",
-      "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
-    );
-    await expect(install).toHaveAttribute("rel", "noopener noreferrer");
-    await expect(dialog.locator('a[href$=".shortcut"]')).toHaveCount(1);
-    expect(requests).toEqual([]);
-
-    await dialog.getByLabel("Name", { exact: true }).fill("My phone");
-    await dialog.getByLabel("Expiration").selectOption("30d");
-    await dialog.getByRole("button", { name: "Create key" }).click();
-    const field = dialog.getByLabel("New capture key");
-    await expect(field).toHaveValue(secret);
-    await dialog.getByRole("button", { name: "Copy", exact: true }).click();
-    await expect(dialog.getByRole("alert")).toContainText(
-      "Couldn't copy automatically",
-    );
-    await field.click();
-    await expect
-      .poll(() =>
-        field.evaluate((element: HTMLInputElement) => [
-          element.selectionStart,
-          element.selectionEnd,
-        ]),
-      )
-      .toEqual([0, secret.length]);
-    await expect
-      .poll(() =>
-        dialog.evaluate(
-          (element) => element.scrollWidth <= element.clientWidth,
-        ),
-      )
-      .toBe(true);
-    expect(requests).toEqual([
-      { method: "POST", body: { name: "My phone", expiry: "30d" } },
-    ]);
-
-    await dialog
-      .getByRole("button", { name: "Copy installation link" })
-      .click();
-    const linkField = dialog.getByLabel("Installation link", { exact: true });
-    await expect(linkField).toHaveValue(
-      "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
-    );
-    await linkField.click();
-    await expect
-      .poll(() =>
-        linkField.evaluate((element: HTMLInputElement) =>
-          element.value.slice(element.selectionStart!, element.selectionEnd!),
-        ),
-      )
-      .toBe("https://app.dotflowy.com/shortcuts/Dotflowy.shortcut");
-    // Exercise link handoff, not native installation. Neither the key nor
-    // captured content may be appended to the public file URL.
-    await page
-      .context()
-      .route("https://app.dotflowy.com/shortcuts/Dotflowy.shortcut", (route) =>
-        route.fulfill({ body: "Shortcut file handoff fixture" }),
-      );
-    const popupPromise = page.waitForEvent("popup");
-    await install.click();
-    const popup = await popupPromise;
-    await expect(popup).toHaveURL(
-      "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
-    );
-    await expect(dialog).toBeVisible();
-    await expect(field).toHaveValue(secret);
-    await expect(dialog.getByText("Installed", { exact: true })).toHaveCount(0);
-    await popup.close();
-
-    await dialog
-      .getByRole("link", { name: "Manage capture keys in Settings" })
-      .click();
-    await expect(dialog).toBeHidden();
-    await expect(page).toHaveURL(/\/settings#capture-keys$/);
-    await page.getByRole("button", { name: "Manage", exact: true }).click();
-    const manager = page.getByRole("dialog", { name: "Capture keys" });
-    await expect(manager.getByText("My phone", { exact: true })).toBeVisible();
-    await expect(manager.getByLabel("New capture key")).toHaveCount(0);
-    await manager.getByRole("button", { name: "Close" }).click();
-    await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("New capture key")).toHaveCount(0);
-    await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(
-      "iPhone",
-    );
-    await expect(dialog.getByLabel("Expiration")).toHaveValue("never");
-    await expect(dialog.getByRole("alert")).toHaveCount(0);
   });
-}
+  const secret = "dfc_" + "b".repeat(64);
+  const requests: RequestRecord[] = [];
+  const keys: unknown[] = [];
+  await page.route("**/api/capture-keys", (route) => {
+    const request = route.request();
+    requests.push({
+      method: request.method(),
+      body: request.postDataJSON(),
+    });
+    if (request.method() === "GET") return route.fulfill({ json: { keys } });
+    const entry = {
+      id: "setup-key",
+      name: "My phone",
+      suffix: "bbbb",
+      createdAt: 1,
+      lastUsedAt: null,
+      expiresAt: 2,
+    };
+    keys.push(entry);
+    return route.fulfill({ json: { key: secret, entry } });
+  });
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add Apple Shortcut" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(
+    "iPhone",
+  );
+  await expect(dialog.getByLabel("Expiration")).toHaveValue("never");
+  await expect(dialog.getByRole("heading", { name: "Your keys" })).toHaveCount(
+    0,
+  );
+  await expect(
+    dialog.getByText(/Experimental. Installation and capture/),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(
+      "Open the signed Dotflowy.shortcut file in Shortcuts and paste your key during setup. Your installed shortcut contains the key, so treat it as a credential.",
+    ),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(/sharing a configured shortcut also shares/),
+  ).toHaveCount(0);
+  const install = dialog.getByRole("link", {
+    name: "Add to Apple Shortcuts",
+  });
+  await expect(install).toHaveAttribute(
+    "href",
+    "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
+  );
+  await expect(install).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(dialog.locator('a[href$=".shortcut"]')).toHaveCount(1);
+  expect(requests).toEqual([]);
+
+  await dialog.getByLabel("Name", { exact: true }).fill("My phone");
+  await dialog.getByLabel("Expiration").selectOption("30d");
+  await dialog.getByRole("button", { name: "Create key" }).click();
+  const field = dialog.getByLabel("New capture key");
+  await expect(field).toHaveValue(secret);
+  await dialog.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Couldn't copy automatically",
+  );
+  await field.click();
+  await expect
+    .poll(() =>
+      field.evaluate((element: HTMLInputElement) => [
+        element.selectionStart,
+        element.selectionEnd,
+      ]),
+    )
+    .toEqual([0, secret.length]);
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => element.scrollWidth <= element.clientWidth),
+    )
+    .toBe(true);
+  expect(requests).toEqual([
+    { method: "POST", body: { name: "My phone", expiry: "30d" } },
+  ]);
+
+  await dialog.getByRole("button", { name: "Copy installation link" }).click();
+  const linkField = dialog.getByLabel("Installation link", { exact: true });
+  await expect(linkField).toHaveValue(
+    "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
+  );
+  await linkField.click();
+  await expect
+    .poll(() =>
+      linkField.evaluate((element: HTMLInputElement) =>
+        element.value.slice(element.selectionStart!, element.selectionEnd!),
+      ),
+    )
+    .toBe("https://app.dotflowy.com/shortcuts/Dotflowy.shortcut");
+  // Exercise link handoff, not native installation. Neither the key nor
+  // captured content may be appended to the public file URL.
+  await page
+    .context()
+    .route("https://app.dotflowy.com/shortcuts/Dotflowy.shortcut", (route) =>
+      route.fulfill({ body: "Shortcut file handoff fixture" }),
+    );
+  const popupPromise = page.waitForEvent("popup");
+  await install.click();
+  const popup = await popupPromise;
+  await expect(popup).toHaveURL(
+    "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut",
+  );
+  await expect(dialog).toBeVisible();
+  await expect(field).toHaveValue(secret);
+  await expect(dialog.getByText("Installed", { exact: true })).toHaveCount(0);
+  await popup.close();
+
+  await dialog
+    .getByRole("link", { name: "Manage capture keys in Settings" })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/\/settings#capture-keys$/);
+  await page.getByRole("button", { name: "Manage", exact: true }).click();
+  const manager = page.getByRole("dialog", { name: "Capture keys" });
+  await expect(manager.getByText("My phone", { exact: true })).toBeVisible();
+  await expect(manager.getByLabel("New capture key")).toHaveCount(0);
+  await manager.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("New capture key")).toHaveCount(0);
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(
+    "iPhone",
+  );
+  await expect(dialog.getByLabel("Expiration")).toHaveValue("never");
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+});
 
 test("Apple Shortcut creation errors preserve input and pending creation cannot lose the one-time key", async ({
   page,

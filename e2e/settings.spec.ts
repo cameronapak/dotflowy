@@ -35,6 +35,57 @@ async function openSettings(page: Page) {
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
 }
 
+test("the App avatar shows a photo without a referrer and falls back when it fails", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "alpha" });
+  const trigger = page.getByRole("button", { name: /Account and help/ });
+  await expect(trigger).toHaveText("T");
+  const session = await page.evaluate(async () =>
+    (await fetch("/api/auth/get-session")).json(),
+  );
+  let imageWorks = true;
+  let referrer: string | undefined;
+  await page.route("**/test-avatar.svg", (route) => {
+    referrer = route.request().headers()["referer"];
+    return imageWorks
+      ? route.fulfill({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="green"/></svg>',
+        })
+      : route.fulfill({ status: 404 });
+  });
+  await page.route("**/api/auth/get-session", (route) =>
+    route.fulfill({
+      json: {
+        ...session,
+        user: {
+          ...session.user,
+          image: new URL("/test-avatar.svg", page.url()).href,
+        },
+      },
+    }),
+  );
+  await page.reload();
+  const photo = trigger.locator("img");
+  await expect(photo).toBeVisible();
+  await expect
+    .poll(() => photo.evaluate((el: HTMLImageElement) => el.naturalWidth))
+    .toBe(24);
+  expect(referrer).toBeUndefined();
+  await trigger.click();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  imageWorks = false;
+  await page.reload();
+  await expect(photo).toHaveAttribute("data-error");
+  await expect(photo).toBeHidden();
+  await expect(trigger).toHaveText("T");
+  await trigger.click();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+});
+
 interface CapturedDownload {
   filename: string;
   text: string;
@@ -219,7 +270,7 @@ test("experimental quick-add is default-off, persists opt-in, and reacts to roll
     page.getByRole("button", { name: "Set up Apple Shortcut" }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Back to outline" }).click();
-  await page.getByRole("button", { name: /more/i }).click();
+  await page.getByRole("button", { name: /Account and help/ }).click();
   await expect(
     page.getByRole("menuitem", { name: "Add Apple Shortcut" }),
   ).toHaveCount(0);
@@ -244,19 +295,17 @@ test("experimental quick-add is default-off, persists opt-in, and reacts to roll
   await expect(toggle).not.toBeChecked();
 
   await toggle.click();
-  await page.getByRole("button", { name: "Back to outline" }).click();
-  await page.getByRole("button", { name: /more/i }).click();
   await expect(
-    page.getByRole("menuitem", { name: "Add Apple Shortcut" }),
+    page.getByRole("button", { name: "Set up Apple Shortcut" }),
   ).toBeVisible();
   // Model another tab clearing storage: subscribers must read the new value
-  // and remove the entry without a reload, including storage's null-key case.
+  // and remove the setup button without a reload, including storage's null-key case.
   await page.evaluate(() => {
     localStorage.removeItem("dotflowy:flag:external-capture");
     window.dispatchEvent(new StorageEvent("storage", { key: null }));
   });
   await expect(
-    page.getByRole("menuitem", { name: "Add Apple Shortcut" }),
+    page.getByRole("button", { name: "Set up Apple Shortcut" }),
   ).toHaveCount(0);
   expect(keyRequests).toBe(0);
 });
@@ -269,11 +318,17 @@ test("Data → Export downloads the whole outline as OPML", async ({ page }) => 
   // to /settings (the store survives the client-side route change).
   await openSeededOutline(page, { anchorId: "alpha" });
 
-  await page.getByRole("button", { name: /more/i }).click();
-  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  await page.getByRole("button", { name: "View options" }).click();
   await expect(
     page.getByRole("menuitem", { name: /Copy as Markdown/ }),
   ).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /Account and help/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  await expect(
+    page.getByRole("menuitem", { name: /Copy as Markdown/ }),
+  ).toHaveCount(0);
   for (const gone of [
     /Import OPML/,
     /Export OPML/,

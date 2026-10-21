@@ -33,8 +33,8 @@ and import. End-to-end real-device testing remains a general-release requirement
 - **Separate keys from installation.** Capture keys are an account capability
   for shortcuts and scripts. Settings has a Capture keys row with Manage, and
   a separate Apple Shortcut row with Set up. During the experiment, both live
-  under Experimental. Header More has Add Apple Shortcut,
-  which opens the same focused setup dialog as Settings. The dialog creates a
+  under Experimental. Setup stays in Settings, not the header menus
+  ([ADR 0072](./0072-split-header-view-and-app-menus.md)). The dialog creates a
   named key (default iPhone), offers automatic and manual copying, and then
   links to the official template. A small Settings link leads to key management;
   the installer does not list or revoke keys.
@@ -49,8 +49,8 @@ and import. End-to-end real-device testing remains a general-release requirement
   including copy-link and Files fallbacks. Keep discovery experimental until
   the real-device workflow passes. Do not offer unsigned bytes as installable.
 - **Experimental rollout.** Settings → Experimental → External quick-add is a
-  default-off, per-device flag. Opting in reveals both separate Settings rows
-  and the header More installer. Keep the untested status visible. The flag is
+  default-off, per-device flag. Opting in reveals both separate Settings rows.
+  Keep the untested status visible. The flag is
   a discovery gate, not API authorization or a server kill switch; disabling
   it does not revoke keys or stop already installed shortcuts. All plans can
   opt in. Remove the temporary gate after real-device verification.

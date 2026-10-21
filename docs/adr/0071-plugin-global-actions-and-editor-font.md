@@ -17,7 +17,7 @@ refreshes action and font snapshots without rebuilding token machinery.
 Scribble mode is the first consumer. It uses self-hosted Redacted Script,
 including for the active node, without changing text source or spoiler
 behavior. It defaults off, persists only in this browser, and toggles through
-Cmd+K and More. Its active-only header button turns it off, following ADRs 0033
+Cmd+K and the View menu. Its active-only header button turns it off, following ADRs 0033
 and 0050. Navigation, controls, images, and embed bodies stay unchanged.
 Copy, export, sync, and MCP are unaffected. The font covers Latin and Latin
 Extended; unsupported characters can use browser fallback fonts. This is a

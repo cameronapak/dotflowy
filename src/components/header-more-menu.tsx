@@ -1,29 +1,27 @@
-import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
+import { Avatar } from "@base-ui/react/avatar";
+import {
+  ArrowShrinkIcon,
+  ArrowExpandIcon,
+  BubbleChatNotificationIcon,
+  CheckmarkCircle01Icon,
+  Copy01Icon,
+  File01Icon,
+  FocusIcon,
+  Logout01Icon,
+  Settings01Icon,
+  ShieldCheckIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+  UserIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  ChevronsDownUpIcon,
-  ChevronsUpDownIcon,
-  CircleCheckIcon,
-  ClipboardCopyIcon,
-  FileTextIcon,
-  FocusIcon,
-  LogOutIcon,
-  MessageSquareWarningIcon,
-  MoreHorizontalIcon,
-  Undo2Icon,
-  Redo2Icon,
-  SettingsIcon,
-  ShieldCheckIcon,
-  SparklesIcon,
-} from "lucide-react";
 import { toast } from "sonner";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
-import { useExperimentalCaptureEnabled } from "../data/flags";
 import { flattenInline } from "../data/inline-text";
 import { outlineToMarkdown } from "../data/markdown";
 import { toggleCollapsed } from "../data/mutations";
@@ -32,11 +30,9 @@ import { runStructural } from "../data/structural";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
-import { signOutAndReload } from "../lib/auth-client";
+import { signOutAndReload, useSession } from "../lib/auth-client";
 import { usePluginChrome } from "../plugins/registry";
-import { openAppleShortcut } from "./apple-shortcut-opener";
 import { openChangelog } from "./changelog-opener";
-import { restoreHistory, useHistoryState } from "./history-restore";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";
@@ -170,90 +166,57 @@ export function setViewCollapsed(collapsed: boolean) {
   });
 }
 
-/**
- * Header overflow ("More") menu. Since #171 the plan/billing, account (Connect
- * Google, Delete account), connections (MCP), data (import/export), and
- * appearance (theme, text size) controls all live on the dedicated `/settings`
- * page -- so this menu is outline-view actions first (copy, collapse/expand,
- * show completed, spotlight), then Apple Shortcut setup (ADR 0065), read-only
- * links (What's new, Report a bug, GitHub, legal) + Settings, with Sign out last.
- *
- * This is the static v1 of the header-action overflow: the pinned/overflow
- * split is a fixed default. User-customizable pinning (Chrome-extension style)
- * is the planned v2 and will land with its own ADR + a per-user pin collection.
- */
-export function HeaderMoreMenu() {
-  const navigate = useNavigate();
+/** Current-view actions and display toggles, separate from account/help (ADR 0072). */
+export function HeaderViewMenu() {
   const { globalActions } = usePluginChrome();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
-  const experimentalCapture = useExperimentalCaptureEnabled();
-  // Unread-changelog signal (ADR 0046): a quiet dot on this trigger replaces the
-  // old loud header CTA. Presence IS the signal; opening the dialog marks
-  // everything read, so both the dot and the item emphasis clear themselves.
-  const unseen = useUnseenReleaseCount();
-  const history = useHistoryState();
 
   return (
-    <DropdownMenu title="More actions">
+    <DropdownMenu title="View options">
       <DropdownMenuTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            title={unseen > 0 ? "More — what's new" : "More"}
-            className="relative"
-          >
-            <MoreHorizontalIcon />
-            {unseen > 0 && (
-              <span
-                data-changelog-dot=""
-                aria-hidden="true"
-                className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-background"
-              />
-            )}
-            <span className="sr-only">
-              More actions{unseen > 0 ? " (new releases available)" : ""}
-            </span>
+          <Button variant="ghost" size="icon-sm" title="View options">
+            <HugeiconsIcon icon={SlidersHorizontalIcon} />
+            <span className="sr-only">View options</span>
           </Button>
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem
-          disabled={!history.canUndo}
-          onClick={() => restoreHistory("undo")}
+        <div
+          role="presentation"
+          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
         >
-          <Undo2Icon />
-          {history.undoLabel}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!history.canRedo}
-          onClick={() => restoreHistory("redo")}
-        >
-          <Redo2Icon />
-          {history.redoLabel}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
-          <ClipboardCopyIcon />
-          Copy as Markdown
-        </DropdownMenuItem>
-
+          This view
+        </div>
         <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
-          <ChevronsDownUpIcon />
+          <HugeiconsIcon icon={ArrowShrinkIcon} />
           Collapse all
         </DropdownMenuItem>
 
         <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
-          <ChevronsUpDownIcon />
+          <HugeiconsIcon icon={ArrowExpandIcon} />
           Expand all
         </DropdownMenuItem>
 
+        <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
+          <HugeiconsIcon icon={Copy01Icon} />
+          Copy as Markdown
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <div
+          role="presentation"
+          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
+        >
+          Display
+        </div>
         <DropdownMenuCheckboxItem
           checked={showCompleted}
           onCheckedChange={setShowCompleted}
         >
-          <CircleCheckIcon />
+          <HugeiconsIcon icon={CheckmarkCircle01Icon} />
           Show completed
         </DropdownMenuCheckboxItem>
 
@@ -261,7 +224,7 @@ export function HeaderMoreMenu() {
           checked={spotlight}
           onCheckedChange={setSpotlightEnabled}
         >
-          <FocusIcon />
+          <HugeiconsIcon icon={FocusIcon} />
           Spotlight mode
         </DropdownMenuCheckboxItem>
 
@@ -278,18 +241,62 @@ export function HeaderMoreMenu() {
               {action.menuLabel}
             </DropdownMenuCheckboxItem>
           ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-        <DropdownMenuSeparator />
+/** Account, help, and the unread-release signal live on the avatar (ADR 0072). */
+export function HeaderAppMenu() {
+  const navigate = useNavigate();
+  const { data: session } = useSession();
+  const unseen = useUnseenReleaseCount();
 
-        {experimentalCapture && (
-          <DropdownMenuItem onClick={() => openAppleShortcut()}>
-            <HugeiconsIcon icon={SmartPhone01Icon} />
-            Add Apple Shortcut
-          </DropdownMenuItem>
-        )}
-
+  return (
+    <DropdownMenu title="Account and help">
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="Account and help"
+            aria-label={
+              unseen > 0
+                ? "Account and help (new releases available)"
+                : "Account and help"
+            }
+            className="relative rounded-full"
+          >
+            <Avatar.Root
+              aria-hidden="true"
+              className="inline-flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
+            >
+              <Avatar.Fallback className="flex size-full items-center justify-center">
+                {session?.user.email?.charAt(0).toUpperCase() || (
+                  <HugeiconsIcon icon={UserIcon} />
+                )}
+              </Avatar.Fallback>
+              <Avatar.Image
+                src={session?.user.image ?? undefined}
+                alt=""
+                referrerPolicy="no-referrer"
+                keepMounted
+                className="absolute size-6 rounded-full object-cover data-error:invisible data-loading:invisible"
+              />
+            </Avatar.Root>
+            {unseen > 0 && (
+              <span
+                data-changelog-dot=""
+                aria-hidden="true"
+                className="absolute top-0 right-0 size-2 rounded-full bg-primary ring-2 ring-background"
+              />
+            )}
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
-          <SettingsIcon />
+          <HugeiconsIcon icon={Settings01Icon} />
           Settings
         </DropdownMenuItem>
 
@@ -301,7 +308,7 @@ export function HeaderMoreMenu() {
           data-unseen={unseen > 0 ? "" : undefined}
           className={unseen > 0 ? "font-medium" : undefined}
         >
-          <SparklesIcon />
+          <HugeiconsIcon icon={SparklesIcon} />
           What's new
           {unseen > 0 && (
             // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
@@ -316,7 +323,7 @@ export function HeaderMoreMenu() {
         </DropdownMenuItem>
 
         <DropdownMenuItem onClick={() => openFeedbackReport()}>
-          <MessageSquareWarningIcon />
+          <HugeiconsIcon icon={BubbleChatNotificationIcon} />
           Report a bug
         </DropdownMenuItem>
 
@@ -338,7 +345,7 @@ export function HeaderMoreMenu() {
         <DropdownMenuItem
           onClick={() => window.open("/terms", "_blank", "noopener,noreferrer")}
         >
-          <FileTextIcon />
+          <HugeiconsIcon icon={File01Icon} />
           Terms
         </DropdownMenuItem>
 
@@ -347,7 +354,7 @@ export function HeaderMoreMenu() {
             window.open("/privacy", "_blank", "noopener,noreferrer")
           }
         >
-          <ShieldCheckIcon />
+          <HugeiconsIcon icon={ShieldCheckIcon} />
           Privacy Policy
         </DropdownMenuItem>
 
@@ -357,7 +364,7 @@ export function HeaderMoreMenu() {
           variant="destructive"
           onClick={() => signOutAndReload()}
         >
-          <LogOutIcon />
+          <HugeiconsIcon icon={Logout01Icon} />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

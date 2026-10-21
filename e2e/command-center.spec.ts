@@ -248,7 +248,7 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
   await expect(title).not.toHaveCSS("font-family", '"Redacted Script"');
   await expect(off).toHaveCount(0);
 
-  await page.getByRole("button", { name: /^More actions/ }).click();
+  await page.getByRole("button", { name: "View options" }).click();
   await page
     .getByRole("menuitemcheckbox", { name: "Scribble mode", exact: true })
     .click();

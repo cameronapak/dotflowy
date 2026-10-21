@@ -4,13 +4,13 @@ The header's right cluster holds several icon toggles (spotlight, bookmark, the 
 
 ## The rule
 
-| Control                | "On" state               | View altered?          | Treatment                            |
-| ---------------------- | ------------------------ | ---------------------- | ------------------------------------ |
-| Spotlight (ADR 0033)   | mode on                  | yes — everything dims  | **solid** `variant="default"`        |
-| Filter magnifier       | a `?q=` query is applied | yes — nodes are hidden | **solid** `variant="default"`        |
-| Filter magnifier       | input open, no query yet | no                     | **muted** `bg-muted text-foreground` |
-| Bookmark star          | current view pinned      | no — it just saves     | **muted** `bg-muted` + filled icon   |
-| ⌘ command center, More | — (opens a dialog/menu)  | no                     | ghost only (no pressed state)        |
+| Control                              | "On" state               | View altered?          | Treatment                            |
+| ------------------------------------ | ------------------------ | ---------------------- | ------------------------------------ |
+| Spotlight (ADR 0033)                 | mode on                  | yes — everything dims  | **solid** `variant="default"`        |
+| Filter magnifier                     | a `?q=` query is applied | yes — nodes are hidden | **solid** `variant="default"`        |
+| Filter magnifier                     | input open, no query yet | no                     | **muted** `bg-muted text-foreground` |
+| Bookmark star                        | current view pinned      | no — it just saves     | **muted** `bg-muted` + filled icon   |
+| ⌘ command center, View and App menus | — (opens a dialog/menu)  | no                     | ghost only (no pressed state)        |
 
 Read it as: **solid answers "why does my outline look different?"** (dimmed, or pruned) — a surprising, persistent state you can scroll away from and forget. **Muted answers "is this tool engaged?"** — low-stakes, and usually corroborated by adjacent chrome (the open input, a filled star).
 

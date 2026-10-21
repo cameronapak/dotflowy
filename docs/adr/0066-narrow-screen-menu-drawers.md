@@ -4,7 +4,7 @@ status: accepted
 
 # Narrow-screen sheets and typing suggestions
 
-Below 768px, More actions, breadcrumb overflow, the calendar month picker, and
+Below 768px, the View and App menus ([ADR 0072](./0072-split-header-view-and-app-menus.md)), breadcrumb overflow, the calendar month picker, and
 Quick-add destinations use React Aria Sheet. Typing suggestions (`/`, `#`, and
 `[[`) use a compact results panel above the keyboard instead. At 768px and above,
 the existing anchored menus and popovers remain unchanged.

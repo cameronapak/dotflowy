@@ -49,7 +49,7 @@ import { useTheme } from "./theme-provider";
 
 /**
  * The GLOBAL-scope half of the Cmd+K command center (ADR 0034): the header +
- * More-menu actions re-expressed as flat `CommandCenterAction` rows. A hook, not
+ * View and App menu actions re-expressed as flat `CommandCenterAction` rows. A hook, not
  * a module singleton, because it lives INSIDE the provider tree (the switcher is
  * mounted in `__root`, under ThemeProvider et al.) and reads those contexts
  * directly -- no bridge needed for globals.
@@ -58,8 +58,8 @@ import { useTheme } from "./theme-provider";
  * (ADR 0034: an action may live in several surfaces); the two NON-trivial ones
  * (Copy as Markdown, Collapse/Expand all) are reused from that module so their
  * logic isn't forked. Stateful multi-value settings (theme, text size) FLATTEN
- * into discrete rows here (keyboard-discoverable) while the More menu keeps its
- * radio submenus. Bookmark view is contextual -- present only when zoomed.
+ * into discrete rows here (keyboard-discoverable), alongside their controls in
+ * Settings. Bookmark view is contextual -- present only when zoomed.
  */
 export function useGlobalActions(opts: {
   openConnect: () => void;
