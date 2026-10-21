@@ -68,6 +68,8 @@ test("the App avatar shows a photo without a referrer and falls back when it fai
     }),
   );
   await page.reload();
+  // Reload includes the lazy editor boot, not just the photo interaction.
+  await trigger.waitFor();
   const photo = trigger.locator("img");
   await expect(photo).toBeVisible();
   await expect
@@ -79,6 +81,7 @@ test("the App avatar shows a photo without a referrer and falls back when it fai
   await page.keyboard.press("Escape");
   imageWorks = false;
   await page.reload();
+  await trigger.waitFor();
   await expect(photo).toHaveAttribute("data-error");
   await expect(photo).toBeHidden();
   await expect(trigger).toHaveText("T");
