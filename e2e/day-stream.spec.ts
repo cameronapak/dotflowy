@@ -946,7 +946,7 @@ test("typing stays local and scrolling reuses day-stream layout and content", as
   }));
   await seedOutline(page, [...TREE, ...entries], { kv: KV });
   await openSeededOutline(page, { path: "/the-day" });
-  await placeCaret(text(page, "standup"), "end");
+  await expect(section(page, DAY, "title")).toBeVisible();
 
   const marks = () =>
     page.evaluate(() =>
@@ -970,7 +970,12 @@ test("typing stays local and scrolling reuses day-stream layout and content", as
       )
       .toBeGreaterThanOrEqual(3);
   };
+  // A visible outline can still be adopting and positioning the day stream.
+  // Seat the caret only after that startup work, outside the measured edit.
   await settle();
+  await placeCaret(text(page, "standup"), "end");
+  await settle();
+  await expect(text(page, "standup")).toBeFocused();
   await page.evaluate(() => performance.clearMarks());
   await page.keyboard.type("abcdefghij");
   await expect(text(page, "standup")).toHaveText("Standupabcdefghij");
