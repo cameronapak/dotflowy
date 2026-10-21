@@ -34,7 +34,7 @@ Feature → seams: **code** A · **links** A+B+C+I+K · **node-links** A(widget)
 
 **Global actions and editor font (ADR 0071).** `globalActions()` returns node-less
 Cmd+K commands; IDs are namespaced by plugin. Optional `menuLabel` and `checked`
-also project a toggle into More. These actions remain available when optional
+also project a toggle into the View menu. These actions remain available when optional
 editor seams are off, so Bible, Daily, and Embeds can be re-enabled. Daily also
 exposes its existing calendar preferences. External-embed permission opens
 Settings with its existing disclosure rather than granting consent directly.

@@ -4,7 +4,7 @@ export function setAppleShortcutOpener(fn: typeof opener) {
   opener = fn;
 }
 
-/** The same focused setup dialog serves Settings and the header More menu. */
+/** Open the focused setup dialog from Settings > Experimental. */
 export function openAppleShortcut() {
   opener?.();
 }

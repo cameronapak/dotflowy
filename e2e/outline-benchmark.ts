@@ -254,10 +254,11 @@ try {
             ),
         );
         expect(authoring(await saved())).toEqual(authoring(beforePaste));
-        await page.getByRole("button", { name: /^More actions/ }).click();
+        await page.keyboard.press("ControlOrMeta+k");
+        await page.getByPlaceholder("Search nodes and actions...").fill("redo");
         await measure(
           "redo-paste",
-          () => page.getByRole("menuitem", { name: /^Redo/ }).click(),
+          () => page.getByRole("option", { name: /^Redo/ }).click(),
           () =>
             page.waitForFunction(() =>
               [...document.querySelectorAll(".node-text")].some(

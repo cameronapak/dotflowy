@@ -122,3 +122,11 @@ _Avoid_: plugin unloading, access control
 **Scribble mode**:
 A writing view that displays outline text in a scribble font, including the active node, to reduce distraction and rereading while you write. It changes appearance, not text source, and is distinct from a Spoiler.
 _Avoid_: redaction, hidden text, privacy mode
+
+**View menu**:
+The header menu for the outline view you are looking at: actions scoped to the current zoom root, and display modes such as Show completed and Spotlight mode.
+_Avoid_: More menu, overflow menu, options menu
+
+**App menu**:
+The header menu, opened from your avatar, for Dotflowy itself and your account: Settings, What's new, help links, legal pages, and Sign out. Nothing in it changes the outline view.
+_Avoid_: More menu, account menu, profile menu

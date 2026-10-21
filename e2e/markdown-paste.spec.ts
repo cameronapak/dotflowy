@@ -206,8 +206,9 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   expect(
     Number(await page.locator("html").getAttribute("data-delete")),
   ).toBeGreaterThanOrEqual(500);
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await page.getByRole("menuitem", { name: /^Redo/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByRole("option", { name: /^Redo/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
   await caretAt(page, "n", 0);

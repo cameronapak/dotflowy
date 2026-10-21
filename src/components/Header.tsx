@@ -4,7 +4,7 @@ import type { PluginContext } from "../plugins/types";
 
 import { usePluginChrome } from "../plugins/registry";
 import { BookmarkStar } from "./bookmarks";
-import { HeaderMoreMenu } from "./header-more-menu";
+import { HeaderAppMenu, HeaderViewMenu } from "./header-more-menu";
 import { CommandCenterButton } from "./node-switcher";
 import { FilterButton } from "./query-filter";
 import { SpotlightIndicator } from "./spotlight-indicator";
@@ -13,7 +13,7 @@ import { SpotlightIndicator } from "./spotlight-indicator";
  * App header row: breadcrumb trail on the left (passed as children, since it's
  * owned by OutlineEditor's zoom logic), action cluster on the right (search +
  * the contextual bookmark star + plugin header slots, with secondary actions in
- * the "More" overflow menu). The breadcrumb still renders its Home button at the
+ * the View and App menus). The breadcrumb still renders its Home button at the
  * top level, so the header is present on every view including the home page.
  *
  * Horizontal padding matches the outline content's `p-6` so the row aligns
@@ -43,11 +43,9 @@ export function Header({
             then the focused-node action (BookmarkStar renders itself + its
             trailing divider only when zoomed), then the filter magnifier (ADR
             0047 §6: summons the `?q=` filter, not the switcher) and the ⌘
-            command-center button beside it (ADR 0034), and finally the "More"
-            overflow holding the secondary set-once actions (theme, text size,
-            show completed, sign out) -- which also carries the unread changelog
-            signal (ADR 0046): a quiet notification dot on the trigger rather
-            than a loud header CTA. See header-more-menu.tsx. */}
+            command-center button beside it (ADR 0034), then View options and
+            the App menu's avatar, which carries the unread changelog signal
+            (ADRs 0046, 0072). See header-more-menu.tsx. */}
         <div className="flex shrink-0 items-center gap-1">
           <SpotlightIndicator />
           {getCtx &&
@@ -57,7 +55,8 @@ export function Header({
           <BookmarkStar />
           <FilterButton />
           <CommandCenterButton />
-          <HeaderMoreMenu />
+          <HeaderViewMenu />
+          <HeaderAppMenu />
         </div>
       </div>
     </header>

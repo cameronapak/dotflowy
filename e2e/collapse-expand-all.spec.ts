@@ -38,9 +38,9 @@ const text = (page: Page, id: string) =>
 const chevron = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row > .collapse-toggle`);
 
-// Open the header "More" menu and click one of its items.
+// Open the View menu and click one of its items.
 async function runMenuAction(page: Page, name: RegExp) {
-  await page.getByRole("button", { name: /more/i }).click();
+  await page.getByRole("button", { name: "View options" }).click();
   await page.getByRole("menuitem", { name }).click();
 }
 

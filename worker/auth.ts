@@ -333,6 +333,9 @@ export function createAuth(
         // email-keyed, so a different-address Google sign-in just finds no
         // account and hits disableSignUp).
         allowDifferentEmails: true,
+        // Copy Google's name/image after a successful link, not its email or
+        // verification state. Linking and signup gates stay unchanged.
+        updateUserInfoOnLink: true,
       },
     },
     // Dev serves the SPA from Vite (:3000) and proxies /api to the Worker, so

@@ -479,24 +479,24 @@ test.describe("narrow-screen drawers", () => {
     await expect(draft).toBeFocused();
   });
 
-  test("More does not reopen a dismissed menu after crossing the breakpoint", async ({
+  test("View does not reopen a dismissed menu after crossing the breakpoint", async ({
     page,
   }) => {
     await load(page);
-    await page.getByRole("button", { name: /More actions/ }).tap();
+    await page.getByRole("button", { name: "View options" }).tap();
     await expect(drawer(page)).toBeVisible();
     await page.setViewportSize({ width: 900, height: 844 });
     await expect(drawer(page)).toHaveCount(0);
     const menu = page.locator('[data-slot="dropdown-menu-content"]');
     // Either dismiss on transition or carry the open state into the desktop menu.
     if (!(await menu.isVisible()))
-      await page.getByRole("button", { name: /More actions/ }).click();
+      await page.getByRole("button", { name: "View options" }).click();
     await expect(menu).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(
-      page.getByRole("button", { name: /More actions/ }),
+      page.getByRole("button", { name: "View options" }),
     ).toHaveAttribute("aria-expanded", "false");
     await expect(drawer(page)).toHaveCount(0);
   });
@@ -519,7 +519,7 @@ test.describe("narrow-screen drawers", () => {
     page,
   }) => {
     await load(page);
-    await page.getByRole("button", { name: /More actions/ }).tap();
+    await page.getByRole("button", { name: "View options" }).tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
     const completed = page.getByRole("menuitemcheckbox", {
@@ -540,7 +540,7 @@ test.describe("narrow-screen drawers", () => {
     await page.getByRole("menuitem", { name: "Collapse all" }).tap();
     await expect(drawer(page)).toBeHidden();
     await page.setViewportSize({ width: 768, height: 844 });
-    await page.getByRole("button", { name: /More actions/ }).click();
+    await page.getByRole("button", { name: "View options" }).click();
     await expect(
       page.locator('[data-slot="dropdown-menu-content"]'),
     ).toBeVisible();
@@ -684,11 +684,11 @@ test.describe("narrow-screen drawers", () => {
     await expect(editor(page)).toBeFocused();
   });
 
-  test("opening another dialog from More transfers focus without leaving a drawer", async ({
+  test("opening another dialog from App transfers focus without leaving a drawer", async ({
     page,
   }) => {
     await load(page);
-    await page.getByRole("button", { name: /More actions/ }).tap();
+    await page.getByRole("button", { name: /Account and help/ }).tap();
     await settleSheet(page);
     await page.getByRole("menuitem", { name: /What's new/ }).tap();
     await expect(drawer(page)).toBeHidden();
@@ -745,7 +745,7 @@ test.describe("narrow-screen drawers", () => {
   test("modal content scrolls independently, a pull can reverse, and dismissal unlocks the page", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 390, height: 620 });
+    await page.setViewportSize({ width: 390, height: 360 });
     await seedOutline(
       page,
       Array.from({ length: 30 }, (_, i) => ({
@@ -780,7 +780,7 @@ test.describe("narrow-screen drawers", () => {
       requestAnimationFrame(sample);
       return positions;
     });
-    const trigger = page.getByRole("button", { name: /More actions/ });
+    const trigger = page.getByRole("button", { name: /Account and help/ });
     await trigger.tap();
     await settleSheet(page);
     expect((await entry.jsonValue()).some((top) => top > 80 && top < 560)).toBe(
@@ -788,7 +788,7 @@ test.describe("narrow-screen drawers", () => {
     );
     await entry.dispose();
     const body = sheetDialog(page);
-    const heading = body.getByRole("heading", { name: "More actions" });
+    const heading = body.getByRole("heading", { name: "Account and help" });
     const headingY = (await heading.boundingBox())!.y;
     const box = (await body.boundingBox())!;
     await expect(body).not.toHaveCSS("mask-image", "none");
@@ -878,14 +878,14 @@ test.describe("narrow-screen drawers", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await load(page);
-    await page.getByRole("button", { name: /More actions/ }).tap();
+    await page.getByRole("button", { name: "View options" }).tap();
     await settleSheet(page);
     await page.getByRole("menuitemcheckbox", { name: "Show completed" }).tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
     await page.keyboard.press("Escape");
     await expect(drawer(page)).toBeHidden();
-    await page.getByRole("button", { name: /More actions/ }).tap();
+    await page.getByRole("button", { name: "View options" }).tap();
     await swipeSheet(page);
     await expect(drawer(page)).toBeHidden();
   });
@@ -932,10 +932,10 @@ test("767px uses drawers even with a mouse; 768px uses caret menus", async ({
   await expect(drawer(page)).toHaveCount(0);
 });
 
-test("keyboard opening More focuses its first item and supports immediate arrows", async ({
+test("keyboard opening App focuses its first item and supports immediate arrows", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 620 });
+  await page.setViewportSize({ width: 390, height: 360 });
   await seedOutline(
     page,
     Array.from({ length: 30 }, (_, i) => ({
@@ -957,12 +957,10 @@ test("keyboard opening More focuses its first item and supports immediate arrows
       () => innerWidth - document.documentElement.clientWidth,
     ),
   ).toBeGreaterThan(0);
-  const trigger = page.getByRole("button", { name: /More actions/ });
+  const trigger = page.getByRole("button", { name: /Account and help/ });
   await trigger.focus();
   await page.keyboard.press("Enter");
   const items = drawer(page).locator('button[role^="menuitem"]:not(:disabled)');
-  const disabled = drawer(page).locator('button[role^="menuitem"]:disabled');
-  await expect(disabled).toHaveCount(2);
   await expect(items.first()).toBeFocused();
   await settleSheet(page);
   // A classic page scrollbar must not push the sheet outside the viewport.

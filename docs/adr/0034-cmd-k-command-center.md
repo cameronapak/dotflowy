@@ -5,7 +5,7 @@ status: accepted
 # Cmd+K command center (nodes + actions)
 
 **What.** The Cmd+K node quick-switcher grows into a keyboard-first **command center**: one box over
-**nodes** AND **actions**. Actions are both global/system (the header + More-menu items) and
+**nodes** AND **actions**. Actions are both global/system (the header + View/App menu items) and
 node-contextual (indent, complete, delete, move, mirror, zoom, plus whole-node plugin `/` commands). A
 node action runs against an **ambient target** (the bullet you came from, captured when the palette opens)
 or against any node you drill into with `→`. Empty query is browsable: the focused node's actions
@@ -18,7 +18,7 @@ virtual rows), and the core `NodeCommands` verbs (re-wrapped as the mobile bar).
 registry is a large, risky refactor with no payoff for _this_ feature. Instead Cmd+K is an **additional
 door**: thin adapters translate each existing model into one `CommandCenterAction` row
 (`src/data/command-center.ts` for node actions, `src/components/command-actions.tsx` for globals), and the
-underlying models are untouched. An action may live in several surfaces (Cmd+K + More menu + mobile bar) —
+underlying models are untouched. An action may live in several surfaces (Cmd+K + header menu + mobile bar) —
 **duplication is accepted**; keyboard access is first-class. Rejected: a "thick" unified command spine.
 
 **Why targeting is captured-then-frozen at open.** The palette is a Radix dialog; the instant it opens it

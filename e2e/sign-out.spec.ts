@@ -26,7 +26,7 @@ async function load(page: Page) {
 }
 
 async function clickSignOut(page: Page) {
-  await page.getByRole("button", { name: /more/i }).click();
+  await page.getByRole("button", { name: /Account and help/ }).click();
   await page.getByRole("menuitem", { name: /sign out/i }).click();
 }
 

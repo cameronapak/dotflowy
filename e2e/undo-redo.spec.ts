@@ -28,9 +28,10 @@ test("the first node after emptying the outline can be undone and redone", async
   await expect(page.locator("li[data-node-id]")).toHaveCount(1);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.locator("li[data-node-id]")).toHaveCount(0);
-  await page.getByRole("button", { name: /^More actions/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
   await expect(
-    page.getByRole("menuitem", { name: /^Redo create$/ }),
+    page.getByRole("option", { name: /^Redo create/ }),
   ).toBeEnabled();
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+Shift+z");
@@ -52,8 +53,9 @@ test("hidden undo preserves the filter and offers View node", async ({
   await page.keyboard.press("ControlOrMeta+f");
   const filter = page.getByRole("combobox", { name: "Filter query" });
   await filter.fill("Alpha");
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await page.getByRole("menuitem", { name: /^Undo typing/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByRole("option", { name: /^Undo typing/ }).click();
   await expect(filter).toHaveValue("Alpha");
   const view = page.getByRole("button", { name: "View node", exact: true });
   await expect(page.getByText("Undid typing", { exact: true })).toBeVisible();
@@ -96,8 +98,9 @@ test("snapshots preserve unchanged authoring history but clear it for external e
   await expect(page.locator('li[data-node-id="alpha-1"]')).toHaveCount(0);
   await expect.poll(savedText).toBe("Alpha");
   server.sendSnapshot();
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  const redo = page.getByRole("menuitem", { name: /^Redo typing$/ });
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  const redo = page.getByRole("option", { name: /^Redo typing/ });
   await expect(redo).toBeEnabled();
   await redo.click();
   await expect(alpha).toHaveText("Alpha kept");
@@ -114,9 +117,17 @@ test("snapshots preserve unchanged authoring history but clear it for external e
   await expect(
     page.getByText("History cleared", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await expect(page.getByRole("menuitem", { name: /^Undo$/ })).toBeDisabled();
-  await expect(page.getByRole("menuitem", { name: /^Redo$/ })).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await expect(page.getByRole("option", { name: /^Undo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
 });
 
 test("external collapse during a pending text write preserves history", async ({
@@ -206,7 +217,7 @@ test("external browsing changes preserve authoring history and remain live after
   );
 });
 
-test("More exposes disabled history, then typing can be undone and redone", async ({
+test("Cmd+K exposes disabled history, then typing can be undone and redone", async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -216,17 +227,27 @@ test("More exposes disabled history, then typing can be undone and redone", asyn
     'li[data-node-id="alpha"] > .outline-row .node-text',
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await expect(page.getByRole("menuitem", { name: /^Undo$/ })).toBeDisabled();
-  await expect(page.getByRole("menuitem", { name: /^Redo$/ })).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await expect(page.getByRole("option", { name: /^Undo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   await page.keyboard.press("Escape");
   await placeCaret(alpha, "end");
   await page.keyboard.type(" updated");
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await page.getByRole("menuitem", { name: /^Undo typing/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByRole("option", { name: /^Undo typing/ }).click();
   await expect(alpha).toHaveText("Alpha");
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await page.getByRole("menuitem", { name: /^Redo typing/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByRole("option", { name: /^Redo typing/ }).click();
   await expect(alpha).toHaveText("Alpha updated");
 });
 
@@ -277,9 +298,17 @@ test("external edits clear both history directions, but our own echoes do not", 
   await expect(
     page.getByText("History cleared", { exact: false }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await expect(page.getByRole("menuitem", { name: /^Undo$/ })).toBeDisabled();
-  await expect(page.getByRole("menuitem", { name: /^Redo$/ })).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await expect(page.getByRole("option", { name: /^Undo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
 });
 
 test("failed undo rolls back and keeps the action available to retry", async ({
@@ -300,9 +329,14 @@ test("failed undo rolls back and keeps the action available to retry", async ({
     page.getByText("Undoing failed. Nothing was changed."),
   ).toBeVisible();
   await expect(alpha).toHaveText("Alpha revised");
-  await page.getByRole("button", { name: /^More actions/ }).click();
-  await expect(page.getByRole("menuitem", { name: /^Redo$/ })).toBeDisabled();
-  await page.getByRole("menuitem", { name: /^Undo typing/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByRole("option", { name: /^Undo typing/ }).click();
   await expect(alpha).toHaveText("Alpha");
 });
 
@@ -359,11 +393,12 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   await page.keyboard.press("ControlOrMeta+z");
   gate.release();
   await expect(page.getByText("Undid capture", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /^More actions/ }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
   await expect(
-    page.getByRole("menuitem", { name: /^Redo capture/ }),
+    page.getByRole("option", { name: /^Redo capture/ }),
   ).toBeEnabled();
-  await page.getByRole("menuitem", { name: /^Redo capture/ }).click();
+  await page.getByRole("option", { name: /^Redo capture/ }).click();
   await expect(page.getByText("Redid capture", { exact: true })).toBeVisible();
   await expect(alpha).toHaveText("Alpha kept");
 });

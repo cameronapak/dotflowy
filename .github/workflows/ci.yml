@@ -64,7 +64,7 @@ jobs:
       - name: Changeset present
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          git fetch --no-tags origin "$GITHUB_BASE_REF"
           bun run check:changeset
       - name: Real Worker regression
         run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1

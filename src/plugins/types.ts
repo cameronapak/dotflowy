@@ -719,7 +719,7 @@ export type { ViewStream } from "../data/view-stream";
 
 // --- The plugin object ------------------------------------------------------
 
-/** A node-less action. Optional checked/menuLabel projects a toggle into More.
+/** A node-less action. Optional checked/menuLabel projects a toggle into the View menu.
  * IDs are local to the plugin; the registry namespaces them. */
 export interface GlobalActionSpec extends Omit<CommandCenterAction, "scope"> {
   menuLabel?: string;
