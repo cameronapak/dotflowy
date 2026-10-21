@@ -22,7 +22,7 @@
     "check:changeset": "bun scripts/require-changeset.ts",
     "check:package": "bun scripts/check-package.ts",
     "changeset": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && printf '%s\n' '---' '---' > ../.changeset/cli-release.md",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "test": "bun test test",
     "prepack": "npm run build"

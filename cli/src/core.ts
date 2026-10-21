@@ -1,8 +1,17 @@
 import { Config, Effect, Option, Predicate, Redacted, Schema } from "effect";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const VERSION = "0.1.0";
+export const VERSION =
+  // SAFETY: npm validates this repository-owned manifest's version before publishing.
+  (
+    JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      version: string;
+    }
+  ).version;
 export const DEFAULT_SERVER = "https://app.dotflowy.com";
 
 export class CliError extends Schema.TaggedError<CliError>()("CliError", {
