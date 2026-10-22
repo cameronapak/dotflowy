@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.28.2
+
+### Patch Changes
+
+- 10093b3: Remove automatic day scroll snapping so dropping a node onto a visible target keeps your reading position and day in view.
+
 ## 1.28.1
 
 ### Patch Changes

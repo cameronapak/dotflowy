@@ -5,8 +5,8 @@ status: accepted
 # The day stream replaces the single-day page
 
 A zoomed Daily note now reads as a **Day stream**: one page per calendar day,
-continuing into earlier and later days, with scrolling that settles on day
-boundaries. It replaces the single-day page. Cam picked this over a Reflect-style
+continuing into earlier and later days, with free vertical scrolling.
+It replaces the single-day page. Cam picked this over a Reflect-style
 newest-first stream and a two-column timeline after trying all three as clickable
 prototypes. It keeps today's page anatomy and steps through days one at a time.
 
@@ -33,7 +33,7 @@ options.
    per day. That stacks N virtualizers and splits focus, selection, and drag at
    every day boundary.
 
-3. **An Empty day is a placeholder, not a node.** Scrolling, snapping, and
+3. **An Empty day is a placeholder, not a node.** Scrolling and
    clicking a strip pill create nothing. The first keystroke on an Empty day
    creates the day, its scaffold, and the typed entry through the existing
    get-or-create, then hands the caret to the new row. Focus without typing leaves
@@ -64,11 +64,14 @@ options.
    anchor. A calendar pick past that reach navigates to the day instead, which
    anchors a new stream there.
 
-6. **Scroll settles on day starts with proximity snapping.** Each day is at least
-   one viewport tall minus a peek of the next day's title. Long days scroll
-   normally. Reduced motion keeps snapping but drops smooth scrolling. No new
-   keyboard shortcut: arrow keys already cross days, and the strip and Today
-   button jump.
+6. **Vertical scrolling stays where you leave it.** Each day is at least one
+   viewport tall minus a peek of the next day's title. Automatic proximity
+   snapping was removed because a pending scroll gesture could snap after a
+   node drop, moving the reading position and potentially changing the day in
+   view even when the drop target was already visible. Settling resumes deferred
+   day loading but does not align a day title. Explicit navigation still aligns
+   the destination title. No new keyboard shortcut: arrow keys already cross
+   days, and the strip and Today button jump.
 
 7. **Entry points are unchanged.** The Today button, `/today`, and Cmd+K "Go to
    Today" open the stream anchored on today and seed one entry line, as before.

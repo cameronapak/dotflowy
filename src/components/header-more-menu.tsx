@@ -2,6 +2,7 @@ import { Avatar } from "@base-ui/react/avatar";
 import {
   ArrowShrinkIcon,
   ArrowExpandIcon,
+  Bookmark01Icon,
   BubbleChatNotificationIcon,
   CheckmarkCircle01Icon,
   Copy01Icon,
@@ -15,7 +16,7 @@ import {
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
@@ -24,11 +25,12 @@ import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
 import { flattenInline } from "../data/inline-text";
 import { outlineToMarkdown } from "../data/markdown";
-import { toggleCollapsed } from "../data/mutations";
+import { toggleBookmark, toggleCollapsed } from "../data/mutations";
 import { exportOpml } from "../data/opml-export";
 import { runStructural } from "../data/structural";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
+import { useTree } from "../data/useTree";
 import { getViewRootId } from "../data/view-state";
 import { signOutAndReload, useSession } from "../lib/auth-client";
 import { usePluginChrome } from "../plugins/registry";
@@ -171,6 +173,9 @@ export function HeaderViewMenu() {
   const { globalActions } = usePluginChrome();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
+  const { index } = useTree();
+  const rootId = useParams({ strict: false }).nodeId;
+  const current = rootId ? index.byId.get(rootId) : null;
 
   return (
     <DropdownMenu title="View options">
@@ -182,13 +187,23 @@ export function HeaderViewMenu() {
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="min-w-44">
+      <DropdownMenuContent align="end" className="min-w-52">
         <div
           role="presentation"
           className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
         >
           This view
         </div>
+        {current && (
+          <DropdownMenuCheckboxItem
+            checked={current.bookmarkedAt != null}
+            onCheckedChange={(checked) => toggleBookmark(current.id, checked)}
+          >
+            <HugeiconsIcon icon={Bookmark01Icon} />
+            Bookmark this page
+          </DropdownMenuCheckboxItem>
+        )}
+
         <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
           <HugeiconsIcon icon={ArrowShrinkIcon} />
           Collapse all

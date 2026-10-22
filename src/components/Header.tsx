@@ -3,7 +3,6 @@ import { Fragment, type ReactNode } from "react";
 import type { PluginContext } from "../plugins/types";
 
 import { usePluginChrome } from "../plugins/registry";
-import { BookmarkStar } from "./bookmarks";
 import { HeaderAppMenu, HeaderViewMenu } from "./header-more-menu";
 import { CommandCenterButton } from "./node-switcher";
 import { FilterButton } from "./query-filter";
@@ -12,7 +11,7 @@ import { SpotlightIndicator } from "./spotlight-indicator";
 /**
  * App header row: breadcrumb trail on the left (passed as children, since it's
  * owned by OutlineEditor's zoom logic), action cluster on the right (search +
- * the contextual bookmark star + plugin header slots, with secondary actions in
+ * plugin header slots, with page actions and display toggles in
  * the View and App menus). The breadcrumb still renders its Home button at the
  * top level, so the header is present on every view including the home page.
  *
@@ -40,8 +39,7 @@ export function Header({
         <div className="min-w-0 flex-1">{children}</div>
         {/* Right cluster: the spotlight-on indicator leads (ADR 0033: awareness
             + off-switch), then plugin header slots (the daily Today button),
-            then the focused-node action (BookmarkStar renders itself + its
-            trailing divider only when zoomed), then the filter magnifier (ADR
+            then the filter magnifier (ADR
             0047 §6: summons the `?q=` filter, not the switcher) and the ⌘
             command-center button beside it (ADR 0034), then View options and
             the App menu's avatar, which carries the unread changelog signal
@@ -52,7 +50,6 @@ export function Header({
             headerSlots.map((s) => (
               <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
             ))}
-          <BookmarkStar />
           <FilterButton />
           <CommandCenterButton />
           <HeaderViewMenu />

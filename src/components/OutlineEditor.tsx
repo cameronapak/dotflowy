@@ -1065,7 +1065,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
     [releaseTitle],
   );
-  const stopSnapRef = useRef<(() => void) | null>(null);
+  const resetScrollGestureRef = useRef<(() => void) | null>(null);
   // A new getItemKey invalidates the virtualizer's geometry for EVERY loaded
   // item, even when the keys are unchanged. Scroll-only renders must reuse it.
   // Rotate both callbacks when page geometry changes: estimateSize alone is
@@ -1319,7 +1319,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       const offset = active?.offsetOf(key);
       if (offset === null || offset === undefined) return false;
       releaseTitle();
-      stopSnapRef.current?.();
+      resetScrollGestureRef.current?.();
       titleAnchorRef.current = {
         section: key,
         focusKey,
@@ -1328,8 +1328,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       headerRef.current?.setAttribute("data-title-anchored", "");
       restoringDayRef.current = null;
       heldRef.current = null;
-      // Stop an already-running native smooth snap before seating the title.
-      window.scrollTo({ top: window.scrollY, behavior: "instant" });
       const { before, after } = rangeRef.current;
       if (offset < -before || offset > after)
         setRange({
@@ -1399,8 +1397,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     }
   });
 
-  // Publish the section in view, load at the edges, and settle a scroll
-  // gesture that ends near a section start onto it (proximity snapping).
+  // Publish the section in view and load at the edges. Settling only resumes
+  // deferred prepends; it must not move the user's reading/drop position.
   useEffect(() => {
     if (!stream) {
       setStreamView(null);
@@ -1410,12 +1408,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       const inView = sectionInView();
       if (inView) setStreamView({ anchor: stream.anchor, inView });
     };
-    let gesture = false;
     let touching = false;
     let pointing = false;
     let settle = 0;
-    stopSnapRef.current = () => {
-      gesture = false;
+    resetScrollGestureRef.current = () => {
       touching = false;
       pointing = false;
       deferPrependRef.current = false;
@@ -1423,46 +1419,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     };
     const markGesture = () => {
       releaseTitle();
-      gesture = true;
       // The user scrolling ends a `?day=` restore: the URL follows them now.
       restoringDayRef.current = null;
-    };
-    const snap = () => {
-      if (!gesture || titleAnchorRef.current) return;
-      gesture = false;
-      const selection = window.getSelection();
-      if (selection && !selection.isCollapsed) return;
-      const cache = virtualizer.measurementsCache;
-      const line = window.scrollY + headerHeightRef.current;
-      let nearest: number | null = null;
-      for (const i of sectionStartsRef.current.values()) {
-        const m = cache[i];
-        if (!m) continue;
-        const d = m.start - line;
-        if (nearest === null || Math.abs(d) < Math.abs(nearest)) nearest = d;
-      }
-      const limit = Math.min(160, window.innerHeight * 0.2);
-      if (
-        nearest === null ||
-        Math.abs(nearest) < 2 ||
-        Math.abs(nearest) > limit
-      )
-        return;
-      // A smooth snap can cross the load threshold too. Let it settle before
-      // inserting rows, rather than compensating against its moving target.
-      heldRef.current = null;
-      deferPrependRef.current = true;
-      window.scrollTo({
-        top: window.scrollY + nearest,
-        behavior: prefersReducedMotion() ? "auto" : "smooth",
-      });
     };
     const onSettled = () => {
       if (touching || pointing) return;
       deferPrependRef.current = false;
       maybeExtend();
-      // The insertion's compensating scroll schedules the eventual snap.
-      if (!extendingRef.current) snap();
     };
     const onScroll = () => {
       // A scrollbar drag or keyboard scroll can continue without another
@@ -1537,11 +1500,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const onKey = (e: KeyboardEvent) => {
       onEdit(e);
       releaseTitle();
-      if (
-        ["PageUp", "PageDown", "Home", "End", " "].includes(e.key) &&
-        !(e.target instanceof HTMLElement && e.target.isContentEditable)
-      )
-        gesture = true;
     };
     publish();
     window.addEventListener("scroll", onScroll, {
@@ -1576,7 +1534,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     for (const event of ["beforeinput", "compositionstart", "input"])
       window.addEventListener(event, onEdit, true);
     return () => {
-      stopSnapRef.current = null;
+      resetScrollGestureRef.current = null;
       deferPrependRef.current = false;
       window.clearTimeout(settle);
       window.removeEventListener("scroll", onScroll, true);
@@ -1594,7 +1552,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         window.removeEventListener(event, onEdit, true);
       setStreamView(null);
     };
-  }, [stream, virtualizer, sectionInView, maybeExtend, releaseTitle]);
+  }, [stream, sectionInView, maybeExtend, releaseTitle]);
   // The list changing under a still viewport (a section created, a fold
   // opened) can change the section in view too.
   useEffect(() => {
