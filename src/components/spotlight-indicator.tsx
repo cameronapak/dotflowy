@@ -10,8 +10,7 @@ import { Button } from "./ui/button";
  * Why a header control and not the subheader band: spotlight exists to REDUCE
  * visual noise, so a persistent subheader banner (a full extra row, colliding
  * with the tag filter) would fight the feature's own intent. A compact chip
- * costs zero vertical space, sidesteps the subheader entirely, and mirrors
- * BookmarkStar's "render nothing when N/A" precedent.
+ * costs zero vertical space and sidesteps the subheader entirely.
  *
  * Why appears-only-when-on: at rest (no caret) the pure-CSS dim shows nothing,
  * so there is otherwise no passive signal that the mode is active. A
