@@ -108,7 +108,7 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
     return false;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  const host = u.hostname.toLowerCase().replace(/^\[|]$|\.$/g, ""); // IPv6 brackets / DNS root dot
+  const host = u.hostname.toLowerCase().replace(/^\[|]$|\.+$/g, ""); // IPv6 brackets / all trailing DNS dots
   if (!host) return false;
   if (
     host === "x.com" ||
