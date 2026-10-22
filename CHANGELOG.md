@@ -1,5 +1,16 @@
 # dotflowy
 
+## 1.29.0
+
+### Minor Changes
+
+- 0247b8e: Add Focus sessions: choose a node and a duration, return when you wander, run Pomodoro rounds, and optionally reflect when you finish or let go. Desktop Chrome can pop the session into a floating picture-in-picture card.
+
+### Patch Changes
+
+- a5dd14d: Page bookmarking moves from the header to View options. Use Bookmark this page to save or remove a bookmark; a check mark shows when the page is bookmarked.
+- 58ce7e1: Harden link title fetching by stripping all trailing hostname dots before checking blocked destinations, including internal hosts and browser-only X content.
+
 ## 1.28.2
 
 ### Patch Changes
