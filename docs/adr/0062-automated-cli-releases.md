@@ -29,17 +29,26 @@ Merging the release PR is the human publish approval. There is no second approva
 on the npm GitHub Environment. Branch protection must require all six CLI matrix
 jobs: macOS, Linux, and Windows on Node 22 and 24. It must also require the
 separate `CLI / changeset` check on ordinary PRs so the packaged-behavior gate
-cannot be merged around. That check remains skipped/successful on the bot's
-version-only release branch.
+cannot be merged around. That check runs on the bot's release branch too; its
+content-based version-only exemption succeeds without a new fragment.
 
 ## Compatibility CI is wider than the package directory
 
 The CLI speaks the Worker's MCP contract and shares concepts with client data
-code. Changes under `cli/**`, `worker/**`, `src/data/**`, the root lockfile, or
-either CLI workflow run the full six-job compatibility matrix. Every job builds,
-typechecks, tests, and inspects the npm package. This is intentionally broader
-than the set of paths that require a CLI changeset: compatibility can change
-without changing the installed package.
+code. Every PR runs the full six-job compatibility matrix and changeset check,
+without path filtering, so required contexts exist even for unrelated PRs.
+Main pushes retain filters for `cli/**`, `worker/**`, `src/data/**`, the root
+lockfile, and either CLI workflow. Every matrix job builds, typechecks, tests,
+and inspects the npm package. This is intentionally broader than the set of
+paths that require a CLI changeset: compatibility can change without changing
+the installed package.
+
+App automation explicitly dispatches the same CLI workflow against its exact
+prepared release candidate before promoting that SHA to main. It keeps
+`GITHUB_TOKEN`, earns the real required checks, and never bypasses them. The
+identity, failure handling, permissions, and protection rollout are specified in
+[ADR 0073](./0073-exact-sha-checked-app-release-candidates.md). Candidate validation
+does not enter the npm environment or publish a package.
 
 ## Publishing rebuilds and reconciles three durable records
 
