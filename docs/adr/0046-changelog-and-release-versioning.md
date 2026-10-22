@@ -147,16 +147,21 @@ release choice below. A merge approves publication and deployment without a
 second release PR. The CLI keeps its independent release-PR approval model.
 
 The production workflow validates current `main`, prepares the version through
-the existing archive-before-consume script, and builds both sites. Only then does
-it push the release commit/tag atomically, publish the GitHub Release, deploy
-landing, and deploy the app. Empty or absent changesets still deploy without a
-version bump. Release dates use America/Chicago.
+the existing archive-before-consume script, and builds both sites. It pushes a
+temporary candidate branch and explicitly dispatches the seven real CLI checks
+on that exact SHA. Only after they succeed does it push the identical release
+commit/tag atomically, publish the GitHub Release, deploy landing, and deploy
+the app. Empty or absent changesets use the same checks and still deploy without
+a version bump. Release dates use America/Chicago. Candidate identity and
+protection rollout follow
+[ADR 0073](./0073-exact-sha-checked-app-release-candidates.md).
 
 One run finishes before the next starts. Pending intermediate commits may be
 superseded; the next run takes newest `main` and releases all pending news
 together. An atomic push rejects a candidate made stale by a concurrent merge.
 GitHub's built-in token pushes release metadata without recursively triggering
-another workflow. It does not bypass branch protection.
+another push workflow. The explicit validation dispatch uses the same token
+with job-scoped Actions write permission. It does not bypass branch protection.
 
 Published releases and tags are reused on retries. Failures stop without rollback;
 publication can precede the live app, and landing can temporarily be ahead of it.

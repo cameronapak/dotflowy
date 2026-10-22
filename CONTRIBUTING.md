@@ -474,11 +474,19 @@ PAT or npm token as a workaround.
 2. Create a GitHub Environment named exactly `npm`. Restrict deployment branches
    to `main`, but add no required reviewers or wait timer. The merged release PR
    is the human approval, so the environment must not add a second approval.
-3. In the `main` branch rule, require all six `CLI / test` matrix checks: Ubuntu,
-   macOS, and Windows on Node 22 and Node 24. Also require the separate
-   `CLI / changeset` check so ordinary packaged-behavior PRs cannot bypass the
-   release gate. It remains skipped/successful on the bot release branch. Allow
-   the installed GitHub App to create and update its release branch and PR.
+3. Before enforcing main protection, land universal PR checks and verify hosted
+   candidate validation and protected promotion as described in
+   [ADR 0073](./docs/adr/0073-exact-sha-checked-app-release-candidates.md). Require
+   `test (ubuntu-latest, 22)`, `test (ubuntu-latest, 24)`,
+   `test (macos-latest, 22)`, `test (macos-latest, 24)`,
+   `test (windows-latest, 22)`, `test (windows-latest, 24)`, and `changeset`,
+   bound to the GitHub Actions producer (App ID 15368). Enable strict up-to-date
+   checks and administrator enforcement, with no bypass, force pushes, or main
+   deletion. Do not add a PR-required rule to this direct-promotion design.
+   Every PR runs the real checks; the version-only release PR passes the
+   content-based changeset exemption rather than skipping the job. Allow the
+   installed GitHub App to create and update its release branch and PR, not to
+   bypass main protection.
 4. After this pipeline is on `main`, bootstrap the unclaimed npm package once
    from a clean, current `main` checkout. Use Node 24 and npm 11.5.1+ with an npm
    owner account protected by 2FA. Record `git rev-parse HEAD` as the bootstrap
@@ -538,8 +546,9 @@ fails rather than moving a conflicting tag.
 ## Deploying
 
 Merging to `main` approves automatic app release and deployment: quality checks,
-both builds, GitHub Release, landing deploy, then app deploy. Pending runs use the
-newest `main`; failures stop without automatic rollback. Setup and retry steps:
+both builds, seven real CLI checks on the exact candidate SHA, atomic promotion,
+GitHub Release, landing deploy, then app deploy. Pending runs use the newest
+`main`; failures stop without automatic rollback. Setup and retry steps:
 [`docs/deploying.md`](./docs/deploying.md#automatic-production-deployment).
 
 For a manual or self-hosted deploy: `wrangler login`, set the production secrets,

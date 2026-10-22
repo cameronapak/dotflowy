@@ -38,10 +38,15 @@ runs the same quality checks as CI, then:
 1. Runs `bun scripts/release.ts --ci`. Nonempty app changesets produce a version,
    archived changelog, release commit, and annotated tag. No news means no bump.
 2. Typechecks the landing site and builds both sites before publishing anything.
-3. Pushes the release commit and tag atomically, then publishes the GitHub Release.
-4. Deploys the landing Worker (`dotflowy.com`), then the app Worker
+3. Pushes only the prepared commit to `release-candidate/<run-id>-<attempt>` and
+   dispatches `CLI` against that branch. Waits up to 45 minutes for all seven real
+   jobs to succeed on that SHA in the identified run attempt. No-news deploys
+   validate the selected main commit the same way.
+4. Confirms main has not advanced, pushes the identical release commit and tag
+   atomically, then publishes the GitHub Release.
+5. Deploys the landing Worker (`dotflowy.com`), then the app Worker
    (`app.dotflowy.com`), using those builds.
-5. Checks the version in both public `changelog.json` assets, both homepages,
+6. Checks the version in both public `changelog.json` assets, both homepages,
    and the app's public auth configuration endpoint.
 
 Only one production workflow runs at a time. It finishes the active deployment;
@@ -61,10 +66,18 @@ secret**:
 | `SENTRY_AUTH_TOKEN`     | Optional Sentry organization token for client source-map uploads.                                                       |
 
 The workflow uses GitHub's built-in `GITHUB_TOKEN` with Contents write permission
-for release commits, tags, and GitHub Releases. Its pushes do not trigger another
-workflow run. `main` must permit that release commit; branch protection that
-requires a PR needs a different release approval flow. Never bypass it with a
-force push. Runtime secrets such as `BETTER_AUTH_SECRET` stay in Cloudflare.
+for candidate branches, release commits, tags, and GitHub Releases. The deploy
+job also has Actions write permission to dispatch, observe, and cancel candidate
+validation. Pushes do not recursively trigger workflows; the validation dispatch
+is explicit. Validation has read-only repository permissions, no persisted Git
+credentials, and no release secrets, npm environment, or OIDC permission.
+
+The seven required CLI checks must be earned on the generated SHA, not its
+parent. Configure main protection only after the hosted protocol is verified,
+following [ADR 0073](./adr/0073-exact-sha-checked-app-release-candidates.md).
+PR-required protection needs a different release approval flow. Never add a
+bypass or force push. Runtime secrets such as `BETTER_AUTH_SECRET` stay in
+Cloudflare; deployment authentication is unchanged.
 
 The token template grants account-level Worker access, not access limited to
 these two Workers. Keep account and zone resource scopes as narrow as possible.
@@ -84,6 +97,18 @@ rerunning only the failed job, which retains the earlier selected commit.
 A merge during release preparation rejects the atomic push, before the GitHub
 Release or either deployment. The queued run handles the newer `main`. Never
 force or rebase the already-built candidate.
+
+Failed, missing, skipped, cancelled, or timed-out candidate checks stop before
+promotion. The workflow summary records the candidate SHA, captured base, and
+validation run ID. Inspect that run rather than looking for any green check on
+the branch. A lost dispatch response stops without redispatching automatically.
+
+Cleanup attempts to cancel known unfinished validation and delete only that
+attempt's temporary branch. Cleanup failures do not change the release outcome.
+If the run ID is unknown or cancellation cannot settle, the branch is retained;
+workflow termination can also leave an orphan. After confirming its validation
+run has stopped, an authorized maintainer can delete that exact branch. Do not
+delete another attempt's candidate, change its SHA, or move a release tag.
 
 The workflow does **not** run D1 SQL migrations or data backfills. Approve and run
 those separately before deploying code that requires them. Wrangler still applies
