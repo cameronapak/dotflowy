@@ -81,6 +81,100 @@ const pill = (page: Page, key: string) =>
     .getByRole("navigation", { name: "Week calendar" })
     .locator(`[data-day-key="${key}"]`);
 
+test("dropping on a visible row keeps the scrolled day and reading position", async ({
+  page,
+}) => {
+  const entries = Array.from({ length: 80 }, (_, i) => ({
+    id: `entry-${i}`,
+    parentId: "prev-day",
+    prevSiblingId: i ? `entry-${i - 1}` : "dentist",
+    text: `Entry ${i}`,
+  }));
+  await seedOutline(page, [...TREE, ...entries], { kv: KV });
+  await openSeededOutline(page, { anchorId: "alpha" });
+  await clientNavigate(page, "/the-day");
+
+  for (const [entry, offset, nest] of [
+    [30, 1050, false],
+    [30, 1050, true],
+    [3, 80, false],
+    [4, -80, false],
+  ] as const) {
+    await pill(page, DAY).click();
+    await expect(pill(page, DAY)).toHaveAttribute("data-selected", "");
+    await pill(page, PREV).click();
+    await expect(page).toHaveURL(new RegExp(`/the-day\\?day=${PREV}$`));
+    await expect
+      .poll(() =>
+        section(page, PREV, "title").evaluate((el) =>
+          Math.abs(
+            el.getBoundingClientRect().top -
+              document.querySelector(".outline-chrome")!.getBoundingClientRect()
+                .bottom,
+          ),
+        ),
+      )
+      .toBeLessThan(2);
+    const seated = await page.evaluate(() => window.scrollY);
+    await page.mouse.wheel(0, offset);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          ({ seated, offset }) => Math.abs(window.scrollY - seated - offset),
+          { seated, offset },
+        ),
+      )
+      .toBeLessThan(2);
+    const from = await page
+      .locator(`li[data-node-id="entry-${entry}"] .bullet`)
+      .boundingBox();
+    const target = await page
+      .locator(`li[data-node-id="entry-${entry + 4}"]`)
+      .boundingBox();
+    if (!from || !target) throw new Error("missing visible drag rows");
+    const before = await page.evaluate(() => window.scrollY);
+    const x = from.x + from.width / 2;
+    const y = from.y + from.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 10, y + 10, { steps: 3 });
+    await page.mouse.move(x + (nest ? 80 : 0), target.y, { steps: 5 });
+    await expect(page.locator(".drag-indicator")).toBeVisible();
+    await page.mouse.up();
+    const moved = page.locator(`li[data-node-id="entry-${entry}"]`);
+    await expect(moved).toHaveAttribute(
+      "data-parent-id",
+      nest ? "entry-33" : "prev-day",
+    );
+    await expect(text(page, `entry-${entry}`)).toBeFocused();
+    await expect
+      .poll(() =>
+        page.evaluate(async (id) => {
+          const nodes: ApiNode[] = await fetch("/api/nodes").then((r) =>
+            r.json(),
+          );
+          return nodes.find((node) => node.id === id)?.prevSiblingId;
+        }, `entry-${entry}`),
+      )
+      .toBe(nest ? null : `entry-${entry + 3}`);
+    // Observe past both the scroll-settle and URL debounce, including transient
+    // jumps that a final-position assertion alone would miss.
+    const drift = await page.evaluate(async (before) => {
+      let maximum = 0;
+      const until = performance.now() + 700;
+      while (performance.now() < until) {
+        maximum = Math.max(maximum, Math.abs(window.scrollY - before));
+        await new Promise(requestAnimationFrame);
+      }
+      return maximum;
+    }, before);
+    expect(drift).toBeLessThan(2);
+    const readingDay = offset < 0 ? "2030-06-10" : PREV;
+    await expect(pill(page, readingDay)).toHaveAttribute("data-selected", "");
+    await expect(page).toHaveURL(new RegExp(`/the-day\\?day=${readingDay}$`));
+  }
+});
+
 test.describe("day navigation on touch", () => {
   test.use({
     viewport: { width: 390, height: 844 },
@@ -728,9 +822,9 @@ test.describe("touch momentum", () => {
           result.samples[inserted]!.top - result.samples[inserted - 1]!.top,
         ),
       ).toBeLessThan(2);
-      // Insertion waits for coasting too, not merely touchend. Proximity snap
-      // may move to a nearby boundary AFTER insertion, so inspect the gesture
-      // through the insertion frame, not that later, intentional movement.
+      // Insertion waits for coasting too, not merely touchend. Inspect the
+      // gesture through the insertion frame to check both momentum deferral
+      // and the compensating scroll.
       const gesture = result.samples.slice(0, inserted + 1);
       const moving = gesture.filter(
         (s, i) => i > 0 && s.top - result.samples[i - 1]!.top > 2,
