@@ -364,12 +364,14 @@ h2 span.protection-indicator {
   }
 }
 
-.outline-row.node-acted {
+.outline-row.node-acted,
+.zoomed-title.node-acted {
   animation: node-acted-fade 0.9s ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .outline-row.node-acted {
+  .outline-row.node-acted,
+  .zoomed-title.node-acted {
     animation: none;
   }
 }

@@ -61,6 +61,7 @@ import {
   useSession,
 } from "../lib/auth-client";
 import { cn } from "../lib/utils";
+import { FocusSettings } from "../plugins/focus/settings";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -1218,6 +1219,7 @@ function SettingsPage() {
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-4 py-8 sm:px-6">
         <ConnectionsSection plan={plan} />
         <EditorFeaturesSection />
+        <FocusSettings />
         <AppearanceSection />
         <ExperimentalSection />
         <details className="border-t pt-4">

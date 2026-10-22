@@ -2506,7 +2506,7 @@ function useZoomNavigation({
     el.focus({ preventScroll: true });
     placeCaretAtEnd(el);
     el.scrollIntoView({ block: "nearest" });
-    flashRow(el.closest(".outline-row"));
+    flashRow(el.closest(".outline-row, .zoomed-title"));
     // Mount-only by design (see above): consumeFlashAfterNav is a one-shot read
     // and refs are stable, so there is nothing reactive to re-run on.
     // eslint-disable-next-line react-doctor/exhaustive-deps

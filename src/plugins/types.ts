@@ -550,6 +550,8 @@ export interface NodeProtection {
 
 export interface SubheaderSlotSpec {
   id: string;
+  /** Full-width rows precede the shared view-specific row (ADR 0002/0074). */
+  placement?: "full-width";
   /** Return null to contribute nothing. `getCtx` is optional for plugins that
    *  read route state directly (the tag filter); call it inside handlers only. */
   render(getCtx: () => PluginContext): ReactNode;
@@ -719,11 +721,18 @@ export type { ViewStream } from "../data/view-stream";
 
 // --- The plugin object ------------------------------------------------------
 
-/** A node-less action. Optional checked/menuLabel projects a toggle into the View menu.
+/** A node-less action. menuLabel projects it into View; checked makes it a toggle.
  * IDs are local to the plugin; the registry namespaces them. */
-export interface GlobalActionSpec extends Omit<CommandCenterAction, "scope"> {
+export interface GlobalActionSpec extends Omit<
+  CommandCenterAction,
+  "scope" | "run"
+> {
   menuLabel?: string;
   checked?: boolean;
+  /** Gate a page action in both Cmd+K and the View menu. */
+  available?(rootId: string | null): boolean;
+  /** The route owns the page root, not a Day stream's current caret section. */
+  run(rootId: string | null): void;
 }
 
 /**

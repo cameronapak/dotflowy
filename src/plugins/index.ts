@@ -12,6 +12,7 @@ import code from "./code";
 import daily from "./daily";
 import embeds from "./embeds";
 import emphasis from "./emphasis";
+import focus from "./focus";
 import highlight from "./highlight";
 import links from "./links";
 import nodeLinks from "./node-links";
@@ -40,6 +41,7 @@ export const plugins: PluginDef[] = [
   spoiler,
   daily,
   scribble,
+  focus,
 ];
 
 // Only these reviewed plugins have optional editor conveniences (ADR 0064).
