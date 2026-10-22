@@ -316,10 +316,13 @@ export function useGlobalActions(opts: {
 
     return [
       ...a,
-      ...globalActions.map((action) => ({
-        ...action,
-        scope: "global" as const,
-      })),
+      ...globalActions
+        .filter((action) => action.available?.(rootId) ?? true)
+        .map((action) => ({
+          ...action,
+          scope: "global" as const,
+          run: () => action.run(rootId),
+        })),
     ];
   }, [
     globalActions,
@@ -331,6 +334,7 @@ export function useGlobalActions(opts: {
     showCompleted,
     setShowCompleted,
     spotlight,
+    rootId,
     rootNode,
     openConnect,
     daily,

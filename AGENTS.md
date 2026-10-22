@@ -35,6 +35,7 @@ New feature or design: `ls docs/adr/` and read the ADRs that match the surface. 
 | Effect: errore removal, sync socket, schemas, fiber    | 0012, 0013, 0021, 0053                                 |
 | Touch targets, reading size, and the bullet dot        | 0029                                                   |
 | Spotlight dim + breathing room                         | 0033, 0060                                             |
+| Focus sessions, Pomodoro, and Document PiP             | 0074, 0002                                             |
 | Lunora retirement and retained exports                 | 0061-retire-lunora-through-per-user-cutover            |
 
 ## Architecture

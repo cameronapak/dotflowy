@@ -68,9 +68,8 @@ function NodeOverflowPanel({
  * Rendered as spans (not divs) so the same component is valid inside both render
  * paths -- the list row's `<li>` and the zoomed title's phrasing-only `<h2>`.
  *
- * Ships DORMANT: no plugin registers an `*:after-text` slot yet, so `slotsAt`
- * is empty and the component returns null with zero DOM/observer cost. The first
- * trailing decoration + the overflow panel land in later build-plan steps.
+ * Focus's remaining-time pie is the first `*:after-text` consumer (ADR 0074).
+ * With no registered slots, the component returns null with no observer cost.
  */
 export function NodeDecorations({
   node,
@@ -87,9 +86,8 @@ export function NodeDecorations({
    *  always reachable -- a consumer only passes this to do something else. */
   onExpand?: () => void;
 }) {
-  // The compiled-in plugin set makes this a load-time constant, so a node with
-  // no trailing decorations pays nothing (no zone, no observer). Today every
-  // `*:after-text` position is empty -- the seam is dormant.
+  // The compiled-in slot roster is stable. Empty positions pay no zone or
+  // observer cost; a registered component may itself render null while idle.
   const slots = slotsAt(position);
   const hasSlots = slots.length > 0;
 

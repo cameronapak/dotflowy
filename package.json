@@ -91,6 +91,7 @@
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cnfast": "^0.2.0",
+    "cuelume": "^0.2.8",
     "date-fns": "^4.4.0",
     "effect": "4.0.0",
     "fuse.js": "^7.5.0",
