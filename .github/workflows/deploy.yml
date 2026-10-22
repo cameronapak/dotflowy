@@ -35,12 +35,14 @@ jobs:
   deploy:
     needs: [select, quality]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     permissions:
       contents: write
+      actions: write
     env:
       TZ: America/Chicago
       HUSKY: "0"
+      RELEASE_BASE: ${{ needs.select.outputs.ref }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,8 +74,58 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       - name: Build landing
         run: bun run --cwd landing build
+      - name: Validate exact release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          candidate=$(git rev-parse HEAD)
+          branch="release-candidate/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "CANDIDATE_SHA=$candidate" >> "$GITHUB_ENV"
+          # Create only this ref, never a tag. A retry uses a new branch.
+          git push origin "$candidate:refs/heads/$branch"
+          echo "CANDIDATE_BRANCH=$branch" >> "$GITHUB_ENV"
+          deadline=$((SECONDS + 45 * 60))
+          dispatch=$(jq -n --arg ref "$branch" --arg base "$RELEASE_BASE" \
+            '{ref: $ref, inputs: {base_sha: $base}}' | \
+            gh api --method POST -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/cli.yml/dispatches" --input -)
+          # A lost or ambiguous response is not permission to dispatch again.
+          run_id=$(jq -er '.workflow_run_id | select(type == "number" and . > 0) | tostring' <<< "$dispatch")
+          echo "CANDIDATE_RUN=$run_id" >> "$GITHUB_ENV"
+          echo "Candidate $candidate: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id"
+          echo "Candidate $candidate, base $RELEASE_BASE, validation run $run_id" >> "$GITHUB_STEP_SUMMARY"
+          while (( SECONDS < deadline )); do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")
+            jq -e --arg sha "$candidate" --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" \
+              '.head_sha == $sha and .head_branch == $branch and
+               .repository.full_name == $repo and .head_repository.full_name == $repo and
+               .path == ".github/workflows/cli.yml" and .event == "workflow_dispatch"' \
+              <<< "$run" > /dev/null
+            if [ "$(jq -r .status <<< "$run")" = completed ]; then
+              jq -e '.conclusion == "success"' <<< "$run" > /dev/null
+              attempt=$(jq -er '.run_attempt' <<< "$run")
+              # Bind results to this completed attempt, not a previous rerun.
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt/jobs?per_page=100" | \
+                jq -e --arg sha "$candidate" '
+                  .total_count == 7 and (.jobs | length) == 7 and
+                  ([.jobs[].name] | sort) == ([
+                    "test (ubuntu-latest, 22)", "test (ubuntu-latest, 24)",
+                    "test (macos-latest, 22)", "test (macos-latest, 24)",
+                    "test (windows-latest, 22)", "test (windows-latest, 24)",
+                    "changeset"
+                  ] | sort) and
+                  all(.jobs[]; .head_sha == $sha and .status == "completed" and .conclusion == "success")
+                ' > /dev/null
+              break
+            fi
+            sleep 15
+          done
+          (( SECONDS < deadline )) || { echo "CLI candidate validation timed out"; exit 1; }
       - name: Push release commit and tag atomically
         run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$RELEASE_BASE"
+          test "$(git ls-remote origin "refs/heads/$CANDIDATE_BRANCH" | cut -f1)" = "$CANDIDATE_SHA"
           tag="v$(bun -p 'require("./package.json").version')"
           # A concurrent merge rejects this push. Never force or rebase a built
           # release: the waiting run will validate and build the newer main.
@@ -111,3 +163,28 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 \
             https://app.dotflowy.com/api/auth-config -o /tmp/auth-config.json
           jq --exit-status 'type == "object" and has("signupOpen")' /tmp/auth-config.json
+      - name: Clean up release candidate
+        if: always() && env.CANDIDATE_BRANCH != ''
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # If dispatch succeeded but its response was lost, leave the branch
+          # rather than deleting a ref used by an unknown validation run.
+          if [ -z "${CANDIDATE_RUN:-}" ]; then
+            echo "::warning::Candidate branch $CANDIDATE_BRANCH retained: validation run unknown"
+            exit 0
+          fi
+          status=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" --jq .status)
+          if [ "$status" != completed ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN/cancel"
+            for _ in {1..12}; do
+              status=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" --jq .status)
+              [ "$status" = completed ] && break
+              sleep 5
+            done
+          fi
+          test "$status" = completed
+          test "$(git ls-remote origin "refs/heads/$CANDIDATE_BRANCH" | cut -f1)" = "$CANDIDATE_SHA"
+          git push origin --delete "$CANDIDATE_BRANCH"

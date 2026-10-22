@@ -113,6 +113,120 @@ function release(dir: string, mode: string, env: Record<string, string> = {}) {
   return run(dir, [process.execPath, "scripts/release.ts", mode], env);
 }
 
+function workflowStep(file: string, job: string, name: string) {
+  // SAFETY: Checked-in workflow structure; actionlint validates the YAML.
+  const workflow = Bun.YAML.parse(
+    readFileSync(join(ROOT, ".github/workflows", file), "utf8"),
+  ) as { jobs: Record<string, { steps: { name?: string; run?: string }[] }> };
+  const step = workflow.jobs[job]?.steps.find((step) => step.name === name);
+  if (!step?.run) throw new Error(`Missing ${file}: ${name}`);
+  return step.run;
+}
+
+function candidateFixture(news = true) {
+  const dir = fixture(
+    news ? { "news.md": '---\n"dotflowy": minor\n---\n\nNews.\n' } : {},
+  );
+  const remote = join(dir, ".test-bin/origin.git");
+  git(dir, "init", "--bare", remote);
+  git(dir, "remote", "add", "origin", remote);
+  git(dir, "tag", "-a", "v1.2.3", "-m", "previous release");
+  git(dir, "push", "origin", "main", "v1.2.3");
+  const base = git(dir, "rev-parse", "HEAD");
+  const prepared = release(dir, "--ci");
+  expect(prepared.code, prepared.err).toBe(0);
+  const sha = git(dir, "rev-parse", "HEAD");
+  const branch = "release-candidate/42-3";
+  const env = {
+    RELEASE_BASE: base,
+    GITHUB_REPOSITORY: "example/dotflowy",
+    GITHUB_SERVER_URL: "https://github.com",
+    GITHUB_RUN_ID: "42",
+    GITHUB_RUN_ATTEMPT: "3",
+    GITHUB_ENV: join(dir, ".test-bin/candidate.env"),
+    GITHUB_STEP_SUMMARY: join(dir, ".test-bin/summary"),
+  };
+  const validation = {
+    head_sha: sha,
+    head_branch: branch,
+    repository: { full_name: "example/dotflowy" },
+    head_repository: { full_name: "example/dotflowy" },
+    path: ".github/workflows/cli.yml",
+    event: "workflow_dispatch",
+    status: "completed",
+    conclusion: "success",
+    run_attempt: 2,
+  };
+  const jobs = [
+    "test (ubuntu-latest, 22)",
+    "test (ubuntu-latest, 24)",
+    "test (macos-latest, 22)",
+    "test (macos-latest, 24)",
+    "test (windows-latest, 22)",
+    "test (windows-latest, 24)",
+    "changeset",
+  ].map((name) => ({
+    name,
+    head_sha: sha,
+    status: "completed",
+    conclusion: "success",
+  }));
+  // A fixture boundary for GitHub only. Every push targets the real local bare
+  // origin; no test can publish a tag or branch to GitHub.
+  writeFileSync(
+    join(dir, ".test-bin/gh"),
+    `#!/usr/bin/env bun
+import { readFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const endpoint = args.find(arg => arg.startsWith("repos/"));
+let reply;
+if (endpoint?.endsWith("/dispatches")) {
+  const input = JSON.parse(await Bun.stdin.text());
+  if (input.ref !== "release-candidate/42-3" || input.inputs.base_sha !== process.env.RELEASE_BASE) process.exit(1);
+  reply = JSON.parse(readFileSync(".test-bin/dispatch.json", "utf8"));
+} else if (endpoint?.endsWith("/attempts/2/jobs?per_page=100")) {
+  reply = JSON.parse(readFileSync(".test-bin/jobs.json", "utf8"));
+} else if (endpoint?.endsWith("/runs/171/cancel")) {
+  const run = JSON.parse(readFileSync(".test-bin/run.json", "utf8"));
+  await Bun.write(".test-bin/run.json", JSON.stringify({ ...run, status: "completed", conclusion: "cancelled" }));
+  reply = {};
+} else if (endpoint?.endsWith("/runs/171")) {
+  reply = JSON.parse(readFileSync(".test-bin/run.json", "utf8"));
+} else process.exit(1);
+process.stdout.write(args.includes("--jq") ? reply.status : JSON.stringify(reply));
+`,
+  );
+  writeFileSync(
+    join(dir, ".test-bin/dispatch.json"),
+    '{"workflow_run_id":171}',
+  );
+  writeFileSync(join(dir, ".test-bin/run.json"), JSON.stringify(validation));
+  writeFileSync(
+    join(dir, ".test-bin/jobs.json"),
+    JSON.stringify({ total_count: jobs.length, jobs }),
+  );
+  return { dir, base, sha, branch, env, validation, jobs };
+}
+
+function promote(dir: string, env: Record<string, string>) {
+  return run(
+    dir,
+    [
+      "bash",
+      "-e",
+      "-o",
+      "pipefail",
+      "-c",
+      `${workflowStep("deploy.yml", "deploy", "Validate exact release candidate")}
+set -a
+source "$GITHUB_ENV"
+set +a
+${workflowStep("deploy.yml", "deploy", "Push release commit and tag atomically")}`,
+    ],
+    env,
+  );
+}
+
 test("CI skips absent and empty changesets without a commit or version bump", () => {
   const cases: Record<string, string>[] = [{}, { "empty.md": "---\n---\n" }];
   for (const fragments of cases) {
@@ -225,6 +339,7 @@ test("deployment builds validated main before atomic push, publishing, and deplo
   const expected = [
     "Build app",
     "Build landing",
+    "Validate exact release candidate",
     "Push release commit and tag atomically",
     "Publish GitHub Release",
     "Deploy landing",
@@ -234,11 +349,11 @@ test("deployment builds validated main before atomic push, publishing, and deplo
     expected.includes(step.name ?? ""),
   );
   expect(steps.map((step) => step.name)).toEqual(expected);
-  expect(steps[2]?.run).toContain(
+  expect(steps[3]?.run).toContain(
     'git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag:refs/tags/$tag"',
   );
-  expect(steps[3]?.run).toBe("bun run release:publish");
-  expect(steps[4]?.["working-directory"]).toBe("landing");
+  expect(steps[4]?.run).toBe("bun run release:publish");
+  expect(steps[5]?.["working-directory"]).toBe("landing");
   const dir = mkdtempSync(join(tmpdir(), "dotflowy-deploy-"));
   fixtures.push(dir);
   mkdirSync(join(dir, ".test-bin"));
@@ -257,6 +372,12 @@ exit 23
   for (const step of steps) {
     expect(step.if).toBeUndefined();
     expect(step["continue-on-error"]).not.toBe(true);
+    // Candidate validation/promotion use real Git origins in the tests below.
+    if (
+      step.name === "Validate exact release candidate" ||
+      step.name === "Push release commit and tag atomically"
+    )
+      continue;
     const result = run(
       join(dir, step["working-directory"] ?? "."),
       ["bash", "-e", "-o", "pipefail", "-c", step.run!],
@@ -265,3 +386,281 @@ exit 23
     expect(result.code, step.name).toBe(23);
   }
 });
+
+test("only the checked SHA is promoted, including no-news retries, and its temporary branch is cleaned up", () => {
+  for (const news of [true, false]) {
+    const { dir, base, sha, branch, env } = candidateFixture(news);
+    const result = promote(dir, env);
+    expect(result.code, result.err).toBe(0);
+    expect(git(dir, "ls-remote", "origin", "refs/heads/main")).toBe(
+      `${sha}\trefs/heads/main`,
+    );
+    const version = news ? "1.3.0" : "1.2.3";
+    expect(git(dir, "ls-remote", "origin", `refs/tags/v${version}^{}`)).toBe(
+      `${sha}\trefs/tags/v${version}^{}`,
+    );
+    expect(sha === base).toBe(!news);
+    const cleanup = run(
+      dir,
+      [
+        "bash",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        `set -a; source "$GITHUB_ENV"; set +a\n${workflowStep("deploy.yml", "deploy", "Clean up release candidate")}`,
+      ],
+      env,
+    );
+    expect(cleanup.code, cleanup.err).toBe(0);
+    expect(git(dir, "ls-remote", "origin", `refs/heads/${branch}`)).toBe("");
+    expect(git(dir, "rev-parse", "HEAD")).toBe(sha);
+  }
+}, 30000);
+
+test("failed or misattributed validation never promotes main or publishes the local release tag", () => {
+  const cases = [
+    "failed",
+    "wrong-sha",
+    "wrong-workflow",
+    "missing-job",
+    "skipped-job",
+    "wrong-job-sha",
+    "lost-dispatch",
+  ];
+  for (const scenario of cases) {
+    const { dir, base, env, validation, jobs } = candidateFixture();
+    if (scenario === "failed") validation.conclusion = "failure";
+    if (scenario === "wrong-sha") validation.head_sha = base;
+    if (scenario === "wrong-workflow")
+      validation.path = ".github/workflows/other.yml";
+    if (scenario === "missing-job") jobs.splice(3, 1);
+    if (scenario === "skipped-job") jobs[6]!.conclusion = "skipped";
+    if (scenario === "wrong-job-sha") jobs[0]!.head_sha = base;
+    if (scenario === "lost-dispatch")
+      writeFileSync(join(dir, ".test-bin/dispatch.json"), "{}");
+    writeFileSync(join(dir, ".test-bin/run.json"), JSON.stringify(validation));
+    writeFileSync(
+      join(dir, ".test-bin/jobs.json"),
+      JSON.stringify({ total_count: jobs.length, jobs }),
+    );
+    expect(promote(dir, env).code, scenario).not.toBe(0);
+    expect(git(dir, "ls-remote", "origin", "refs/heads/main"), scenario).toBe(
+      `${base}\trefs/heads/main`,
+    );
+    expect(git(dir, "ls-remote", "origin", "refs/tags/v1.3.0"), scenario).toBe(
+      "",
+    );
+  }
+}, 30000);
+
+test("a concurrent merge or conflicting tag rejects promotion without publishing either ref", () => {
+  for (const conflict of ["main", "late-main", "tag"]) {
+    const { dir, base, env } = candidateFixture();
+    let main = base;
+    if (conflict !== "tag") {
+      git(dir, "checkout", "-b", "concurrent", base);
+      git(dir, "commit", "--allow-empty", "-m", "concurrent merge");
+      main = git(dir, "rev-parse", "HEAD");
+      if (conflict === "main") {
+        git(dir, "push", "origin", "HEAD:refs/heads/main");
+      } else {
+        // Advance the remote after ls-remote has passed, during the actual
+        // promotion push. Git must reject both main and the new tag atomically.
+        git(dir, "push", "origin", "HEAD:refs/heads/concurrent");
+        git(dir, "config", "core.hooksPath", ".git/hooks");
+        const hook = join(dir, ".git/hooks/pre-push");
+        writeFileSync(
+          hook,
+          `#!/bin/sh
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = refs/heads/main ]; then
+    git --git-dir=.test-bin/origin.git update-ref refs/heads/main ${main} ${base} || exit 1
+  fi
+done
+`,
+        );
+        chmodSync(hook, 0o755);
+      }
+      git(dir, "checkout", "main");
+    } else {
+      git(dir, "push", "origin", `${base}:refs/tags/v1.3.0`);
+    }
+    const result = promote(dir, env);
+    expect(result.code, `${conflict}: ${result.err}`).not.toBe(0);
+    expect(
+      git(dir, "ls-remote", "origin", "refs/heads/main"),
+      `${conflict}: ${result.err}`,
+    ).toBe(`${main}\trefs/heads/main`);
+    expect(git(dir, "ls-remote", "origin", "refs/tags/v1.3.0")).toBe(
+      conflict === "tag" ? `${base}\trefs/tags/v1.3.0` : "",
+    );
+  }
+}, 30000);
+
+test("queued validation expires without promotion", () => {
+  const { dir, base, env, validation } = candidateFixture();
+  writeFileSync(
+    join(dir, ".test-bin/run.json"),
+    JSON.stringify({ ...validation, status: "queued", conclusion: null }),
+  );
+  const result = run(
+    dir,
+    [
+      "bash",
+      "-e",
+      "-o",
+      "pipefail",
+      "-c",
+      `
+# Advance Bash's elapsed clock at the polling boundary, without a real wait.
+sleep() { SECONDS=10000; }
+${workflowStep("deploy.yml", "deploy", "Validate exact release candidate")}
+set -a; source "$GITHUB_ENV"; set +a
+${workflowStep("deploy.yml", "deploy", "Push release commit and tag atomically")}`,
+    ],
+    env,
+  );
+  expect(result.code).not.toBe(0);
+  expect(git(dir, "ls-remote", "origin", "refs/heads/main")).toBe(
+    `${base}\trefs/heads/main`,
+  );
+  expect(git(dir, "ls-remote", "origin", "refs/tags/v1.3.0")).toBe("");
+});
+
+test("cleanup cancels known unfinished validation but retains a branch when dispatch outcome is unknown", () => {
+  for (const known of [true, false]) {
+    const { dir, sha, branch, env, validation } = candidateFixture(false);
+    git(dir, "push", "origin", `${sha}:refs/heads/${branch}`);
+    git(
+      dir,
+      "push",
+      "origin",
+      `${sha}:refs/heads/release-candidate/another-attempt`,
+    );
+    writeFileSync(
+      join(dir, ".test-bin/run.json"),
+      JSON.stringify({
+        ...validation,
+        status: "in_progress",
+        conclusion: null,
+      }),
+    );
+    const result = run(
+      dir,
+      [
+        "bash",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        workflowStep("deploy.yml", "deploy", "Clean up release candidate"),
+      ],
+      {
+        ...env,
+        CANDIDATE_SHA: sha,
+        CANDIDATE_BRANCH: branch,
+        CANDIDATE_RUN: known ? "171" : "",
+      },
+    );
+    expect(result.code, result.err).toBe(0);
+    expect(git(dir, "ls-remote", "origin", `refs/heads/${branch}`)).toBe(
+      known ? "" : `${sha}\trefs/heads/${branch}`,
+    );
+    expect(
+      git(
+        dir,
+        "ls-remote",
+        "origin",
+        "refs/heads/release-candidate/another-attempt",
+      ),
+    ).toBe(`${sha}\trefs/heads/release-candidate/another-attempt`);
+  }
+});
+
+test("the CLI changeset gate checks real content on PRs and validates the dispatched comparison base", () => {
+  const { dir } = candidateFixture(false);
+  for (const path of ["cli/scripts", "cli/src", "cli/.changeset"])
+    mkdirSync(join(dir, path), { recursive: true });
+  copyFileSync(
+    join(ROOT, "cli/scripts/require-changeset.ts"),
+    join(dir, "cli/scripts/require-changeset.ts"),
+  );
+  copyFileSync(
+    join(ROOT, "cli/.changeset/config.json"),
+    join(dir, "cli/.changeset/config.json"),
+  );
+  const manifest = {
+    name: "dotflowy",
+    version: "0.1.0",
+    scripts: { "check:changeset": "bun scripts/require-changeset.ts" },
+  };
+  writeFileSync(join(dir, "cli/package.json"), JSON.stringify(manifest));
+  writeFileSync(join(dir, "cli/src/main.ts"), 'console.log("original");\n');
+  git(dir, "add", "cli");
+  git(dir, "commit", "-m", "CLI fixture");
+  git(dir, "push", "origin", "main");
+  const base = git(dir, "rev-parse", "HEAD");
+  const cases = [
+    ["docs", "pull_request", true],
+    ["source", "pull_request", false],
+    ["source-with-fragment", "pull_request", true],
+    ["version", "pull_request", true],
+    ["no-news", "workflow_dispatch", true],
+    ["app-version", "workflow_dispatch", true],
+    ["source", "workflow_dispatch", false],
+    ["self-base", "workflow_dispatch", false],
+    ["two-commits", "workflow_dispatch", false],
+  ] as const;
+  for (const [scenario, event, accepted] of cases) {
+    git(dir, "reset", "--hard", base);
+    if (scenario === "version")
+      writeFileSync(
+        join(dir, "cli/package.json"),
+        JSON.stringify({ ...manifest, version: "0.2.0" }),
+      );
+    else if (scenario.startsWith("source") || scenario === "self-base")
+      writeFileSync(join(dir, "cli/src/main.ts"), 'console.log("changed");\n');
+    else if (scenario === "docs")
+      writeFileSync(join(dir, "README.md"), "Repository docs.\n");
+    else if (scenario !== "no-news")
+      writeFileSync(
+        join(dir, "package.json"),
+        '{"name":"dotflowy","version":"1.2.4","private":true}',
+      );
+    if (scenario === "source-with-fragment")
+      writeFileSync(
+        join(dir, "cli/.changeset/change.md"),
+        '---\n"dotflowy": patch\n---\n\nA CLI behavior change.\n',
+      );
+    if (scenario === "two-commits")
+      git(dir, "commit", "--allow-empty", "-m", "extra ancestor");
+    if (scenario !== "no-news") {
+      git(dir, "add", ".");
+      git(dir, "commit", "-m", scenario);
+    }
+    const result = run(
+      join(dir, "cli"),
+      [
+        "bash",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        workflowStep(
+          "cli.yml",
+          "changeset",
+          "Require a CLI changeset for packaged behavior",
+        ),
+      ],
+      {
+        GITHUB_EVENT_NAME: event,
+        GITHUB_BASE_REF: "main",
+        GITHUB_HEAD_REF: "changeset-release/main",
+        CANDIDATE_BASE:
+          scenario === "self-base" ? git(dir, "rev-parse", "HEAD") : base,
+      },
+    );
+    expect(result.code === 0, `${scenario}: ${result.err}`).toBe(accepted);
+  }
+}, 30000);
