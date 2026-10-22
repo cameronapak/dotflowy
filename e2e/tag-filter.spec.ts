@@ -46,6 +46,5 @@ test("a #tag chip filters to matches; Clear restores the view and closes the sub
   ).toHaveCount(0);
 
   const subheader = page.locator('[aria-label="Active filters"]');
-  await expect(subheader).toHaveCSS("padding-top", "0px");
-  await expect(subheader).toHaveCSS("padding-bottom", "0px");
+  await expect(subheader).toBeHidden();
 });
